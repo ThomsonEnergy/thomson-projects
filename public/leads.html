@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Leads - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=4" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <nav class="topbar-tabs">
+      <a href="/leads.html" class="topbar-tab active">Leads<span class="tab-total">&mdash;</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
+      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">&mdash;</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">&mdash;</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
+    </nav>
+    <div class="topbar-right">
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/dashboard.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Leads</h1>
+    <p class="subtitle">New enquiries before they become a quote.</p>
+
+    <div class="grid cols-4">
+      <div class="stat"><div class="label">Total</div><div class="value placeholder">&mdash;</div></div>
+      <div class="stat"><div class="label">This month</div><div class="value placeholder">&mdash;</div></div>
+      <div class="stat"><div class="label">Outstanding</div><div class="value placeholder">&mdash;</div></div>
+      <div class="stat"><div class="label">Overdue</div><div class="value placeholder">&mdash;</div></div>
+    </div>
+
+    <div class="card">
+      <div class="empty-state">
+        <div class="empty-icon">&#128736;</div>
+        <h2>Coming in Phase 5</h2>
+        <p>This section is a placeholder for now &mdash; it gets built out with real data and actions in Phase 5 of the build.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+    })();
+  </script>
+</body>
+</html>
