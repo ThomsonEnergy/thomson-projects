@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Quotes - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <nav class="topbar-tabs">
+      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">&mdash;</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
+      <a href="/quotes.html" class="topbar-tab active">Quotes<span class="tab-total">&mdash;</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">&mdash;</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
+    </nav>
+    <div class="topbar-right">
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/dashboard.html" class="topbar-logo"><img src="/icons/logo-wordmark-header.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+      <div>
+        <h1>Quotes</h1>
+        <p class="subtitle">Every quote built through this tool, with live cost data pulled from ServiceM8.</p>
+      </div>
+      <a href="/new-project.html" class="btn">+ New quote</a>
+    </div>
+
+    <div class="card">
+      <div id="list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      const { data: projects, error } = await supabaseClient
+        .from('projects')
+        .select('*, cost_centres(quoted_amount, labour_cost, material_cost, invoiced_amount)')
+        .order('created_at', { ascending: false });
+
+      const list = document.getElementById('list');
+      if (error) {
+        list.innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+      if (!projects.length) {
+        list.innerHTML = `<div class="empty-state">
+          <div class="empty-icon">&#128203;</div>
+          <h2>No quotes yet</h2>
+          <p>Build your first one to see it here.</p>
+          <a class="btn" style="margin-top:10px; display:inline-flex;" href="/new-project.html">+ New quote</a>
+        </div>`;
+        return;
+      }
+
+      list.innerHTML = projects.map(p => {
+        const quoted = p.cost_centres.reduce((s, c) => s + Number(c.quoted_amount), 0);
+        const invoiced = p.cost_centres.reduce((s, c) => s + Number(c.invoiced_amount), 0);
+        const pctInvoiced = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
+        return `
+          <a class="project-list-item" href="/project.html?id=${p.id}">
+            <div>
+              <div class="name">${p.name}</div>
+              <div class="meta">${p.client_name} &middot; ${p.cost_centres.length} stage${p.cost_centres.length === 1 ? '' : 's'} &middot; ${money(quoted)} quoted</div>
+            </div>
+            <div style="text-align:right; min-width:160px;">
+              <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
+              <div class="meta" style="margin-top:6px;">${pctInvoiced}% invoiced</div>
+            </div>
+          </a>`;
+      }).join('');
+    })();
+  </script>
+</body>
+</html>
