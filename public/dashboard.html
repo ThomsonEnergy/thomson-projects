@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Projects - Thomson Energy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <a class="brand" href="/dashboard.html">THOMSON <span>ENERGY / PROJECTS</span></a>
+    <nav>
+      <a href="/dashboard.html">Projects</a>
+      <a href="/new-project.html">New quote</a>
+      <a href="/settings.html">Settings</a>
+      <a href="#" id="logout-link">Log out</a>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <h1>Projects</h1>
+    <p class="subtitle">Every multi-stage project quoted through this tool, with live cost data pulled from ServiceM8.</p>
+
+    <div class="card">
+      <div id="list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script>
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      const { data: projects, error } = await supabaseClient
+        .from('projects')
+        .select('*, cost_centres(quoted_amount, labour_cost, material_cost, invoiced_amount)')
+        .order('created_at', { ascending: false });
+
+      const list = document.getElementById('list');
+      if (error) {
+        list.innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+      if (!projects.length) {
+        list.innerHTML = `<div class="empty-state">No projects yet. <a class="link-quiet" href="/new-project.html">Create your first quote</a>.</div>`;
+        return;
+      }
+
+      list.innerHTML = projects.map(p => {
+        const quoted = p.cost_centres.reduce((s, c) => s + Number(c.quoted_amount), 0);
+        const invoiced = p.cost_centres.reduce((s, c) => s + Number(c.invoiced_amount), 0);
+        const pctInvoiced = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
+        return `
+          <a class="project-list-item" href="/project.html?id=${p.id}">
+            <div>
+              <div class="name">${p.name}</div>
+              <div class="meta">${p.client_name} &middot; ${p.cost_centres.length} stage${p.cost_centres.length === 1 ? '' : 's'} &middot; ${money(quoted)} quoted</div>
+            </div>
+            <div style="text-align:right; min-width:160px;">
+              <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
+              <div class="meta" style="margin-top:6px;">${pctInvoiced}% invoiced</div>
+            </div>
+          </a>`;
+      }).join('');
+    })();
+  </script>
+</body>
+</html>
