@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=3" />
+<link rel="stylesheet" href="/css/style.css?v=4" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   @media print {
@@ -89,6 +89,7 @@
       }
 
       const project = data.project;
+      const template = project.proposal_template || 'new_build';
       const centres = data.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const total = centres.reduce((sum, c) => sum + Number(c.quoted_amount), 0);
       const coverPhotos = (project.cover_photos || []).map(p => p.url || p).slice(0, 3);
@@ -106,9 +107,10 @@
           <div class="cover-content">
             ${s.logo_url ? `<img src="${s.logo_url}" class="cover-logo" />` : `<p style="font-size:22px; font-weight:700; margin:0 0 8px;">${s.company_name || ''}</p>`}
             ${s.tagline ? `<p class="cover-tagline">${s.tagline}</p>` : '<div style="margin-bottom:40px;"></div>'}
-            <p class="cover-eyebrow">Proposal</p>
+            <p class="cover-eyebrow">${template === 'quick_estimate' ? 'Estimate' : 'Proposal'}</p>
             <h1 class="cover-title">${project.name}</h1>
             <p class="cover-subtitle">${project.proposal_subtitle || ('Prepared for ' + project.client_name)}</p>
+            ${template === 'solar' && project.pylon_link ? `<div style="margin-top:18px;"><a class="btn" href="${project.pylon_link}" target="_blank" rel="noopener">View interactive system design</a></div>` : ''}
           </div>
           ${(detailParts.length || licenseParts) ? `
             <div class="cover-details">
@@ -117,7 +119,8 @@
             </div>` : ''}
         </div>
         <p class="subtitle" style="margin:0 0 24px;">Prepared for ${project.client_name}${project.client_address ? ' &middot; ' + project.client_address : ''}</p>
-        ${project.pylon_link ? `<div style="margin-bottom:24px;"><a class="btn secondary" href="${project.pylon_link}" target="_blank" rel="noopener">View interactive system design</a></div>` : ''}
+        ${template !== 'solar' && project.pylon_link ? `<div style="margin-bottom:24px;"><a class="btn secondary" href="${project.pylon_link}" target="_blank" rel="noopener">View interactive system design</a></div>` : ''}
+        ${template === 'quick_estimate' ? `<div class="card" style="border-color:var(--accent); margin-bottom:24px;"><p style="margin:0; font-weight:600;">${project.estimate_disclaimer_text || 'Estimate only — final invoice based on actual hours and materials used.'}</p></div>` : ''}
       `;
 
       const stagePhotosHtml = centres.some(c => (c.photo_groups || []).length) ? `
@@ -134,7 +137,7 @@
           `).join('')}
         </div>` : '';
 
-      const paymentScheduleHtml = `
+      const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials') ? '' : `
         <div class="card">
           <h2>Payment schedule</h2>
           <table>
@@ -195,11 +198,11 @@
 
         <div class="card" id="accept-section">
           ${project.status === 'accepted' || project.status === 'in_progress' || project.status === 'complete'
-            ? `<p class="success-box" style="display:inline-block">Quote accepted, thank you. Work will begin as scheduled.</p>`
+            ? `<p class="success-box" style="display:inline-block">${template === 'quick_estimate' ? 'Estimate accepted, thank you.' : 'Quote accepted, thank you.'} Work will begin as scheduled.</p>`
             : `
               <h2>Ready to go ahead?</h2>
-              <p class="subtitle">Accepting this quote lets us schedule the work.</p>
-              <button id="accept-btn">Accept this quote</button>
+              <p class="subtitle">${template === 'quick_estimate' ? 'Accepting this estimate lets us schedule the work.' : 'Accepting this quote lets us schedule the work.'}</p>
+              <button id="accept-btn">${template === 'quick_estimate' ? 'Accept this estimate' : 'Accept this quote'}</button>
               <div id="accept-msg"></div>
             `}
         </div>

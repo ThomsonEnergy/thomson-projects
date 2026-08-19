@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=3" />
+<link rel="stylesheet" href="/css/style.css?v=4" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -65,7 +65,6 @@
       const pctComplete = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
       const remaining = Math.max(0, quoted - invoiced);
       const quoteUrl = `${window.location.origin}/quote.html?token=${project.quote_token}`;
-      const anyJobsCreated = centres.some(c => c.servicem8_job_uuid);
 
       const content = document.getElementById('content');
       content.innerHTML = `
@@ -93,6 +92,7 @@
           </div>
         ` : ''}
 
+        ${project.proposal_template !== 'time_and_materials' ? `
         <div class="card">
           <h2>Client quote link</h2>
           <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
@@ -101,13 +101,14 @@
           ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * (project.deposit_percent / 100))}) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
           ${project.pylon_link ? `<p class="subtitle" style="margin-top:6px;">Pylon design: <a class="link-quiet" href="${project.pylon_link}" target="_blank" rel="noopener">${project.pylon_link}</a></p>` : ''}
         </div>
+        ` : ''}
 
         <div class="card">
           <h2>Stages</h2>
           <table>
             <thead>
               <tr>
-                <th>Stage</th><th>ServiceM8 job</th>
+                <th>Stage</th>
                 ${pricingVisible ? '<th class="num">Quoted</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">Invoiced</th>' : ''}
               </tr>
             </thead>
@@ -115,7 +116,6 @@
               ${centres.map(c => `
                 <tr>
                   <td>${c.name}</td>
-                  <td>${c.servicem8_job_uuid ? `<span class="badge in_progress">${c.servicem8_job_status}</span>` : '<span class="badge draft">not created</span>'}</td>
                   ${pricingVisible ? `
                     <td class="num">${moneyOrHidden(c.quoted_amount)}</td>
                     <td class="num">${moneyOrHidden(c.labour_cost)}</td>
@@ -128,20 +128,8 @@
         </div>
 
         <div class="card">
-          <h2>ServiceM8 sync</h2>
-          <p class="subtitle" style="margin-bottom:14px;">
-            ${anyJobsCreated
-              ? 'Jobs are linked in ServiceM8. Pull the latest hours and materials logged against them.'
-              : 'Once the client accepts, create one ServiceM8 job per stage so your team can clock time and materials as normal.'}
-          </p>
-          ${!anyJobsCreated ? `<button id="create-jobs-btn">Create ServiceM8 jobs for this project</button>` : ''}
-          <button id="sync-btn" class="secondary">Sync costs from ServiceM8</button>
-          <div id="action-msg"></div>
-        </div>
-
-        <div class="card">
           <h2>Purchase orders &amp; supplier invoices</h2>
-          <p class="subtitle" style="margin-bottom:14px;">Tracked separately from the actuals synced from ServiceM8, so nothing gets double-counted.</p>
+          <p class="subtitle" style="margin-bottom:14px;">Tracked separately so costs aren't double-counted.</p>
           <div id="po-list"></div>
           <div style="border-top:1px solid var(--border); padding-top:16px; margin-top:${centres.length ? '16px' : '0'};">
             <div class="grid cols-3">
@@ -277,50 +265,6 @@
         }
       });
 
-      const createBtn = document.getElementById('create-jobs-btn');
-      if (createBtn) {
-        createBtn.addEventListener('click', async () => {
-          createBtn.disabled = true;
-          createBtn.textContent = 'Creating jobs...';
-          const actionMsg = document.getElementById('action-msg');
-          try {
-            const res = await fetch('/.netlify/functions/create-jobs', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ projectId: project.id }),
-            });
-            const json = await res.json();
-            if (!json.ok) throw new Error(json.error);
-            actionMsg.innerHTML = `<div class="success-box">Jobs created in ServiceM8.</div>`;
-            const refreshed = await loadProject();
-            if (refreshed) render(refreshed);
-          } catch (err) {
-            actionMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
-            createBtn.disabled = false;
-            createBtn.textContent = 'Create ServiceM8 jobs for this project';
-          }
-        });
-      }
-
-      document.getElementById('sync-btn').addEventListener('click', async () => {
-        const syncBtn = document.getElementById('sync-btn');
-        const actionMsg = document.getElementById('action-msg');
-        syncBtn.disabled = true;
-        syncBtn.textContent = 'Syncing...';
-        try {
-          const res = await fetch(`/.netlify/functions/sync-costs?projectId=${project.id}`);
-          const json = await res.json();
-          if (!json.ok) throw new Error(json.error);
-          actionMsg.innerHTML = `<div class="success-box">Synced ${json.updated} stage(s) from ServiceM8.</div>`;
-          const refreshed = await loadProject();
-          if (refreshed) render(refreshed);
-        } catch (err) {
-          actionMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
-        } finally {
-          syncBtn.disabled = false;
-          syncBtn.textContent = 'Sync costs from ServiceM8';
-        }
-      });
     }
 
     async function loadPurchaseOrders(projectId, centres) {

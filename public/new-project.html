@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=3" />
+<link rel="stylesheet" href="/css/style.css?v=4" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -34,7 +34,25 @@
 
   <div class="wrap">
     <h1 id="page-title">New quote</h1>
-    <p class="subtitle">Break the job into stages. Each stage becomes its own job in ServiceM8 once the client accepts.</p>
+    <p class="subtitle">Break the job into stages, each priced separately.</p>
+
+    <div class="card">
+      <h2>Proposal template</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Changes what this quote asks for and how it's presented to the client.</p>
+      <div class="grid cols-4" id="template-picker">
+        <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
+        <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
+        <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
+        <button type="button" class="secondary template-option" data-template="time_and_materials">Time &amp; Materials</button>
+      </div>
+      <p class="subtitle" id="template-note" style="margin:12px 0 0;"></p>
+    </div>
+
+    <div class="card" id="estimate-disclaimer-card" style="display:none;">
+      <h2>Estimate wording</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Shown as a banner on the client's estimate page. Edit if this job needs different wording.</p>
+      <textarea id="p-estimate-disclaimer" style="min-height:80px;"></textarea>
+    </div>
 
     <div class="card">
       <h2>Project &amp; client</h2>
@@ -99,7 +117,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="deposit-card">
       <h2>Payment schedule</h2>
       <p class="subtitle" style="margin-bottom:10px;">Shown to the client on the proposal. The remainder is invoiced stage by stage as each is completed.</p>
       <div style="max-width:160px;">
@@ -141,7 +159,70 @@
     const editId = new URLSearchParams(window.location.search).get('id');
     let referencePhotos = [];
     let rowCount = 0;
+    let currentTemplate = 'new_build';
     const rowsEl = document.getElementById('cc-rows');
+
+    const TEMPLATE_INFO = {
+      new_build: {
+        note: 'Multi-stage project with a deposit and full scope of works.',
+        photoCategory: 'electrical',
+        singleStage: false,
+        showDeposit: true,
+        showPylon: false,
+      },
+      solar: {
+        note: 'Pylon design link is prominent on the cover page. Defaults to a single stage — add more if needed.',
+        photoCategory: 'solar',
+        singleStage: false,
+        showDeposit: true,
+        showPylon: true,
+      },
+      quick_estimate: {
+        note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page — invoiced from actual hours and materials, not this figure.',
+        photoCategory: 'general',
+        singleStage: true,
+        showDeposit: false,
+        showPylon: false,
+      },
+      time_and_materials: {
+        note: 'No quote or approval step — saving this sends the job straight to booked, invoiced from actuals when done. No client-facing proposal is created.',
+        photoCategory: 'general',
+        singleStage: true,
+        showDeposit: false,
+        showPylon: false,
+      },
+    };
+
+    function applyTemplate(template) {
+      currentTemplate = template;
+      document.querySelectorAll('.template-option').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.template === template);
+      });
+      const info = TEMPLATE_INFO[template];
+      document.getElementById('template-note').textContent = info.note;
+      document.getElementById('add-row').style.display = info.singleStage ? 'none' : 'inline-flex';
+      document.querySelectorAll('.remove-row').forEach(btn => {
+        btn.style.display = info.singleStage ? 'none' : 'inline-flex';
+      });
+      // Trim to a single stage if this template doesn't allow multiples.
+      if (info.singleStage) {
+        [...document.querySelectorAll('.cc-row')].slice(1).forEach(row => row.remove());
+      }
+      const depositCard = document.getElementById('deposit-card');
+      if (depositCard) depositCard.style.display = info.showDeposit ? 'block' : 'none';
+      if (!info.showDeposit) document.getElementById('p-deposit').value = 0;
+
+      const disclaimerCard = document.getElementById('estimate-disclaimer-card');
+      const disclaimerField = document.getElementById('p-estimate-disclaimer');
+      disclaimerCard.style.display = template === 'quick_estimate' ? 'block' : 'none';
+      if (template === 'quick_estimate' && !disclaimerField.value.trim()) {
+        disclaimerField.value = 'Estimate only — the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.';
+      }
+    }
+
+    document.querySelectorAll('.template-option').forEach(btn => {
+      btn.addEventListener('click', () => applyTemplate(btn.dataset.template));
+    });
 
     // ---------- line items ----------
 
@@ -192,6 +273,59 @@
       updateTotal();
     }
 
+    // ---------- prebuilds ----------
+
+    let _prebuildsCache = null;
+    async function getPrebuilds() {
+      if (_prebuildsCache) return _prebuildsCache;
+      const { data, error } = await supabaseClient
+        .from('prebuilds')
+        .select('*, prebuild_components(*)')
+        .order('category')
+        .order('name');
+      _prebuildsCache = error ? [] : data;
+      return _prebuildsCache;
+    }
+
+    async function openPrebuildPicker(stageRow) {
+      const prebuilds = await getPrebuilds();
+      if (!prebuilds.length) {
+        alert('No prebuilds set up yet. Add some under Settings > Prebuild Categories.');
+        return;
+      }
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:480px; width:90%; max-height:80vh; overflow-y:auto;">
+          <h2>Add a prebuild</h2>
+          <select id="prebuild-select" style="margin-bottom:12px;">
+            ${prebuilds.map(p => `<option value="${p.id}">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''} &mdash; ${p.name}</option>`).join('')}
+          </select>
+          <label style="margin-top:0">Quantity</label>
+          <input id="prebuild-qty" type="number" value="1" min="1" step="1" />
+          <div style="margin-top:16px; text-align:right;">
+            <button type="button" class="secondary" id="prebuild-cancel">Cancel</button>
+            <button type="button" id="prebuild-confirm">Add to stage</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#prebuild-cancel').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      overlay.querySelector('#prebuild-confirm').addEventListener('click', () => {
+        const prebuild = prebuilds.find(p => p.id === overlay.querySelector('#prebuild-select').value);
+        const qty = parseFloat(overlay.querySelector('#prebuild-qty').value) || 1;
+        (prebuild.prebuild_components || []).forEach(comp => {
+          addLineItem(stageRow, {
+            description: `${prebuild.name} — ${comp.description}`,
+            item_type: comp.item_type,
+            quantity: (parseFloat(comp.quantity) || 0) * qty,
+            unit_cost: comp.unit_cost,
+          });
+        });
+        overlay.remove();
+      });
+    }
+
     // ---------- stages ----------
 
     function addRow({ name = '', description = '', markup_percent = null, lineItems = [], photoGroups = [] } = {}) {
@@ -216,6 +350,7 @@
           <label style="margin-top:0">Line items</label>
           <div class="li-rows"></div>
           <button type="button" class="secondary li-add" style="font-size:12px; padding:6px 12px;">+ Add line item</button>
+          <button type="button" class="secondary prebuild-add" style="font-size:12px; padding:6px 12px;">+ Add prebuild</button>
         </div>
 
         <div style="margin-top:16px;">
@@ -250,8 +385,12 @@
       div.querySelector('.cc-markup').addEventListener('input', () => updateStageTotals(div));
       div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); });
       div.querySelector('.li-add').addEventListener('click', () => addLineItem(div));
+      div.querySelector('.prebuild-add').addEventListener('click', () => openPrebuildPicker(div));
       div.querySelector('.pg-add').addEventListener('click', () => addPhotoGroup(div));
       div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateTotal(); });
+      if (TEMPLATE_INFO[currentTemplate].singleStage) {
+        div.querySelector('.remove-row').style.display = 'none';
+      }
 
       if (lineItems.length) {
         lineItems.forEach(li => addLineItem(div, li));
@@ -434,7 +573,9 @@
       }
 
       const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
-      const coverPhotos = (settings && settings.portfolio_photos) || [];
+      const allPhotos = (settings && settings.portfolio_photos) || [];
+      const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
+      const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
 
       const projectFields = {
         name, client_name, client_email, client_address,
@@ -442,7 +583,17 @@
         deposit_percent, pylon_link, pylon_project_id,
         reference_photos: referencePhotos.map(url => ({ url })),
         cover_photos: coverPhotos,
+        proposal_template: currentTemplate,
+        estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
       };
+
+      // Time & Materials has no quote/approval step — send it straight to
+      // booked rather than sitting in Draft Quote waiting for a client to
+      // accept a proposal that doesn't exist for this template.
+      if (currentTemplate === 'time_and_materials' && !editId) {
+        projectFields.pipeline_stage = 'job_booked';
+        projectFields.status = 'in_progress';
+      }
 
       let projectId = editId;
       if (editId) {
@@ -494,6 +645,8 @@
         return;
       }
       document.getElementById('page-title').textContent = 'Edit quote';
+      applyTemplate(project.proposal_template || 'new_build');
+      document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';
       document.getElementById('p-name').value = project.name;
       document.getElementById('p-subtitle').value = project.proposal_subtitle || '';
       document.getElementById('p-client').value = project.client_name;
@@ -551,6 +704,7 @@
       if (editId) {
         await loadForEdit();
       } else {
+        applyTemplate('new_build');
         const { data: settings } = await supabaseClient.from('company_settings').select('default_terms').eq('id', 1).single();
         if (settings) document.getElementById('p-terms').value = settings.default_terms || '';
         ['Site Power', 'Rough In', 'Fit Off', 'Finishing Touches'].forEach(n => addRow({ name: n }));

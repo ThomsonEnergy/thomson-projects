@@ -398,6 +398,12 @@ html[data-theme="navy"] .success-box {
 .theme-option-label .check { color: var(--accent); font-size: 13px; visibility: hidden; }
 .theme-option.active .theme-option-label .check { visibility: visible; }
 
+.template-option.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
 /* ===================================================================
    Job pipeline board
    =================================================================== */

@@ -1,8 +1,10 @@
 const fetch = require('node-fetch');
+const { getIntegrationKey } = require('./_shared/get-integration-key');
 
-// Uses your own Anthropic API key (from console.anthropic.com, separate from
-// a claude.ai login) to draft a professional scope-of-works description for
-// each stage, based on a short brief you type in.
+// Uses your Anthropic API key (set in Settings > API Keys, falls back to the
+// ANTHROPIC_API_KEY environment variable if that hasn't been set yet) to
+// draft a professional scope-of-works description for each stage, based on
+// a short brief you type in.
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
@@ -14,8 +16,7 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: 'brief and stageNames are required' };
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set in Netlify environment variables');
+    const apiKey = await getIntegrationKey('anthropic');
 
     const prompt = `You are writing scope-of-works descriptions for an electrical contractor's client-facing quote.
 

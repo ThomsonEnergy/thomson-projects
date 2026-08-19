@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=3" />
+<link rel="stylesheet" href="/css/style.css?v=4" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -41,11 +41,11 @@
         <button class="settings-tab active" data-panel="company">Company Details</button>
         <button class="settings-tab" data-panel="xero">Xero Mapping</button>
         <button class="settings-tab" data-panel="numbering">Numbering</button>
-        <button class="settings-tab" data-panel="quoting">Quoting Defaults</button>
-        <button class="settings-tab" data-panel="sm8">ServiceM8 Defaults</button>
+        <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
+        <button class="settings-tab" data-panel="sm8">Job Defaults</button>
         <button class="settings-tab" data-panel="terms">Payment Terms &amp; T&amp;Cs</button>
         <button class="settings-tab" data-panel="photos">Photo Categories</button>
-        <button class="settings-tab" data-panel="prebuilds">Prebuild Categories</button>
+        <button class="settings-tab" data-panel="prebuilds" data-pricing-only="1">Prebuild Categories</button>
         <button class="settings-tab" data-panel="users" data-admin-only="1">Users &amp; Roles</button>
         <button class="settings-tab" data-panel="apikeys" data-admin-only="1">API Keys</button>
         <button class="settings-tab" data-panel="appearance">Appearance</button>
@@ -154,13 +154,13 @@
           <div id="save-quoting-msg"></div>
         </div>
 
-        <!-- ServiceM8 Defaults (stub) -->
+        <!-- Job Defaults (stub) -->
         <div class="settings-panel" id="panel-sm8">
           <div class="card">
             <div class="empty-state">
               <div class="empty-icon">&#128736;</div>
               <h2>Coming in Phase 4</h2>
-              <p>Default job category and checklist items per stage type will be set here once the ServiceM8 push is built.</p>
+              <p>Default checklist items per stage/job type will be set here once the Reactive Jobs workflow is built — shared between staged projects and quick reactive jobs.</p>
             </div>
           </div>
         </div>
@@ -176,25 +176,62 @@
           <div id="save-terms-msg"></div>
         </div>
 
-        <!-- Photo Categories (stub) -->
+        <!-- Photo Categories -->
         <div class="settings-panel" id="panel-photos">
           <div class="card">
             <div class="empty-state">
-              <div class="empty-icon">&#128736;</div>
-              <h2>Coming in Phase 5</h2>
-              <p>Electrical / Solar / General photo categories get managed here alongside the proposal templates.</p>
+              <div class="empty-icon">&#128247;</div>
+              <h2>Tagged where the photos live</h2>
+              <p>Electrical / Solar / General categories are set per-photo under <strong>Company Details &gt; Portfolio photos</strong>. Each proposal template pulls cover photos from the matching category automatically &mdash; New Build uses Electrical, Solar Proposal uses Solar, and Quick Estimate / Time &amp; Materials use General.</p>
             </div>
           </div>
         </div>
 
-        <!-- Prebuild Categories (stub) -->
+        <!-- Prebuild library -->
         <div class="settings-panel" id="panel-prebuilds">
           <div class="card">
-            <div class="empty-state">
-              <div class="empty-icon">&#128736;</div>
-              <h2>Coming in Phase 5</h2>
-              <p>Prebuild categories (Lighting, Power, Trenching, Cable Runs, Panels, Batteries, Inverters) get managed here alongside the prebuild library.</p>
+            <h2>Add a prebuild</h2>
+            <p class="subtitle" style="margin-bottom:10px;">A reusable supply-and-install package. Staff pick this on a quote and set a quantity &mdash; every component scales automatically.</p>
+            <div class="grid cols-3">
+              <div>
+                <label>Name</label>
+                <input id="pb-name" placeholder="e.g. Supply &amp; Install Downlight" />
+              </div>
+              <div>
+                <label>Internal part number (optional)</label>
+                <input id="pb-part-number" placeholder="Internal only, not a supplier SKU" />
+              </div>
+              <div>
+                <label>Client-facing description</label>
+                <input id="pb-client-desc" placeholder="What the client sees on the proposal" />
+              </div>
             </div>
+            <div class="grid cols-3">
+              <div>
+                <label>Category</label>
+                <select id="pb-category">
+                  <option value="Electrical">Electrical</option>
+                  <option value="Solar">Solar</option>
+                </select>
+              </div>
+              <div>
+                <label>Subcategory</label>
+                <select id="pb-subcategory"></select>
+              </div>
+            </div>
+            <label>Components</label>
+            <div id="pb-components"></div>
+            <button type="button" class="secondary" id="pb-add-component" style="margin-top:6px;">+ Add component</button>
+            <div style="margin-top:14px;">
+              <button id="pb-save-btn">Save prebuild</button>
+              <button class="secondary" id="pb-clear-btn" type="button">Clear form</button>
+            </div>
+            <div id="pb-msg"></div>
+          </div>
+
+          <div class="card">
+            <h2>Library</h2>
+            <div id="pb-list"><p class="subtitle">Loading...</p></div>
           </div>
         </div>
 
@@ -245,9 +282,6 @@
 
             <label>Anthropic API key</label>
             <input id="key-anthropic" type="password" placeholder="sk-ant-..." autocomplete="off" />
-
-            <label>ServiceM8 API key</label>
-            <input id="key-servicem8" type="password" placeholder="Paste key" autocomplete="off" />
 
             <label>Pylon API key</label>
             <input id="key-pylon" type="password" placeholder="Paste key (used from Phase 5 onward)" autocomplete="off" />
@@ -328,10 +362,10 @@
         document.getElementById('save-company-msg').innerHTML = `<div class="error-box">${error.message}</div>`;
         return;
       }
-      portfolioPhotos = (data.portfolio_photos || []).map(p => p.url || p);
+      portfolioPhotos = (data.portfolio_photos || []).map(p => typeof p === 'string' ? { url: p, category: 'general' } : { url: p.url, category: p.category || 'general' });
       logoUrl = data.logo_url || '';
       renderLogoPreview();
-      renderPhotoThumbs(document.getElementById('portfolio-thumbs'), portfolioPhotos);
+      renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('company-name').value = data.company_name || '';
       document.getElementById('abn').value = data.abn || '';
@@ -342,6 +376,34 @@
       document.getElementById('tagline').value = data.tagline || '';
       document.getElementById('default-markup').value = data.default_markup_percent ?? 45;
       document.getElementById('default-deposit').value = data.default_deposit_percent ?? 10;
+    }
+
+    function renderCategorizedThumbs() {
+      const container = document.getElementById('portfolio-thumbs');
+      container.innerHTML = portfolioPhotos.map((p, i) => `
+        <div style="display:inline-block; margin:0 10px 10px 0; text-align:center; vertical-align:top;">
+          <div style="position:relative;">
+            <img src="${p.url}" style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid var(--border);" />
+            <button type="button" data-i="${i}" class="portfolio-remove" style="position:absolute; top:-6px; right:-6px; width:20px; height:20px; padding:0; border-radius:50%; font-size:11px; line-height:1;">x</button>
+          </div>
+          <select class="portfolio-category" data-i="${i}" style="margin-top:6px; width:90px; font-size:11px; padding:4px;">
+            <option value="electrical" ${p.category === 'electrical' ? 'selected' : ''}>Electrical</option>
+            <option value="solar" ${p.category === 'solar' ? 'selected' : ''}>Solar</option>
+            <option value="general" ${p.category === 'general' ? 'selected' : ''}>General</option>
+          </select>
+        </div>
+      `).join('');
+      container.querySelectorAll('.portfolio-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          portfolioPhotos.splice(parseInt(btn.dataset.i), 1);
+          renderCategorizedThumbs();
+        });
+      });
+      container.querySelectorAll('.portfolio-category').forEach(sel => {
+        sel.addEventListener('change', () => {
+          portfolioPhotos[parseInt(sel.dataset.i)].category = sel.value;
+        });
+      });
     }
 
     document.getElementById('logo-upload-btn').addEventListener('click', async () => {
@@ -373,10 +435,10 @@
       msg.innerHTML = '';
       try {
         const urls = await uploadPhotos(fileInput.files, 'portfolio');
-        portfolioPhotos.push(...urls);
-        renderPhotoThumbs(document.getElementById('portfolio-thumbs'), portfolioPhotos);
+        urls.forEach(url => portfolioPhotos.push({ url, category: 'general' }));
+        renderCategorizedThumbs();
         fileInput.value = '';
-        msg.innerHTML = `<div class="success-box">Uploaded. Click "Save company details" below to keep these.</div>`;
+        msg.innerHTML = `<div class="success-box">Uploaded. Tag each photo's category, then click "Save company details" to keep these.</div>`;
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
       }
@@ -387,7 +449,7 @@
       const { error } = await supabaseClient
         .from('company_settings')
         .update({
-          portfolio_photos: portfolioPhotos.map(url => ({ url })),
+          portfolio_photos: portfolioPhotos,
           logo_url: logoUrl,
           tagline: document.getElementById('tagline').value.trim(),
           company_name: document.getElementById('company-name').value.trim(),
@@ -428,8 +490,11 @@
         : `<div class="success-box">Saved.</div>`;
     });
 
-    // --- Admin-only tab gating ---
+    // --- Role-based tab gating ---
     let myRole = 'staff';
+    function isPricingRoleLocal(role) {
+      return role === 'admin' || role === 'finance' || role === 'sales';
+    }
     async function applyAdminGating() {
       const { data: { session } } = await supabaseClient.auth.getSession();
       const { data: profile } = await supabaseClient
@@ -441,6 +506,15 @@
 
       if (myRole !== 'admin') {
         document.querySelectorAll('[data-admin-only="1"]').forEach(btn => {
+          const stillActive = btn.classList.contains('active');
+          btn.style.display = 'none';
+          if (stillActive) {
+            document.querySelector('.settings-tab[data-panel="company"]').click();
+          }
+        });
+      }
+      if (!isPricingRoleLocal(myRole)) {
+        document.querySelectorAll('[data-pricing-only="1"]').forEach(btn => {
           const stillActive = btn.classList.contains('active');
           btn.style.display = 'none';
           if (stillActive) {
@@ -572,7 +646,6 @@
       if (error) return; // not an admin, or table not migrated yet — panel is hidden anyway
       const byName = Object.fromEntries((data || []).map(k => [k.key_name, k.key_value]));
       if (byName.anthropic) document.getElementById('key-anthropic').value = byName.anthropic;
-      if (byName.servicem8) document.getElementById('key-servicem8').value = byName.servicem8;
       if (byName.pylon) document.getElementById('key-pylon').value = byName.pylon;
     }
 
@@ -580,7 +653,6 @@
       const msg = document.getElementById('apikeys-msg');
       const rows = [
         { key_name: 'anthropic', key_value: document.getElementById('key-anthropic').value.trim() },
-        { key_name: 'servicem8', key_value: document.getElementById('key-servicem8').value.trim() },
         { key_name: 'pylon', key_value: document.getElementById('key-pylon').value.trim() },
       ].filter(r => r.key_value);
 
@@ -595,6 +667,152 @@
       msg.innerHTML = error
         ? `<div class="error-box">${error.message}</div>`
         : `<div class="success-box">Saved.</div>`;
+    });
+
+    // --- Prebuild library ---
+    const PREBUILD_SUBCATEGORIES = {
+      Electrical: ['Lighting', 'Power', 'Trenching', 'Cable Runs'],
+      Solar: ['Panels', 'Batteries', 'Inverters'],
+    };
+    let editingPrebuildId = null;
+
+    function refreshSubcategoryOptions() {
+      const cat = document.getElementById('pb-category').value;
+      document.getElementById('pb-subcategory').innerHTML = PREBUILD_SUBCATEGORIES[cat]
+        .map(s => `<option value="${s}">${s}</option>`).join('');
+    }
+    document.getElementById('pb-category').addEventListener('change', refreshSubcategoryOptions);
+
+    function addComponentRow({ item_type = 'material', description = '', quantity = 1, unit_cost = '' } = {}) {
+      const row = document.createElement('div');
+      row.className = 'pb-component-row';
+      row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.7fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
+      row.innerHTML = `
+        <input class="pbc-desc" placeholder="e.g. Downlight fitting" value="${description}" style="font-size:13px;" />
+        <select class="pbc-type" style="font-size:13px;">
+          <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
+          <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
+        </select>
+        <input class="pbc-qty" type="number" step="0.01" value="${quantity}" placeholder="Qty/hrs" style="font-size:13px;" />
+        <input class="pbc-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px;" />
+        <button type="button" class="secondary pbc-remove" style="padding:6px 10px; font-size:12px;">x</button>
+      `;
+      row.querySelector('.pbc-remove').addEventListener('click', () => row.remove());
+      document.getElementById('pb-components').appendChild(row);
+    }
+    document.getElementById('pb-add-component').addEventListener('click', () => addComponentRow());
+
+    function clearPrebuildForm() {
+      editingPrebuildId = null;
+      document.getElementById('pb-name').value = '';
+      document.getElementById('pb-part-number').value = '';
+      document.getElementById('pb-client-desc').value = '';
+      document.getElementById('pb-category').value = 'Electrical';
+      refreshSubcategoryOptions();
+      document.getElementById('pb-components').innerHTML = '';
+      addComponentRow();
+      document.getElementById('pb-msg').innerHTML = '';
+    }
+    document.getElementById('pb-clear-btn').addEventListener('click', clearPrebuildForm);
+
+    async function loadPrebuilds() {
+      const listEl = document.getElementById('pb-list');
+      const { data, error } = await supabaseClient
+        .from('prebuilds')
+        .select('*, prebuild_components(*)')
+        .order('category').order('name');
+      if (error) {
+        listEl.innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+      if (!data.length) {
+        listEl.innerHTML = `<p class="subtitle">No prebuilds yet — add your first one above.</p>`;
+        return;
+      }
+      listEl.innerHTML = data.map(pb => {
+        const total = (pb.prebuild_components || []).reduce((s, c) => s + Number(c.quantity) * Number(c.unit_cost), 0);
+        return `
+        <div class="project-list-item" data-id="${pb.id}">
+          <div>
+            <div class="name">${pb.name}</div>
+            <div class="meta">${pb.category}${pb.subcategory ? ' / ' + pb.subcategory : ''} &middot; ${(pb.prebuild_components || []).length} component${(pb.prebuild_components || []).length === 1 ? '' : 's'} &middot; ${money(total)} base cost</div>
+          </div>
+          <div>
+            <button class="secondary pb-edit-btn" data-id="${pb.id}">Edit</button>
+            <button class="secondary danger pb-delete-btn" data-id="${pb.id}">Delete</button>
+          </div>
+        </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.pb-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const pb = data.find(p => p.id === btn.dataset.id);
+          editingPrebuildId = pb.id;
+          document.getElementById('pb-name').value = pb.name;
+          document.getElementById('pb-part-number').value = pb.internal_part_number || '';
+          document.getElementById('pb-client-desc').value = pb.client_description || '';
+          document.getElementById('pb-category').value = pb.category;
+          refreshSubcategoryOptions();
+          document.getElementById('pb-subcategory').value = pb.subcategory || '';
+          document.getElementById('pb-components').innerHTML = '';
+          (pb.prebuild_components || []).sort((a, b) => a.sort_order - b.sort_order).forEach(addComponentRow);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      });
+      listEl.querySelectorAll('.pb-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this prebuild? This cannot be undone.')) return;
+          const { error: delErr } = await supabaseClient.from('prebuilds').delete().eq('id', btn.dataset.id);
+          if (delErr) { alert(delErr.message); return; }
+          await loadPrebuilds();
+        });
+      });
+    }
+
+    document.getElementById('pb-save-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('pb-msg');
+      const name = document.getElementById('pb-name').value.trim();
+      if (!name) {
+        msg.innerHTML = `<div class="error-box">Name is required.</div>`;
+        return;
+      }
+      const components = [...document.querySelectorAll('.pb-component-row')].map((row, i) => ({
+        item_type: row.querySelector('.pbc-type').value,
+        description: row.querySelector('.pbc-desc').value.trim(),
+        quantity: parseFloat(row.querySelector('.pbc-qty').value) || 0,
+        unit_cost: parseFloat(row.querySelector('.pbc-cost').value) || 0,
+        sort_order: i,
+      })).filter(c => c.description);
+
+      const prebuildFields = {
+        name,
+        internal_part_number: document.getElementById('pb-part-number').value.trim(),
+        client_description: document.getElementById('pb-client-desc').value.trim(),
+        category: document.getElementById('pb-category').value,
+        subcategory: document.getElementById('pb-subcategory').value,
+      };
+
+      let prebuildId = editingPrebuildId;
+      if (editingPrebuildId) {
+        const { error } = await supabaseClient.from('prebuilds').update(prebuildFields).eq('id', editingPrebuildId);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        await supabaseClient.from('prebuild_components').delete().eq('prebuild_id', editingPrebuildId);
+      } else {
+        const { data: inserted, error } = await supabaseClient.from('prebuilds').insert(prebuildFields).select().single();
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        prebuildId = inserted.id;
+      }
+
+      if (components.length) {
+        const { error: compErr } = await supabaseClient
+          .from('prebuild_components')
+          .insert(components.map(c => ({ ...c, prebuild_id: prebuildId })));
+        if (compErr) { msg.innerHTML = `<div class="error-box">${compErr.message}</div>`; return; }
+      }
+
+      msg.innerHTML = `<div class="success-box">Saved.</div>`;
+      clearPrebuildForm();
+      await loadPrebuilds();
     });
 
     (async function () {
@@ -612,6 +830,10 @@
       if (myRole === 'admin') {
         await loadUsers();
         await loadApiKeys();
+      }
+      if (isPricingRoleLocal(myRole)) {
+        clearPrebuildForm();
+        await loadPrebuilds();
       }
     })();
   </script>
