@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Settings - Thomson Energy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <a class="brand" href="/dashboard.html">THOMSON <span>ENERGY / PROJECTS</span></a>
+    <nav>
+      <a href="/dashboard.html">Projects</a>
+      <a href="/new-project.html">New quote</a>
+      <a href="/settings.html">Settings</a>
+      <a href="#" id="logout-link">Log out</a>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <h1>Settings</h1>
+    <p class="subtitle">These apply across every quote: your branding, company details, portfolio photos, and standard terms.</p>
+
+    <div class="card">
+      <h2>Logo and branding</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Your logo appears top-left on the client proposal, replacing the default text.</p>
+      <div id="logo-preview" style="margin-bottom:12px;"></div>
+      <input type="file" id="logo-file" accept="image/*" />
+      <button type="button" id="logo-upload-btn" class="secondary" style="margin-top:10px;">Upload logo</button>
+      <div id="logo-msg"></div>
+      <label>Tagline (optional, shown under your logo on the cover page)</label>
+      <input id="tagline" placeholder="e.g. Renewable Energy Specialists" />
+    </div>
+
+    <div class="card">
+      <h2>Company details</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Shown on the proposal cover page.</p>
+      <div class="grid cols-3">
+        <div>
+          <label>Company name</label>
+          <input id="company-name" placeholder="Thomson Energy Australia Pty Ltd" />
+        </div>
+        <div>
+          <label>ABN</label>
+          <input id="abn" placeholder="88 689 985 831" />
+        </div>
+        <div>
+          <label>Phone</label>
+          <input id="phone" placeholder="0455 415 464" />
+        </div>
+      </div>
+      <div class="grid cols-3">
+        <div>
+          <label>Address</label>
+          <input id="address" placeholder="7319 Tweed Valley Way, Fernvale NSW 2484" />
+        </div>
+        <div>
+          <label>Website</label>
+          <input id="website" placeholder="thomsonenergy.com.au" />
+        </div>
+        <div>
+          <label>Licenses</label>
+          <input id="licenses" placeholder="QLD ECL 1508141 | NSW ECL 490514C" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Portfolio photos (used on every proposal's cover page)</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Upload photos of previous jobs. These appear on the title page of every quote you send.</p>
+      <div id="portfolio-thumbs" style="margin-bottom:10px;"></div>
+      <input type="file" id="portfolio-file" accept="image/*" multiple />
+      <button type="button" id="portfolio-upload-btn" class="secondary" style="margin-top:10px;">Upload photos</button>
+      <div id="portfolio-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Default terms and conditions</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Shown at the bottom of every proposal. You can still edit it per quote if a job needs different terms.</p>
+      <textarea id="terms-text" style="min-height:220px;"></textarea>
+    </div>
+
+    <button id="save-btn">Save settings</button>
+    <div id="save-msg"></div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script>
+    let portfolioPhotos = [];
+    let logoUrl = '';
+
+    function renderLogoPreview() {
+      document.getElementById('logo-preview').innerHTML = logoUrl
+        ? `<img src="${logoUrl}" style="max-height:70px; max-width:240px;" />`
+        : `<p class="subtitle" style="margin:0;">No logo uploaded yet.</p>`;
+    }
+
+    async function loadSettings() {
+      const { data, error } = await supabaseClient.from('company_settings').select('*').eq('id', 1).single();
+      if (error) {
+        document.getElementById('save-msg').innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+      portfolioPhotos = (data.portfolio_photos || []).map(p => p.url || p);
+      logoUrl = data.logo_url || '';
+      renderLogoPreview();
+      renderPhotoThumbs(document.getElementById('portfolio-thumbs'), portfolioPhotos);
+      document.getElementById('terms-text').value = data.default_terms || '';
+      document.getElementById('company-name').value = data.company_name || '';
+      document.getElementById('abn').value = data.abn || '';
+      document.getElementById('phone').value = data.phone || '';
+      document.getElementById('address').value = data.address || '';
+      document.getElementById('website').value = data.website || '';
+      document.getElementById('licenses').value = data.licenses || '';
+      document.getElementById('tagline').value = data.tagline || '';
+    }
+
+    document.getElementById('logo-upload-btn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('logo-file');
+      const msg = document.getElementById('logo-msg');
+      if (!fileInput.files.length) {
+        msg.innerHTML = `<div class="error-box">Choose a logo file first.</div>`;
+        return;
+      }
+      msg.innerHTML = '';
+      try {
+        const [url] = await uploadPhotos(fileInput.files, 'logo');
+        logoUrl = url;
+        renderLogoPreview();
+        fileInput.value = '';
+        msg.innerHTML = `<div class="success-box">Uploaded. Click "Save settings" below to keep this.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+    });
+
+    document.getElementById('portfolio-upload-btn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('portfolio-file');
+      const msg = document.getElementById('portfolio-msg');
+      if (!fileInput.files.length) {
+        msg.innerHTML = `<div class="error-box">Choose one or more photos first.</div>`;
+        return;
+      }
+      msg.innerHTML = '';
+      try {
+        const urls = await uploadPhotos(fileInput.files, 'portfolio');
+        portfolioPhotos.push(...urls);
+        renderPhotoThumbs(document.getElementById('portfolio-thumbs'), portfolioPhotos);
+        fileInput.value = '';
+        msg.innerHTML = `<div class="success-box">Uploaded. Click "Save settings" below to keep these.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+    });
+
+    document.getElementById('save-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('save-msg');
+      const { error } = await supabaseClient
+        .from('company_settings')
+        .update({
+          portfolio_photos: portfolioPhotos.map(url => ({ url })),
+          default_terms: document.getElementById('terms-text').value,
+          logo_url: logoUrl,
+          tagline: document.getElementById('tagline').value.trim(),
+          company_name: document.getElementById('company-name').value.trim(),
+          abn: document.getElementById('abn').value.trim(),
+          phone: document.getElementById('phone').value.trim(),
+          address: document.getElementById('address').value.trim(),
+          website: document.getElementById('website').value.trim(),
+          licenses: document.getElementById('licenses').value.trim(),
+        })
+        .eq('id', 1);
+      msg.innerHTML = error
+        ? `<div class="error-box">${error.message}</div>`
+        : `<div class="success-box">Settings saved.</div>`;
+    });
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      await loadSettings();
+    })();
+  </script>
+</body>
+</html>

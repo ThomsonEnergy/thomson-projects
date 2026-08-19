@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Your proposal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  @media print {
+    .topbar, #accept-section { display: none; }
+    body { background: white; color: black; }
+    .card { border: 1px solid #ccc; background: white; }
+  }
+  .cover-banner {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    min-height: 380px;
+    background: #1a1f27;
+    color: #fff;
+    margin-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .cover-photo-grid {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    z-index: 0;
+  }
+  .cover-photo-grid img { width: 100%; height: 100%; object-fit: cover; }
+  .cover-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, rgba(10,12,16,0.94) 30%, rgba(10,12,16,0.45) 75%);
+    z-index: 1;
+  }
+  .cover-content { position: relative; z-index: 2; padding: 36px 36px 28px; }
+  .cover-logo { max-height: 56px; max-width: 220px; display: block; margin-bottom: 8px; }
+  .cover-tagline { font-size: 12px; letter-spacing: 0.12em; color: #cfd6e2; text-transform: uppercase; margin: 0 0 40px; }
+  .cover-eyebrow { font-size: 13px; letter-spacing: 0.14em; color: var(--amber); text-transform: uppercase; margin: 0 0 8px; }
+  .cover-title { font-size: 32px; font-weight: 700; margin: 0 0 6px; max-width: 520px; }
+  .cover-subtitle { font-size: 15px; color: #cfd6e2; margin: 0; }
+  .cover-details {
+    position: relative; z-index: 2;
+    padding: 16px 36px; background: rgba(0,0,0,0.35);
+    font-size: 12px; color: #cfd6e2; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span id="brand-mark" class="brand">PROPOSAL</span>
+    <button class="secondary" onclick="window.print()">Print / Save as PDF</button>
+  </div>
+
+  <div class="wrap" style="max-width:800px;">
+    <div id="content"><p class="subtitle">Loading your proposal...</p></div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script>
+    const token = new URLSearchParams(window.location.search).get('token');
+
+    async function load() {
+      const [{ data, error }, { data: settings }] = await Promise.all([
+        supabaseClient.rpc('get_quote_by_token', { p_token: token }),
+        supabaseClient.from('company_settings').select('*').eq('id', 1).single(),
+      ]);
+      const content = document.getElementById('content');
+      if (error || !data) {
+        content.innerHTML = `<div class="error-box">This quote link isn't valid. Please check the link or contact us.</div>`;
+        return;
+      }
+
+      const s = settings || {};
+      if (s.logo_url) {
+        document.getElementById('brand-mark').innerHTML = `<img src="${s.logo_url}" style="max-height:28px;" />`;
+      } else if (s.company_name) {
+        document.getElementById('brand-mark').textContent = s.company_name;
+      }
+
+      const project = data.project;
+      const centres = data.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
+      const total = centres.reduce((sum, c) => sum + Number(c.quoted_amount), 0);
+      const coverPhotos = (project.cover_photos || []).map(p => p.url || p).slice(0, 3);
+      const referencePhotos = (project.reference_photos || []).map(p => p.url || p);
+      const depositPercent = Number(project.deposit_percent) || 0;
+      const depositAmount = total * (depositPercent / 100);
+
+      const detailParts = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
+      const licenseParts = (s.licenses || '').trim();
+
+      const coverHtml = `
+        <div class="cover-banner">
+          ${coverPhotos.length ? `<div class="cover-photo-grid">${coverPhotos.map(url => `<img src="${url}" />`).join('')}</div>` : ''}
+          <div class="cover-scrim"></div>
+          <div class="cover-content">
+            ${s.logo_url ? `<img src="${s.logo_url}" class="cover-logo" />` : `<p style="font-size:22px; font-weight:700; margin:0 0 8px;">${s.company_name || ''}</p>`}
+            ${s.tagline ? `<p class="cover-tagline">${s.tagline}</p>` : '<div style="margin-bottom:40px;"></div>'}
+            <p class="cover-eyebrow">Proposal</p>
+            <h1 class="cover-title">${project.name}</h1>
+            <p class="cover-subtitle">${project.proposal_subtitle || ('Prepared for ' + project.client_name)}</p>
+          </div>
+          ${(detailParts.length || licenseParts) ? `
+            <div class="cover-details">
+              <span>${s.company_name || ''}${detailParts.length ? ' &middot; ' + detailParts.join(' &middot; ') : ''}</span>
+              ${licenseParts ? `<span>${licenseParts}</span>` : ''}
+            </div>` : ''}
+        </div>
+        <p class="subtitle" style="margin:0 0 24px;">Prepared for ${project.client_name}${project.client_address ? ' &middot; ' + project.client_address : ''}</p>
+        ${project.pylon_link ? `<div style="margin-bottom:24px;"><a class="btn secondary" href="${project.pylon_link}" target="_blank" rel="noopener">View interactive system design</a></div>` : ''}
+      `;
+
+      const stagePhotosHtml = centres.some(c => (c.photo_groups || []).length) ? `
+        <div class="card">
+          <h2>Stage photos</h2>
+          ${centres.filter(c => (c.photo_groups || []).length).map(c => `
+            <p style="font-weight:600; margin:16px 0 8px;">${c.name}</p>
+            ${c.photo_groups.map(g => `
+              <p class="subtitle" style="margin:0 0 6px;">${g.description || ''}</p>
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:14px;">
+                ${(g.photos || []).map(p => `<img src="${p.url || p}" style="width:100%; height:130px; object-fit:cover; border-radius:8px;" />`).join('')}
+              </div>
+            `).join('')}
+          `).join('')}
+        </div>` : '';
+
+      const paymentScheduleHtml = `
+        <div class="card">
+          <h2>Payment schedule</h2>
+          <table>
+            <thead><tr><th>Milestone</th><th class="num">Amount</th></tr></thead>
+            <tbody>
+              <tr><td>Deposit (${depositPercent}%), due on acceptance</td><td class="num">${money(depositAmount)}</td></tr>
+              ${centres.map(c => `<tr><td>${c.name}, due on completion</td><td class="num">${money(c.quoted_amount * (1 - depositPercent / 100))}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+      const sowHtml = project.sow_text ? `
+        <div class="card">
+          <h2>Scope of works</h2>
+          <p class="subtitle" style="white-space:pre-wrap; line-height:1.7; color:var(--text);">${project.sow_text}</p>
+        </div>` : '';
+
+      const referenceHtml = referencePhotos.length ? `
+        <div class="card">
+          <h2>What it will look like</h2>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px;">
+            ${referencePhotos.map(url => `<img src="${url}" style="width:100%; height:150px; object-fit:cover; border-radius:8px;" />`).join('')}
+          </div>
+        </div>` : '';
+
+      const termsHtml = project.terms_text ? `
+        <div class="card">
+          <h2>Terms and conditions</h2>
+          <p class="subtitle" style="white-space:pre-wrap; line-height:1.6;">${project.terms_text}</p>
+        </div>` : '';
+
+      content.innerHTML = `
+        ${coverHtml}
+        ${sowHtml}
+
+        <div class="card">
+          <h2>Investment summary</h2>
+          <table>
+            <thead><tr><th>Stage</th><th>Description</th><th class="num">Price</th></tr></thead>
+            <tbody>
+              ${centres.map(c => `
+                <tr>
+                  <td>${c.name}</td>
+                  <td style="color:var(--muted)">${c.description || ''}</td>
+                  <td class="num">${money(c.quoted_amount)}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+          <div style="text-align:right; margin-top:16px; font-size:20px; font-weight:700;">
+            Total: ${money(total)}
+          </div>
+        </div>
+
+        ${referenceHtml}
+        ${stagePhotosHtml}
+        ${paymentScheduleHtml}
+        ${termsHtml}
+
+        <div class="card" id="accept-section">
+          ${project.status === 'accepted' || project.status === 'in_progress' || project.status === 'complete'
+            ? `<p class="success-box" style="display:inline-block">Quote accepted, thank you. Work will begin as scheduled.</p>`
+            : `
+              <h2>Ready to go ahead?</h2>
+              <p class="subtitle">Accepting this quote lets us schedule the work.</p>
+              <button id="accept-btn">Accept this quote</button>
+              <div id="accept-msg"></div>
+            `}
+        </div>
+      `;
+
+      const acceptBtn = document.getElementById('accept-btn');
+      if (acceptBtn) {
+        acceptBtn.addEventListener('click', async () => {
+          acceptBtn.disabled = true;
+          const { error: acceptErr } = await supabaseClient.rpc('accept_quote', { p_token: token });
+          const msg = document.getElementById('accept-msg');
+          if (acceptErr) {
+            msg.innerHTML = `<div class="error-box">${acceptErr.message}</div>`;
+            acceptBtn.disabled = false;
+            return;
+          }
+          load();
+        });
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

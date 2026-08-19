@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>New quote - Thomson Energy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <a class="brand" href="/dashboard.html">THOMSON <span>ENERGY / PROJECTS</span></a>
+    <nav>
+      <a href="/dashboard.html">Projects</a>
+      <a href="/new-project.html">New quote</a>
+      <a href="/settings.html">Settings</a>
+      <a href="#" id="logout-link">Log out</a>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <h1 id="page-title">New quote</h1>
+    <p class="subtitle">Break the job into stages. Each stage becomes its own job in ServiceM8 once the client accepts.</p>
+
+    <div class="card">
+      <h2>Project &amp; client</h2>
+      <label>Project name</label>
+      <input id="p-name" placeholder="e.g. 14 Miller St - New Build" required />
+      <label>Proposal subtitle (optional)</label>
+      <input id="p-subtitle" placeholder="e.g. Grid-Connected Solar Photovoltaic System" />
+      <div class="grid cols-3">
+        <div>
+          <label>Client name</label>
+          <input id="p-client" required />
+        </div>
+        <div>
+          <label>Client email</label>
+          <input id="p-email" type="email" placeholder="for sending the quote" />
+        </div>
+        <div>
+          <label>Site address</label>
+          <input id="p-address" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Scope of works document</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Paste in your full scope of works. Shown as its own section in the proposal, above the pricing table.</p>
+      <textarea id="p-sow" style="min-height:260px;" placeholder="Paste your scope of works here..."></textarea>
+    </div>
+
+    <div class="card">
+      <h2>Stage descriptions (optional AI helper)</h2>
+      <p class="subtitle" style="margin-bottom:10px;">A few rough notes. Used to draft a short description for each stage below.</p>
+      <textarea id="p-brief" placeholder="e.g. Single storey new build, 3 bed 2 bath, standard fitout, ducted air con, solar-ready switchboard"></textarea>
+      <button type="button" class="secondary" id="generate-scope-btn" style="margin-top:12px;">Generate stage descriptions with AI</button>
+      <div id="generate-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>What it will look like</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Reference photos, renders, or similar completed jobs.</p>
+      <div id="reference-thumbs" style="margin-bottom:10px;"></div>
+      <input type="file" id="reference-file" accept="image/*" multiple />
+      <button type="button" id="reference-upload-btn" class="secondary" style="margin-top:10px;">Upload photos</button>
+      <div id="reference-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Stages / cost centres</h2>
+      <div style="max-width:220px; margin-bottom:16px;">
+        <label style="margin-top:0">Default markup %</label>
+        <input id="default-markup" type="number" step="1" value="45" />
+      </div>
+      <div id="cc-rows"></div>
+      <button type="button" class="secondary" id="add-row">+ Add stage</button>
+    </div>
+
+    <div class="card">
+      <h2>Total</h2>
+      <div class="stat" style="max-width:220px;">
+        <div class="label">Quoted total</div>
+        <div class="value" id="total-display">$0.00</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Payment schedule</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Shown to the client on the proposal. The remainder is invoiced stage by stage as each is completed.</p>
+      <div style="max-width:160px;">
+        <label style="margin-top:0">Deposit %</label>
+        <input id="p-deposit" type="number" step="1" value="10" />
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Pylon system design</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Link to the Pylon proposal so the client can view the interactive design. Shown as a button on the proposal.</p>
+      <label style="margin-top:0">Pylon proposal link</label>
+      <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." />
+      <div class="grid cols-3" style="margin-top:10px;">
+        <div style="grid-column: span 2;">
+          <label>Pylon project ID (optional, for pulling system data)</label>
+          <input id="p-pylon-id" placeholder="Requires a Pylon API key set up in Netlify" />
+        </div>
+        <div style="display:flex; align-items:end;">
+          <button type="button" class="secondary" id="pylon-pull-btn" style="width:100%;">Pull from Pylon</button>
+        </div>
+      </div>
+      <div id="pylon-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Terms and conditions</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Prefilled from your default terms in Settings. Edit here if this job needs something different.</p>
+      <textarea id="p-terms" style="min-height:180px;"></textarea>
+    </div>
+
+    <button id="save-btn">Save quote</button>
+    <div id="msg"></div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script>
+    const editId = new URLSearchParams(window.location.search).get('id');
+    let referencePhotos = [];
+    let rowCount = 0;
+    const rowsEl = document.getElementById('cc-rows');
+
+    // ---------- line items ----------
+
+    function lineItemTotal(li) {
+      return (parseFloat(li.querySelector('.li-qty').value) || 0) * (parseFloat(li.querySelector('.li-cost').value) || 0);
+    }
+
+    function addLineItem(stageRow, { description = '', item_type = 'material', quantity = 1, unit_cost = '' } = {}) {
+      const li = document.createElement('div');
+      li.className = 'li-row';
+      li.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
+      li.innerHTML = `
+        <input class="li-desc" placeholder="e.g. Solar panels" value="${description}" style="font-size:13px;" />
+        <select class="li-type" style="font-size:13px;">
+          <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
+          <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
+        </select>
+        <input class="li-qty" type="number" step="0.01" value="${quantity}" placeholder="Qty" style="font-size:13px;" />
+        <input class="li-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px;" />
+        <div class="li-total" style="font-size:13px; font-weight:600;">$0.00</div>
+        <button type="button" class="secondary li-remove" style="padding:6px 10px; font-size:12px;">x</button>
+      `;
+      stageRow.querySelector('.li-rows').appendChild(li);
+      const recalc = () => updateStageTotals(stageRow);
+      li.querySelector('.li-qty').addEventListener('input', recalc);
+      li.querySelector('.li-cost').addEventListener('input', recalc);
+      li.querySelector('.li-type').addEventListener('change', recalc);
+      li.querySelector('.li-remove').addEventListener('click', () => { li.remove(); recalc(); });
+      updateStageTotals(stageRow);
+    }
+
+    function updateStageTotals(stageRow) {
+      const items = [...stageRow.querySelectorAll('.li-row')];
+      let labour = 0, material = 0;
+      items.forEach(li => {
+        const total = lineItemTotal(li);
+        li.querySelector('.li-total').textContent = money(total);
+        if (li.querySelector('.li-type').value === 'labour') labour += total; else material += total;
+      });
+      const markup = parseFloat(stageRow.querySelector('.cc-markup').value) || 0;
+      const salePrice = (labour + material) * (1 + markup / 100);
+      stageRow.querySelector('.cc-labour-total').textContent = money(labour);
+      stageRow.querySelector('.cc-material-total').textContent = money(material);
+      stageRow.querySelector('.cc-sale-price').textContent = money(salePrice);
+      stageRow.dataset.labourTotal = labour.toFixed(2);
+      stageRow.dataset.materialTotal = material.toFixed(2);
+      stageRow.dataset.salePrice = salePrice.toFixed(2);
+      updateTotal();
+    }
+
+    // ---------- stages ----------
+
+    function addRow({ name = '', description = '', markup_percent = null, lineItems = [], photoGroups = [] } = {}) {
+      rowCount++;
+      const defaultMarkup = markup_percent !== null ? markup_percent : (parseFloat(document.getElementById('default-markup').value) || 45);
+      const div = document.createElement('div');
+      div.className = 'cc-row';
+      div.dataset.name = name;
+      div.innerHTML = `
+        <div class="cc-row-top">
+          <div>
+            <label style="margin-top:0">Stage name</label>
+            <input class="cc-name" placeholder="e.g. Rough In" value="${name}" />
+          </div>
+          <div>
+            <label style="margin-top:0">Description</label>
+            <input class="cc-desc" placeholder="What's covered in this stage" value="${description}" />
+          </div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <label style="margin-top:0">Line items</label>
+          <div class="li-rows"></div>
+          <button type="button" class="secondary li-add" style="font-size:12px; padding:6px 12px;">+ Add line item</button>
+        </div>
+
+        <div style="margin-top:16px;">
+          <label style="margin-top:0">Photos for this stage</label>
+          <div class="photo-groups"></div>
+          <button type="button" class="secondary pg-add" style="font-size:12px; padding:6px 12px;">+ Add photo group</button>
+        </div>
+
+        <div class="cc-row-costs" style="grid-template-columns: 1fr 1fr 0.7fr 1fr;">
+          <div>
+            <label style="margin-top:0">Labour total</label>
+            <div class="readout cc-labour-total">$0.00</div>
+          </div>
+          <div>
+            <label style="margin-top:0">Materials total</label>
+            <div class="readout cc-material-total">$0.00</div>
+          </div>
+          <div>
+            <label style="margin-top:0">Markup %</label>
+            <input class="cc-markup" type="number" step="1" value="${defaultMarkup}" />
+          </div>
+          <div>
+            <label style="margin-top:0">Sale price</label>
+            <div class="readout cc-sale-price">$0.00</div>
+          </div>
+        </div>
+        <div style="text-align:right; margin-top:10px;">
+          <button type="button" class="secondary remove-row">Remove stage</button>
+        </div>`;
+      rowsEl.appendChild(div);
+
+      div.querySelector('.cc-markup').addEventListener('input', () => updateStageTotals(div));
+      div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); });
+      div.querySelector('.li-add').addEventListener('click', () => addLineItem(div));
+      div.querySelector('.pg-add').addEventListener('click', () => addPhotoGroup(div));
+      div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateTotal(); });
+
+      if (lineItems.length) {
+        lineItems.forEach(li => addLineItem(div, li));
+      } else {
+        addLineItem(div);
+      }
+
+      photoGroups.forEach(pg => addPhotoGroup(div, pg));
+    }
+
+    // ---------- per-stage photo groups ----------
+
+    function addPhotoGroup(stageRow, { description = '', photos = [] } = {}) {
+      const pg = document.createElement('div');
+      pg.className = 'pg-row';
+      pg.style.cssText = 'border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px;';
+      pg.dataset.photos = JSON.stringify(photos);
+      pg.innerHTML = `
+        <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${description}" style="margin-bottom:8px;" />
+        <div class="pg-thumbs" style="margin-bottom:8px;"></div>
+        <input type="file" class="pg-file" accept="image/*" multiple style="font-size:12px;" />
+        <button type="button" class="secondary pg-upload" style="font-size:12px; padding:6px 12px; margin-left:6px;">Upload</button>
+        <button type="button" class="secondary pg-remove" style="font-size:12px; padding:6px 12px;">Remove group</button>
+      `;
+      stageRow.querySelector('.photo-groups').appendChild(pg);
+
+      const renderThumbs = () => {
+        const arr = JSON.parse(pg.dataset.photos);
+        renderPhotoThumbs(pg.querySelector('.pg-thumbs'), arr, () => {
+          pg.dataset.photos = JSON.stringify(arr);
+        });
+      };
+      renderThumbs();
+
+      pg.querySelector('.pg-upload').addEventListener('click', async () => {
+        const fileInput = pg.querySelector('.pg-file');
+        if (!fileInput.files.length) return;
+        const urls = await uploadPhotos(fileInput.files, 'stage-photos');
+        const arr = JSON.parse(pg.dataset.photos);
+        arr.push(...urls);
+        pg.dataset.photos = JSON.stringify(arr);
+        fileInput.value = '';
+        renderThumbs();
+      });
+      pg.querySelector('.pg-remove').addEventListener('click', () => pg.remove());
+    }
+
+    function updateTotal() {
+      const prices = [...document.querySelectorAll('.cc-row')].map(r => parseFloat(r.dataset.salePrice) || 0);
+      document.getElementById('total-display').textContent = money(prices.reduce((a, b) => a + b, 0));
+    }
+
+    document.getElementById('add-row').addEventListener('click', () => addRow());
+
+    // ---------- AI scope descriptions ----------
+
+    document.getElementById('generate-scope-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('generate-scope-btn');
+      const msg = document.getElementById('generate-msg');
+      const brief = document.getElementById('p-brief').value.trim();
+      const projectName = document.getElementById('p-name').value.trim();
+      const rows = [...document.querySelectorAll('.cc-row')];
+      const stageNames = rows.map(r => r.dataset.name).filter(Boolean);
+
+      if (!brief) { msg.innerHTML = `<div class="error-box">Add a few notes first.</div>`; return; }
+      if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first.</div>`; return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+      msg.innerHTML = '';
+      try {
+        const res = await fetch('/.netlify/functions/generate-scope', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error);
+        rows.forEach(row => {
+          const desc = json.descriptions[row.dataset.name];
+          if (desc) row.querySelector('.cc-desc').value = desc;
+        });
+        msg.innerHTML = `<div class="success-box">Descriptions drafted. Review and edit as needed.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate stage descriptions with AI';
+      }
+    });
+
+    // ---------- reference photos ----------
+
+    document.getElementById('reference-upload-btn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('reference-file');
+      const msg = document.getElementById('reference-msg');
+      if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more photos first.</div>`; return; }
+      msg.innerHTML = '';
+      try {
+        const urls = await uploadPhotos(fileInput.files, 'reference');
+        referencePhotos.push(...urls);
+        renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
+        fileInput.value = '';
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+    });
+
+    // ---------- Pylon ----------
+
+    document.getElementById('pylon-pull-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('pylon-msg');
+      const pylonProjectId = document.getElementById('p-pylon-id').value.trim();
+      if (!editId) {
+        msg.innerHTML = `<div class="error-box">Save this quote first, then come back to pull Pylon data.</div>`;
+        return;
+      }
+      if (!pylonProjectId) {
+        msg.innerHTML = `<div class="error-box">Enter a Pylon project ID first.</div>`;
+        return;
+      }
+      msg.innerHTML = '';
+      try {
+        const res = await fetch('/.netlify/functions/pylon-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: editId, pylonProjectId }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error);
+        msg.innerHTML = `<div class="success-box">Pulled data from Pylon.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message} (Pylon's API needs verifying against your actual access, see SETUP.md)</div>`;
+      }
+    });
+
+    // ---------- save (create or update) ----------
+
+    document.getElementById('save-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('msg');
+      msg.innerHTML = '';
+
+      const name = document.getElementById('p-name').value.trim();
+      const client_name = document.getElementById('p-client').value.trim();
+      const client_email = document.getElementById('p-email').value.trim();
+      const client_address = document.getElementById('p-address').value.trim();
+      const sow_text = document.getElementById('p-sow').value;
+      const proposal_subtitle = document.getElementById('p-subtitle').value.trim();
+      const terms_text = document.getElementById('p-terms').value;
+      const deposit_percent = parseFloat(document.getElementById('p-deposit').value) || 0;
+      const pylon_link = document.getElementById('p-pylon-link').value.trim();
+      const pylon_project_id = document.getElementById('p-pylon-id').value.trim();
+
+      const stageRows = [...document.querySelectorAll('.cc-row')];
+      const stagesPayload = stageRows.map((row, i) => ({
+        name: row.querySelector('.cc-name').value.trim(),
+        description: row.querySelector('.cc-desc').value.trim(),
+        markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
+        estimated_labour_cost: parseFloat(row.dataset.labourTotal) || 0,
+        estimated_material_cost: parseFloat(row.dataset.materialTotal) || 0,
+        quoted_amount: parseFloat(row.dataset.salePrice) || 0,
+        sort_order: i,
+        lineItems: [...row.querySelectorAll('.li-row')].map((li, j) => ({
+          description: li.querySelector('.li-desc').value.trim(),
+          item_type: li.querySelector('.li-type').value,
+          quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
+          unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
+          sort_order: j,
+        })).filter(li => li.description),
+        photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
+          description: pg.querySelector('.pg-desc').value.trim(),
+          photos: JSON.parse(pg.dataset.photos || '[]').map(url => ({ url })),
+          sort_order: j,
+        })).filter(pg => pg.description || pg.photos.length),
+      })).filter(s => s.name);
+
+      if (!name || !client_name || stagesPayload.length === 0) {
+        msg.innerHTML = `<div class="error-box">Please fill in the project name, client name, and at least one stage.</div>`;
+        return;
+      }
+
+      const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
+      const coverPhotos = (settings && settings.portfolio_photos) || [];
+
+      const projectFields = {
+        name, client_name, client_email, client_address,
+        sow_text, proposal_subtitle, terms_text,
+        deposit_percent, pylon_link, pylon_project_id,
+        reference_photos: referencePhotos.map(url => ({ url })),
+        cover_photos: coverPhotos,
+      };
+
+      let projectId = editId;
+      if (editId) {
+        const { error: updateErr } = await supabaseClient.from('projects').update(projectFields).eq('id', editId);
+        if (updateErr) { msg.innerHTML = `<div class="error-box">${updateErr.message}</div>`; return; }
+        // Simplest way to keep stages/line items in sync with edits: replace them.
+        const { error: delErr } = await supabaseClient.from('cost_centres').delete().eq('project_id', editId);
+        if (delErr) { msg.innerHTML = `<div class="error-box">${delErr.message}</div>`; return; }
+      } else {
+        const { data: project, error: projErr } = await supabaseClient.from('projects').insert(projectFields).select().single();
+        if (projErr) { msg.innerHTML = `<div class="error-box">${projErr.message}</div>`; return; }
+        projectId = project.id;
+      }
+
+      const { data: insertedStages, error: ccErr } = await supabaseClient
+        .from('cost_centres')
+        .insert(stagesPayload.map(({ lineItems, photoGroups, ...s }) => ({ ...s, project_id: projectId })))
+        .select();
+      if (ccErr) { msg.innerHTML = `<div class="error-box">${ccErr.message}</div>`; return; }
+
+      const allLineItems = [];
+      const allPhotoGroups = [];
+      insertedStages.forEach((stage, i) => {
+        stagesPayload[i].lineItems.forEach(li => allLineItems.push({ ...li, cost_centre_id: stage.id }));
+        stagesPayload[i].photoGroups.forEach(pg => allPhotoGroups.push({ ...pg, cost_centre_id: stage.id }));
+      });
+      if (allLineItems.length) {
+        const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(allLineItems);
+        if (liErr) { msg.innerHTML = `<div class="error-box">${liErr.message}</div>`; return; }
+      }
+      if (allPhotoGroups.length) {
+        const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(allPhotoGroups);
+        if (pgErr) { msg.innerHTML = `<div class="error-box">${pgErr.message}</div>`; return; }
+      }
+
+      window.location.href = `/project.html?id=${projectId}`;
+    });
+
+    // ---------- load (edit mode) or start fresh ----------
+
+    async function loadForEdit() {
+      const { data: project, error } = await supabaseClient
+        .from('projects')
+        .select('*, cost_centres(*, cost_centre_line_items(*), cost_centre_photo_groups(*))')
+        .eq('id', editId)
+        .single();
+      if (error) {
+        document.getElementById('msg').innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+      document.getElementById('page-title').textContent = 'Edit quote';
+      document.getElementById('p-name').value = project.name;
+      document.getElementById('p-subtitle').value = project.proposal_subtitle || '';
+      document.getElementById('p-client').value = project.client_name;
+      document.getElementById('p-email').value = project.client_email || '';
+      document.getElementById('p-address').value = project.client_address || '';
+      document.getElementById('p-sow').value = project.sow_text || '';
+      document.getElementById('p-terms').value = project.terms_text || '';
+      document.getElementById('p-deposit').value = project.deposit_percent;
+      document.getElementById('p-pylon-link').value = project.pylon_link || '';
+      document.getElementById('p-pylon-id').value = project.pylon_project_id || '';
+      referencePhotos = (project.reference_photos || []).map(p => p.url || p);
+      renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
+
+      const stages = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
+      stages.forEach(stage => {
+        addRow({
+          name: stage.name,
+          description: stage.description,
+          markup_percent: stage.markup_percent,
+          lineItems: (stage.cost_centre_line_items || [])
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map(li => ({ description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost })),
+          photoGroups: (stage.cost_centre_photo_groups || [])
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map(pg => ({ description: pg.description, photos: (pg.photos || []).map(p => p.url || p) })),
+        });
+      });
+      updateTotal();
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      if (editId) {
+        await loadForEdit();
+      } else {
+        const { data: settings } = await supabaseClient.from('company_settings').select('default_terms').eq('id', 1).single();
+        if (settings) document.getElementById('p-terms').value = settings.default_terms || '';
+        ['Site Power', 'Rough In', 'Fit Off', 'Finishing Touches'].forEach(n => addRow({ name: n }));
+        updateTotal();
+      }
+    })();
+  </script>
+</body>
+</html>

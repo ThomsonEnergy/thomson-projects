@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Log in - Thomson Energy Projects</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="wrap" style="max-width:420px; padding-top:100px;">
+    <h1>Thomson Energy <span style="color:var(--amber)">Projects</span></h1>
+    <p class="subtitle">Staff login</p>
+    <div class="card">
+      <form id="login-form">
+        <label>Email</label>
+        <input type="email" id="email" required autocomplete="username" />
+        <label>Password</label>
+        <input type="password" id="password" required autocomplete="current-password" />
+        <div style="margin-top:20px;">
+          <button type="submit" style="width:100%">Log in</button>
+        </div>
+      </form>
+      <div id="msg"></div>
+    </div>
+    <p class="subtitle">First time setup? Create your team's logins in Supabase under Authentication &gt; Users, then log in here.</p>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const msg = document.getElementById('msg');
+      msg.innerHTML = '';
+
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) {
+        msg.innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+      window.location.href = '/dashboard.html';
+    });
+
+    // If already logged in, skip straight to the dashboard.
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+      if (session) window.location.href = '/dashboard.html';
+    });
+  </script>
+</body>
+</html>
