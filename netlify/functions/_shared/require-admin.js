@@ -12,8 +12,20 @@ const { createClient } = require('@supabase/supabase-js');
 // data, not secrecy of this key.
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InppYWtwa2xuemtiYmpqbnFna216Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcwOTg2OTIsImV4cCI6MjEwMjY3NDY5Mn0.xuEorSGdx9rI_ySM6V4MOxoQLOTD1OCWdrSXKMKnFAE';
 
+// Server-side clients must disable the browser-oriented session handling
+// (autoRefreshToken/persistSession), which supabase-js assumes by default.
+// Without this, calls like auth.getUser(token) can throw a misleading
+// "Auth session missing!" error even when a valid token is passed in.
+const SERVER_CLIENT_OPTS = {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+    detectSessionInUrl: false,
+  },
+};
+
 function getAdminClient() {
-  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, SERVER_CLIENT_OPTS);
 }
 
 // A client built with the service-role key can unreliably throw
@@ -22,7 +34,7 @@ function getAdminClient() {
 // client instead, since all this call does is check the token's signature
 // against the auth server.
 function getAuthCheckClient() {
-  return createClient(process.env.SUPABASE_URL, SUPABASE_ANON_KEY);
+  return createClient(process.env.SUPABASE_URL, SUPABASE_ANON_KEY, SERVER_CLIENT_OPTS);
 }
 
 // Verifies the request's bearer token belongs to a logged-in, active
@@ -31,6 +43,7 @@ function getAuthCheckClient() {
 async function requireAdmin(event) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   const token = authHeader.replace(/^Bearer\s+/i, '');
+  console.log('requireAdmin: authHeader present?', !!authHeader, '| token length:', token.length, '| looks like a JWT?', token.split('.').length === 3);
   if (!token) {
     console.error('requireAdmin: no bearer token in request headers');
     return null;
