@@ -7,8 +7,22 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
+// Safe to hardcode — this is the same public anon key already embedded in
+// the browser at /js/supabase-client.js. RLS is what actually protects
+// data, not secrecy of this key.
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InppYWtwa2xuemtiYmpqbnFna216Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcwOTg2OTIsImV4cCI6MjEwMjY3NDY5Mn0.xuEorSGdx9rI_ySM6V4MOxoQLOTD1OCWdrSXKMKnFAE';
+
 function getAdminClient() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+// A client built with the service-role key can unreliably throw
+// "Auth session missing!" when calling auth.getUser(token) — it's a known
+// supabase-js quirk. Verifying the JWT works reliably from an anon-keyed
+// client instead, since all this call does is check the token's signature
+// against the auth server.
+function getAuthCheckClient() {
+  return createClient(process.env.SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
 // Verifies the request's bearer token belongs to a logged-in, active
@@ -23,8 +37,9 @@ async function requireAdmin(event) {
   }
 
   const supabaseAdmin = getAdminClient();
+  const authCheckClient = getAuthCheckClient();
 
-  const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
+  const { data: userData, error: userErr } = await authCheckClient.auth.getUser(token);
   if (userErr || !userData?.user) {
     console.error('requireAdmin: auth.getUser failed —', userErr?.message || 'no user returned');
     return null;
