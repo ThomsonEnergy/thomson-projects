@@ -17,12 +17,18 @@ function getAdminClient() {
 async function requireAdmin(event) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   const token = authHeader.replace(/^Bearer\s+/i, '');
-  if (!token) return null;
+  if (!token) {
+    console.error('requireAdmin: no bearer token in request headers');
+    return null;
+  }
 
   const supabaseAdmin = getAdminClient();
 
   const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
-  if (userErr || !userData?.user) return null;
+  if (userErr || !userData?.user) {
+    console.error('requireAdmin: auth.getUser failed —', userErr?.message || 'no user returned');
+    return null;
+  }
 
   const { data: profile, error: profileErr } = await supabaseAdmin
     .from('profiles')
@@ -30,7 +36,22 @@ async function requireAdmin(event) {
     .eq('id', userData.user.id)
     .single();
 
-  if (profileErr || !profile || profile.role !== 'admin' || !profile.active) return null;
+  if (profileErr) {
+    console.error('requireAdmin: profile lookup failed for user', userData.user.id, '—', profileErr.message);
+    return null;
+  }
+  if (!profile) {
+    console.error('requireAdmin: no profile row found for user', userData.user.id);
+    return null;
+  }
+  if (profile.role !== 'admin') {
+    console.error('requireAdmin: user', userData.user.id, 'has role', profile.role, 'not admin');
+    return null;
+  }
+  if (!profile.active) {
+    console.error('requireAdmin: user', userData.user.id, 'is marked inactive');
+    return null;
+  }
 
   return { supabaseAdmin, user: userData.user };
 }
