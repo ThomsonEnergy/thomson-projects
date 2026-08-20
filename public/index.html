@@ -14,8 +14,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/js/supabase-client.js"></script>
 <script>
+  const landingPage = window.innerWidth <= 700 ? '/timesheets.html' : '/dashboard.html';
   supabaseClient.auth.getSession().then(({ data: { session } }) => {
-    window.location.href = session ? '/dashboard.html' : '/login.html';
+    window.location.href = session ? landingPage : '/login.html';
   });
 </script>
 </body>

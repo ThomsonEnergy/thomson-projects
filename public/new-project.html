@@ -11,19 +11,29 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=4" />
+<link rel="stylesheet" href="/css/style.css?v=6" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown">
+      <a href="/leads.html" class="">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="active">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="">Timesheets<span class="tab-total">-</span></a>
+    </div>
     <nav class="topbar-tabs">
-      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">&mdash;</span></a>
-      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
-      <a href="/quotes.html" class="topbar-tab active">Quotes<span class="tab-total">&mdash;</span></a>
-      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
-      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
-      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">&mdash;</span></a>
-      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
+      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="topbar-tab active">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">-</span></a>
     </nav>
     <div class="topbar-right">
       <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
@@ -71,7 +81,7 @@
         </div>
         <button type="button" class="secondary" id="clear-client-btn" style="flex-shrink:0;">Clear</button>
       </div>
-      <p class="subtitle" id="selected-client-note" style="margin:6px 0 0;">No client selected &mdash; search above, or just fill in the fields below to create one when you save.</p>
+      <p class="subtitle" id="selected-client-note" style="margin:6px 0 0;">No client selected - search above, or just fill in the fields below to create one when you save.</p>
 
       <div class="grid cols-3" style="margin-top:14px;">
         <div>
@@ -113,7 +123,7 @@
 
     <div class="card">
       <h2>Write the scope of works with AI</h2>
-      <p class="subtitle" style="margin-bottom:10px;">A few rough notes, plus anything useful to attach — plans, drawings, or an electricity bill. Drafts each stage's description first, then a full scope of works using those.</p>
+      <p class="subtitle" style="margin-bottom:10px;">A few rough notes, plus anything useful to attach - plans, drawings, or an electricity bill. Drafts each stage's description first, then a full scope of works using those.</p>
       <textarea id="p-brief" placeholder="e.g. Single storey new build, 3 bed 2 bath, standard fitout, ducted air con, solar-ready switchboard"></textarea>
 
       <div id="lead-attachments-import"></div>
@@ -222,7 +232,7 @@
         document.getElementById('p-address').value = client.address || '';
         document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
       } else {
-        note.textContent = 'No client selected — search above, or just fill in the fields below to create one when you save.';
+        note.textContent = 'No client selected - search above, or just fill in the fields below to create one when you save.';
       }
       document.getElementById('client-search-results').style.display = 'none';
     }
@@ -283,21 +293,21 @@
         showPylon: false,
       },
       solar: {
-        note: 'Pylon design link is prominent on the cover page. Defaults to a single stage — add more if needed.',
+        note: 'Pylon design link is prominent on the cover page. Defaults to a single stage - add more if needed.',
         photoCategory: 'solar',
         singleStage: false,
         showDeposit: true,
         showPylon: true,
       },
       quick_estimate: {
-        note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page — invoiced from actual hours and materials, not this figure.',
+        note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page - invoiced from actual hours and materials, not this figure.',
         photoCategory: 'general',
         singleStage: true,
         showDeposit: false,
         showPylon: false,
       },
       time_and_materials: {
-        note: 'No quote or approval step — saving this sends the job straight to booked, invoiced from actuals when done. No client-facing proposal is created.',
+        note: 'No quote or approval step - saving this sends the job straight to booked, invoiced from actuals when done. No client-facing proposal is created.',
         photoCategory: 'general',
         singleStage: true,
         showDeposit: false,
@@ -329,7 +339,7 @@
       disclaimerCard.style.display = template === 'quick_estimate' ? 'block' : 'none';
       if (template === 'quick_estimate' && !disclaimerField.value.trim()) {
         disclaimerField.value = companySettings.default_estimate_disclaimer
-          || 'Estimate only — the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.';
+          || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.';
       }
 
       document.getElementById('pylon-card').style.display = info.showPylon ? 'block' : 'none';
@@ -418,7 +428,7 @@
         <div class="card" style="max-width:480px; width:90%; max-height:80vh; overflow-y:auto;">
           <h2>Add a prebuild</h2>
           <select id="prebuild-select" style="margin-bottom:12px;">
-            ${prebuilds.map(p => `<option value="${p.id}">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''} &mdash; ${p.name}</option>`).join('')}
+            ${prebuilds.map(p => `<option value="${p.id}">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''} - ${p.name}</option>`).join('')}
           </select>
           <label style="margin-top:0">Quantity</label>
           <input id="prebuild-qty" type="number" value="1" min="1" step="1" />
@@ -435,7 +445,7 @@
         const qty = parseFloat(overlay.querySelector('#prebuild-qty').value) || 1;
         (prebuild.prebuild_components || []).forEach(comp => {
           addLineItem(stageRow, {
-            description: `${prebuild.name} — ${comp.description}`,
+            description: `${prebuild.name} - ${comp.description}`,
             item_type: comp.item_type,
             quantity: (parseFloat(comp.quantity) || 0) * qty,
             unit_cost: comp.unit_cost,
@@ -830,7 +840,7 @@
         accounts_contact_id: assignedContactIds.accounts_contact_id || null,
       };
 
-      // Time & Materials has no quote/approval step — send it straight to
+      // Time & Materials has no quote/approval step - send it straight to
       // booked rather than sitting in Draft Quote waiting for a client to
       // accept a proposal that doesn't exist for this template.
       if (currentTemplate === 'time_and_materials' && !editId) {
@@ -887,7 +897,7 @@
       const container = document.getElementById('lead-attachments-import');
       container.innerHTML = `
         <div class="success-box" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-          <span>${attachments.length} file${attachments.length === 1 ? '' : 's'} attached to this enquiry (photos/bills) &mdash; import into the AI helper?</span>
+          <span>${attachments.length} file${attachments.length === 1 ? '' : 's'} attached to this enquiry (photos/bills) - import into the AI helper?</span>
           <button type="button" class="secondary" id="import-lead-files-btn" style="flex-shrink:0;">Import</button>
         </div>`;
 
@@ -976,13 +986,13 @@
     // ---------- address autocomplete ----------
 
     function loadAddressAutocomplete(apiKey) {
-      if (!apiKey) return; // no key set in Settings yet — plain text input still works fine
+      if (!apiKey) return; // no key set in Settings yet - plain text input still works fine
       if (window.google && window.google.maps) { initAddressAutocomplete(); return; }
       window._initAddressAutocomplete = initAddressAutocomplete;
       const script = document.createElement('script');
       script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=_initAddressAutocomplete`;
       script.async = true;
-      script.onerror = () => console.error('Google Maps script failed to load — check the API key in Settings > API Keys.');
+      script.onerror = () => console.error('Google Maps script failed to load - check the API key in Settings > API Keys.');
       document.head.appendChild(script);
     }
 

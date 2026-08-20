@@ -69,7 +69,7 @@ function renderPhotoThumbs(containerEl, photosArray, onChange) {
 
 // Returns the logged-in user's role (admin/finance/sales/staff), cached
 // for the life of the page. Defaults to the safest option, 'staff', if
-// anything goes wrong — better to under-show pricing than leak it.
+// anything goes wrong - better to under-show pricing than leak it.
 let _cachedRole = null;
 async function getMyRole() {
   if (_cachedRole) return _cachedRole;
@@ -90,7 +90,7 @@ function isPricingRole(role) {
 
 // The two cost_centres column lists used across the app when embedding
 // via a projects query. Pricing columns are only requested for roles that
-// are actually allowed to see them — the database also enforces this via
+// are actually allowed to see them - the database also enforces this via
 // column-level grants (see migration_007), so a role-check bug here can't
 // by itself leak pricing.
 const COST_CENTRE_COLS_BASE = 'id, project_id, name, description, sort_order';
@@ -111,5 +111,5 @@ async function lineItemColumns() {
 // For display: tells a null pricing value (masked by role) apart from a
 // genuine $0. Use instead of money() wherever a value might be masked.
 function moneyOrHidden(n) {
-  return (n === null || n === undefined) ? '&mdash;' : money(n);
+  return (n === null || n === undefined) ? ' - ' : money(n);
 }

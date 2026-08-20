@@ -11,19 +11,29 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=4" />
+<link rel="stylesheet" href="/css/style.css?v=6" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown">
+      <a href="/leads.html" class="active">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="">Timesheets<span class="tab-total">-</span></a>
+    </div>
     <nav class="topbar-tabs">
-      <a href="/leads.html" class="topbar-tab active">Leads<span class="tab-total">&mdash;</span></a>
-      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
-      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">&mdash;</span></a>
-      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
-      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
-      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">&mdash;</span></a>
-      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
+      <a href="/leads.html" class="topbar-tab active">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">-</span></a>
     </nav>
     <div class="topbar-right">
       <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
@@ -39,10 +49,10 @@
     <p class="subtitle">Enquiries from the website. Anything with a phone or email lands automatically on the Projects pipeline board too.</p>
 
     <div class="grid cols-4" id="lead-stats">
-      <div class="stat"><div class="label">New enquiries</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">This week</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">On the pipeline</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">Site interest (anonymous)</div><div class="value placeholder">&mdash;</div></div>
+      <div class="stat"><div class="label">New enquiries</div><div class="value placeholder">-</div></div>
+      <div class="stat"><div class="label">This week</div><div class="value placeholder">-</div></div>
+      <div class="stat"><div class="label">On the pipeline</div><div class="value placeholder">-</div></div>
+      <div class="stat"><div class="label">Site interest (anonymous)</div><div class="value placeholder">-</div></div>
     </div>
 
     <div class="card">
@@ -53,7 +63,7 @@
 
     <div class="card">
       <h2>Site interest</h2>
-      <p class="subtitle" style="margin-bottom:14px;">Package, brand, or calculator interactions with no contact details left &mdash; not actionable individually, but useful for spotting what's getting attention.</p>
+      <p class="subtitle" style="margin-bottom:14px;">Package, brand, or calculator interactions with no contact details left - not actionable individually, but useful for spotting what's getting attention.</p>
       <div id="anon-leads-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>

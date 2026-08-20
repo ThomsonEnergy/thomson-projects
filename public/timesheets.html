@@ -11,19 +11,29 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=4" />
+<link rel="stylesheet" href="/css/style.css?v=6" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown">
+      <a href="/leads.html" class="">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="active">Timesheets<span class="tab-total">-</span></a>
+    </div>
     <nav class="topbar-tabs">
-      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">&mdash;</span></a>
-      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
-      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">&mdash;</span></a>
-      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
-      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
-      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">&mdash;</span></a>
-      <a href="/timesheets.html" class="topbar-tab active">Timesheets<span class="tab-total">&mdash;</span></a>
+      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="topbar-tab active">Timesheets<span class="tab-total">-</span></a>
     </nav>
     <div class="topbar-right">
       <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
@@ -36,14 +46,15 @@
 
   <div class="wrap">
     <h1>Timesheets</h1>
-    <p class="subtitle">Clock time against a job, request leave. Pushing to Xero Payroll comes in a later phase — this all works natively for now.</p>
+    <p class="subtitle">Clock time against a job, request leave. Pushing to Xero Payroll comes in a later phase - this all works natively for now.</p>
 
     <div class="card">
       <h2 id="clock-heading">Clock in</h2>
       <div id="clock-idle">
+        <div id="todays-schedule"></div>
         <div class="grid cols-3">
           <div style="grid-column: span 2;">
-            <label style="margin-top:0">Job</label>
+            <label style="margin-top:0">Or pick a job manually</label>
             <select id="clock-project"><option value="">General / Office</option></select>
           </div>
           <div style="display:flex; align-items:end;">
@@ -187,6 +198,38 @@
       }
     }
 
+    async function loadTodaysSchedule() {
+      const container = document.getElementById('todays-schedule');
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+      const { data, error } = await supabaseClient
+        .from('schedule_assignments')
+        .select('id, project_id, projects(name)')
+        .eq('staff_id', myUserId)
+        .eq('assignment_date', todayStr);
+
+      if (error || !data || !data.length) { container.innerHTML = ''; return; }
+
+      container.innerHTML = `
+        <p class="subtitle" style="margin-bottom:8px;">You're scheduled for today:</p>
+        <div style="margin-bottom:16px;">
+          ${data.map(a => `
+            <button type="button" class="quick-clock-btn" data-project-id="${a.project_id || ''}" style="margin:0 8px 8px 0;">
+              Clock into ${a.projects ? a.projects.name : 'General / Office'}
+            </button>`).join('')}
+        </div>`;
+
+      container.querySelectorAll('.quick-clock-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          const { error: clockErr } = await supabaseClient.from('time_entries').insert({ staff_id: myUserId, project_id: btn.dataset.projectId || null });
+          if (clockErr) { alert(clockErr.message); btn.disabled = false; return; }
+          await checkActiveClock();
+        });
+      });
+    }
+
     document.getElementById('clock-in-btn').addEventListener('click', async () => {
       const projectId = document.getElementById('clock-project').value || null;
       const { error } = await supabaseClient.from('time_entries').insert({ staff_id: myUserId, project_id: projectId });
@@ -216,22 +259,28 @@
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (!data.length) { listEl.innerHTML = `<p class="subtitle">No entries yet.</p>`; return; }
       listEl.innerHTML = `
-        <table>
+        <table class="responsive-stack">
           <thead><tr><th>Job</th><th>Clocked in</th><th>Clocked out</th><th class="num">Duration</th><th></th></tr></thead>
           <tbody>
             ${data.map(e => `
               <tr data-id="${e.id}" data-project-id="${e.project_id || ''}" data-clock-in="${e.clock_in}" data-clock-out="${e.clock_out || ''}">
-                <td>${e.projects ? e.projects.name : 'General / Office'}</td>
-                <td>${fmtDateTime(e.clock_in)}</td>
-                <td>${e.clock_out ? fmtDateTime(e.clock_out) : '<span class="badge in_progress">In progress</span>'}</td>
-                <td class="num">${e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : ''}</td>
-                <td style="text-align:right;"><button type="button" class="secondary edit-entry-btn" style="font-size:12px; padding:6px 10px;">Edit</button></td>
+                <td data-label="Job">${e.projects ? e.projects.name : 'General / Office'}</td>
+                <td data-label="Clocked in">${fmtDateTime(e.clock_in)}</td>
+                <td data-label="Clocked out">${e.clock_out ? fmtDateTime(e.clock_out) : '<span class="badge in_progress">In progress</span>'}</td>
+                <td class="num" data-label="Duration">${e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : ''}</td>
+                <td data-label="" style="text-align:right;">
+                  <button type="button" class="secondary edit-entry-btn" style="font-size:12px; padding:6px 10px;">Edit</button>
+                  ${e.clock_out ? `<button type="button" class="secondary split-entry-btn" style="font-size:12px; padding:6px 10px;">Split</button>` : ''}
+                </td>
               </tr>`).join('')}
           </tbody>
         </table>`;
 
       listEl.querySelectorAll('.edit-entry-btn').forEach(btn => {
         btn.addEventListener('click', () => openEntryEditor(btn.closest('tr')));
+      });
+      listEl.querySelectorAll('.split-entry-btn').forEach(btn => {
+        btn.addEventListener('click', () => openSplitPanel(btn.closest('tr')));
       });
     }
 
@@ -281,6 +330,140 @@
         await loadMyEntries();
         await checkActiveClock();
       });
+    }
+
+    // ---------- split entry across cost centres ----------
+
+    function segmentColor(i) {
+      return `hsl(${(i * 137.5) % 360}, 55%, 55%)`;
+    }
+
+    async function openSplitPanel(row) {
+      const projectId = row.dataset.projectId;
+      if (!projectId) { alert("This entry isn't tied to a job, so there's nothing to split it across."); return; }
+
+      const { data: centres, error } = await supabaseClient
+        .from('cost_centres')
+        .select('id, name')
+        .eq('project_id', projectId)
+        .order('sort_order');
+      if (error || !centres || centres.length < 2) {
+        alert('This job only has one stage on it, so there\'s nothing to split.');
+        return;
+      }
+
+      const totalMs = new Date(row.dataset.clockOut) - new Date(row.dataset.clockIn);
+      const totalMin = Math.round(totalMs / 60000);
+      const entryId = row.dataset.id;
+      const clockInIso = row.dataset.clockIn;
+
+      let percentages = centres.map(() => Math.round(100 / centres.length));
+      percentages[0] += 100 - percentages.reduce((a, b) => a + b, 0); // absorb rounding
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+
+      function render() {
+        overlay.innerHTML = `
+          <div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;">
+            <h2>Split this entry across stages</h2>
+            <p class="subtitle" style="margin-bottom:12px;">Total time: ${fmtDuration(totalMs)}. Adjust the sliders until the split feels right.</p>
+
+            <div style="display:flex; height:22px; border-radius:6px; overflow:hidden; margin-bottom:16px;">
+              ${centres.map((c, i) => `<div style="width:${percentages[i]}%; background:${segmentColor(i)};"></div>`).join('')}
+            </div>
+
+            ${centres.map((c, i) => `
+              <div style="margin-bottom:14px;">
+                <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
+                  <span><span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:${segmentColor(i)}; margin-right:6px;"></span>${c.name}</span>
+                  <span>${percentages[i]}% &middot; ${fmtDuration(totalMin * percentages[i] / 100 * 60000)}</span>
+                </div>
+                <input type="range" min="0" max="100" value="${percentages[i]}" class="split-slider" data-index="${i}" style="width:100%;" />
+              </div>
+            `).join('')}
+
+            <div style="margin-top:10px;">
+              <button id="split-save-btn">Save split</button>
+              <button type="button" class="secondary" id="split-cancel-btn">Cancel</button>
+            </div>
+            <div id="split-msg"></div>
+          </div>`;
+
+        overlay.querySelectorAll('.split-slider').forEach(slider => {
+          slider.addEventListener('input', () => {
+            const idx = parseInt(slider.dataset.index);
+            const newVal = parseInt(slider.value);
+            const oldVal = percentages[idx];
+            const delta = newVal - oldVal;
+
+            const othersTotal = percentages.reduce((s, v, i) => i === idx ? s : s + v, 0);
+            if (othersTotal <= 0) return;
+
+            percentages[idx] = newVal;
+            let remaining = 100 - newVal;
+            let assigned = 0;
+            centres.forEach((_, i) => {
+              if (i === idx) return;
+              const share = Math.round((percentages[i] / othersTotal) * remaining);
+              percentages[i] = share;
+              assigned += share;
+            });
+            // Absorb any rounding drift into the last non-active slider.
+            const lastOther = centres.map((_, i) => i).filter(i => i !== idx).pop();
+            if (lastOther !== undefined) percentages[lastOther] += (100 - newVal) - assigned;
+
+            render();
+          });
+        });
+
+        overlay.querySelector('#split-cancel-btn').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('#split-save-btn').addEventListener('click', async () => {
+          const msg = overlay.querySelector('#split-msg');
+          const btn = overlay.querySelector('#split-save-btn');
+          btn.disabled = true;
+
+          const totalPct = percentages.reduce((a, b) => a + b, 0);
+          if (totalPct !== 100) {
+            msg.innerHTML = `<div class="error-box">Percentages must add up to 100 (currently ${totalPct}).</div>`;
+            btn.disabled = false;
+            return;
+          }
+
+          const newEntries = [];
+          let cursor = new Date(clockInIso);
+          centres.forEach((c, i) => {
+            const isLast = i === centres.length - 1;
+            const minutes = isLast
+              ? totalMin - newEntries.reduce((s, e) => s + e.minutes, 0)
+              : Math.round(totalMin * percentages[i] / 100);
+            const segStart = new Date(cursor);
+            const segEnd = new Date(cursor.getTime() + minutes * 60000);
+            newEntries.push({ minutes, clock_in: segStart.toISOString(), clock_out: segEnd.toISOString(), cost_centre_id: c.id });
+            cursor = segEnd;
+          });
+
+          try {
+            const { error: insErr } = await supabaseClient.from('time_entries').insert(
+              newEntries.map(e => ({
+                staff_id: myUserId, project_id: projectId, cost_centre_id: e.cost_centre_id,
+                clock_in: e.clock_in, clock_out: e.clock_out,
+              }))
+            );
+            if (insErr) throw insErr;
+            const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', entryId);
+            if (delErr) throw delErr;
+            overlay.remove();
+            await loadMyEntries();
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+            btn.disabled = false;
+          }
+        });
+      }
+
+      render();
+      document.body.appendChild(overlay);
     }
 
     document.getElementById('add-manual-entry-btn').addEventListener('click', () => {
@@ -369,7 +552,7 @@
       listEl.innerHTML = data.map(l => `
         <div class="project-list-item" data-id="${l.id}">
           <div>
-            <div class="name">${(l.profiles && l.profiles.full_name) || 'Staff member'} &mdash; ${l.leave_type} leave</div>
+            <div class="name">${(l.profiles && l.profiles.full_name) || 'Staff member'} - ${l.leave_type} leave</div>
             <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + l.notes : ''}</div>
           </div>
           <div>
@@ -410,6 +593,7 @@
 
       const myRole = await getMyRole();
       await loadProjectOptions();
+      await loadTodaysSchedule();
       await checkActiveClock();
       await loadMyEntries();
       await loadMyLeave();

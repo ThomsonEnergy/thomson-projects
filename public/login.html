@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=4" />
+<link rel="stylesheet" href="/css/style.css?v=6" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -37,6 +37,8 @@
   <script src="/js/supabase-client.js"></script>
   <script src="/js/theme.js"></script>
   <script>
+    const landingPage = window.innerWidth <= 700 ? '/timesheets.html' : '/dashboard.html';
+
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = document.getElementById('email').value;
@@ -49,12 +51,12 @@
         msg.innerHTML = `<div class="error-box">${error.message}</div>`;
         return;
       }
-      window.location.href = '/dashboard.html';
+      window.location.href = landingPage;
     });
 
-    // If already logged in, skip straight to the dashboard.
+    // If already logged in, skip straight to the landing page.
     supabaseClient.auth.getSession().then(({ data: { session } }) => {
-      if (session) window.location.href = '/dashboard.html';
+      if (session) window.location.href = landingPage;
     });
   </script>
 </body>

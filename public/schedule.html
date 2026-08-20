@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=4" />
+<link rel="stylesheet" href="/css/style.css?v=6" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
@@ -48,14 +48,24 @@
 </head>
 <body>
   <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown">
+      <a href="/leads.html" class="">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="">Timesheets<span class="tab-total">-</span></a>
+    </div>
     <nav class="topbar-tabs">
-      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">&mdash;</span></a>
-      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
-      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">&mdash;</span></a>
-      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
-      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
-      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">&mdash;</span></a>
-      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
+      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">-</span></a>
     </nav>
     <div class="topbar-right">
       <a href="/schedule.html" class="topbar-icon-link" title="Schedule" style="color:var(--accent);">&#128197;</a>
@@ -68,7 +78,7 @@
 
   <div class="wrap wide">
     <h1>Schedule</h1>
-    <p class="subtitle">Who's on which job, and who's on leave. Approved leave shows automatically — click a day to assign someone to a job.</p>
+    <p class="subtitle">Who's on which job, and who's on leave. Approved leave shows automatically - click a day to assign someone to a job.</p>
 
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">

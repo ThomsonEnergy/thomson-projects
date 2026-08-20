@@ -11,19 +11,29 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=4" />
+<link rel="stylesheet" href="/css/style.css?v=6" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown">
+      <a href="/leads.html" class="">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="active">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="">Timesheets<span class="tab-total">-</span></a>
+    </div>
     <nav class="topbar-tabs">
-      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">&mdash;</span></a>
-      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
-      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">&mdash;</span></a>
-      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
-      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
-      <a href="/purchase-orders.html" class="topbar-tab active">Purchase Orders<span class="tab-total">&mdash;</span></a>
-      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
+      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab active">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">-</span></a>
     </nav>
     <div class="topbar-right">
       <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
@@ -39,17 +49,17 @@
     <p class="subtitle">Supplier POs and invoice matching.</p>
 
     <div class="grid cols-4">
-      <div class="stat"><div class="label">Total</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">This month</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">Outstanding</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">Overdue</div><div class="value placeholder">&mdash;</div></div>
+      <div class="stat"><div class="label">Total</div><div class="value placeholder">-</div></div>
+      <div class="stat"><div class="label">This month</div><div class="value placeholder">-</div></div>
+      <div class="stat"><div class="label">Outstanding</div><div class="value placeholder">-</div></div>
+      <div class="stat"><div class="label">Overdue</div><div class="value placeholder">-</div></div>
     </div>
 
     <div class="card">
       <div class="empty-state">
         <div class="empty-icon">&#128736;</div>
         <h2>Coming in Phase 9</h2>
-        <p>This section is a placeholder for now &mdash; it gets built out with real data and actions in Phase 9 of the build.</p>
+        <p>This section is a placeholder for now - it gets built out with real data and actions in Phase 9 of the build.</p>
       </div>
     </div>
   </div>

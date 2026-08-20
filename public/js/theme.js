@@ -25,7 +25,7 @@ function setTheme(name) {
   localStorage.setItem(TE_THEME_KEY, name);
   document.dispatchEvent(new CustomEvent('te-theme-changed', { detail: name }));
   // Best-effort save to the user's profile. Table may not exist yet if
-  // migration_006 hasn't been run — fail silently either way, local
+  // migration_006 hasn't been run - fail silently either way, local
   // storage still keeps this device working.
   if (typeof supabaseClient !== 'undefined') {
     supabaseClient.auth.getSession().then(({ data: { session } }) => {
@@ -50,7 +50,7 @@ async function syncThemeFromProfile() {
     .maybeSingle();
 
   if (error || !data) {
-    // No profile row yet — create one from whatever's showing locally.
+    // No profile row yet - create one from whatever's showing locally.
     const current = document.documentElement.getAttribute('data-theme') || TE_THEME_DEFAULT;
     supabaseClient.from('profiles').upsert({ id: session.user.id, theme: current }).then(() => {});
     return;

@@ -11,19 +11,29 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=4" />
+<link rel="stylesheet" href="/css/style.css?v=6" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown">
+      <a href="/leads.html" class="">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="">Timesheets<span class="tab-total">-</span></a>
+    </div>
     <nav class="topbar-tabs">
-      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">&mdash;</span></a>
-      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
-      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">&mdash;</span></a>
-      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
-      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
-      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">&mdash;</span></a>
-      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
+      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">-</span></a>
     </nav>
     <div class="topbar-right">
       <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
@@ -103,7 +113,7 @@
 
           <div class="card">
             <h2>Address autocomplete</h2>
-            <p class="subtitle" style="margin-bottom:10px;">Powers the site address lookup when building a quote, so addresses are picked from a verified list rather than typed freehand. Uses a Google Maps API key — safe to store here since these keys are restricted by domain in Google's console, not by secrecy.</p>
+            <p class="subtitle" style="margin-bottom:10px;">Powers the site address lookup when building a quote, so addresses are picked from a verified list rather than typed freehand. Uses a Google Maps API key - safe to store here since these keys are restricted by domain in Google's console, not by secrecy.</p>
             <label style="margin-top:0">Google Maps API key</label>
             <input id="google-maps-key" placeholder="AIza..." />
           </div>
@@ -169,7 +179,7 @@
             <div class="empty-state">
               <div class="empty-icon">&#128736;</div>
               <h2>Coming in Phase 4</h2>
-              <p>Default checklist items per stage/job type will be set here once the Reactive Jobs workflow is built — shared between staged projects and quick reactive jobs.</p>
+              <p>Default checklist items per stage/job type will be set here once the Reactive Jobs workflow is built - shared between staged projects and quick reactive jobs.</p>
             </div>
           </div>
         </div>
@@ -196,7 +206,7 @@
             <div class="empty-state">
               <div class="empty-icon">&#128247;</div>
               <h2>Tagged where the photos live</h2>
-              <p>Electrical / Solar / General categories are set per-photo under <strong>Company Details &gt; Portfolio photos</strong>. Each proposal template pulls cover photos from the matching category automatically &mdash; New Build uses Electrical, Solar Proposal uses Solar, and Quick Estimate / Time &amp; Materials use General.</p>
+              <p>Electrical / Solar / General categories are set per-photo under <strong>Company Details &gt; Portfolio photos</strong>. Each proposal template pulls cover photos from the matching category automatically - New Build uses Electrical, Solar Proposal uses Solar, and Quick Estimate / Time &amp; Materials use General.</p>
             </div>
           </div>
         </div>
@@ -205,7 +215,7 @@
         <div class="settings-panel" id="panel-prebuilds">
           <div class="card">
             <h2>Add a prebuild</h2>
-            <p class="subtitle" style="margin-bottom:10px;">A reusable supply-and-install package. Staff pick this on a quote and set a quantity &mdash; every component scales automatically.</p>
+            <p class="subtitle" style="margin-bottom:10px;">A reusable supply-and-install package. Staff pick this on a quote and set a quantity - every component scales automatically.</p>
             <div class="grid cols-3">
               <div>
                 <label>Name</label>
@@ -289,7 +299,7 @@
             <h2>Integration keys</h2>
             <p class="subtitle" style="margin-bottom:10px;">
               Stored in the database rather than baked into the code, so a key can be rotated here without a redeploy.
-              Supabase's own URL and service role key can't live here — the app needs those just to reach this database,
+              Supabase's own URL and service role key can't live here - the app needs those just to reach this database,
               so they stay as Netlify environment variables.
             </p>
             <div id="apikeys-msg"></div>
@@ -580,7 +590,7 @@
             <tbody>
               ${data.users.map(u => `
                 <tr data-id="${u.id}">
-                  <td>${u.full_name || '<span style="color:var(--muted)">&mdash;</span>'}</td>
+                  <td>${u.full_name || '<span style="color:var(--muted)"> - </span>'}</td>
                   <td>${u.email}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
                   <td><select class="role-select" data-id="${u.id}">${roleOptionsHtml(u.role)}</select></td>
                   <td>${u.active ? '<span class="badge accepted">Active</span>' : '<span class="badge draft">Deactivated</span>'}</td>
@@ -663,7 +673,7 @@
     // --- API Keys ---
     async function loadApiKeys() {
       const { data, error } = await supabaseClient.from('api_keys').select('key_name, key_value');
-      if (error) return; // not an admin, or table not migrated yet — panel is hidden anyway
+      if (error) return; // not an admin, or table not migrated yet - panel is hidden anyway
       const byName = Object.fromEntries((data || []).map(k => [k.key_name, k.key_value]));
       if (byName.anthropic) document.getElementById('key-anthropic').value = byName.anthropic;
       if (byName.pylon) document.getElementById('key-pylon').value = byName.pylon;
@@ -746,7 +756,7 @@
         return;
       }
       if (!data.length) {
-        listEl.innerHTML = `<p class="subtitle">No prebuilds yet — add your first one above.</p>`;
+        listEl.innerHTML = `<p class="subtitle">No prebuilds yet - add your first one above.</p>`;
         return;
       }
       listEl.innerHTML = data.map(pb => {

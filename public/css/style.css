@@ -1,7 +1,7 @@
 /* ===================================================================
    Theme tokens
    Two themes, both derived from the logo colors (cyan-blue #1C87C9,
-   indigo #3B3486). Switching sets [data-theme] on <html> — see
+   indigo #3B3486). Switching sets [data-theme] on <html> - see
    /js/theme.js. Default (no attribute yet) matches Dark Trade so
    there's no flash of unstyled content before JS runs.
    =================================================================== */
@@ -61,6 +61,7 @@ body {
   height: 76px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
+  position: relative;
 }
 
 .topbar-tabs {
@@ -137,7 +138,49 @@ body {
   .topbar { padding: 0 14px; gap: 10px; height: 64px; }
   .topbar-tab { padding: 0 10px; font-size: 12px; height: 64px; }
   .topbar-logo img { height: 42px; }
+  .topbar-tabs { display: none; }
+  .mobile-menu-btn { display: flex; }
 }
+
+.mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+.mobile-menu-dropdown {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  top: 64px;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 50;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.25);
+}
+.mobile-menu-dropdown.open { display: flex; }
+.mobile-menu-dropdown a {
+  padding: 15px 20px;
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.mobile-menu-dropdown a:last-child { border-bottom: none; }
+.mobile-menu-dropdown a.active { color: var(--accent); }
+.mobile-menu-dropdown a .tab-total { color: var(--muted); font-size: 12px; font-weight: 500; }
 
 .wrap {
   max-width: 1100px;
@@ -476,4 +519,42 @@ html[data-theme="navy"] .success-box {
 }
 @media (max-width: 700px) {
   .pipeline-column { flex-basis: 220px; }
+}
+
+/* ===================================================================
+   Responsive tables — stack into cards on narrow screens instead of
+   overflowing horizontally. Opt-in via class="responsive-stack" plus
+   data-label on each <td> (JS supplies the label per row).
+   =================================================================== */
+@media (max-width: 700px) {
+  table.responsive-stack, table.responsive-stack thead, table.responsive-stack tbody,
+  table.responsive-stack th, table.responsive-stack td, table.responsive-stack tr {
+    display: block;
+  }
+  table.responsive-stack thead { display: none; }
+  table.responsive-stack tr {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    padding: 8px 10px;
+  }
+  table.responsive-stack td {
+    border: none;
+    padding: 6px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    text-align: right;
+  }
+  table.responsive-stack td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+    flex-shrink: 0;
+  }
+  table.responsive-stack td.num { text-align: right; }
 }
