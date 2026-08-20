@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=6" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -46,6 +46,7 @@
 
   <div class="wrap">
     <h1 id="page-title">New quote</h1>
+    <p class="subtitle" id="page-numbers"></p>
     <p class="subtitle">Break the job into stages, each priced separately.</p>
 
     <div class="card">
@@ -217,7 +218,15 @@
     let currentTemplate = 'new_build';
     let companySettings = {};
     let selectedClientId = null;
+    let currentJobNumber = null;
     const rowsEl = document.getElementById('cc-rows');
+
+    function renumberStages() {
+      document.querySelectorAll('.cc-row').forEach((row, i) => {
+        const label = row.querySelector('.cc-number');
+        if (label) label.textContent = currentJobNumber ? `(${costCentreNumber(currentJobNumber, i + 1)})` : `(stage ${i + 1})`;
+      });
+    }
 
     // ---------- client picker ----------
 
@@ -466,7 +475,7 @@
       div.innerHTML = `
         <div class="cc-row-top">
           <div>
-            <label style="margin-top:0">Stage name</label>
+            <label style="margin-top:0">Stage name <span class="cc-number" style="color:var(--muted); font-weight:400;"></span></label>
             <input class="cc-name" placeholder="e.g. Rough In" value="${name}" />
           </div>
           <div>
@@ -510,13 +519,14 @@
           <button type="button" class="secondary remove-row">Remove stage</button>
         </div>`;
       rowsEl.appendChild(div);
+      renumberStages();
 
       div.querySelector('.cc-markup').addEventListener('input', () => updateStageTotals(div));
       div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); });
       div.querySelector('.li-add').addEventListener('click', () => addLineItem(div));
       div.querySelector('.prebuild-add').addEventListener('click', () => openPrebuildPicker(div));
       div.querySelector('.pg-add').addEventListener('click', () => addPhotoGroup(div));
-      div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateTotal(); });
+      div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateTotal(); renumberStages(); });
       if (TEMPLATE_INFO[currentTemplate].singleStage) {
         div.querySelector('.remove-row').style.display = 'none';
       }
@@ -840,6 +850,21 @@
         accounts_contact_id: assignedContactIds.accounts_contact_id || null,
       };
 
+      // Numbers are drawn once, atomically, only when a new quote is
+      // created - editing an existing one never reassigns its numbers.
+      if (!editId) {
+        const [{ data: quoteNum, error: qErr }, { data: jobNum, error: jErr }] = await Promise.all([
+          supabaseClient.rpc('get_next_number', { counter_name: 'quote' }),
+          supabaseClient.rpc('get_next_number', { counter_name: 'job' }),
+        ]);
+        if (qErr || jErr) {
+          msg.innerHTML = `<div class="error-box">Could not draw a quote/job number: ${(qErr || jErr).message}</div>`;
+          return;
+        }
+        projectFields.quote_number = quoteNum;
+        projectFields.job_number = jobNum;
+      }
+
       // Time & Materials has no quote/approval step - send it straight to
       // booked rather than sitting in Draft Quote waiting for a client to
       // accept a proposal that doesn't exist for this template.
@@ -933,6 +958,11 @@
         return;
       }
       document.getElementById('page-title').textContent = 'Edit quote';
+      currentJobNumber = project.job_number;
+      document.getElementById('page-numbers').textContent = [
+        project.quote_number ? `Quote #${project.quote_number}` : null,
+        project.job_number ? `Job #${project.job_number}` : null,
+      ].filter(Boolean).join(' · ');
       applyTemplate(project.proposal_template || 'new_build');
       document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';
       offerLeadAttachmentImport(project.lead_id);

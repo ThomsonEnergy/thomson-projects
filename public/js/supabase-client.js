@@ -113,3 +113,9 @@ async function lineItemColumns() {
 function moneyOrHidden(n) {
   return (n === null || n === undefined) ? ' - ' : money(n);
 }
+
+// Cost centre numbers (e.g. "7000-2") are computed from the job number
+// plus the stage's position, not stored - position is 1-indexed.
+function costCentreNumber(jobNumber, position) {
+  return jobNumber ? `${jobNumber}-${position}` : `-${position}`;
+}

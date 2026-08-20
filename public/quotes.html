@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=6" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -100,11 +100,12 @@
       list.innerHTML = projects.map(p => {
         const stageCount = p.cost_centres.length;
         const stageLabel = `${stageCount} stage${stageCount === 1 ? '' : 's'}`;
+        const nameDisplay = `${p.quote_number ? '#' + p.quote_number + ' - ' : ''}${p.name}`;
         if (!pricingVisible) {
           return `
             <a class="project-list-item" href="/project.html?id=${p.id}">
               <div>
-                <div class="name">${p.name}</div>
+                <div class="name">${nameDisplay}</div>
                 <div class="meta">${p.client_name} &middot; ${stageLabel}</div>
               </div>
               <div style="text-align:right; min-width:160px;">
@@ -118,7 +119,7 @@
         return `
           <a class="project-list-item" href="/project.html?id=${p.id}">
             <div>
-              <div class="name">${p.name}</div>
+              <div class="name">${nameDisplay}</div>
               <div class="meta">${p.client_name} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
             </div>
             <div style="text-align:right; min-width:160px;">

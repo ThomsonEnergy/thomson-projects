@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=6" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -84,9 +84,13 @@
       const quoteUrl = `${window.location.origin}/quote.html?token=${project.quote_token}`;
 
       const content = document.getElementById('content');
+      const numberLine = [
+        project.job_number ? `Job #${project.job_number}` : null,
+        project.quote_number ? `Quote #${project.quote_number}` : null,
+      ].filter(Boolean).join(' &middot; ');
       content.innerHTML = `
         <h1>${project.name}</h1>
-        <p class="subtitle">${project.client_name} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span></p>
+        <p class="subtitle">${project.client_name} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
         <div style="margin-bottom:20px;">
           ${pricingVisible ? `
             <a class="btn secondary" href="/new-project.html?id=${project.id}">Edit quote</a>
@@ -143,22 +147,23 @@
 
         <div class="card">
           <h2>Stages</h2>
-          <table>
+          <table class="responsive-stack">
             <thead>
               <tr>
-                <th>Stage</th>
+                <th>#</th><th>Stage</th>
                 ${pricingVisible ? '<th class="num">Quoted</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">Invoiced</th>' : ''}
               </tr>
             </thead>
             <tbody>
-              ${centres.map(c => `
+              ${centres.map((c, i) => `
                 <tr>
-                  <td>${c.name}</td>
+                  <td data-label="#">${costCentreNumber(project.job_number, i + 1)}</td>
+                  <td data-label="Stage">${c.name}</td>
                   ${pricingVisible ? `
-                    <td class="num">${moneyOrHidden(c.quoted_amount)}</td>
-                    <td class="num">${moneyOrHidden(c.labour_cost)}</td>
-                    <td class="num">${moneyOrHidden(c.material_cost)}</td>
-                    <td class="num">${moneyOrHidden(c.invoiced_amount)}</td>
+                    <td class="num" data-label="Quoted">${moneyOrHidden(c.quoted_amount)}</td>
+                    <td class="num" data-label="Labour">${moneyOrHidden(c.labour_cost)}</td>
+                    <td class="num" data-label="Materials">${moneyOrHidden(c.material_cost)}</td>
+                    <td class="num" data-label="Invoiced">${moneyOrHidden(c.invoiced_amount)}</td>
                   ` : ''}
                 </tr>`).join('')}
             </tbody>

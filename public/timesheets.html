@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=6" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -54,13 +54,16 @@
         <div id="todays-schedule"></div>
         <div class="grid cols-3">
           <div style="grid-column: span 2;">
-            <label style="margin-top:0">Or pick a job manually</label>
+            <label style="margin-top:0">Job</label>
             <select id="clock-project"><option value="">General / Office</option></select>
           </div>
-          <div style="display:flex; align-items:end;">
-            <button id="clock-in-btn" style="width:100%;">Clock in</button>
-          </div>
         </div>
+        <div id="clock-cost-centres" style="display:none; margin-top:10px;">
+          <label style="margin-top:0">Which stage(s) are you working on?</label>
+          <div id="clock-cc-chips"></div>
+          <p class="subtitle" id="clock-cc-hint" style="margin:6px 0 0;"></p>
+        </div>
+        <button id="clock-in-btn" style="width:100%; margin-top:14px;">Clock in</button>
       </div>
       <div id="clock-active" style="display:none;">
         <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-project-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
@@ -75,20 +78,21 @@
         <button type="button" class="secondary" id="add-manual-entry-btn">+ Add missed entry</button>
       </div>
       <div id="manual-entry-form" style="display:none; margin-bottom:16px; padding:14px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;">
-        <div class="grid cols-3">
-          <div>
-            <label style="margin-top:0">Job</label>
-            <select id="manual-project"><option value="">General / Office</option></select>
+        <label style="margin-top:0">Job</label>
+        <select id="manual-project"><option value="">General / Office</option></select>
+        <label>Date</label>
+        <input type="date" id="manual-date" />
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label>Start time</label>
+            <input type="time" id="manual-start-time" />
           </div>
-          <div>
-            <label style="margin-top:0">Clocked in</label>
-            <input type="datetime-local" id="manual-clock-in" />
-          </div>
-          <div>
-            <label style="margin-top:0">Clocked out</label>
-            <input type="datetime-local" id="manual-clock-out" />
+          <div style="flex:1;">
+            <label>Finish time</label>
+            <input type="time" id="manual-end-time" />
           </div>
         </div>
+        <p class="subtitle" style="margin:6px 0 0;">One date per entry - if a shift genuinely runs past midnight, log it as two separate entries.</p>
         <button id="manual-entry-save-btn" style="margin-top:10px;">Save entry</button>
         <button type="button" class="secondary" id="manual-entry-cancel-btn" style="margin-top:10px;">Cancel</button>
         <div id="manual-entry-msg"></div>
@@ -157,7 +161,7 @@
     async function loadProjectOptions() {
       const { data } = await supabaseClient
         .from('projects')
-        .select('id, name')
+        .select('id, name, job_number')
         .neq('pipeline_stage', 'archived')
         .order('created_at', { ascending: false })
         .limit(200);
@@ -216,34 +220,106 @@
         <div style="margin-bottom:16px;">
           ${data.map(a => `
             <button type="button" class="quick-clock-btn" data-project-id="${a.project_id || ''}" style="margin:0 8px 8px 0;">
-              Clock into ${a.projects ? a.projects.name : 'General / Office'}
+              ${a.projects ? a.projects.name : 'General / Office'}
             </button>`).join('')}
         </div>`;
 
       container.querySelectorAll('.quick-clock-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          btn.disabled = true;
-          const { error: clockErr } = await supabaseClient.from('time_entries').insert({ staff_id: myUserId, project_id: btn.dataset.projectId || null });
-          if (clockErr) { alert(clockErr.message); btn.disabled = false; return; }
-          await checkActiveClock();
+        btn.addEventListener('click', () => {
+          document.getElementById('clock-project').value = btn.dataset.projectId;
+          loadCostCentreChips(btn.dataset.projectId);
+        });
+      });
+    }
+
+    let selectedClockCostCentres = [];
+
+    document.getElementById('clock-project').addEventListener('change', (e) => {
+      loadCostCentreChips(e.target.value);
+    });
+
+    async function loadCostCentreChips(projectId) {
+      selectedClockCostCentres = [];
+      const wrap = document.getElementById('clock-cost-centres');
+      const chipsEl = document.getElementById('clock-cc-chips');
+      const hintEl = document.getElementById('clock-cc-hint');
+
+      if (!projectId) { wrap.style.display = 'none'; return; }
+
+      const project = cachedProjects.find(p => p.id === projectId);
+      const { data: centres, error } = await supabaseClient
+        .from('cost_centres')
+        .select('id, name')
+        .eq('project_id', projectId)
+        .order('sort_order');
+
+      if (error || !centres || !centres.length) { wrap.style.display = 'none'; return; }
+
+      wrap.style.display = 'block';
+      chipsEl.innerHTML = centres.map((c, i) => `
+        <button type="button" class="cc-chip" data-id="${c.id}">
+          <span class="cc-chip-num">${costCentreNumber(project ? project.job_number : null, i + 1)}</span> ${c.name}
+        </button>
+      `).join('');
+
+      chipsEl.querySelectorAll('.cc-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          chip.classList.toggle('selected');
+          const id = chip.dataset.id;
+          if (chip.classList.contains('selected')) {
+            selectedClockCostCentres.push(id);
+          } else {
+            selectedClockCostCentres = selectedClockCostCentres.filter(x => x !== id);
+          }
+          hintEl.textContent = selectedClockCostCentres.length > 1
+            ? `Time will be split across these ${selectedClockCostCentres.length} stages when you clock out.`
+            : '';
         });
       });
     }
 
     document.getElementById('clock-in-btn').addEventListener('click', async () => {
       const projectId = document.getElementById('clock-project').value || null;
-      const { error } = await supabaseClient.from('time_entries').insert({ staff_id: myUserId, project_id: projectId });
       const msg = document.getElementById('clock-msg');
+
+      const wrap = document.getElementById('clock-cost-centres');
+      if (wrap.style.display !== 'none' && selectedClockCostCentres.length === 0) {
+        msg.innerHTML = `<div class="error-box">Pick at least one stage you're working on.</div>`;
+        return;
+      }
+
+      const entry = { staff_id: myUserId, project_id: projectId };
+      if (selectedClockCostCentres.length === 1) {
+        entry.cost_centre_id = selectedClockCostCentres[0];
+      } else if (selectedClockCostCentres.length > 1) {
+        entry.selected_cost_centre_ids = selectedClockCostCentres;
+      }
+
+      const { error } = await supabaseClient.from('time_entries').insert(entry);
       if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       msg.innerHTML = '';
+      selectedClockCostCentres = [];
+      document.getElementById('clock-cost-centres').style.display = 'none';
       await checkActiveClock();
     });
 
-    function toLocalInputValue(iso) {
+    function isoToDatePart(iso) {
       if (!iso) return '';
       const d = new Date(iso);
       const pad = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+    function isoToTimePart(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      const pad = n => String(n).padStart(2, '0');
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    // Combines a date + time pair into a Date, same as the browser would
+    // for a datetime-local field - no timezone conversion, just local time.
+    function combineDateTime(dateStr, timeStr) {
+      if (!dateStr || !timeStr) return null;
+      return new Date(`${dateStr}T${timeStr}`);
     }
 
     let cachedProjects = [];
@@ -263,7 +339,7 @@
           <thead><tr><th>Job</th><th>Clocked in</th><th>Clocked out</th><th class="num">Duration</th><th></th></tr></thead>
           <tbody>
             ${data.map(e => `
-              <tr data-id="${e.id}" data-project-id="${e.project_id || ''}" data-clock-in="${e.clock_in}" data-clock-out="${e.clock_out || ''}">
+              <tr data-id="${e.id}" data-project-id="${e.project_id || ''}" data-clock-in="${e.clock_in}" data-clock-out="${e.clock_out || ''}" data-selected-cost-centres='${JSON.stringify(e.selected_cost_centre_ids || null)}'>
                 <td data-label="Job">${e.projects ? e.projects.name : 'General / Office'}</td>
                 <td data-label="Clocked in">${fmtDateTime(e.clock_in)}</td>
                 <td data-label="Clocked out">${e.clock_out ? fmtDateTime(e.clock_out) : '<span class="badge in_progress">In progress</span>'}</td>
@@ -289,38 +365,43 @@
       const projectOptions = `<option value="">General / Office</option>` +
         cachedProjects.map(p => `<option value="${p.id}" ${p.id === row.dataset.projectId ? 'selected' : ''}>${p.name}</option>`).join('');
 
+      // Full-width card instead of a cramped table cell - a 3-column grid
+      // inside a <td> doesn't leave enough room on a phone screen.
       row.innerHTML = `
-        <td colspan="5">
-          <div class="grid cols-3" style="margin:6px 0;">
-            <div>
-              <label style="margin-top:0">Job</label>
-              <select class="edit-project">${projectOptions}</select>
+        <td colspan="5" style="padding:0; display:block;">
+          <div style="padding:14px; background:var(--surface-2); border-radius:8px; margin:6px 0; width:100%; box-sizing:border-box;">
+            <label style="margin-top:0">Job</label>
+            <select class="edit-project">${projectOptions}</select>
+            <label>Date</label>
+            <input type="date" class="edit-date" value="${isoToDatePart(row.dataset.clockIn)}" />
+            <div style="display:flex; gap:10px;">
+              <div style="flex:1;">
+                <label>Start time</label>
+                <input type="time" class="edit-start-time" value="${isoToTimePart(row.dataset.clockIn)}" />
+              </div>
+              <div style="flex:1;">
+                <label>Finish time</label>
+                <input type="time" class="edit-end-time" value="${isoToTimePart(row.dataset.clockOut)}" />
+              </div>
             </div>
-            <div>
-              <label style="margin-top:0">Clocked in</label>
-              <input type="datetime-local" class="edit-clock-in" value="${toLocalInputValue(row.dataset.clockIn)}" />
-            </div>
-            <div>
-              <label style="margin-top:0">Clocked out</label>
-              <input type="datetime-local" class="edit-clock-out" value="${toLocalInputValue(row.dataset.clockOut)}" />
-            </div>
+            <button class="save-entry-btn" style="margin-top:10px;">Save</button>
+            <button type="button" class="secondary cancel-entry-btn" style="margin-top:10px;">Cancel</button>
+            <div class="edit-entry-msg"></div>
           </div>
-          <button class="save-entry-btn">Save</button>
-          <button type="button" class="secondary cancel-entry-btn">Cancel</button>
-          <div class="edit-entry-msg"></div>
         </td>`;
 
       row.querySelector('.cancel-entry-btn').addEventListener('click', () => loadMyEntries());
       row.querySelector('.save-entry-btn').addEventListener('click', async () => {
         const msg = row.querySelector('.edit-entry-msg');
-        const clockInVal = row.querySelector('.edit-clock-in').value;
-        const clockOutVal = row.querySelector('.edit-clock-out').value;
+        const dateVal = row.querySelector('.edit-date').value;
+        const startVal = row.querySelector('.edit-start-time').value;
+        const endVal = row.querySelector('.edit-end-time').value;
         const projectId = row.querySelector('.edit-project').value || null;
 
-        if (!clockInVal) { msg.innerHTML = `<div class="error-box">Clock-in time is required.</div>`; return; }
-        const clockIn = new Date(clockInVal);
-        const clockOut = clockOutVal ? new Date(clockOutVal) : null;
-        if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Clock-out must be after clock-in.</div>`; return; }
+        if (!dateVal || !startVal) { msg.innerHTML = `<div class="error-box">Date and start time are required.</div>`; return; }
+        const clockIn = combineDateTime(dateVal, startVal);
+        const clockOut = endVal ? combineDateTime(dateVal, endVal) : null;
+        if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Finish time must be after start time - shifts can't cross midnight here, log it as two entries instead.</div>`; return; }
 
         const { error } = await supabaseClient
           .from('time_entries')
@@ -342,15 +423,29 @@
       const projectId = row.dataset.projectId;
       if (!projectId) { alert("This entry isn't tied to a job, so there's nothing to split it across."); return; }
 
-      const { data: centres, error } = await supabaseClient
+      const project = cachedProjects.find(p => p.id === projectId);
+      const jobNumber = project ? project.job_number : null;
+
+      // Fetch every stage on the job so numbering (7000-2, 7000-3...) is
+      // always correct, then narrow down to just the ones actually picked
+      // at clock-in, if any were.
+      const { data: allCentres, error } = await supabaseClient
         .from('cost_centres')
         .select('id, name')
         .eq('project_id', projectId)
         .order('sort_order');
-      if (error || !centres || centres.length < 2) {
-        alert('This job only has one stage on it, so there\'s nothing to split.');
+      if (error || !allCentres || allCentres.length < 2) {
+        alert("This job only has one stage on it, so there's nothing to split.");
         return;
       }
+
+      const numbered = allCentres.map((c, i) => ({ ...c, number: costCentreNumber(jobNumber, i + 1) }));
+      const preselected = JSON.parse(row.dataset.selectedCostCentres || 'null');
+      const centres = preselected && preselected.length > 1
+        ? numbered.filter(c => preselected.includes(c.id))
+        : numbered;
+
+      if (centres.length < 2) { alert("There's only one stage to split across here."); return; }
 
       const totalMs = new Date(row.dataset.clockOut) - new Date(row.dataset.clockIn);
       const totalMin = Math.round(totalMs / 60000);
@@ -363,126 +458,158 @@
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
 
-      function render() {
-        overlay.innerHTML = `
-          <div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;">
-            <h2>Split this entry across stages</h2>
-            <p class="subtitle" style="margin-bottom:12px;">Total time: ${fmtDuration(totalMs)}. Adjust the sliders until the split feels right.</p>
+      // Build the DOM once. Every subsequent update touches existing nodes
+      // directly rather than re-rendering - rebuilding mid-drag was what
+      // made the slider impossible to actually drag before.
+      overlay.innerHTML = `
+        <div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Split this entry across stages</h2>
+          <p class="subtitle" style="margin-bottom:12px;">Total time: ${fmtDuration(totalMs)}. Drag the sliders until the split feels right - adjusting one only shifts the ones after it.</p>
 
-            <div style="display:flex; height:22px; border-radius:6px; overflow:hidden; margin-bottom:16px;">
-              ${centres.map((c, i) => `<div style="width:${percentages[i]}%; background:${segmentColor(i)};"></div>`).join('')}
-            </div>
+          <div id="split-bar" style="display:flex; height:22px; border-radius:6px; overflow:hidden; margin-bottom:16px;">
+            ${centres.map((c, i) => `<div class="split-bar-seg" data-index="${i}" style="width:${percentages[i]}%; background:${segmentColor(i)};"></div>`).join('')}
+          </div>
 
-            ${centres.map((c, i) => `
-              <div style="margin-bottom:14px;">
-                <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
-                  <span><span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:${segmentColor(i)}; margin-right:6px;"></span>${c.name}</span>
-                  <span>${percentages[i]}% &middot; ${fmtDuration(totalMin * percentages[i] / 100 * 60000)}</span>
-                </div>
-                <input type="range" min="0" max="100" value="${percentages[i]}" class="split-slider" data-index="${i}" style="width:100%;" />
+          ${centres.map((c, i) => `
+            <div style="margin-bottom:14px;">
+              <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
+                <span><span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:${segmentColor(i)}; margin-right:6px;"></span><strong>${c.number}</strong> ${c.name}</span>
+                <span class="split-label" data-index="${i}">${percentages[i]}% &middot; ${fmtDuration(totalMin * percentages[i] / 100 * 60000)}</span>
               </div>
-            `).join('')}
-
-            <div style="margin-top:10px;">
-              <button id="split-save-btn">Save split</button>
-              <button type="button" class="secondary" id="split-cancel-btn">Cancel</button>
+              <input type="range" min="0" max="100" value="${percentages[i]}" class="split-slider" data-index="${i}" style="width:100%;" />
             </div>
-            <div id="split-msg"></div>
-          </div>`;
+          `).join('')}
 
-        overlay.querySelectorAll('.split-slider').forEach(slider => {
-          slider.addEventListener('input', () => {
-            const idx = parseInt(slider.dataset.index);
-            const newVal = parseInt(slider.value);
-            const oldVal = percentages[idx];
-            const delta = newVal - oldVal;
+          <div style="margin-top:10px;">
+            <button id="split-save-btn">Save split</button>
+            <button type="button" class="secondary" id="split-cancel-btn">Cancel</button>
+          </div>
+          <div id="split-msg"></div>
+        </div>`;
 
-            const othersTotal = percentages.reduce((s, v, i) => i === idx ? s : s + v, 0);
-            if (othersTotal <= 0) return;
+      const sliders = [...overlay.querySelectorAll('.split-slider')];
+      const labels = [...overlay.querySelectorAll('.split-label')];
+      const barSegs = [...overlay.querySelectorAll('.split-bar-seg')];
 
-            percentages[idx] = newVal;
-            let remaining = 100 - newVal;
-            let assigned = 0;
-            centres.forEach((_, i) => {
-              if (i === idx) return;
-              const share = Math.round((percentages[i] / othersTotal) * remaining);
-              percentages[i] = share;
-              assigned += share;
-            });
-            // Absorb any rounding drift into the last non-active slider.
-            const lastOther = centres.map((_, i) => i).filter(i => i !== idx).pop();
-            if (lastOther !== undefined) percentages[lastOther] += (100 - newVal) - assigned;
-
-            render();
-          });
-        });
-
-        overlay.querySelector('#split-cancel-btn').addEventListener('click', () => overlay.remove());
-        overlay.querySelector('#split-save-btn').addEventListener('click', async () => {
-          const msg = overlay.querySelector('#split-msg');
-          const btn = overlay.querySelector('#split-save-btn');
-          btn.disabled = true;
-
-          const totalPct = percentages.reduce((a, b) => a + b, 0);
-          if (totalPct !== 100) {
-            msg.innerHTML = `<div class="error-box">Percentages must add up to 100 (currently ${totalPct}).</div>`;
-            btn.disabled = false;
-            return;
-          }
-
-          const newEntries = [];
-          let cursor = new Date(clockInIso);
-          centres.forEach((c, i) => {
-            const isLast = i === centres.length - 1;
-            const minutes = isLast
-              ? totalMin - newEntries.reduce((s, e) => s + e.minutes, 0)
-              : Math.round(totalMin * percentages[i] / 100);
-            const segStart = new Date(cursor);
-            const segEnd = new Date(cursor.getTime() + minutes * 60000);
-            newEntries.push({ minutes, clock_in: segStart.toISOString(), clock_out: segEnd.toISOString(), cost_centre_id: c.id });
-            cursor = segEnd;
-          });
-
-          try {
-            const { error: insErr } = await supabaseClient.from('time_entries').insert(
-              newEntries.map(e => ({
-                staff_id: myUserId, project_id: projectId, cost_centre_id: e.cost_centre_id,
-                clock_in: e.clock_in, clock_out: e.clock_out,
-              }))
-            );
-            if (insErr) throw insErr;
-            const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', entryId);
-            if (delErr) throw delErr;
-            overlay.remove();
-            await loadMyEntries();
-          } catch (err) {
-            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-            btn.disabled = false;
-          }
-        });
+      function paint() {
+        sliders.forEach((s, i) => { s.value = percentages[i]; });
+        labels.forEach((l, i) => { l.textContent = `${percentages[i]}% \u00b7 ${fmtDuration(totalMin * percentages[i] / 100 * 60000)}`; });
+        barSegs.forEach((b, i) => { b.style.width = `${percentages[i]}%`; });
       }
 
-      render();
+      // Waterfall rebalancing: moving a slider only redistributes across
+      // the ones AFTER it (keeping earlier ones exactly as you left them).
+      // If you're dragging the last slider, there's nothing after it to
+      // absorb the change, so it redistributes across the ones before
+      // instead - either way the total always stays locked at 100.
+      function rebalance(idx, newVal) {
+        newVal = Math.max(0, Math.min(100, newVal));
+
+        const isLast = idx === centres.length - 1;
+        const flexIdxs = isLast
+          ? centres.map((_, i) => i).filter(i => i < idx)
+          : centres.map((_, i) => i).filter(i => i > idx);
+
+        const lockedSum = centres.map((_, i) => i)
+          .filter(i => i !== idx && !flexIdxs.includes(i))
+          .reduce((s, i) => s + percentages[i], 0);
+
+        // Can't let the dragged value + whatever's locked exceed 100 - if
+        // it would, clamp the drag itself rather than letting flex sliders
+        // go negative.
+        newVal = Math.min(newVal, 100 - lockedSum);
+        percentages[idx] = newVal;
+        const remaining = 100 - newVal - lockedSum;
+
+        const flexOldTotal = flexIdxs.reduce((s, i) => s + percentages[i], 0);
+        let assigned = 0;
+        flexIdxs.forEach((i, n) => {
+          const isLastFlex = n === flexIdxs.length - 1;
+          const share = isLastFlex
+            ? remaining - assigned
+            : Math.round(flexOldTotal > 0 ? (percentages[i] / flexOldTotal) * remaining : remaining / flexIdxs.length);
+          percentages[i] = Math.max(0, share);
+          assigned += share;
+        });
+
+        paint();
+      }
+
+      sliders.forEach(slider => {
+        slider.addEventListener('input', () => {
+          rebalance(parseInt(slider.dataset.index), parseInt(slider.value));
+        });
+      });
+
+      overlay.querySelector('#split-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#split-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#split-msg');
+        const btn = overlay.querySelector('#split-save-btn');
+        btn.disabled = true;
+
+        const totalPct = percentages.reduce((a, b) => a + b, 0);
+        if (totalPct !== 100) {
+          msg.innerHTML = `<div class="error-box">Percentages must add up to 100 (currently ${totalPct}).</div>`;
+          btn.disabled = false;
+          return;
+        }
+
+        const newEntries = [];
+        let cursor = new Date(clockInIso);
+        centres.forEach((c, i) => {
+          const isLast = i === centres.length - 1;
+          const minutes = isLast
+            ? totalMin - newEntries.reduce((s, e) => s + e.minutes, 0)
+            : Math.round(totalMin * percentages[i] / 100);
+          const segStart = new Date(cursor);
+          const segEnd = new Date(cursor.getTime() + minutes * 60000);
+          newEntries.push({ minutes, clock_in: segStart.toISOString(), clock_out: segEnd.toISOString(), cost_centre_id: c.id });
+          cursor = segEnd;
+        });
+
+        try {
+          const { error: insErr } = await supabaseClient.from('time_entries').insert(
+            newEntries.map(e => ({
+              staff_id: myUserId, project_id: projectId, cost_centre_id: e.cost_centre_id,
+              clock_in: e.clock_in, clock_out: e.clock_out,
+            }))
+          );
+          if (insErr) throw insErr;
+          const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', entryId);
+          if (delErr) throw delErr;
+          overlay.remove();
+          await loadMyEntries();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          btn.disabled = false;
+        }
+      });
+
       document.body.appendChild(overlay);
     }
 
     document.getElementById('add-manual-entry-btn').addEventListener('click', () => {
       const form = document.getElementById('manual-entry-form');
-      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+      const opening = form.style.display === 'none';
+      form.style.display = opening ? 'block' : 'none';
+      if (opening && !document.getElementById('manual-date').value) {
+        document.getElementById('manual-date').value = isoToDatePart(new Date().toISOString());
+      }
     });
     document.getElementById('manual-entry-cancel-btn').addEventListener('click', () => {
       document.getElementById('manual-entry-form').style.display = 'none';
     });
     document.getElementById('manual-entry-save-btn').addEventListener('click', async () => {
       const msg = document.getElementById('manual-entry-msg');
-      const clockInVal = document.getElementById('manual-clock-in').value;
-      const clockOutVal = document.getElementById('manual-clock-out').value;
+      const dateVal = document.getElementById('manual-date').value;
+      const startVal = document.getElementById('manual-start-time').value;
+      const endVal = document.getElementById('manual-end-time').value;
       const projectId = document.getElementById('manual-project').value || null;
 
-      if (!clockInVal) { msg.innerHTML = `<div class="error-box">Clock-in time is required.</div>`; return; }
-      const clockIn = new Date(clockInVal);
-      const clockOut = clockOutVal ? new Date(clockOutVal) : null;
-      if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Clock-out must be after clock-in.</div>`; return; }
+      if (!dateVal || !startVal) { msg.innerHTML = `<div class="error-box">Date and start time are required.</div>`; return; }
+      const clockIn = combineDateTime(dateVal, startVal);
+      const clockOut = endVal ? combineDateTime(dateVal, endVal) : null;
+      if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Finish time must be after start time - shifts can't cross midnight here, log it as two entries instead.</div>`; return; }
 
       const { error } = await supabaseClient.from('time_entries').insert({
         staff_id: myUserId, project_id: projectId,
@@ -490,8 +617,8 @@
       });
       if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       document.getElementById('manual-entry-form').style.display = 'none';
-      document.getElementById('manual-clock-in').value = '';
-      document.getElementById('manual-clock-out').value = '';
+      document.getElementById('manual-start-time').value = '';
+      document.getElementById('manual-end-time').value = '';
       msg.innerHTML = '';
       await loadMyEntries();
       await checkActiveClock();

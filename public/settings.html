@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=6" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -52,7 +52,7 @@
       <div class="settings-tabs">
         <button class="settings-tab active" data-panel="company">Company Details</button>
         <button class="settings-tab" data-panel="xero">Xero Mapping</button>
-        <button class="settings-tab" data-panel="numbering">Numbering</button>
+        <button class="settings-tab" data-panel="numbering" data-pricing-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
         <button class="settings-tab" data-panel="terms">Payment Terms &amp; T&amp;Cs</button>
@@ -142,14 +142,32 @@
           </div>
         </div>
 
-        <!-- Numbering (stub) -->
+        <!-- Numbering -->
         <div class="settings-panel" id="panel-numbering">
           <div class="card">
-            <div class="empty-state">
-              <div class="empty-icon">&#128736;</div>
-              <h2>Coming in Phase 6</h2>
-              <p>Next progress-claim number (from PC2000) and next project number (from 7000) will be visible and adjustable here.</p>
+            <h2>Numbering</h2>
+            <p class="subtitle" style="margin-bottom:14px;">
+              Cost centre numbers (e.g. "7000-2") are worked out automatically from a job's number plus stage position - nothing to set there.
+              These counters control what the <em>next new</em> quote, job, or invoice gets. Changing them doesn't renumber anything already created.
+            </p>
+            <div class="grid cols-3">
+              <div>
+                <label style="margin-top:0">Next quote number</label>
+                <input type="number" id="next-quote-number" />
+              </div>
+              <div>
+                <label style="margin-top:0">Next job number</label>
+                <input type="number" id="next-job-number" />
+              </div>
+              <div>
+                <label style="margin-top:0">Next invoice number</label>
+                <input type="number" id="next-invoice-number" />
+              </div>
             </div>
+            <label>Invoice number prefix</label>
+            <input id="invoice-number-prefix" placeholder="SI" style="max-width:120px;" />
+            <button id="save-numbering-btn" style="margin-top:14px;">Save numbering</button>
+            <div id="save-numbering-msg"></div>
           </div>
         </div>
 
@@ -402,6 +420,10 @@
       document.getElementById('tagline').value = data.tagline || '';
       document.getElementById('default-markup').value = data.default_markup_percent ?? 45;
       document.getElementById('default-deposit').value = data.default_deposit_percent ?? 10;
+      document.getElementById('next-quote-number').value = data.next_quote_number ?? 1000;
+      document.getElementById('next-job-number').value = data.next_job_number ?? 7000;
+      document.getElementById('next-invoice-number').value = data.next_invoice_number ?? 3000;
+      document.getElementById('invoice-number-prefix').value = data.invoice_number_prefix || 'SI';
     }
 
     function renderCategorizedThumbs() {
@@ -513,6 +535,22 @@
         .update({
           default_markup_percent: parseFloat(document.getElementById('default-markup').value) || 45,
           default_deposit_percent: parseFloat(document.getElementById('default-deposit').value) || 10,
+        })
+        .eq('id', 1);
+      msg.innerHTML = error
+        ? `<div class="error-box">${error.message}</div>`
+        : `<div class="success-box">Saved.</div>`;
+    });
+
+    document.getElementById('save-numbering-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('save-numbering-msg');
+      const { error } = await supabaseClient
+        .from('company_settings')
+        .update({
+          next_quote_number: parseInt(document.getElementById('next-quote-number').value) || 1000,
+          next_job_number: parseInt(document.getElementById('next-job-number').value) || 7000,
+          next_invoice_number: parseInt(document.getElementById('next-invoice-number').value) || 3000,
+          invoice_number_prefix: document.getElementById('invoice-number-prefix').value.trim() || 'SI',
         })
         .eq('id', 1);
       msg.innerHTML = error
