@@ -51,7 +51,7 @@
     <div class="settings-layout">
       <div class="settings-tabs">
         <button class="settings-tab active" data-panel="company">Company Details</button>
-        <button class="settings-tab" data-panel="xero">Xero Mapping</button>
+        <button class="settings-tab" data-panel="xero" data-pricing-only="1">Xero Mapping</button>
         <button class="settings-tab" data-panel="numbering" data-pricing-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
@@ -131,14 +131,51 @@
           <div id="save-company-msg"></div>
         </div>
 
-        <!-- Xero Mapping (stub) -->
-        <div class="settings-panel" id="panel-xero">
+        <!-- Xero Mapping -->
+        <div class="settings-panel" id="panel-xero" data-pricing-only="1">
           <div class="card">
-            <div class="empty-state">
-              <div class="empty-icon">&#128736;</div>
-              <h2>Coming in Phase 6</h2>
-              <p>Account codes and tax types per line item type get mapped here once Xero invoicing is built.</p>
+            <h2>Xero account mapping</h2>
+            <p class="subtitle" style="margin-bottom:14px;">
+              Locks which Xero account code and tax type each category is allowed to post as, so a mismatched combination
+              gets rejected before it reaches Xero rather than silently miscoded. Confirm these against your actual
+              chart of accounts before pushing anything beyond the demo company.
+            </p>
+            <div id="xero-mapping-list"><p class="subtitle">Loading...</p></div>
+          </div>
+
+          <div class="card">
+            <h2>Add a category</h2>
+            <div class="grid cols-4">
+              <div>
+                <label style="margin-top:0">Internal key</label>
+                <input id="xm-category" placeholder="e.g. stc_credits" />
+              </div>
+              <div>
+                <label style="margin-top:0">Label</label>
+                <input id="xm-label" placeholder="e.g. STC Credits" />
+              </div>
+              <div>
+                <label style="margin-top:0">Xero account code</label>
+                <input id="xm-account-code" placeholder="e.g. 270" />
+              </div>
+              <div>
+                <label style="margin-top:0">Xero tax type</label>
+                <input id="xm-tax-type" placeholder="e.g. OUTPUT2" />
+              </div>
             </div>
+            <button id="xm-add-btn" style="margin-top:10px;">Add category</button>
+            <div id="xm-add-msg"></div>
+          </div>
+
+          <div class="card">
+            <h2>Xero connection</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Tracking category used to tag invoice lines and payroll timesheets back to a job. Create a Tracking Category called "Job" in Xero first (Settings &gt; Tracking Categories), then paste its ID here.</p>
+            <label style="margin-top:0">Xero Tracking Category ID</label>
+            <input id="xero-tracking-category-id" placeholder="From Xero's Tracking Category settings" />
+            <label>Ordinary Hours earnings rate ID</label>
+            <input id="xero-earnings-rate-id" placeholder="From Xero Payroll Settings > Pay Items" />
+            <button id="save-xero-connection-btn" style="margin-top:10px;">Save</button>
+            <div id="xero-connection-msg"></div>
           </div>
         </div>
 
@@ -213,6 +250,11 @@
             <h2>Default estimate disclaimer</h2>
             <p class="subtitle" style="margin-bottom:10px;">Prefills the banner shown on Quick Estimate proposals. Editable per quote too, this is just the starting wording.</p>
             <textarea id="estimate-disclaimer-text" style="min-height:100px;"></textarea>
+          </div>
+          <div class="card">
+            <h2>Payment details</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Shown on the client-facing invoice - bank details, EFT reference format, etc.</p>
+            <textarea id="payment-details-text" style="min-height:100px;"></textarea>
           </div>
           <button id="save-terms-btn">Save terms</button>
           <div id="save-terms-msg"></div>
@@ -328,7 +370,30 @@
             <label>Pylon API key</label>
             <input id="key-pylon" type="password" placeholder="Paste key (used from Phase 5 onward)" autocomplete="off" />
 
+            <label>Xero Client ID</label>
+            <input id="key-xero-client-id" type="password" placeholder="From your Custom Connection's Configuration tab" autocomplete="off" />
+
+            <label>Xero Client Secret</label>
+            <input id="key-xero-client-secret" type="password" placeholder="Generated on the same Configuration tab" autocomplete="off" />
+
+            <label>Xero Webhook Key</label>
+            <input id="key-xero-webhook-key" type="password" placeholder="From the Webhooks tab of your Xero app" autocomplete="off" />
+
+            <label>Formbay API Key</label>
+            <input id="key-formbay" type="password" placeholder="From your Formbay account" autocomplete="off" />
+
             <button id="save-keys-btn" style="margin-top:14px;">Save keys</button>
+          </div>
+
+          <div class="card">
+            <h2>Test Formbay connection</h2>
+            <p class="subtitle" style="margin-bottom:10px;">
+              Save the key above first. This tries a few plausible ways of authenticating (Formbay's public docs
+              don't state the exact token endpoint) and shows you exactly what comes back from each - useful to
+              paste straight to Formbay support if none of them work.
+            </p>
+            <button id="test-formbay-btn" class="secondary">Test connection</button>
+            <pre id="test-formbay-result" style="margin-top:12px; white-space:pre-wrap; font-size:12px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:12px; display:none; max-height:400px; overflow-y:auto;"></pre>
           </div>
         </div>
 
@@ -410,6 +475,7 @@
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';
+      document.getElementById('payment-details-text').value = data.payment_details_text || '';
       document.getElementById('company-name').value = data.company_name || '';
       document.getElementById('abn').value = data.abn || '';
       document.getElementById('phone').value = data.phone || '';
@@ -521,6 +587,7 @@
         .update({
           default_terms: document.getElementById('terms-text').value,
           default_estimate_disclaimer: document.getElementById('estimate-disclaimer-text').value,
+          payment_details_text: document.getElementById('payment-details-text').value,
         })
         .eq('id', 1);
       msg.innerHTML = error
@@ -623,16 +690,17 @@
         }
 
         listEl.innerHTML = `
-          <table>
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+          <table class="responsive-stack">
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Xero Employee ID</th><th>Status</th><th></th></tr></thead>
             <tbody>
               ${data.users.map(u => `
                 <tr data-id="${u.id}">
-                  <td>${u.full_name || '<span style="color:var(--muted)"> - </span>'}</td>
-                  <td>${u.email}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
-                  <td><select class="role-select" data-id="${u.id}">${roleOptionsHtml(u.role)}</select></td>
-                  <td>${u.active ? '<span class="badge accepted">Active</span>' : '<span class="badge draft">Deactivated</span>'}</td>
-                  <td style="text-align:right;">
+                  <td data-label="Name">${u.full_name || '<span style="color:var(--muted)"> - </span>'}</td>
+                  <td data-label="Email">${u.email}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
+                  <td data-label="Role"><select class="role-select" data-id="${u.id}">${roleOptionsHtml(u.role)}</select></td>
+                  <td data-label="Xero Employee ID"><input class="xero-employee-input" data-id="${u.id}" value="${u.xero_employee_id || ''}" placeholder="From Xero Payroll" style="font-size:12px;" /></td>
+                  <td data-label="Status">${u.active ? '<span class="badge accepted">Active</span>' : '<span class="badge draft">Deactivated</span>'}</td>
+                  <td data-label="" style="text-align:right;">
                     <button class="secondary toggle-active-btn" data-id="${u.id}" data-active="${u.active}">
                       ${u.active ? 'Deactivate' : 'Reactivate'}
                     </button>
@@ -641,6 +709,16 @@
               `).join('')}
             </tbody>
           </table>`;
+
+        listEl.querySelectorAll('.xero-employee-input').forEach(input => {
+          input.addEventListener('change', async () => {
+            const { error } = await supabaseClient
+              .from('profiles')
+              .update({ xero_employee_id: input.value.trim() || null })
+              .eq('id', input.dataset.id);
+            if (error) alert('Could not save Xero Employee ID: ' + error.message);
+          });
+        });
 
         listEl.querySelectorAll('.role-select').forEach(sel => {
           sel.addEventListener('change', async () => {
@@ -715,6 +793,10 @@
       const byName = Object.fromEntries((data || []).map(k => [k.key_name, k.key_value]));
       if (byName.anthropic) document.getElementById('key-anthropic').value = byName.anthropic;
       if (byName.pylon) document.getElementById('key-pylon').value = byName.pylon;
+      if (byName.xero_client_id) document.getElementById('key-xero-client-id').value = byName.xero_client_id;
+      if (byName.xero_client_secret) document.getElementById('key-xero-client-secret').value = byName.xero_client_secret;
+      if (byName.xero_webhook_key) document.getElementById('key-xero-webhook-key').value = byName.xero_webhook_key;
+      if (byName.formbay) document.getElementById('key-formbay').value = byName.formbay;
     }
 
     document.getElementById('save-keys-btn').addEventListener('click', async () => {
@@ -722,6 +804,10 @@
       const rows = [
         { key_name: 'anthropic', key_value: document.getElementById('key-anthropic').value.trim() },
         { key_name: 'pylon', key_value: document.getElementById('key-pylon').value.trim() },
+        { key_name: 'xero_client_id', key_value: document.getElementById('key-xero-client-id').value.trim() },
+        { key_name: 'xero_client_secret', key_value: document.getElementById('key-xero-client-secret').value.trim() },
+        { key_name: 'xero_webhook_key', key_value: document.getElementById('key-xero-webhook-key').value.trim() },
+        { key_name: 'formbay', key_value: document.getElementById('key-formbay').value.trim() },
       ].filter(r => r.key_value);
 
       if (!rows.length) {
@@ -735,6 +821,27 @@
       msg.innerHTML = error
         ? `<div class="error-box">${error.message}</div>`
         : `<div class="success-box">Saved.</div>`;
+    });
+
+    document.getElementById('test-formbay-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('test-formbay-btn');
+      const resultEl = document.getElementById('test-formbay-result');
+      btn.disabled = true;
+      btn.textContent = 'Testing...';
+      resultEl.style.display = 'block';
+      resultEl.textContent = 'Calling Formbay a few different ways, one moment...';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/test-formbay-connection', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const data = await res.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        resultEl.textContent = `Request failed: ${err.message}`;
+      }
+      btn.disabled = false;
+      btn.textContent = 'Test connection';
     });
 
     // --- Prebuild library ---
@@ -883,6 +990,100 @@
       await loadPrebuilds();
     });
 
+    // --- Xero Mapping ---
+    async function loadXeroMapping() {
+      const listEl = document.getElementById('xero-mapping-list');
+      const { data, error } = await supabaseClient.from('xero_account_mapping').select('*').order('label');
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No categories yet - add one below.</p>`; return; }
+
+      listEl.innerHTML = `
+        <table>
+          <thead><tr><th>Label</th><th>Internal key</th><th>Account code</th><th>Tax type</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(m => `
+              <tr data-id="${m.id}">
+                <td>${m.label}</td>
+                <td style="color:var(--muted); font-size:12px;">${m.category}</td>
+                <td><input class="xm-edit-code" value="${m.xero_account_code}" style="width:90px;" /></td>
+                <td><input class="xm-edit-tax" value="${m.xero_tax_type}" style="width:110px;" /></td>
+                <td style="text-align:right;">
+                  <button class="secondary xm-save-btn" style="font-size:12px; padding:6px 10px;">Save</button>
+                  <button class="secondary danger xm-delete-btn" style="font-size:12px; padding:6px 10px;">Delete</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      listEl.querySelectorAll('.xm-save-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const row = btn.closest('tr');
+          const { error: updErr } = await supabaseClient
+            .from('xero_account_mapping')
+            .update({
+              xero_account_code: row.querySelector('.xm-edit-code').value.trim(),
+              xero_tax_type: row.querySelector('.xm-edit-tax').value.trim(),
+            })
+            .eq('id', row.dataset.id);
+          if (updErr) alert(updErr.message);
+        });
+      });
+      listEl.querySelectorAll('.xm-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this mapping? Quotes already using this category will need a new one assigned before they can push to Xero.')) return;
+          const row = btn.closest('tr');
+          const { error: delErr } = await supabaseClient.from('xero_account_mapping').delete().eq('id', row.dataset.id);
+          if (delErr) { alert(delErr.message); return; }
+          await loadXeroMapping();
+        });
+      });
+    }
+
+    document.getElementById('xm-add-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('xm-add-msg');
+      const category = document.getElementById('xm-category').value.trim().toLowerCase().replace(/\s+/g, '_');
+      const label = document.getElementById('xm-label').value.trim();
+      const xero_account_code = document.getElementById('xm-account-code').value.trim();
+      const xero_tax_type = document.getElementById('xm-tax-type').value.trim();
+
+      if (!category || !label || !xero_account_code || !xero_tax_type) {
+        msg.innerHTML = `<div class="error-box">All four fields are required.</div>`;
+        return;
+      }
+
+      const { error } = await supabaseClient.from('xero_account_mapping').insert({ category, label, xero_account_code, xero_tax_type });
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      msg.innerHTML = '';
+      document.getElementById('xm-category').value = '';
+      document.getElementById('xm-label').value = '';
+      document.getElementById('xm-account-code').value = '';
+      document.getElementById('xm-tax-type').value = '';
+      await loadXeroMapping();
+    });
+
+    async function loadXeroConnection() {
+      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id').eq('id', 1).single();
+      if (data) {
+        document.getElementById('xero-tracking-category-id').value = data.xero_tracking_category_id || '';
+        document.getElementById('xero-earnings-rate-id').value = data.xero_ordinary_earnings_rate_id || '';
+      }
+    }
+
+    document.getElementById('save-xero-connection-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('xero-connection-msg');
+      const { error } = await supabaseClient
+        .from('company_settings')
+        .update({
+          xero_tracking_category_id: document.getElementById('xero-tracking-category-id').value.trim(),
+          xero_ordinary_earnings_rate_id: document.getElementById('xero-earnings-rate-id').value.trim(),
+        })
+        .eq('id', 1);
+      msg.innerHTML = error
+        ? `<div class="error-box">${error.message}</div>`
+        : `<div class="success-box">Saved.</div>`;
+    });
+
     (async function () {
       const session = await requireLogin();
       if (!session) return;
@@ -902,6 +1103,8 @@
       if (isPricingRoleLocal(myRole)) {
         clearPrebuildForm();
         await loadPrebuilds();
+        await loadXeroMapping();
+        await loadXeroConnection();
       }
     })();
   </script>
