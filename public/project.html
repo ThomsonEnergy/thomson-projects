@@ -26,6 +26,7 @@
       <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
     </nav>
     <div class="topbar-right">
+      <a href="/clients.html" class="topbar-icon-link" title="Clients">&#128100;</a>
       <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
       <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
       <a href="/dashboard.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
@@ -46,7 +47,12 @@
       const centreCols = await costCentreColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols})`)
+        .select(`*, cost_centres(${centreCols}),
+          project_manager:client_contacts!project_manager_contact_id(name, phone, email),
+          site_contact:client_contacts!site_contact_id(name, phone, email),
+          job_contact:client_contacts!job_contact_id(name, phone, email),
+          sales_contact:client_contacts!sales_contact_id(name, phone, email),
+          accounts_contact:client_contacts!accounts_contact_id(name, phone, email)`)
         .eq('id', projectId)
         .single();
       if (error) {
@@ -91,6 +97,27 @@
             <p class="subtitle" style="margin:8px 0 0;">${pctComplete}% invoiced (${money(invoiced)} of ${money(quoted)})</p>
           </div>
         ` : ''}
+
+        ${(() => {
+          const contactRows = [
+            { label: 'Project manager', c: project.project_manager },
+            { label: 'Site supervisor', c: project.site_contact },
+            { label: 'Job contact', c: project.job_contact },
+            { label: 'Sales contact', c: project.sales_contact },
+            { label: 'Accounts contact', c: project.accounts_contact },
+          ].filter(r => r.c && r.c.name);
+          if (!contactRows.length) return '';
+          return `
+        <div class="card">
+          <h2>Who's running this job</h2>
+          <table>
+            <thead><tr><th>Role</th><th>Name</th><th>Phone</th><th>Email</th></tr></thead>
+            <tbody>
+              ${contactRows.map(r => `<tr><td>${r.label}</td><td>${r.c.name || ''}</td><td>${r.c.phone ? `<a class="link-quiet" href="tel:${r.c.phone}">${r.c.phone}</a>` : ''}</td><td>${r.c.email ? `<a class="link-quiet" href="mailto:${r.c.email}">${r.c.email}</a>` : ''}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+        })()}
 
         ${project.proposal_template !== 'time_and_materials' ? `
         <div class="card">

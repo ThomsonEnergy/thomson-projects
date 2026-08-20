@@ -217,6 +217,17 @@ A library of frequently-used supply-and-install packages, so common jobs don't g
 - Documents upload to the same private storage bucket used elsewhere, fetched server-side when generating — never sent through the browser twice
 - Everything it drafts is fully editable before saving, same as if typed by hand
 
+## 20. Client Base
+
+- Dedicated `clients` table — name, contact details, payment terms (COD default, Net 7/14/30 for builders and repeat trade clients), notes
+- Multiple contacts per client via `client_contacts`, each tagged by role: Accounts, Job, Site, Sales, Project Manager
+- Quote builder gets a client picker: search existing clients by name/email/phone, or just fill in the fields to create a new one on save — no separate "create client" step required
+- A client's saved details auto-fill the quote's client fields, still editable per job (a client's billing address doesn't retroactively change on old quotes; site contact can differ job to job even for a repeat client)
+- Web leads (#18) find-or-create a client automatically, matched by email or phone, so a repeat enquiry from the same person doesn't create a duplicate
+- CSV import on the Clients page for pulling the existing client list out of ServiceM8 — flexible column mapping since export formats vary, shows a preview before anything saves, skips rows that already match an existing client
+- **Per-job contact assignment**: a client can have several people in each contact role (e.g. multiple project managers, multiple site supervisors, across several jobs running at once) — each individual job picks which specific person from the client's contact list is running *that* job, so correspondence like variations goes to the right person rather than whoever's first on file. Shown on the job itself once assigned, ready for future features (variations, notifications) to address correctly without staff needing to look anyone up
+- **Office address vs site address**: a client's own address is their main office/billing address; each project keeps its own separate site address. This distinction already exists in the data — Phase 6 (Xero invoicing) needs to actually use it: office address + site address + job number (7000-series, not yet built) all shown on the invoice, job number to the side. Flagging here so Phase 6 gets built with this in mind rather than needing rework
+
 ---
 
 ## Explicitly Dropped

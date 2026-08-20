@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Clients - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=4" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <nav class="topbar-tabs">
+      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">&mdash;</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
+      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">&mdash;</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">&mdash;</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
+    </nav>
+    <div class="topbar-right">
+      <a href="/clients.html" class="topbar-icon-link" title="Clients" style="color:var(--accent);">&#128100;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/dashboard.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Clients</h1>
+    <p class="subtitle">Every client, their contacts, and payment terms. Selected right from the quote builder too.</p>
+
+    <div class="settings-layout">
+      <div class="settings-tabs">
+        <button class="settings-tab active" data-panel="list">All Clients</button>
+        <button class="settings-tab" data-panel="edit" id="edit-tab-btn" style="display:none;">Add / Edit Client</button>
+        <button class="settings-tab" data-panel="import">Import from ServiceM8</button>
+      </div>
+
+      <div class="settings-content">
+
+        <!-- List -->
+        <div class="settings-panel active" id="panel-list">
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <input id="client-search" placeholder="Search by name, email, or phone" style="max-width:320px;" />
+              <button id="new-client-btn">+ New client</button>
+            </div>
+            <div id="clients-list"><p class="subtitle">Loading...</p></div>
+          </div>
+        </div>
+
+        <!-- Add / Edit -->
+        <div class="settings-panel" id="panel-edit">
+          <div class="card">
+            <h2 id="edit-heading">New client</h2>
+            <div class="grid cols-3">
+              <div>
+                <label style="margin-top:0">Name</label>
+                <input id="c-name" placeholder="Company or person's name" />
+              </div>
+              <div>
+                <label style="margin-top:0">Email</label>
+                <input id="c-email" type="email" />
+              </div>
+              <div>
+                <label style="margin-top:0">Phone</label>
+                <input id="c-phone" />
+              </div>
+            </div>
+            <label>Address</label>
+            <input id="c-address" />
+            <div class="grid cols-3">
+              <div>
+                <label>Payment terms</label>
+                <select id="c-terms">
+                  <option value="cod">COD</option>
+                  <option value="net_7">Net 7 days</option>
+                  <option value="net_14">Net 14 days</option>
+                  <option value="net_30">Net 30 days</option>
+                </select>
+              </div>
+            </div>
+            <label>Notes</label>
+            <textarea id="c-notes" style="min-height:70px;"></textarea>
+
+            <label>Contacts</label>
+            <div id="contacts-rows"></div>
+            <button type="button" class="secondary" id="add-contact-btn" style="font-size:12px; padding:6px 12px;">+ Add contact</button>
+
+            <div style="margin-top:16px;">
+              <button id="save-client-btn">Save client</button>
+              <button type="button" class="secondary" id="cancel-edit-btn">Cancel</button>
+              <button type="button" class="danger" id="delete-client-btn" style="display:none; float:right;">Delete client</button>
+            </div>
+            <div id="save-client-msg"></div>
+          </div>
+        </div>
+
+        <!-- CSV Import -->
+        <div class="settings-panel" id="panel-import">
+          <div class="card">
+            <h2>Import from ServiceM8</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Export your client/company list from ServiceM8 as a CSV, then upload it here. You'll get a chance to review before anything is saved.</p>
+            <input type="file" id="csv-file" accept=".csv" />
+            <div id="import-msg"></div>
+          </div>
+          <div class="card" id="import-preview-card" style="display:none;">
+            <h2>Review before importing</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Map each CSV column to a field. Rows with no name will be skipped. Rows matching an existing client (by email or phone) will be skipped too, so this is safe to re-run.</p>
+            <div class="grid cols-4" id="csv-mapping"></div>
+            <div id="csv-preview-table" style="margin-top:14px; overflow-x:auto;"></div>
+            <button id="confirm-import-btn" style="margin-top:14px;">Import clients</button>
+            <div id="confirm-import-msg"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let allClients = [];
+    let editingClientId = null;
+    let contactCount = 0;
+    let csvRows = [];
+    let csvHeaders = [];
+
+    // --- tab switching ---
+    document.querySelectorAll('.settings-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.settings-tab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+      });
+    });
+
+    function showEditTab() {
+      document.getElementById('edit-tab-btn').style.display = 'block';
+      document.getElementById('edit-tab-btn').click();
+    }
+
+    // --- contacts sub-form ---
+    function addContactRow({ contact_type = 'job', name = '', phone = '', email = '' } = {}) {
+      contactCount++;
+      const row = document.createElement('div');
+      row.className = 'contact-row';
+      row.style.cssText = 'display:grid; grid-template-columns:1fr 1.4fr 1fr 1.4fr auto; gap:8px; margin-bottom:6px; align-items:center;';
+      row.innerHTML = `
+        <select class="ct-type" style="font-size:13px;">
+          <option value="job" ${contact_type === 'job' ? 'selected' : ''}>Job contact</option>
+          <option value="accounts" ${contact_type === 'accounts' ? 'selected' : ''}>Accounts</option>
+          <option value="site" ${contact_type === 'site' ? 'selected' : ''}>Site contact</option>
+          <option value="sales" ${contact_type === 'sales' ? 'selected' : ''}>Sales contact</option>
+          <option value="project_manager" ${contact_type === 'project_manager' ? 'selected' : ''}>Project manager</option>
+        </select>
+        <input class="ct-name" placeholder="Name" value="${name || ''}" style="font-size:13px;" />
+        <input class="ct-phone" placeholder="Phone" value="${phone || ''}" style="font-size:13px;" />
+        <input class="ct-email" placeholder="Email" value="${email || ''}" style="font-size:13px;" />
+        <button type="button" class="secondary ct-remove" style="padding:6px 10px; font-size:12px;">x</button>
+      `;
+      row.querySelector('.ct-remove').addEventListener('click', () => row.remove());
+      document.getElementById('contacts-rows').appendChild(row);
+    }
+    document.getElementById('add-contact-btn').addEventListener('click', () => addContactRow());
+
+    function resetEditForm() {
+      editingClientId = null;
+      document.getElementById('edit-heading').textContent = 'New client';
+      document.getElementById('c-name').value = '';
+      document.getElementById('c-email').value = '';
+      document.getElementById('c-phone').value = '';
+      document.getElementById('c-address').value = '';
+      document.getElementById('c-terms').value = 'cod';
+      document.getElementById('c-notes').value = '';
+      document.getElementById('contacts-rows').innerHTML = '';
+      document.getElementById('delete-client-btn').style.display = 'none';
+      document.getElementById('save-client-msg').innerHTML = '';
+      addContactRow();
+    }
+
+    document.getElementById('new-client-btn').addEventListener('click', () => {
+      resetEditForm();
+      showEditTab();
+    });
+    document.getElementById('cancel-edit-btn').addEventListener('click', () => {
+      document.querySelector('.settings-tab[data-panel="list"]').click();
+    });
+
+    // --- list + search ---
+    async function loadClients() {
+      const listEl = document.getElementById('clients-list');
+      const { data, error } = await supabaseClient.from('clients').select('*, client_contacts(*)').order('name');
+      if (error) {
+        listEl.innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+      allClients = data;
+      renderClientsList(allClients);
+    }
+
+    function renderClientsList(clients) {
+      const listEl = document.getElementById('clients-list');
+      if (!clients.length) {
+        listEl.innerHTML = `<p class="subtitle">No clients yet.</p>`;
+        return;
+      }
+      listEl.innerHTML = clients.map(c => `
+        <div class="project-list-item" data-id="${c.id}" style="cursor:pointer;">
+          <div>
+            <div class="name">${c.name}</div>
+            <div class="meta">${[c.email, c.phone, c.address].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}</div>
+          </div>
+          <span class="badge draft">${(c.payment_terms || 'cod').replace('_', ' ').toUpperCase()}</span>
+        </div>
+      `).join('');
+      listEl.querySelectorAll('.project-list-item').forEach(row => {
+        row.addEventListener('click', () => openClientForEdit(row.dataset.id));
+      });
+    }
+
+    document.getElementById('client-search').addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      if (!q) { renderClientsList(allClients); return; }
+      renderClientsList(allClients.filter(c =>
+        (c.name || '').toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.phone || '').toLowerCase().includes(q)
+      ));
+    });
+
+    function openClientForEdit(id) {
+      const c = allClients.find(x => x.id === id);
+      if (!c) return;
+      editingClientId = c.id;
+      document.getElementById('edit-heading').textContent = 'Edit client';
+      document.getElementById('c-name').value = c.name || '';
+      document.getElementById('c-email').value = c.email || '';
+      document.getElementById('c-phone').value = c.phone || '';
+      document.getElementById('c-address').value = c.address || '';
+      document.getElementById('c-terms').value = c.payment_terms || 'cod';
+      document.getElementById('c-notes').value = c.notes || '';
+      document.getElementById('contacts-rows').innerHTML = '';
+      (c.client_contacts || []).forEach(addContactRow);
+      if (!(c.client_contacts || []).length) addContactRow();
+      document.getElementById('delete-client-btn').style.display = 'inline-flex';
+      document.getElementById('save-client-msg').innerHTML = '';
+      showEditTab();
+    }
+
+    document.getElementById('save-client-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('save-client-msg');
+      const name = document.getElementById('c-name').value.trim();
+      if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
+
+      const clientFields = {
+        name,
+        email: document.getElementById('c-email').value.trim(),
+        phone: document.getElementById('c-phone').value.trim(),
+        address: document.getElementById('c-address').value.trim(),
+        payment_terms: document.getElementById('c-terms').value,
+        notes: document.getElementById('c-notes').value.trim(),
+      };
+
+      let clientId = editingClientId;
+      if (editingClientId) {
+        const { error } = await supabaseClient.from('clients').update(clientFields).eq('id', editingClientId);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        await supabaseClient.from('client_contacts').delete().eq('client_id', editingClientId);
+      } else {
+        const { data: inserted, error } = await supabaseClient.from('clients').insert(clientFields).select().single();
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        clientId = inserted.id;
+      }
+
+      const contacts = [...document.querySelectorAll('.contact-row')].map((row, i) => ({
+        client_id: clientId,
+        contact_type: row.querySelector('.ct-type').value,
+        name: row.querySelector('.ct-name').value.trim(),
+        phone: row.querySelector('.ct-phone').value.trim(),
+        email: row.querySelector('.ct-email').value.trim(),
+        sort_order: i,
+      })).filter(c => c.name || c.phone || c.email);
+
+      if (contacts.length) {
+        const { error: contactErr } = await supabaseClient.from('client_contacts').insert(contacts);
+        if (contactErr) { msg.innerHTML = `<div class="error-box">${contactErr.message}</div>`; return; }
+      }
+
+      await loadClients();
+      document.querySelector('.settings-tab[data-panel="list"]').click();
+    });
+
+    document.getElementById('delete-client-btn').addEventListener('click', async () => {
+      if (!editingClientId) return;
+      if (!confirm('Delete this client? Existing quotes stay as they are, just unlinked.')) return;
+      const { error } = await supabaseClient.from('clients').delete().eq('id', editingClientId);
+      if (error) { alert(error.message); return; }
+      await loadClients();
+      document.querySelector('.settings-tab[data-panel="list"]').click();
+    });
+
+    // --- CSV import ---
+    document.getElementById('csv-file').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          csvRows = results.data;
+          csvHeaders = results.meta.fields || [];
+          renderCsvMapping();
+        },
+        error: (err) => {
+          document.getElementById('import-msg').innerHTML = `<div class="error-box">${err.message}</div>`;
+        },
+      });
+    });
+
+    function guessColumn(fieldGuesses) {
+      for (const guess of fieldGuesses) {
+        const match = csvHeaders.find(h => h.toLowerCase().replace(/[^a-z]/g, '').includes(guess));
+        if (match) return match;
+      }
+      return '';
+    }
+
+    function renderCsvMapping() {
+      document.getElementById('import-preview-card').style.display = 'block';
+      const mapping = document.getElementById('csv-mapping');
+      const fields = [
+        { key: 'name', label: 'Name', guesses: ['name', 'company', 'contact'] },
+        { key: 'email', label: 'Email', guesses: ['email'] },
+        { key: 'phone', label: 'Phone', guesses: ['phone', 'mobile'] },
+        { key: 'address', label: 'Address', guesses: ['address'] },
+      ];
+      mapping.innerHTML = fields.map(f => `
+        <div>
+          <label style="margin-top:0">${f.label}</label>
+          <select class="csv-map-select" data-field="${f.key}">
+            <option value="">-- Not in file --</option>
+            ${csvHeaders.map(h => `<option value="${h}" ${h === guessColumn(f.guesses) ? 'selected' : ''}>${h}</option>`).join('')}
+          </select>
+        </div>
+      `).join('');
+      mapping.querySelectorAll('.csv-map-select').forEach(sel => sel.addEventListener('change', renderCsvPreview));
+      renderCsvPreview();
+    }
+
+    function currentMapping() {
+      const map = {};
+      document.querySelectorAll('.csv-map-select').forEach(sel => { map[sel.dataset.field] = sel.value; });
+      return map;
+    }
+
+    function renderCsvPreview() {
+      const map = currentMapping();
+      const preview = csvRows.slice(0, 8).map(row => ({
+        name: map.name ? row[map.name] : '',
+        email: map.email ? row[map.email] : '',
+        phone: map.phone ? row[map.phone] : '',
+        address: map.address ? row[map.address] : '',
+      }));
+      document.getElementById('csv-preview-table').innerHTML = `
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th></tr></thead>
+          <tbody>
+            ${preview.map(r => `<tr><td>${r.name || ''}</td><td>${r.email || ''}</td><td>${r.phone || ''}</td><td>${r.address || ''}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <p class="subtitle" style="margin-top:8px;">Showing first 8 of ${csvRows.length} rows.</p>`;
+    }
+
+    document.getElementById('confirm-import-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('confirm-import-msg');
+      const map = currentMapping();
+      if (!map.name) { msg.innerHTML = `<div class="error-box">Map a Name column first.</div>`; return; }
+
+      const btn = document.getElementById('confirm-import-btn');
+      btn.disabled = true;
+      btn.textContent = 'Importing...';
+
+      const existingEmails = new Set(allClients.map(c => (c.email || '').toLowerCase()).filter(Boolean));
+      const existingPhones = new Set(allClients.map(c => (c.phone || '').toLowerCase()).filter(Boolean));
+
+      const toInsert = [];
+      let skipped = 0;
+      csvRows.forEach(row => {
+        const name = map.name ? (row[map.name] || '').trim() : '';
+        const email = map.email ? (row[map.email] || '').trim() : '';
+        const phone = map.phone ? (row[map.phone] || '').trim() : '';
+        const address = map.address ? (row[map.address] || '').trim() : '';
+        if (!name) { skipped++; return; }
+        if ((email && existingEmails.has(email.toLowerCase())) || (phone && existingPhones.has(phone.toLowerCase()))) {
+          skipped++;
+          return;
+        }
+        toInsert.push({ name, email: email || null, phone: phone || null, address: address || null });
+      });
+
+      if (toInsert.length) {
+        const { error } = await supabaseClient.from('clients').insert(toInsert);
+        if (error) {
+          msg.innerHTML = `<div class="error-box">${error.message}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Import clients';
+          return;
+        }
+      }
+
+      msg.innerHTML = `<div class="success-box">Imported ${toInsert.length} client${toInsert.length === 1 ? '' : 's'}. Skipped ${skipped} (no name, or already matched an existing client).</div>`;
+      btn.disabled = false;
+      btn.textContent = 'Import clients';
+      document.getElementById('import-preview-card').style.display = 'none';
+      document.getElementById('csv-file').value = '';
+      await loadClients();
+    });
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      const myRole = await getMyRole();
+      if (!isPricingRole(myRole)) {
+        document.querySelector('.wrap').innerHTML = `
+          <div class="card">
+            <div class="empty-state">
+              <div class="empty-icon">&#128274;</div>
+              <h2>Not available for your role</h2>
+              <p>Clients are limited to Sales, Finance, and Admin accounts.</p>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Projects</a>
+            </div>
+          </div>`;
+        return;
+      }
+
+      resetEditForm();
+      await loadClients();
+    })();
+  </script>
+</body>
+</html>
