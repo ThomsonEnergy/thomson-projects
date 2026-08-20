@@ -22,7 +22,7 @@ exports.handler = async (event) => {
 
     const { data: profiles, error: profileErr } = await supabaseAdmin
       .from('profiles')
-      .select('id, role, active, full_name');
+      .select('id, role, active, full_name, xero_employee_id');
     if (profileErr) throw profileErr;
 
     const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
@@ -35,6 +35,7 @@ exports.handler = async (event) => {
       confirmed: !!u.email_confirmed_at,
       full_name: profileById[u.id]?.full_name || u.user_metadata?.full_name || '',
       role: profileById[u.id]?.role || 'staff',
+      xero_employee_id: profileById[u.id]?.xero_employee_id || '',
       active: profileById[u.id]?.active ?? true,
     }));
 

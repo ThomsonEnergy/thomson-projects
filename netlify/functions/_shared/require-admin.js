@@ -84,4 +84,4 @@ async function requireAdmin(event) {
   return { supabaseAdmin, user: userData.user };
 }
 
-module.exports = { getAdminClient, requireAdmin };
+module.exports = { getAdminClient, getAuthCheckClient, requireAdmin };
