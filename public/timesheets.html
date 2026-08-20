@@ -26,6 +26,7 @@
       <a href="/timesheets.html" class="topbar-tab active">Timesheets<span class="tab-total">&mdash;</span></a>
     </nav>
     <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
       <a href="/clients.html" class="topbar-icon-link" title="Clients">&#128100;</a>
       <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
       <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
@@ -35,36 +36,384 @@
 
   <div class="wrap">
     <h1>Timesheets</h1>
-    <p class="subtitle">Staff time logged against jobs, pushed to Xero Payroll.</p>
+    <p class="subtitle">Clock time against a job, request leave. Pushing to Xero Payroll comes in a later phase — this all works natively for now.</p>
 
-    <div class="grid cols-4">
-      <div class="stat"><div class="label">Total</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">This month</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">Outstanding</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">Overdue</div><div class="value placeholder">&mdash;</div></div>
+    <div class="card">
+      <h2 id="clock-heading">Clock in</h2>
+      <div id="clock-idle">
+        <div class="grid cols-3">
+          <div style="grid-column: span 2;">
+            <label style="margin-top:0">Job</label>
+            <select id="clock-project"><option value="">General / Office</option></select>
+          </div>
+          <div style="display:flex; align-items:end;">
+            <button id="clock-in-btn" style="width:100%;">Clock in</button>
+          </div>
+        </div>
+      </div>
+      <div id="clock-active" style="display:none;">
+        <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-project-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
+        <button class="danger" id="clock-out-btn">Clock out</button>
+      </div>
+      <div id="clock-msg"></div>
     </div>
 
     <div class="card">
-      <div class="empty-state">
-        <div class="empty-icon">&#128736;</div>
-        <h2>Coming in Phase 7</h2>
-        <p>This section is a placeholder for now &mdash; it gets built out with real data and actions in Phase 7 of the build.</p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="margin:0;">My recent entries</h2>
+        <button type="button" class="secondary" id="add-manual-entry-btn">+ Add missed entry</button>
       </div>
+      <div id="manual-entry-form" style="display:none; margin-bottom:16px; padding:14px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;">
+        <div class="grid cols-3">
+          <div>
+            <label style="margin-top:0">Job</label>
+            <select id="manual-project"><option value="">General / Office</option></select>
+          </div>
+          <div>
+            <label style="margin-top:0">Clocked in</label>
+            <input type="datetime-local" id="manual-clock-in" />
+          </div>
+          <div>
+            <label style="margin-top:0">Clocked out</label>
+            <input type="datetime-local" id="manual-clock-out" />
+          </div>
+        </div>
+        <button id="manual-entry-save-btn" style="margin-top:10px;">Save entry</button>
+        <button type="button" class="secondary" id="manual-entry-cancel-btn" style="margin-top:10px;">Cancel</button>
+        <div id="manual-entry-msg"></div>
+      </div>
+      <div id="my-entries-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Request leave</h2>
+      <div class="grid cols-4">
+        <div>
+          <label style="margin-top:0">Start date</label>
+          <input type="date" id="leave-start" />
+        </div>
+        <div>
+          <label style="margin-top:0">End date</label>
+          <input type="date" id="leave-end" />
+        </div>
+        <div>
+          <label style="margin-top:0">Type</label>
+          <select id="leave-type">
+            <option value="annual">Annual leave</option>
+            <option value="sick">Sick leave</option>
+            <option value="unpaid">Unpaid leave</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div style="display:flex; align-items:end;">
+          <button id="request-leave-btn" style="width:100%;">Request</button>
+        </div>
+      </div>
+      <label>Notes (optional)</label>
+      <input id="leave-notes" placeholder="Anything worth flagging" />
+      <div id="leave-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>My leave requests</h2>
+      <div id="my-leave-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card" id="approvals-card" style="display:none;">
+      <h2>Pending approvals</h2>
+      <div id="approvals-list"></div>
     </div>
   </div>
 
   <script src="/js/supabase-client.js"></script>
   <script src="/js/theme.js"></script>
   <script>
+    let myUserId = null;
+    let myProfileName = '';
+    let elapsedInterval = null;
+
+    function fmtDuration(ms) {
+      const totalMin = Math.floor(ms / 60000);
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      return `${h}h ${m}m`;
+    }
+
+    function fmtDateTime(iso) {
+      return new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadProjectOptions() {
+      const { data } = await supabaseClient
+        .from('projects')
+        .select('id, name')
+        .neq('pipeline_stage', 'archived')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      cachedProjects = data || [];
+      const optionsHtml = cachedProjects.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+      document.getElementById('clock-project').insertAdjacentHTML('beforeend', optionsHtml);
+      document.getElementById('manual-project').insertAdjacentHTML('beforeend', optionsHtml);
+    }
+
+    async function checkActiveClock() {
+      const { data } = await supabaseClient
+        .from('time_entries')
+        .select('*, projects(name)')
+        .eq('staff_id', myUserId)
+        .is('clock_out', null)
+        .order('clock_in', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      clearInterval(elapsedInterval);
+      if (data) {
+        document.getElementById('clock-idle').style.display = 'none';
+        document.getElementById('clock-active').style.display = 'block';
+        document.getElementById('active-project-name').textContent = data.projects ? data.projects.name : 'General / Office';
+        document.getElementById('active-since').textContent = fmtDateTime(data.clock_in);
+        const update = () => { document.getElementById('active-elapsed').textContent = fmtDuration(Date.now() - new Date(data.clock_in).getTime()); };
+        update();
+        elapsedInterval = setInterval(update, 30000);
+        document.getElementById('clock-out-btn').onclick = async () => {
+          const { error } = await supabaseClient.from('time_entries').update({ clock_out: new Date().toISOString() }).eq('id', data.id);
+          if (error) { alert(error.message); return; }
+          await checkActiveClock();
+          await loadMyEntries();
+        };
+      } else {
+        document.getElementById('clock-idle').style.display = 'block';
+        document.getElementById('clock-active').style.display = 'none';
+      }
+    }
+
+    document.getElementById('clock-in-btn').addEventListener('click', async () => {
+      const projectId = document.getElementById('clock-project').value || null;
+      const { error } = await supabaseClient.from('time_entries').insert({ staff_id: myUserId, project_id: projectId });
+      const msg = document.getElementById('clock-msg');
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      msg.innerHTML = '';
+      await checkActiveClock();
+    });
+
+    function toLocalInputValue(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    let cachedProjects = [];
+
+    async function loadMyEntries() {
+      const listEl = document.getElementById('my-entries-list');
+      const { data, error } = await supabaseClient
+        .from('time_entries')
+        .select('*, projects(name)')
+        .eq('staff_id', myUserId)
+        .order('clock_in', { ascending: false })
+        .limit(20);
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No entries yet.</p>`; return; }
+      listEl.innerHTML = `
+        <table>
+          <thead><tr><th>Job</th><th>Clocked in</th><th>Clocked out</th><th class="num">Duration</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(e => `
+              <tr data-id="${e.id}" data-project-id="${e.project_id || ''}" data-clock-in="${e.clock_in}" data-clock-out="${e.clock_out || ''}">
+                <td>${e.projects ? e.projects.name : 'General / Office'}</td>
+                <td>${fmtDateTime(e.clock_in)}</td>
+                <td>${e.clock_out ? fmtDateTime(e.clock_out) : '<span class="badge in_progress">In progress</span>'}</td>
+                <td class="num">${e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : ''}</td>
+                <td style="text-align:right;"><button type="button" class="secondary edit-entry-btn" style="font-size:12px; padding:6px 10px;">Edit</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      listEl.querySelectorAll('.edit-entry-btn').forEach(btn => {
+        btn.addEventListener('click', () => openEntryEditor(btn.closest('tr')));
+      });
+    }
+
+    function openEntryEditor(row) {
+      const id = row.dataset.id;
+      const projectOptions = `<option value="">General / Office</option>` +
+        cachedProjects.map(p => `<option value="${p.id}" ${p.id === row.dataset.projectId ? 'selected' : ''}>${p.name}</option>`).join('');
+
+      row.innerHTML = `
+        <td colspan="5">
+          <div class="grid cols-3" style="margin:6px 0;">
+            <div>
+              <label style="margin-top:0">Job</label>
+              <select class="edit-project">${projectOptions}</select>
+            </div>
+            <div>
+              <label style="margin-top:0">Clocked in</label>
+              <input type="datetime-local" class="edit-clock-in" value="${toLocalInputValue(row.dataset.clockIn)}" />
+            </div>
+            <div>
+              <label style="margin-top:0">Clocked out</label>
+              <input type="datetime-local" class="edit-clock-out" value="${toLocalInputValue(row.dataset.clockOut)}" />
+            </div>
+          </div>
+          <button class="save-entry-btn">Save</button>
+          <button type="button" class="secondary cancel-entry-btn">Cancel</button>
+          <div class="edit-entry-msg"></div>
+        </td>`;
+
+      row.querySelector('.cancel-entry-btn').addEventListener('click', () => loadMyEntries());
+      row.querySelector('.save-entry-btn').addEventListener('click', async () => {
+        const msg = row.querySelector('.edit-entry-msg');
+        const clockInVal = row.querySelector('.edit-clock-in').value;
+        const clockOutVal = row.querySelector('.edit-clock-out').value;
+        const projectId = row.querySelector('.edit-project').value || null;
+
+        if (!clockInVal) { msg.innerHTML = `<div class="error-box">Clock-in time is required.</div>`; return; }
+        const clockIn = new Date(clockInVal);
+        const clockOut = clockOutVal ? new Date(clockOutVal) : null;
+        if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Clock-out must be after clock-in.</div>`; return; }
+
+        const { error } = await supabaseClient
+          .from('time_entries')
+          .update({ clock_in: clockIn.toISOString(), clock_out: clockOut ? clockOut.toISOString() : null, project_id: projectId })
+          .eq('id', id);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        await loadMyEntries();
+        await checkActiveClock();
+      });
+    }
+
+    document.getElementById('add-manual-entry-btn').addEventListener('click', () => {
+      const form = document.getElementById('manual-entry-form');
+      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    });
+    document.getElementById('manual-entry-cancel-btn').addEventListener('click', () => {
+      document.getElementById('manual-entry-form').style.display = 'none';
+    });
+    document.getElementById('manual-entry-save-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('manual-entry-msg');
+      const clockInVal = document.getElementById('manual-clock-in').value;
+      const clockOutVal = document.getElementById('manual-clock-out').value;
+      const projectId = document.getElementById('manual-project').value || null;
+
+      if (!clockInVal) { msg.innerHTML = `<div class="error-box">Clock-in time is required.</div>`; return; }
+      const clockIn = new Date(clockInVal);
+      const clockOut = clockOutVal ? new Date(clockOutVal) : null;
+      if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Clock-out must be after clock-in.</div>`; return; }
+
+      const { error } = await supabaseClient.from('time_entries').insert({
+        staff_id: myUserId, project_id: projectId,
+        clock_in: clockIn.toISOString(), clock_out: clockOut ? clockOut.toISOString() : null,
+      });
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      document.getElementById('manual-entry-form').style.display = 'none';
+      document.getElementById('manual-clock-in').value = '';
+      document.getElementById('manual-clock-out').value = '';
+      msg.innerHTML = '';
+      await loadMyEntries();
+      await checkActiveClock();
+    });
+
+    document.getElementById('request-leave-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('leave-msg');
+      const start_date = document.getElementById('leave-start').value;
+      const end_date = document.getElementById('leave-end').value;
+      const leave_type = document.getElementById('leave-type').value;
+      const notes = document.getElementById('leave-notes').value.trim();
+      if (!start_date || !end_date) { msg.innerHTML = `<div class="error-box">Pick a start and end date.</div>`; return; }
+      if (end_date < start_date) { msg.innerHTML = `<div class="error-box">End date can't be before the start date.</div>`; return; }
+
+      const { error } = await supabaseClient.from('leave_requests').insert({ staff_id: myUserId, start_date, end_date, leave_type, notes });
+      msg.innerHTML = error
+        ? `<div class="error-box">${error.message}</div>`
+        : `<div class="success-box">Requested. You'll see it below once it's actioned.</div>`;
+      if (!error) {
+        document.getElementById('leave-start').value = '';
+        document.getElementById('leave-end').value = '';
+        document.getElementById('leave-notes').value = '';
+        await loadMyLeave();
+      }
+    });
+
+    async function loadMyLeave() {
+      const listEl = document.getElementById('my-leave-list');
+      const { data, error } = await supabaseClient
+        .from('leave_requests')
+        .select('*')
+        .eq('staff_id', myUserId)
+        .order('start_date', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No leave requests yet.</p>`; return; }
+      const badgeClass = { pending: 'draft', approved: 'accepted', declined: 'draft' };
+      listEl.innerHTML = data.map(l => `
+        <div class="project-list-item">
+          <div>
+            <div class="name">${l.leave_type[0].toUpperCase() + l.leave_type.slice(1)} leave</div>
+            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + l.notes : ''}</div>
+          </div>
+          <span class="badge ${badgeClass[l.status]}">${l.status}</span>
+        </div>`).join('');
+    }
+
+    async function loadApprovals(myRole) {
+      if (myRole !== 'admin' && myRole !== 'finance') return;
+      const card = document.getElementById('approvals-card');
+      const listEl = document.getElementById('approvals-list');
+      const { data, error } = await supabaseClient
+        .from('leave_requests')
+        .select('*, profiles(full_name)')
+        .eq('status', 'pending')
+        .order('start_date');
+      if (error || !data || !data.length) return;
+      card.style.display = 'block';
+      listEl.innerHTML = data.map(l => `
+        <div class="project-list-item" data-id="${l.id}">
+          <div>
+            <div class="name">${(l.profiles && l.profiles.full_name) || 'Staff member'} &mdash; ${l.leave_type} leave</div>
+            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + l.notes : ''}</div>
+          </div>
+          <div>
+            <button class="secondary approve-leave-btn" data-id="${l.id}">Approve</button>
+            <button class="secondary danger decline-leave-btn" data-id="${l.id}">Decline</button>
+          </div>
+        </div>`).join('');
+      listEl.querySelectorAll('.approve-leave-btn, .decline-leave-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const status = btn.classList.contains('approve-leave-btn') ? 'approved' : 'declined';
+          const { error: updErr } = await supabaseClient
+            .from('leave_requests')
+            .update({ status, decided_by: myUserId, decided_at: new Date().toISOString() })
+            .eq('id', btn.dataset.id);
+          if (updErr) { alert(updErr.message); return; }
+          await loadApprovals(myRole);
+        });
+      });
+    }
+
     (async function () {
       const session = await requireLogin();
       if (!session) return;
-      syncThemeFromProfile();
+      myUserId = session.user.id;
+      // Belt and braces: time_entries/leave_requests now have a foreign key
+      // to profiles, and theme.js's own profile-creation is fire-and-forget.
+      // Make sure the row actually exists before anything here can insert.
+      const { data: existingProfile } = await supabaseClient.from('profiles').select('id').eq('id', myUserId).maybeSingle();
+      if (!existingProfile) {
+        await supabaseClient.from('profiles').upsert({ id: myUserId, theme: 'dark' });
+      }
+      await syncThemeFromProfile();
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+
+      const myRole = await getMyRole();
+      await loadProjectOptions();
+      await checkActiveClock();
+      await loadMyEntries();
+      await loadMyLeave();
+      await loadApprovals(myRole);
     })();
   </script>
 </body>

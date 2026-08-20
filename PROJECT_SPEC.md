@@ -228,6 +228,14 @@ A library of frequently-used supply-and-install packages, so common jobs don't g
 - **Per-job contact assignment**: a client can have several people in each contact role (e.g. multiple project managers, multiple site supervisors, across several jobs running at once) — each individual job picks which specific person from the client's contact list is running *that* job, so correspondence like variations goes to the right person rather than whoever's first on file. Shown on the job itself once assigned, ready for future features (variations, notifications) to address correctly without staff needing to look anyone up
 - **Office address vs site address**: a client's own address is their main office/billing address; each project keeps its own separate site address. This distinction already exists in the data — Phase 6 (Xero invoicing) needs to actually use it: office address + site address + job number (7000-series, not yet built) all shown on the invoice, job number to the side. Flagging here so Phase 6 gets built with this in mind rather than needing rework
 
+## 21. Timesheets, Leave, and Staff Schedule
+
+- Native clock in/clock out — pick a job or "General/Office", clock in, clock out, see your recent entries. No Xero connection needed for any of this; pushing to Xero Payroll as DRAFT stays a separate later step (Phase 7 as originally planned) once Xero's OAuth app is actually set up
+- Leave requests: staff submit a date range, type (annual/sick/unpaid/other), and notes; Admin/Finance approve or decline from the Timesheets page
+- Approved leave shows automatically on a new Schedule calendar — this is the "notification" mechanism: visible on the roster, not a push/email alert (a separate build if that's wanted too)
+- Schedule calendar also handles staff-to-job assignment: click any day, assign a staff member to a specific project, everyone can see the roster, only Admin/Finance/Sales can make assignments
+- New "Schedule" icon in the top nav alongside Clients and Settings
+
 ---
 
 ## Explicitly Dropped

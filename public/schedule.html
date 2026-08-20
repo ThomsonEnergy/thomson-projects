@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Schedule - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=4" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .cal-dow { text-align: center; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 6px; }
+  .cal-day {
+    min-height: 90px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .cal-day.other-month { opacity: 0.35; }
+  .cal-day.today { border-color: var(--accent); }
+  .cal-day .day-num { font-weight: 600; margin-bottom: 4px; }
+  .cal-chip {
+    display: block;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-radius: 5px;
+    padding: 1px 5px;
+    margin-bottom: 2px;
+    font-size: 10.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cal-chip.leave { background: var(--red); color: #fff; opacity: 0.85; }
+  @media (max-width: 800px) {
+    .cal-day { min-height: 60px; font-size: 10.5px; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <nav class="topbar-tabs">
+      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">&mdash;</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">&mdash;</span></a>
+      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">&mdash;</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">&mdash;</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">&mdash;</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">&mdash;</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">&mdash;</span></a>
+    </nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule" style="color:var(--accent);">&#128197;</a>
+      <a href="/clients.html" class="topbar-icon-link" title="Clients">&#128100;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/dashboard.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Schedule</h1>
+    <p class="subtitle">Who's on which job, and who's on leave. Approved leave shows automatically — click a day to assign someone to a job.</p>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <button class="secondary" id="prev-month-btn">&larr; Prev</button>
+        <h2 id="month-label" style="margin:0;"></h2>
+        <button class="secondary" id="next-month-btn">Next &rarr;</button>
+      </div>
+      <div class="cal-grid" id="cal-dow-row"></div>
+      <div class="cal-grid" id="cal-grid" style="margin-top:6px;"></div>
+    </div>
+  </div>
+
+  <!-- Day detail / assign panel -->
+  <div id="day-panel-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:100;">
+    <div class="card" style="max-width:480px; width:90%; max-height:80vh; overflow-y:auto;">
+      <h2 id="day-panel-heading"></h2>
+      <div id="day-panel-leave"></div>
+      <div id="day-panel-assignments"></div>
+      <div id="day-panel-add" style="margin-top:14px; display:none;">
+        <label style="margin-top:0">Assign staff to a job</label>
+        <select id="assign-staff"></select>
+        <select id="assign-project" style="margin-top:8px;"></select>
+        <button id="assign-save-btn" style="margin-top:10px;">Assign</button>
+        <div id="assign-msg"></div>
+      </div>
+      <div style="margin-top:14px; text-align:right;">
+        <button class="secondary" id="day-panel-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let viewYear, viewMonth; // 0-indexed month
+    let myRole = 'staff';
+    let staffList = [];
+    let projectList = [];
+
+    function toDateStr(y, m, d) {
+      return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+
+    function renderDowRow() {
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      document.getElementById('cal-dow-row').innerHTML = days.map(d => `<div class="cal-dow">${d}</div>`).join('');
+    }
+
+    async function loadMonth() {
+      document.getElementById('month-label').textContent = new Date(viewYear, viewMonth, 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' });
+
+      const firstOfMonth = new Date(viewYear, viewMonth, 1);
+      const startDow = firstOfMonth.getDay();
+      const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+      const gridStart = new Date(viewYear, viewMonth, 1 - startDow);
+      const totalCells = 42; // 6 weeks, keeps the grid a consistent height
+
+      const rangeStart = toDateStr(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate());
+      const gridEndDate = new Date(gridStart); gridEndDate.setDate(gridStart.getDate() + totalCells - 1);
+      const rangeEnd = toDateStr(gridEndDate.getFullYear(), gridEndDate.getMonth(), gridEndDate.getDate());
+
+      const [{ data: assignments }, { data: leave }] = await Promise.all([
+        supabaseClient.from('schedule_assignments').select('*, profiles(full_name), projects(name)').gte('assignment_date', rangeStart).lte('assignment_date', rangeEnd),
+        supabaseClient.from('leave_requests').select('*, profiles(full_name)').eq('status', 'approved').lte('start_date', rangeEnd).gte('end_date', rangeStart),
+      ]);
+
+      const assignmentsByDate = {};
+      (assignments || []).forEach(a => { (assignmentsByDate[a.assignment_date] ||= []).push(a); });
+
+      const todayStr = toDateStr(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+
+      let html = '';
+      for (let i = 0; i < totalCells; i++) {
+        const cellDate = new Date(gridStart); cellDate.setDate(gridStart.getDate() + i);
+        const dateStr = toDateStr(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate());
+        const isOtherMonth = cellDate.getMonth() !== viewMonth;
+        const dayAssignments = assignmentsByDate[dateStr] || [];
+        const dayLeave = (leave || []).filter(l => dateStr >= l.start_date && dateStr <= l.end_date);
+
+        html += `
+          <div class="cal-day ${isOtherMonth ? 'other-month' : ''} ${dateStr === todayStr ? 'today' : ''}" data-date="${dateStr}">
+            <div class="day-num">${cellDate.getDate()}</div>
+            ${dayLeave.map(l => `<span class="cal-chip leave">${(l.profiles && l.profiles.full_name) || 'Staff'} (leave)</span>`).join('')}
+            ${dayAssignments.map(a => `<span class="cal-chip">${(a.profiles && a.profiles.full_name) || 'Staff'} &middot; ${(a.projects && a.projects.name) || 'Job'}</span>`).join('')}
+          </div>`;
+      }
+      document.getElementById('cal-grid').innerHTML = html;
+
+      document.querySelectorAll('.cal-day').forEach(cell => {
+        cell.addEventListener('click', () => openDayPanel(cell.dataset.date, assignmentsByDate[cell.dataset.date] || [], (leave || []).filter(l => cell.dataset.date >= l.start_date && cell.dataset.date <= l.end_date)));
+      });
+    }
+
+    function openDayPanel(dateStr, dayAssignments, dayLeave) {
+      document.getElementById('day-panel-heading').textContent = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      document.getElementById('day-panel-leave').innerHTML = dayLeave.length
+        ? `<p class="subtitle" style="margin-bottom:6px;">On leave:</p>` + dayLeave.map(l => `<div class="badge draft" style="margin:0 6px 6px 0; display:inline-block;">${(l.profiles && l.profiles.full_name) || 'Staff'} (${l.leave_type})</div>`).join('')
+        : '';
+
+      document.getElementById('day-panel-assignments').innerHTML = dayAssignments.length
+        ? `<p class="subtitle" style="margin:10px 0 6px;">Assigned:</p>` + dayAssignments.map(a => `
+            <div class="project-list-item">
+              <div class="name">${(a.profiles && a.profiles.full_name) || 'Staff'}</div>
+              <div class="meta">${(a.projects && a.projects.name) || 'General'}</div>
+            </div>`).join('')
+        : `<p class="subtitle" style="margin:10px 0 0;">Nobody assigned yet.</p>`;
+
+      if (myRole === 'admin' || myRole === 'finance' || myRole === 'sales') {
+        document.getElementById('day-panel-add').style.display = 'block';
+        document.getElementById('assign-save-btn').onclick = async () => {
+          const staffId = document.getElementById('assign-staff').value;
+          const projectId = document.getElementById('assign-project').value || null;
+          const msg = document.getElementById('assign-msg');
+          if (!staffId) { msg.innerHTML = `<div class="error-box">Pick a staff member.</div>`; return; }
+          const { error } = await supabaseClient.from('schedule_assignments').insert({ staff_id: staffId, project_id: projectId, assignment_date: dateStr });
+          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+          document.getElementById('day-panel-overlay').style.display = 'none';
+          await loadMonth();
+        };
+      } else {
+        document.getElementById('day-panel-add').style.display = 'none';
+      }
+
+      document.getElementById('day-panel-overlay').style.display = 'flex';
+    }
+
+    document.getElementById('day-panel-close').addEventListener('click', () => {
+      document.getElementById('day-panel-overlay').style.display = 'none';
+    });
+    document.getElementById('day-panel-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'day-panel-overlay') document.getElementById('day-panel-overlay').style.display = 'none';
+    });
+
+    document.getElementById('prev-month-btn').addEventListener('click', () => {
+      viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+      loadMonth();
+    });
+    document.getElementById('next-month-btn').addEventListener('click', () => {
+      viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+      loadMonth();
+    });
+
+    async function loadPickerData() {
+      const { data: profiles } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true);
+      staffList = profiles || [];
+      document.getElementById('assign-staff').innerHTML = `<option value="">-- Select --</option>` +
+        staffList.map(p => `<option value="${p.id}">${p.full_name || 'Unnamed'}</option>`).join('');
+
+      const { data: projects } = await supabaseClient.from('projects').select('id, name').neq('pipeline_stage', 'archived').order('created_at', { ascending: false }).limit(200);
+      projectList = projects || [];
+      document.getElementById('assign-project').innerHTML = `<option value="">General / no specific job</option>` +
+        projectList.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      await syncThemeFromProfile();
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      myRole = await getMyRole();
+      const now = new Date();
+      viewYear = now.getFullYear();
+      viewMonth = now.getMonth();
+
+      renderDowRow();
+      await loadPickerData();
+      await loadMonth();
+    })();
+  </script>
+</body>
+</html>
