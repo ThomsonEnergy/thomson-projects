@@ -46,27 +46,234 @@
 
   <div class="wrap">
     <h1>Invoices</h1>
-    <p class="subtitle">Progress claims and final invoices pushed to Xero.</p>
+    <p class="subtitle">Every claim raised from the app, across every job. Push to Xero and payment status still happen from the job page - this is the overview.</p>
 
     <div class="grid cols-4">
-      <div class="stat"><div class="label">Total</div><div class="value placeholder">-</div></div>
-      <div class="stat"><div class="label">This month</div><div class="value placeholder">-</div></div>
-      <div class="stat"><div class="label">Outstanding</div><div class="value placeholder">-</div></div>
-      <div class="stat"><div class="label">Overdue</div><div class="value placeholder">-</div></div>
+      <div class="stat"><div class="label">Total</div><div class="value" id="stat-total">-</div></div>
+      <div class="stat"><div class="label">This month</div><div class="value" id="stat-month">-</div></div>
+      <div class="stat"><div class="label">Outstanding</div><div class="value" id="stat-outstanding">-</div></div>
+      <div class="stat"><div class="label">Overdue</div><div class="value" id="stat-overdue">-</div></div>
     </div>
 
     <div class="card">
-      <div class="empty-state">
-        <div class="empty-icon">&#128736;</div>
-        <h2>Coming in Phase 6</h2>
-        <p>This section is a placeholder for now - it gets built out with real data and actions in Phase 6 of the build.</p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="margin:0;">All invoices</h2>
+        <button class="secondary" id="standalone-invoice-btn">Create standalone invoice</button>
       </div>
+      <div id="invoices-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
   <script src="/js/supabase-client.js"></script>
   <script src="/js/theme.js"></script>
   <script>
+    async function loadInvoices() {
+      const listEl = document.getElementById('invoices-list');
+      const { data, error } = await supabaseClient
+        .from('invoices')
+        .select(`*, cost_centres(name, project_id, projects(name, job_number, client_name))`)
+        .order('sent_at', { ascending: false });
+
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) {
+        listEl.innerHTML = `<p class="subtitle">No invoices raised yet - create one from a job's stage claims card.</p>`;
+        document.getElementById('stat-total').textContent = money(0);
+        document.getElementById('stat-month').textContent = money(0);
+        document.getElementById('stat-outstanding').textContent = money(0);
+        document.getElementById('stat-overdue').textContent = money(0);
+        return;
+      }
+
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const DUE_DAYS = 14; // treat unpaid invoices older than this as overdue - no formal due-date field yet
+
+      let total = 0, thisMonth = 0, outstanding = 0, overdue = 0;
+
+      data.forEach(inv => {
+        const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
+        const sentAt = new Date(inv.sent_at);
+        total += amount;
+        if (sentAt >= startOfMonth) thisMonth += amount;
+        if (!inv.paid_at) {
+          outstanding += amount;
+          const daysSince = (now - sentAt) / 86400000;
+          if (daysSince > DUE_DAYS) overdue += amount;
+        }
+      });
+
+      document.getElementById('stat-total').textContent = money(total);
+      document.getElementById('stat-month').textContent = money(thisMonth);
+      document.getElementById('stat-outstanding').textContent = money(outstanding);
+      document.getElementById('stat-overdue').textContent = money(overdue);
+
+      listEl.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Invoice</th><th>Job</th><th>Stage</th><th class="num">Amount</th><th>Sent</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(inv => {
+              const cc = inv.cost_centres;
+              const project = cc?.projects;
+              const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
+              const daysSince = (now - new Date(inv.sent_at)) / 86400000;
+              const isOverdue = !inv.paid_at && daysSince > DUE_DAYS;
+              return `
+                <tr>
+                  <td data-label="Invoice">${inv.invoice_number}</td>
+                  <td data-label="Job">${project ? `#${project.job_number || '-'} ${project.name}` : '-'}</td>
+                  <td data-label="Stage">${cc?.name || '-'}</td>
+                  <td class="num" data-label="Amount">${money(amount)}</td>
+                  <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
+                  <td data-label="Status">
+                    ${inv.paid_at ? '<span class="badge accepted">Paid</span>'
+                      : isOverdue ? '<span class="badge draft" style="color:var(--red);">Overdue</span>'
+                      : '<span class="badge sent">Awaiting payment</span>'}
+                    ${inv.xero_invoice_id ? '' : '<span class="subtitle" style="font-size:11px; display:block;">Not yet in Xero</span>'}
+                  </td>
+                  <td data-label="">
+                    <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:8px;">View</a>
+                    ${project ? `<a class="link-quiet" href="/project.html?id=${cc.project_id}" style="font-size:12px;">Job</a>` : ''}
+                  </td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    function openStandaloneInvoicePanel() {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Create standalone invoice</h2>
+          <p class="subtitle" style="margin-bottom:12px;">No job or quote attached - for a one-off charge, callout, or anything else that isn't part of the job pipeline.</p>
+
+          <label style="margin-top:0">Client</label>
+          <input id="standalone-client-search" placeholder="Search existing clients..." autocomplete="off" />
+          <div id="standalone-client-results" style="position:relative;"></div>
+          <div id="standalone-client-selected" class="subtitle" style="margin-top:6px;"></div>
+
+          <label>What's this for</label>
+          <input id="standalone-description" placeholder="e.g. Callout - switchboard fault" />
+
+          <label>Invoice number</label>
+          <input id="standalone-invoice-number" placeholder="Leave blank to auto-assign the next number" />
+
+          <div class="grid cols-3">
+            <div>
+              <label>Labour amount</label>
+              <input type="number" step="0.01" id="standalone-labour" value="0" />
+            </div>
+            <div>
+              <label>Materials amount</label>
+              <input type="number" step="0.01" id="standalone-materials" value="0" />
+            </div>
+            <div>
+              <label>Total</label>
+              <input id="standalone-total" readonly style="background:var(--surface); color:var(--muted);" />
+            </div>
+          </div>
+
+          <div style="margin-top:14px;">
+            <button id="standalone-confirm-btn">Create &amp; send</button>
+            <button type="button" class="secondary" id="standalone-cancel-btn">Cancel</button>
+          </div>
+          <div id="standalone-panel-msg"></div>
+        </div>`;
+
+      let selectedClientId = null;
+      let selectedClientEmail = '';
+      let selectedClientName = '';
+
+      function updateTotal() {
+        const l = parseFloat(overlay.querySelector('#standalone-labour').value) || 0;
+        const m = parseFloat(overlay.querySelector('#standalone-materials').value) || 0;
+        overlay.querySelector('#standalone-total').value = money(l + m);
+      }
+      overlay.querySelector('#standalone-labour').addEventListener('input', updateTotal);
+      overlay.querySelector('#standalone-materials').addEventListener('input', updateTotal);
+
+      let searchTimeout;
+      overlay.querySelector('#standalone-client-search').addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        const q = e.target.value.trim();
+        selectedClientId = null;
+        overlay.querySelector('#standalone-client-selected').textContent = '';
+        if (q.length < 2) { overlay.querySelector('#standalone-client-results').innerHTML = ''; return; }
+        searchTimeout = setTimeout(async () => {
+          const { data } = await supabaseClient
+            .from('clients')
+            .select('id, name, email, address')
+            .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
+            .limit(8);
+          const resultsEl = overlay.querySelector('#standalone-client-results');
+          if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - check the spelling, or add this client via the Clients page first.</p>`; return; }
+          resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+            ${data.map(c => `<div class="client-pick-row" data-id="${c.id}" data-name="${c.name}" data-email="${c.email || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${c.name} <span class="subtitle">${c.email || ''}</span></div>`).join('')}
+          </div>`;
+          resultsEl.querySelectorAll('.client-pick-row').forEach(row => {
+            row.addEventListener('click', () => {
+              selectedClientId = row.dataset.id;
+              selectedClientName = row.dataset.name;
+              selectedClientEmail = row.dataset.email;
+              overlay.querySelector('#standalone-client-search').value = row.dataset.name;
+              overlay.querySelector('#standalone-client-selected').textContent = `Selected: ${row.dataset.name}`;
+              resultsEl.innerHTML = '';
+            });
+          });
+        }, 250);
+      });
+
+      overlay.querySelector('#standalone-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#standalone-confirm-btn').addEventListener('click', async () => {
+        const confirmBtn = overlay.querySelector('#standalone-confirm-btn');
+        const panelMsg = overlay.querySelector('#standalone-panel-msg');
+
+        if (!selectedClientId) {
+          panelMsg.innerHTML = `<div class="error-box">Pick a client from the search results first.</div>`;
+          return;
+        }
+
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Creating...';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/create-invoice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({
+              clientId: selectedClientId,
+              description: overlay.querySelector('#standalone-description').value.trim() || 'Invoice',
+              labourAmount: parseFloat(overlay.querySelector('#standalone-labour').value) || 0,
+              materialAmount: parseFloat(overlay.querySelector('#standalone-materials').value) || 0,
+              invoiceNumber: overlay.querySelector('#standalone-invoice-number').value.trim() || null,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
+
+          const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
+          panelMsg.innerHTML = `
+            <div class="success-box">Created as ${data.invoiceNumber}.</div>
+            <label>Invoice link</label>
+            <input readonly value="${invoiceUrl}" onclick="this.select()" />
+            <a class="btn secondary" style="margin-top:10px; display:inline-flex;" href="mailto:${selectedClientEmail}?subject=${encodeURIComponent('Invoice ' + data.invoiceNumber)}&body=${encodeURIComponent('Hi ' + selectedClientName + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy')}">Email invoice to client</a>`;
+          confirmBtn.style.display = 'none';
+          overlay.querySelector('#standalone-cancel-btn').textContent = 'Close';
+          await loadInvoices();
+        } catch (err) {
+          panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Create & send';
+        }
+      });
+
+      document.body.appendChild(overlay);
+      updateTotal();
+    }
+
+    document.getElementById('standalone-invoice-btn').addEventListener('click', openStandaloneInvoicePanel);
+
     (async function () {
       const session = await requireLogin();
       if (!session) return;
@@ -76,6 +283,7 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+      await loadInvoices();
     })();
   </script>
 </body>

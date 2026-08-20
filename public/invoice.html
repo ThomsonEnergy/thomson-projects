@@ -82,6 +82,7 @@
       const stcTotal = Number(cc.stc_total) || 0;
       const stcAppliedPreviously = 0; // previous_claims doesn't carry stc breakdown separately here, kept simple
       const stcRemaining = Math.max(0, stcTotal - stcAmount - stcAppliedPreviously);
+      const isStandalone = !project.job_number;
 
       content.innerHTML = `
         <div class="card">
@@ -103,8 +104,8 @@
               ${project.client_address ? `<p class="subtitle" style="margin:2px 0 0;">${project.client_address}</p>` : ''}
             </div>
             <div class="meta-box">
-              <div><span class="k">Job No.</span>${project.job_number || '-'}</div>
-              <div><span class="k">Stage</span>${cc.name}</div>
+              ${!isStandalone ? `<div><span class="k">Job No.</span>${project.job_number}</div>` : ''}
+              <div><span class="k">${isStandalone ? 'For' : 'Stage'}</span>${cc.name}</div>
             </div>
           </div>
 
@@ -122,7 +123,7 @@
                 ${lineItems.map(li => `<tr><td>${li.description}</td><td class="num">${li.quantity}</td><td class="num">${money(li.unit_cost)}</td><td class="num">${money(li.quantity * li.unit_cost)}</td></tr>`).join('')}
               </tbody>
             </table>
-          ` : `<p class="subtitle">${cc.name} - labour and materials as quoted.</p>`}
+          ` : `<p class="subtitle">${isStandalone ? 'Labour and materials as invoiced.' : cc.name + ' - labour and materials as quoted.'}</p>`}
 
           <div style="text-align:right; margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
             <p class="subtitle" style="margin:0;">Subtotal: ${money(subtotal)}</p>
@@ -133,9 +134,10 @@
           </div>
         </div>
 
+        ${!isStandalone ? `
         <div class="card">
           <h2 style="margin-bottom:2px;">Claim summary</h2>
-          <p class="subtitle" style="margin-bottom:16px;">${cc.name} &middot; Job ${project.job_number || '-'}</p>
+          <p class="subtitle" style="margin-bottom:16px;">${cc.name} &middot; Job ${project.job_number}</p>
           <table>
             <thead><tr><th></th><th class="num">Total</th><th class="num">Claimed to date</th><th class="num">This claim</th><th class="num">Remaining</th></tr></thead>
             <tbody>
@@ -161,6 +163,7 @@
             : `<p class="subtitle" style="margin-top:12px;">This customer is entitled to a ${money(stcTotal)} STC credit. It has not been applied on this claim - it will be credited on a future invoice for this stage.</p>`
           ) : ''}
         </div>
+        ` : ''}
 
         ${previousClaims.length ? `
         <div class="card">

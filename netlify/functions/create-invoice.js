@@ -1,8 +1,9 @@
 // POST /api/create-invoice
-// Body: { costCentreId, labourAmount, materialAmount, stcAmount, claimPercent, invoiceNumber (optional override) }
-// Pricing roles only. Creates a new row in the invoices table - a stage
-// can be claimed more than once, so this always adds a new claim rather
-// than overwriting a single invoice per stage.
+// Body EITHER: { costCentreId, labourAmount, materialAmount, stcAmount, claimPercent, invoiceNumber }
+//   for a job-linked claim, OR
+// { clientId, description, labourAmount, materialAmount, invoiceNumber }
+//   for a standalone invoice with no job/quote behind it.
+// Pricing roles only. Creates a new row in the invoices table.
 
 const crypto = require('crypto');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
@@ -21,6 +22,8 @@ exports.handler = async (event) => {
   try {
     const {
       costCentreId,
+      clientId,
+      description,
       labourAmount = 0,
       materialAmount = 0,
       stcAmount = 0,
@@ -28,16 +31,20 @@ exports.handler = async (event) => {
       invoiceNumber: overrideNumber,
     } = JSON.parse(event.body || '{}');
 
-    if (!costCentreId) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'costCentreId is required' }) };
+    if (!costCentreId && !clientId) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Either costCentreId (job claim) or clientId (standalone invoice) is required' }) };
     }
 
-    const { data: centre, error: centreErr } = await supabaseAdmin
-      .from('cost_centres')
-      .select('id, invoiced_amount')
-      .eq('id', costCentreId)
-      .single();
-    if (centreErr || !centre) throw new Error('Cost centre not found');
+    let invoicedAmountBefore = 0;
+    if (costCentreId) {
+      const { data: centre, error: centreErr } = await supabaseAdmin
+        .from('cost_centres')
+        .select('id, invoiced_amount')
+        .eq('id', costCentreId)
+        .single();
+      if (centreErr || !centre) throw new Error('Cost centre not found');
+      invoicedAmountBefore = Number(centre.invoiced_amount) || 0;
+    }
 
     let invoiceNumberStr = overrideNumber;
     if (!invoiceNumberStr) {
@@ -51,7 +58,9 @@ exports.handler = async (event) => {
     const totalAmount = (Number(labourAmount) || 0) + (Number(materialAmount) || 0);
 
     const { error: insErr } = await supabaseAdmin.from('invoices').insert({
-      cost_centre_id: costCentreId,
+      cost_centre_id: costCentreId || null,
+      client_id: costCentreId ? null : clientId,
+      description: costCentreId ? null : (description || null),
       invoice_number: invoiceNumberStr,
       invoice_token: invoiceToken,
       labour_amount: Number(labourAmount) || 0,
@@ -62,10 +71,12 @@ exports.handler = async (event) => {
     });
     if (insErr) throw insErr;
 
-    await supabaseAdmin
-      .from('cost_centres')
-      .update({ invoiced_amount: (Number(centre.invoiced_amount) || 0) + totalAmount })
-      .eq('id', costCentreId);
+    if (costCentreId) {
+      await supabaseAdmin
+        .from('cost_centres')
+        .update({ invoiced_amount: invoicedAmountBefore + totalAmount })
+        .eq('id', costCentreId);
+    }
 
     return {
       statusCode: 200,

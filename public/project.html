@@ -276,7 +276,7 @@
         </div>`;
         })()}
 
-        ${project.proposal_template !== 'time_and_materials' ? `
+        ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) ? `
         <div class="card">
           <h2>Client quote link</h2>
           <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>

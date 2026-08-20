@@ -45,8 +45,13 @@
   </div>
 
   <div class="wrap wide">
-    <h1>Job pipeline</h1>
-    <p class="subtitle">Every project, left to right through its lifecycle. Move a card manually for now - automatic stage changes come online in later phases.</p>
+    <div style="display:flex; justify-content:space-between; align-items:start; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1>Job pipeline</h1>
+        <p class="subtitle">Every project, left to right through its lifecycle. Move a card manually for now - automatic stage changes come online in later phases.</p>
+      </div>
+      <button class="secondary" id="new-direct-job-btn">+ New job (no quote)</button>
+    </div>
 
     <div id="board" class="pipeline-board">
       <p class="subtitle">Loading...</p>
@@ -69,6 +74,111 @@
     ];
     // Archived sits off-board per the spec - it's a valid stage value but
     // doesn't get its own column here.
+
+    function openDirectJobPanel() {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>New job - no quote</h2>
+          <p class="subtitle" style="margin-bottom:12px;">Skips the quote/proposal step entirely and goes straight to Job Booked - a job number is assigned immediately since there's no approval to wait for. Use this for work that was never quoted through the app.</p>
+
+          <label style="margin-top:0">Job name</label>
+          <input id="direct-job-name" placeholder="e.g. 14 Miller St - Switchboard Repair" />
+
+          <label>Client</label>
+          <input id="direct-job-client-search" placeholder="Search existing clients..." autocomplete="off" />
+          <div id="direct-job-client-results"></div>
+          <div id="direct-job-client-selected" class="subtitle" style="margin-top:6px;"></div>
+
+          <label>Site address</label>
+          <input id="direct-job-address" placeholder="Job site address" />
+
+          <div style="margin-top:14px;">
+            <button id="direct-job-confirm-btn">Create job</button>
+            <button type="button" class="secondary" id="direct-job-cancel-btn">Cancel</button>
+          </div>
+          <div id="direct-job-panel-msg"></div>
+        </div>`;
+
+      let selectedClientId = null;
+      let selectedClientName = '';
+      let selectedClientEmail = '';
+      let selectedClientPhone = '';
+
+      let searchTimeout;
+      overlay.querySelector('#direct-job-client-search').addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        const q = e.target.value.trim();
+        selectedClientId = null;
+        overlay.querySelector('#direct-job-client-selected').textContent = '';
+        if (q.length < 2) { overlay.querySelector('#direct-job-client-results').innerHTML = ''; return; }
+        searchTimeout = setTimeout(async () => {
+          const { data } = await supabaseClient
+            .from('clients')
+            .select('id, name, email, phone, address')
+            .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
+            .limit(8);
+          const resultsEl = overlay.querySelector('#direct-job-client-results');
+          if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - add this client via the Clients page first.</p>`; return; }
+          resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+            ${data.map(c => `<div class="client-pick-row" data-id="${c.id}" data-name="${c.name}" data-email="${c.email || ''}" data-phone="${c.phone || ''}" data-address="${c.address || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${c.name} <span class="subtitle">${c.email || ''}</span></div>`).join('')}
+          </div>`;
+          resultsEl.querySelectorAll('.client-pick-row').forEach(row => {
+            row.addEventListener('click', () => {
+              selectedClientId = row.dataset.id;
+              selectedClientName = row.dataset.name;
+              selectedClientEmail = row.dataset.email;
+              selectedClientPhone = row.dataset.phone;
+              overlay.querySelector('#direct-job-client-search').value = row.dataset.name;
+              overlay.querySelector('#direct-job-client-selected').textContent = `Selected: ${row.dataset.name}`;
+              if (row.dataset.address && !overlay.querySelector('#direct-job-address').value) {
+                overlay.querySelector('#direct-job-address').value = row.dataset.address;
+              }
+              resultsEl.innerHTML = '';
+            });
+          });
+        }, 250);
+      });
+
+      overlay.querySelector('#direct-job-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#direct-job-confirm-btn').addEventListener('click', async () => {
+        const confirmBtn = overlay.querySelector('#direct-job-confirm-btn');
+        const panelMsg = overlay.querySelector('#direct-job-panel-msg');
+        const name = overlay.querySelector('#direct-job-name').value.trim();
+
+        if (!name) { panelMsg.innerHTML = `<div class="error-box">Job name is required.</div>`; return; }
+        if (!selectedClientId) { panelMsg.innerHTML = `<div class="error-box">Pick a client from the search results first.</div>`; return; }
+
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Creating...';
+        try {
+          const { data, error } = await supabaseClient.from('projects').insert({
+            name,
+            client_id: selectedClientId,
+            client_name: selectedClientName,
+            client_email: selectedClientEmail,
+            client_phone: selectedClientPhone,
+            client_address: overlay.querySelector('#direct-job-address').value.trim(),
+            proposal_template: 'direct_job',
+            pipeline_stage: 'job_booked',
+            status: 'in_progress',
+          }).select('id').single();
+          if (error) throw error;
+
+          overlay.remove();
+          window.location.href = `/project.html?id=${data.id}`;
+        } catch (err) {
+          panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Create job';
+        }
+      });
+
+      document.body.appendChild(overlay);
+    }
+
+    document.getElementById('new-direct-job-btn').addEventListener('click', openDirectJobPanel);
 
     (async function () {
       const session = await requireLogin();

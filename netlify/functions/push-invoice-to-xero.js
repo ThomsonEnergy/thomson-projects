@@ -1,36 +1,31 @@
 // POST /api/push-invoice-to-xero
 // Body: { invoiceId }
 // Pricing roles only. Copies an already-created, already-sent invoice
-// (see create-invoice.js) across to Xero as a DRAFT, for the bookkeeper's
-// records - the client never sees Xero, they already have the invoice
-// link from the app. Labour and Materials always post; an STC Credit
-// line is added when this claim applies one, coded to GST-free or
-// GST-on-income depending on the client's type.
+// across to Xero as a DRAFT, for the bookkeeper's records - the client
+// never sees Xero, they already have the invoice link from the app.
+// Handles both job-linked claims and standalone invoices with no job.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { xeroRequest } = require('./_shared/xero-client');
 
-async function getOrCreateContact(supabaseAdmin, project) {
-  if (project.xero_contact_id) return project.xero_contact_id;
+async function getOrCreateContact(supabaseAdmin, { name, email }, storeOn) {
+  if (storeOn.xero_contact_id) return storeOn.xero_contact_id;
 
-  const searchName = (project.client_name || '').replace(/"/g, '\\"');
+  const searchName = (name || '').replace(/"/g, '\\"');
   const found = await xeroRequest('accounting', `Contacts?where=Name=="${encodeURIComponent(searchName)}"`);
   if (found.Contacts && found.Contacts.length) {
-    const contactId = found.Contacts[0].ContactID;
-    await supabaseAdmin.from('projects').update({ xero_contact_id: contactId }).eq('id', project.id);
-    return contactId;
+    return found.Contacts[0].ContactID;
   }
 
   const created = await xeroRequest('accounting', 'Contacts', {
     method: 'POST',
-    body: { Contacts: [{ Name: project.client_name, EmailAddress: project.client_email || undefined }] },
+    body: { Contacts: [{ Name: name, EmailAddress: email || undefined }] },
   });
-  const contactId = created.Contacts[0].ContactID;
-  await supabaseAdmin.from('projects').update({ xero_contact_id: contactId }).eq('id', project.id);
-  return contactId;
+  return created.Contacts[0].ContactID;
 }
 
 async function getOrCreateTrackingOptionId(supabaseAdmin, jobNumber) {
+  if (!jobNumber) return null;
   const { data: settings } = await supabaseAdmin.from('company_settings').select('xero_tracking_category_id').eq('id', 1).single();
   const categoryId = settings?.xero_tracking_category_id;
   if (!categoryId) return null;
@@ -71,7 +66,7 @@ exports.handler = async (event) => {
 
     const { data: invoice, error: invErr } = await supabaseAdmin
       .from('invoices')
-      .select('*, cost_centres(*, projects(*, clients(client_type)))')
+      .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients(name, email, client_type, xero_contact_id)')
       .eq('id', invoiceId)
       .single();
     if (invErr || !invoice) throw new Error('Invoice not found');
@@ -80,16 +75,41 @@ exports.handler = async (event) => {
     }
 
     const centre = invoice.cost_centres;
-    const project = centre.projects;
-    const clientType = project.clients?.client_type || 'individual';
+    const project = centre?.projects;
+    const isStandalone = !centre;
 
-    const { data: allCentres } = await supabaseAdmin
-      .from('cost_centres')
-      .select('id, sort_order')
-      .eq('project_id', project.id)
-      .order('sort_order');
-    const stageIndex = allCentres.findIndex(c => c.id === centre.id);
-    const totalStages = allCentres.length;
+    // Everything below is branched: job-linked claims get a job-tagged
+    // reference and tracking; standalone invoices just get a plain
+    // description and no tracking, since there's no job to tag them to.
+    let contactName, contactEmail, clientType, jobNumber, reference, contactStoreTable, contactStoreId, existingXeroContactId;
+
+    if (isStandalone) {
+      const client = invoice.clients;
+      contactName = client?.name;
+      contactEmail = client?.email;
+      clientType = client?.client_type || 'individual';
+      jobNumber = null;
+      reference = invoice.description || 'Invoice';
+      contactStoreTable = 'clients';
+      contactStoreId = invoice.client_id;
+      existingXeroContactId = client?.xero_contact_id;
+    } else {
+      contactName = project.client_name;
+      contactEmail = project.client_email;
+      clientType = project.clients?.client_type || 'individual';
+      jobNumber = project.job_number;
+      contactStoreTable = 'projects';
+      contactStoreId = project.id;
+      existingXeroContactId = project.xero_contact_id;
+
+      const { data: allCentres } = await supabaseAdmin
+        .from('cost_centres')
+        .select('id, sort_order')
+        .eq('project_id', project.id)
+        .order('sort_order');
+      const stageIndex = allCentres.findIndex(c => c.id === centre.id);
+      reference = `Job ${jobNumber} - Sales Invoice ${stageIndex + 1} of ${allCentres.length} (${centre.name})`;
+    }
 
     const { data: mappings } = await supabaseAdmin.from('xero_account_mapping').select('*');
     const labourMap = mappings.find(m => m.category === 'labour');
@@ -99,17 +119,21 @@ exports.handler = async (event) => {
       throw new Error('Labour and Materials mappings must be set up in Settings > Xero Mapping before pushing invoices.');
     }
 
-    const contactId = await getOrCreateContact(supabaseAdmin, project);
-    const trackingOptionId = await getOrCreateTrackingOptionId(supabaseAdmin, project.job_number);
-    const { data: settings } = await supabaseAdmin.from('company_settings').select('xero_tracking_category_id').eq('id', 1).single();
+    const contactId = await getOrCreateContact(supabaseAdmin, { name: contactName, email: contactEmail }, { xero_contact_id: existingXeroContactId });
+    if (!existingXeroContactId && contactStoreId) {
+      await supabaseAdmin.from(contactStoreTable).update({ xero_contact_id: contactId }).eq('id', contactStoreId);
+    }
 
+    const trackingOptionId = jobNumber ? await getOrCreateTrackingOptionId(supabaseAdmin, jobNumber) : null;
+    const { data: settings } = await supabaseAdmin.from('company_settings').select('xero_tracking_category_id').eq('id', 1).single();
     const trackingBlock = (trackingOptionId && settings?.xero_tracking_category_id)
       ? [{ TrackingCategoryID: settings.xero_tracking_category_id, TrackingOptionID: trackingOptionId }]
       : undefined;
 
+    const lineDescription = isStandalone ? (invoice.description || 'Invoice') : centre.name;
     const lineItems = [
       {
-        Description: `${centre.name} - Labour`,
+        Description: `${lineDescription} - Labour`,
         Quantity: 1,
         UnitAmount: Number(invoice.labour_amount) || 0,
         AccountCode: labourMap.xero_account_code,
@@ -119,7 +143,7 @@ exports.handler = async (event) => {
     ];
     if (Number(invoice.material_amount) > 0) {
       lineItems.push({
-        Description: `${centre.name} - Materials`,
+        Description: `${lineDescription} - Materials`,
         Quantity: 1,
         UnitAmount: Number(invoice.material_amount),
         AccountCode: materialsMap.xero_account_code,
@@ -148,7 +172,7 @@ exports.handler = async (event) => {
           Type: 'ACCREC',
           Contact: { ContactID: contactId },
           LineItems: lineItems,
-          Reference: `Job ${project.job_number} - Sales Invoice ${stageIndex + 1} of ${totalStages} (${centre.name})`,
+          Reference: reference,
           InvoiceNumber: invoice.invoice_number,
           Status: 'DRAFT',
         }],
