@@ -34,27 +34,140 @@
 
   <div class="wrap">
     <h1>Leads</h1>
-    <p class="subtitle">New enquiries before they become a quote.</p>
+    <p class="subtitle">Enquiries from the website. Anything with a phone or email lands automatically on the Projects pipeline board too.</p>
 
-    <div class="grid cols-4">
-      <div class="stat"><div class="label">Total</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">This month</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">Outstanding</div><div class="value placeholder">&mdash;</div></div>
-      <div class="stat"><div class="label">Overdue</div><div class="value placeholder">&mdash;</div></div>
+    <div class="grid cols-4" id="lead-stats">
+      <div class="stat"><div class="label">New enquiries</div><div class="value placeholder">&mdash;</div></div>
+      <div class="stat"><div class="label">This week</div><div class="value placeholder">&mdash;</div></div>
+      <div class="stat"><div class="label">On the pipeline</div><div class="value placeholder">&mdash;</div></div>
+      <div class="stat"><div class="label">Site interest (anonymous)</div><div class="value placeholder">&mdash;</div></div>
     </div>
 
     <div class="card">
-      <div class="empty-state">
-        <div class="empty-icon">&#128736;</div>
-        <h2>Coming in Phase 5</h2>
-        <p>This section is a placeholder for now &mdash; it gets built out with real data and actions in Phase 5 of the build.</p>
-      </div>
+      <h2>Enquiries</h2>
+      <p class="subtitle" style="margin-bottom:14px;">People who left contact details. Each of these already has a card on the pipeline board.</p>
+      <div id="contact-leads-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Site interest</h2>
+      <p class="subtitle" style="margin-bottom:14px;">Package, brand, or calculator interactions with no contact details left &mdash; not actionable individually, but useful for spotting what's getting attention.</p>
+      <div id="anon-leads-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
   <script src="/js/supabase-client.js"></script>
   <script src="/js/theme.js"></script>
   <script>
+    function timeAgo(dateStr) {
+      const diffMs = Date.now() - new Date(dateStr).getTime();
+      const mins = Math.floor(diffMs / 60000);
+      if (mins < 60) return `${mins}m ago`;
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return `${hours}h ago`;
+      const days = Math.floor(hours / 24);
+      return `${days}d ago`;
+    }
+
+    function sourceLabel(source) {
+      return { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form' }[source] || source;
+    }
+
+    async function loadLeads() {
+      const contactList = document.getElementById('contact-leads-list');
+      const anonList = document.getElementById('anon-leads-list');
+
+      const { data: leads, error } = await supabaseClient
+        .from('leads')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (error) {
+        contactList.innerHTML = `<div class="error-box">${error.message}</div>`;
+        anonList.innerHTML = '';
+        return;
+      }
+
+      const contactLeads = leads.filter(l => l.email || l.phone);
+      const anonLeads = leads.filter(l => !l.email && !l.phone);
+
+      // Stats
+      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const stats = document.querySelectorAll('#lead-stats .value');
+      stats[0].textContent = contactLeads.filter(l => l.status === 'new' || l.status === 'in_pipeline').length;
+      stats[0].classList.remove('placeholder');
+      stats[1].textContent = leads.filter(l => new Date(l.created_at).getTime() > weekAgo).length;
+      stats[1].classList.remove('placeholder');
+      stats[2].textContent = contactLeads.filter(l => l.status === 'in_pipeline').length;
+      stats[2].classList.remove('placeholder');
+      stats[3].textContent = anonLeads.length;
+      stats[3].classList.remove('placeholder');
+
+      // Look up which contact leads already have a linked project so we can link straight to it.
+      const leadIds = contactLeads.map(l => l.id);
+      let projectByLead = {};
+      if (leadIds.length) {
+        const { data: linkedProjects } = await supabaseClient
+          .from('projects')
+          .select('id, lead_id')
+          .in('lead_id', leadIds);
+        (linkedProjects || []).forEach(p => { projectByLead[p.lead_id] = p.id; });
+      }
+
+      if (!contactLeads.length) {
+        contactList.innerHTML = `<div class="empty-state"><div class="empty-icon">&#128231;</div><h2>No enquiries yet</h2><p>They'll show up here the moment someone submits the enquiry form on the website.</p></div>`;
+      } else {
+        contactList.innerHTML = contactLeads.map(l => {
+          const attachments = (l.details && l.details.attachments) || [];
+          return `
+          <a class="project-list-item" href="${projectByLead[l.id] ? '/project.html?id=' + projectByLead[l.id] : '#'}">
+            <div>
+              <div class="name">${l.name || '(no name given)'}</div>
+              <div class="meta">
+                ${sourceLabel(l.source)} &middot; ${timeAgo(l.created_at)}
+                ${l.phone ? ' &middot; ' + l.phone : ''}${l.email ? ' &middot; ' + l.email : ''}
+                ${l.address_formatted ? ' &middot; ' + l.address_formatted : ''}
+                ${attachments.length ? ` &middot; <span class="lead-attachments-btn" data-paths='${JSON.stringify(attachments.map(a => a.path))}' data-names='${JSON.stringify(attachments.map(a => a.name))}' style="color:var(--accent); cursor:pointer;">${attachments.length} file${attachments.length === 1 ? '' : 's'} attached</span>` : ''}
+              </div>
+            </div>
+            <div style="text-align:right; min-width:120px;">
+              <span class="badge ${l.status === 'in_pipeline' ? 'in_progress' : 'draft'}">${l.status.replace('_', ' ')}</span>
+            </div>
+          </a>`;
+        }).join('');
+
+        contactList.querySelectorAll('.lead-attachments-btn').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const paths = JSON.parse(btn.dataset.paths);
+            const names = JSON.parse(btn.dataset.names);
+            const urls = await Promise.all(paths.map(p => supabaseClient.storage.from('lead-uploads').createSignedUrl(p, 300)));
+            const links = urls.map((u, i) => u.data ? `<a href="${u.data.signedUrl}" target="_blank" rel="noopener" style="display:block; margin:2px 0;">${names[i]}</a>` : '').join('');
+            btn.outerHTML = links || '(could not load files)';
+          });
+        });
+      }
+
+      if (!anonLeads.length) {
+        anonList.innerHTML = `<p class="subtitle">No anonymous site interactions logged yet.</p>`;
+      } else {
+        anonList.innerHTML = `
+          <table>
+            <thead><tr><th>When</th><th>Type</th><th>Details</th></tr></thead>
+            <tbody>
+              ${anonLeads.slice(0, 30).map(l => `
+                <tr>
+                  <td>${timeAgo(l.created_at)}</td>
+                  <td>${sourceLabel(l.source)}</td>
+                  <td style="color:var(--muted); font-size:12px;">${l.details ? JSON.stringify(l.details) : ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`;
+      }
+    }
+
     (async function () {
       const session = await requireLogin();
       if (!session) return;
@@ -64,6 +177,22 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+
+      const myRole = await getMyRole();
+      if (!isPricingRole(myRole)) {
+        document.querySelector('.wrap').innerHTML = `
+          <div class="card">
+            <div class="empty-state">
+              <div class="empty-icon">&#128274;</div>
+              <h2>Not available for your role</h2>
+              <p>Leads are limited to Sales, Finance, and Admin accounts.</p>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Projects</a>
+            </div>
+          </div>`;
+        return;
+      }
+
+      await loadLeads();
     })();
   </script>
 </body>

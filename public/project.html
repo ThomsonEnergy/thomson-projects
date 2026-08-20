@@ -99,7 +99,7 @@
           <input readonly value="${quoteUrl}" style="margin-bottom:10px;" onclick="this.select()" />
           <a class="btn secondary" href="mailto:${project.client_email || ''}?subject=${encodeURIComponent('Quote: ' + project.name)}&body=${encodeURIComponent('Hi ' + project.client_name + ',\n\nPlease find your quote here:\n' + quoteUrl + '\n\nThanks,\nThomson Energy')}">Email quote to client</a>
           ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * (project.deposit_percent / 100))}) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
-          ${project.pylon_link ? `<p class="subtitle" style="margin-top:6px;">Pylon design: <a class="link-quiet" href="${project.pylon_link}" target="_blank" rel="noopener">${project.pylon_link}</a></p>` : ''}
+          ${project.proposal_template === 'solar' && project.pylon_link ? `<p class="subtitle" style="margin-top:6px;">Pylon design: <a class="link-quiet" href="${project.pylon_link}" target="_blank" rel="noopener">${project.pylon_link}</a></p>` : ''}
         </div>
         ` : ''}
 

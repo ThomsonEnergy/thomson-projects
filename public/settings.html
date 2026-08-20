@@ -100,6 +100,13 @@
           </div>
 
           <div class="card">
+            <h2>Address autocomplete</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Powers the site address lookup when building a quote, so addresses are picked from a verified list rather than typed freehand. Uses a Google Maps API key — safe to store here since these keys are restricted by domain in Google's console, not by secrecy.</p>
+            <label style="margin-top:0">Google Maps API key</label>
+            <input id="google-maps-key" placeholder="AIza..." />
+          </div>
+
+          <div class="card">
             <h2>Portfolio photos (used on every proposal's cover page)</h2>
             <p class="subtitle" style="margin-bottom:10px;">Upload photos of previous jobs. These appear on the title page of every quote you send.</p>
             <div id="portfolio-thumbs" style="margin-bottom:10px;"></div>
@@ -171,6 +178,11 @@
             <h2>Default terms and conditions</h2>
             <p class="subtitle" style="margin-bottom:10px;">Shown at the bottom of every proposal. You can still edit it per quote if a job needs different terms.</p>
             <textarea id="terms-text" style="min-height:220px;"></textarea>
+          </div>
+          <div class="card">
+            <h2>Default estimate disclaimer</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Prefills the banner shown on Quick Estimate proposals. Editable per quote too, this is just the starting wording.</p>
+            <textarea id="estimate-disclaimer-text" style="min-height:100px;"></textarea>
           </div>
           <button id="save-terms-btn">Save terms</button>
           <div id="save-terms-msg"></div>
@@ -367,12 +379,14 @@
       renderLogoPreview();
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
+      document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';
       document.getElementById('company-name').value = data.company_name || '';
       document.getElementById('abn').value = data.abn || '';
       document.getElementById('phone').value = data.phone || '';
       document.getElementById('address').value = data.address || '';
       document.getElementById('website').value = data.website || '';
       document.getElementById('licenses').value = data.licenses || '';
+      document.getElementById('google-maps-key').value = data.google_maps_api_key || '';
       document.getElementById('tagline').value = data.tagline || '';
       document.getElementById('default-markup').value = data.default_markup_percent ?? 45;
       document.getElementById('default-deposit').value = data.default_deposit_percent ?? 10;
@@ -458,6 +472,7 @@
           address: document.getElementById('address').value.trim(),
           website: document.getElementById('website').value.trim(),
           licenses: document.getElementById('licenses').value.trim(),
+          google_maps_api_key: document.getElementById('google-maps-key').value.trim(),
         })
         .eq('id', 1);
       msg.innerHTML = error
@@ -469,7 +484,10 @@
       const msg = document.getElementById('save-terms-msg');
       const { error } = await supabaseClient
         .from('company_settings')
-        .update({ default_terms: document.getElementById('terms-text').value })
+        .update({
+          default_terms: document.getElementById('terms-text').value,
+          default_estimate_disclaimer: document.getElementById('estimate-disclaimer-text').value,
+        })
         .eq('id', 1);
       msg.innerHTML = error
         ? `<div class="error-box">${error.message}</div>`

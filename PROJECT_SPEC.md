@@ -166,12 +166,12 @@ Anything that could change without a code change belongs here as an editable dat
 
 | Category | Contains |
 |---|---|
-| **Company Details** | Name, ABN, address, phone, website, licences, logo, tagline |
+| **Company Details** | Name, ABN, address, phone, website, licences, logo, tagline, Google Maps API key (address autocomplete on the site address field) |
 | **Xero Mapping** | Account codes + tax type per line item type (Labour Income, Materials/Trading Income, STC Credits, etc.) |
 | **Numbering** | Next PC invoice number, next project number — visible/adjustable, not just trusted blindly |
 | **Quoting Defaults** | Default markup %, default deposit % |
 | **ServiceM8 Defaults** | Job category, default checklist items per stage type |
-| **Payment Terms & T&Cs** | Editable text blocks used on proposals/invoices |
+| **Payment Terms & T&Cs** | Editable text blocks used on proposals/invoices, plus the default Quick Estimate disclaimer wording |
 | **Photo Categories** | Electrical / Solar / General — extendable |
 | **Prebuild Categories** | Electrical (Lighting/Power/Trenching/Cable Runs), Solar (Panels/Batteries/Inverters) — extendable |
 | **Users & Roles** | Staff accounts, role assignment (see below) |
@@ -199,6 +199,23 @@ A library of frequently-used supply-and-install packages, so common jobs don't g
   - Electrical: Lighting, Power, Trenching, Cable Runs
   - Solar: Panels, Batteries, Inverters
   - Searchable/filterable by category when building a quote, not one long flat list
+
+## 18. Lead Capture (from the marketing website)
+
+- The marketing site (thomsonenergy.com.au, separate codebase) shares this same Supabase project — no sync job needed, both apps just read/write the same database
+- Public `leads` table, insert-only for anonymous visitors via RLS: `source` ('package' / 'brand' / 'calculator' / 'enquiry_modal'), contact fields, address fields (line/suburb/state/postcode/formatted/lat/lng from Google Places Autocomplete on the site), `status`, and a `details` jsonb catch-all for source-specific context
+- **Only enquiry-form submissions (with an email or phone) automatically create a pipeline card** — package/brand/calculator clicks with no contact info are anonymous interest signals, logged for visibility on the Leads tab but not cluttering the pipeline board with nothing to act on
+- A database trigger (`on_lead_created`) does the pipeline-card creation automatically: new `projects` row, `pipeline_stage = 'lead'`, `lead_id` set so the two stay linked, a starting `sow_text` note summarising what the person submitted
+- Leads tab shows contactable enquiries (linked straight to their pipeline card) separately from anonymous site-interest data
+- Marketing site reuses the same Google Maps API key as the quote builder (Settings > Company Details) — just add the marketing site's domain to that key's HTTP referrer restrictions in Google Cloud Console, no second key needed
+- **File attachments** (switchboard photos, electricity bills): uploaded from the enquiry modal straight to a private `lead-uploads` Storage bucket (anon can upload, never read/list), paths recorded in `details.attachments` on the lead row. Staff can view them from the Leads tab, and if that lead becomes a quote, one click imports the same files straight into the AI scope-of-works helper (#19) — no re-uploading
+
+## 19. AI Quote Helper
+
+- One button on the quote builder: drafts each stage's description first, then writes a full scope-of-works document using those plus the contractor's rough notes
+- Optional supporting documents (plans/drawings as PDF, electricity bills as PDF or photo) can be attached — the model references them when relevant (e.g. existing switchboard capacity, circuit count)
+- Documents upload to the same private storage bucket used elsewhere, fetched server-side when generating — never sent through the browser twice
+- Everything it drafts is fully editable before saving, same as if typed by hand
 
 ---
 

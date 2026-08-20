@@ -77,17 +77,27 @@
     </div>
 
     <div class="card">
-      <h2>Scope of works document</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Paste in your full scope of works. Shown as its own section in the proposal, above the pricing table.</p>
-      <textarea id="p-sow" style="min-height:260px;" placeholder="Paste your scope of works here..."></textarea>
+      <h2>Write the scope of works with AI</h2>
+      <p class="subtitle" style="margin-bottom:10px;">A few rough notes, plus anything useful to attach — plans, drawings, or an electricity bill. Drafts each stage's description first, then a full scope of works using those.</p>
+      <textarea id="p-brief" placeholder="e.g. Single storey new build, 3 bed 2 bath, standard fitout, ducted air con, solar-ready switchboard"></textarea>
+
+      <div id="lead-attachments-import"></div>
+
+      <label>Supporting documents (optional)</label>
+      <div id="sow-doc-list" style="margin-bottom:8px;"></div>
+      <input type="file" id="sow-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple />
+      <button type="button" id="sow-doc-upload-btn" class="secondary" style="margin-top:10px;">Upload documents</button>
+      <p class="subtitle" style="margin:6px 0 0; font-size:12px;">PDF plans/drawings or photos of bills work best. A handful of files, not a full folder.</p>
+      <div id="sow-doc-msg"></div>
+
+      <button type="button" id="generate-scope-btn" style="margin-top:16px;">Generate scope of works with AI</button>
+      <div id="generate-msg"></div>
     </div>
 
     <div class="card">
-      <h2>Stage descriptions (optional AI helper)</h2>
-      <p class="subtitle" style="margin-bottom:10px;">A few rough notes. Used to draft a short description for each stage below.</p>
-      <textarea id="p-brief" placeholder="e.g. Single storey new build, 3 bed 2 bath, standard fitout, ducted air con, solar-ready switchboard"></textarea>
-      <button type="button" class="secondary" id="generate-scope-btn" style="margin-top:12px;">Generate stage descriptions with AI</button>
-      <div id="generate-msg"></div>
+      <h2>Scope of works document</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Paste in your full scope of works, or generate it above. Shown as its own section in the proposal, above the pricing table.</p>
+      <textarea id="p-sow" style="min-height:260px;" placeholder="Paste your scope of works here..."></textarea>
     </div>
 
     <div class="card">
@@ -126,7 +136,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="pylon-card">
       <h2>Pylon system design</h2>
       <p class="subtitle" style="margin-bottom:10px;">Link to the Pylon proposal so the client can view the interactive design. Shown as a button on the proposal.</p>
       <label style="margin-top:0">Pylon proposal link</label>
@@ -160,6 +170,7 @@
     let referencePhotos = [];
     let rowCount = 0;
     let currentTemplate = 'new_build';
+    let companySettings = {};
     const rowsEl = document.getElementById('cc-rows');
 
     const TEMPLATE_INFO = {
@@ -216,7 +227,14 @@
       const disclaimerField = document.getElementById('p-estimate-disclaimer');
       disclaimerCard.style.display = template === 'quick_estimate' ? 'block' : 'none';
       if (template === 'quick_estimate' && !disclaimerField.value.trim()) {
-        disclaimerField.value = 'Estimate only — the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.';
+        disclaimerField.value = companySettings.default_estimate_disclaimer
+          || 'Estimate only — the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.';
+      }
+
+      document.getElementById('pylon-card').style.display = info.showPylon ? 'block' : 'none';
+      if (!info.showPylon) {
+        document.getElementById('p-pylon-link').value = '';
+        document.getElementById('p-pylon-id').value = '';
       }
     }
 
@@ -447,6 +465,43 @@
 
     // ---------- AI scope descriptions ----------
 
+    // ---------- supporting documents for the AI helper ----------
+
+    let sowDocs = []; // { path, name, mime }
+
+    function renderSowDocList() {
+      const el = document.getElementById('sow-doc-list');
+      if (!sowDocs.length) { el.innerHTML = ''; return; }
+      el.innerHTML = sowDocs.map((d, i) => `
+        <div style="display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:6px 10px; margin:0 8px 8px 0; font-size:12px;">
+          ${d.name}
+          <button type="button" data-i="${i}" class="sow-doc-remove" style="padding:2px 6px; font-size:11px;">x</button>
+        </div>
+      `).join('');
+      el.querySelectorAll('.sow-doc-remove').forEach(btn => {
+        btn.addEventListener('click', () => { sowDocs.splice(parseInt(btn.dataset.i), 1); renderSowDocList(); });
+      });
+    }
+
+    document.getElementById('sow-doc-upload-btn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('sow-doc-file');
+      const msg = document.getElementById('sow-doc-msg');
+      if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more files first.</div>`; return; }
+      msg.innerHTML = '';
+      try {
+        for (const file of fileInput.files) {
+          const path = await uploadPrivateFile(file, 'sow-source');
+          sowDocs.push({ path, name: file.name, mime: file.type });
+        }
+        renderSowDocList();
+        fileInput.value = '';
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+    });
+
+    // ---------- AI scope of works helper ----------
+
     document.getElementById('generate-scope-btn').addEventListener('click', async () => {
       const btn = document.getElementById('generate-scope-btn');
       const msg = document.getElementById('generate-msg');
@@ -459,26 +514,43 @@
       if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first.</div>`; return; }
 
       btn.disabled = true;
-      btn.textContent = 'Generating...';
       msg.innerHTML = '';
       try {
-        const res = await fetch('/.netlify/functions/generate-scope', {
+        btn.textContent = 'Drafting stage descriptions...';
+        const scopeRes = await fetch('/.netlify/functions/generate-scope', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames }),
         });
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error);
+        const scopeJson = await scopeRes.json();
+        if (!scopeJson.ok) throw new Error(scopeJson.error);
         rows.forEach(row => {
-          const desc = json.descriptions[row.dataset.name];
+          const desc = scopeJson.descriptions[row.dataset.name];
           if (desc) row.querySelector('.cc-desc').value = desc;
         });
-        msg.innerHTML = `<div class="success-box">Descriptions drafted. Review and edit as needed.</div>`;
+
+        btn.textContent = 'Writing scope of works...';
+        const sowRes = await fetch('/.netlify/functions/generate-sow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectName: projectName || 'This project',
+            brief,
+            stageNames,
+            stageDescriptions: scopeJson.descriptions,
+            documentPaths: sowDocs.map(d => d.path),
+          }),
+        });
+        const sowJson = await sowRes.json();
+        if (!sowJson.ok) throw new Error(sowJson.error);
+        document.getElementById('p-sow').value = sowJson.sow;
+
+        msg.innerHTML = `<div class="success-box">Stage descriptions and scope of works drafted. Review and edit as needed.</div>`;
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Generate stage descriptions with AI';
+        btn.textContent = 'Generate scope of works with AI';
       }
     });
 
@@ -634,6 +706,41 @@
 
     // ---------- load (edit mode) or start fresh ----------
 
+    async function offerLeadAttachmentImport(leadId) {
+      if (!leadId) return;
+      const { data: lead, error } = await supabaseClient.from('leads').select('details').eq('id', leadId).maybeSingle();
+      if (error || !lead) return;
+      const attachments = (lead.details && lead.details.attachments) || [];
+      if (!attachments.length) return;
+
+      const container = document.getElementById('lead-attachments-import');
+      container.innerHTML = `
+        <div class="success-box" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <span>${attachments.length} file${attachments.length === 1 ? '' : 's'} attached to this enquiry (photos/bills) &mdash; import into the AI helper?</span>
+          <button type="button" class="secondary" id="import-lead-files-btn" style="flex-shrink:0;">Import</button>
+        </div>`;
+
+      document.getElementById('import-lead-files-btn').addEventListener('click', async (e) => {
+        const btn = e.target;
+        btn.disabled = true;
+        btn.textContent = 'Importing...';
+        try {
+          for (const att of attachments) {
+            const { data: fileBlob, error: dlErr } = await supabaseClient.storage.from('lead-uploads').download(att.path);
+            if (dlErr) continue;
+            const newPath = `sow-source/${Date.now()}-${att.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(newPath, fileBlob);
+            if (upErr) continue;
+            sowDocs.push({ path: newPath, name: att.name, mime: att.type });
+          }
+          renderSowDocList();
+          container.innerHTML = `<div class="success-box">Imported. They'll be used next time you generate the scope of works.</div>`;
+        } catch (err) {
+          container.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+      });
+    }
+
     async function loadForEdit() {
       const { data: project, error } = await supabaseClient
         .from('projects')
@@ -647,6 +754,7 @@
       document.getElementById('page-title').textContent = 'Edit quote';
       applyTemplate(project.proposal_template || 'new_build');
       document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';
+      offerLeadAttachmentImport(project.lead_id);
       document.getElementById('p-name').value = project.name;
       document.getElementById('p-subtitle').value = project.proposal_subtitle || '';
       document.getElementById('p-client').value = project.client_name;
@@ -677,6 +785,32 @@
       updateTotal();
     }
 
+    // ---------- address autocomplete ----------
+
+    function loadAddressAutocomplete(apiKey) {
+      if (!apiKey) return; // no key set in Settings yet — plain text input still works fine
+      if (window.google && window.google.maps) { initAddressAutocomplete(); return; }
+      window._initAddressAutocomplete = initAddressAutocomplete;
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=_initAddressAutocomplete`;
+      script.async = true;
+      script.onerror = () => console.error('Google Maps script failed to load — check the API key in Settings > API Keys.');
+      document.head.appendChild(script);
+    }
+
+    function initAddressAutocomplete() {
+      const input = document.getElementById('p-address');
+      const autocomplete = new google.maps.places.Autocomplete(input, {
+        componentRestrictions: { country: 'au' },
+        fields: ['formatted_address'],
+        types: ['address'],
+      });
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place && place.formatted_address) input.value = place.formatted_address;
+      });
+    }
+
     (async function () {
       const session = await requireLogin();
       if (!session) return;
@@ -701,12 +835,19 @@
         return;
       }
 
+      const { data: settingsRow } = await supabaseClient
+        .from('company_settings')
+        .select('default_terms, default_estimate_disclaimer, google_maps_api_key')
+        .eq('id', 1)
+        .single();
+      companySettings = settingsRow || {};
+      loadAddressAutocomplete(companySettings.google_maps_api_key);
+
       if (editId) {
         await loadForEdit();
       } else {
         applyTemplate('new_build');
-        const { data: settings } = await supabaseClient.from('company_settings').select('default_terms').eq('id', 1).single();
-        if (settings) document.getElementById('p-terms').value = settings.default_terms || '';
+        document.getElementById('p-terms').value = companySettings.default_terms || '';
         ['Site Power', 'Rough In', 'Fit Off', 'Finishing Touches'].forEach(n => addRow({ name: n }));
         updateTotal();
       }
