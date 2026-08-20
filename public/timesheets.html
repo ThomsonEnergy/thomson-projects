@@ -138,6 +138,25 @@
       <h2>Pending approvals</h2>
       <div id="approvals-list"></div>
     </div>
+
+    <div class="card" id="xero-payroll-card" style="display:none;">
+      <h2>Push to Xero Payroll</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Pushes everyone's unpushed clocked hours in the range as DRAFT timesheets. Dates must match a real pay period in Xero. Safe to run more than once - already-pushed hours are skipped.</p>
+      <div class="grid cols-3">
+        <div>
+          <label style="margin-top:0">Pay period start</label>
+          <input type="date" id="xero-push-start" />
+        </div>
+        <div>
+          <label style="margin-top:0">Pay period end</label>
+          <input type="date" id="xero-push-end" />
+        </div>
+        <div style="display:flex; align-items:end;">
+          <button id="xero-push-btn" style="width:100%;">Push timesheets</button>
+        </div>
+      </div>
+      <div id="xero-push-msg"></div>
+    </div>
   </div>
 
   <script src="/js/supabase-client.js"></script>
@@ -665,6 +684,43 @@
         </div>`).join('');
     }
 
+    function initXeroPayrollCard(myRole) {
+      if (myRole !== 'admin' && myRole !== 'finance') return;
+      document.getElementById('xero-payroll-card').style.display = 'block';
+    }
+
+    document.getElementById('xero-push-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('xero-push-msg');
+      const startDate = document.getElementById('xero-push-start').value;
+      const endDate = document.getElementById('xero-push-end').value;
+      if (!startDate || !endDate) { msg.innerHTML = `<div class="error-box">Pick both dates.</div>`; return; }
+
+      const btn = document.getElementById('xero-push-btn');
+      btn.disabled = true;
+      btn.textContent = 'Pushing...';
+      msg.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/push-timesheets-to-xero', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ startDate, endDate }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
+
+        let html = `<div class="success-box">Pushed ${data.pushed} timesheet${data.pushed === 1 ? '' : 's'}.</div>`;
+        if (data.skipped && data.skipped.length) {
+          html += `<div class="error-box" style="margin-top:8px;">Skipped: ${data.skipped.join('; ')}</div>`;
+        }
+        msg.innerHTML = html;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+      btn.disabled = false;
+      btn.textContent = 'Push timesheets';
+    });
+
     async function loadApprovals(myRole) {
       if (myRole !== 'admin' && myRole !== 'finance') return;
       const card = document.getElementById('approvals-card');
@@ -725,6 +781,7 @@
       await loadMyEntries();
       await loadMyLeave();
       await loadApprovals(myRole);
+      initXeroPayrollCard(myRole);
     })();
   </script>
 </body>

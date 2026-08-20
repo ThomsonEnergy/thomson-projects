@@ -24,9 +24,10 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 - Staged projects → invoiced from the app directly to Xero's **Invoices API**
 
 **Numbering:**
-- Progress claims: sequential, starting at **PC2000** (PC2000, PC2001, PC2002...) - one global counter, not per-job
-- Project reference carried in Xero's `Reference` field, e.g. "Job 7014 - Progress Claim 2 of 4"
+- Sales invoices: sequential, starting at **SI3000** (SI3000, SI3001, SI3002...) - one global counter, not per-job. Prefix and starting number both editable in Settings > Numbering
+- Project reference carried in Xero's `Reference` field, e.g. "Job 7014 - Sales Invoice 2 of 4"
 - Projects themselves numbered separately, starting at **7000-series** (7001, 7002...), incrementing independently - this is the project's permanent ID shown everywhere in-app
+- Both the invoice amount split (Labour/Materials) and the invoice number itself are editable in a confirmation step before anything pushes to Xero - not locked to the full quoted total or an auto-assigned number, so a partial claim or a manually-chosen number both work
 
 **Tax & account coding per line item:**
 - `TaxType` toggle per line: GST on Income / GST Free Income / BAS Excluded
@@ -289,7 +290,7 @@ Each numbered phase = one build session (new chat), one deploy, one round of tes
 
 ### Phase 6 - Xero invoicing
 *Numbering, GST toggle, account code mapping.*
-- PC2000 sequential numbering, 7000-series project numbers, TaxType/AccountCode lookup table
+- SI3000 sequential numbering (editable prefix/start), 7000-series project numbers, TaxType/AccountCode lookup table
 - **Test:** push a real test invoice to a Xero demo/sandbox company first, not your live Xero, if at all possible. Confirm invoice number sequence, confirm GST and account code land correctly on each line, confirm a deliberately wrong combination gets rejected rather than silently miscoded. Only point at live Xero once sandbox testing looks clean.
 
 ### Phase 7 - Xero payroll/timesheets (Employment Hero cutover)

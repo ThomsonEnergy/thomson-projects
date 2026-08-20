@@ -91,6 +91,14 @@
             <input id="c-address" />
             <div class="grid cols-3">
               <div>
+                <label>Client type</label>
+                <select id="c-type">
+                  <option value="individual">Individual</option>
+                  <option value="company">Company</option>
+                </select>
+                <p class="subtitle" style="margin:4px 0 0; font-size:11px;">Drives STC GST treatment automatically when invoicing.</p>
+              </div>
+              <div>
                 <label>Payment terms</label>
                 <select id="c-terms">
                   <option value="cod">COD</option>
@@ -194,6 +202,7 @@
       document.getElementById('c-phone').value = '';
       document.getElementById('c-address').value = '';
       document.getElementById('c-terms').value = 'cod';
+      document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
       document.getElementById('contacts-rows').innerHTML = '';
       document.getElementById('delete-client-btn').style.display = 'none';
@@ -233,7 +242,10 @@
             <div class="name">${c.name}</div>
             <div class="meta">${[c.email, c.phone, c.address].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}</div>
           </div>
-          <span class="badge draft">${(c.payment_terms || 'cod').replace('_', ' ').toUpperCase()}</span>
+          <div style="text-align:right;">
+            <span class="badge draft">${(c.payment_terms || 'cod').replace('_', ' ').toUpperCase()}</span>
+            <div class="subtitle" style="font-size:11px; margin-top:4px;">${c.client_type === 'company' ? 'Company' : 'Individual'}</div>
+          </div>
         </div>
       `).join('');
       listEl.querySelectorAll('.project-list-item').forEach(row => {
@@ -261,6 +273,7 @@
       document.getElementById('c-phone').value = c.phone || '';
       document.getElementById('c-address').value = c.address || '';
       document.getElementById('c-terms').value = c.payment_terms || 'cod';
+      document.getElementById('c-type').value = c.client_type || 'individual';
       document.getElementById('c-notes').value = c.notes || '';
       document.getElementById('contacts-rows').innerHTML = '';
       (c.client_contacts || []).forEach(addContactRow);
@@ -281,6 +294,7 @@
         phone: document.getElementById('c-phone').value.trim(),
         address: document.getElementById('c-address').value.trim(),
         payment_terms: document.getElementById('c-terms').value,
+        client_type: document.getElementById('c-type').value,
         notes: document.getElementById('c-notes').value.trim(),
       };
 

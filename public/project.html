@@ -58,7 +58,7 @@
       const centreCols = await costCentreColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols}),
+        .select(`*, cost_centres(${centreCols}, invoices(*)),
           project_manager:client_contacts!project_manager_contact_id(name, phone, email),
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
@@ -71,6 +71,148 @@
         return null;
       }
       return project;
+    }
+
+    function openCreateInvoicePanel(btn, project, pricingVisible) {
+      const centreId = btn.dataset.id;
+      const centre = project.cost_centres.find(c => c.id === centreId);
+      if (!centre) return;
+
+      const stageInvoices = centre.invoices || [];
+      const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
+      const quotedAmount = Number(centre.quoted_amount) || 0;
+      const remaining = Math.max(0, quotedAmount - claimedTotal);
+
+      const labourCost = Number(centre.labour_cost) || 0;
+      const materialCost = Number(centre.material_cost) || 0;
+      const costTotal = labourCost + materialCost;
+      const labourShare = costTotal > 0 ? labourCost / costTotal : 1;
+      const defaultLabourAmount = Math.round(remaining * labourShare * 100) / 100;
+      const defaultMaterialAmount = Math.round((remaining - defaultLabourAmount) * 100) / 100;
+
+      const stcApplied = stageInvoices.reduce((s, inv) => s + Number(inv.stc_amount || 0), 0);
+      const stcRemaining = Math.max(0, Number(centre.stc_total || 0) - stcApplied);
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Create &amp; send ${stageInvoices.length ? 'next claim' : 'invoice'}</h2>
+          <p class="subtitle" style="margin-bottom:12px;">${centre.name} &middot; ${money(remaining)} remaining to claim. Adjust the amounts or invoice number if this claim shouldn't be for the full remaining balance.</p>
+
+          <label style="margin-top:0">Invoice number</label>
+          <input id="create-invoice-number" placeholder="Leave blank to auto-assign the next number" />
+
+          <div class="grid cols-3">
+            <div>
+              <label>Labour amount</label>
+              <input type="number" step="0.01" id="create-invoice-labour" value="${defaultLabourAmount}" />
+            </div>
+            <div>
+              <label>Materials amount</label>
+              <input type="number" step="0.01" id="create-invoice-materials" value="${defaultMaterialAmount}" />
+            </div>
+            <div>
+              <label>Total</label>
+              <input id="create-invoice-total" readonly style="background:var(--surface); color:var(--muted);" />
+            </div>
+          </div>
+
+          ${stcRemaining > 0 ? `
+            <label>STC credit to apply on this claim</label>
+            <input type="number" step="0.01" id="create-invoice-stc" value="${stcRemaining}" />
+            <p class="subtitle" style="margin:4px 0 0;">${money(stcRemaining)} STC credit outstanding for this stage. Set to 0 to defer it to a later claim - it'll still show as owing on the claim summary either way.</p>
+          ` : '<input type="hidden" id="create-invoice-stc" value="0" />'}
+
+          <div style="margin-top:14px;">
+            <button id="create-invoice-confirm-btn">Create &amp; send</button>
+            <button type="button" class="secondary" id="create-invoice-cancel-btn">Cancel</button>
+          </div>
+          <div id="create-invoice-panel-msg"></div>
+        </div>`;
+
+      function updateTotal() {
+        const l = parseFloat(overlay.querySelector('#create-invoice-labour').value) || 0;
+        const m = parseFloat(overlay.querySelector('#create-invoice-materials').value) || 0;
+        const s = parseFloat(overlay.querySelector('#create-invoice-stc').value) || 0;
+        overlay.querySelector('#create-invoice-total').value = money(l + m - s);
+      }
+      overlay.querySelector('#create-invoice-labour').addEventListener('input', updateTotal);
+      overlay.querySelector('#create-invoice-materials').addEventListener('input', updateTotal);
+      const stcInput = overlay.querySelector('#create-invoice-stc');
+      if (stcInput) stcInput.addEventListener('input', updateTotal);
+
+      overlay.querySelector('#create-invoice-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#create-invoice-confirm-btn').addEventListener('click', async () => {
+        const confirmBtn = overlay.querySelector('#create-invoice-confirm-btn');
+        const panelMsg = overlay.querySelector('#create-invoice-panel-msg');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Creating...';
+
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const labourAmt = parseFloat(overlay.querySelector('#create-invoice-labour').value) || 0;
+          const materialAmt = parseFloat(overlay.querySelector('#create-invoice-materials').value) || 0;
+          const claimPercent = quotedAmount > 0 ? Math.round(((claimedTotal + labourAmt + materialAmt) / quotedAmount) * 10000) / 100 : 100;
+
+          const res = await fetch('/.netlify/functions/create-invoice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({
+              costCentreId: centreId,
+              labourAmount: labourAmt,
+              materialAmount: materialAmt,
+              stcAmount: parseFloat(overlay.querySelector('#create-invoice-stc').value) || 0,
+              claimPercent,
+              invoiceNumber: overlay.querySelector('#create-invoice-number').value.trim() || null,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
+
+          const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
+          panelMsg.innerHTML = `
+            <div class="success-box">Created as ${data.invoiceNumber}.</div>
+            <label>Invoice link</label>
+            <input readonly value="${invoiceUrl}" onclick="this.select()" />
+            <a class="btn secondary" style="margin-top:10px; display:inline-flex;" href="mailto:${project.client_email || ''}?subject=${encodeURIComponent('Invoice ' + data.invoiceNumber + ' - ' + project.name)}&body=${encodeURIComponent('Hi ' + project.client_name + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy')}">Email invoice to client</a>`;
+          confirmBtn.style.display = 'none';
+          overlay.querySelector('#create-invoice-cancel-btn').textContent = 'Close';
+
+          const refreshed = await loadProject();
+          if (refreshed) render(refreshed, pricingVisible);
+        } catch (err) {
+          panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Create & send';
+        }
+      });
+
+      document.body.appendChild(overlay);
+      updateTotal();
+    }
+
+    async function pushExistingInvoiceToXero(btn) {
+      const msg = document.getElementById('push-xero-msg');
+      btn.disabled = true;
+      btn.textContent = 'Pushing...';
+      msg.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/push-invoice-to-xero', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ invoiceId: btn.dataset.invoiceId }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
+        msg.innerHTML = `<div class="success-box">Pushed ${data.invoiceNumber} to Xero.</div>`;
+        location.reload();
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        btn.disabled = false;
+        btn.textContent = 'Push to Xero';
+      }
     }
 
     function render(project, pricingVisible) {
@@ -170,6 +312,42 @@
           </table>
         </div>
 
+        ${pricingVisible ? centres.map((c, i) => {
+          const stageInvoices = (c.invoices || []).slice().sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+          const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
+          const quotedAmt = Number(c.quoted_amount) || 0;
+          const remaining = Math.max(0, quotedAmt - claimedTotal);
+          const stcApplied = stageInvoices.reduce((s, inv) => s + Number(inv.stc_amount || 0), 0);
+          const stcRemaining = Math.max(0, Number(c.stc_total || 0) - stcApplied);
+          return `
+          <div class="card">
+            <h2>${costCentreNumber(project.job_number, i + 1)} ${c.name} - claims</h2>
+            ${stageInvoices.length ? `
+              <table class="responsive-stack">
+                <thead><tr><th>Invoice</th><th class="num">Amount</th><th>Sent</th><th></th></tr></thead>
+                <tbody>
+                  ${stageInvoices.map(inv => `
+                    <tr>
+                      <td data-label="Invoice">${inv.invoice_number}</td>
+                      <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
+                      <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
+                      <td data-label="">
+                        ${inv.paid_at ? `<span class="badge accepted">Paid</span>` : `<span class="badge sent" style="margin-right:6px;">Sent</span>`}
+                        <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:6px;">View</a>
+                        ${!inv.xero_invoice_id ? `<button class="secondary push-xero-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>` : `<span class="subtitle" style="font-size:11px;">In Xero</span>`}
+                      </td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            ` : `<p class="subtitle">No claims raised yet.</p>`}
+
+            <p class="subtitle" style="margin-top:14px;">Claimed to date: <strong style="color:var(--text);">${money(claimedTotal)}</strong> of ${money(quotedAmt)}. Remaining: <strong style="color:var(--text);">${money(remaining)}</strong>.</p>
+            ${c.stc_total > 0 ? `<p class="subtitle">STC entitlement: ${money(c.stc_total)} - applied so far: ${money(stcApplied)}, remaining: ${money(stcRemaining)}.</p>` : ''}
+            ${remaining > 0 ? `<button class="secondary create-invoice-btn" data-id="${c.id}" style="margin-top:6px;">Create &amp; send next claim</button>` : ''}
+          </div>`;
+        }).join('') : ''}
+        <div id="push-xero-msg"></div>
+
         <div class="card">
           <h2>Purchase orders &amp; supplier invoices</h2>
           <p class="subtitle" style="margin-bottom:14px;">Tracked separately so costs aren't double-counted.</p>
@@ -220,6 +398,13 @@
       `;
 
       loadPurchaseOrders(project.id, centres);
+
+      document.querySelectorAll('.create-invoice-btn').forEach(btn => {
+        btn.addEventListener('click', () => openCreateInvoicePanel(btn, project, pricingVisible));
+      });
+      document.querySelectorAll('.push-xero-btn').forEach(btn => {
+        btn.addEventListener('click', () => pushExistingInvoiceToXero(btn));
+      });
 
       const duplicateBtn = document.getElementById('duplicate-btn');
       if (duplicateBtn) duplicateBtn.addEventListener('click', async () => {

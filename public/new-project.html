@@ -466,7 +466,7 @@
 
     // ---------- stages ----------
 
-    function addRow({ name = '', description = '', markup_percent = null, lineItems = [], photoGroups = [] } = {}) {
+    function addRow({ name = '', description = '', markup_percent = null, stc_total = 0, lineItems = [], photoGroups = [] } = {}) {
       rowCount++;
       const defaultMarkup = markup_percent !== null ? markup_percent : (parseFloat(document.getElementById('default-markup').value) || 45);
       const div = document.createElement('div');
@@ -513,6 +513,12 @@
           <div>
             <label style="margin-top:0">Sale price</label>
             <div class="readout cc-sale-price">$0.00</div>
+          </div>
+        </div>
+        <div class="grid cols-3" style="margin-top:10px;">
+          <div>
+            <label style="margin-top:0">STC entitlement (if any)</label>
+            <input class="cc-stc-total" type="number" step="0.01" value="${stc_total}" placeholder="0.00" />
           </div>
         </div>
         <div style="text-align:right; margin-top:10px;">
@@ -795,6 +801,7 @@
         name: row.querySelector('.cc-name').value.trim(),
         description: row.querySelector('.cc-desc').value.trim(),
         markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
+        stc_total: parseFloat(row.querySelector('.cc-stc-total').value) || 0,
         estimated_labour_cost: parseFloat(row.dataset.labourTotal) || 0,
         estimated_material_cost: parseFloat(row.dataset.materialTotal) || 0,
         quoted_amount: parseFloat(row.dataset.salePrice) || 0,
@@ -850,19 +857,19 @@
         accounts_contact_id: assignedContactIds.accounts_contact_id || null,
       };
 
-      // Numbers are drawn once, atomically, only when a new quote is
-      // created - editing an existing one never reassigns its numbers.
+      // Quote number is drawn once, atomically, only when a new quote is
+      // created - editing an existing one never reassigns it. Job number
+      // is NOT drawn here - a database trigger assigns it automatically
+      // the moment the quote is approved (or immediately for Time &
+      // Materials, which skips straight to booked below). No job number
+      // yet is itself the signal that a quote isn't approved.
       if (!editId) {
-        const [{ data: quoteNum, error: qErr }, { data: jobNum, error: jErr }] = await Promise.all([
-          supabaseClient.rpc('get_next_number', { counter_name: 'quote' }),
-          supabaseClient.rpc('get_next_number', { counter_name: 'job' }),
-        ]);
-        if (qErr || jErr) {
-          msg.innerHTML = `<div class="error-box">Could not draw a quote/job number: ${(qErr || jErr).message}</div>`;
+        const { data: quoteNum, error: qErr } = await supabaseClient.rpc('get_next_number', { counter_name: 'quote' });
+        if (qErr) {
+          msg.innerHTML = `<div class="error-box">Could not draw a quote number: ${qErr.message}</div>`;
           return;
         }
         projectFields.quote_number = quoteNum;
-        projectFields.job_number = jobNum;
       }
 
       // Time & Materials has no quote/approval step - send it straight to
@@ -1002,6 +1009,7 @@
           name: stage.name,
           description: stage.description,
           markup_percent: stage.markup_percent,
+          stc_total: stage.stc_total || 0,
           lineItems: (stage.cost_centre_line_items || [])
             .sort((a, b) => a.sort_order - b.sort_order)
             .map(li => ({ description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost })),
