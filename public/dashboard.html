@@ -86,10 +86,22 @@
           <label style="margin-top:0">Job name</label>
           <input id="direct-job-name" placeholder="e.g. 14 Miller St - Switchboard Repair" />
 
-          <label>Client</label>
+          <label>Client - search existing, or just type a new one below</label>
           <input id="direct-job-client-search" placeholder="Search existing clients..." autocomplete="off" />
           <div id="direct-job-client-results"></div>
-          <div id="direct-job-client-selected" class="subtitle" style="margin-top:6px;"></div>
+
+          <div class="grid cols-2" style="margin-top:8px;">
+            <div>
+              <label style="margin-top:0">Client name</label>
+              <input id="direct-job-client-name" required />
+            </div>
+            <div>
+              <label style="margin-top:0">Client email</label>
+              <input id="direct-job-client-email" type="email" />
+            </div>
+          </div>
+          <label>Client phone</label>
+          <input id="direct-job-client-phone" />
 
           <label>Site address</label>
           <input id="direct-job-address" placeholder="Job site address" />
@@ -102,16 +114,12 @@
         </div>`;
 
       let selectedClientId = null;
-      let selectedClientName = '';
-      let selectedClientEmail = '';
-      let selectedClientPhone = '';
 
       let searchTimeout;
       overlay.querySelector('#direct-job-client-search').addEventListener('input', (e) => {
         clearTimeout(searchTimeout);
         const q = e.target.value.trim();
         selectedClientId = null;
-        overlay.querySelector('#direct-job-client-selected').textContent = '';
         if (q.length < 2) { overlay.querySelector('#direct-job-client-results').innerHTML = ''; return; }
         searchTimeout = setTimeout(async () => {
           const { data } = await supabaseClient
@@ -120,18 +128,17 @@
             .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
             .limit(8);
           const resultsEl = overlay.querySelector('#direct-job-client-results');
-          if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - add this client via the Clients page first.</p>`; return; }
+          if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - fill in the fields below to add them as a new client.</p>`; return; }
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
             ${data.map(c => `<div class="client-pick-row" data-id="${c.id}" data-name="${c.name}" data-email="${c.email || ''}" data-phone="${c.phone || ''}" data-address="${c.address || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${c.name} <span class="subtitle">${c.email || ''}</span></div>`).join('')}
           </div>`;
           resultsEl.querySelectorAll('.client-pick-row').forEach(row => {
             row.addEventListener('click', () => {
               selectedClientId = row.dataset.id;
-              selectedClientName = row.dataset.name;
-              selectedClientEmail = row.dataset.email;
-              selectedClientPhone = row.dataset.phone;
               overlay.querySelector('#direct-job-client-search').value = row.dataset.name;
-              overlay.querySelector('#direct-job-client-selected').textContent = `Selected: ${row.dataset.name}`;
+              overlay.querySelector('#direct-job-client-name').value = row.dataset.name;
+              overlay.querySelector('#direct-job-client-email').value = row.dataset.email;
+              overlay.querySelector('#direct-job-client-phone').value = row.dataset.phone;
               if (row.dataset.address && !overlay.querySelector('#direct-job-address').value) {
                 overlay.querySelector('#direct-job-address').value = row.dataset.address;
               }
@@ -146,20 +153,35 @@
         const confirmBtn = overlay.querySelector('#direct-job-confirm-btn');
         const panelMsg = overlay.querySelector('#direct-job-panel-msg');
         const name = overlay.querySelector('#direct-job-name').value.trim();
+        const clientName = overlay.querySelector('#direct-job-client-name').value.trim();
+        const clientEmail = overlay.querySelector('#direct-job-client-email').value.trim();
+        const clientPhone = overlay.querySelector('#direct-job-client-phone').value.trim();
+        const clientAddress = overlay.querySelector('#direct-job-address').value.trim();
 
         if (!name) { panelMsg.innerHTML = `<div class="error-box">Job name is required.</div>`; return; }
-        if (!selectedClientId) { panelMsg.innerHTML = `<div class="error-box">Pick a client from the search results first.</div>`; return; }
+        if (!clientName) { panelMsg.innerHTML = `<div class="error-box">Client name is required - search for an existing client or type a new one.</div>`; return; }
 
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Creating...';
         try {
+          let clientId = selectedClientId;
+          if (!clientId) {
+            const { data: newClient, error: clientErr } = await supabaseClient
+              .from('clients')
+              .insert({ name: clientName, email: clientEmail, phone: clientPhone, address: clientAddress })
+              .select('id')
+              .single();
+            if (clientErr) throw clientErr;
+            clientId = newClient.id;
+          }
+
           const { data, error } = await supabaseClient.from('projects').insert({
             name,
-            client_id: selectedClientId,
-            client_name: selectedClientName,
-            client_email: selectedClientEmail,
-            client_phone: selectedClientPhone,
-            client_address: overlay.querySelector('#direct-job-address').value.trim(),
+            client_id: clientId,
+            client_name: clientName,
+            client_email: clientEmail,
+            client_phone: clientPhone,
+            client_address: clientAddress,
             proposal_template: 'direct_job',
             pipeline_stage: 'job_booked',
             status: 'in_progress',

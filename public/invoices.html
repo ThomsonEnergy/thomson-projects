@@ -148,10 +148,20 @@
           <h2>Create standalone invoice</h2>
           <p class="subtitle" style="margin-bottom:12px;">No job or quote attached - for a one-off charge, callout, or anything else that isn't part of the job pipeline.</p>
 
-          <label style="margin-top:0">Client</label>
+          <label style="margin-top:0">Client - search existing, or just type a new one below</label>
           <input id="standalone-client-search" placeholder="Search existing clients..." autocomplete="off" />
           <div id="standalone-client-results" style="position:relative;"></div>
-          <div id="standalone-client-selected" class="subtitle" style="margin-top:6px;"></div>
+
+          <div class="grid cols-2" style="margin-top:8px;">
+            <div>
+              <label style="margin-top:0">Client name</label>
+              <input id="standalone-client-name" required />
+            </div>
+            <div>
+              <label style="margin-top:0">Client email</label>
+              <input id="standalone-client-email" type="email" />
+            </div>
+          </div>
 
           <label>What's this for</label>
           <input id="standalone-description" placeholder="e.g. Callout - switchboard fault" />
@@ -182,8 +192,6 @@
         </div>`;
 
       let selectedClientId = null;
-      let selectedClientEmail = '';
-      let selectedClientName = '';
 
       function updateTotal() {
         const l = parseFloat(overlay.querySelector('#standalone-labour').value) || 0;
@@ -198,7 +206,6 @@
         clearTimeout(searchTimeout);
         const q = e.target.value.trim();
         selectedClientId = null;
-        overlay.querySelector('#standalone-client-selected').textContent = '';
         if (q.length < 2) { overlay.querySelector('#standalone-client-results').innerHTML = ''; return; }
         searchTimeout = setTimeout(async () => {
           const { data } = await supabaseClient
@@ -207,17 +214,16 @@
             .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
             .limit(8);
           const resultsEl = overlay.querySelector('#standalone-client-results');
-          if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - check the spelling, or add this client via the Clients page first.</p>`; return; }
+          if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - fill in the fields below to add them as a new client.</p>`; return; }
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
             ${data.map(c => `<div class="client-pick-row" data-id="${c.id}" data-name="${c.name}" data-email="${c.email || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${c.name} <span class="subtitle">${c.email || ''}</span></div>`).join('')}
           </div>`;
           resultsEl.querySelectorAll('.client-pick-row').forEach(row => {
             row.addEventListener('click', () => {
               selectedClientId = row.dataset.id;
-              selectedClientName = row.dataset.name;
-              selectedClientEmail = row.dataset.email;
               overlay.querySelector('#standalone-client-search').value = row.dataset.name;
-              overlay.querySelector('#standalone-client-selected').textContent = `Selected: ${row.dataset.name}`;
+              overlay.querySelector('#standalone-client-name').value = row.dataset.name;
+              overlay.querySelector('#standalone-client-email').value = row.dataset.email;
               resultsEl.innerHTML = '';
             });
           });
@@ -228,21 +234,34 @@
       overlay.querySelector('#standalone-confirm-btn').addEventListener('click', async () => {
         const confirmBtn = overlay.querySelector('#standalone-confirm-btn');
         const panelMsg = overlay.querySelector('#standalone-panel-msg');
+        const clientName = overlay.querySelector('#standalone-client-name').value.trim();
+        const clientEmail = overlay.querySelector('#standalone-client-email').value.trim();
 
-        if (!selectedClientId) {
-          panelMsg.innerHTML = `<div class="error-box">Pick a client from the search results first.</div>`;
+        if (!clientName) {
+          panelMsg.innerHTML = `<div class="error-box">Client name is required - search for an existing client or type a new one.</div>`;
           return;
         }
 
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Creating...';
         try {
+          let clientId = selectedClientId;
+          if (!clientId) {
+            const { data: newClient, error: clientErr } = await supabaseClient
+              .from('clients')
+              .insert({ name: clientName, email: clientEmail })
+              .select('id')
+              .single();
+            if (clientErr) throw clientErr;
+            clientId = newClient.id;
+          }
+
           const { data: { session } } = await supabaseClient.auth.getSession();
           const res = await fetch('/.netlify/functions/create-invoice', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
             body: JSON.stringify({
-              clientId: selectedClientId,
+              clientId,
               description: overlay.querySelector('#standalone-description').value.trim() || 'Invoice',
               labourAmount: parseFloat(overlay.querySelector('#standalone-labour').value) || 0,
               materialAmount: parseFloat(overlay.querySelector('#standalone-materials').value) || 0,
@@ -257,7 +276,7 @@
             <div class="success-box">Created as ${data.invoiceNumber}.</div>
             <label>Invoice link</label>
             <input readonly value="${invoiceUrl}" onclick="this.select()" />
-            <a class="btn secondary" style="margin-top:10px; display:inline-flex;" href="mailto:${selectedClientEmail}?subject=${encodeURIComponent('Invoice ' + data.invoiceNumber)}&body=${encodeURIComponent('Hi ' + selectedClientName + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy')}">Email invoice to client</a>`;
+            <a class="btn secondary" style="margin-top:10px; display:inline-flex;" href="mailto:${clientEmail}?subject=${encodeURIComponent('Invoice ' + data.invoiceNumber)}&body=${encodeURIComponent('Hi ' + clientName + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy')}">Email invoice to client</a>`;
           confirmBtn.style.display = 'none';
           overlay.querySelector('#standalone-cancel-btn').textContent = 'Close';
           await loadInvoices();

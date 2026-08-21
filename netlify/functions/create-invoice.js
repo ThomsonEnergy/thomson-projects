@@ -48,7 +48,7 @@ exports.handler = async (event) => {
 
     let invoiceNumberStr = overrideNumber;
     if (!invoiceNumberStr) {
-      const { data: drawnNumber, error: numErr } = await supabaseAdmin.rpc('get_next_number', { counter_name: 'invoice' });
+      const { data: drawnNumber, error: numErr } = await supabaseAdmin.rpc('get_next_number_serverside', { counter_name: 'invoice' });
       if (numErr) throw numErr;
       const { data: companySettings } = await supabaseAdmin.from('company_settings').select('invoice_number_prefix').eq('id', 1).single();
       invoiceNumberStr = `${companySettings?.invoice_number_prefix || 'SI'}${drawnNumber}`;
