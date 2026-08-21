@@ -53,7 +53,7 @@
       <div class="settings-tabs">
         <button class="settings-tab active" data-panel="list">All Clients</button>
         <button class="settings-tab" data-panel="edit" id="edit-tab-btn" style="display:none;">Add / Edit Client</button>
-        <button class="settings-tab" data-panel="import">Import from ServiceM8</button>
+        <button class="settings-tab" data-panel="import">Import</button>
       </div>
 
       <div class="settings-content">
@@ -127,17 +127,42 @@
         <!-- CSV Import -->
         <div class="settings-panel" id="panel-import">
           <div class="card">
-            <h2>Import from ServiceM8</h2>
-            <p class="subtitle" style="margin-bottom:10px;">Export your client/company list from ServiceM8 as a CSV, then upload it here. You'll get a chance to review before anything is saved.</p>
+            <h2>Import clients</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Upload a CSV from anywhere - any export, any column layout. AI reads the columns and suggests a mapping automatically; you can adjust it before anything is saved.</p>
             <input type="file" id="csv-file" accept=".csv" />
             <div id="import-msg"></div>
           </div>
           <div class="card" id="import-preview-card" style="display:none;">
             <h2>Review before importing</h2>
-            <p class="subtitle" style="margin-bottom:10px;">Map each CSV column to a field. Rows with no name will be skipped. Rows matching an existing client (by email or phone) will be skipped too, so this is safe to re-run.</p>
+            <p class="subtitle" style="margin-bottom:10px;" id="mapping-status">Mapping columns...</p>
             <div class="grid cols-4" id="csv-mapping"></div>
+
+            <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+              <p class="subtitle" style="margin-bottom:8px;">
+                Optional - only fill these in if your file has separate billing/accounts contact columns.
+                Billing phone/email become an "accounts" contact; an alternate/mobile phone becomes a "job" contact,
+                but only if it's actually different from the main phone above.
+              </p>
+              <div class="grid cols-4" id="csv-mapping-optional"></div>
+            </div>
             <div id="csv-preview-table" style="margin-top:14px; overflow-x:auto;"></div>
-            <button id="confirm-import-btn" style="margin-top:14px;">Import clients</button>
+          </div>
+          <div class="card" id="duplicates-card" style="display:none;">
+            <h2>Possible duplicates</h2>
+            <p class="subtitle" style="margin-bottom:10px;">These rows share the same name as another row in this file, or an existing client. For each one, pick which version's details to actually keep - they'll be merged into a single client rather than imported as separate ones.</p>
+            <div id="duplicates-list"></div>
+          </div>
+          <div class="card" id="incomplete-card" style="display:none;">
+            <h2>Missing contact details</h2>
+            <p class="subtitle" style="margin-bottom:10px;">These have neither an email nor a phone number. Fill one in directly, or tick to exclude them from the import.</p>
+            <div style="margin-bottom:10px;">
+              <button class="secondary" id="select-all-incomplete-btn" style="font-size:12px; padding:6px 10px;">Exclude all</button>
+              <button class="secondary" id="select-none-incomplete-btn" style="font-size:12px; padding:6px 10px;">Include all</button>
+            </div>
+            <div id="incomplete-list"></div>
+          </div>
+          <div class="card" id="import-confirm-card" style="display:none;">
+            <button id="confirm-import-btn">Import clients</button>
             <div id="confirm-import-msg"></div>
           </div>
         </div>
@@ -337,6 +362,7 @@
     });
 
     // --- CSV import ---
+
     document.getElementById('csv-file').addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -362,40 +388,132 @@
       return '';
     }
 
-    function renderCsvMapping() {
+    const FIELDS = [
+      { key: 'name', label: 'Name', guesses: ['name', 'company', 'contact'], multi: false },
+      { key: 'email', label: 'Email', guesses: ['email'], multi: true },
+      { key: 'phone', label: 'Phone (main contact)', guesses: ['phone', 'mobile', 'telephone'], multi: true },
+      { key: 'address', label: 'Address', guesses: ['address'], multi: false },
+    ];
+
+    // Optional - only relevant if the file actually has these columns
+    // (e.g. an SM8 client report). When mapped, they create linked
+    // client_contacts rows rather than overwriting the main client's
+    // own phone/email:
+    // - Billing Phone/Email -> an "accounts" contact
+    // - Alternate/Mobile Phone -> a "job" contact, but only if it's
+    //   actually different from the main Phone - no point creating a
+    //   duplicate contact holding the same number twice.
+    const OPTIONAL_FIELDS = [
+      { key: 'altPhone', label: 'Alternate/mobile phone', guesses: ['mobile'] },
+      { key: 'billingFirstName', label: 'Billing contact first name', guesses: ['billingcontactfirst'] },
+      { key: 'billingLastName', label: 'Billing contact last name', guesses: ['billingcontactlast'] },
+      { key: 'billingPhone', label: 'Billing phone', guesses: ['billingmobile', 'billingtelephone'] },
+      { key: 'billingEmail', label: 'Billing email', guesses: ['billingemail'] },
+    ];
+
+    async function renderCsvMapping() {
       document.getElementById('import-preview-card').style.display = 'block';
-      const mapping = document.getElementById('csv-mapping');
-      const fields = [
-        { key: 'name', label: 'Name', guesses: ['name', 'company', 'contact'] },
-        { key: 'email', label: 'Email', guesses: ['email'] },
-        { key: 'phone', label: 'Phone', guesses: ['phone', 'mobile'] },
-        { key: 'address', label: 'Address', guesses: ['address'] },
-      ];
-      mapping.innerHTML = fields.map(f => `
+      document.getElementById('duplicates-card').style.display = 'none';
+      document.getElementById('incomplete-card').style.display = 'none';
+      document.getElementById('import-confirm-card').style.display = 'none';
+
+      // Instant fallback via keyword guessing, replaced by the AI's
+      // suggestion the moment it comes back - keeps the UI responsive
+      // rather than sitting blank while waiting on the API call.
+      renderMappingSelects(Object.fromEntries(FIELDS.map(f => [f.key, guessColumn(f.guesses)])));
+      document.getElementById('mapping-status').textContent = 'Mapping columns with keyword matching - checking with AI for a better guess...';
+
+      try {
+        const res = await fetch('/.netlify/functions/analyze-csv-columns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ headers: csvHeaders, sampleRows: csvRows.slice(0, 5) }),
+        });
+        const json = await res.json();
+        if (json.ok) {
+          renderMappingSelects(json.mapping);
+          document.getElementById('mapping-status').textContent = 'Columns mapped by AI - Email and Phone support picking more than one column (ctrl/cmd-click), tried in order until a value is found. Adjust anything that looks off, then review below.';
+        } else {
+          document.getElementById('mapping-status').textContent = 'AI mapping unavailable, using keyword-matched guesses - check these carefully.';
+        }
+      } catch {
+        document.getElementById('mapping-status').textContent = 'AI mapping unavailable, using keyword-matched guesses - check these carefully.';
+      }
+    }
+
+    function renderMappingSelects(mapping) {
+      const mappingEl = document.getElementById('csv-mapping');
+      mappingEl.innerHTML = FIELDS.map(f => {
+        if (f.multi) {
+          const preselect = mapping[f.key] ? [mapping[f.key]] : [];
+          return `
+            <div>
+              <label style="margin-top:0">${f.label} <span class="subtitle" style="font-size:11px;">(ctrl/cmd-click to add fallback columns)</span></label>
+              <select class="csv-map-select" data-field="${f.key}" multiple size="4">
+                ${csvHeaders.map(h => `<option value="${h}" ${preselect.includes(h) ? 'selected' : ''}>${h}</option>`).join('')}
+              </select>
+            </div>`;
+        }
+        return `
+          <div>
+            <label style="margin-top:0">${f.label}</label>
+            <select class="csv-map-select" data-field="${f.key}">
+              <option value="">-- Not in file --</option>
+              ${csvHeaders.map(h => `<option value="${h}" ${h === mapping[f.key] ? 'selected' : ''}>${h}</option>`).join('')}
+            </select>
+          </div>`;
+      }).join('');
+      mappingEl.querySelectorAll('.csv-map-select').forEach(sel => sel.addEventListener('change', () => { renderCsvPreview(); findDuplicates(); findIncomplete(); }));
+
+      const optionalEl = document.getElementById('csv-mapping-optional');
+      optionalEl.innerHTML = OPTIONAL_FIELDS.map(f => `
         <div>
           <label style="margin-top:0">${f.label}</label>
-          <select class="csv-map-select" data-field="${f.key}">
+          <select class="csv-map-select-optional" data-field="${f.key}">
             <option value="">-- Not in file --</option>
             ${csvHeaders.map(h => `<option value="${h}" ${h === guessColumn(f.guesses) ? 'selected' : ''}>${h}</option>`).join('')}
           </select>
-        </div>
-      `).join('');
-      mapping.querySelectorAll('.csv-map-select').forEach(sel => sel.addEventListener('change', renderCsvPreview));
+        </div>`).join('');
+      optionalEl.querySelectorAll('.csv-map-select-optional').forEach(sel => sel.addEventListener('change', () => { findIncomplete(); }));
+
       renderCsvPreview();
+      findDuplicates();
+      findIncomplete();
+    }
+
+    function currentOptionalMapping() {
+      const map = {};
+      document.querySelectorAll('.csv-map-select-optional').forEach(sel => { map[sel.dataset.field] = sel.value; });
+      return map;
     }
 
     function currentMapping() {
       const map = {};
-      document.querySelectorAll('.csv-map-select').forEach(sel => { map[sel.dataset.field] = sel.value; });
+      document.querySelectorAll('.csv-map-select').forEach(sel => {
+        const field = FIELDS.find(f => f.key === sel.dataset.field);
+        map[sel.dataset.field] = field.multi
+          ? [...sel.selectedOptions].map(o => o.value)
+          : sel.value;
+      });
       return map;
+    }
+
+    // Resolves a value for a multi-column field (email/phone) by trying
+    // each selected column in order and using the first non-empty one.
+    function resolveMulti(row, columns) {
+      for (const col of columns || []) {
+        const v = (row[col] || '').trim();
+        if (v) return v;
+      }
+      return '';
     }
 
     function renderCsvPreview() {
       const map = currentMapping();
       const preview = csvRows.slice(0, 8).map(row => ({
         name: map.name ? row[map.name] : '',
-        email: map.email ? row[map.email] : '',
-        phone: map.phone ? row[map.phone] : '',
+        email: resolveMulti(row, map.email),
+        phone: resolveMulti(row, map.phone),
         address: map.address ? row[map.address] : '',
       }));
       document.getElementById('csv-preview-table').innerHTML = `
@@ -408,6 +526,131 @@
         <p class="subtitle" style="margin-top:8px;">Showing first 8 of ${csvRows.length} rows.</p>`;
     }
 
+    function normalize(v) { return (v || '').toString().trim().toLowerCase(); }
+
+    let duplicateGroups = []; // [{ normalizedName, candidates: [{source, rowIndex?, clientId?, name, email, phone, address}] }]
+
+    function findDuplicates() {
+      const map = currentMapping();
+      if (!map.name) { document.getElementById('duplicates-card').style.display = 'none'; document.getElementById('import-confirm-card').style.display = 'block'; return; }
+
+      const existingByName = new Map(allClients.map(c => [normalize(c.name), c]));
+      const csvGroupsByName = new Map(); // normalized name -> array of csv row indexes
+
+      csvRows.forEach((row, i) => {
+        const name = (map.name ? row[map.name] : '').trim();
+        if (!name) return;
+        const key = normalize(name);
+        if (!csvGroupsByName.has(key)) csvGroupsByName.set(key, []);
+        csvGroupsByName.get(key).push(i);
+      });
+
+      duplicateGroups = [];
+      csvGroupsByName.forEach((rowIndexes, key) => {
+        const existing = existingByName.get(key);
+        if (rowIndexes.length < 2 && !existing) return; // truly unique, nothing to review
+
+        const candidates = rowIndexes.map(i => ({
+          source: 'csv',
+          rowIndex: i,
+          name: (map.name ? csvRows[i][map.name] : '').trim(),
+          email: resolveMulti(csvRows[i], map.email),
+          phone: resolveMulti(csvRows[i], map.phone),
+          address: (map.address ? csvRows[i][map.address] : '').trim(),
+        }));
+        if (existing) {
+          candidates.unshift({
+            source: 'existing', clientId: existing.id,
+            name: existing.name, email: existing.email || '', phone: existing.phone || '', address: existing.address || '',
+          });
+        }
+        duplicateGroups.push({ normalizedName: key, candidates });
+      });
+
+      const dupCard = document.getElementById('duplicates-card');
+      const listEl = document.getElementById('duplicates-list');
+
+      if (!duplicateGroups.length) {
+        dupCard.style.display = 'none';
+      } else {
+        dupCard.style.display = 'block';
+        listEl.innerHTML = duplicateGroups.map((group, gIdx) => {
+          const fields = ['name', 'email', 'phone', 'address'];
+          return `
+          <div class="card" style="background:var(--surface-2); margin-bottom:14px;">
+            <h3 style="margin:0 0 10px;">${group.candidates[0].name} <span class="subtitle">(${group.candidates.length} version${group.candidates.length === 1 ? '' : 's'} found)</span></h3>
+            <table>
+              <thead><tr><th>Source</th>${fields.map(f => `<th style="text-transform:capitalize;">${f}</th>`).join('')}</tr></thead>
+              <tbody>
+                ${group.candidates.map((c, cIdx) => `
+                  <tr>
+                    <td>${c.source === 'existing' ? 'Existing client' : 'Row ' + (c.rowIndex + 1)}</td>
+                    ${fields.map(f => `
+                      <td>
+                        <label style="display:flex; align-items:center; gap:6px; font-weight:400; margin:0;">
+                          <input type="radio" name="dupe-${gIdx}-${f}" value="${cIdx}" ${cIdx === 0 ? 'checked' : ''} />
+                          ${c[f] || '<span class="subtitle">(empty)</span>'}
+                        </label>
+                      </td>`).join('')}
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`;
+        }).join('');
+      }
+      document.getElementById('import-confirm-card').style.display = 'block';
+    }
+
+    let incompleteRowIndexes = new Set();
+
+    function findIncomplete() {
+      const map = currentMapping();
+      const card = document.getElementById('incomplete-card');
+      if (!map.name) { card.style.display = 'none'; return; }
+
+      const dupeRowIndexes = new Set();
+      duplicateGroups.forEach(g => g.candidates.forEach(c => { if (c.source === 'csv') dupeRowIndexes.add(c.rowIndex); }));
+
+      const incomplete = [];
+      csvRows.forEach((row, i) => {
+        if (dupeRowIndexes.has(i)) return; // handled via the duplicate merge instead
+        const name = (map.name ? row[map.name] : '').trim();
+        if (!name) return;
+        const email = resolveMulti(row, map.email);
+        const phone = resolveMulti(row, map.phone);
+        if (!email && !phone) incomplete.push({ index: i, name });
+      });
+
+      const listEl = document.getElementById('incomplete-list');
+      incompleteRowIndexes = new Set(incomplete.map(r => r.index));
+
+      if (!incomplete.length) {
+        card.style.display = 'none';
+      } else {
+        card.style.display = 'block';
+        listEl.innerHTML = `
+          <table class="responsive-stack">
+            <thead><tr><th></th><th>Name</th><th>Email</th><th>Phone</th></tr></thead>
+            <tbody>
+              ${incomplete.map(r => `
+                <tr>
+                  <td data-label=""><input type="checkbox" class="incomplete-exclude-checkbox" data-index="${r.index}" /></td>
+                  <td data-label="Name">${r.name}</td>
+                  <td data-label="Email"><input type="email" class="incomplete-email-input" data-index="${r.index}" placeholder="Add an email" /></td>
+                  <td data-label="Phone"><input class="incomplete-phone-input" data-index="${r.index}" placeholder="Add a phone number" /></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`;
+      }
+    }
+
+    document.getElementById('select-all-incomplete-btn').addEventListener('click', () => {
+      document.querySelectorAll('.incomplete-exclude-checkbox').forEach(cb => { cb.checked = true; });
+    });
+    document.getElementById('select-none-incomplete-btn').addEventListener('click', () => {
+      document.querySelectorAll('.incomplete-exclude-checkbox').forEach(cb => { cb.checked = false; });
+    });
+
     document.getElementById('confirm-import-btn').addEventListener('click', async () => {
       const msg = document.getElementById('confirm-import-msg');
       const map = currentMapping();
@@ -417,40 +660,111 @@
       btn.disabled = true;
       btn.textContent = 'Importing...';
 
-      const existingEmails = new Set(allClients.map(c => (c.email || '').toLowerCase()).filter(Boolean));
-      const existingPhones = new Set(allClients.map(c => (c.phone || '').toLowerCase()).filter(Boolean));
+      try {
+        // Rows that are part of a duplicate group get merged separately -
+        // exclude them from the plain row-by-row insert below.
+        const dupeRowIndexes = new Set();
+        duplicateGroups.forEach(g => g.candidates.forEach(c => { if (c.source === 'csv') dupeRowIndexes.add(c.rowIndex); }));
 
-      const toInsert = [];
-      let skipped = 0;
-      csvRows.forEach(row => {
-        const name = map.name ? (row[map.name] || '').trim() : '';
-        const email = map.email ? (row[map.email] || '').trim() : '';
-        const phone = map.phone ? (row[map.phone] || '').trim() : '';
-        const address = map.address ? (row[map.address] || '').trim() : '';
-        if (!name) { skipped++; return; }
-        if ((email && existingEmails.has(email.toLowerCase())) || (phone && existingPhones.has(phone.toLowerCase()))) {
-          skipped++;
-          return;
-        }
-        toInsert.push({ name, email: email || null, phone: phone || null, address: address || null });
-      });
+        const excludedIncomplete = new Set(
+          [...document.querySelectorAll('.incomplete-exclude-checkbox:checked')].map(cb => parseInt(cb.dataset.index))
+        );
 
-      if (toInsert.length) {
-        const { error } = await supabaseClient.from('clients').insert(toInsert);
-        if (error) {
-          msg.innerHTML = `<div class="error-box">${error.message}</div>`;
-          btn.disabled = false;
-          btn.textContent = 'Import clients';
-          return;
+        const optionalMap = currentOptionalMapping();
+        const toInsert = [];
+        const pendingContactsByRow = []; // same length/order as toInsert
+        let skipped = 0;
+        let excludedIncompleteCount = 0;
+        csvRows.forEach((row, i) => {
+          const name = map.name ? (row[map.name] || '').trim() : '';
+          if (!name) { skipped++; return; }
+          if (dupeRowIndexes.has(i)) return; // handled via merge below
+
+          if (excludedIncomplete.has(i)) { excludedIncompleteCount++; return; }
+
+          let email = resolveMulti(row, map.email);
+          let phone = resolveMulti(row, map.phone);
+          if (incompleteRowIndexes.has(i)) {
+            // Manual override fields, if this row was flagged incomplete.
+            const emailInput = document.querySelector(`.incomplete-email-input[data-index="${i}"]`);
+            const phoneInput = document.querySelector(`.incomplete-phone-input[data-index="${i}"]`);
+            if (emailInput && emailInput.value.trim()) email = emailInput.value.trim();
+            if (phoneInput && phoneInput.value.trim()) phone = phoneInput.value.trim();
+          }
+          const address = map.address ? (row[map.address] || '').trim() : '';
+          toInsert.push({ name, email: email || null, phone: phone || null, address: address || null });
+
+          // Optional sub-contacts, only created if the relevant columns
+          // were actually mapped for this file.
+          const contacts = [];
+          if (optionalMap.altPhone) {
+            const altPhone = (row[optionalMap.altPhone] || '').trim();
+            if (altPhone && normalize(altPhone) !== normalize(phone)) {
+              contacts.push({ contact_type: 'job', name, phone: altPhone, email: null });
+            }
+          }
+          if (optionalMap.billingPhone || optionalMap.billingEmail) {
+            const billingPhone = optionalMap.billingPhone ? (row[optionalMap.billingPhone] || '').trim() : '';
+            const billingEmail = optionalMap.billingEmail ? (row[optionalMap.billingEmail] || '').trim() : '';
+            if (billingPhone || billingEmail) {
+              const billingFirst = optionalMap.billingFirstName ? (row[optionalMap.billingFirstName] || '').trim() : '';
+              const billingLast = optionalMap.billingLastName ? (row[optionalMap.billingLastName] || '').trim() : '';
+              const billingName = `${billingFirst} ${billingLast}`.trim() || name;
+              contacts.push({ contact_type: 'accounts', name: billingName, phone: billingPhone || null, email: billingEmail || null });
+            }
+          }
+          pendingContactsByRow.push(contacts);
+        });
+
+        let mergedCount = 0;
+        for (let gIdx = 0; gIdx < duplicateGroups.length; gIdx++) {
+          const group = duplicateGroups[gIdx];
+          const fields = ['name', 'email', 'phone', 'address'];
+          const merged = {};
+          fields.forEach(f => {
+            const checked = document.querySelector(`input[name="dupe-${gIdx}-${f}"]:checked`);
+            const cIdx = checked ? parseInt(checked.value) : 0;
+            merged[f] = group.candidates[cIdx][f] || null;
+          });
+
+          const existingCandidate = group.candidates.find(c => c.source === 'existing');
+          if (existingCandidate) {
+            const { error } = await supabaseClient.from('clients').update(merged).eq('id', existingCandidate.clientId);
+            if (error) throw error;
+          } else {
+            const { error } = await supabaseClient.from('clients').insert(merged);
+            if (error) throw error;
+          }
+          mergedCount++;
         }
+
+        if (toInsert.length) {
+          const { data: insertedClients, error } = await supabaseClient.from('clients').insert(toInsert).select('id');
+          if (error) throw error;
+
+          const contactsBatch = [];
+          insertedClients.forEach((client, i) => {
+            (pendingContactsByRow[i] || []).forEach(c => contactsBatch.push({ ...c, client_id: client.id }));
+          });
+          if (contactsBatch.length) {
+            const { error: contactsErr } = await supabaseClient.from('client_contacts').insert(contactsBatch);
+            if (contactsErr) throw contactsErr;
+          }
+        }
+
+        const totalContacts = pendingContactsByRow.reduce((s, arr) => s + arr.length, 0);
+        msg.innerHTML = `<div class="success-box">Imported ${toInsert.length} new client${toInsert.length === 1 ? '' : 's'} (with ${totalContacts} accounts/job contact${totalContacts === 1 ? '' : 's'} attached), merged ${mergedCount} duplicate group${mergedCount === 1 ? '' : 's'} into one client each. Excluded ${excludedIncompleteCount} incomplete row${excludedIncompleteCount === 1 ? '' : 's'}. Skipped ${skipped} row${skipped === 1 ? '' : 's'} with no name.</div>`;
+        document.getElementById('import-preview-card').style.display = 'none';
+        document.getElementById('duplicates-card').style.display = 'none';
+        document.getElementById('incomplete-card').style.display = 'none';
+        document.getElementById('import-confirm-card').style.display = 'none';
+        document.getElementById('csv-file').value = '';
+        await loadClients();
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
       }
-
-      msg.innerHTML = `<div class="success-box">Imported ${toInsert.length} client${toInsert.length === 1 ? '' : 's'}. Skipped ${skipped} (no name, or already matched an existing client).</div>`;
       btn.disabled = false;
       btn.textContent = 'Import clients';
-      document.getElementById('import-preview-card').style.display = 'none';
-      document.getElementById('csv-file').value = '';
-      await loadClients();
     });
 
     (async function () {

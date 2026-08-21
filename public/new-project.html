@@ -643,7 +643,7 @@
       btn.disabled = true;
       msg.innerHTML = '';
       try {
-        btn.textContent = 'Drafting stage descriptions...';
+        btn.textContent = 'Drafting stage names and descriptions...';
         const scopeRes = await fetch('/.netlify/functions/generate-scope', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -651,10 +651,24 @@
         });
         const scopeJson = await scopeRes.json();
         if (!scopeJson.ok) throw new Error(scopeJson.error);
-        rows.forEach(row => {
-          const desc = scopeJson.descriptions[row.dataset.name];
-          if (desc) row.querySelector('.cc-desc').value = desc;
+
+        // AI suggests both a fitting name and a description per stage, in
+        // the same order the rows are currently in - apply both, then
+        // renumber (cost centre numbers are position-based, not tied to
+        // the name, so this is safe even though names just changed).
+        rows.forEach((row, i) => {
+          const stage = scopeJson.stages[i];
+          if (!stage) return;
+          if (stage.name) {
+            row.querySelector('.cc-name').value = stage.name;
+            row.dataset.name = stage.name.trim();
+          }
+          if (stage.description) row.querySelector('.cc-desc').value = stage.description;
         });
+        renumberStages();
+
+        const updatedStageNames = rows.map(r => r.dataset.name).filter(Boolean);
+        const updatedDescriptions = Object.fromEntries(rows.map(r => [r.dataset.name, r.querySelector('.cc-desc').value]));
 
         btn.textContent = 'Writing scope of works...';
         const sowRes = await fetch('/.netlify/functions/generate-sow', {
@@ -663,8 +677,8 @@
           body: JSON.stringify({
             projectName: projectName || 'This project',
             brief,
-            stageNames,
-            stageDescriptions: scopeJson.descriptions,
+            stageNames: updatedStageNames,
+            stageDescriptions: updatedDescriptions,
             documentPaths: sowDocs.map(d => d.path),
           }),
         });
@@ -672,7 +686,7 @@
         if (!sowJson.ok) throw new Error(sowJson.error);
         document.getElementById('p-sow').value = sowJson.sow;
 
-        msg.innerHTML = `<div class="success-box">Stage descriptions and scope of works drafted. Review and edit as needed.</div>`;
+        msg.innerHTML = `<div class="success-box">Stage names, descriptions, and scope of works drafted. Review and edit as needed.</div>`;
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
       } finally {
