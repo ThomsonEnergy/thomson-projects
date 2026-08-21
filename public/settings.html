@@ -40,7 +40,7 @@
       <a href="/clients.html" class="topbar-icon-link" title="Clients">&#128100;</a>
       <a href="/settings.html" class="topbar-icon-link" title="Settings" style="color:var(--accent);">&#9881;</a>
       <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
-      <a href="/dashboard.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
     </div>
   </div>
 
@@ -169,13 +169,22 @@
 
           <div class="card">
             <h2>Xero connection</h2>
-            <p class="subtitle" style="margin-bottom:10px;">Tracking category used to tag invoice lines and payroll timesheets back to a job. Create a Tracking Category called "Job" in Xero first (Settings &gt; Tracking Categories), then paste its ID here.</p>
+            <p class="subtitle" style="margin-bottom:10px;">
+              Tracking category used to tag invoice lines and payroll timesheets back to a job. Create a Tracking
+              Category called "Job" in Xero first (Settings &gt; Advanced &gt; Tracking Categories), then use the
+              lookup below to get its real ID - Xero's own screens never show it, only the API does.
+            </p>
             <label style="margin-top:0">Xero Tracking Category ID</label>
-            <input id="xero-tracking-category-id" placeholder="From Xero's Tracking Category settings" />
+            <input id="xero-tracking-category-id" placeholder="Use Look up IDs below to find this" />
             <label>Ordinary Hours earnings rate ID</label>
-            <input id="xero-earnings-rate-id" placeholder="From Xero Payroll Settings > Pay Items" />
+            <input id="xero-earnings-rate-id" placeholder="Use Look up IDs below to find this" />
             <button id="save-xero-connection-btn" style="margin-top:10px;">Save</button>
             <div id="xero-connection-msg"></div>
+
+            <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border);">
+              <button class="secondary" id="lookup-xero-ids-btn">Look up IDs from Xero</button>
+              <div id="lookup-xero-ids-result" style="display:none; margin-top:12px;"></div>
+            </div>
           </div>
         </div>
 
@@ -1082,6 +1091,56 @@
       msg.innerHTML = error
         ? `<div class="error-box">${error.message}</div>`
         : `<div class="success-box">Saved.</div>`;
+    });
+
+    document.getElementById('lookup-xero-ids-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('lookup-xero-ids-btn');
+      const resultEl = document.getElementById('lookup-xero-ids-result');
+      btn.disabled = true;
+      btn.textContent = 'Looking up...';
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `<p class="subtitle">Calling Xero...</p>`;
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/lookup-xero-ids', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Lookup failed');
+
+        let html = '';
+        if (data.trackingCategories.length) {
+          html += `<p class="subtitle" style="margin-bottom:6px;"><strong style="color:var(--text);">Tracking Categories</strong> - click a category ID to fill it in above:</p>`;
+          data.trackingCategories.forEach(tc => {
+            html += `<div class="project-list-item" style="cursor:pointer;" onclick="document.getElementById('xero-tracking-category-id').value='${tc.id}'">
+              <div><div class="name">${tc.name}</div><div class="meta">${tc.options.map(o => o.name).join(', ') || 'no options yet'}</div></div>
+              <span class="subtitle" style="font-size:11px;">${tc.id}</span>
+            </div>`;
+          });
+        } else {
+          html += `<p class="subtitle">No tracking categories found - create one in Xero first (Settings &gt; Advanced &gt; Tracking Categories).</p>`;
+        }
+
+        if (data.earningsRates.length) {
+          html += `<p class="subtitle" style="margin:14px 0 6px;"><strong style="color:var(--text);">Earnings Rates</strong> - click the one that represents ordinary hours:</p>`;
+          data.earningsRates.forEach(er => {
+            html += `<div class="project-list-item" style="cursor:pointer;" onclick="document.getElementById('xero-earnings-rate-id').value='${er.id}'">
+              <div><div class="name">${er.name}</div><div class="meta">${er.type || ''}</div></div>
+              <span class="subtitle" style="font-size:11px;">${er.id}</span>
+            </div>`;
+          });
+        }
+
+        if (data.errors.length) {
+          html += `<div class="error-box" style="margin-top:10px;">${data.errors.join('<br>')}</div>`;
+        }
+
+        resultEl.innerHTML = html;
+      } catch (err) {
+        resultEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+      btn.disabled = false;
+      btn.textContent = 'Look up IDs from Xero';
     });
 
     (async function () {

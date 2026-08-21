@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Home - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .quick-nav { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px; margin-bottom:24px; }
+  .quick-nav a {
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:20px 10px; text-decoration:none; color:var(--text); font-weight:600; font-size:13px;
+    text-align:center;
+  }
+  .quick-nav a:hover { border-color:var(--accent); }
+  .quick-nav .icon { font-size:26px; }
+  .action-item {
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    padding:10px 0; border-bottom:1px solid var(--border);
+  }
+  .action-item:last-child { border-bottom:none; }
+  .feed-post { border-bottom:1px solid var(--border); padding:16px 0; }
+  .feed-post:last-child { border-bottom:none; }
+  .feed-author { font-weight:600; }
+  .feed-meta { color:var(--muted); font-size:12px; }
+  .feed-actions { display:flex; gap:16px; margin-top:8px; }
+  .feed-like-btn { background:none; border:none; color:var(--muted); cursor:pointer; font-size:13px; padding:2px 0; }
+  .feed-like-btn.liked { color:var(--accent); font-weight:600; }
+  .feed-comment { padding:8px 0 0 0; font-size:13px; }
+  .feed-comment .feed-author { font-size:13px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown">
+      <a href="/leads.html">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html">Timesheets<span class="tab-total">-</span></a>
+    </div>
+    <nav class="topbar-tabs">
+      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">-</span></a>
+      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">-</span></a>
+      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">-</span></a>
+      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">-</span></a>
+      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">-</span></a>
+      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">-</span></a>
+      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">-</span></a>
+    </nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/clients.html" class="topbar-icon-link" title="Clients">&#128100;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1 id="greeting">Home</h1>
+
+    <div class="quick-nav">
+      <a href="/dashboard.html"><span class="icon">&#128203;</span>Projects</a>
+      <a href="/timesheets.html"><span class="icon">&#9203;</span>Timesheets</a>
+      <a href="/purchase-orders.html"><span class="icon">&#128230;</span>Purchase Orders</a>
+      <a href="/quotes.html"><span class="icon">&#128221;</span>Quotes</a>
+      <a href="/invoices.html"><span class="icon">&#128179;</span>Invoices</a>
+      <a href="/leads.html"><span class="icon">&#127919;</span>Leads</a>
+      <a href="/sales.html"><span class="icon">&#128176;</span>Sales</a>
+      <a href="/schedule.html"><span class="icon">&#128197;</span>Schedule</a>
+      <a href="/clients.html"><span class="icon">&#128100;</span>Clients</a>
+    </div>
+
+    <div class="card">
+      <h2>Needs attention</h2>
+      <div id="action-items"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Company feed</h2>
+      <textarea id="new-post-text" placeholder="Post something to the team..." style="min-height:70px;"></textarea>
+      <button id="new-post-btn" style="margin-top:8px;">Post</button>
+      <div id="feed-msg"></div>
+      <div id="feed-list" style="margin-top:16px;"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let myUserId, myRole, myName;
+
+    async function loadActionItems() {
+      const el = document.getElementById('action-items');
+      const items = [];
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+      // Today's schedule for this person
+      const { data: mySchedule } = await supabaseClient
+        .from('schedule_assignments')
+        .select('project_id, projects(name, job_number)')
+        .eq('staff_id', myUserId)
+        .eq('assignment_date', todayStr);
+      (mySchedule || []).forEach(a => {
+        items.push({ label: `You're scheduled today: ${a.projects ? a.projects.name : 'General / Office'}`, link: a.project_id ? `/project.html?id=${a.project_id}` : null });
+      });
+
+      // Jobs flagged Not Complete - relevant to everyone, no $ involved
+      const { data: notComplete } = await supabaseClient
+        .from('projects')
+        .select('id, name, job_number')
+        .eq('pipeline_stage', 'job_not_complete');
+      (notComplete || []).forEach(p => {
+        items.push({ label: `Job flagged not complete: #${p.job_number || '-'} ${p.name}`, link: `/project.html?id=${p.id}` });
+      });
+
+      const isPricing = ['admin', 'finance', 'sales'].includes(myRole);
+      if (isPricing) {
+        const { data: draftQuotes } = await supabaseClient
+          .from('projects')
+          .select('id, name, quote_number')
+          .eq('pipeline_stage', 'draft_quote');
+        (draftQuotes || []).forEach(p => {
+          items.push({ label: `Draft quote needs finishing: ${p.name}`, link: `/new-project.html?id=${p.id}` });
+        });
+
+        const { data: invoices } = await supabaseClient
+          .from('invoices')
+          .select('id, invoice_number, sent_at, paid_at, labour_amount, material_amount, stc_amount')
+          .is('paid_at', null);
+        (invoices || []).forEach(inv => {
+          const daysSince = (today - new Date(inv.sent_at)) / 86400000;
+          if (daysSince > 14) {
+            items.push({ label: `Overdue: invoice ${inv.invoice_number} (${Math.floor(daysSince)} days)`, link: '/invoices.html' });
+          }
+        });
+      }
+
+      if (myRole === 'admin' || myRole === 'finance') {
+        const { data: pendingLeave } = await supabaseClient
+          .from('leave_requests')
+          .select('id, profiles(full_name)')
+          .eq('status', 'pending');
+        (pendingLeave || []).forEach(lr => {
+          items.push({ label: `Leave request pending: ${lr.profiles ? lr.profiles.full_name : 'a staff member'}`, link: '/timesheets.html' });
+        });
+      }
+
+      if (!items.length) {
+        el.innerHTML = `<p class="subtitle">Nothing needs your attention right now.</p>`;
+        return;
+      }
+      el.innerHTML = items.map(i => `
+        <div class="action-item">
+          <span>${i.label}</span>
+          ${i.link ? `<a class="link-quiet" href="${i.link}" style="font-size:12px;">View</a>` : ''}
+        </div>`).join('');
+    }
+
+    async function loadFeed() {
+      const el = document.getElementById('feed-list');
+      const { data: posts, error } = await supabaseClient
+        .from('feed_posts')
+        .select('*, profiles(full_name)')
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!posts.length) { el.innerHTML = `<p class="subtitle">No posts yet - be the first.</p>`; return; }
+
+      const postIds = posts.map(p => p.id);
+      const { data: likes } = await supabaseClient.from('feed_likes').select('post_id, author_id').in('post_id', postIds);
+      const { data: comments } = await supabaseClient.from('feed_comments').select('*, profiles(full_name)').in('post_id', postIds).order('created_at');
+
+      el.innerHTML = posts.map(post => {
+        const postLikes = (likes || []).filter(l => l.post_id === post.id);
+        const iLiked = postLikes.some(l => l.author_id === myUserId);
+        const postComments = (comments || []).filter(c => c.post_id === post.id);
+        return `
+          <div class="feed-post" data-post-id="${post.id}">
+            <div class="feed-author">${post.profiles ? post.profiles.full_name : 'Someone'}</div>
+            <div class="feed-meta">${new Date(post.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</div>
+            <p style="margin:8px 0 0; white-space:pre-wrap;">${post.message}</p>
+            <div class="feed-actions">
+              <button class="feed-like-btn ${iLiked ? 'liked' : ''}" data-post-id="${post.id}" data-liked="${iLiked}">
+                &#128077; ${postLikes.length || ''} ${iLiked ? 'Liked' : 'Like'}
+              </button>
+              <button class="feed-like-btn toggle-comments-btn" data-post-id="${post.id}">&#128172; Comment${postComments.length ? ' (' + postComments.length + ')' : ''}</button>
+            </div>
+            <div class="feed-comments" data-post-id="${post.id}" style="display:none; margin-top:10px; padding-left:12px; border-left:2px solid var(--border);">
+              ${postComments.map(c => `
+                <div class="feed-comment">
+                  <span class="feed-author">${c.profiles ? c.profiles.full_name : 'Someone'}</span>
+                  <span class="feed-meta">${new Date(c.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
+                  <div>${c.message}</div>
+                </div>`).join('')}
+              <div style="display:flex; gap:8px; margin-top:8px;">
+                <input class="new-comment-input" data-post-id="${post.id}" placeholder="Write a comment..." style="flex:1;" />
+                <button class="secondary send-comment-btn" data-post-id="${post.id}" style="padding:8px 14px;">Send</button>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+
+      el.querySelectorAll('.feed-like-btn[data-liked]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const postId = btn.dataset.postId;
+          const liked = btn.dataset.liked === 'true';
+          if (liked) {
+            await supabaseClient.from('feed_likes').delete().eq('post_id', postId).eq('author_id', myUserId);
+          } else {
+            await supabaseClient.from('feed_likes').insert({ post_id: postId, author_id: myUserId });
+          }
+          await loadFeed();
+        });
+      });
+
+      el.querySelectorAll('.toggle-comments-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const panel = el.querySelector(`.feed-comments[data-post-id="${btn.dataset.postId}"]`);
+          panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        });
+      });
+
+      el.querySelectorAll('.send-comment-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const postId = btn.dataset.postId;
+          const input = el.querySelector(`.new-comment-input[data-post-id="${postId}"]`);
+          const message = input.value.trim();
+          if (!message) return;
+          btn.disabled = true;
+          const { error } = await supabaseClient.from('feed_comments').insert({ post_id: postId, author_id: myUserId, message });
+          if (error) { alert(error.message); btn.disabled = false; return; }
+          await loadFeed();
+        });
+      });
+    }
+
+    document.getElementById('new-post-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('feed-msg');
+      const textEl = document.getElementById('new-post-text');
+      const message = textEl.value.trim();
+      if (!message) return;
+      const btn = document.getElementById('new-post-btn');
+      btn.disabled = true;
+      const { error } = await supabaseClient.from('feed_posts').insert({ author_id: myUserId, message });
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; btn.disabled = false; return; }
+      textEl.value = '';
+      msg.innerHTML = '';
+      btn.disabled = false;
+      await loadFeed();
+    });
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      myUserId = session.user.id;
+      syncThemeFromProfile();
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      const { data: profile } = await supabaseClient.from('profiles').select('role, full_name').eq('id', myUserId).maybeSingle();
+      myRole = profile?.role || 'staff';
+      myName = profile?.full_name || '';
+      document.getElementById('greeting').textContent = myName ? `Welcome back, ${myName.split(' ')[0]}` : 'Home';
+
+      await loadActionItems();
+      await loadFeed();
+    })();
+  </script>
+</body>
+</html>
