@@ -94,6 +94,28 @@
   .job-card:active { cursor: grabbing; }
   .job-card .jc-title { font-weight: 600; margin-bottom: 2px; }
   .job-card .jc-meta { color: var(--muted); font-size: 11px; }
+
+  .mobile-day-list { display: none; }
+  .mobile-staff-block {
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+    background: var(--surface-2);
+  }
+  .mobile-staff-block .msb-name { font-weight: 600; margin-bottom: 6px; }
+  .mobile-entry {
+    display: flex; justify-content: space-between; gap: 8px; padding: 6px 0 6px 10px;
+    border-left: 3px solid var(--accent); font-size: 13px; margin-bottom: 4px;
+  }
+  .mobile-entry.reconciled { border-left-color: var(--green); color: var(--green); }
+  .mobile-entry.site-visit { border-left-color: #eab308; color: #eab308; }
+  .mobile-entry.leave { border-left-color: var(--red); color: var(--red); }
+  .mobile-entry .me-time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .mobile-add-btn { width: 100%; margin-top: 4px; font-size: 12px; padding: 8px; }
+
+  @media (max-width: 700px) {
+    .day-board-main { display: none; }
+    .day-board-sidebar { display: none; }
+    .mobile-day-list { display: block; }
+  }
 </style>
 </head>
 <body>
@@ -145,6 +167,7 @@
         <div class="cal-grid" id="cal-grid" style="margin-top:6px;"></div>
       </div>
       <div id="day-view" style="display:none;">
+        <div id="mobile-day-list" class="mobile-day-list"></div>
         <div class="day-board">
           <div class="day-board-main">
             <div id="day-time-header"></div>
@@ -154,7 +177,7 @@
             <div class="job-search-card">
               <label style="margin-top:0">Find a job</label>
               <input id="job-search-input" placeholder="Job number, name, client, address..." autocomplete="off" />
-              <p class="subtitle" style="margin:8px 0 0;">Drag a job onto a staff member's timeline to schedule them.</p>
+              <p class="subtitle" style="margin:8px 0 0;">Drag a job onto a staff member's timeline to schedule them. On mobile, use the + Add button under each person instead.</p>
               <div id="job-search-results" style="margin-top:10px;"></div>
             </div>
           </div>
@@ -365,6 +388,167 @@
 
       wireStaffTimelines();
       wireDayBlocks(liveAssignments);
+      renderMobileDayList(activeStaff, liveAssignments, leave || [], reconciledById, dateStr);
+    }
+
+    function fmtTime12(hhmm) {
+      const [h, m] = hhmm.split(':').map(Number);
+      const period = h >= 12 ? 'pm' : 'am';
+      const h12 = h % 12 === 0 ? 12 : h % 12;
+      return `${h12}:${String(m).padStart(2, '0')}${period}`;
+    }
+
+    function renderMobileDayList(activeStaff, liveAssignments, leave, reconciledById, dateStr) {
+      const container = document.getElementById('mobile-day-list');
+      container.innerHTML = activeStaff.map(staff => {
+        const staffAssignments = liveAssignments.filter(a => a.staff_id === staff.id);
+        const staffLeave = leave.find(l => l.staff_id === staff.id || (l.profiles && l.profiles.id === staff.id));
+
+        let entriesHtml = '';
+        if (staffLeave) {
+          entriesHtml += `<div class="mobile-entry leave"><span>Leave (${staffLeave.leave_type || 'approved'})</span></div>`;
+        }
+        staffAssignments.forEach(a => {
+          const reconciled = reconciledById[a.id];
+          const displayStart = reconciled ? reconciled.start : a.start_time.slice(0, 5);
+          const displayEnd = reconciled ? reconciled.end : a.end_time.slice(0, 5);
+          const label = a.project_id
+            ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
+            : `${CATEGORY_LABELS[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
+          const cls = reconciled ? 'reconciled' : (a.block_type === 'site_visit' ? 'site-visit' : '');
+          entriesHtml += `
+            <div class="mobile-entry ${cls}" data-id="${a.id}">
+              <span>${label}${reconciled ? ' &#10003;' : ''}</span>
+              <span class="me-time">${fmtTime12(displayStart)} - ${fmtTime12(displayEnd)}</span>
+            </div>`;
+        });
+
+        return `
+          <div class="mobile-staff-block">
+            <div class="msb-name">${staff.full_name || 'Unnamed'}</div>
+            ${entriesHtml || '<p class="subtitle" style="margin:0 0 6px;">Nothing scheduled.</p>'}
+            <button type="button" class="secondary mobile-add-btn" data-staff-id="${staff.id}" data-staff-name="${staff.full_name || 'Unnamed'}">+ Add</button>
+          </div>`;
+      }).join('');
+
+      container.querySelectorAll('.mobile-add-btn').forEach(btn => {
+        btn.addEventListener('click', () => openMobileAddPanel(btn.dataset.staffId, btn.dataset.staffName, dateStr));
+      });
+      container.querySelectorAll('.mobile-entry[data-id]').forEach(entry => {
+        entry.addEventListener('click', () => {
+          const assignment = liveAssignments.find(a => a.id === entry.dataset.id);
+          if (!assignment) return;
+          const isReconciled = !!reconciledById[assignment.id];
+          if (isReconciled) {
+            if (myRole !== 'admin' && myRole !== 'finance' && myRole !== 'sales') return;
+            if (confirm('This reflects real clocked hours the employee was paid for. Remove it anyway?')) {
+              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+            }
+            return;
+          }
+          if (assignment.project_id) {
+            if (confirm(`Clock in to ${assignment.projects?.name || 'this job'} now? (Cancel to remove this block instead)`)) {
+              window.location.href = `/timesheets.html?clockin_project=${assignment.project_id}`;
+            } else if (confirm('Remove this schedule block?')) {
+              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+            }
+          } else {
+            const categoryLabel = CATEGORY_LABELS[assignment.block_type] || 'this block';
+            if (confirm(`Remove this ${categoryLabel} block?`)) {
+              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+            }
+          }
+        });
+      });
+    }
+
+    function openMobileAddPanel(staffId, staffName, dateStr) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:420px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Add to ${staffName}'s day</h2>
+          <label style="margin-top:0">Job (leave blank for training/office time)</label>
+          <input id="mobile-add-job-search" placeholder="Job number, name, client..." autocomplete="off" />
+          <div id="mobile-add-job-results"></div>
+          <div id="mobile-add-job-selected" class="subtitle" style="margin-top:4px;"></div>
+          <div id="mobile-add-category-row" style="margin-top:10px;">
+            <label style="margin-top:0">Category</label>
+            <select id="mobile-add-category">
+              <option value="office">Office / admin</option>
+              <option value="training">Training</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="grid cols-2" style="margin-top:10px;">
+            <div>
+              <label style="margin-top:0">Start time</label>
+              <input type="time" id="mobile-add-start" value="07:00" />
+            </div>
+            <div>
+              <label style="margin-top:0">Finish time</label>
+              <input type="time" id="mobile-add-end" value="15:30" />
+            </div>
+          </div>
+          <div style="margin-top:14px;">
+            <button id="mobile-add-save-btn">Add</button>
+            <button type="button" class="secondary" id="mobile-add-cancel-btn">Cancel</button>
+          </div>
+          <div id="mobile-add-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      let selectedProject = null;
+      let searchTimeout;
+      overlay.querySelector('#mobile-add-job-search').addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        const q = e.target.value.trim();
+        selectedProject = null;
+        overlay.querySelector('#mobile-add-job-selected').textContent = '';
+        overlay.querySelector('#mobile-add-category-row').style.display = 'block';
+        if (q.length < 2) { overlay.querySelector('#mobile-add-job-results').innerHTML = ''; return; }
+        searchTimeout = setTimeout(async () => {
+          const results = await searchProjects(q);
+          const resultsEl = overlay.querySelector('#mobile-add-job-results');
+          if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
+          resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+            ${results.map(p => `<div class="mob-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</div>`).join('')}
+          </div>`;
+          resultsEl.querySelectorAll('.mob-job-pick').forEach(row => {
+            row.addEventListener('click', () => {
+              selectedProject = { id: row.dataset.id, name: row.dataset.name, job_number: row.dataset.jobNumber || null };
+              overlay.querySelector('#mobile-add-job-search').value = row.dataset.name;
+              overlay.querySelector('#mobile-add-job-selected').textContent = `Selected: ${row.dataset.name}`;
+              overlay.querySelector('#mobile-add-category-row').style.display = 'none';
+              resultsEl.innerHTML = '';
+            });
+          });
+        }, 250);
+      });
+
+      overlay.querySelector('#mobile-add-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#mobile-add-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#mobile-add-msg');
+        const startTime = overlay.querySelector('#mobile-add-start').value;
+        const endTime = overlay.querySelector('#mobile-add-end').value;
+        if (!startTime || !endTime) { msg.innerHTML = `<div class="error-box">Pick both times.</div>`; return; }
+
+        const insert = {
+          staff_id: staffId, assignment_date: dateStr, start_time: startTime, end_time: endTime,
+        };
+        if (selectedProject) {
+          insert.project_id = selectedProject.id;
+          insert.block_type = selectedProject.job_number ? 'job' : 'site_visit';
+        } else {
+          insert.project_id = null;
+          insert.block_type = overlay.querySelector('#mobile-add-category').value;
+        }
+
+        const { error } = await supabaseClient.from('schedule_assignments').insert(insert);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        overlay.remove();
+        await loadDay();
+      });
     }
 
     function minutesFromX(x, timelineEl) {
