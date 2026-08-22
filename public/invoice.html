@@ -179,6 +179,10 @@
         ${!isPaid ? `
         <div class="card">
           <h2>Payment details</h2>
+          ${inv.airwallex_payment_link_url ? `
+            <a href="${inv.airwallex_payment_link_url}" target="_blank" style="display:inline-block; background:var(--accent); color:var(--accent-contrast); padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:600; margin-bottom:16px;">Pay online now</a>
+            <p class="subtitle" style="margin-bottom:16px;">Or pay by direct deposit using the details below.</p>
+          ` : ''}
           ${s.bank_name || s.bank_account_number ? `
             <table>
               <tbody>
@@ -191,7 +195,7 @@
             </table>
           ` : ''}
           ${s.payment_details_text ? `<p class="subtitle" style="white-space:pre-wrap; margin-top:10px;">${s.payment_details_text}</p>` : ''}
-          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? `<p class="subtitle">Contact us for payment details.</p>` : ''}
+          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text && !inv.airwallex_payment_link_url ? `<p class="subtitle">Contact us for payment details.</p>` : ''}
         </div>` : ''}
       `;
     }

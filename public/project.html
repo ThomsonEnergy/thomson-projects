@@ -215,6 +215,29 @@
       }
     }
 
+    async function createPaymentLink(btn) {
+      const msg = document.getElementById('push-xero-msg');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+      msg.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/create-payment-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ invoiceId: btn.dataset.invoiceId }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate the link');
+        msg.innerHTML = `<div class="success-box">Payment link ready - it'll show automatically on the client's invoice page.</div>`;
+        location.reload();
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        btn.disabled = false;
+        btn.textContent = 'Generate payment link';
+      }
+    }
+
     function render(project, pricingVisible) {
       const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const quoted = centres.reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
@@ -335,6 +358,9 @@
                         ${inv.paid_at ? `<span class="badge accepted">Paid</span>` : `<span class="badge sent" style="margin-right:6px;">Sent</span>`}
                         <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:6px;">View</a>
                         ${!inv.xero_invoice_id ? `<button class="secondary push-xero-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>` : `<span class="subtitle" style="font-size:11px;">In Xero</span>`}
+                        ${!inv.paid_at ? (!inv.airwallex_payment_link_id
+                          ? `<button class="secondary create-payment-link-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Generate payment link</button>`
+                          : `<span class="subtitle" style="font-size:11px;">Payment link sent</span>`) : ''}
                       </td>
                     </tr>`).join('')}
                 </tbody>
@@ -404,6 +430,9 @@
       });
       document.querySelectorAll('.push-xero-btn').forEach(btn => {
         btn.addEventListener('click', () => pushExistingInvoiceToXero(btn));
+      });
+      document.querySelectorAll('.create-payment-link-btn').forEach(btn => {
+        btn.addEventListener('click', () => createPaymentLink(btn));
       });
 
       const duplicateBtn = document.getElementById('duplicate-btn');
