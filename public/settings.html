@@ -54,6 +54,7 @@
         <button class="settings-tab" data-panel="xero" data-admin-only="1">Xero Mapping</button>
         <button class="settings-tab" data-panel="numbering" data-admin-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
+        <button class="settings-tab" data-panel="billable-rates" data-pricing-only="1">Billable Rates</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
         <button class="settings-tab" data-panel="terms" data-admin-only="1">Payment Terms &amp; T&amp;Cs</button>
         <button class="settings-tab" data-panel="photos">Photo Categories</button>
@@ -235,6 +236,27 @@
           </div>
           <button id="save-quoting-btn">Save quoting defaults</button>
           <div id="save-quoting-msg"></div>
+        </div>
+
+        <!-- Billable Rates -->
+        <div class="settings-panel" id="panel-billable-rates">
+          <div class="card">
+            <h2>Rate tiers</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Sell rates only - what's charged to clients for labour. Used when "Labour" is picked as a quote line item. Each employee's own cost rate is set on their profile under Users & Roles, since actual wages don't map cleanly to these tiers.</p>
+            <div id="rate-tiers-list"><p class="subtitle">Loading...</p></div>
+            <div style="margin-top:14px; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+              <div>
+                <label style="margin-top:0">New tier name</label>
+                <input id="new-tier-name" placeholder="e.g. Leading Hand" />
+              </div>
+              <div>
+                <label style="margin-top:0">Sell rate ($/hr)</label>
+                <input id="new-tier-rate" type="number" step="0.01" style="width:120px;" />
+              </div>
+              <button id="add-tier-btn">Add tier</button>
+            </div>
+            <div id="rate-tiers-msg"></div>
+          </div>
         </div>
 
         <!-- Job Defaults (stub) -->
@@ -671,6 +693,59 @@
         : `<div class="success-box">Saved.</div>`;
     });
 
+    async function loadRateTiers() {
+      const listEl = document.getElementById('rate-tiers-list');
+      const { data, error } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No rate tiers yet - add one below.</p>`; return; }
+
+      listEl.innerHTML = `
+        <table>
+          <thead><tr><th>Tier</th><th class="num">Sell rate ($/hr)</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(t => `
+              <tr>
+                <td><input class="tier-name-input" data-id="${t.id}" value="${t.name}" /></td>
+                <td class="num"><input class="tier-rate-input" data-id="${t.id}" type="number" step="0.01" value="${t.sell_rate}" style="text-align:right;" /></td>
+                <td><button class="secondary delete-tier-btn" data-id="${t.id}" style="font-size:12px; padding:6px 10px;">Delete</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      listEl.querySelectorAll('.tier-name-input, .tier-rate-input').forEach(input => {
+        input.addEventListener('change', async () => {
+          const id = input.dataset.id;
+          const name = listEl.querySelector(`.tier-name-input[data-id="${id}"]`).value.trim();
+          const sell_rate = parseFloat(listEl.querySelector(`.tier-rate-input[data-id="${id}"]`).value) || 0;
+          const { error } = await supabaseClient.from('billable_rate_tiers').update({ name, sell_rate }).eq('id', id);
+          if (error) alert('Could not save: ' + error.message);
+        });
+      });
+      listEl.querySelectorAll('.delete-tier-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this rate tier? Quotes that already used it keep their saved rate - this only affects future selections.')) return;
+          const { error } = await supabaseClient.from('billable_rate_tiers').delete().eq('id', btn.dataset.id);
+          if (error) { alert(error.message); return; }
+          await loadRateTiers();
+        });
+      });
+    }
+
+    document.getElementById('add-tier-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('rate-tiers-msg');
+      const name = document.getElementById('new-tier-name').value.trim();
+      const sell_rate = parseFloat(document.getElementById('new-tier-rate').value);
+      if (!name || !sell_rate) { msg.innerHTML = `<div class="error-box">Enter a name and rate.</div>`; return; }
+      const { data: existing } = await supabaseClient.from('billable_rate_tiers').select('sort_order').order('sort_order', { ascending: false }).limit(1);
+      const nextSort = (existing?.[0]?.sort_order || 0) + 1;
+      const { error } = await supabaseClient.from('billable_rate_tiers').insert({ name, sell_rate, sort_order: nextSort });
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      document.getElementById('new-tier-name').value = '';
+      document.getElementById('new-tier-rate').value = '';
+      msg.innerHTML = '';
+      await loadRateTiers();
+    });
+
     document.getElementById('save-numbering-btn').addEventListener('click', async () => {
       const msg = document.getElementById('save-numbering-msg');
       const { error } = await supabaseClient
@@ -747,6 +822,8 @@
 
       const { data: profile, error } = await supabaseClient.from('profiles').select('*').eq('id', userId).single();
       const { data: licences } = await supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date');
+      const { data: allowances } = await supabaseClient.from('employee_allowances').select('*').eq('profile_id', userId);
+      const { data: rateTiers } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
       if (error) { overlay.querySelector('.card').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
       function renderLicenceRows(list) {
@@ -756,6 +833,19 @@
             <input class="licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1;" />
             <input class="licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1;" />
             <button type="button" class="secondary remove-licence-btn" style="padding:8px 10px;">&times;</button>
+          </div>`).join('');
+      }
+
+      function renderAllowanceRows(list) {
+        return (list || []).map(a => `
+          <div class="allowance-row" data-id="${a.id}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+            <input class="allowance-name" value="${a.name || ''}" placeholder="e.g. Company car" style="flex:2;" />
+            <input class="allowance-amount" type="number" step="0.01" value="${a.amount || ''}" placeholder="$" style="flex:1;" />
+            <select class="allowance-frequency" style="flex:1;">
+              <option value="per_day" ${a.frequency === 'per_day' ? 'selected' : ''}>Per day</option>
+              <option value="per_hour" ${a.frequency === 'per_hour' ? 'selected' : ''}>Per hour</option>
+            </select>
+            <button type="button" class="secondary remove-allowance-btn" style="padding:8px 10px;">&times;</button>
           </div>`).join('');
       }
 
@@ -781,6 +871,38 @@
         <label style="margin-top:14px;">Industry licences</label>
         <div id="licence-rows">${renderLicenceRows(licences)}</div>
         <button type="button" class="secondary" id="add-licence-btn" style="font-size:12px; padding:6px 10px;">+ Add licence</button>
+
+        <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+          <label style="margin-top:0">Rate tier (for quoting - see Settings &gt; Billable Rates)</label>
+          <select id="profile-tier-select">
+            <option value="">-- None --</option>
+            ${(rateTiers || []).map(t => `<option value="${t.id}" ${profile.rate_tier_id === t.id ? 'selected' : ''}>${t.name}</option>`).join('')}
+          </select>
+
+          <p class="subtitle" style="margin:14px 0 8px;">Actual pay rates - entered directly since award overtime rarely equals a clean multiple of ordinary time. Used to calculate real job costs from logged hours.</p>
+          <div class="grid cols-4">
+            <div>
+              <label style="margin-top:0">Ordinary ($/hr)</label>
+              <input id="profile-rate-ordinary" type="number" step="0.01" value="${profile.ordinary_rate || ''}" />
+            </div>
+            <div>
+              <label style="margin-top:0">1.5x ($/hr)</label>
+              <input id="profile-rate-1-5x" type="number" step="0.01" value="${profile.rate_1_5x || ''}" />
+            </div>
+            <div>
+              <label style="margin-top:0">2x ($/hr)</label>
+              <input id="profile-rate-2x" type="number" step="0.01" value="${profile.rate_2x || ''}" />
+            </div>
+            <div>
+              <label style="margin-top:0">2.5x ($/hr)</label>
+              <input id="profile-rate-2-5x" type="number" step="0.01" value="${profile.rate_2_5x || ''}" />
+            </div>
+          </div>
+
+          <label style="margin-top:14px;">Allowances</label>
+          <div id="allowance-rows">${renderAllowanceRows(allowances)}</div>
+          <button type="button" class="secondary" id="add-allowance-btn" style="font-size:12px; padding:6px 10px;">+ Add allowance</button>
+        </div>
 
         <div style="margin-top:16px;">
           <button id="save-profile-btn">Save</button>
@@ -813,6 +935,18 @@
       }
       wireLicenceRemoveButtons();
 
+      overlay.querySelector('#add-allowance-btn').addEventListener('click', () => {
+        overlay.querySelector('#allowance-rows').insertAdjacentHTML('beforeend', renderAllowanceRows([{ id: '', name: '', amount: '', frequency: 'per_day' }]));
+        wireAllowanceRemoveButtons();
+      });
+
+      function wireAllowanceRemoveButtons() {
+        overlay.querySelectorAll('.remove-allowance-btn').forEach(btn => {
+          btn.onclick = () => btn.closest('.allowance-row').remove();
+        });
+      }
+      wireAllowanceRemoveButtons();
+
       overlay.querySelector('#close-profile-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#save-profile-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#profile-panel-msg');
@@ -825,6 +959,11 @@
             full_name: overlay.querySelector('#profile-name-input').value.trim() || null,
             mobile_number: overlay.querySelector('#profile-mobile-input').value.trim() || null,
             notes: overlay.querySelector('#profile-notes-input').value.trim() || null,
+            rate_tier_id: overlay.querySelector('#profile-tier-select').value || null,
+            ordinary_rate: parseFloat(overlay.querySelector('#profile-rate-ordinary').value) || null,
+            rate_1_5x: parseFloat(overlay.querySelector('#profile-rate-1-5x').value) || null,
+            rate_2x: parseFloat(overlay.querySelector('#profile-rate-2x').value) || null,
+            rate_2_5x: parseFloat(overlay.querySelector('#profile-rate-2-5x').value) || null,
           };
           if (photoPreview.dataset.newUrl) updates.photo_url = photoPreview.dataset.newUrl;
 
@@ -846,6 +985,21 @@
           if (newLicences.length) {
             const { error: licErr } = await supabaseClient.from('profile_licences').insert(newLicences);
             if (licErr) throw licErr;
+          }
+
+          // Same replace-all approach for allowances.
+          await supabaseClient.from('employee_allowances').delete().eq('profile_id', userId);
+          const newAllowances = [...overlay.querySelectorAll('.allowance-row')]
+            .map(row => ({
+              profile_id: userId,
+              name: row.querySelector('.allowance-name').value.trim(),
+              amount: parseFloat(row.querySelector('.allowance-amount').value) || 0,
+              frequency: row.querySelector('.allowance-frequency').value,
+            }))
+            .filter(a => a.name && a.amount > 0);
+          if (newAllowances.length) {
+            const { error: allowErr } = await supabaseClient.from('employee_allowances').insert(newAllowances);
+            if (allowErr) throw allowErr;
           }
 
           overlay.remove();
@@ -1427,6 +1581,7 @@
         await loadPrebuilds();
         await loadXeroMapping();
         await loadXeroConnection();
+        await loadRateTiers();
       }
     })();
   </script>

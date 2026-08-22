@@ -58,7 +58,7 @@
       const centreCols = await costCentreColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols}, invoices(*)),
+        .select(`*, cost_centres(${centreCols}, invoices(*), cost_centre_line_items(item_type, quantity)),
           project_manager:client_contacts!project_manager_contact_id(name, phone, email),
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
@@ -70,6 +70,21 @@
         document.getElementById('content').innerHTML = `<div class="error-box">${error.message}</div>`;
         return null;
       }
+
+      // Real labour cost/hours per stage - fetched here (async RPCs) so
+      // render() itself can stay a plain synchronous template function.
+      for (const centre of project.cost_centres || []) {
+        const [{ data: actualCost }, { data: actualHours }] = await Promise.all([
+          supabaseClient.rpc('get_stage_actual_labour_cost', { p_cost_centre_id: centre.id }),
+          supabaseClient.rpc('get_stage_actual_hours', { p_cost_centre_id: centre.id }),
+        ]);
+        centre.actual_labour_cost = Number(actualCost) || 0;
+        centre.actual_hours = Number(actualHours) || 0;
+        centre.quoted_hours = (centre.cost_centre_line_items || [])
+          .filter(li => li.item_type === 'labour')
+          .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
+      }
+
       return project;
     }
 
@@ -318,6 +333,61 @@
             </tbody>
           </table>
         </div>
+
+        ${centres.map((c, i) => {
+          const quotedLabour = Number(c.labour_cost) || 0;
+          const actualLabour = Number(c.actual_labour_cost) || 0;
+          const quotedHours = Number(c.quoted_hours) || 0;
+          const actualHours = Number(c.actual_hours) || 0;
+          const budgetPercent = quotedLabour > 0 ? Math.round((actualLabour / quotedLabour) * 100) : 0;
+          const isOver = budgetPercent > 100;
+
+          if (pricingVisible) {
+            const marginPercent = quotedLabour > 0 ? Math.round(((quotedLabour - actualLabour) / quotedLabour) * 100) : null;
+            return `
+            <div class="card">
+              <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - labour</h2>
+              <p class="subtitle" style="margin-bottom:14px;">Labour only - full gross profit needs materials cost too, once the materials database exists.</p>
+              <div class="grid cols-3">
+                <div>
+                  <p class="subtitle" style="margin:0 0 4px;">Quoted</p>
+                  <p style="font-size:20px; font-weight:600; margin:0;">${money(quotedLabour)}</p>
+                </div>
+                <div>
+                  <p class="subtitle" style="margin:0 0 4px;">Actual cost</p>
+                  <p style="font-size:20px; font-weight:600; margin:0;">${money(actualLabour)}</p>
+                </div>
+                <div>
+                  <p class="subtitle" style="margin:0 0 4px;">Labour margin</p>
+                  <p style="font-size:20px; font-weight:600; margin:0; color:${marginPercent === null ? 'inherit' : marginPercent >= 0 ? 'var(--green)' : 'var(--red)'};">${marginPercent === null ? '-' : marginPercent + '%'}</p>
+                </div>
+              </div>
+            </div>`;
+          }
+
+          // Staff/Sales - hours only, budget-% bar (driven by real cost
+          // internally, never shown as a dollar figure) so two apprentices
+          // taking more hours at a lower rate can still correctly show as
+          // under budget, rather than falsely flagging on hours alone.
+          const barWidthPercent = Math.min(100, budgetPercent);
+          const trackScale = isOver ? budgetPercent : 100;
+          const markerPosition = isOver ? Math.round((100 / trackScale) * 100 * 10) / 10 : null;
+          return `
+          <div class="card">
+            <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - labour</h2>
+            <p class="subtitle" style="margin-bottom:14px;">${actualHours} hrs logged - ${quotedHours} hrs quoted</p>
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+              <span class="subtitle">Labour budget</span>
+              <span style="font-weight:600; color:${isOver ? 'var(--red)' : 'var(--green)'};">${budgetPercent}%</span>
+            </div>
+            <div style="position:relative; background:var(--surface-2); border-radius:999px; height:10px; overflow:${isOver ? 'visible' : 'hidden'};">
+              <div style="background:${isOver ? 'var(--red)' : 'var(--green)'}; width:${isOver ? '100%' : barWidthPercent + '%'}; height:100%; border-radius:999px;"></div>
+              ${isOver ? `<div style="position:absolute; left:${markerPosition}%; top:-4px; width:2px; height:18px; background:var(--text);"></div>` : ''}
+            </div>
+            ${isOver ? `<div style="position:relative; height:14px;"><span style="position:absolute; left:${markerPosition}%; transform:translateX(-50%); font-size:11px; color:var(--muted);">100%</span></div>` : ''}
+            <p class="subtitle" style="margin-top:8px; color:${isOver ? 'var(--red)' : 'var(--green)'};">${isOver ? (budgetPercent - 100) + '% over' : (100 - budgetPercent) + '% remaining'}</p>
+          </div>`;
+        }).join('')}
 
         ${pricingVisible ? centres.map((c, i) => {
           const stageInvoices = (c.invoices || []).slice().sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));

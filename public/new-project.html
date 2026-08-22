@@ -218,6 +218,7 @@
     let currentTemplate = 'new_build';
     let companySettings = {};
     let selectedClientId = null;
+    let RATE_TIERS = [];
     let currentJobNumber = null;
     const rowsEl = document.getElementById('cc-rows');
 
@@ -368,26 +369,51 @@
       return (parseFloat(li.querySelector('.li-qty').value) || 0) * (parseFloat(li.querySelector('.li-cost').value) || 0);
     }
 
-    function addLineItem(stageRow, { description = '', item_type = 'material', quantity = 1, unit_cost = '' } = {}) {
+    function addLineItem(stageRow, { description = '', item_type = 'material', quantity = 1, unit_cost = '', rate_tier_id = '' } = {}) {
       const li = document.createElement('div');
       li.className = 'li-row';
       li.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
+      const isLabour = item_type === 'labour';
       li.innerHTML = `
         <input class="li-desc" placeholder="e.g. Solar panels" value="${description}" style="font-size:13px;" />
         <select class="li-type" style="font-size:13px;">
           <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
           <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
         </select>
-        <input class="li-qty" type="number" step="0.01" value="${quantity}" placeholder="Qty" style="font-size:13px;" />
-        <input class="li-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px;" />
+        <input class="li-qty" type="number" step="0.01" value="${quantity}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="font-size:13px;" />
+        <select class="li-tier" style="font-size:13px; display:${isLabour ? 'block' : 'none'};">
+          <option value="">-- Select tier --</option>
+          ${RATE_TIERS.map(t => `<option value="${t.id}" data-rate="${t.sell_rate}" ${rate_tier_id === t.id ? 'selected' : ''}>${t.name} ($${t.sell_rate}/hr)</option>`).join('')}
+        </select>
+        <input class="li-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px; display:${isLabour ? 'none' : 'block'};" />
         <div class="li-total" style="font-size:13px; font-weight:600;">$0.00</div>
         <button type="button" class="secondary li-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
       stageRow.querySelector('.li-rows').appendChild(li);
       const recalc = () => updateStageTotals(stageRow);
+
       li.querySelector('.li-qty').addEventListener('input', recalc);
       li.querySelector('.li-cost').addEventListener('input', recalc);
-      li.querySelector('.li-type').addEventListener('change', recalc);
+
+      li.querySelector('.li-tier').addEventListener('change', (e) => {
+        const selected = e.target.selectedOptions[0];
+        li.querySelector('.li-cost').value = selected?.dataset.rate || '';
+        recalc();
+      });
+
+      li.querySelector('.li-type').addEventListener('change', (e) => {
+        const nowLabour = e.target.value === 'labour';
+        li.querySelector('.li-qty').placeholder = nowLabour ? 'Hours' : 'Qty';
+        li.querySelector('.li-tier').style.display = nowLabour ? 'block' : 'none';
+        li.querySelector('.li-cost').style.display = nowLabour ? 'none' : 'block';
+        if (nowLabour) {
+          // Switching to Labour - pick up whatever tier's already selected, if any
+          const selected = li.querySelector('.li-tier').selectedOptions[0];
+          li.querySelector('.li-cost').value = selected?.dataset.rate || '';
+        }
+        recalc();
+      });
+
       li.querySelector('.li-remove').addEventListener('click', () => { li.remove(); recalc(); });
       updateStageTotals(stageRow);
     }
@@ -825,6 +851,7 @@
           item_type: li.querySelector('.li-type').value,
           quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
           unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
+          rate_tier_id: li.querySelector('.li-tier').value || null,
           sort_order: j,
         })).filter(li => li.description),
         photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
@@ -1026,7 +1053,7 @@
           stc_total: stage.stc_total || 0,
           lineItems: (stage.cost_centre_line_items || [])
             .sort((a, b) => a.sort_order - b.sort_order)
-            .map(li => ({ description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost })),
+            .map(li => ({ description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id })),
           photoGroups: (stage.cost_centre_photo_groups || [])
             .sort((a, b) => a.sort_order - b.sort_order)
             .map(pg => ({ description: pg.description, photos: (pg.photos || []).map(p => p.url || p) })),
@@ -1084,6 +1111,9 @@
           </div>`;
         return;
       }
+
+      const { data: tiersData } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
+      RATE_TIERS = tiersData || [];
 
       const { data: settingsRow } = await supabaseClient
         .from('company_settings')
