@@ -179,7 +179,19 @@
         ${!isPaid ? `
         <div class="card">
           <h2>Payment details</h2>
-          <p class="subtitle" style="white-space:pre-wrap;">${s.payment_details_text || 'Contact us for payment details.'}</p>
+          ${s.bank_name || s.bank_account_number ? `
+            <table>
+              <tbody>
+                ${s.bank_account_name ? `<tr><td>Account name</td><td>${s.bank_account_name}</td></tr>` : ''}
+                ${s.bank_name ? `<tr><td>Bank</td><td>${s.bank_name}</td></tr>` : ''}
+                ${s.bank_bsb ? `<tr><td>BSB</td><td>${s.bank_bsb}</td></tr>` : ''}
+                ${s.bank_account_number ? `<tr><td>Account number</td><td>${s.bank_account_number}</td></tr>` : ''}
+                <tr><td>Reference</td><td><strong>${inv.invoice_number}</strong></td></tr>
+              </tbody>
+            </table>
+          ` : ''}
+          ${s.payment_details_text ? `<p class="subtitle" style="white-space:pre-wrap; margin-top:10px;">${s.payment_details_text}</p>` : ''}
+          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? `<p class="subtitle">Contact us for payment details.</p>` : ''}
         </div>` : ''}
       `;
     }

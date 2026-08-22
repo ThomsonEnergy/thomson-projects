@@ -50,12 +50,12 @@
 
     <div class="settings-layout">
       <div class="settings-tabs">
-        <button class="settings-tab active" data-panel="company">Company Details</button>
-        <button class="settings-tab" data-panel="xero" data-pricing-only="1">Xero Mapping</button>
-        <button class="settings-tab" data-panel="numbering" data-pricing-only="1">Numbering</button>
+        <button class="settings-tab active" data-panel="company" data-admin-only="1">Company Details</button>
+        <button class="settings-tab" data-panel="xero" data-admin-only="1">Xero Mapping</button>
+        <button class="settings-tab" data-panel="numbering" data-admin-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
-        <button class="settings-tab" data-panel="terms">Payment Terms &amp; T&amp;Cs</button>
+        <button class="settings-tab" data-panel="terms" data-admin-only="1">Payment Terms &amp; T&amp;Cs</button>
         <button class="settings-tab" data-panel="photos">Photo Categories</button>
         <button class="settings-tab" data-panel="prebuilds" data-pricing-only="1">Prebuild Categories</button>
         <button class="settings-tab" data-panel="users" data-admin-only="1">Users &amp; Roles</button>
@@ -66,7 +66,7 @@
       <div class="settings-content">
 
         <!-- Company Details -->
-        <div class="settings-panel active" id="panel-company">
+        <div class="settings-panel active" id="panel-company" data-admin-only="1">
           <div class="card">
             <h2>Logo and branding</h2>
             <p class="subtitle" style="margin-bottom:10px;">Your logo appears on the client proposal cover page.</p>
@@ -132,7 +132,7 @@
         </div>
 
         <!-- Xero Mapping -->
-        <div class="settings-panel" id="panel-xero" data-pricing-only="1">
+        <div class="settings-panel" id="panel-xero" data-admin-only="1">
           <div class="card">
             <h2>Xero account mapping</h2>
             <p class="subtitle" style="margin-bottom:14px;">
@@ -189,7 +189,7 @@
         </div>
 
         <!-- Numbering -->
-        <div class="settings-panel" id="panel-numbering">
+        <div class="settings-panel" id="panel-numbering" data-admin-only="1">
           <div class="card">
             <h2>Numbering</h2>
             <p class="subtitle" style="margin-bottom:14px;">
@@ -249,7 +249,7 @@
         </div>
 
         <!-- Payment Terms & T&Cs -->
-        <div class="settings-panel" id="panel-terms">
+        <div class="settings-panel" id="panel-terms" data-admin-only="1">
           <div class="card">
             <h2>Default terms and conditions</h2>
             <p class="subtitle" style="margin-bottom:10px;">Shown at the bottom of every proposal. You can still edit it per quote if a job needs different terms.</p>
@@ -262,8 +262,27 @@
           </div>
           <div class="card">
             <h2>Payment details</h2>
-            <p class="subtitle" style="margin-bottom:10px;">Shown on the client-facing invoice - bank details, EFT reference format, etc.</p>
-            <textarea id="payment-details-text" style="min-height:100px;"></textarea>
+            <p class="subtitle" style="margin-bottom:10px;">Bank details shown on the client-facing invoice. The payment reference is always the invoice number itself (SI3000-series) - no need to set that here.</p>
+            <div class="grid cols-2">
+              <div>
+                <label style="margin-top:0">Bank name</label>
+                <input id="bank-name" placeholder="e.g. CBA" />
+              </div>
+              <div>
+                <label style="margin-top:0">Account name</label>
+                <input id="bank-account-name" placeholder="e.g. Thomson Energy Solutions" />
+              </div>
+              <div>
+                <label>BSB</label>
+                <input id="bank-bsb" placeholder="e.g. 062-580" />
+              </div>
+              <div>
+                <label>Account number</label>
+                <input id="bank-account-number" placeholder="e.g. 10394670" />
+              </div>
+            </div>
+            <label style="margin-top:14px;">Anything else worth adding</label>
+            <textarea id="payment-details-text" style="min-height:70px;" placeholder="Optional - e.g. card payment instructions, late fee terms"></textarea>
           </div>
           <button id="save-terms-btn">Save terms</button>
           <div id="save-terms-msg"></div>
@@ -331,8 +350,7 @@
         <!-- Users & Roles -->
         <div class="settings-panel" id="panel-users">
           <div class="card">
-            <h2>Invite a staff member</h2>
-            <p class="subtitle" style="margin-bottom:10px;">They'll get an email to set their own password. Their role can be changed any time from the table below.</p>
+            <h2>Add a staff member</h2>
             <div class="grid cols-3">
               <div>
                 <label>Name</label>
@@ -352,7 +370,23 @@
                 </select>
               </div>
             </div>
-            <button id="invite-btn" style="margin-top:6px;">Send invite</button>
+
+            <label style="margin-top:14px;">How should they get access?</label>
+            <select id="invite-method">
+              <option value="email">Send an invite email (they set their own password)</option>
+              <option value="password">Set a password myself (use this if email delivery isn't working)</option>
+            </select>
+
+            <div id="invite-password-row" style="display:none; margin-top:10px;">
+              <label style="margin-top:0">Password</label>
+              <div style="display:flex; gap:8px;">
+                <input id="invite-password" type="text" placeholder="Set a password to give them directly" style="flex:1;" />
+                <button type="button" class="secondary" id="generate-password-btn">Generate</button>
+              </div>
+              <p class="subtitle" style="margin:4px 0 0;">Give this to them yourself - in person, by phone, however's reliable. They can change it once logged in via password reset.</p>
+            </div>
+
+            <button id="invite-btn" style="margin-top:14px;">Add user</button>
             <div id="invite-msg"></div>
           </div>
 
@@ -369,27 +403,38 @@
             <p class="subtitle" style="margin-bottom:10px;">
               Stored in the database rather than baked into the code, so a key can be rotated here without a redeploy.
               Supabase's own URL and service role key can't live here - the app needs those just to reach this database,
-              so they stay as Netlify environment variables.
+              so they stay as Netlify environment variables. These fields are write-only - once saved, the actual value
+              never gets sent back to the browser, just a status showing whether something's set. Leave a field blank
+              to keep whatever's already saved; type a new value to replace it.
             </p>
             <div id="apikeys-msg"></div>
 
-            <label>Anthropic API key</label>
+            <label>Anthropic API key <span class="key-status" data-key="anthropic"></span></label>
             <input id="key-anthropic" type="password" placeholder="sk-ant-..." autocomplete="off" />
 
-            <label>Pylon API key</label>
+            <label>Pylon API key <span class="key-status" data-key="pylon"></span></label>
             <input id="key-pylon" type="password" placeholder="Paste key (used from Phase 5 onward)" autocomplete="off" />
 
-            <label>Xero Client ID</label>
+            <label>Xero Client ID <span class="key-status" data-key="xero_client_id"></span></label>
             <input id="key-xero-client-id" type="password" placeholder="From your Custom Connection's Configuration tab" autocomplete="off" />
 
-            <label>Xero Client Secret</label>
+            <label>Xero Client Secret <span class="key-status" data-key="xero_client_secret"></span></label>
             <input id="key-xero-client-secret" type="password" placeholder="Generated on the same Configuration tab" autocomplete="off" />
 
-            <label>Xero Webhook Key</label>
+            <label>Xero Webhook Key <span class="key-status" data-key="xero_webhook_key"></span></label>
             <input id="key-xero-webhook-key" type="password" placeholder="From the Webhooks tab of your Xero app" autocomplete="off" />
 
-            <label>Formbay API Key</label>
+            <label>Formbay API Key <span class="key-status" data-key="formbay"></span></label>
             <input id="key-formbay" type="password" placeholder="From your Formbay account" autocomplete="off" />
+
+            <label>Airwallex Client ID <span class="key-status" data-key="airwallex_client_id"></span></label>
+            <input id="key-airwallex-client-id" type="password" placeholder="Account > Developer > API Keys" autocomplete="off" />
+
+            <label>Airwallex API Key <span class="key-status" data-key="airwallex_api_key"></span></label>
+            <input id="key-airwallex-api-key" type="password" placeholder="Shown once when the key is created" autocomplete="off" />
+
+            <label>Airwallex Webhook Secret <span class="key-status" data-key="airwallex_webhook_secret"></span></label>
+            <input id="key-airwallex-webhook-secret" type="password" placeholder="From creating the webhook subscription" autocomplete="off" />
 
             <button id="save-keys-btn" style="margin-top:14px;">Save keys</button>
           </div>
@@ -485,6 +530,10 @@
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';
       document.getElementById('payment-details-text').value = data.payment_details_text || '';
+      document.getElementById('bank-name').value = data.bank_name || '';
+      document.getElementById('bank-account-name').value = data.bank_account_name || '';
+      document.getElementById('bank-bsb').value = data.bank_bsb || '';
+      document.getElementById('bank-account-number').value = data.bank_account_number || '';
       document.getElementById('company-name').value = data.company_name || '';
       document.getElementById('abn').value = data.abn || '';
       document.getElementById('phone').value = data.phone || '';
@@ -597,6 +646,10 @@
           default_terms: document.getElementById('terms-text').value,
           default_estimate_disclaimer: document.getElementById('estimate-disclaimer-text').value,
           payment_details_text: document.getElementById('payment-details-text').value,
+          bank_name: document.getElementById('bank-name').value.trim(),
+          bank_account_name: document.getElementById('bank-account-name').value.trim(),
+          bank_bsb: document.getElementById('bank-bsb').value.trim(),
+          bank_account_number: document.getElementById('bank-account-number').value.trim(),
         })
         .eq('id', 1);
       msg.innerHTML = error
@@ -653,7 +706,7 @@
           const stillActive = btn.classList.contains('active');
           btn.style.display = 'none';
           if (stillActive) {
-            document.querySelector('.settings-tab[data-panel="company"]').click();
+            document.querySelector('.settings-tab[data-panel="appearance"]').click();
           }
         });
       }
@@ -662,7 +715,7 @@
           const stillActive = btn.classList.contains('active');
           btn.style.display = 'none';
           if (stillActive) {
-            document.querySelector('.settings-tab[data-panel="company"]').click();
+            document.querySelector('.settings-tab[data-panel="appearance"]').click();
           }
         });
       }
@@ -686,6 +739,125 @@
       ).join('');
     }
 
+    async function openUserProfilePanel(userId) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;"><p class="subtitle">Loading...</p></div>`;
+      document.body.appendChild(overlay);
+
+      const { data: profile, error } = await supabaseClient.from('profiles').select('*').eq('id', userId).single();
+      const { data: licences } = await supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date');
+      if (error) { overlay.querySelector('.card').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      function renderLicenceRows(list) {
+        return (list || []).map(l => `
+          <div class="licence-row" data-id="${l.id}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+            <input class="licence-name" value="${l.licence_name || ''}" placeholder="Licence name" style="flex:2;" />
+            <input class="licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1;" />
+            <input class="licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1;" />
+            <button type="button" class="secondary remove-licence-btn" style="padding:8px 10px;">&times;</button>
+          </div>`).join('');
+      }
+
+      overlay.querySelector('.card').innerHTML = `
+        <h2>${profile.full_name || 'User profile'}</h2>
+        <div style="display:flex; gap:16px; align-items:start; margin-bottom:10px;">
+          <img id="profile-photo-preview" src="${profile.photo_url || ''}" style="width:80px; height:80px; border-radius:50%; object-fit:cover; background:var(--surface-2); display:${profile.photo_url ? 'block' : 'none'};" />
+          <div style="flex:1;">
+            <label style="margin-top:0">Photo</label>
+            <input type="file" id="profile-photo-input" accept="image/*" />
+          </div>
+        </div>
+
+        <label>Name</label>
+        <input id="profile-name-input" value="${profile.full_name || ''}" />
+
+        <label>Mobile number</label>
+        <input id="profile-mobile-input" value="${profile.mobile_number || ''}" />
+
+        <label>Notes</label>
+        <textarea id="profile-notes-input" style="min-height:70px;">${profile.notes || ''}</textarea>
+
+        <label style="margin-top:14px;">Industry licences</label>
+        <div id="licence-rows">${renderLicenceRows(licences)}</div>
+        <button type="button" class="secondary" id="add-licence-btn" style="font-size:12px; padding:6px 10px;">+ Add licence</button>
+
+        <div style="margin-top:16px;">
+          <button id="save-profile-btn">Save</button>
+          <button type="button" class="secondary" id="close-profile-btn">Close</button>
+        </div>
+        <div id="profile-panel-msg"></div>`;
+
+      overlay.querySelector('#profile-photo-input').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+          const [url] = await uploadPhotos([file], 'staff-photos');
+          overlay.querySelector('#profile-photo-preview').src = url;
+          overlay.querySelector('#profile-photo-preview').style.display = 'block';
+          overlay.querySelector('#profile-photo-preview').dataset.newUrl = url;
+        } catch (err) {
+          alert('Photo upload failed: ' + err.message);
+        }
+      });
+
+      overlay.querySelector('#add-licence-btn').addEventListener('click', () => {
+        overlay.querySelector('#licence-rows').insertAdjacentHTML('beforeend', renderLicenceRows([{ id: '', licence_name: '', licence_number: '', expiry_date: '' }]));
+        wireLicenceRemoveButtons();
+      });
+
+      function wireLicenceRemoveButtons() {
+        overlay.querySelectorAll('.remove-licence-btn').forEach(btn => {
+          btn.onclick = () => btn.closest('.licence-row').remove();
+        });
+      }
+      wireLicenceRemoveButtons();
+
+      overlay.querySelector('#close-profile-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#save-profile-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#profile-panel-msg');
+        const saveBtn = overlay.querySelector('#save-profile-btn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        try {
+          const photoPreview = overlay.querySelector('#profile-photo-preview');
+          const updates = {
+            full_name: overlay.querySelector('#profile-name-input').value.trim() || null,
+            mobile_number: overlay.querySelector('#profile-mobile-input').value.trim() || null,
+            notes: overlay.querySelector('#profile-notes-input').value.trim() || null,
+          };
+          if (photoPreview.dataset.newUrl) updates.photo_url = photoPreview.dataset.newUrl;
+
+          const { error: updErr } = await supabaseClient.from('profiles').update(updates).eq('id', userId);
+          if (updErr) throw updErr;
+
+          // Replace all licences with whatever's currently in the form -
+          // simplest way to handle add/edit/remove in one save, given how
+          // few licences a person typically has.
+          await supabaseClient.from('profile_licences').delete().eq('profile_id', userId);
+          const newLicences = [...overlay.querySelectorAll('.licence-row')]
+            .map(row => ({
+              profile_id: userId,
+              licence_name: row.querySelector('.licence-name').value.trim(),
+              licence_number: row.querySelector('.licence-number').value.trim() || null,
+              expiry_date: row.querySelector('.licence-expiry').value || null,
+            }))
+            .filter(l => l.licence_name);
+          if (newLicences.length) {
+            const { error: licErr } = await supabaseClient.from('profile_licences').insert(newLicences);
+            if (licErr) throw licErr;
+          }
+
+          overlay.remove();
+          await loadUsers();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save';
+        }
+      });
+    }
+
     async function loadUsers() {
       const listEl = document.getElementById('users-list');
       try {
@@ -704,7 +876,7 @@
             <tbody>
               ${data.users.map(u => `
                 <tr data-id="${u.id}">
-                  <td data-label="Name">${u.full_name || '<span style="color:var(--muted)"> - </span>'}</td>
+                  <td data-label="Name"><input class="user-name-input" data-id="${u.id}" value="${u.full_name || ''}" placeholder="Full name" style="font-size:13px;" /></td>
                   <td data-label="Email">${u.email}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
                   <td data-label="Role"><select class="role-select" data-id="${u.id}">${roleOptionsHtml(u.role)}</select></td>
                   <td data-label="Xero Employee ID"><input class="xero-employee-input" data-id="${u.id}" value="${u.xero_employee_id || ''}" placeholder="From Xero Payroll" style="font-size:12px;" /></td>
@@ -713,11 +885,23 @@
                     <button class="secondary toggle-active-btn" data-id="${u.id}" data-active="${u.active}">
                       ${u.active ? 'Deactivate' : 'Reactivate'}
                     </button>
+                    <button class="secondary set-password-btn" data-id="${u.id}" data-name="${u.full_name || u.email}" style="margin-top:4px;">Set password</button>
+                    <button class="secondary open-profile-btn" data-id="${u.id}" style="margin-top:4px;">Profile</button>
                   </td>
                 </tr>
               `).join('')}
             </tbody>
           </table>`;
+
+        listEl.querySelectorAll('.user-name-input').forEach(input => {
+          input.addEventListener('change', async () => {
+            const { error } = await supabaseClient
+              .from('profiles')
+              .update({ full_name: input.value.trim() || null })
+              .eq('id', input.dataset.id);
+            if (error) alert('Could not save name: ' + error.message);
+          });
+        });
 
         listEl.querySelectorAll('.xero-employee-input').forEach(input => {
           input.addEventListener('change', async () => {
@@ -760,34 +944,91 @@
             }
           });
         });
+
+        listEl.querySelectorAll('.set-password-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const newPassword = prompt(`Set a new password for ${btn.dataset.name}. They'll need to be given this directly - it isn't emailed.`, generatePassword());
+            if (!newPassword) return;
+            btn.disabled = true;
+            try {
+              const res = await authedFetch('/.netlify/functions/set-user-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: btn.dataset.id, password: newPassword }),
+              });
+              const data = await res.json();
+              if (!res.ok) throw new Error(data.error || 'Failed');
+              alert(`Password set for ${btn.dataset.name}: ${newPassword}\n\nGive this to them now - it won't be shown again.`);
+            } catch (err) {
+              alert(err.message);
+            }
+            btn.disabled = false;
+          });
+        });
+
+        listEl.querySelectorAll('.open-profile-btn').forEach(btn => {
+          btn.addEventListener('click', () => openUserProfilePanel(btn.dataset.id));
+        });
       } catch (err) {
         listEl.innerHTML = `<div class="error-box">${err.message}</div>`;
       }
     }
+
+    document.getElementById('invite-method').addEventListener('change', (e) => {
+      document.getElementById('invite-password-row').style.display = e.target.value === 'password' ? 'block' : 'none';
+    });
+
+    function generatePassword() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+      let pw = '';
+      for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+      return pw;
+    }
+    document.getElementById('generate-password-btn').addEventListener('click', () => {
+      document.getElementById('invite-password').value = generatePassword();
+    });
 
     document.getElementById('invite-btn').addEventListener('click', async () => {
       const msg = document.getElementById('invite-msg');
       const name = document.getElementById('invite-name').value.trim();
       const email = document.getElementById('invite-email').value.trim();
       const role = document.getElementById('invite-role').value;
+      const method = document.getElementById('invite-method').value;
       if (!email) {
         msg.innerHTML = `<div class="error-box">Email is required.</div>`;
+        return;
+      }
+      if (method === 'password' && !document.getElementById('invite-password').value.trim()) {
+        msg.innerHTML = `<div class="error-box">Set a password, or click Generate.</div>`;
         return;
       }
       msg.innerHTML = '';
       const btn = document.getElementById('invite-btn');
       btn.disabled = true;
       try {
-        const res = await authedFetch('/.netlify/functions/invite-user', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ full_name: name, email, role }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Invite failed');
-        msg.innerHTML = `<div class="success-box">Invite sent to ${email}.</div>`;
+        if (method === 'email') {
+          const res = await authedFetch('/.netlify/functions/invite-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ full_name: name, email, role }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Invite failed');
+          msg.innerHTML = `<div class="success-box">Invite sent to ${email}.</div>`;
+        } else {
+          const password = document.getElementById('invite-password').value.trim();
+          const res = await authedFetch('/.netlify/functions/create-user-with-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ full_name: name, email, role, password }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Could not create user');
+          msg.innerHTML = `<div class="success-box">User created. Password: <strong>${password}</strong> - give this to them now, it won't be shown again.</div>`;
+        }
         document.getElementById('invite-name').value = '';
         document.getElementById('invite-email').value = '';
+        document.getElementById('invite-password').value = '';
         await loadUsers();
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
@@ -797,15 +1038,23 @@
 
     // --- API Keys ---
     async function loadApiKeys() {
-      const { data, error } = await supabaseClient.from('api_keys').select('key_name, key_value');
-      if (error) return; // not an admin, or table not migrated yet - panel is hidden anyway
-      const byName = Object.fromEntries((data || []).map(k => [k.key_name, k.key_value]));
-      if (byName.anthropic) document.getElementById('key-anthropic').value = byName.anthropic;
-      if (byName.pylon) document.getElementById('key-pylon').value = byName.pylon;
-      if (byName.xero_client_id) document.getElementById('key-xero-client-id').value = byName.xero_client_id;
-      if (byName.xero_client_secret) document.getElementById('key-xero-client-secret').value = byName.xero_client_secret;
-      if (byName.xero_webhook_key) document.getElementById('key-xero-webhook-key').value = byName.xero_webhook_key;
-      if (byName.formbay) document.getElementById('key-formbay').value = byName.formbay;
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/check-api-keys-status', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) return; // not an admin, or not migrated yet - panel is hidden anyway
+
+        document.querySelectorAll('.key-status').forEach(el => {
+          const isSet = !!data.status[el.dataset.key];
+          el.innerHTML = isSet
+            ? '<span style="color:var(--green); font-weight:600;">&#10003; set</span>'
+            : '<span style="color:var(--muted);">not set</span>';
+        });
+      } catch {
+        // fails quietly - the fields still work, they just won't show a status
+      }
     }
 
     document.getElementById('save-keys-btn').addEventListener('click', async () => {
@@ -817,6 +1066,9 @@
         { key_name: 'xero_client_secret', key_value: document.getElementById('key-xero-client-secret').value.trim() },
         { key_name: 'xero_webhook_key', key_value: document.getElementById('key-xero-webhook-key').value.trim() },
         { key_name: 'formbay', key_value: document.getElementById('key-formbay').value.trim() },
+        { key_name: 'airwallex_client_id', key_value: document.getElementById('key-airwallex-client-id').value.trim() },
+        { key_name: 'airwallex_api_key', key_value: document.getElementById('key-airwallex-api-key').value.trim() },
+        { key_name: 'airwallex_webhook_secret', key_value: document.getElementById('key-airwallex-webhook-secret').value.trim() },
       ].filter(r => r.key_value);
 
       if (!rows.length) {
@@ -830,6 +1082,17 @@
       msg.innerHTML = error
         ? `<div class="error-box">${error.message}</div>`
         : `<div class="success-box">Saved.</div>`;
+
+      // Clear the fields immediately after a successful save - the value
+      // just travelled to the database, no reason for it to keep sitting
+      // in the browser once that's done.
+      if (!error) {
+        rows.forEach(r => {
+          const input = document.querySelector(`[data-key="${r.key_name}"]`)?.closest('label')?.nextElementSibling;
+          if (input) input.value = '';
+        });
+        await loadApiKeys();
+      }
     });
 
     document.getElementById('test-formbay-btn').addEventListener('click', async () => {
