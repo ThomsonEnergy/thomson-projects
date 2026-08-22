@@ -179,7 +179,7 @@
               <a class="btn secondary" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Invoice ' + data.invoiceNumber + ' - ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy' })}">Email invoice to client</a>
               <a class="btn secondary" target="_blank" href="/invoice.html?token=${data.invoiceToken}&print=1">Download PDF</a>
             </div>
-            <p class="subtitle" style="margin-top:6px;">Gmail opens in a new tab ready to send - the PDF downloads separately, so you'll need to attach it yourself once Gmail's open (no browser can auto-attach a file for you).</p>`;
+            <p class="subtitle" style="margin-top:6px;">Gmail opens in a new tab ready to send - the PDF downloads separately, so you'll need to attach it yourself once Gmail's open (no browser can auto-attach a file for you). The client's invoice page already has a Pay Online option alongside your bank details, generated automatically - nothing else to do here.</p>`;
           confirmBtn.style.display = 'none';
           overlay.querySelector('#create-invoice-cancel-btn').textContent = 'Close';
 
@@ -216,29 +216,6 @@
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
         btn.disabled = false;
         btn.textContent = 'Push to Xero';
-      }
-    }
-
-    async function createPaymentLink(btn) {
-      const msg = document.getElementById('push-xero-msg');
-      btn.disabled = true;
-      btn.textContent = 'Generating...';
-      msg.innerHTML = '';
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/create-payment-link', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ invoiceId: btn.dataset.invoiceId }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate the link');
-        msg.innerHTML = `<div class="success-box">Payment link ready - it'll show automatically on the client's invoice page.</div>`;
-        location.reload();
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-        btn.disabled = false;
-        btn.textContent = 'Generate payment link';
       }
     }
 
@@ -365,9 +342,6 @@
                         ${inv.paid_at ? `<span class="badge accepted">Paid</span>` : `<span class="badge sent" style="margin-right:6px;">Sent</span>`}
                         <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:6px;">View</a>
                         ${!inv.xero_invoice_id ? `<button class="secondary push-xero-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>` : `<span class="subtitle" style="font-size:11px;">In Xero</span>`}
-                        ${!inv.paid_at ? (!inv.airwallex_payment_link_id
-                          ? `<button class="secondary create-payment-link-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Generate payment link</button>`
-                          : `<span class="subtitle" style="font-size:11px;">Payment link sent</span>`) : ''}
                       </td>
                     </tr>`).join('')}
                 </tbody>
@@ -437,9 +411,6 @@
       });
       document.querySelectorAll('.push-xero-btn').forEach(btn => {
         btn.addEventListener('click', () => pushExistingInvoiceToXero(btn));
-      });
-      document.querySelectorAll('.create-payment-link-btn').forEach(btn => {
-        btn.addEventListener('click', () => createPaymentLink(btn));
       });
 
       const duplicateBtn = document.getElementById('duplicate-btn');
