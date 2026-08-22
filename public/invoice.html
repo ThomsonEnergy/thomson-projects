@@ -69,7 +69,11 @@
       const subtotal = labourAmount + materialAmount;
       const gst = Math.round(subtotal * 0.10 * 100) / 100;
       const totalIncGst = subtotal + gst;
-      const balanceDue = totalIncGst - stcAmount;
+      // Balance due comes straight from the server (get_invoice_balance_due,
+      // via the RPC) rather than being recalculated here - this is the
+      // exact same number Airwallex charges, computed in exactly one
+      // place, specifically so the two can never drift apart again.
+      const balanceDue = Number(inv.balance_due);
       const isPaid = !!inv.paid_at;
 
       const detailParts = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
@@ -179,10 +183,9 @@
         ${!isPaid ? `
         <div class="card">
           <h2>Payment details</h2>
-          ${inv.airwallex_payment_link_url ? `
-            <a href="${inv.airwallex_payment_link_url}" target="_blank" style="display:inline-block; background:var(--accent); color:var(--accent-contrast); padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:600; margin-bottom:16px;">Pay online now</a>
-            <p class="subtitle" style="margin-bottom:16px;">Or pay by direct deposit using the details below.</p>
-          ` : ''}
+          <button id="pay-online-btn" data-token="${token}" style="background:var(--accent); color:var(--accent-contrast); padding:12px 24px; border-radius:8px; border:none; font-weight:600; font-size:15px; cursor:pointer; margin-bottom:16px;">Pay online now</button>
+          <div id="pay-online-msg"></div>
+          <p class="subtitle" style="margin-bottom:16px;">Or pay by direct deposit using the details below.</p>
           ${s.bank_name || s.bank_account_number ? `
             <table>
               <tbody>
@@ -195,9 +198,33 @@
             </table>
           ` : ''}
           ${s.payment_details_text ? `<p class="subtitle" style="white-space:pre-wrap; margin-top:10px;">${s.payment_details_text}</p>` : ''}
-          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text && !inv.airwallex_payment_link_url ? `<p class="subtitle">Contact us for payment details.</p>` : ''}
+          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? `<p class="subtitle">Contact us for payment details.</p>` : ''}
         </div>` : ''}
       `;
+
+      const payBtn = document.getElementById('pay-online-btn');
+      if (payBtn) {
+        payBtn.addEventListener('click', async () => {
+          const msgEl = document.getElementById('pay-online-msg');
+          payBtn.disabled = true;
+          payBtn.textContent = 'Preparing secure payment...';
+          msgEl.innerHTML = '';
+          try {
+            const res = await fetch('/.netlify/functions/get-or-create-payment-link', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: payBtn.dataset.token }),
+            });
+            const result = await res.json();
+            if (!res.ok || !result.ok) throw new Error(result.error || 'Could not start payment');
+            window.location.href = result.url;
+          } catch (err) {
+            msgEl.innerHTML = `<p class="subtitle" style="color:var(--red, #e05252);">${err.message}</p>`;
+            payBtn.disabled = false;
+            payBtn.textContent = 'Pay online now';
+          }
+        });
+      }
     }
 
     load().then(() => {
