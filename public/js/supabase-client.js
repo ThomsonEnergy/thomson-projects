@@ -114,6 +114,15 @@ function moneyOrHidden(n) {
   return (n === null || n === undefined) ? ' - ' : money(n);
 }
 
+// Opens Gmail's own compose window directly, rather than whatever the
+// browser/OS decides is the "default" mail app for a plain mailto: link -
+// most people using Gmail actually use it in the browser, not a desktop
+// mail client, so mailto: often opens the wrong thing entirely.
+function gmailComposeUrl({ to = '', subject = '', body = '' } = {}) {
+  const params = new URLSearchParams({ view: 'cm', fs: '1', to, su: subject, body });
+  return `https://mail.google.com/mail/?${params.toString()}`;
+}
+
 // Cost centre numbers (e.g. "7000-2") are computed from the job number
 // plus the stage's position, not stored - position is 1-indexed.
 function costCentreNumber(jobNumber, position) {

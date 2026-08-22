@@ -276,7 +276,11 @@
             <div class="success-box">Created as ${data.invoiceNumber}.</div>
             <label>Invoice link</label>
             <input readonly value="${invoiceUrl}" onclick="this.select()" />
-            <a class="btn secondary" style="margin-top:10px; display:inline-flex;" href="mailto:${clientEmail}?subject=${encodeURIComponent('Invoice ' + data.invoiceNumber)}&body=${encodeURIComponent('Hi ' + clientName + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy')}">Email invoice to client</a>`;
+            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+              <a class="btn secondary" target="_blank" href="${gmailComposeUrl({ to: clientEmail, subject: 'Invoice ' + data.invoiceNumber, body: 'Hi ' + clientName + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy' })}">Email invoice to client</a>
+              <a class="btn secondary" target="_blank" href="/invoice.html?token=${data.invoiceToken}&print=1">Download PDF</a>
+            </div>
+            <p class="subtitle" style="margin-top:6px;">Gmail opens ready to send - the PDF downloads separately for you to attach, since no browser can auto-attach a file into an email.</p>`;
           confirmBtn.style.display = 'none';
           overlay.querySelector('#standalone-cancel-btn').textContent = 'Close';
           await loadInvoices();

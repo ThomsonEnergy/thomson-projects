@@ -200,7 +200,11 @@
       `;
     }
 
-    load();
+    load().then(() => {
+      if (new URLSearchParams(window.location.search).get('print') === '1') {
+        setTimeout(() => window.print(), 400); // brief pause so the content's actually rendered first
+      }
+    });
   </script>
 </body>
 </html>

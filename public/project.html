@@ -175,7 +175,11 @@
             <div class="success-box">Created as ${data.invoiceNumber}.</div>
             <label>Invoice link</label>
             <input readonly value="${invoiceUrl}" onclick="this.select()" />
-            <a class="btn secondary" style="margin-top:10px; display:inline-flex;" href="mailto:${project.client_email || ''}?subject=${encodeURIComponent('Invoice ' + data.invoiceNumber + ' - ' + project.name)}&body=${encodeURIComponent('Hi ' + project.client_name + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy')}">Email invoice to client</a>`;
+            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+              <a class="btn secondary" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Invoice ' + data.invoiceNumber + ' - ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy' })}">Email invoice to client</a>
+              <a class="btn secondary" target="_blank" href="/invoice.html?token=${data.invoiceToken}&print=1">Download PDF</a>
+            </div>
+            <p class="subtitle" style="margin-top:6px;">Gmail opens in a new tab ready to send - the PDF downloads separately, so you'll need to attach it yourself once Gmail's open (no browser can auto-attach a file for you).</p>`;
           confirmBtn.style.display = 'none';
           overlay.querySelector('#create-invoice-cancel-btn').textContent = 'Close';
 
@@ -304,7 +308,10 @@
           <h2>Client quote link</h2>
           <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
           <input readonly value="${quoteUrl}" style="margin-bottom:10px;" onclick="this.select()" />
-          <a class="btn secondary" href="mailto:${project.client_email || ''}?subject=${encodeURIComponent('Quote: ' + project.name)}&body=${encodeURIComponent('Hi ' + project.client_name + ',\n\nPlease find your quote here:\n' + quoteUrl + '\n\nThanks,\nThomson Energy')}">Email quote to client</a>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <a class="btn secondary" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Quote: ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your quote here:\n' + quoteUrl + '\n\nThanks,\nThomson Energy' })}">Email quote to client</a>
+            <a class="btn secondary" target="_blank" href="${quoteUrl}${quoteUrl.includes('?') ? '&' : '?'}print=1">Download PDF</a>
+          </div>
           ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * (project.deposit_percent / 100))}) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
           ${project.proposal_template === 'solar' && project.pylon_link ? `<p class="subtitle" style="margin-top:6px;">Pylon design: <a class="link-quiet" href="${project.pylon_link}" target="_blank" rel="noopener">${project.pylon_link}</a></p>` : ''}
         </div>
