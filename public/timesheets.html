@@ -54,9 +54,19 @@
         <div id="todays-schedule"></div>
         <div class="grid cols-3">
           <div style="grid-column: span 2;">
-            <label style="margin-top:0">Job</label>
-            <select id="clock-project"><option value="">General / Office</option></select>
+            <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
+            <input id="clock-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
+            <div id="clock-job-results"></div>
+            <div id="clock-job-selected" class="subtitle" style="margin-top:4px;"></div>
           </div>
+        </div>
+        <div id="clock-category-row" style="margin-top:10px;">
+          <label style="margin-top:0">What's this time for</label>
+          <select id="clock-category">
+            <option value="office">Office / admin</option>
+            <option value="training">Training</option>
+            <option value="other">Other</option>
+          </select>
         </div>
         <div id="clock-cost-centres" style="display:none; margin-top:10px;">
           <label style="margin-top:0">Which stage(s) are you working on?</label>
@@ -157,6 +167,25 @@
       </div>
       <div id="xero-push-msg"></div>
     </div>
+
+    <div class="card" id="nonbillable-card" style="display:none;">
+      <h2>Non-billable time</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Real cost of training and office time, not just hours - based on each person's own pay rate for when it was actually worked.</p>
+      <div class="grid cols-3">
+        <div>
+          <label style="margin-top:0">From</label>
+          <input type="date" id="nonbillable-start" />
+        </div>
+        <div>
+          <label style="margin-top:0">To</label>
+          <input type="date" id="nonbillable-end" />
+        </div>
+        <div style="display:flex; align-items:end;">
+          <button id="nonbillable-refresh-btn" style="width:100%;">Refresh</button>
+        </div>
+      </div>
+      <div id="nonbillable-results" style="margin-top:14px;"></div>
+    </div>
   </div>
 
   <script src="/js/supabase-client.js"></script>
@@ -186,7 +215,6 @@
         .limit(200);
       cachedProjects = data || [];
       const optionsHtml = cachedProjects.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-      document.getElementById('clock-project').insertAdjacentHTML('beforeend', optionsHtml);
       document.getElementById('manual-project').insertAdjacentHTML('beforeend', optionsHtml);
     }
 
@@ -245,16 +273,44 @@
 
       container.querySelectorAll('.quick-clock-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          document.getElementById('clock-project').value = btn.dataset.projectId;
-          loadCostCentreChips(btn.dataset.projectId);
+          selectClockJob(btn.dataset.projectId || null, btn.textContent.trim());
         });
       });
     }
 
     let selectedClockCostCentres = [];
+    let selectedClockJobId = null;
 
-    document.getElementById('clock-project').addEventListener('change', (e) => {
-      loadCostCentreChips(e.target.value);
+    function selectClockJob(projectId, label) {
+      selectedClockJobId = projectId;
+      document.getElementById('clock-job-search').value = label || '';
+      document.getElementById('clock-job-selected').textContent = projectId ? `Selected: ${label}` : '';
+      document.getElementById('clock-category-row').style.display = projectId ? 'none' : 'block';
+      loadCostCentreChips(projectId);
+    }
+
+    let clockJobSearchTimeout;
+    document.getElementById('clock-job-search').addEventListener('input', (e) => {
+      clearTimeout(clockJobSearchTimeout);
+      const q = e.target.value.trim();
+      selectedClockJobId = null;
+      document.getElementById('clock-job-selected').textContent = '';
+      document.getElementById('clock-category-row').style.display = 'block';
+      if (q.length < 2) { document.getElementById('clock-job-results').innerHTML = ''; return; }
+      clockJobSearchTimeout = setTimeout(async () => {
+        const results = await searchProjects(q);
+        const resultsEl = document.getElementById('clock-job-results');
+        if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
+        resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${(p.job_number ? '#' + p.job_number + ' ' : '') + p.name}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+        </div>`;
+        resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
+          row.addEventListener('click', () => {
+            selectClockJob(row.dataset.id, row.dataset.label);
+            resultsEl.innerHTML = '';
+          });
+        });
+      }, 250);
     });
 
     async function loadCostCentreChips(projectId) {
@@ -298,7 +354,7 @@
     }
 
     document.getElementById('clock-in-btn').addEventListener('click', async () => {
-      const projectId = document.getElementById('clock-project').value || null;
+      const projectId = selectedClockJobId;
       const msg = document.getElementById('clock-msg');
 
       const wrap = document.getElementById('clock-cost-centres');
@@ -307,7 +363,11 @@
         return;
       }
 
-      const entry = { staff_id: myUserId, project_id: projectId };
+      const entry = {
+        staff_id: myUserId,
+        project_id: projectId,
+        time_category: projectId ? 'job' : document.getElementById('clock-category').value,
+      };
       if (selectedClockCostCentres.length === 1) {
         entry.cost_centre_id = selectedClockCostCentres[0];
       } else if (selectedClockCostCentres.length > 1) {
@@ -318,6 +378,9 @@
       if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       msg.innerHTML = '';
       selectedClockCostCentres = [];
+      selectedClockJobId = null;
+      document.getElementById('clock-job-search').value = '';
+      document.getElementById('clock-job-selected').textContent = '';
       document.getElementById('clock-cost-centres').style.display = 'none';
       await checkActiveClock();
     });
@@ -689,6 +752,51 @@
       document.getElementById('xero-payroll-card').style.display = 'block';
     }
 
+    function initNonbillableCard(myRole) {
+      if (myRole !== 'admin' && myRole !== 'finance') return;
+      document.getElementById('nonbillable-card').style.display = 'block';
+      const now = new Date();
+      const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      document.getElementById('nonbillable-start').value = firstOfMonth.toISOString().slice(0, 10);
+      document.getElementById('nonbillable-end').value = now.toISOString().slice(0, 10);
+      loadNonbillableSummary();
+    }
+
+    async function loadNonbillableSummary() {
+      const resultsEl = document.getElementById('nonbillable-results');
+      const start = document.getElementById('nonbillable-start').value;
+      const end = document.getElementById('nonbillable-end').value;
+      if (!start || !end) return;
+
+      resultsEl.innerHTML = `<p class="subtitle">Loading...</p>`;
+      const { data, error } = await supabaseClient.rpc('get_nonbillable_cost_by_category', { p_start: start, p_end: end });
+      if (error) { resultsEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      const labels = { training: 'Training', office: 'Office / admin', other: 'Other' };
+      const rows = ['training', 'office', 'other'].map(cat => {
+        const row = (data || []).find(d => d.category === cat);
+        return { category: cat, hours: row ? Number(row.total_hours) : 0, cost: row ? Number(row.total_cost) : 0 };
+      });
+      const totalHours = rows.reduce((s, r) => s + r.hours, 0);
+      const totalCost = rows.reduce((s, r) => s + r.cost, 0);
+
+      if (totalHours === 0) {
+        resultsEl.innerHTML = `<p class="subtitle">No non-billable time logged in this range.</p>`;
+        return;
+      }
+
+      resultsEl.innerHTML = `
+        <table>
+          <thead><tr><th>Category</th><th class="num">Hours</th><th class="num">Cost</th></tr></thead>
+          <tbody>
+            ${rows.map(r => `<tr><td>${labels[r.category]}</td><td class="num">${r.hours.toFixed(1)}</td><td class="num">${money(r.cost)}</td></tr>`).join('')}
+            <tr style="font-weight:600;"><td>Total</td><td class="num">${totalHours.toFixed(1)}</td><td class="num">${money(totalCost)}</td></tr>
+          </tbody>
+        </table>`;
+    }
+
+    document.getElementById('nonbillable-refresh-btn').addEventListener('click', loadNonbillableSummary);
+
     document.getElementById('xero-push-btn').addEventListener('click', async () => {
       const msg = document.getElementById('xero-push-msg');
       const startDate = document.getElementById('xero-push-start').value;
@@ -777,11 +885,18 @@
       const myRole = await getMyRole();
       await loadProjectOptions();
       await loadTodaysSchedule();
+
+      const deepLinkProjectId = new URLSearchParams(window.location.search).get('clockin_project');
+      if (deepLinkProjectId) {
+        const project = cachedProjects.find(p => p.id === deepLinkProjectId);
+        selectClockJob(deepLinkProjectId, project ? project.name : 'Job');
+      }
       await checkActiveClock();
       await loadMyEntries();
       await loadMyLeave();
       await loadApprovals(myRole);
       initXeroPayrollCard(myRole);
+      initNonbillableCard(myRole);
     })();
   </script>
 </body>

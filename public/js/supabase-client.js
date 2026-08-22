@@ -114,6 +114,25 @@ function moneyOrHidden(n) {
   return (n === null || n === undefined) ? ' - ' : money(n);
 }
 
+// Shared job search - by job number, name, client name, or site address.
+// Used by the Schedule day view's draggable job panel, the Timesheets job
+// picker, and anywhere else that needs "find a job by anything about it."
+async function searchProjects(query, limit = 15) {
+  if (!query || query.trim().length < 2) return [];
+  const q = query.trim();
+  const isNumeric = /^\d+$/.test(q);
+  const orClauses = [`name.ilike.%${q}%`, `client_name.ilike.%${q}%`, `client_address.ilike.%${q}%`];
+  if (isNumeric) orClauses.push(`job_number.eq.${q}`, `quote_number.eq.${q}`);
+  const { data, error } = await supabaseClient
+    .from('projects')
+    .select('id, name, job_number, quote_number, client_name, client_address, pipeline_stage')
+    .or(orClauses.join(','))
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) { console.error('searchProjects error:', error.message); return []; }
+  return data || [];
+}
+
 // Opens Gmail's own compose window directly, rather than whatever the
 // browser/OS decides is the "default" mail app for a plain mailto: link -
 // most people using Gmail actually use it in the browser, not a desktop

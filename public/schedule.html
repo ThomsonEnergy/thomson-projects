@@ -41,9 +41,59 @@
     text-overflow: ellipsis;
   }
   .cal-chip.leave { background: var(--red); color: #fff; opacity: 0.85; }
+  .cal-day.holiday { background: var(--surface-1); opacity: 0.6; }
+  .cal-day.holiday .day-num::after { content: " \2022 holiday"; font-size: 9px; color: var(--muted); font-weight: 400; }
   @media (max-width: 800px) {
     .cal-day { min-height: 60px; font-size: 10.5px; }
   }
+
+  .day-board { display: flex; gap: 16px; align-items: flex-start; }
+  .day-board-main { flex: 1; overflow-x: auto; min-width: 0; }
+  .day-board-sidebar { width: 280px; flex-shrink: 0; }
+  @media (max-width: 900px) {
+    .day-board { flex-direction: column; }
+    .day-board-sidebar { width: 100%; }
+  }
+
+  .day-time-header { display: flex; min-width: 900px; border-bottom: 1px solid var(--border); }
+  .day-time-header .staff-col-spacer { width: 120px; flex-shrink: 0; }
+  .day-time-header .hour-label { flex: 1; font-size: 11px; color: var(--muted); text-align:center; padding-bottom: 6px; }
+  .day-time-header .hour-label.holiday-hdr { color: var(--muted); opacity: 0.6; }
+
+  .staff-row { display: flex; min-width: 900px; border-bottom: 1px solid var(--border); }
+  .staff-row.holiday-row { background: var(--surface-1); }
+  .staff-name-col {
+    width: 120px; flex-shrink: 0; display: flex; align-items: center;
+    font-size: 13px; font-weight: 600; padding: 10px 8px;
+  }
+  .staff-timeline {
+    position: relative; flex-shrink: 0; min-height: 52px;
+    background-image: repeating-linear-gradient(to right, var(--border), var(--border) 1px, transparent 1px, transparent calc(100% / var(--hour-count)));
+  }
+  .staff-timeline.drag-over { background-color: var(--accent-dim); }
+
+  .day-block {
+    position: absolute; top: 4px; bottom: 4px;
+    background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 4px;
+    padding: 3px 6px; font-size: 11px; color: var(--accent); overflow: hidden; cursor: pointer;
+  }
+  .day-block.leave { background: var(--red); color: #fff; border-color: var(--red); opacity: 0.85; }
+  .day-block.reconciled {
+    background: var(--accent-dim); border-color: var(--green); color: var(--green);
+    cursor: default;
+  }
+  .day-block.site-visit {
+    background: rgba(234, 179, 8, 0.15); border-color: #eab308; color: #eab308;
+  }
+
+  .job-search-card { position: sticky; top: 12px; }
+  .job-card {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; margin-bottom: 8px; cursor: grab; font-size: 12px;
+  }
+  .job-card:active { cursor: grabbing; }
+  .job-card .jc-title { font-weight: 600; margin-bottom: 2px; }
+  .job-card .jc-meta { color: var(--muted); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -81,13 +131,35 @@
     <p class="subtitle">Who's on which job, and who's on leave. Approved leave shows automatically - click a day to assign someone to a job.</p>
 
     <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-        <button class="secondary" id="prev-month-btn">&larr; Prev</button>
-        <h2 id="month-label" style="margin:0;"></h2>
-        <button class="secondary" id="next-month-btn">Next &rarr;</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+        <button class="secondary" id="prev-btn">&larr; Prev</button>
+        <h2 id="period-label" style="margin:0;"></h2>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="secondary" id="view-month-btn">Month</button>
+          <button class="secondary" id="view-day-btn">Day</button>
+          <button class="secondary" id="next-btn">Next &rarr;</button>
+        </div>
       </div>
-      <div class="cal-grid" id="cal-dow-row"></div>
-      <div class="cal-grid" id="cal-grid" style="margin-top:6px;"></div>
+      <div id="month-view">
+        <div class="cal-grid" id="cal-dow-row"></div>
+        <div class="cal-grid" id="cal-grid" style="margin-top:6px;"></div>
+      </div>
+      <div id="day-view" style="display:none;">
+        <div class="day-board">
+          <div class="day-board-main">
+            <div id="day-time-header"></div>
+            <div id="day-staff-rows"></div>
+          </div>
+          <div class="day-board-sidebar">
+            <div class="job-search-card">
+              <label style="margin-top:0">Find a job</label>
+              <input id="job-search-input" placeholder="Job number, name, client, address..." autocomplete="off" />
+              <p class="subtitle" style="margin:8px 0 0;">Drag a job onto a staff member's timeline to schedule them.</p>
+              <div id="job-search-results" style="margin-top:10px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -101,6 +173,16 @@
         <label style="margin-top:0">Assign staff to a job</label>
         <select id="assign-staff"></select>
         <select id="assign-project" style="margin-top:8px;"></select>
+        <div class="grid cols-2" style="margin-top:8px;">
+          <div>
+            <label style="margin-top:0">Start time</label>
+            <input type="time" id="assign-start-time" value="07:00" />
+          </div>
+          <div>
+            <label style="margin-top:0">Finish time</label>
+            <input type="time" id="assign-end-time" value="15:30" />
+          </div>
+        </div>
         <button id="assign-save-btn" style="margin-top:10px;">Assign</button>
         <div id="assign-msg"></div>
       </div>
@@ -113,13 +195,27 @@
   <script src="/js/supabase-client.js"></script>
   <script src="/js/theme.js"></script>
   <script>
-    let viewYear, viewMonth; // 0-indexed month
+    let viewYear, viewMonth; // month view state (0-indexed month)
+    let currentView = 'month';
     let myRole = 'staff';
     let staffList = [];
     let projectList = [];
+    let publicHolidaySet = new Set(); // 'YYYY-MM-DD' strings, for the currently loaded range
 
     function toDateStr(y, m, d) {
       return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+    function dateToStr(d) {
+      return toDateStr(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+    function timeToMinutes(t) {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    }
+
+    async function fetchHolidays(rangeStart, rangeEnd) {
+      const { data } = await supabaseClient.from('public_holidays').select('holiday_date').gte('holiday_date', rangeStart).lte('holiday_date', rangeEnd);
+      publicHolidaySet = new Set((data || []).map(h => h.holiday_date));
     }
 
     function renderDowRow() {
@@ -128,38 +224,39 @@
     }
 
     async function loadMonth() {
-      document.getElementById('month-label').textContent = new Date(viewYear, viewMonth, 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' });
+      document.getElementById('period-label').textContent = new Date(viewYear, viewMonth, 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' });
 
       const firstOfMonth = new Date(viewYear, viewMonth, 1);
       const startDow = firstOfMonth.getDay();
-      const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
       const gridStart = new Date(viewYear, viewMonth, 1 - startDow);
-      const totalCells = 42; // 6 weeks, keeps the grid a consistent height
+      const totalCells = 42;
 
-      const rangeStart = toDateStr(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate());
+      const rangeStart = dateToStr(gridStart);
       const gridEndDate = new Date(gridStart); gridEndDate.setDate(gridStart.getDate() + totalCells - 1);
-      const rangeEnd = toDateStr(gridEndDate.getFullYear(), gridEndDate.getMonth(), gridEndDate.getDate());
+      const rangeEnd = dateToStr(gridEndDate);
 
       const [{ data: assignments }, { data: leave }] = await Promise.all([
         supabaseClient.from('schedule_assignments').select('*, profiles(full_name), projects(name)').gte('assignment_date', rangeStart).lte('assignment_date', rangeEnd),
         supabaseClient.from('leave_requests').select('*, profiles(full_name)').eq('status', 'approved').lte('start_date', rangeEnd).gte('end_date', rangeStart),
       ]);
+      await fetchHolidays(rangeStart, rangeEnd);
 
       const assignmentsByDate = {};
       (assignments || []).forEach(a => { (assignmentsByDate[a.assignment_date] ||= []).push(a); });
 
-      const todayStr = toDateStr(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+      const todayStr = dateToStr(new Date());
 
       let html = '';
       for (let i = 0; i < totalCells; i++) {
         const cellDate = new Date(gridStart); cellDate.setDate(gridStart.getDate() + i);
-        const dateStr = toDateStr(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate());
+        const dateStr = dateToStr(cellDate);
         const isOtherMonth = cellDate.getMonth() !== viewMonth;
+        const isHoliday = publicHolidaySet.has(dateStr);
         const dayAssignments = assignmentsByDate[dateStr] || [];
         const dayLeave = (leave || []).filter(l => dateStr >= l.start_date && dateStr <= l.end_date);
 
         html += `
-          <div class="cal-day ${isOtherMonth ? 'other-month' : ''} ${dateStr === todayStr ? 'today' : ''}" data-date="${dateStr}">
+          <div class="cal-day ${isOtherMonth ? 'other-month' : ''} ${dateStr === todayStr ? 'today' : ''} ${isHoliday ? 'holiday' : ''}" data-date="${dateStr}">
             <div class="day-num">${cellDate.getDate()}</div>
             ${dayLeave.map(l => `<span class="cal-chip leave">${(l.profiles && l.profiles.full_name) || 'Staff'} (leave)</span>`).join('')}
             ${dayAssignments.map(a => `<span class="cal-chip">${(a.profiles && a.profiles.full_name) || 'Staff'} &middot; ${(a.projects && a.projects.name) || 'Job'}</span>`).join('')}
@@ -172,39 +269,341 @@
       });
     }
 
-    function openDayPanel(dateStr, dayAssignments, dayLeave) {
-      document.getElementById('day-panel-heading').textContent = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    let dayViewDate; // Date - the single day currently shown in Day view
+    const CATEGORY_LABELS = { training: 'Training', office: 'Office / admin', other: 'Other' };
 
-      document.getElementById('day-panel-leave').innerHTML = dayLeave.length
-        ? `<p class="subtitle" style="margin-bottom:6px;">On leave:</p>` + dayLeave.map(l => `<div class="badge draft" style="margin:0 6px 6px 0; display:inline-block;">${(l.profiles && l.profiles.full_name) || 'Staff'} (${l.leave_type})</div>`).join('')
-        : '';
+    const DAY_START_HOUR = 5;
+    const DAY_END_HOUR = 20;
+    let pxPerHour = 90; // recalculated to fit the container width on each render
 
-      document.getElementById('day-panel-assignments').innerHTML = dayAssignments.length
-        ? `<p class="subtitle" style="margin:10px 0 6px;">Assigned:</p>` + dayAssignments.map(a => `
-            <div class="project-list-item">
-              <div class="name">${(a.profiles && a.profiles.full_name) || 'Staff'}</div>
-              <div class="meta">${(a.projects && a.projects.name) || 'General'}</div>
-            </div>`).join('')
-        : `<p class="subtitle" style="margin:10px 0 0;">Nobody assigned yet.</p>`;
-
-      if (myRole === 'admin' || myRole === 'finance' || myRole === 'sales') {
-        document.getElementById('day-panel-add').style.display = 'block';
-        document.getElementById('assign-save-btn').onclick = async () => {
-          const staffId = document.getElementById('assign-staff').value;
-          const projectId = document.getElementById('assign-project').value || null;
-          const msg = document.getElementById('assign-msg');
-          if (!staffId) { msg.innerHTML = `<div class="error-box">Pick a staff member.</div>`; return; }
-          const { error } = await supabaseClient.from('schedule_assignments').insert({ staff_id: staffId, project_id: projectId, assignment_date: dateStr });
-          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-          document.getElementById('day-panel-overlay').style.display = 'none';
-          await loadMonth();
-        };
-      } else {
-        document.getElementById('day-panel-add').style.display = 'none';
-      }
-
-      document.getElementById('day-panel-overlay').style.display = 'flex';
+    function sydneyDateStr(isoString) {
+      return new Date(isoString).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
     }
+    function sydneyTimeStr(isoString) {
+      return new Date(isoString).toLocaleTimeString('en-GB', { timeZone: 'Australia/Sydney', hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    async function loadDay() {
+      document.getElementById('period-label').textContent = dayViewDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      const dateStr = dateToStr(dayViewDate);
+      const todayStr = dateToStr(new Date());
+      const isPastDay = dateStr < todayStr;
+
+      // Wide UTC window either side of the viewed day, to safely catch
+      // anything near the Sydney midnight boundary - filtered precisely
+      // by real Sydney-local date below.
+      const windowStart = new Date(dateStr + 'T00:00:00'); windowStart.setDate(windowStart.getDate() - 1);
+      const windowEnd = new Date(dateStr + 'T00:00:00'); windowEnd.setDate(windowEnd.getDate() + 2);
+
+      const [{ data: assignments }, { data: leave }, { data: dayTimeEntries }] = await Promise.all([
+        supabaseClient.from('schedule_assignments').select('*, profiles(id, full_name), projects(id, name, job_number)').eq('assignment_date', dateStr),
+        supabaseClient.from('leave_requests').select('*, profiles(id, full_name)').eq('status', 'approved').lte('start_date', dateStr).gte('end_date', dateStr),
+        supabaseClient.from('time_entries').select('staff_id, project_id, time_category, clock_in, clock_out').gte('clock_in', windowStart.toISOString()).lte('clock_in', windowEnd.toISOString()).not('clock_out', 'is', null),
+      ]);
+      await fetchHolidays(dateStr, dateStr);
+      const isHoliday = publicHolidaySet.has(dateStr);
+
+      // Reconciliation: only meaningful for days that have actually
+      // happened - today's still in progress, future days haven't
+      // started. For each past assignment, find real clocked time
+      // against the same job (or the same non-billable category) that
+      // day. Found -> lock it in with the real times. Not found -> it
+      // was scheduled but never actually worked, so remove it rather
+      // than leave an inaccurate plan sitting on the board.
+      const toDelete = [];
+      const reconciledById = {};
+      if (isPastDay) {
+        (assignments || []).forEach(a => {
+          const matches = (dayTimeEntries || []).filter(te =>
+            te.staff_id === a.staff_id &&
+            sydneyDateStr(te.clock_in) === dateStr &&
+            (a.project_id ? te.project_id === a.project_id : (!te.project_id && te.time_category === a.block_type))
+          );
+          if (matches.length) {
+            const starts = matches.map(m => sydneyTimeStr(m.clock_in));
+            const ends = matches.map(m => sydneyTimeStr(m.clock_out));
+            reconciledById[a.id] = { start: starts.sort()[0], end: ends.sort().slice(-1)[0] };
+          } else {
+            toDelete.push(a.id);
+          }
+        });
+        if (toDelete.length) {
+          await supabaseClient.from('schedule_assignments').delete().in('id', toDelete);
+        }
+      }
+      const liveAssignments = (assignments || []).filter(a => !toDelete.includes(a.id));
+
+      const hourCount = DAY_END_HOUR - DAY_START_HOUR;
+      const mainWidth = document.getElementById('day-time-header').parentElement.clientWidth || 900;
+      pxPerHour = Math.max(70, Math.floor((mainWidth - 90) / hourCount));
+      const timelineWidth = pxPerHour * hourCount;
+
+      let headerHtml = `<div class="day-time-header" style="min-width:${90 + timelineWidth}px;"><div class="staff-col-spacer"></div>`;
+      for (let h = DAY_START_HOUR; h < DAY_END_HOUR; h++) {
+        headerHtml += `<div class="hour-label ${isHoliday ? 'holiday-hdr' : ''}" style="width:${pxPerHour}px; flex:none;">${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'am' : 'pm'}</div>`;
+      }
+      headerHtml += `</div>`;
+      document.getElementById('day-time-header').innerHTML = headerHtml;
+
+      const activeStaff = staffList; // already filtered to active in loadPickerData
+
+      let rowsHtml = '';
+      activeStaff.forEach(staff => {
+        const staffAssignments = liveAssignments.filter(a => a.staff_id === staff.id);
+        const staffLeave = (leave || []).find(l => l.staff_id === staff.id || (l.profiles && l.profiles.id === staff.id));
+
+        let blocksHtml = '';
+        if (staffLeave) {
+          blocksHtml += `<div class="day-block leave" style="left:0; width:${timelineWidth}px;">${staff.full_name} - leave (${staffLeave.leave_type || 'approved'})</div>`;
+        }
+        staffAssignments.forEach(a => {
+          const reconciled = reconciledById[a.id];
+          const displayStart = reconciled ? reconciled.start : a.start_time.slice(0, 5);
+          const displayEnd = reconciled ? reconciled.end : a.end_time.slice(0, 5);
+          const startMin = timeToMinutes(displayStart) - DAY_START_HOUR * 60;
+          const endMin = timeToMinutes(displayEnd) - DAY_START_HOUR * 60;
+          const left = Math.max(0, startMin) / 60 * pxPerHour;
+          const width = Math.max(20, (endMin - startMin) / 60 * pxPerHour);
+          const label = a.project_id
+            ? `${displayStart} - ${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
+            : `${CATEGORY_LABELS[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
+          const isNote = !a.project_id;
+          const noteStyle = isNote && !reconciled ? 'background:var(--surface-1); color:var(--muted); border-color:var(--border);' : '';
+          const siteVisitClass = a.block_type === 'site_visit' && !reconciled ? 'site-visit' : '';
+          blocksHtml += `
+            <div class="day-block ${reconciled ? 'reconciled' : ''} ${siteVisitClass}" data-id="${a.id}" data-project-id="${a.project_id || ''}" data-reconciled="${reconciled ? '1' : ''}" style="left:${left}px; width:${width}px; ${noteStyle}">
+              ${!reconciled ? `<div class="block-resize-handle" data-edge="left" style="position:absolute; left:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
+              <span class="block-label">${label}${reconciled ? ' &#10003;' : ''}</span>
+              ${!reconciled ? `<div class="block-resize-handle" data-edge="right" style="position:absolute; right:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
+            </div>`;
+        });
+
+        rowsHtml += `
+          <div class="staff-row ${isHoliday ? 'holiday-row' : ''}" style="min-width:${90 + timelineWidth}px;">
+            <div class="staff-name-col">${staff.full_name || 'Unnamed'}</div>
+            <div class="staff-timeline" data-staff-id="${staff.id}" style="width:${timelineWidth}px; --hour-count:${hourCount};">
+              ${blocksHtml}
+            </div>
+          </div>`;
+      });
+      document.getElementById('day-staff-rows').innerHTML = rowsHtml;
+
+      wireStaffTimelines();
+      wireDayBlocks(liveAssignments);
+    }
+
+    function minutesFromX(x, timelineEl) {
+      const hours = x / pxPerHour;
+      let minutes = DAY_START_HOUR * 60 + hours * 60;
+      minutes = Math.round(minutes / 15) * 15; // snap to 15 min
+      return minutes;
+    }
+    function minutesToTimeStr(mins) {
+      mins = Math.max(0, Math.min(23 * 60 + 45, mins));
+      const h = Math.floor(mins / 60), m = mins % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+
+    function wireStaffTimelines() {
+      document.querySelectorAll('.staff-timeline').forEach(timeline => {
+        timeline.addEventListener('dragover', (e) => { e.preventDefault(); timeline.classList.add('drag-over'); });
+        timeline.addEventListener('dragleave', () => timeline.classList.remove('drag-over'));
+        timeline.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          timeline.classList.remove('drag-over');
+          const projectData = e.dataTransfer.getData('application/json');
+          if (!projectData) return;
+          const project = JSON.parse(projectData);
+          const rect = timeline.getBoundingClientRect();
+          const startMin = minutesFromX(e.clientX - rect.left, timeline);
+          const startTime = minutesToTimeStr(startMin);
+          // No job number yet means this is a lead/draft quote, not an
+          // approved job - scheduling time against it means visiting the
+          // site to assess/quote, not doing actual job work. A shorter
+          // default duration suits a visit better than a full work day.
+          const isSiteVisit = !project.job_number;
+          const endTime = minutesToTimeStr(startMin + (isSiteVisit ? 60 : 8 * 60));
+          const { error } = await supabaseClient.from('schedule_assignments').insert({
+            staff_id: timeline.dataset.staffId, project_id: project.id,
+            block_type: isSiteVisit ? 'site_visit' : 'job',
+            assignment_date: dateToStr(dayViewDate), start_time: startTime, end_time: endTime,
+          });
+          if (error) { alert(error.message); return; }
+          await loadDay();
+        });
+
+        // Double-click empty timeline space to add a non-billable block
+        // (Training/Office/Other) - a real category, not free text, so
+        // it can actually be summed and costed later, not just labelled.
+        timeline.addEventListener('dblclick', async (e) => {
+          if (e.target.closest('.day-block')) return;
+          const category = await promptCategory();
+          if (!category) return;
+          const rect = timeline.getBoundingClientRect();
+          const startMin = minutesFromX(e.clientX - rect.left, timeline);
+          const { error } = await supabaseClient.from('schedule_assignments').insert({
+            staff_id: timeline.dataset.staffId, project_id: null, block_type: category.type, note: category.note,
+            assignment_date: dateToStr(dayViewDate), start_time: minutesToTimeStr(startMin), end_time: minutesToTimeStr(startMin + 240),
+          });
+          if (error) { alert(error.message); return; }
+          await loadDay();
+        });
+      });
+    }
+
+    function promptCategory() {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200;';
+        overlay.innerHTML = `
+          <div class="card" style="max-width:360px; width:90%;">
+            <h2>Block type</h2>
+            <label style="margin-top:0">Category</label>
+            <select id="category-select">
+              <option value="training">Training</option>
+              <option value="office">Office / admin</option>
+              <option value="other">Other</option>
+            </select>
+            <label>Note (optional)</label>
+            <input id="category-note" placeholder="e.g. TAFE - Cert III" />
+            <div style="margin-top:14px;">
+              <button id="category-ok-btn">Add</button>
+              <button type="button" class="secondary" id="category-cancel-btn">Cancel</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#category-cancel-btn').addEventListener('click', () => { overlay.remove(); resolve(null); });
+        overlay.querySelector('#category-ok-btn').addEventListener('click', () => {
+          const type = overlay.querySelector('#category-select').value;
+          const note = overlay.querySelector('#category-note').value.trim() || null;
+          overlay.remove();
+          resolve({ type, note });
+        });
+      });
+    }
+
+    function wireDayBlocks(assignments) {
+      document.querySelectorAll('.day-block[data-id]').forEach(block => {
+        const isReconciled = block.dataset.reconciled === '1';
+        const timeline = block.closest('.staff-timeline');
+        let dragMode = null; // 'move' | 'resize-left' | 'resize-right'
+        let startX = 0;
+        let originalLeft = 0, originalWidth = 0;
+        let moved = false;
+
+        function onMouseMove(e) {
+          const dx = e.clientX - startX;
+          if (Math.abs(dx) > 3) moved = true;
+          if (dragMode === 'move') {
+            block.style.left = Math.max(0, originalLeft + dx) + 'px';
+          } else if (dragMode === 'resize-right') {
+            block.style.width = Math.max(20, originalWidth + dx) + 'px';
+          } else if (dragMode === 'resize-left') {
+            const newLeft = Math.max(0, originalLeft + dx);
+            const newWidth = originalWidth - (newLeft - originalLeft);
+            if (newWidth > 20) { block.style.left = newLeft + 'px'; block.style.width = newWidth + 'px'; }
+          }
+        }
+
+        async function onMouseUp() {
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+          if (!moved) { dragMode = null; return; }
+
+          const finalLeft = parseFloat(block.style.left);
+          const finalWidth = parseFloat(block.style.width);
+          const startMin = minutesFromX(finalLeft, timeline);
+          const endMin = minutesFromX(finalLeft + finalWidth, timeline);
+          const { error } = await supabaseClient.from('schedule_assignments')
+            .update({ start_time: minutesToTimeStr(startMin), end_time: minutesToTimeStr(endMin) })
+            .eq('id', block.dataset.id);
+          if (error) alert(error.message);
+          await loadDay();
+          dragMode = null;
+        }
+
+        // Reconciled blocks represent real, already-paid hours - locked
+        // from drag/resize entirely, not just visually different. Only
+        // deleting one (an admin correcting a genuine mistake) is still
+        // possible, via the click handler below.
+        if (!isReconciled) {
+          block.querySelectorAll('.block-resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+              e.stopPropagation();
+              dragMode = handle.dataset.edge === 'left' ? 'resize-left' : 'resize-right';
+              startX = e.clientX;
+              originalLeft = parseFloat(block.style.left);
+              originalWidth = parseFloat(block.style.width);
+              moved = false;
+              document.addEventListener('mousemove', onMouseMove);
+              document.addEventListener('mouseup', onMouseUp);
+            });
+          });
+
+          block.addEventListener('mousedown', (e) => {
+            if (e.target.closest('.block-resize-handle')) return;
+            dragMode = 'move';
+            startX = e.clientX;
+            originalLeft = parseFloat(block.style.left);
+            originalWidth = parseFloat(block.style.width);
+            moved = false;
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+          });
+        }
+
+        block.addEventListener('click', (e) => {
+          if (moved) return; // was a drag, not a click - already handled above
+          const assignment = assignments.find(a => a.id === block.dataset.id);
+          if (!assignment) return;
+
+          if (isReconciled) {
+            if (myRole !== 'admin' && myRole !== 'finance' && myRole !== 'sales') {
+              return; // locked - these are confirmed, paid hours, not editable by Staff
+            }
+            if (confirm('This reflects real clocked hours the employee was paid for. Remove it anyway?')) {
+              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+            }
+            return;
+          }
+
+          if (assignment.project_id) {
+            if (confirm(`Clock in to ${assignment.projects?.name || 'this job'} now? (Cancel to remove this schedule block instead)`)) {
+              window.location.href = `/timesheets.html?clockin_project=${assignment.project_id}`;
+            } else if (confirm('Remove this schedule block?')) {
+              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+            }
+          } else {
+            const categoryLabel = CATEGORY_LABELS[assignment.block_type] || 'this block';
+            if (confirm(`Remove this ${categoryLabel} block?`)) {
+              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+            }
+          }
+        });
+      });
+    }
+
+    async function runJobSearch(query) {
+      const resultsEl = document.getElementById('job-search-results');
+      const results = await searchProjects(query);
+      if (!results.length) { resultsEl.innerHTML = query.trim().length >= 2 ? `<p class="subtitle">No matches.</p>` : ''; return; }
+      resultsEl.innerHTML = results.map(p => `
+        <div class="job-card" draggable="true" data-project='${JSON.stringify({ id: p.id, name: p.name, job_number: p.job_number }).replace(/'/g, '&apos;')}'>
+          <div class="jc-title">${p.name}</div>
+          <div class="jc-meta">${p.job_number ? 'Job #' + p.job_number : (p.quote_number ? 'Quote #' + p.quote_number : '')} ${p.client_address ? '- ' + p.client_address : ''}</div>
+        </div>`).join('');
+      resultsEl.querySelectorAll('.job-card').forEach(card => {
+        card.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('application/json', card.dataset.project.replace(/&apos;/g, "'"));
+        });
+      });
+    }
+    let jobSearchTimeout;
+    document.getElementById('job-search-input').addEventListener('input', (e) => {
+      clearTimeout(jobSearchTimeout);
+      jobSearchTimeout = setTimeout(() => runJobSearch(e.target.value), 250);
+    });
 
     document.getElementById('day-panel-close').addEventListener('click', () => {
       document.getElementById('day-panel-overlay').style.display = 'none';
@@ -213,13 +612,34 @@
       if (e.target.id === 'day-panel-overlay') document.getElementById('day-panel-overlay').style.display = 'none';
     });
 
-    document.getElementById('prev-month-btn').addEventListener('click', () => {
-      viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; }
-      loadMonth();
+    function setView(view) {
+      currentView = view;
+      document.getElementById('month-view').style.display = view === 'month' ? 'block' : 'none';
+      document.getElementById('day-view').style.display = view === 'day' ? 'block' : 'none';
+      document.getElementById('view-month-btn').style.borderColor = view === 'month' ? 'var(--accent)' : '';
+      document.getElementById('view-day-btn').style.borderColor = view === 'day' ? 'var(--accent)' : '';
+      if (view === 'month') loadMonth(); else loadDay();
+    }
+    document.getElementById('view-month-btn').addEventListener('click', () => setView('month'));
+    document.getElementById('view-day-btn').addEventListener('click', () => setView('day'));
+
+    document.getElementById('prev-btn').addEventListener('click', () => {
+      if (currentView === 'month') {
+        viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+        loadMonth();
+      } else {
+        dayViewDate.setDate(dayViewDate.getDate() - 1);
+        loadDay();
+      }
     });
-    document.getElementById('next-month-btn').addEventListener('click', () => {
-      viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; }
-      loadMonth();
+    document.getElementById('next-btn').addEventListener('click', () => {
+      if (currentView === 'month') {
+        viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+        loadMonth();
+      } else {
+        dayViewDate.setDate(dayViewDate.getDate() + 1);
+        loadDay();
+      }
     });
 
     async function loadPickerData() {
@@ -248,10 +668,11 @@
       const now = new Date();
       viewYear = now.getFullYear();
       viewMonth = now.getMonth();
+      dayViewDate = new Date(now);
 
       renderDowRow();
       await loadPickerData();
-      await loadMonth();
+      setView('month');
     })();
   </script>
 </body>
