@@ -163,34 +163,6 @@
     </div>
   </div>
 
-  <!-- Day detail / assign panel -->
-  <div id="day-panel-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:100;">
-    <div class="card" style="max-width:480px; width:90%; max-height:80vh; overflow-y:auto;">
-      <h2 id="day-panel-heading"></h2>
-      <div id="day-panel-leave"></div>
-      <div id="day-panel-assignments"></div>
-      <div id="day-panel-add" style="margin-top:14px; display:none;">
-        <label style="margin-top:0">Assign staff to a job</label>
-        <select id="assign-staff"></select>
-        <select id="assign-project" style="margin-top:8px;"></select>
-        <div class="grid cols-2" style="margin-top:8px;">
-          <div>
-            <label style="margin-top:0">Start time</label>
-            <input type="time" id="assign-start-time" value="07:00" />
-          </div>
-          <div>
-            <label style="margin-top:0">Finish time</label>
-            <input type="time" id="assign-end-time" value="15:30" />
-          </div>
-        </div>
-        <button id="assign-save-btn" style="margin-top:10px;">Assign</button>
-        <div id="assign-msg"></div>
-      </div>
-      <div style="margin-top:14px; text-align:right;">
-        <button class="secondary" id="day-panel-close">Close</button>
-      </div>
-    </div>
-  </div>
 
   <script src="/js/supabase-client.js"></script>
   <script src="/js/theme.js"></script>
@@ -199,7 +171,6 @@
     let currentView = 'month';
     let myRole = 'staff';
     let staffList = [];
-    let projectList = [];
     let publicHolidaySet = new Set(); // 'YYYY-MM-DD' strings, for the currently loaded range
 
     function toDateStr(y, m, d) {
@@ -265,7 +236,10 @@
       document.getElementById('cal-grid').innerHTML = html;
 
       document.querySelectorAll('.cal-day').forEach(cell => {
-        cell.addEventListener('click', () => openDayPanel(cell.dataset.date, assignmentsByDate[cell.dataset.date] || [], (leave || []).filter(l => cell.dataset.date >= l.start_date && cell.dataset.date <= l.end_date)));
+        cell.addEventListener('click', () => {
+          dayViewDate = new Date(cell.dataset.date + 'T00:00:00');
+          setView('day');
+        });
       });
     }
 
@@ -605,13 +579,6 @@
       jobSearchTimeout = setTimeout(() => runJobSearch(e.target.value), 250);
     });
 
-    document.getElementById('day-panel-close').addEventListener('click', () => {
-      document.getElementById('day-panel-overlay').style.display = 'none';
-    });
-    document.getElementById('day-panel-overlay').addEventListener('click', (e) => {
-      if (e.target.id === 'day-panel-overlay') document.getElementById('day-panel-overlay').style.display = 'none';
-    });
-
     function setView(view) {
       currentView = view;
       document.getElementById('month-view').style.display = view === 'month' ? 'block' : 'none';
@@ -645,13 +612,6 @@
     async function loadPickerData() {
       const { data: profiles } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true);
       staffList = profiles || [];
-      document.getElementById('assign-staff').innerHTML = `<option value="">-- Select --</option>` +
-        staffList.map(p => `<option value="${p.id}">${p.full_name || 'Unnamed'}</option>`).join('');
-
-      const { data: projects } = await supabaseClient.from('projects').select('id, name').neq('pipeline_stage', 'archived').order('created_at', { ascending: false }).limit(200);
-      projectList = projects || [];
-      document.getElementById('assign-project').innerHTML = `<option value="">General / no specific job</option>` +
-        projectList.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
     }
 
     (async function () {
@@ -672,7 +632,7 @@
 
       renderDowRow();
       await loadPickerData();
-      setView('month');
+      setView('day');
     })();
   </script>
 </body>
