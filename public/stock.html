@@ -410,8 +410,13 @@
             </div>
             <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''} - ${money(total)}</p>
             ${renderPoLineItemsReceivable(po, true)}
+            ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice</button>` : ''}
           </div>`;
       }).join('');
+
+      listEl.querySelectorAll('.upload-invoice-btn').forEach(btn => {
+        btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
+      });
 
       wireReceiveLineItemButtons(
         listEl,

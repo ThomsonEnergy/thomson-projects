@@ -146,6 +146,7 @@
                 <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''}</p>
                 ${renderPoLineItemsReceivable(po, true)}
                 ${po.po_type === 'open' && po.budget_cap ? `<p class="subtitle" style="margin-top:8px;">Budget cap: ${money(po.budget_cap)}</p>` : ''}
+                ${!po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice for this PO</button>` : ''}
               </div>`).join('')}
           </div>
         </div>
@@ -157,6 +158,10 @@
           if (error) { alert(error.message); return; }
           await loadSupplier();
         });
+      });
+
+      document.querySelectorAll('.upload-invoice-btn').forEach(btn => {
+        btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
       });
 
       wireReceiveLineItemButtons(
@@ -499,7 +504,7 @@
       }
     }
 
-    async function openReviewPanel(extracted) {
+    async function openReviewPanel(extracted, preselectedPoId = null) {
       const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand');
       const materials = allMaterials || [];
 
@@ -508,6 +513,17 @@
         .select('id, po_number, description, status, purchase_order_line_items(id, material_id, description, quantity, unit_cost)')
         .eq('supplier_id', supplierId)
         .not('status', 'in', '(paid,invoiced)');
+
+      // If the invoice itself references our PO number (e.g. "Your
+      // Order: PO2014"), auto-match against it rather than making the
+      // person hunt for it in a dropdown - still just a suggestion,
+      // shown clearly so it can be corrected if wrong.
+      let autoMatchedPoId = preselectedPoId;
+      if (!autoMatchedPoId && extracted.our_order_reference) {
+        const ref = extracted.our_order_reference.toLowerCase().trim();
+        const matchedPO = (openPOs || []).find(po => po.po_number && ref.includes(po.po_number.toLowerCase()));
+        if (matchedPO) autoMatchedPoId = matchedPO.id;
+      }
 
       const lineItems = (extracted.line_items || []).map(li => {
         let bestMatch = null, bestScore = 0;
@@ -537,14 +553,15 @@
           <input type="number" step="0.01" id="rev-total" value="${extracted.total || ''}" />
 
           <label style="margin-top:14px;">Purchase order</label>
+          ${autoMatchedPoId ? `<p class="subtitle" style="color:var(--green); margin-bottom:6px;">${preselectedPoId ? 'Uploaded directly to this PO.' : `Matched to PO ${(openPOs.find(p => p.id === autoMatchedPoId) || {}).po_number} from the invoice's own reference - check this is correct.`}</p>` : ''}
           <select id="rev-po-mode">
-            <option value="none">No PO for this bill</option>
-            ${openPOs?.length ? `<option value="existing">Link to an existing open PO</option>` : ''}
+            <option value="none" ${!autoMatchedPoId ? 'selected' : ''}>No PO for this bill</option>
+            ${openPOs?.length ? `<option value="existing" ${autoMatchedPoId ? 'selected' : ''}>Link to an existing open PO</option>` : ''}
             <option value="new">Create a new PO from this bill</option>
           </select>
 
-          <div id="rev-po-existing-section" style="display:none; margin-top:8px;">
-            <select id="rev-po"><option value="">-- Select --</option>${(openPOs || []).map(po => `<option value="${po.id}">${po.po_number || 'PO'} - ${po.description || ''}</option>`).join('')}</select>
+          <div id="rev-po-existing-section" style="display:${autoMatchedPoId ? 'block' : 'none'}; margin-top:8px;">
+            <select id="rev-po"><option value="">-- Select --</option>${(openPOs || []).map(po => `<option value="${po.id}" ${po.id === autoMatchedPoId ? 'selected' : ''}>${po.po_number || 'PO'} - ${po.description || ''}</option>`).join('')}</select>
           </div>
 
           <div id="rev-po-new-section" style="display:none; margin-top:8px;">
@@ -777,13 +794,13 @@
         const pending = sessionStorage.getItem('pending_upload');
         if (pending) {
           sessionStorage.removeItem('pending_upload');
-          const { type, extracted, fileBase64, fileName, fileType } = JSON.parse(pending);
+          const { type, extracted, fileBase64, fileName, fileType, preselectedPoId } = JSON.parse(pending);
           const byteString = atob(fileBase64);
           const bytes = new Uint8Array(byteString.length);
           for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
           const file = new File([bytes], fileName, { type: fileType });
 
-          if (type === 'bill') await openReviewPanel(extracted);
+          if (type === 'bill') await openReviewPanel(extracted, preselectedPoId || null);
           else if (type === 'pricelist') await openPricelistReviewPanel(extracted.items);
           else if (type === 'statement') await openStatementReviewPanel(extracted, file);
         }

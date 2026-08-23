@@ -35,6 +35,7 @@ exports.handler = async (event) => {
 
 - supplier: the supplier/vendor's business name
 - our_account_number: the account number THIS SUPPLIER uses to identify US as their customer - often labelled "Charge To", "Customer Account", "Account No", "Customer No", or similar, shown near the billing address. This is NOT their ABN and NOT their own bank details - it's specifically the number that identifies our account with them. Null if not shown.
+- our_order_reference: the reference to OUR purchase order, if the supplier's invoice shows one - often labelled "Your Order", "Customer PO No", "PO Number", "Order Ref", or similar. This is different from their own invoice number. Null if not shown.
 - abn: the supplier's own ABN, if shown
 - contact_phone: the supplier's phone number, if shown
 - contact_email: the supplier's email address, if shown

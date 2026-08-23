@@ -544,3 +544,47 @@ async function drawNextPoNumber() {
   if (error) throw error;
   return `${prefix}${nextNum}`;
 }
+
+// Upload a photo/file of a supplier invoice straight against a specific
+// PO - lets staff scan it while still standing at the wholesaler, rather
+// than typing every line item by hand later. The supplier is already
+// known from the PO, so this skips straight to the review screen on
+// that supplier's page instead of asking which supplier it's for.
+function uploadInvoiceForPo(po) {
+  if (!po.supplier_id) {
+    alert("This PO has no supplier attached - it was pulled from Warehouse stock, so there's no invoice to upload.");
+    return;
+  }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.pdf,.jpg,.jpeg,.png';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+    overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the invoice...</p></div>`;
+    document.body.appendChild(overlay);
+
+    try {
+      const fileBase64 = await fileToBase64(file);
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/extract-supplier-invoice', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ fileBase64, mediaType: file.type }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+
+      sessionStorage.setItem('pending_upload', JSON.stringify({
+        type: 'bill', extracted: data.extracted, fileBase64, fileName: file.name, fileType: file.type, preselectedPoId: po.id,
+      }));
+      window.location.href = `/supplier-detail.html?id=${po.supplier_id}&resume_upload=1`;
+    } catch (err) {
+      overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="uip-close">Close</button>`;
+      overlay.querySelector('#uip-close').addEventListener('click', () => overlay.remove());
+    }
+  };
+  input.click();
+}
