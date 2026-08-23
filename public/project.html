@@ -41,7 +41,7 @@
       const centreCols = await costCentreColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols}, invoices(*), cost_centre_line_items(item_type, quantity)),
+        .select(`*, cost_centres(${centreCols}, invoices(*), cost_centre_line_items(id, item_type, description, quantity, unit_cost)),
           project_manager:client_contacts!project_manager_contact_id(name, phone, email),
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
@@ -482,7 +482,10 @@
           <h2>Purchase orders &amp; supplier invoices</h2>
           <p class="subtitle" style="margin-bottom:14px;">Tracked separately so costs aren't double-counted.</p>
           <div id="po-list"></div>
-          <button type="button" id="create-po-btn" class="secondary" style="margin-top:${centres.length ? '16px' : '0'};">+ Create purchase order</button>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:${centres.length ? '16px' : '0'};">
+            <button type="button" id="create-po-btn" class="secondary">+ Create purchase order</button>
+            ${project.job_number ? `<button type="button" id="suggest-po-btn" class="secondary">Generate PO suggestions from quote</button>` : ''}
+          </div>
           <div id="po-msg"></div>
         </div>
       `;
@@ -676,6 +679,156 @@
       });
 
       document.getElementById('create-po-btn').onclick = () => openCreatePoPanel(projectId, centres);
+      const suggestBtn = document.getElementById('suggest-po-btn');
+      if (suggestBtn) suggestBtn.onclick = () => openSuggestPoPanel(projectId, centres);
+    }
+
+    function fuzzyMatchScore(a, b) {
+      const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+      const wordsA = new Set(norm(a));
+      const wordsB = norm(b);
+      if (!wordsA.size || !wordsB.length) return 0;
+      const matches = wordsB.filter(w => wordsA.has(w)).length;
+      return matches / Math.max(wordsA.size, wordsB.length);
+    }
+
+    async function openSuggestPoPanel(projectId, centres) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Matching quoted materials against Stock...</p></div>`;
+      document.body.appendChild(overlay);
+
+      const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price, supplier_id, suppliers(name)');
+      const { data: existingPOItems } = await supabaseClient
+        .from('purchase_order_line_items')
+        .select('material_id, purchase_orders!inner(project_id)')
+        .eq('purchase_orders.project_id', projectId);
+      const alreadyOrderedMaterialIds = new Set((existingPOItems || []).map(x => x.material_id).filter(Boolean));
+
+      const quotedMaterials = centres.flatMap(c => (c.cost_centre_line_items || [])
+        .filter(li => li.item_type === 'material')
+        .map(li => ({ ...li, stageName: c.name })));
+
+      const matched = {}; // supplier_id -> { supplierName, items: [] }
+      const unassigned = [];
+
+      quotedMaterials.forEach(li => {
+        let bestMatch = null, bestScore = 0;
+        (materials || []).forEach(m => {
+          const score = fuzzyMatchScore(m.name, li.description);
+          if (score > bestScore) { bestScore = score; bestMatch = m; }
+        });
+        const match = bestScore >= 0.3 ? bestMatch : null;
+        if (match && alreadyOrderedMaterialIds.has(match.id)) return; // already on a PO for this job, skip
+
+        if (match && match.supplier_id) {
+          if (!matched[match.supplier_id]) matched[match.supplier_id] = { supplierName: match.suppliers?.name || 'Unknown', items: [] };
+          matched[match.supplier_id].items.push({ description: li.description, quantity: li.quantity, unit_cost: match.cost_price, materialId: match.id, stageName: li.stageName });
+        } else {
+          unassigned.push({ description: li.description, quantity: li.quantity, unit_cost: li.unit_cost, materialId: match?.id || null, stageName: li.stageName });
+        }
+      });
+
+      const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
+
+      if (!Object.keys(matched).length && !unassigned.length) {
+        overlay.querySelector('.card').innerHTML = `<h2>Nothing to suggest</h2><p class="subtitle">Every quoted material is either already on a PO for this job, or there are no material line items quoted.</p><button type="button" class="secondary" id="sp-close-btn">Close</button>`;
+        overlay.querySelector('#sp-close-btn').addEventListener('click', () => overlay.remove());
+        return;
+      }
+
+      overlay.style.overflowY = 'auto';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:720px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>Suggested purchase orders</h2>
+          <p class="subtitle" style="margin-bottom:14px;">Nothing's created yet - review each supplier group, then confirm.</p>
+
+          ${Object.entries(matched).map(([supplierId, group]) => `
+            <div class="sp-group" data-supplier-id="${supplierId}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+              <label style="margin-top:0; display:flex; align-items:center; gap:8px;"><input type="checkbox" class="sp-include" checked style="width:auto;" /><strong>${group.supplierName}</strong></label>
+              ${group.items.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${item.description} (${item.stageName}) x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
+              <p class="subtitle" style="margin-top:6px;">Total: ${money(group.items.reduce((s, i) => s + i.quantity * i.unit_cost, 0))}</p>
+            </div>`).join('')}
+
+          ${unassigned.length ? `
+            <div style="border:1px solid var(--red); border-radius:8px; padding:12px; margin-bottom:10px;">
+              <p style="margin:0 0 8px; color:var(--red); font-weight:600;">Needs a supplier assigned</p>
+              ${unassigned.map((item, i) => `
+                <div class="sp-unassigned-row" data-index="${i}" style="display:grid; grid-template-columns:2fr 1fr; gap:8px; margin-bottom:6px; align-items:center;">
+                  <span style="font-size:13px;">${item.description} (${item.stageName}) x${item.quantity}</span>
+                  <select class="sp-unassigned-supplier" style="font-size:12px;">
+                    <option value="">-- Skip --</option>
+                    ${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+                  </select>
+                </div>`).join('')}
+            </div>` : ''}
+
+          <div style="margin-top:14px;">
+            <button id="sp-confirm-btn">Create purchase orders</button>
+            <button type="button" class="secondary" id="sp-cancel-btn">Cancel</button>
+          </div>
+          <div id="sp-msg"></div>
+        </div>`;
+
+      overlay.querySelector('#sp-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#sp-confirm-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#sp-msg');
+        const confirmBtn = overlay.querySelector('#sp-confirm-btn');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Creating...';
+
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          let created = 0;
+
+          for (const groupEl of overlay.querySelectorAll('.sp-group')) {
+            if (!groupEl.querySelector('.sp-include').checked) continue;
+            const supplierId = groupEl.dataset.supplierId;
+            const group = matched[supplierId];
+            const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
+              project_id: projectId, supplier_id: supplierId, supplier_name: group.supplierName,
+              po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+              description: 'Auto-suggested from quoted materials',
+            }).select('id').single();
+            if (poErr) throw poErr;
+            await supabaseClient.from('purchase_order_line_items').insert(
+              group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
+            );
+            created++;
+          }
+
+          // Group manually-assigned unassigned items by the supplier picked
+          const manualGroups = {};
+          overlay.querySelectorAll('.sp-unassigned-row').forEach(row => {
+            const supplierId = row.querySelector('.sp-unassigned-supplier').value;
+            if (!supplierId) return;
+            const item = unassigned[parseInt(row.dataset.index)];
+            if (!manualGroups[supplierId]) manualGroups[supplierId] = [];
+            manualGroups[supplierId].push(item);
+          });
+          for (const [supplierId, items] of Object.entries(manualGroups)) {
+            const supplierName = suppliers.find(s => s.id === supplierId)?.name || 'Unknown';
+            const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
+              project_id: projectId, supplier_id: supplierId, supplier_name: supplierName,
+              po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+              description: 'Auto-suggested from quoted materials (manually assigned)',
+            }).select('id').single();
+            if (poErr) throw poErr;
+            await supabaseClient.from('purchase_order_line_items').insert(
+              items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
+            );
+            created++;
+          }
+
+          overlay.remove();
+          alert(`Created ${created} purchase order${created === 1 ? '' : 's'}.`);
+          await loadPurchaseOrders(projectId, centres);
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Create purchase orders';
+        }
+      });
     }
 
     async function openCreatePoPanel(projectId, centres) {
