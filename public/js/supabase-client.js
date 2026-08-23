@@ -406,7 +406,7 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
   let defaultJobName = null;
   if (po.project_id) {
     const { data: proj } = await supabaseClient.from('projects').select('name, job_number').eq('id', po.project_id).maybeSingle();
-    defaultJobName = proj ? (proj.job_number ? `#${proj.job_number} ${proj.name}` : proj.name) : null;
+    defaultJobName = proj ? (proj.job_number ? `Job ${proj.job_number}` : proj.name) : null;
   }
 
   const overlay = document.createElement('div');
@@ -460,11 +460,11 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
       const results = await searchProjects(q);
       const resultsEl = overlay.querySelector('#rl-job-results');
       resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-        ${results.map(p => `<div class="rl-job-pick" data-id="${p.id}" data-name="${p.name}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</div>`).join('')}
+        ${results.map(p => `<div class="rl-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</div>`).join('')}
       </div>`;
       resultsEl.querySelectorAll('.rl-job-pick').forEach(row => {
         row.addEventListener('click', () => {
-          selectedJob = { id: row.dataset.id, name: row.dataset.name };
+          selectedJob = { id: row.dataset.id, name: row.dataset.jobNumber ? `Job ${row.dataset.jobNumber}` : row.dataset.name };
           jobSearchInput.value = row.dataset.name;
           overlay.querySelector('#rl-job-selected').textContent = `Selected: ${row.dataset.name}`;
           resultsEl.innerHTML = '';
