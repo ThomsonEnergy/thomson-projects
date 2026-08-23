@@ -596,6 +596,14 @@
         .eq('project_id', projectId)
         .order('created_at', { ascending: false });
 
+      // Wired up unconditionally, before any early return below - this
+      // button previously only got its click handler when the project
+      // already had at least one PO, so a brand new job's "Create
+      // purchase order" button silently did nothing.
+      document.getElementById('create-po-btn').onclick = () => openCreatePoPanel(projectId, centres);
+      const suggestBtn = document.getElementById('suggest-po-btn');
+      if (suggestBtn) suggestBtn.onclick = () => openSuggestPoPanel(projectId, centres);
+
       const listEl = document.getElementById('po-list');
       if (error) {
         listEl.innerHTML = `<div class="error-box">${error.message}</div>`;
@@ -681,10 +689,6 @@
         (po) => po.vehicle_id ? 'vehicle' : 'job', // POs on this page belong to this job by default
         () => loadPurchaseOrders(projectId, centres)
       );
-
-      document.getElementById('create-po-btn').onclick = () => openCreatePoPanel(projectId, centres);
-      const suggestBtn = document.getElementById('suggest-po-btn');
-      if (suggestBtn) suggestBtn.onclick = () => openSuggestPoPanel(projectId, centres);
     }
 
     function fuzzyMatchScore(a, b) {
@@ -830,6 +834,7 @@
             const group = matched[supplierId];
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: group.supplierName,
+              po_number: await drawNextPoNumber(),
               po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials',
             }).select('id').single();
@@ -853,6 +858,7 @@
             const supplierName = suppliers.find(s => s.id === supplierId)?.name || 'Unknown';
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: supplierName,
+              po_number: await drawNextPoNumber(),
               po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials (manually assigned)',
             }).select('id').single();
@@ -883,10 +889,8 @@
           <h2>Create purchase order</h2>
           <label style="margin-top:0">Supplier</label>
           <select id="cp-supplier"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
-          <div class="grid cols-2">
-            <div><label>PO number (optional)</label><input id="cp-number" /></div>
-            <div><label>Stage (optional)</label><select id="cp-stage"><option value="">Whole project</option>${centres.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select></div>
-          </div>
+          <label>Stage (optional)</label>
+          <select id="cp-stage"><option value="">Whole project</option>${centres.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select>
           <label>Description</label>
           <input id="cp-description" />
 
@@ -963,7 +967,7 @@
             cost_centre_id: overlay.querySelector('#cp-stage').value || null,
             supplier_id: supplierId,
             supplier_name: supplierName,
-            po_number: overlay.querySelector('#cp-number').value.trim() || null,
+            po_number: await drawNextPoNumber(),
             description: overlay.querySelector('#cp-description').value.trim() || null,
             po_type: poType,
             locked: poType === 'fixed',

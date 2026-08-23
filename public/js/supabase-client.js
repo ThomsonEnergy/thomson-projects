@@ -181,6 +181,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'projects', label: 'Projects', href: '/projects.html' },
   { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html' },
   { key: 'invoices', label: 'Invoices', href: '/invoices.html' },
+  { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html' },
   { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html' },
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html' },
   { key: 'clients', label: 'Clients', href: '/clients.html' },
@@ -531,4 +532,15 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
       msg.innerHTML = `<div class="error-box">${err.message}</div>`;
     }
   });
+}
+
+// Draws the next sequential PO number (e.g. "PO2001") - same atomic
+// counter pattern already used for quotes/jobs/invoices, so two people
+// creating a PO at the same moment never collide.
+async function drawNextPoNumber() {
+  const { data: settings } = await supabaseClient.from('company_settings').select('po_number_prefix').eq('id', 1).single();
+  const prefix = settings?.po_number_prefix || 'PO';
+  const { data: nextNum, error } = await supabaseClient.rpc('get_next_number', { counter_name: 'po' });
+  if (error) throw error;
+  return `${prefix}${nextNum}`;
 }

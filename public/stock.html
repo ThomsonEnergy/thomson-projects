@@ -40,6 +40,7 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
         <input id="stock-search" placeholder="Search by name, category, or supplier..." style="max-width:320px;" />
         <div>
+          <button id="create-stock-po-btn" style="margin-right:8px;">+ Create PO</button>
           <button class="secondary" id="suggest-restock-btn" style="margin-right:8px;">Suggest restock PO</button>
           <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
           <button id="add-material-btn">+ Add material</button>
@@ -217,6 +218,85 @@
 
     document.getElementById('add-material-btn').addEventListener('click', () => openMaterialPanel(null));
 
+    document.getElementById('create-stock-po-btn').addEventListener('click', openCreateStockPoPanel);
+
+    async function openCreateStockPoPanel() {
+      const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>Create purchase order for Stock</h2>
+          <label style="margin-top:0">Supplier</label>
+          <select id="csp-supplier"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+          <label style="margin-top:14px;">Items</label>
+          <div id="csp-items"></div>
+          <button type="button" class="secondary" id="csp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
+          <div style="margin-top:14px;">
+            <button id="csp-save-btn">Create PO</button>
+            <button type="button" class="secondary" id="csp-cancel-btn">Cancel</button>
+          </div>
+          <div id="csp-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      function addLineRow() {
+        const row = document.createElement('div');
+        row.className = 'csp-line';
+        row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:6px; margin-bottom:6px;';
+        row.innerHTML = `
+          <select class="csp-line-material" style="font-size:13px;">${allMaterials.map(m => `<option value="${m.id}" data-cost="${m.cost_price}">${m.name}</option>`).join('')}</select>
+          <input class="csp-line-qty" type="number" step="1" value="1" placeholder="Qty" style="font-size:13px;" />
+          <input class="csp-line-cost" type="number" step="0.01" value="${allMaterials[0]?.cost_price || 0}" placeholder="Unit cost" style="font-size:13px;" />
+          <button type="button" class="secondary csp-remove-line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
+        overlay.querySelector('#csp-items').appendChild(row);
+        row.querySelector('.csp-remove-line').addEventListener('click', () => row.remove());
+        row.querySelector('.csp-line-material').addEventListener('change', (e) => {
+          row.querySelector('.csp-line-cost').value = e.target.selectedOptions[0].dataset.cost || 0;
+        });
+      }
+      addLineRow();
+      overlay.querySelector('#csp-add-line-btn').addEventListener('click', addLineRow);
+
+      overlay.querySelector('#csp-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#csp-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#csp-msg');
+        const supplierId = overlay.querySelector('#csp-supplier').value;
+        if (!supplierId) { msg.innerHTML = `<div class="error-box">Pick a supplier.</div>`; return; }
+
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const supplierName = overlay.querySelector('#csp-supplier').selectedOptions[0].textContent;
+
+          const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
+            project_id: null, supplier_id: supplierId, supplier_name: supplierName,
+            po_number: await drawNextPoNumber(),
+            po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+            description: 'Stock purchase order',
+          }).select('id').single();
+          if (poErr) throw poErr;
+
+          const lines = [...overlay.querySelectorAll('.csp-line')].map(row => ({
+            po_id: newPo.id,
+            material_id: row.querySelector('.csp-line-material').value,
+            description: row.querySelector('.csp-line-material').selectedOptions[0].textContent,
+            quantity: parseFloat(row.querySelector('.csp-line-qty').value) || 0,
+            unit_cost: parseFloat(row.querySelector('.csp-line-cost').value) || 0,
+            added_by: user.id,
+          })).filter(l => l.quantity > 0);
+          if (lines.length) {
+            const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(lines);
+            if (liErr) throw liErr;
+          }
+
+          overlay.remove();
+          await loadStockPOs();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+      });
+    }
+
     document.getElementById('suggest-restock-btn').addEventListener('click', openRestockPanel);
 
     async function openRestockPanel() {
@@ -288,6 +368,7 @@
             const group = grouped[supplierId];
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: null, supplier_id: supplierId, supplier_name: group.supplierName,
+              po_number: await drawNextPoNumber(),
               po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
               description: 'Restock - below minimum quantity',
             }).select('id').single();
@@ -325,42 +406,19 @@
           <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
             <div style="display:flex; justify-content:space-between;">
               <strong>${po.suppliers?.name || po.supplier_name || 'Unknown supplier'}${po.po_number ? ' (' + po.po_number + ')' : ''}</strong>
-              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Received' : po.status}</span>
+              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
             </div>
             <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''} - ${money(total)}</p>
-            ${items.map(li => `<div style="font-size:13px; display:flex; justify-content:space-between;"><span>${li.description} x${li.quantity}</span><span>${money(li.quantity * li.unit_cost)}</span></div>`).join('')}
-            ${!po.received ? `<button type="button" class="secondary stock-confirm-received-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Confirm all items received - approve for payment</button>` : ''}
+            ${renderPoLineItemsReceivable(po, true)}
           </div>`;
       }).join('');
 
-      listEl.querySelectorAll('.stock-confirm-received-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          if (!confirm('Confirm every item on this PO has physically arrived? This approves any bill linked to it for payment.')) return;
-          const po = pos.find(p => p.id === btn.dataset.poId);
-          const { data: { user } } = await supabaseClient.auth.getUser();
-
-          const { error: poErr } = await supabaseClient.from('purchase_orders').update({
-            received: true, received_by: user.id, received_at: new Date().toISOString(),
-          }).eq('id', btn.dataset.poId);
-          if (poErr) { alert(poErr.message); return; }
-
-          // Stock POs go into general inventory, not any specific job -
-          // increment quantity_on_hand for each item received.
-          const items = po?.purchase_order_line_items || [];
-          for (const li of items) {
-            if (!li.material_id) continue;
-            const { data: material } = await supabaseClient.from('materials').select('quantity_on_hand').eq('id', li.material_id).single();
-            await supabaseClient.from('materials').update({
-              quantity_on_hand: (Number(material?.quantity_on_hand) || 0) + Number(li.quantity),
-            }).eq('id', li.material_id);
-          }
-
-          const { error: billErr } = await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', btn.dataset.poId);
-          if (billErr) { alert(billErr.message); return; }
-          await loadStockPOs();
-          await loadMaterials();
-        });
-      });
+      wireReceiveLineItemButtons(
+        listEl,
+        pos,
+        () => 'warehouse', // POs on this page default to Warehouse
+        async () => { await loadStockPOs(); await loadMaterials(); }
+      );
     }
 
     document.getElementById('upload-pricelist-btn').addEventListener('click', () => {

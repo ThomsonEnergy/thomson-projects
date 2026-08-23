@@ -187,6 +187,7 @@
 
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: null, vehicle_id: vehicleId, supplier_id: supplierId, supplier_name: supplierName,
+            po_number: await drawNextPoNumber(),
             po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
             description: source === 'stock' ? 'Pulled from Warehouse stock' : 'Purchased for vehicle',
           }).select('id').single();

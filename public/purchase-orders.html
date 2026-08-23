@@ -27,29 +27,258 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Purchase Orders</h1>
-    <p class="subtitle">Supplier POs and invoice matching.</p>
+  <div class="wrap wide">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1>Purchase Orders</h1>
+        <p class="subtitle">Every PO, wherever it's headed - a job, Stock, or a vehicle.</p>
+      </div>
+      <button id="create-po-btn">+ Create purchase order</button>
+    </div>
 
-    <div class="grid cols-4">
-      <div class="stat"><div class="label">Total</div><div class="value placeholder">-</div></div>
-      <div class="stat"><div class="label">This month</div><div class="value placeholder">-</div></div>
-      <div class="stat"><div class="label">Outstanding</div><div class="value placeholder">-</div></div>
-      <div class="stat"><div class="label">Overdue</div><div class="value placeholder">-</div></div>
+    <div class="grid cols-3">
+      <div class="stat"><div class="label">Pending (not received)</div><div class="value" id="stat-pending">-</div></div>
+      <div class="stat"><div class="label">Needs approval</div><div class="value" id="stat-needs-approval">-</div></div>
+      <div class="stat"><div class="label">Received this month</div><div class="value" id="stat-received-month">-</div></div>
     </div>
 
     <div class="card">
-      <div class="empty-state">
-        <div class="empty-icon">&#128736;</div>
-        <h2>Coming in Phase 9</h2>
-        <p>This section is a placeholder for now - it gets built out with real data and actions in Phase 9 of the build.</p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+        <input id="po-search" placeholder="Search by PO number, supplier, or destination..." style="max-width:340px;" />
+        <select id="po-filter">
+          <option value="all">All</option>
+          <option value="pending">Pending only</option>
+          <option value="received">Received only</option>
+        </select>
       </div>
+      <div id="po-full-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
   <script src="/js/supabase-client.js?v=2"></script>
   <script src="/js/theme.js"></script>
   <script>
+    let allPos = [];
+
+    async function loadAllPOs() {
+      const listEl = document.getElementById('po-full-list');
+      const { data, error } = await supabaseClient
+        .from('purchase_orders')
+        .select('*, purchase_order_line_items(*), suppliers(name), projects(name, job_number), fleet_vehicles(vehicle_name, rego)')
+        .order('created_at', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      allPos = data || [];
+      renderStats();
+      renderList();
+    }
+
+    function poTotal(po) {
+      const items = po.purchase_order_line_items || [];
+      return items.length ? items.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0) : Number(po.amount) || 0;
+    }
+
+    function destinationLabel(po) {
+      if (po.project_id) return po.projects ? `${po.projects.job_number ? '#' + po.projects.job_number + ' ' : ''}${po.projects.name}` : 'Job';
+      if (po.vehicle_id) return po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : 'Vehicle';
+      return 'Stock';
+    }
+
+    function renderStats() {
+      const pending = allPos.filter(po => !po.received);
+      const pendingTotal = pending.reduce((s, po) => s + poTotal(po), 0);
+      const needsApproval = pending.filter(po => (po.purchase_order_line_items || []).some(li => !li.received)).length;
+      const now = new Date();
+      const receivedThisMonth = allPos.filter(po => po.received && po.received_at && new Date(po.received_at).getMonth() === now.getMonth() && new Date(po.received_at).getFullYear() === now.getFullYear());
+      const receivedTotal = receivedThisMonth.reduce((s, po) => s + poTotal(po), 0);
+
+      document.getElementById('stat-pending').textContent = money(pendingTotal);
+      document.getElementById('stat-needs-approval').textContent = needsApproval;
+      document.getElementById('stat-received-month').textContent = money(receivedTotal);
+    }
+
+    function renderList() {
+      const listEl = document.getElementById('po-full-list');
+      const q = document.getElementById('po-search').value.trim().toLowerCase();
+      const filter = document.getElementById('po-filter').value;
+
+      let filtered = allPos;
+      if (filter === 'pending') filtered = filtered.filter(po => !po.received);
+      if (filter === 'received') filtered = filtered.filter(po => po.received);
+      if (q) {
+        filtered = filtered.filter(po =>
+          (po.po_number || '').toLowerCase().includes(q) ||
+          (po.suppliers?.name || po.supplier_name || '').toLowerCase().includes(q) ||
+          destinationLabel(po).toLowerCase().includes(q)
+        );
+      }
+
+      if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No purchase orders found.</p>`; return; }
+
+      listEl.innerHTML = filtered.map(po => `
+        <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+            <div>
+              <strong>${po.po_number || 'PO'}</strong> - ${po.suppliers?.name || po.supplier_name || 'Unknown supplier'}
+              <span class="badge draft" style="margin-left:6px;">${destinationLabel(po)}</span>
+            </div>
+            <div>
+              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
+              <span style="font-weight:600; margin-left:8px;">${money(poTotal(po))}</span>
+            </div>
+          </div>
+          <p class="subtitle" style="margin:6px 0;">${po.description || ''}</p>
+          ${renderPoLineItemsReceivable(po, true)}
+        </div>`).join('');
+
+      wireReceiveLineItemButtons(
+        listEl,
+        filtered,
+        (po) => po.project_id ? 'job' : po.vehicle_id ? 'vehicle' : 'warehouse',
+        loadAllPOs
+      );
+    }
+
+    document.getElementById('po-search').addEventListener('input', renderList);
+    document.getElementById('po-filter').addEventListener('change', renderList);
+
+    async function openCreatePoPanel() {
+      const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
+      const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
+      const { data: vehicles } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:600px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>Create purchase order</h2>
+          <label style="margin-top:0">This PO is for</label>
+          <select id="np-dest-type">
+            <option value="stock">Stock</option>
+            <option value="job">A job</option>
+            ${vehicles?.length ? '<option value="vehicle">A vehicle</option>' : ''}
+          </select>
+
+          <div id="np-job-section" style="display:none; margin-top:8px;">
+            <input id="np-job-search" placeholder="Search for the job..." autocomplete="off" />
+            <div id="np-job-results"></div>
+            <div id="np-job-selected" class="subtitle" style="margin-top:4px;"></div>
+          </div>
+          <div id="np-vehicle-section" style="display:none; margin-top:8px;">
+            <select id="np-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}">${v.vehicle_name || v.rego}</option>`).join('')}</select>
+          </div>
+
+          <label style="margin-top:14px;">Supplier ${' '}<span class="subtitle" id="np-supplier-hint"></span></label>
+          <select id="np-supplier"><option value="">-- None (pull from Warehouse stock) --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+
+          <label style="margin-top:14px;">Items</label>
+          <div id="np-items"></div>
+          <button type="button" class="secondary" id="np-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
+
+          <div style="margin-top:14px;">
+            <button id="np-save-btn">Create PO</button>
+            <button type="button" class="secondary" id="np-cancel-btn">Cancel</button>
+          </div>
+          <div id="np-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      function syncDestSections() {
+        const val = overlay.querySelector('#np-dest-type').value;
+        overlay.querySelector('#np-job-section').style.display = val === 'job' ? 'block' : 'none';
+        overlay.querySelector('#np-vehicle-section').style.display = val === 'vehicle' ? 'block' : 'none';
+        overlay.querySelector('#np-supplier-hint').textContent = val === 'vehicle' ? '(leave blank if pulling from Warehouse stock)' : '';
+      }
+      overlay.querySelector('#np-dest-type').addEventListener('change', syncDestSections);
+      syncDestSections();
+
+      let selectedJob = null;
+      const jobSearchInput = overlay.querySelector('#np-job-search');
+      let jobSearchTimeout;
+      jobSearchInput.addEventListener('input', (e) => {
+        clearTimeout(jobSearchTimeout);
+        selectedJob = null;
+        const q = e.target.value.trim();
+        if (q.length < 2) { overlay.querySelector('#np-job-results').innerHTML = ''; return; }
+        jobSearchTimeout = setTimeout(async () => {
+          const results = await searchProjects(q);
+          const resultsEl = overlay.querySelector('#np-job-results');
+          resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+            ${results.map(p => `<div class="np-job-pick" data-id="${p.id}" data-name="${p.name}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</div>`).join('')}
+          </div>`;
+          resultsEl.querySelectorAll('.np-job-pick').forEach(row => {
+            row.addEventListener('click', () => {
+              selectedJob = { id: row.dataset.id, name: row.dataset.name };
+              jobSearchInput.value = row.dataset.name;
+              overlay.querySelector('#np-job-selected').textContent = `Selected: ${row.dataset.name}`;
+              resultsEl.innerHTML = '';
+            });
+          });
+        }, 250);
+      });
+
+      function addLineRow() {
+        const row = document.createElement('div');
+        row.className = 'np-line';
+        row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:6px; margin-bottom:6px;';
+        row.innerHTML = `
+          <select class="np-line-material" style="font-size:13px;">${(materials || []).map(m => `<option value="${m.id}" data-cost="${m.cost_price}">${m.name}</option>`).join('')}</select>
+          <input class="np-line-qty" type="number" step="1" value="1" placeholder="Qty" style="font-size:13px;" />
+          <input class="np-line-cost" type="number" step="0.01" value="${materials[0]?.cost_price || 0}" placeholder="Unit cost" style="font-size:13px;" />
+          <button type="button" class="secondary np-remove-line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
+        overlay.querySelector('#np-items').appendChild(row);
+        row.querySelector('.np-remove-line').addEventListener('click', () => row.remove());
+        row.querySelector('.np-line-material').addEventListener('change', (e) => {
+          row.querySelector('.np-line-cost').value = e.target.selectedOptions[0].dataset.cost || 0;
+        });
+      }
+      addLineRow();
+      overlay.querySelector('#np-add-line-btn').addEventListener('click', addLineRow);
+
+      overlay.querySelector('#np-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#np-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#np-msg');
+        const destType = overlay.querySelector('#np-dest-type').value;
+        if (destType === 'job' && !selectedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
+        const vehicleId = destType === 'vehicle' ? overlay.querySelector('#np-vehicle-select').value : null;
+        const supplierId = overlay.querySelector('#np-supplier').value || null;
+
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const supplierName = supplierId ? overlay.querySelector('#np-supplier').selectedOptions[0].textContent : null;
+
+          const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
+            project_id: destType === 'job' ? selectedJob.id : null,
+            vehicle_id: destType === 'vehicle' ? vehicleId : null,
+            supplier_id: supplierId, supplier_name: supplierName,
+            po_number: await drawNextPoNumber(),
+            po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+            description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? 'PO for vehicle' : 'Stock purchase order',
+          }).select('id').single();
+          if (poErr) throw poErr;
+
+          const lines = [...overlay.querySelectorAll('.np-line')].map(row => ({
+            po_id: newPo.id,
+            material_id: row.querySelector('.np-line-material').value,
+            description: row.querySelector('.np-line-material').selectedOptions[0].textContent,
+            quantity: parseFloat(row.querySelector('.np-line-qty').value) || 0,
+            unit_cost: parseFloat(row.querySelector('.np-line-cost').value) || 0,
+            added_by: user.id,
+          })).filter(l => l.quantity > 0);
+          if (lines.length) {
+            const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(lines);
+            if (liErr) throw liErr;
+          }
+
+          overlay.remove();
+          await loadAllPOs();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+      });
+    }
+
+    document.getElementById('create-po-btn').addEventListener('click', openCreatePoPanel);
+
     (async function () {
       const session = await requireLogin();
       if (!session) return;
@@ -60,6 +289,7 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+      await loadAllPOs();
     })();
   </script>
 </body>
