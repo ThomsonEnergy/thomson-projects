@@ -34,7 +34,10 @@
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
         <h2 style="margin:0;">Bills</h2>
-        <button id="add-bill-btn">+ Add bill</button>
+        <div>
+          <button id="upload-extract-btn" class="secondary" style="margin-right:8px;">Upload &amp; extract</button>
+          <button id="add-bill-btn">+ Add bill</button>
+        </div>
       </div>
       <div id="bills-list"><p class="subtitle">Loading...</p></div>
     </div>
@@ -145,6 +148,199 @@
     }
 
     document.getElementById('add-bill-btn').addEventListener('click', () => openBillPanel(null));
+
+    // --- AI extraction flow ---
+
+    document.getElementById('upload-extract-btn').addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.pdf,.jpg,.jpeg,.png';
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        await runExtraction(file);
+      };
+      input.click();
+    });
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Simple fuzzy match - normalizes both strings and scores by shared
+    // significant words. Good enough to surface a likely candidate for a
+    // human to confirm or reject, not meant to be perfect on its own.
+    function fuzzyMatchScore(a, b) {
+      const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+      const wordsA = new Set(norm(a));
+      const wordsB = norm(b);
+      if (!wordsA.size || !wordsB.length) return 0;
+      const matches = wordsB.filter(w => wordsA.has(w)).length;
+      return matches / Math.max(wordsA.size, wordsB.length);
+    }
+
+    async function runExtraction(file) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the invoice...</p></div>`;
+      document.body.appendChild(overlay);
+
+      try {
+        const fileBase64 = await fileToBase64(file);
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/extract-supplier-invoice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ fileBase64, mediaType: file.type }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+        overlay.remove();
+        await openReviewPanel(data.extracted, file);
+      } catch (err) {
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="extract-err-close">Close</button>`;
+        overlay.querySelector('#extract-err-close').addEventListener('click', () => overlay.remove());
+      }
+    }
+
+    async function openReviewPanel(extracted, sourceFile) {
+      const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand');
+      const materials = allMaterials || [];
+
+      let matchingPOs = [];
+      if (extracted.supplier) {
+        const { data: poData } = await supabaseClient
+          .from('purchase_orders')
+          .select('id, po_number, supplier_name, description, amount, status')
+          .ilike('supplier_name', `%${extracted.supplier}%`)
+          .not('status', 'in', '(paid,invoiced)');
+        matchingPOs = poData || [];
+      }
+
+      const lineItems = (extracted.line_items || []).map(li => {
+        let bestMatch = null, bestScore = 0;
+        materials.forEach(m => {
+          const score = fuzzyMatchScore(m.name, li.description);
+          if (score > bestScore) { bestScore = score; bestMatch = m; }
+        });
+        return { ...li, suggestedMatchId: bestScore >= 0.3 ? bestMatch?.id : null };
+      });
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; overflow-y:auto;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:720px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>Review before saving</h2>
+          <p class="subtitle" style="margin-bottom:14px;">Nothing's saved yet - check everything below, extraction from a real scanned invoice isn't always perfect.</p>
+
+          <div class="grid cols-3">
+            <div><label style="margin-top:0">Supplier</label><input id="rev-supplier" value="${extracted.supplier || ''}" /></div>
+            <div><label style="margin-top:0">Bill number</label><input id="rev-bill-number" value="${extracted.bill_number || ''}" /></div>
+            <div><label style="margin-top:0">Date</label><input type="date" id="rev-bill-date" value="${extracted.bill_date || ''}" /></div>
+          </div>
+          <label>Total amount</label>
+          <input type="number" step="0.01" id="rev-total" value="${extracted.total || ''}" />
+
+          ${matchingPOs.length ? `
+            <label>Link to an open purchase order (optional)</label>
+            <select id="rev-po"><option value="">-- None --</option>${matchingPOs.map(po => `<option value="${po.id}">${po.po_number || 'PO'} - ${po.description || ''} (${money(po.amount)})</option>`).join('')}</select>
+          ` : '<input type="hidden" id="rev-po" value="" />'}
+
+          <label style="margin-top:14px;">Line items</label>
+          <div id="rev-line-items">
+            ${lineItems.map((li, i) => `
+              <div class="rev-line-item" data-index="${i}" style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px;">
+                <input class="rli-desc" value="${li.description || ''}" placeholder="Description" style="margin-bottom:6px;" />
+                <div class="grid cols-2">
+                  <div><label style="margin-top:0; font-size:11px;">Quantity</label><input class="rli-qty" type="number" step="0.01" value="${li.quantity ?? 1}" /></div>
+                  <div><label style="margin-top:0; font-size:11px;">Unit cost</label><input class="rli-cost" type="number" step="0.01" value="${li.unit_cost ?? 0}" /></div>
+                </div>
+                <label style="margin-top:6px; font-size:11px;">Match to Stock</label>
+                <select class="rli-match">
+                  <option value="__new__">+ Create as new material</option>
+                  ${materials.map(m => `<option value="${m.id}" ${li.suggestedMatchId === m.id ? 'selected' : ''}>${m.name} (currently ${money(m.cost_price)})</option>`).join('')}
+                </select>
+                ${li.suggestedMatchId ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Suggested match - check this is actually the same item before confirming.</p>` : ''}
+              </div>`).join('')}
+          </div>
+
+          <div style="margin-top:14px;">
+            <button id="rev-confirm-btn">Confirm &amp; save</button>
+            <button type="button" class="secondary" id="rev-cancel-btn">Cancel</button>
+          </div>
+          <div id="rev-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#rev-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#rev-confirm-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#rev-msg');
+        const confirmBtn = overlay.querySelector('#rev-confirm-btn');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Saving...';
+
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const { data: companySettings } = await supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).single();
+          const markup = Number(companySettings?.default_markup_percent) || 45;
+
+          const { data: newBill, error: billErr } = await supabaseClient.from('supplier_bills').insert({
+            supplier_name: overlay.querySelector('#rev-supplier').value.trim(),
+            bill_number: overlay.querySelector('#rev-bill-number').value.trim() || null,
+            bill_date: overlay.querySelector('#rev-bill-date').value || null,
+            amount: parseFloat(overlay.querySelector('#rev-total').value) || 0,
+            po_id: overlay.querySelector('#rev-po').value || null,
+            created_by: user.id,
+          }).select('id').single();
+          if (billErr) throw billErr;
+
+          const rows = [...overlay.querySelectorAll('.rev-line-item')];
+          for (const row of rows) {
+            const description = row.querySelector('.rli-desc').value.trim();
+            const quantity = parseFloat(row.querySelector('.rli-qty').value) || 0;
+            const unitCost = parseFloat(row.querySelector('.rli-cost').value) || 0;
+            const matchValue = row.querySelector('.rli-match').value;
+            if (!description) continue;
+
+            let materialId;
+            if (matchValue === '__new__') {
+              const { data: newMat, error: matErr } = await supabaseClient.from('materials').insert({
+                name: description,
+                cost_price: unitCost,
+                sell_price: Math.round(unitCost * (1 + markup / 100) * 100) / 100,
+                quantity_on_hand: quantity,
+              }).select('id').single();
+              if (matErr) throw matErr;
+              materialId = newMat.id;
+            } else {
+              materialId = matchValue;
+              const existing = materials.find(m => m.id === materialId);
+              const { error: updErr } = await supabaseClient.from('materials').update({
+                cost_price: unitCost,
+                quantity_on_hand: (Number(existing?.quantity_on_hand) || 0) + quantity,
+              }).eq('id', materialId);
+              if (updErr) throw updErr;
+            }
+
+            await supabaseClient.from('supplier_bill_line_items').insert({
+              bill_id: newBill.id, material_id: materialId, description, quantity, unit_cost: unitCost,
+            });
+          }
+
+          overlay.remove();
+          await loadBills();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Confirm & save';
+        }
+      });
+    }
 
     (async function () {
       const session = await requireLogin();
