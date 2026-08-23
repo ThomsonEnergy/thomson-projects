@@ -40,15 +40,16 @@
   .cover-scrim {
     position: absolute;
     inset: 0;
-    background: linear-gradient(100deg, rgba(10,12,16,0.94) 30%, rgba(10,12,16,0.45) 75%);
+    background: linear-gradient(180deg, rgba(10,12,16,0.82) 0%, rgba(10,12,16,0.55) 45%, rgba(10,12,16,0.2) 100%);
     z-index: 1;
   }
   .cover-content { position: relative; z-index: 2; padding: 36px 36px 28px; }
-  .cover-logo { max-height: 56px; max-width: 220px; display: block; margin-bottom: 8px; }
+  .cover-logo-badge { display: inline-block; background: #fff; border-radius: 8px; padding: 8px 14px; margin-bottom: 12px; }
+  .cover-logo { max-height: 40px; max-width: 200px; display: block; }
   .cover-tagline { font-size: 12px; letter-spacing: 0.12em; color: #cfd6e2; text-transform: uppercase; margin: 0 0 40px; }
   .cover-eyebrow { font-size: 13px; letter-spacing: 0.14em; color: var(--accent); text-transform: uppercase; margin: 0 0 8px; }
-  .cover-title { font-size: 32px; font-weight: 700; margin: 0 0 6px; max-width: 520px; }
-  .cover-subtitle { font-size: 15px; color: #cfd6e2; margin: 0; }
+  .cover-title { font-size: 32px; font-weight: 700; margin: 0 0 6px; max-width: 520px; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
+  .cover-subtitle { font-size: 15px; color: #cfd6e2; margin: 0; text-shadow: 0 1px 8px rgba(0,0,0,0.6); }
   .cover-details {
     position: relative; z-index: 2;
     padding: 16px 36px; background: rgba(0,0,0,0.35);
@@ -105,7 +106,7 @@
           ${coverPhotos.length ? `<div class="cover-photo-grid">${coverPhotos.map(url => `<img src="${url}" />`).join('')}</div>` : ''}
           <div class="cover-scrim"></div>
           <div class="cover-content">
-            ${s.logo_url ? `<img src="${s.logo_url}" class="cover-logo" />` : `<p style="font-size:22px; font-weight:700; margin:0 0 8px;">${s.company_name || ''}</p>`}
+            ${s.logo_url ? `<div class="cover-logo-badge"><img src="${s.logo_url}" class="cover-logo" /></div>` : `<p style="font-size:22px; font-weight:700; margin:0 0 8px;">${s.company_name || ''}</p>`}
             ${s.tagline ? `<p class="cover-tagline">${s.tagline}</p>` : '<div style="margin-bottom:40px;"></div>'}
             <p class="cover-eyebrow">${template === 'quick_estimate' ? 'Estimate' : 'Proposal'}</p>
             <h1 class="cover-title">${project.name}</h1>
