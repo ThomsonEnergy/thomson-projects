@@ -217,8 +217,7 @@
       overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
       document.body.appendChild(overlay);
       try {
-        const fileBase64 = await fileToBase64(file);
-        const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', fileBase64, file.type);
+        const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', file, file.type);
         overlay.remove();
         await resolveSupplierAndHandoff(data.supplier, 'pricelist', { items: data.items }, file);
       } catch (err) {
@@ -233,8 +232,7 @@
       overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the statement...</p></div>`;
       document.body.appendChild(overlay);
       try {
-        const fileBase64 = await fileToBase64(file);
-        const data = await runBackgroundExtraction('statement', 'extract-statement-background', fileBase64, file.type);
+        const data = await runBackgroundExtraction('statement', 'extract-statement-background', file, file.type);
         overlay.remove();
         await resolveSupplierAndHandoff(data, 'statement', data, file);
       } catch (err) {

@@ -12,9 +12,13 @@ exports.handler = async (event) => {
   if (!auth) return { statusCode: 403, body: '' };
   const { supabaseAdmin } = auth;
 
-  const { jobId, fileBase64, mediaType } = JSON.parse(event.body || '{}');
+  const { jobId, filePath, mediaType } = JSON.parse(event.body || '{}');
 
   try {
+    const { data: fileBlob, error: downloadErr } = await supabaseAdmin.storage.from('project-documents').download(filePath);
+    if (downloadErr) throw downloadErr;
+    const fileBase64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64');
+
     const apiKey = await getIntegrationKey('anthropic');
     const isPdf = mediaType === 'application/pdf';
 
@@ -22,6 +26,10 @@ exports.handler = async (event) => {
 
 Extract:
 - supplier: the supplier/vendor's business name shown on the statement
+- abn: the supplier's ABN, if shown
+- acn: the supplier's ACN, if shown
+- contact_email: an email address for the supplier, if shown
+- contact_phone: a phone number for the supplier, if shown
 - statement_date: the date the statement was issued, as YYYY-MM-DD
 - total_amount: the closing/total balance owed, as a plain number
 - invoices: an array of every individual invoice/bill line shown on the statement, each with:

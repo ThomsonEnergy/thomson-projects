@@ -17,9 +17,16 @@ exports.handler = async (event) => {
   if (!auth) return { statusCode: 403, body: '' }; // response body is discarded anyway for background functions
   const { supabaseAdmin } = auth;
 
-  const { jobId, fileBase64, mediaType } = JSON.parse(event.body || '{}');
+  const { jobId, filePath, mediaType } = JSON.parse(event.body || '{}');
 
   try {
+    // The file was uploaded to storage by the client first - only the
+    // path travels through this invocation, since Background Function
+    // payloads are capped at 256KB, far too small for an encoded PDF.
+    const { data: fileBlob, error: downloadErr } = await supabaseAdmin.storage.from('project-documents').download(filePath);
+    if (downloadErr) throw downloadErr;
+    const fileBase64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64');
+
     const apiKey = await getIntegrationKey('anthropic');
     const isPdf = mediaType === 'application/pdf';
 

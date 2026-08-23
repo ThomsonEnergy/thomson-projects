@@ -237,19 +237,37 @@ function costCentreNumber(jobNumber, position) {
 // Kicks off a background extraction function and polls the resulting job
 // row until it's done. Used for pricelist/statement extraction, which can
 // genuinely run past a normal function's ~10s ceiling for a long document.
-async function runBackgroundExtraction(jobType, functionName, fileBase64, mediaType) {
+async function runBackgroundExtraction(jobType, functionName, file, mediaType) {
   const { data: { user } } = await supabaseClient.auth.getUser();
   const { data: job, error: jobErr } = await supabaseClient.from('ai_extraction_jobs').insert({
     job_type: jobType, status: 'pending', created_by: user.id,
   }).select('id').single();
   if (jobErr) throw jobErr;
 
+  // Background Functions cap request payloads at 256KB - nowhere near
+  // enough for a base64-encoded PDF, even a small one. Upload the file to
+  // storage first and pass only the path (a short string), then the
+  // background function downloads it itself server-side. This is also
+  // what removes any real size ceiling on what can be uploaded at all.
+  const filePath = await uploadPrivateFile(file, 'ai-extraction-uploads');
+
   const { data: { session } } = await supabaseClient.auth.getSession();
-  fetch(`/.netlify/functions/${functionName}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify({ jobId: job.id, fileBase64, mediaType }),
-  }).catch(() => {}); // fire and forget - result comes from polling the job row, not this response
+
+  let triggerRes;
+  try {
+    triggerRes = await fetch(`/.netlify/functions/${functionName}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ jobId: job.id, filePath, mediaType }),
+    });
+  } catch (networkErr) {
+    throw new Error(`Couldn't reach the extraction service: ${networkErr.message}`);
+  }
+
+  if (triggerRes.status !== 202) {
+    const text = await triggerRes.text().catch(() => '');
+    throw new Error(`The extraction didn't start (status ${triggerRes.status}). ${text || 'Check the function is deployed.'}`);
+  }
 
   const maxAttempts = 60; // ~3 minutes at 3s intervals - a genuinely stuck job should surface an error well before this
   for (let i = 0; i < maxAttempts; i++) {
@@ -258,7 +276,7 @@ async function runBackgroundExtraction(jobType, functionName, fileBase64, mediaT
     if (row?.status === 'complete') return row.result;
     if (row?.status === 'failed') throw new Error(row.error || 'Extraction failed');
   }
-  throw new Error('This is taking longer than expected - try again shortly, or check with a smaller file.');
+  throw new Error('This is taking longer than expected - try again shortly.');
 }
 
 // Shared between the Suppliers page and the Stock page's "Upload
