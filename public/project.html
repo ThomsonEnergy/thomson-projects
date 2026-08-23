@@ -632,10 +632,7 @@
             </div>
             <p class="subtitle" style="margin:6px 0;">${stageName(po.cost_centre_id)}${po.description ? ' - ' + po.description : ''}</p>
 
-            ${items.length ? `
-              <table style="margin-top:8px;"><tbody>
-                ${items.map(li => `<tr><td style="font-size:13px;">${li.description} x${li.quantity}</td><td class="num" style="font-size:13px;">${money(li.quantity * li.unit_cost)}</td></tr>`).join('')}
-              </tbody></table>` : ''}
+            <div style="margin-top:8px;">${renderPoLineItemsReceivable(po, true)}</div>
 
             ${po.po_type === 'open' && po.budget_cap ? `
               <div style="margin-top:10px;">
@@ -653,6 +650,7 @@
             <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
               ${po.po_type === 'open' && !po.locked ? `<button type="button" class="secondary add-po-item-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">+ Add item</button>` : ''}
               ${po.po_type === 'fixed' && po.locked && canOverride ? `<button type="button" class="secondary override-po-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">Override (Admin/Finance)</button>` : ''}
+              ${po.received ? `<span class="badge accepted" style="font-size:11px;">Fully received</span>` : ''}
             </div>
           </div>`;
       }).join('') + `<p class="subtitle" style="margin-top:6px;">Total: ${money(pos.reduce((s, p) => {
@@ -677,6 +675,12 @@
       listEl.querySelectorAll('.override-po-btn').forEach(btn => {
         btn.addEventListener('click', () => openOverridePoPanel(pos.find(p => p.id === btn.dataset.poId), projectId, centres));
       });
+      wireReceiveLineItemButtons(
+        listEl,
+        pos,
+        (po) => po.vehicle_id ? 'vehicle' : 'job', // POs on this page belong to this job by default
+        () => loadPurchaseOrders(projectId, centres)
+      );
 
       document.getElementById('create-po-btn').onclick = () => openCreatePoPanel(projectId, centres);
       const suggestBtn = document.getElementById('suggest-po-btn');
@@ -698,7 +702,7 @@
       overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Matching quoted materials against Stock...</p></div>`;
       document.body.appendChild(overlay);
 
-      const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price, supplier_id, suppliers(name)');
+      const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price, supplier_id, quantity_on_hand, suppliers(name)');
       const { data: existingPOItems } = await supabaseClient
         .from('purchase_order_line_items')
         .select('material_id, purchase_orders!inner(project_id)')
@@ -707,10 +711,11 @@
 
       const quotedMaterials = centres.flatMap(c => (c.cost_centre_line_items || [])
         .filter(li => li.item_type === 'material')
-        .map(li => ({ ...li, stageName: c.name })));
+        .map(li => ({ ...li, stageName: c.name, costCentreId: c.id })));
 
       const matched = {}; // supplier_id -> { supplierName, items: [] }
       const unassigned = [];
+      const fromStock = []; // covered by what's already on hand - never ordered at all
 
       quotedMaterials.forEach(li => {
         let bestMatch = null, bestScore = 0;
@@ -721,17 +726,27 @@
         const match = bestScore >= 0.3 ? bestMatch : null;
         if (match && alreadyOrderedMaterialIds.has(match.id)) return; // already on a PO for this job, skip
 
+        const onHand = Number(match?.quantity_on_hand) || 0;
+        const quotedQty = Number(li.quantity) || 0;
+        const coveredByStock = match ? Math.min(quotedQty, onHand) : 0;
+        const stillNeeded = quotedQty - coveredByStock;
+
+        if (coveredByStock > 0) {
+          fromStock.push({ description: li.description, quantity: coveredByStock, unit_cost: match.cost_price, materialId: match.id, costCentreId: li.costCentreId, stageName: li.stageName });
+        }
+        if (stillNeeded <= 0) return; // fully covered by existing stock, nothing to order
+
         if (match && match.supplier_id) {
           if (!matched[match.supplier_id]) matched[match.supplier_id] = { supplierName: match.suppliers?.name || 'Unknown', items: [] };
-          matched[match.supplier_id].items.push({ description: li.description, quantity: li.quantity, unit_cost: match.cost_price, materialId: match.id, stageName: li.stageName });
+          matched[match.supplier_id].items.push({ description: li.description, quantity: stillNeeded, unit_cost: match.cost_price, materialId: match.id, stageName: li.stageName });
         } else {
-          unassigned.push({ description: li.description, quantity: li.quantity, unit_cost: li.unit_cost, materialId: match?.id || null, stageName: li.stageName });
+          unassigned.push({ description: li.description, quantity: stillNeeded, unit_cost: li.unit_cost, materialId: match?.id || null, stageName: li.stageName });
         }
       });
 
       const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
 
-      if (!Object.keys(matched).length && !unassigned.length) {
+      if (!Object.keys(matched).length && !unassigned.length && !fromStock.length) {
         overlay.querySelector('.card').innerHTML = `<h2>Nothing to suggest</h2><p class="subtitle">Every quoted material is either already on a PO for this job, or there are no material line items quoted.</p><button type="button" class="secondary" id="sp-close-btn">Close</button>`;
         overlay.querySelector('#sp-close-btn').addEventListener('click', () => overlay.remove());
         return;
@@ -742,6 +757,13 @@
         <div class="card" style="max-width:720px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Suggested purchase orders</h2>
           <p class="subtitle" style="margin-bottom:14px;">Nothing's created yet - review each supplier group, then confirm.</p>
+
+          ${fromStock.length ? `
+            <div style="border:1px solid var(--green); border-radius:8px; padding:12px; margin-bottom:10px;">
+              <p style="margin:0 0 8px; color:var(--green); font-weight:600;">Already covered by Stock - nothing to order</p>
+              ${fromStock.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${item.description} (${item.stageName}) x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
+              <p class="subtitle" style="margin-top:6px;">This will be deducted from Stock and costed directly to the job when you confirm.</p>
+            </div>` : ''}
 
           ${Object.entries(matched).map(([supplierId, group]) => `
             <div class="sp-group" data-supplier-id="${supplierId}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
@@ -764,7 +786,7 @@
             </div>` : ''}
 
           <div style="margin-top:14px;">
-            <button id="sp-confirm-btn">Create purchase orders</button>
+            <button id="sp-confirm-btn">Confirm</button>
             <button type="button" class="secondary" id="sp-cancel-btn">Cancel</button>
           </div>
           <div id="sp-msg"></div>
@@ -780,6 +802,27 @@
         try {
           const { data: { user } } = await supabaseClient.auth.getUser();
           let created = 0;
+
+          // Deduct what's covered by existing stock and cost it straight
+          // to the job - this portion is never ordered at all. Track a
+          // running tally rather than re-reading the original cached
+          // quantity each time, in case the same material covers more
+          // than one stage.
+          const runningQuantities = {};
+          for (const item of fromStock) {
+            await supabaseClient.from('job_material_usage').insert({
+              project_id: projectId, cost_centre_id: item.costCentreId, material_id: item.materialId,
+              quantity: item.quantity, unit_cost: item.unit_cost, source: 'from_stock', created_by: user.id,
+            });
+            if (!(item.materialId in runningQuantities)) {
+              const currentMaterial = materials.find(m => m.id === item.materialId);
+              runningQuantities[item.materialId] = Number(currentMaterial?.quantity_on_hand) || 0;
+            }
+            runningQuantities[item.materialId] = Math.max(0, runningQuantities[item.materialId] - item.quantity);
+            await supabaseClient.from('materials').update({
+              quantity_on_hand: runningQuantities[item.materialId],
+            }).eq('id', item.materialId);
+          }
 
           for (const groupEl of overlay.querySelectorAll('.sp-group')) {
             if (!groupEl.querySelector('.sp-include').checked) continue;

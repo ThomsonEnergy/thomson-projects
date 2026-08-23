@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Vehicle Stock - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap" id="content">
+    <p class="subtitle">Loading...</p>
+  </div>
+
+  <script src="/js/supabase-client.js?v=2"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    const vehicleId = new URLSearchParams(window.location.search).get('id');
+    let currentVehicle = null;
+
+    async function loadVehicleStock() {
+      const { data: vehicle, error } = await supabaseClient.from('fleet_vehicles').select('*').eq('id', vehicleId).single();
+      if (error || !vehicle) {
+        document.getElementById('content').innerHTML = `<div class="error-box">Vehicle not found.</div>`;
+        return;
+      }
+      currentVehicle = vehicle;
+
+      const { data: stockRows } = await supabaseClient
+        .from('material_stock_by_location')
+        .select('*, materials(id, name, cost_price)')
+        .eq('vehicle_id', vehicleId)
+        .eq('location_type', 'vehicle')
+        .gt('quantity', 0);
+
+      const { data: pos } = await supabaseClient
+        .from('purchase_orders')
+        .select('*, purchase_order_line_items(*), suppliers(name)')
+        .eq('vehicle_id', vehicleId)
+        .order('created_at', { ascending: false });
+
+      render(vehicle, stockRows || [], pos || []);
+    }
+
+    function render(vehicle, stockRows, pos) {
+      document.getElementById('content').innerHTML = `
+        <a href="/fleet.html" class="link-quiet">&larr; Fleet</a>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-top:8px;">
+          <div>
+            <h1>${vehicle.vehicle_name || vehicle.rego}</h1>
+            <p class="subtitle">${vehicle.rego}${vehicle.asset_number ? ' &middot; Asset ' + vehicle.asset_number : ''}</p>
+          </div>
+          <button id="create-po-btn">+ Create PO for this vehicle</button>
+        </div>
+
+        <div class="card">
+          <h2>Current stock</h2>
+          ${!stockRows.length ? '<p class="subtitle">No stock assigned to this vehicle yet.</p>' : `
+            <table class="responsive-stack">
+              <thead><tr><th>Material</th><th class="num">Quantity</th><th class="num">Value</th></tr></thead>
+              <tbody>
+                ${stockRows.map(r => `
+                  <tr>
+                    <td data-label="Material">${r.materials?.name || 'Unknown'}</td>
+                    <td class="num" data-label="Quantity">${r.quantity}</td>
+                    <td class="num" data-label="Value">${money(r.quantity * (r.materials?.cost_price || 0))}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>`}
+        </div>
+
+        <div class="card">
+          <h2>Purchase orders for this vehicle</h2>
+          <div id="veh-po-list">
+            ${!pos.length ? '<p class="subtitle">None yet.</p>' : pos.map(po => {
+              const isStockPull = !po.supplier_id;
+              return `
+                <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+                  <div style="display:flex; justify-content:space-between;">
+                    <strong>${isStockPull ? 'From Warehouse stock' : (po.suppliers?.name || po.supplier_name || 'Unknown supplier')}</strong>
+                    <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
+                  </div>
+                  ${renderPoLineItemsReceivable(po, true)}
+                </div>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
+
+      document.getElementById('create-po-btn').addEventListener('click', openCreatePoPanel);
+
+      wireReceiveLineItemButtons(
+        document.getElementById('veh-po-list'),
+        pos,
+        () => 'vehicle', // POs on this page default to this vehicle
+        loadVehicleStock
+      );
+    }
+
+    async function openCreatePoPanel() {
+      const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
+      const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>Create PO for ${currentVehicle.vehicle_name || currentVehicle.rego}</h2>
+          <label style="margin-top:0">Source</label>
+          <div style="display:flex; gap:16px; margin-bottom:10px;">
+            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="cp-source" value="stock" checked style="width:auto;" /> At the shed - pull from Warehouse stock</label>
+          </div>
+          <div style="display:flex; gap:16px; margin-bottom:10px;">
+            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="cp-source" value="supplier" style="width:auto;" /> At a wholesaler - buying from a supplier</label>
+          </div>
+
+          <div id="cp-supplier-section" style="display:none;">
+            <label>Supplier</label>
+            <select id="cp-supplier"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+          </div>
+
+          <label style="margin-top:14px;">Items</label>
+          <div id="cp-items"></div>
+          <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
+
+          <div style="margin-top:14px;">
+            <button id="cp-save-btn">Create PO</button>
+            <button type="button" class="secondary" id="cp-cancel-btn">Cancel</button>
+          </div>
+          <div id="cp-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      function addLineRow() {
+        const row = document.createElement('div');
+        row.className = 'cp-line';
+        row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:6px; margin-bottom:6px;';
+        row.innerHTML = `
+          <select class="cp-line-material" style="font-size:13px;">${materials.map(m => `<option value="${m.id}" data-cost="${m.cost_price}">${m.name}</option>`).join('')}</select>
+          <input class="cp-line-qty" type="number" step="1" value="1" placeholder="Qty" style="font-size:13px;" />
+          <input class="cp-line-cost" type="number" step="0.01" value="${materials[0]?.cost_price || 0}" placeholder="Unit cost" style="font-size:13px;" />
+          <button type="button" class="secondary cp-remove-line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
+        overlay.querySelector('#cp-items').appendChild(row);
+        row.querySelector('.cp-remove-line').addEventListener('click', () => row.remove());
+        row.querySelector('.cp-line-material').addEventListener('change', (e) => {
+          row.querySelector('.cp-line-cost').value = e.target.selectedOptions[0].dataset.cost || 0;
+        });
+      }
+      addLineRow();
+      overlay.querySelector('#cp-add-line-btn').addEventListener('click', addLineRow);
+
+      overlay.querySelectorAll('input[name="cp-source"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+          overlay.querySelector('#cp-supplier-section').style.display = e.target.value === 'supplier' ? 'block' : 'none';
+        });
+      });
+
+      overlay.querySelector('#cp-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#cp-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#cp-msg');
+        const source = overlay.querySelector('input[name="cp-source"]:checked').value;
+        const supplierId = source === 'supplier' ? overlay.querySelector('#cp-supplier').value : null;
+        if (source === 'supplier' && !supplierId) { msg.innerHTML = `<div class="error-box">Pick a supplier.</div>`; return; }
+
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const supplierName = supplierId ? overlay.querySelector('#cp-supplier').selectedOptions[0].textContent : null;
+
+          const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
+            project_id: null, vehicle_id: vehicleId, supplier_id: supplierId, supplier_name: supplierName,
+            po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+            description: source === 'stock' ? 'Pulled from Warehouse stock' : 'Purchased for vehicle',
+          }).select('id').single();
+          if (poErr) throw poErr;
+
+          const lines = [...overlay.querySelectorAll('.cp-line')].map(row => ({
+            po_id: newPo.id,
+            material_id: row.querySelector('.cp-line-material').value,
+            description: row.querySelector('.cp-line-material').selectedOptions[0].textContent,
+            quantity: parseFloat(row.querySelector('.cp-line-qty').value) || 0,
+            unit_cost: parseFloat(row.querySelector('.cp-line-cost').value) || 0,
+            added_by: user.id,
+          })).filter(l => l.quantity > 0);
+          if (lines.length) {
+            const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(lines);
+            if (liErr) throw liErr;
+          }
+
+          overlay.remove();
+          await loadVehicleStock();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+      });
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('fleet');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      if (!vehicleId) {
+        document.getElementById('content').innerHTML = `<div class="error-box">No vehicle specified.</div>`;
+        return;
+      }
+      await loadVehicleStock();
+    })();
+  </script>
+</body>
+</html>

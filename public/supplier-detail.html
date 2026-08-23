@@ -51,7 +51,7 @@
 
       const { data: bills } = await supabaseClient
         .from('supplier_bills')
-        .select('*, purchase_orders(po_number, description)')
+        .select('*, purchase_orders(id, po_number, description, received)')
         .eq('supplier_id', supplierId)
         .order('bill_date', { ascending: false });
 
@@ -123,7 +123,11 @@
                     <td class="num" data-label="Amount">${money(b.amount)}</td>
                     <td data-label="Due">${b.due_date ? new Date(b.due_date).toLocaleDateString('en-AU') : '-'}</td>
                     <td data-label="Status">${b.paid ? '<span class="badge accepted">Paid</span>' : (b.approved_for_payment ? '<span class="badge sent">Approved</span>' : '<span class="badge draft">Not approved</span>')}</td>
-                    <td data-label="">${!b.paid && !b.approved_for_payment ? `<button class="secondary approve-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Approve</button>` : ''}</td>
+                    <td data-label="">${!b.paid && !b.approved_for_payment ? (
+                      b.purchase_orders
+                        ? (b.purchase_orders.received ? '' : '<span class="subtitle" style="font-size:12px;">Waiting on goods received</span>')
+                        : `<button class="secondary approve-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Approve</button>`
+                    ) : ''}</td>
                   </tr>`).join('')}
               </tbody>
             </table>`}
@@ -137,10 +141,10 @@
               <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
                 <div style="display:flex; justify-content:space-between;">
                   <strong>${po.po_number || 'PO'} ${po.po_type === 'open' ? '(open-ended)' : '(fixed)'}</strong>
-                  <span class="badge ${po.status === 'paid' || po.status === 'invoiced' ? 'accepted' : 'draft'}">${po.status}</span>
+                  <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
                 </div>
                 <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''}</p>
-                ${(po.purchase_order_line_items || []).map(li => `<div style="font-size:13px; display:flex; justify-content:space-between;"><span>${li.description} x${li.quantity}</span><span>${money(li.quantity * li.unit_cost)}</span></div>`).join('')}
+                ${renderPoLineItemsReceivable(po, true)}
                 ${po.po_type === 'open' && po.budget_cap ? `<p class="subtitle" style="margin-top:8px;">Budget cap: ${money(po.budget_cap)}</p>` : ''}
               </div>`).join('')}
           </div>
@@ -154,6 +158,13 @@
           await loadSupplier();
         });
       });
+
+      wireReceiveLineItemButtons(
+        document.getElementById('pos-list'),
+        pos,
+        (po) => po.project_id ? 'job' : po.vehicle_id ? 'vehicle' : 'warehouse',
+        loadSupplier
+      );
 
       document.getElementById('edit-supplier-btn').addEventListener('click', () => openEditPanel(supplier));
       document.getElementById('upload-bill-btn').addEventListener('click', () => {
@@ -525,10 +536,29 @@
           <label>Total amount</label>
           <input type="number" step="0.01" id="rev-total" value="${extracted.total || ''}" />
 
-          ${openPOs?.length ? `
-            <label>Link to an open purchase order (optional)</label>
-            <select id="rev-po"><option value="">-- None --</option>${openPOs.map(po => `<option value="${po.id}">${po.po_number || 'PO'} - ${po.description || ''}</option>`).join('')}</select>
-          ` : '<input type="hidden" id="rev-po" value="" />'}
+          <label style="margin-top:14px;">Purchase order</label>
+          <select id="rev-po-mode">
+            <option value="none">No PO for this bill</option>
+            ${openPOs?.length ? `<option value="existing">Link to an existing open PO</option>` : ''}
+            <option value="new">Create a new PO from this bill</option>
+          </select>
+
+          <div id="rev-po-existing-section" style="display:none; margin-top:8px;">
+            <select id="rev-po"><option value="">-- Select --</option>${(openPOs || []).map(po => `<option value="${po.id}">${po.po_number || 'PO'} - ${po.description || ''}</option>`).join('')}</select>
+          </div>
+
+          <div id="rev-po-new-section" style="display:none; margin-top:8px;">
+            <p class="subtitle" style="margin-bottom:8px;">Auto-filled from this bill's line items below - creates a locked PO so it can be signed off once everything's arrived, before this bill gets approved for payment.</p>
+            <select id="rev-po-assign-type">
+              <option value="stock">Assign to Stock (not a specific job)</option>
+              <option value="job">Assign to a job</option>
+            </select>
+            <div id="rev-po-job-search-wrap" style="display:none; margin-top:8px;">
+              <input id="rev-po-job-search" placeholder="Search for the job..." autocomplete="off" />
+              <div id="rev-po-job-results"></div>
+              <div id="rev-po-job-selected" class="subtitle" style="margin-top:4px;"></div>
+            </div>
+          </div>
 
           <label style="margin-top:14px;">Line items</label>
           <div id="rev-line-items">
@@ -556,6 +586,45 @@
         </div>`;
       document.body.appendChild(overlay);
 
+      overlay.querySelector('#rev-po-mode').addEventListener('change', (e) => {
+        overlay.querySelector('#rev-po-existing-section').style.display = e.target.value === 'existing' ? 'block' : 'none';
+        overlay.querySelector('#rev-po-new-section').style.display = e.target.value === 'new' ? 'block' : 'none';
+      });
+
+      const assignTypeSelect = overlay.querySelector('#rev-po-assign-type');
+      if (assignTypeSelect) {
+        assignTypeSelect.addEventListener('change', (e) => {
+          overlay.querySelector('#rev-po-job-search-wrap').style.display = e.target.value === 'job' ? 'block' : 'none';
+        });
+      }
+
+      let selectedJobForNewPO = null;
+      const jobSearchInput = overlay.querySelector('#rev-po-job-search');
+      if (jobSearchInput) {
+        let jobSearchTimeout;
+        jobSearchInput.addEventListener('input', (e) => {
+          clearTimeout(jobSearchTimeout);
+          selectedJobForNewPO = null;
+          const q = e.target.value.trim();
+          if (q.length < 2) { overlay.querySelector('#rev-po-job-results').innerHTML = ''; return; }
+          jobSearchTimeout = setTimeout(async () => {
+            const results = await searchProjects(q);
+            const resultsEl = overlay.querySelector('#rev-po-job-results');
+            resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+              ${results.map(p => `<div class="rev-job-pick" data-id="${p.id}" data-name="${p.name}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</div>`).join('')}
+            </div>`;
+            resultsEl.querySelectorAll('.rev-job-pick').forEach(row => {
+              row.addEventListener('click', () => {
+                selectedJobForNewPO = { id: row.dataset.id, name: row.dataset.name };
+                jobSearchInput.value = row.dataset.name;
+                overlay.querySelector('#rev-po-job-selected').textContent = `Selected: ${row.dataset.name}`;
+                resultsEl.innerHTML = '';
+              });
+            });
+          }, 250);
+        });
+      }
+
       overlay.querySelector('#rev-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#rev-confirm-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#rev-msg');
@@ -568,8 +637,46 @@
           const { data: companySettings } = await supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).single();
           const markup = Number(companySettings?.default_markup_percent) || 45;
 
-          const poId = overlay.querySelector('#rev-po').value || null;
-          const linkedPO = poId ? openPOs.find(p => p.id === poId) : null;
+          const poMode = overlay.querySelector('#rev-po-mode').value;
+          let poId = null;
+          let linkedPO = null;
+
+          if (poMode === 'existing') {
+            poId = overlay.querySelector('#rev-po').value || null;
+            linkedPO = poId ? openPOs.find(p => p.id === poId) : null;
+          } else if (poMode === 'new') {
+            const assignType = overlay.querySelector('#rev-po-assign-type').value;
+            if (assignType === 'job' && !selectedJobForNewPO) {
+              throw new Error('Search for and select a job, or switch to assigning this PO to Stock instead.');
+            }
+            const lineRows = [...overlay.querySelectorAll('.rev-line-item')];
+            const { data: newPO, error: poErr } = await supabaseClient.from('purchase_orders').insert({
+              project_id: assignType === 'job' ? selectedJobForNewPO.id : null,
+              supplier_id: supplierId,
+              supplier_name: currentSupplier.name,
+              po_type: 'fixed',
+              locked: true,
+              status: 'ordered',
+              amount: 0,
+              description: `Created from bill ${overlay.querySelector('#rev-bill-number').value.trim() || ''}`.trim(),
+            }).select('*').single();
+            if (poErr) throw poErr;
+
+            const poLineItems = lineRows.map(row => ({
+              po_id: newPO.id,
+              description: row.querySelector('.rli-desc').value.trim(),
+              quantity: parseFloat(row.querySelector('.rli-qty').value) || 0,
+              unit_cost: parseFloat(row.querySelector('.rli-cost').value) || 0,
+              added_by: user.id,
+            })).filter(li => li.description);
+            if (poLineItems.length) {
+              const { error: poLiErr } = await supabaseClient.from('purchase_order_line_items').insert(poLineItems);
+              if (poLiErr) throw poLiErr;
+            }
+
+            poId = newPO.id;
+            linkedPO = { ...newPO, purchase_order_line_items: poLineItems };
+          }
 
           const billDate = overlay.querySelector('#rev-bill-date').value || null;
           const dueDate = billDate ? await (async () => {

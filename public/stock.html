@@ -31,15 +31,27 @@
     <h1>Stock</h1>
     <p class="subtitle">Materials on hand - cost and sell price, so job costing has real numbers to work from once this feeds into quoting.</p>
 
+    <div class="grid cols-2">
+      <div class="stat"><div class="label">Total stock cost</div><div class="value" id="stat-total-stock-cost">-</div></div>
+      <div class="stat"><div class="label">Below minimum</div><div class="value" id="stat-below-minimum">-</div></div>
+    </div>
+
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
         <input id="stock-search" placeholder="Search by name, category, or supplier..." style="max-width:320px;" />
         <div>
+          <button class="secondary" id="suggest-restock-btn" style="margin-right:8px;">Suggest restock PO</button>
           <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
           <button id="add-material-btn">+ Add material</button>
         </div>
       </div>
       <div id="stock-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Stock purchase orders</h2>
+      <p class="subtitle" style="margin-bottom:14px;">Purchase orders for general stock replenishment - not tied to any specific job.</p>
+      <div id="stock-pos-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
@@ -48,13 +60,31 @@
   <script>
     let allMaterials = [];
     let allSuppliers = [];
+    let stockVehicles = [];
+    let locationRows = [];
 
     async function loadMaterials() {
       const listEl = document.getElementById('stock-list');
       const { data, error } = await supabaseClient.from('materials').select('*, suppliers(id, name)').order('name');
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       allMaterials = data || [];
+
+      const { data: vehicles } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
+      stockVehicles = vehicles || [];
+      const { data: locations } = await supabaseClient.from('material_stock_by_location').select('*');
+      locationRows = locations || [];
+
       renderMaterials();
+    }
+
+    function locationBreakdown(materialId) {
+      const warehouseQty = locationRows.find(r => r.material_id === materialId && r.location_type === 'warehouse')?.quantity || 0;
+      const parts = [`${warehouseQty} Warehouse`];
+      stockVehicles.forEach(v => {
+        const qty = locationRows.find(r => r.material_id === materialId && r.location_type === 'vehicle' && r.vehicle_id === v.id)?.quantity || 0;
+        parts.push(`${qty} ${v.vehicle_name || v.rego}`);
+      });
+      return parts.join(' &middot; ');
     }
 
     function renderMaterials() {
@@ -64,24 +94,36 @@
         ? allMaterials.filter(m => (m.name || '').toLowerCase().includes(q) || (m.category || '').toLowerCase().includes(q) || (m.suppliers?.name || '').toLowerCase().includes(q))
         : allMaterials;
 
+      const totalStockCost = allMaterials.reduce((s, m) => s + (Number(m.quantity_on_hand) || 0) * (Number(m.cost_price) || 0), 0);
+      const belowMinimumCount = allMaterials.filter(m => Number(m.minimum_quantity) > 0 && Number(m.quantity_on_hand) < Number(m.minimum_quantity)).length;
+      document.getElementById('stat-total-stock-cost').textContent = money(totalStockCost);
+      document.getElementById('stat-below-minimum').textContent = belowMinimumCount;
+
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No materials yet - add one to get started.</p>`; return; }
 
       listEl.innerHTML = `
         <table class="responsive-stack">
-          <thead><tr><th>Name</th><th>Category</th><th>Supplier</th><th class="num">Cost</th><th class="num">Sell</th><th class="num">Qty on hand</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Category</th><th>Supplier</th><th class="num">Cost</th><th class="num">Sell</th><th class="num">Qty on hand</th><th class="num">Minimum</th><th></th></tr></thead>
           <tbody>
-            ${filtered.map(m => `
+            ${filtered.map(m => {
+              const isBelowMin = Number(m.minimum_quantity) > 0 && Number(m.quantity_on_hand) < Number(m.minimum_quantity);
+              return `
               <tr>
                 <td data-label="Name">${m.name}</td>
                 <td data-label="Category">${m.category || '-'}</td>
                 <td data-label="Supplier">${m.suppliers?.name || '-'}</td>
                 <td class="num" data-label="Cost">${money(m.cost_price)}</td>
                 <td class="num" data-label="Sell">${money(m.sell_price)}</td>
-                <td class="num" data-label="Qty">${m.quantity_on_hand}</td>
+                <td class="num" data-label="Qty" style="${isBelowMin ? 'color:var(--red); font-weight:600;' : ''}">
+                  ${m.quantity_on_hand}${isBelowMin ? ' &#9888;' : ''}
+                  ${stockVehicles.length ? `<div class="subtitle" style="font-size:11px; font-weight:400; white-space:nowrap;">${locationBreakdown(m.id)}</div>` : ''}
+                </td>
+                <td class="num" data-label="Minimum">${m.minimum_quantity || '-'}</td>
                 <td data-label="">
                   <button class="secondary edit-material-btn" data-id="${m.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
                 </td>
-              </tr>`).join('')}
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>`;
 
@@ -124,6 +166,8 @@
               <input id="mat-qty" type="number" step="1" value="${material?.quantity_on_hand || 0}" />
             </div>
           </div>
+          <label>Minimum quantity - flags for restocking below this</label>
+          <input id="mat-minimum" type="number" step="1" value="${material?.minimum_quantity || 0}" />
           <label>Notes</label>
           <textarea id="mat-notes" style="min-height:60px;">${material?.notes || ''}</textarea>
           <div style="margin-top:14px; display:flex; justify-content:space-between;">
@@ -149,6 +193,7 @@
           cost_price: parseFloat(overlay.querySelector('#mat-cost').value) || 0,
           sell_price: parseFloat(overlay.querySelector('#mat-sell').value) || 0,
           quantity_on_hand: parseFloat(overlay.querySelector('#mat-qty').value) || 0,
+          minimum_quantity: parseFloat(overlay.querySelector('#mat-minimum').value) || 0,
           notes: overlay.querySelector('#mat-notes').value.trim() || null,
         };
         const { error } = material
@@ -171,6 +216,152 @@
     }
 
     document.getElementById('add-material-btn').addEventListener('click', () => openMaterialPanel(null));
+
+    document.getElementById('suggest-restock-btn').addEventListener('click', openRestockPanel);
+
+    async function openRestockPanel() {
+      const belowMinimum = allMaterials.filter(m => Number(m.minimum_quantity) > 0 && Number(m.quantity_on_hand) < Number(m.minimum_quantity));
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      document.body.appendChild(overlay);
+
+      if (!belowMinimum.length) {
+        overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><h2>Nothing needs restocking</h2><p class="subtitle">No materials are below their minimum quantity.</p><button type="button" class="secondary" id="rk-close-btn">Close</button></div>`;
+        overlay.querySelector('#rk-close-btn').addEventListener('click', () => overlay.remove());
+        return;
+      }
+
+      const { data: materialsWithSupplier } = await supabaseClient.from('materials').select('id, name, cost_price, supplier_id, quantity_on_hand, minimum_quantity, suppliers(name)').in('id', belowMinimum.map(m => m.id));
+
+      const grouped = {}; // supplier_id -> { supplierName, items: [] }
+      const noSupplier = [];
+      (materialsWithSupplier || []).forEach(m => {
+        const shortfall = Number(m.minimum_quantity) - Number(m.quantity_on_hand);
+        const item = { materialId: m.id, description: m.name, quantity: shortfall, unit_cost: m.cost_price };
+        if (m.supplier_id) {
+          if (!grouped[m.supplier_id]) grouped[m.supplier_id] = { supplierName: m.suppliers?.name || 'Unknown', items: [] };
+          grouped[m.supplier_id].items.push(item);
+        } else {
+          noSupplier.push(item);
+        }
+      });
+
+      overlay.style.overflowY = 'auto';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:640px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>Suggested restock POs</h2>
+          <p class="subtitle" style="margin-bottom:14px;">Below minimum quantity - nothing's created yet, review then confirm.</p>
+
+          ${Object.entries(grouped).map(([supplierId, group]) => `
+            <div class="rk-group" data-supplier-id="${supplierId}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+              <label style="margin-top:0; display:flex; align-items:center; gap:8px;"><input type="checkbox" class="rk-include" checked style="width:auto;" /><strong>${group.supplierName}</strong></label>
+              ${group.items.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${item.description} x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
+              <p class="subtitle" style="margin-top:6px;">Total: ${money(group.items.reduce((s, i) => s + i.quantity * i.unit_cost, 0))}</p>
+            </div>`).join('')}
+
+          ${noSupplier.length ? `
+            <div style="border:1px solid var(--red); border-radius:8px; padding:12px; margin-bottom:10px;">
+              <p style="margin:0 0 8px; color:var(--red); font-weight:600;">No supplier assigned - can't include in a PO</p>
+              ${noSupplier.map(item => `<div style="font-size:13px; padding:4px 0;">${item.description} x${item.quantity} - assign a supplier on this material first</div>`).join('')}
+            </div>` : ''}
+
+          <div style="margin-top:14px;">
+            <button id="rk-confirm-btn">Create purchase orders</button>
+            <button type="button" class="secondary" id="rk-cancel-btn">Cancel</button>
+          </div>
+          <div id="rk-msg"></div>
+        </div>`;
+
+      overlay.querySelector('#rk-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#rk-confirm-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#rk-msg');
+        const confirmBtn = overlay.querySelector('#rk-confirm-btn');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Creating...';
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          let created = 0;
+          for (const groupEl of overlay.querySelectorAll('.rk-group')) {
+            if (!groupEl.querySelector('.rk-include').checked) continue;
+            const supplierId = groupEl.dataset.supplierId;
+            const group = grouped[supplierId];
+            const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
+              project_id: null, supplier_id: supplierId, supplier_name: group.supplierName,
+              po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+              description: 'Restock - below minimum quantity',
+            }).select('id').single();
+            if (poErr) throw poErr;
+            await supabaseClient.from('purchase_order_line_items').insert(
+              group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
+            );
+            created++;
+          }
+          overlay.remove();
+          alert(`Created ${created} restock purchase order${created === 1 ? '' : 's'}.`);
+          await loadStockPOs();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Create purchase orders';
+        }
+      });
+    }
+
+    async function loadStockPOs() {
+      const listEl = document.getElementById('stock-pos-list');
+      const { data: pos, error } = await supabaseClient
+        .from('purchase_orders')
+        .select('*, purchase_order_line_items(*), suppliers(name)')
+        .is('project_id', null)
+        .order('created_at', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!pos.length) { listEl.innerHTML = `<p class="subtitle">No stock purchase orders yet.</p>`; return; }
+
+      listEl.innerHTML = pos.map(po => {
+        const items = po.purchase_order_line_items || [];
+        const total = items.length ? items.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0) : Number(po.amount) || 0;
+        return `
+          <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+            <div style="display:flex; justify-content:space-between;">
+              <strong>${po.suppliers?.name || po.supplier_name || 'Unknown supplier'}${po.po_number ? ' (' + po.po_number + ')' : ''}</strong>
+              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Received' : po.status}</span>
+            </div>
+            <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''} - ${money(total)}</p>
+            ${items.map(li => `<div style="font-size:13px; display:flex; justify-content:space-between;"><span>${li.description} x${li.quantity}</span><span>${money(li.quantity * li.unit_cost)}</span></div>`).join('')}
+            ${!po.received ? `<button type="button" class="secondary stock-confirm-received-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Confirm all items received - approve for payment</button>` : ''}
+          </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.stock-confirm-received-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Confirm every item on this PO has physically arrived? This approves any bill linked to it for payment.')) return;
+          const po = pos.find(p => p.id === btn.dataset.poId);
+          const { data: { user } } = await supabaseClient.auth.getUser();
+
+          const { error: poErr } = await supabaseClient.from('purchase_orders').update({
+            received: true, received_by: user.id, received_at: new Date().toISOString(),
+          }).eq('id', btn.dataset.poId);
+          if (poErr) { alert(poErr.message); return; }
+
+          // Stock POs go into general inventory, not any specific job -
+          // increment quantity_on_hand for each item received.
+          const items = po?.purchase_order_line_items || [];
+          for (const li of items) {
+            if (!li.material_id) continue;
+            const { data: material } = await supabaseClient.from('materials').select('quantity_on_hand').eq('id', li.material_id).single();
+            await supabaseClient.from('materials').update({
+              quantity_on_hand: (Number(material?.quantity_on_hand) || 0) + Number(li.quantity),
+            }).eq('id', li.material_id);
+          }
+
+          const { error: billErr } = await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', btn.dataset.poId);
+          if (billErr) { alert(billErr.message); return; }
+          await loadStockPOs();
+          await loadMaterials();
+        });
+      });
+    }
 
     document.getElementById('upload-pricelist-btn').addEventListener('click', () => {
       const input = document.createElement('input');
@@ -208,6 +399,7 @@
       const { data: suppliersData } = await supabaseClient.from('suppliers').select('id, name').order('name');
       allSuppliers = suppliersData || [];
       await loadMaterials();
+      await loadStockPOs();
     })();
   </script>
 </body>

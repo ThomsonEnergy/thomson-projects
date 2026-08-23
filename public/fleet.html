@@ -61,7 +61,7 @@
 
       listEl.innerHTML = `
         <table class="responsive-stack">
-          <thead><tr><th>Rego</th><th>Vehicle</th><th>Assigned to</th><th>Rego expiry</th><th>Next service</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Rego</th><th>Vehicle</th><th>Assigned to</th><th>Rego expiry</th><th>Next service</th><th></th></tr></thead>
           <tbody>
             ${data.map(v => {
               const regoDays = daysUntil(v.rego_expiry);
@@ -70,12 +70,16 @@
               const serviceWarn = serviceDays !== null && serviceDays <= 30;
               return `
                 <tr>
-                  <td data-label="Rego"><strong>${v.rego}</strong></td>
+                  <td data-label="Name"><strong>${v.vehicle_name || '-'}</strong></td>
+                  <td data-label="Rego">${v.rego}</td>
                   <td data-label="Vehicle">${[v.year, v.make, v.model].filter(Boolean).join(' ')}</td>
                   <td data-label="Assigned to">${v.profiles?.full_name || '-'}</td>
                   <td data-label="Rego expiry">${v.rego_expiry ? new Date(v.rego_expiry).toLocaleDateString('en-AU') : '-'}${regoWarn ? ` <span class="badge draft" style="color:var(--red);">${regoDays}d</span>` : ''}</td>
                   <td data-label="Next service">${v.next_service_date ? new Date(v.next_service_date).toLocaleDateString('en-AU') : '-'}${serviceWarn ? ` <span class="badge draft" style="color:var(--red);">${serviceDays}d</span>` : ''}</td>
-                  <td data-label=""><button class="secondary edit-vehicle-btn" data-id="${v.id}" style="font-size:12px; padding:6px 10px;">Edit</button></td>
+                  <td data-label="">
+                    ${v.holds_stock ? `<a href="/vehicle-stock.html?id=${v.id}" class="link-quiet" style="font-size:12px; margin-right:10px;">Stock</a>` : ''}
+                    <button class="secondary edit-vehicle-btn" data-id="${v.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
+                  </td>
                 </tr>`;
             }).join('')}
           </tbody>
@@ -92,7 +96,11 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
           <h2>${vehicle ? 'Edit vehicle' : 'Add vehicle'}</h2>
-          <label style="margin-top:0">Rego</label>
+          <div class="grid cols-2">
+            <div><label style="margin-top:0">Vehicle name</label><input id="veh-name" value="${vehicle?.vehicle_name || ''}" placeholder="e.g. TE03" /></div>
+            <div><label style="margin-top:0">Asset number</label><input id="veh-asset" value="${vehicle?.asset_number || ''}" /></div>
+          </div>
+          <label>Rego</label>
           <input id="veh-rego" value="${vehicle?.rego || ''}" />
           <div class="grid cols-3">
             <div><label>Year</label><input id="veh-year" type="number" value="${vehicle?.year || ''}" /></div>
@@ -107,6 +115,7 @@
           </div>
           <label>Odometer</label>
           <input id="veh-odo" type="number" value="${vehicle?.odometer || ''}" />
+          <label style="margin-top:14px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="veh-holds-stock" ${vehicle?.holds_stock ? 'checked' : ''} style="width:auto;" /> This vehicle holds stock</label>
           <label>Notes</label>
           <textarea id="veh-notes" style="min-height:60px;">${vehicle?.notes || ''}</textarea>
           <div style="margin-top:14px; display:flex; justify-content:space-between;">
@@ -127,6 +136,9 @@
         if (!rego) { msg.innerHTML = `<div class="error-box">Rego is required.</div>`; return; }
         const fields = {
           rego,
+          vehicle_name: overlay.querySelector('#veh-name').value.trim() || null,
+          asset_number: overlay.querySelector('#veh-asset').value.trim() || null,
+          holds_stock: overlay.querySelector('#veh-holds-stock').checked,
           year: parseInt(overlay.querySelector('#veh-year').value) || null,
           make: overlay.querySelector('#veh-make').value.trim() || null,
           model: overlay.querySelector('#veh-model').value.trim() || null,

@@ -360,3 +360,175 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
     proceedTo(created.id);
   }
 }
+
+// Shared across supplier, job, and vehicle PO views - each line item on
+// a PO gets ticked off and sent wherever it actually needs to go, not
+// just wherever the PO as a whole defaults to (buying materials for a
+// job and a tool for the van in the same order needs two destinations).
+function renderPoLineItemsReceivable(po, canEdit) {
+  const items = po.purchase_order_line_items || [];
+  return items.map(li => {
+    if (li.received) {
+      const destLabel = li.destination_type === 'job' ? 'Job' : li.destination_type === 'vehicle' ? 'Vehicle' : 'Warehouse';
+      return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
+        <span>${li.description} x${li.quantity}</span>
+        <span class="badge accepted" style="font-size:11px;">Received - ${destLabel}</span>
+      </div>`;
+    }
+    return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
+      <span>${li.description} x${li.quantity} - ${money(li.quantity * li.unit_cost)}</span>
+      ${canEdit ? `<button type="button" class="secondary receive-line-item-btn" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">Receive</button>` : '<span class="subtitle" style="font-size:11px;">Not yet received</span>'}
+    </div>`;
+  }).join('');
+}
+
+// Wires up every ".receive-line-item-btn" found in the container - call
+// this after rendering a PO list that used renderPoLineItemsReceivable.
+function wireReceiveLineItemButtons(containerEl, allPos, defaultDestinationFor, onComplete) {
+  containerEl.querySelectorAll('.receive-line-item-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const lineId = btn.dataset.lineId;
+      let lineItem = null, parentPo = null;
+      for (const po of allPos) {
+        const found = (po.purchase_order_line_items || []).find(li => li.id === lineId);
+        if (found) { lineItem = found; parentPo = po; break; }
+      }
+      if (lineItem) openReceiveLineItemPanel(lineItem, parentPo, defaultDestinationFor(parentPo), onComplete);
+    });
+  });
+}
+
+async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComplete) {
+  const sourceIsWarehouse = !!po.vehicle_id && !po.supplier_id; // pulled from the shed, not a new purchase
+  const { data: vehicles } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+  overlay.innerHTML = `
+    <div class="card" style="max-width:420px; width:100%; max-height:85vh; overflow-y:auto;">
+      <h2>Receive item</h2>
+      <p class="subtitle" style="margin-bottom:10px;">${lineItem.description} x${lineItem.quantity}</p>
+      <label style="margin-top:0">Send to</label>
+      <select id="rl-dest-type">
+        <option value="warehouse" ${defaultDestination === 'warehouse' ? 'selected' : ''}>Warehouse</option>
+        <option value="job" ${defaultDestination === 'job' ? 'selected' : ''}>A job</option>
+        ${vehicles?.length ? `<option value="vehicle" ${defaultDestination === 'vehicle' ? 'selected' : ''}>A vehicle</option>` : ''}
+      </select>
+      <div id="rl-job-section" style="display:none; margin-top:8px;">
+        <input id="rl-job-search" placeholder="Search for the job..." autocomplete="off" />
+        <div id="rl-job-results"></div>
+        <div id="rl-job-selected" class="subtitle" style="margin-top:4px;"></div>
+      </div>
+      <div id="rl-vehicle-section" style="display:none; margin-top:8px;">
+        <select id="rl-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}">${v.vehicle_name || v.rego}</option>`).join('')}</select>
+      </div>
+      <div style="margin-top:14px;">
+        <button id="rl-confirm-btn">Confirm received</button>
+        <button type="button" class="secondary" id="rl-cancel-btn">Cancel</button>
+      </div>
+      <div id="rl-msg"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  function syncSections() {
+    const val = overlay.querySelector('#rl-dest-type').value;
+    overlay.querySelector('#rl-job-section').style.display = val === 'job' ? 'block' : 'none';
+    overlay.querySelector('#rl-vehicle-section').style.display = val === 'vehicle' ? 'block' : 'none';
+  }
+  overlay.querySelector('#rl-dest-type').addEventListener('change', syncSections);
+  syncSections();
+
+  let selectedJob = po.project_id ? { id: po.project_id } : null;
+  const jobSearchInput = overlay.querySelector('#rl-job-search');
+  if (po.project_id) {
+    overlay.querySelector('#rl-job-selected').textContent = 'This PO\'s own job (default)';
+  }
+  let jobSearchTimeout;
+  jobSearchInput.addEventListener('input', (e) => {
+    clearTimeout(jobSearchTimeout);
+    selectedJob = null;
+    const q = e.target.value.trim();
+    if (q.length < 2) { overlay.querySelector('#rl-job-results').innerHTML = ''; return; }
+    jobSearchTimeout = setTimeout(async () => {
+      const results = await searchProjects(q);
+      const resultsEl = overlay.querySelector('#rl-job-results');
+      resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+        ${results.map(p => `<div class="rl-job-pick" data-id="${p.id}" data-name="${p.name}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</div>`).join('')}
+      </div>`;
+      resultsEl.querySelectorAll('.rl-job-pick').forEach(row => {
+        row.addEventListener('click', () => {
+          selectedJob = { id: row.dataset.id, name: row.dataset.name };
+          jobSearchInput.value = row.dataset.name;
+          overlay.querySelector('#rl-job-selected').textContent = `Selected: ${row.dataset.name}`;
+          resultsEl.innerHTML = '';
+        });
+      });
+    }, 250);
+  });
+
+  overlay.querySelector('#rl-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#rl-confirm-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#rl-msg');
+    const destType = overlay.querySelector('#rl-dest-type').value;
+    if (destType === 'job' && !selectedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
+    const vehicleId = destType === 'vehicle' ? overlay.querySelector('#rl-vehicle-select').value : null;
+
+    try {
+      const { data: { user } } = await supabaseClient.auth.getUser();
+
+      if (destType === 'warehouse') {
+        // If this PO itself was a vehicle-pull-from-stock (no supplier),
+        // the warehouse quantity was already the source, not the
+        // destination - this path only ever ADDS to warehouse.
+        const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', lineItem.material_id).eq('location_type', 'warehouse').maybeSingle();
+        if (whRow) {
+          await supabaseClient.from('material_stock_by_location').update({ quantity: Number(whRow.quantity) + Number(lineItem.quantity), updated_at: new Date().toISOString() }).eq('id', whRow.id);
+        } else {
+          await supabaseClient.from('material_stock_by_location').insert({ material_id: lineItem.material_id, location_type: 'warehouse', quantity: lineItem.quantity });
+        }
+      } else if (destType === 'job') {
+        await supabaseClient.from('job_material_usage').insert({
+          project_id: selectedJob.id, cost_centre_id: po.cost_centre_id || null, material_id: lineItem.material_id,
+          quantity: lineItem.quantity, unit_cost: lineItem.unit_cost, source: 'from_po', po_line_item_id: lineItem.id, created_by: user.id,
+        });
+      } else if (destType === 'vehicle') {
+        if (sourceIsWarehouse) {
+          const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', lineItem.material_id).eq('location_type', 'warehouse').maybeSingle();
+          const warehouseQty = Number(whRow?.quantity) || 0;
+          if (lineItem.quantity > warehouseQty) throw new Error(`Only ${warehouseQty} available in the Warehouse.`);
+          if (whRow) {
+            await supabaseClient.from('material_stock_by_location').update({ quantity: warehouseQty - lineItem.quantity, updated_at: new Date().toISOString() }).eq('id', whRow.id);
+          }
+        }
+        const { data: vehRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', lineItem.material_id).eq('location_type', 'vehicle').eq('vehicle_id', vehicleId).maybeSingle();
+        if (vehRow) {
+          await supabaseClient.from('material_stock_by_location').update({ quantity: Number(vehRow.quantity) + Number(lineItem.quantity), updated_at: new Date().toISOString() }).eq('id', vehRow.id);
+        } else {
+          await supabaseClient.from('material_stock_by_location').insert({ material_id: lineItem.material_id, location_type: 'vehicle', vehicle_id: vehicleId, quantity: lineItem.quantity });
+        }
+      }
+
+      await supabaseClient.from('purchase_order_line_items').update({
+        received: true, destination_type: destType,
+        destination_job_id: destType === 'job' ? selectedJob.id : null,
+        destination_vehicle_id: destType === 'vehicle' ? vehicleId : null,
+        received_by: user.id, received_at: new Date().toISOString(),
+      }).eq('id', lineItem.id);
+
+      // If every line item on this PO is now received, mark the PO
+      // itself received and approve any linked bill for payment.
+      const { data: allItems } = await supabaseClient.from('purchase_order_line_items').select('received').eq('po_id', po.id);
+      if ((allItems || []).every(li => li.received)) {
+        await supabaseClient.from('purchase_orders').update({
+          received: true, received_by: user.id, received_at: new Date().toISOString(),
+        }).eq('id', po.id);
+        await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', po.id);
+      }
+
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } catch (err) {
+      msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+    }
+  });
+}
