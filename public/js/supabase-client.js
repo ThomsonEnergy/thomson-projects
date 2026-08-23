@@ -126,7 +126,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html' },
   { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html' },
   { key: 'invoices', label: 'Invoices', href: '/invoices.html' },
-  { key: 'supplier-bills', label: 'Supplier Bills', href: '/supplier-bills.html' },
+  { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html' },
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html' },
   { key: 'clients', label: 'Clients', href: '/clients.html' },
   { key: 'stock', label: 'Stock', href: '/stock.html' },

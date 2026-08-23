@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Suppliers - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1>Suppliers</h1>
+        <p class="subtitle">Who you owe, how much, and what's actually due.</p>
+      </div>
+      <div>
+        <button class="secondary" id="run-payments-btn" style="margin-right:8px;">Run payments due today</button>
+        <button id="add-supplier-btn">+ Add supplier</button>
+      </div>
+    </div>
+
+    <div class="grid cols-4">
+      <div class="stat"><div class="label">Invoiced, not paid</div><div class="value" id="stat-outstanding">-</div></div>
+      <div class="stat"><div class="label">Approved for payment</div><div class="value" id="stat-approved">-</div></div>
+      <div class="stat"><div class="label">Not approved</div><div class="value" id="stat-pending">-</div></div>
+      <div class="stat"><div class="label">Overdue</div><div class="value" id="stat-overdue">-</div></div>
+    </div>
+
+    <div class="card">
+      <input id="supplier-search" placeholder="Search suppliers..." style="margin-bottom:14px; max-width:320px;" />
+      <div id="suppliers-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let allSuppliers = [];
+
+    async function loadSuppliers() {
+      const listEl = document.getElementById('suppliers-list');
+      const { data: suppliers, error } = await supabaseClient.from('suppliers').select('*').order('name');
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      const { data: summaries } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: null });
+      const summaryBySupplier = Object.fromEntries((summaries || []).map(s => [s.supplier_id, s]));
+
+      allSuppliers = (suppliers || []).map(s => ({ ...s, summary: summaryBySupplier[s.id] || { invoiced_not_paid: 0, approved_for_payment: 0, not_approved: 0, overdue: 0 } }));
+
+      const totals = allSuppliers.reduce((acc, s) => ({
+        outstanding: acc.outstanding + Number(s.summary.invoiced_not_paid),
+        approved: acc.approved + Number(s.summary.approved_for_payment),
+        pending: acc.pending + Number(s.summary.not_approved),
+        overdue: acc.overdue + Number(s.summary.overdue),
+      }), { outstanding: 0, approved: 0, pending: 0, overdue: 0 });
+
+      document.getElementById('stat-outstanding').textContent = money(totals.outstanding);
+      document.getElementById('stat-approved').textContent = money(totals.approved);
+      document.getElementById('stat-pending').textContent = money(totals.pending);
+      document.getElementById('stat-overdue').textContent = money(totals.overdue);
+
+      renderSuppliers();
+    }
+
+    const CREDIT_TERMS_LABELS = { cod: 'COD', net_days: 'days', eom_days: 'days EOM' };
+
+    function renderSuppliers() {
+      const listEl = document.getElementById('suppliers-list');
+      const q = document.getElementById('supplier-search').value.trim().toLowerCase();
+      const filtered = q ? allSuppliers.filter(s => s.name.toLowerCase().includes(q)) : allSuppliers;
+
+      if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No suppliers yet - add one to get started.</p>`; return; }
+
+      listEl.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Supplier</th><th>Terms</th><th class="num">Invoiced, not paid</th><th class="num">Overdue</th></tr></thead>
+          <tbody>
+            ${filtered.map(s => {
+              const terms = s.credit_terms_type === 'cod' ? 'COD' : `${s.credit_terms_days} ${CREDIT_TERMS_LABELS[s.credit_terms_type]}`;
+              const overdue = Number(s.summary.overdue);
+              return `
+                <tr class="supplier-row-link" data-id="${s.id}" style="cursor:pointer;">
+                  <td data-label="Supplier"><strong>${s.name}</strong></td>
+                  <td data-label="Terms">${terms}</td>
+                  <td class="num" data-label="Invoiced, not paid">${money(s.summary.invoiced_not_paid)}</td>
+                  <td class="num" data-label="Overdue">${overdue > 0 ? `<span style="color:var(--red); font-weight:600;">${money(overdue)}</span>` : money(0)}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+
+      listEl.querySelectorAll('.supplier-row-link').forEach(row => {
+        row.addEventListener('click', () => { window.location.href = `/supplier-detail.html?id=${row.dataset.id}`; });
+      });
+    }
+
+    document.getElementById('supplier-search').addEventListener('input', renderSuppliers);
+
+    function openSupplierPanel() {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Add supplier</h2>
+          <label style="margin-top:0">Name</label>
+          <input id="sup-name" />
+          <div class="grid cols-2">
+            <div><label>Contact email</label><input id="sup-email" type="email" /></div>
+            <div><label>Contact phone</label><input id="sup-phone" /></div>
+          </div>
+          <label>Credit terms</label>
+          <div class="grid cols-2">
+            <select id="sup-terms-type">
+              <option value="cod">COD</option>
+              <option value="net_days">Net days</option>
+              <option value="eom_days">Days after end of month</option>
+            </select>
+            <input id="sup-terms-days" type="number" placeholder="Days" value="30" />
+          </div>
+          <label>Notes</label>
+          <textarea id="sup-notes" style="min-height:60px;"></textarea>
+          <div style="margin-top:14px;">
+            <button id="sup-save-btn">Save</button>
+            <button type="button" class="secondary" id="sup-cancel-btn">Cancel</button>
+          </div>
+          <div id="sup-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#sup-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#sup-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#sup-msg');
+        const name = overlay.querySelector('#sup-name').value.trim();
+        if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
+        const { error } = await supabaseClient.from('suppliers').insert({
+          name,
+          contact_email: overlay.querySelector('#sup-email').value.trim() || null,
+          contact_phone: overlay.querySelector('#sup-phone').value.trim() || null,
+          credit_terms_type: overlay.querySelector('#sup-terms-type').value,
+          credit_terms_days: parseInt(overlay.querySelector('#sup-terms-days').value) || 0,
+          notes: overlay.querySelector('#sup-notes').value.trim() || null,
+        });
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        overlay.remove();
+        await loadSuppliers();
+      });
+    }
+
+    document.getElementById('add-supplier-btn').addEventListener('click', openSupplierPanel);
+
+    document.getElementById('run-payments-btn').addEventListener('click', async () => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:500px; width:100%;"><p class="subtitle">Checking what's due...</p></div>`;
+      document.body.appendChild(overlay);
+
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/run-supplier-payments', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not check due payments');
+
+        if (!data.preview.length) {
+          overlay.querySelector('.card').innerHTML = `<h2>Nothing due today</h2><p class="subtitle">No approved, unpaid bills have a due date today or earlier.</p><button type="button" class="secondary" id="rp-close-btn">Close</button>`;
+          overlay.querySelector('#rp-close-btn').addEventListener('click', () => overlay.remove());
+          return;
+        }
+
+        const totalDue = data.preview.reduce((s, p) => s + p.total, 0);
+        overlay.querySelector('.card').innerHTML = `
+          <h2>Confirm payments</h2>
+          <p class="subtitle" style="margin-bottom:14px;">These become Airwallex transfers - nothing pays out until you also approve them directly inside Airwallex.</p>
+          <table>
+            <thead><tr><th>Supplier</th><th class="num">Bills</th><th class="num">Amount</th></tr></thead>
+            <tbody>
+              ${data.preview.map(p => `
+                <tr>
+                  <td>${p.supplierName}${!p.hasBankDetails ? ' <span class="badge draft" style="color:var(--red);">No bank details</span>' : ''}</td>
+                  <td class="num">${p.billCount}</td>
+                  <td class="num">${money(p.total)}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+          <p style="text-align:right; font-weight:600; margin-top:10px;">Total: ${money(totalDue)}</p>
+          <div style="margin-top:14px;">
+            <button id="rp-confirm-btn">Confirm & send to Airwallex</button>
+            <button type="button" class="secondary" id="rp-cancel-btn">Cancel</button>
+          </div>
+          <div id="rp-msg"></div>`;
+
+        overlay.querySelector('#rp-cancel-btn').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('#rp-confirm-btn').addEventListener('click', async () => {
+          const confirmBtn = overlay.querySelector('#rp-confirm-btn');
+          const msg = overlay.querySelector('#rp-msg');
+          confirmBtn.disabled = true;
+          confirmBtn.textContent = 'Processing...';
+          try {
+            const res2 = await fetch('/.netlify/functions/run-supplier-payments', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${session.access_token}` },
+            });
+            const data2 = await res2.json();
+            if (!res2.ok || !data2.ok) throw new Error(data2.error || 'Payment run failed');
+            msg.innerHTML = data2.results.map(r => r.ok
+              ? `<div class="success-box">${r.supplier}: ${money(r.amount)} sent to Airwallex.</div>`
+              : `<div class="error-box">${r.supplier}: ${r.error}</div>`).join('');
+            confirmBtn.style.display = 'none';
+            overlay.querySelector('#rp-cancel-btn').textContent = 'Close';
+            await loadSuppliers();
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Confirm & send to Airwallex';
+          }
+        });
+      } catch (err) {
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't check payments</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="rp-err-close">Close</button>`;
+        overlay.querySelector('#rp-err-close').addEventListener('click', () => overlay.remove());
+      }
+    });
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('suppliers');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      await loadSuppliers();
+    })();
+  </script>
+</body>
+</html>

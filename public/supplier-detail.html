@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Supplier - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide" id="content">
+    <p class="subtitle">Loading...</p>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    const supplierId = new URLSearchParams(window.location.search).get('id');
+    let currentSupplier = null;
+    const CREDIT_TERMS_LABELS = { cod: 'COD', net_days: 'days', eom_days: 'days after end of month' };
+
+    async function loadSupplier() {
+      const { data: supplier, error } = await supabaseClient.from('suppliers').select('*').eq('id', supplierId).single();
+      if (error || !supplier) {
+        document.getElementById('content').innerHTML = `<div class="error-box">Supplier not found.</div>`;
+        return;
+      }
+      currentSupplier = supplier;
+
+      const { data: summaryRows } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: supplierId });
+      const summary = summaryRows?.[0] || { invoiced_not_paid: 0, approved_for_payment: 0, not_approved: 0, overdue: 0 };
+
+      const { data: bills } = await supabaseClient
+        .from('supplier_bills')
+        .select('*, purchase_orders(po_number, description)')
+        .eq('supplier_id', supplierId)
+        .order('bill_date', { ascending: false });
+
+      const { data: flaggedItems } = await supabaseClient
+        .from('supplier_bill_line_items')
+        .select('*, supplier_bills!inner(supplier_id, bill_number)')
+        .eq('supplier_bills.supplier_id', supplierId)
+        .not('flag_reason', 'is', null);
+
+      const { data: pos } = await supabaseClient
+        .from('purchase_orders')
+        .select('*, purchase_order_line_items(*)')
+        .eq('supplier_id', supplierId)
+        .order('created_at', { ascending: false });
+
+      render(supplier, summary, bills || [], flaggedItems || [], pos || []);
+    }
+
+    function render(supplier, summary, bills, flaggedItems, pos) {
+      const terms = supplier.credit_terms_type === 'cod' ? 'COD' : `${supplier.credit_terms_days} ${CREDIT_TERMS_LABELS[supplier.credit_terms_type]}`;
+
+      document.getElementById('content').innerHTML = `
+        <a href="/suppliers.html" class="link-quiet">&larr; Suppliers</a>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-top:8px;">
+          <div>
+            <h1>${supplier.name}</h1>
+            <p class="subtitle">${terms}${supplier.contact_email ? ' &middot; ' + supplier.contact_email : ''}${supplier.contact_phone ? ' &middot; ' + supplier.contact_phone : ''}</p>
+          </div>
+          <div>
+            <button class="secondary" id="edit-supplier-btn" style="margin-right:8px;">Edit details</button>
+            <button class="secondary" id="upload-bill-btn">Upload bill</button>
+          </div>
+        </div>
+
+        <div class="grid cols-4">
+          <div class="stat"><div class="label">Invoiced, not paid</div><div class="value">${money(summary.invoiced_not_paid)}</div></div>
+          <div class="stat"><div class="label">Approved for payment</div><div class="value">${money(summary.approved_for_payment)}</div></div>
+          <div class="stat"><div class="label">Not approved</div><div class="value">${money(summary.not_approved)}</div></div>
+          <div class="stat"><div class="label">Overdue</div><div class="value" style="color:${Number(summary.overdue) > 0 ? 'var(--red)' : 'inherit'};">${money(summary.overdue)}</div></div>
+        </div>
+
+        ${flaggedItems.length ? `
+        <div class="card">
+          <h2>Needs attention</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Line items that don't match an approved PO, or were charged higher than expected.</p>
+          ${flaggedItems.map(fi => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
+              <div>
+                <p style="margin:0 0 2px;">${fi.description}</p>
+                <p class="subtitle" style="margin:0; color:var(--red);">${fi.flag_reason} - bill ${fi.supplier_bills.bill_number || ''}</p>
+              </div>
+            </div>`).join('')}
+        </div>` : ''}
+
+        <div class="card">
+          <h2>Bills</h2>
+          <div id="bills-list">
+            ${!bills.length ? '<p class="subtitle">No bills logged yet.</p>' : `
+            <table class="responsive-stack">
+              <thead><tr><th>Bill #</th><th>Date</th><th>PO</th><th class="num">Amount</th><th>Due</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                ${bills.map(b => `
+                  <tr>
+                    <td data-label="Bill #">${b.bill_number || '-'}</td>
+                    <td data-label="Date">${b.bill_date ? new Date(b.bill_date).toLocaleDateString('en-AU') : '-'}</td>
+                    <td data-label="PO">${b.purchase_orders?.po_number || '-'}</td>
+                    <td class="num" data-label="Amount">${money(b.amount)}</td>
+                    <td data-label="Due">${b.due_date ? new Date(b.due_date).toLocaleDateString('en-AU') : '-'}</td>
+                    <td data-label="Status">${b.paid ? '<span class="badge accepted">Paid</span>' : (b.approved_for_payment ? '<span class="badge sent">Approved</span>' : '<span class="badge draft">Not approved</span>')}</td>
+                    <td data-label="">${!b.paid && !b.approved_for_payment ? `<button class="secondary approve-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Approve</button>` : ''}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>`}
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Purchase orders</h2>
+          <div id="pos-list">
+            ${!pos.length ? '<p class="subtitle">No purchase orders for this supplier yet.</p>' : pos.map(po => `
+              <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between;">
+                  <strong>${po.po_number || 'PO'} ${po.po_type === 'open' ? '(open-ended)' : '(fixed)'}</strong>
+                  <span class="badge ${po.status === 'paid' || po.status === 'invoiced' ? 'accepted' : 'draft'}">${po.status}</span>
+                </div>
+                <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''}</p>
+                ${(po.purchase_order_line_items || []).map(li => `<div style="font-size:13px; display:flex; justify-content:space-between;"><span>${li.description} x${li.quantity}</span><span>${money(li.quantity * li.unit_cost)}</span></div>`).join('')}
+                ${po.po_type === 'open' && po.budget_cap ? `<p class="subtitle" style="margin-top:8px;">Budget cap: ${money(po.budget_cap)}</p>` : ''}
+              </div>`).join('')}
+          </div>
+        </div>
+      `;
+
+      document.querySelectorAll('.approve-bill-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const { error } = await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('id', btn.dataset.id);
+          if (error) { alert(error.message); return; }
+          await loadSupplier();
+        });
+      });
+
+      document.getElementById('edit-supplier-btn').addEventListener('click', () => openEditPanel(supplier));
+      document.getElementById('upload-bill-btn').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf,.jpg,.jpeg,.png';
+        input.onchange = async (e) => {
+          const file = e.target.files[0];
+          if (file) await runExtraction(file);
+        };
+        input.click();
+      });
+    }
+
+    function openEditPanel(supplier) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Edit ${supplier.name}</h2>
+          <label style="margin-top:0">Name</label>
+          <input id="ed-name" value="${supplier.name}" />
+          <div class="grid cols-2">
+            <div><label>Contact email</label><input id="ed-email" value="${supplier.contact_email || ''}" /></div>
+            <div><label>Contact phone</label><input id="ed-phone" value="${supplier.contact_phone || ''}" /></div>
+          </div>
+          <label>Credit terms</label>
+          <div class="grid cols-2">
+            <select id="ed-terms-type">
+              <option value="cod" ${supplier.credit_terms_type === 'cod' ? 'selected' : ''}>COD</option>
+              <option value="net_days" ${supplier.credit_terms_type === 'net_days' ? 'selected' : ''}>Net days</option>
+              <option value="eom_days" ${supplier.credit_terms_type === 'eom_days' ? 'selected' : ''}>Days after end of month</option>
+            </select>
+            <input id="ed-terms-days" type="number" value="${supplier.credit_terms_days}" />
+          </div>
+          <p class="subtitle" style="margin-top:14px;">Bank details - needed to pay this supplier via Airwallex.</p>
+          <label>Account name</label>
+          <input id="ed-bank-name" value="${supplier.bank_account_name || ''}" />
+          <div class="grid cols-2">
+            <div><label>BSB</label><input id="ed-bsb" value="${supplier.bsb || ''}" /></div>
+            <div><label>Account number</label><input id="ed-account" value="${supplier.bank_account_number || ''}" /></div>
+          </div>
+          <label>Notes</label>
+          <textarea id="ed-notes" style="min-height:60px;">${supplier.notes || ''}</textarea>
+          <div style="margin-top:14px;">
+            <button id="ed-save-btn">Save</button>
+            <button type="button" class="secondary" id="ed-cancel-btn">Cancel</button>
+          </div>
+          <div id="ed-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#ed-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#ed-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#ed-msg');
+        const { error } = await supabaseClient.from('suppliers').update({
+          name: overlay.querySelector('#ed-name').value.trim(),
+          contact_email: overlay.querySelector('#ed-email').value.trim() || null,
+          contact_phone: overlay.querySelector('#ed-phone').value.trim() || null,
+          credit_terms_type: overlay.querySelector('#ed-terms-type').value,
+          credit_terms_days: parseInt(overlay.querySelector('#ed-terms-days').value) || 0,
+          bank_account_name: overlay.querySelector('#ed-bank-name').value.trim() || null,
+          bsb: overlay.querySelector('#ed-bsb').value.trim() || null,
+          bank_account_number: overlay.querySelector('#ed-account').value.trim() || null,
+          notes: overlay.querySelector('#ed-notes').value.trim() || null,
+        }).eq('id', supplier.id);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        overlay.remove();
+        await loadSupplier();
+      });
+    }
+
+    // --- AI bill extraction, scoped to this supplier ---
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function fuzzyMatchScore(a, b) {
+      const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+      const wordsA = new Set(norm(a));
+      const wordsB = norm(b);
+      if (!wordsA.size || !wordsB.length) return 0;
+      const matches = wordsB.filter(w => wordsA.has(w)).length;
+      return matches / Math.max(wordsA.size, wordsB.length);
+    }
+
+    async function runExtraction(file) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the invoice...</p></div>`;
+      document.body.appendChild(overlay);
+
+      try {
+        const fileBase64 = await fileToBase64(file);
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/extract-supplier-invoice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ fileBase64, mediaType: file.type }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+        overlay.remove();
+        await openReviewPanel(data.extracted);
+      } catch (err) {
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="extract-err-close">Close</button>`;
+        overlay.querySelector('#extract-err-close').addEventListener('click', () => overlay.remove());
+      }
+    }
+
+    async function openReviewPanel(extracted) {
+      const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand');
+      const materials = allMaterials || [];
+
+      const { data: openPOs } = await supabaseClient
+        .from('purchase_orders')
+        .select('id, po_number, description, status, purchase_order_line_items(id, material_id, description, quantity, unit_cost)')
+        .eq('supplier_id', supplierId)
+        .not('status', 'in', '(paid,invoiced)');
+
+      const lineItems = (extracted.line_items || []).map(li => {
+        let bestMatch = null, bestScore = 0;
+        materials.forEach(m => {
+          const score = fuzzyMatchScore(m.name, li.description);
+          if (score > bestScore) { bestScore = score; bestMatch = m; }
+        });
+        return { ...li, suggestedMatchId: bestScore >= 0.3 ? bestMatch?.id : null };
+      });
+
+      const nameWarning = extracted.supplier && !fuzzyMatchScore(currentSupplier.name, extracted.supplier)
+        ? `<div class="error-box" style="margin-bottom:10px;">The invoice says "${extracted.supplier}" - check this is actually a ${currentSupplier.name} bill before saving.</div>` : '';
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; overflow-y:auto;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:720px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>Review before saving</h2>
+          <p class="subtitle" style="margin-bottom:14px;">Saving against ${currentSupplier.name}. Nothing's saved yet.</p>
+          ${nameWarning}
+
+          <div class="grid cols-2">
+            <div><label style="margin-top:0">Bill number</label><input id="rev-bill-number" value="${extracted.bill_number || ''}" /></div>
+            <div><label style="margin-top:0">Date</label><input type="date" id="rev-bill-date" value="${extracted.bill_date || ''}" /></div>
+          </div>
+          <label>Total amount</label>
+          <input type="number" step="0.01" id="rev-total" value="${extracted.total || ''}" />
+
+          ${openPOs?.length ? `
+            <label>Link to an open purchase order (optional)</label>
+            <select id="rev-po"><option value="">-- None --</option>${openPOs.map(po => `<option value="${po.id}">${po.po_number || 'PO'} - ${po.description || ''}</option>`).join('')}</select>
+          ` : '<input type="hidden" id="rev-po" value="" />'}
+
+          <label style="margin-top:14px;">Line items</label>
+          <div id="rev-line-items">
+            ${lineItems.map((li, i) => `
+              <div class="rev-line-item" data-index="${i}" style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px;">
+                <input class="rli-desc" value="${li.description || ''}" placeholder="Description" style="margin-bottom:6px;" />
+                <div class="grid cols-2">
+                  <div><label style="margin-top:0; font-size:11px;">Quantity</label><input class="rli-qty" type="number" step="0.01" value="${li.quantity ?? 1}" /></div>
+                  <div><label style="margin-top:0; font-size:11px;">Unit cost</label><input class="rli-cost" type="number" step="0.01" value="${li.unit_cost ?? 0}" /></div>
+                </div>
+                <label style="margin-top:6px; font-size:11px;">Match to Stock</label>
+                <select class="rli-match">
+                  <option value="__new__">+ Create as new material</option>
+                  ${materials.map(m => `<option value="${m.id}" ${li.suggestedMatchId === m.id ? 'selected' : ''}>${m.name} (currently ${money(m.cost_price)})</option>`).join('')}
+                </select>
+                ${li.suggestedMatchId ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Suggested match - check this is actually the same item before confirming.</p>` : ''}
+              </div>`).join('')}
+          </div>
+
+          <div style="margin-top:14px;">
+            <button id="rev-confirm-btn">Confirm &amp; save</button>
+            <button type="button" class="secondary" id="rev-cancel-btn">Cancel</button>
+          </div>
+          <div id="rev-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#rev-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#rev-confirm-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#rev-msg');
+        const confirmBtn = overlay.querySelector('#rev-confirm-btn');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Saving...';
+
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const { data: companySettings } = await supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).single();
+          const markup = Number(companySettings?.default_markup_percent) || 45;
+
+          const poId = overlay.querySelector('#rev-po').value || null;
+          const linkedPO = poId ? openPOs.find(p => p.id === poId) : null;
+
+          const billDate = overlay.querySelector('#rev-bill-date').value || null;
+          const dueDate = billDate ? await (async () => {
+            const { data: computed } = await supabaseClient.rpc('calculate_bill_due_date', {
+              p_bill_date: billDate, p_credit_terms_type: currentSupplier.credit_terms_type, p_credit_terms_days: currentSupplier.credit_terms_days,
+            });
+            return computed;
+          })() : null;
+
+          const { data: newBill, error: billErr } = await supabaseClient.from('supplier_bills').insert({
+            supplier_id: supplierId,
+            supplier_name: currentSupplier.name,
+            bill_number: overlay.querySelector('#rev-bill-number').value.trim() || null,
+            bill_date: billDate,
+            due_date: dueDate,
+            amount: parseFloat(overlay.querySelector('#rev-total').value) || 0,
+            po_id: poId,
+            created_by: user.id,
+          }).select('id').single();
+          if (billErr) throw billErr;
+
+          const rows = [...overlay.querySelectorAll('.rev-line-item')];
+          for (const row of rows) {
+            const description = row.querySelector('.rli-desc').value.trim();
+            const quantity = parseFloat(row.querySelector('.rli-qty').value) || 0;
+            const unitCost = parseFloat(row.querySelector('.rli-cost').value) || 0;
+            const matchValue = row.querySelector('.rli-match').value;
+            if (!description) continue;
+
+            let materialId;
+            if (matchValue === '__new__') {
+              const { data: newMat, error: matErr } = await supabaseClient.from('materials').insert({
+                name: description, cost_price: unitCost,
+                sell_price: Math.round(unitCost * (1 + markup / 100) * 100) / 100,
+                quantity_on_hand: quantity, supplier_id: supplierId,
+              }).select('id').single();
+              if (matErr) throw matErr;
+              materialId = newMat.id;
+            } else {
+              materialId = matchValue;
+              const existing = materials.find(m => m.id === materialId);
+              await supabaseClient.from('materials').update({
+                cost_price: unitCost,
+                quantity_on_hand: (Number(existing?.quantity_on_hand) || 0) + quantity,
+              }).eq('id', materialId);
+            }
+
+            // Flag against the linked PO, if one was chosen - either the
+            // item isn't on that PO at all, or it's genuinely priced
+            // higher than what the PO expected.
+            let flagReason = null;
+            let poLineItemId = null;
+            if (linkedPO) {
+              const poLine = (linkedPO.purchase_order_line_items || []).find(pl => pl.material_id === materialId);
+              if (!poLine) {
+                flagReason = 'Not on the linked PO';
+              } else {
+                poLineItemId = poLine.id;
+                if (unitCost > Number(poLine.unit_cost) * 1.01) {
+                  flagReason = `Charged ${money(unitCost)}, PO expected ${money(poLine.unit_cost)}`;
+                }
+              }
+            }
+
+            await supabaseClient.from('supplier_bill_line_items').insert({
+              bill_id: newBill.id, material_id: materialId, description, quantity, unit_cost: unitCost,
+              po_line_item_id: poLineItemId, flag_reason: flagReason,
+            });
+          }
+
+          overlay.remove();
+          await loadSupplier();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Confirm & save';
+        }
+      });
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('suppliers');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      if (!supplierId) {
+        document.getElementById('content').innerHTML = `<div class="error-box">No supplier specified.</div>`;
+        return;
+      }
+      await loadSupplier();
+    })();
+  </script>
+</body>
+</html>
