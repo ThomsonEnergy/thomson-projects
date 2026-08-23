@@ -29,8 +29,9 @@ exports.handler = async (event) => {
     const apiKey = await getIntegrationKey('anthropic');
     const isPdf = mediaType === 'application/pdf';
 
-    const prompt = `This is a supplier price list for an electrical/solar contracting business - potentially many items, not a bill to be paid. Extract every item you can find:
+    const prompt = `This is a supplier price list for an electrical/solar contracting business - potentially many items, not a bill to be paid. Extract:
 
+- supplier: the supplier/vendor's business name shown on the document
 - items: an array, each with:
   - description: the item/product name or description as written
   - unit_cost: the price per unit, ex-GST if both are shown, as a plain number (no currency symbols)
@@ -38,7 +39,7 @@ exports.handler = async (event) => {
 
 Extract every item on the list, however many there are - don't stop early or summarize. If a price genuinely isn't legible for an item, use null for unit_cost rather than guessing.
 
-Respond with ONLY a JSON object shaped like {"items": [...]}, no other text, no markdown fences.`;
+Respond with ONLY a JSON object shaped like {"supplier": "...", "items": [...]}, no other text, no markdown fences.`;
 
     const contentBlock = isPdf
       ? { type: 'document', source: { type: 'base64', media_type: mediaType, data: fileBase64 } }
@@ -71,7 +72,7 @@ Respond with ONLY a JSON object shaped like {"items": [...]}, no other text, no 
     const cleaned = raw.replace(/^```json/i, '').replace(/```$/, '').trim();
     const extracted = JSON.parse(cleaned);
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, items: extracted.items || [] }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, supplier: extracted.supplier || null, items: extracted.items || [] }) };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };

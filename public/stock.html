@@ -44,10 +44,11 @@
   <script src="/js/theme.js"></script>
   <script>
     let allMaterials = [];
+    let allSuppliers = [];
 
     async function loadMaterials() {
       const listEl = document.getElementById('stock-list');
-      const { data, error } = await supabaseClient.from('materials').select('*').order('name');
+      const { data, error } = await supabaseClient.from('materials').select('*, suppliers(id, name)').order('name');
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       allMaterials = data || [];
       renderMaterials();
@@ -57,7 +58,7 @@
       const listEl = document.getElementById('stock-list');
       const q = document.getElementById('stock-search').value.trim().toLowerCase();
       const filtered = q
-        ? allMaterials.filter(m => (m.name || '').toLowerCase().includes(q) || (m.category || '').toLowerCase().includes(q) || (m.supplier || '').toLowerCase().includes(q))
+        ? allMaterials.filter(m => (m.name || '').toLowerCase().includes(q) || (m.category || '').toLowerCase().includes(q) || (m.suppliers?.name || '').toLowerCase().includes(q))
         : allMaterials;
 
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No materials yet - add one to get started.</p>`; return; }
@@ -70,7 +71,7 @@
               <tr>
                 <td data-label="Name">${m.name}</td>
                 <td data-label="Category">${m.category || '-'}</td>
-                <td data-label="Supplier">${m.supplier || '-'}</td>
+                <td data-label="Supplier">${m.suppliers?.name || '-'}</td>
                 <td class="num" data-label="Cost">${money(m.cost_price)}</td>
                 <td class="num" data-label="Sell">${money(m.sell_price)}</td>
                 <td class="num" data-label="Qty">${m.quantity_on_hand}</td>
@@ -103,7 +104,7 @@
             </div>
             <div>
               <label>Supplier</label>
-              <input id="mat-supplier" value="${material?.supplier || ''}" />
+              <select id="mat-supplier"><option value="">-- None --</option>${allSuppliers.map(s => `<option value="${s.id}" ${material?.supplier_id === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}</select>
             </div>
           </div>
           <div class="grid cols-3">
@@ -141,7 +142,7 @@
         const fields = {
           name,
           category: overlay.querySelector('#mat-category').value.trim() || null,
-          supplier: overlay.querySelector('#mat-supplier').value.trim() || null,
+          supplier_id: overlay.querySelector('#mat-supplier').value || null,
           cost_price: parseFloat(overlay.querySelector('#mat-cost').value) || 0,
           sell_price: parseFloat(overlay.querySelector('#mat-sell').value) || 0,
           quantity_on_hand: parseFloat(overlay.querySelector('#mat-qty').value) || 0,
@@ -178,6 +179,8 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+      const { data: suppliersData } = await supabaseClient.from('suppliers').select('id, name').order('name');
+      allSuppliers = suppliersData || [];
       await loadMaterials();
     })();
   </script>

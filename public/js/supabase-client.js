@@ -114,6 +114,42 @@ function moneyOrHidden(n) {
   return (n === null || n === undefined) ? ' - ' : money(n);
 }
 
+// Shared across the Suppliers and supplier-detail pages - both need to
+// read a file for AI extraction and fuzzy-match text against existing
+// records, so these live here once rather than being copy-pasted twice.
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function fuzzyMatchScore(a, b) {
+  const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+  const wordsA = new Set(norm(a));
+  const wordsB = norm(b);
+  if (!wordsA.size || !wordsB.length) return 0;
+  const matches = wordsB.filter(w => wordsA.has(w)).length;
+  return matches / Math.max(wordsA.size, wordsB.length);
+}
+
+// Given a supplier name pulled off an uploaded document, finds the best
+// matching existing supplier record. Returns null if nothing scores well
+// enough to trust - the caller should offer to create a new supplier
+// rather than silently guessing wrong.
+async function findMatchingSupplier(extractedName) {
+  if (!extractedName) return null;
+  const { data: suppliers } = await supabaseClient.from('suppliers').select('*');
+  let best = null, bestScore = 0;
+  (suppliers || []).forEach(s => {
+    const score = fuzzyMatchScore(s.name, extractedName);
+    if (score > bestScore) { bestScore = score; best = s; }
+  });
+  return bestScore >= 0.5 ? best : null;
+}
+
 // Single source of truth for the main nav - every page calls
 // renderMainNav('key') into empty <nav id="topbar-tabs"> and
 // <div id="mobile-menu-dropdown"> containers, instead of each page
@@ -124,7 +160,6 @@ const MAIN_NAV_ITEMS = [
   { key: 'quotes', label: 'Quotes', href: '/quotes.html' },
   { key: 'projects', label: 'Projects', href: '/projects.html' },
   { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html' },
-  { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html' },
   { key: 'invoices', label: 'Invoices', href: '/invoices.html' },
   { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html' },
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html' },

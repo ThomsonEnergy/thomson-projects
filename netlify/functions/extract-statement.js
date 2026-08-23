@@ -30,6 +30,7 @@ exports.handler = async (event) => {
     const prompt = `This is a supplier account statement for an electrical/solar contracting business - a summary of invoices and the current balance owed, not a single bill.
 
 Extract:
+- supplier: the supplier/vendor's business name shown on the statement
 - statement_date: the date the statement was issued, as YYYY-MM-DD
 - total_amount: the closing/total balance owed, as a plain number
 - invoices: an array of every individual invoice/bill line shown on the statement, each with:
