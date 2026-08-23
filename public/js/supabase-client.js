@@ -516,6 +516,12 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
         received_by: user.id, received_at: new Date().toISOString(),
       }).eq('id', lineItem.id);
 
+      const destLabel = destType === 'job' ? (selectedJob.name || 'a job') : destType === 'vehicle' ? 'a vehicle' : 'Warehouse';
+      await logActivity('purchase_order', po.id, 'item_received', `${lineItem.description} x${lineItem.quantity} received - sent to ${destLabel}`);
+      if (destType === 'job') {
+        await logActivity('project', selectedJob.id, 'material_received', `${lineItem.description} x${lineItem.quantity} received from PO ${po.po_number || ''}, costed to this job`);
+      }
+
       // If every line item on this PO is now received, mark the PO
       // itself received and approve any linked bill for payment.
       const { data: allItems } = await supabaseClient.from('purchase_order_line_items').select('received').eq('po_id', po.id);
@@ -524,6 +530,7 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
           received: true, received_by: user.id, received_at: new Date().toISOString(),
         }).eq('id', po.id);
         await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', po.id);
+        await logActivity('purchase_order', po.id, 'fully_received', `PO ${po.po_number || ''} fully received - any linked bill approved for payment`);
       }
 
       overlay.remove();
@@ -645,4 +652,41 @@ function readMaterialLineRows(containerId) {
     quantity: parseFloat(row.querySelector('.po-line-qty').value) || 0,
     unit_cost: parseFloat(row.querySelector('.po-line-cost').value) || 0,
   })).filter(l => l.description && l.quantity > 0);
+}
+
+// Universal activity log - one shared table for every entity type. Call
+// logActivity() from anywhere something gets created, changed, or
+// approved; call renderActivityLog() to show a "Log" section on any
+// detail page, filtered to that one record.
+async function logActivity(entityType, entityId, action, description) {
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    await supabaseClient.from('activity_log').insert({
+      entity_type: entityType, entity_id: entityId, action, description, changed_by: user?.id || null,
+    });
+  } catch (err) {
+    console.error('Activity log write failed:', err); // never block the real action over a logging failure
+  }
+}
+
+async function renderActivityLog(entityType, entityId, containerId) {
+  const containerEl = document.getElementById(containerId);
+  if (!containerEl) return;
+  containerEl.innerHTML = `<p class="subtitle">Loading...</p>`;
+
+  const { data: entries, error } = await supabaseClient
+    .from('activity_log')
+    .select('*, profiles(full_name)')
+    .eq('entity_type', entityType)
+    .eq('entity_id', entityId)
+    .order('created_at', { ascending: false });
+
+  if (error) { containerEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+  if (!entries.length) { containerEl.innerHTML = `<p class="subtitle">No activity logged yet.</p>`; return; }
+
+  containerEl.innerHTML = entries.map(e => `
+    <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
+      <span>${e.description}</span>
+      <span class="subtitle" style="white-space:nowrap;">${e.profiles?.full_name || 'Someone'} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+    </div>`).join('');
 }

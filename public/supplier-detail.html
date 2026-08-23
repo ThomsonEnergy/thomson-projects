@@ -150,12 +150,20 @@
               </div>`).join('')}
           </div>
         </div>
+
+        <div class="card">
+          <h2>Activity log</h2>
+          <div id="supplier-activity-log"><p class="subtitle">Loading...</p></div>
+        </div>
       `;
 
+      renderActivityLog('supplier', supplier.id, 'supplier-activity-log');
       document.querySelectorAll('.approve-bill-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const { error } = await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('id', btn.dataset.id);
           if (error) { alert(error.message); return; }
+          const bill = bills.find(b => b.id === btn.dataset.id);
+          await logActivity('supplier', supplierId, 'bill_approved', `Bill ${bill?.bill_number || ''} approved for payment`);
           await loadSupplier();
         });
       });

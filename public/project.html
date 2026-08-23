@@ -488,9 +488,15 @@
           </div>
           <div id="po-msg"></div>
         </div>
+
+        <div class="card">
+          <h2>Activity log</h2>
+          <div id="job-activity-log"><p class="subtitle">Loading...</p></div>
+        </div>
       `;
 
       loadPurchaseOrders(project.id, centres);
+      renderActivityLog('project', project.id, 'job-activity-log');
       if (document.getElementById('ccew-section')) initCcewSection(project);
 
       document.querySelectorAll('.create-invoice-btn').forEach(btn => {
@@ -843,6 +849,7 @@
               description: 'Auto-suggested from quoted materials',
             }).select('id').single();
             if (poErr) throw poErr;
+            await logActivity('purchase_order', newPo.id, 'created', `PO created for ${group.supplierName} (auto-suggested from quote)`);
             await supabaseClient.from('purchase_order_line_items').insert(
               group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
@@ -867,6 +874,7 @@
               description: 'Auto-suggested from quoted materials (manually assigned)',
             }).select('id').single();
             if (poErr) throw poErr;
+            await logActivity('purchase_order', newPo.id, 'created', `PO created for ${supplierName} (auto-suggested, manually assigned)`);
             await supabaseClient.from('purchase_order_line_items').insert(
               items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
@@ -968,8 +976,10 @@
             status: 'ordered',
             amount: 0,
             file_path, file_name,
-          }).select('id').single();
+          }).select('id, po_number').single();
           if (poErr) throw poErr;
+          await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${supplierName}`);
+          await logActivity('project', projectId, 'po_created', `PO ${newPo.po_number || ''} created for ${supplierName}`);
 
           if (poType === 'fixed') {
             const lines = readMaterialLineRows('cp-fixed-items-container').map(l => ({

@@ -129,7 +129,19 @@
           <p class="subtitle" style="margin:6px 0;">${po.description || ''}</p>
           ${renderPoLineItemsReceivable(po, true)}
           ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice for this PO</button>` : ''}
+          <button type="button" class="secondary view-log-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">View log</button>
+          <div id="log-${po.id}" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);"></div>
         </div>`).join('');
+
+      listEl.querySelectorAll('.view-log-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const logEl = document.getElementById(`log-${btn.dataset.poId}`);
+          const isOpen = logEl.style.display !== 'none';
+          logEl.style.display = isOpen ? 'none' : 'block';
+          btn.textContent = isOpen ? 'View log' : 'Hide log';
+          if (!isOpen) await renderActivityLog('purchase_order', btn.dataset.poId, `log-${btn.dataset.poId}`);
+        });
+      });
 
       listEl.querySelectorAll('.upload-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => uploadInvoiceForPo(filtered.find(po => po.id === btn.dataset.poId)));
@@ -243,8 +255,10 @@
             po_number: await drawNextPoNumber(),
             po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
             description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? 'PO for vehicle' : 'Stock purchase order',
-          }).select('id').single();
+          }).select('id, po_number').single();
           if (poErr) throw poErr;
+          const destLabel = destType === 'job' ? selectedJob.name : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || 'a vehicle') : 'Stock';
+          await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${supplierName || 'Warehouse pull'} - ${destLabel}`);
 
           const lines = readMaterialLineRows('np-items-container').map(l => ({
             po_id: newPo.id, material_id: l.materialId, description: l.description,

@@ -180,8 +180,9 @@
             po_number: await drawNextPoNumber(),
             po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
             description: source === 'stock' ? 'Pulled from Warehouse stock' : 'Purchased for vehicle',
-          }).select('id').single();
+          }).select('id, po_number').single();
           if (poErr) throw poErr;
+          await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${currentVehicle.vehicle_name || currentVehicle.rego} - ${source === 'stock' ? 'pulled from Warehouse' : supplierName}`);
 
           const lines = readMaterialLineRows('cp-items-container').map(l => ({
             po_id: newPo.id, material_id: l.materialId, description: l.description,

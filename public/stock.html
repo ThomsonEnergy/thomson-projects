@@ -258,8 +258,9 @@
             po_number: await drawNextPoNumber(),
             po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
             description: 'Stock purchase order',
-          }).select('id').single();
+          }).select('id, po_number').single();
           if (poErr) throw poErr;
+          await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${supplierName} - Stock`);
 
           const lines = readMaterialLineRows('csp-items-container').map(l => ({
             po_id: newPo.id, material_id: l.materialId, description: l.description,
@@ -352,8 +353,9 @@
               po_number: await drawNextPoNumber(),
               po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
               description: 'Restock - below minimum quantity',
-            }).select('id').single();
+            }).select('id, po_number').single();
             if (poErr) throw poErr;
+            await logActivity('purchase_order', newPo.id, 'created', `Restock PO ${newPo.po_number || ''} created for ${group.supplierName}`);
             await supabaseClient.from('purchase_order_line_items').insert(
               group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
