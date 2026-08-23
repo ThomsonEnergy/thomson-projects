@@ -408,6 +408,12 @@
             </select>
             <input id="ed-terms-days" type="number" value="${supplier.credit_terms_days}" />
           </div>
+          <p class="subtitle" style="margin-top:14px;">Used to match future invoices to this supplier automatically.</p>
+          <div class="grid cols-2">
+            <div><label style="margin-top:0">Our account number with them</label><input id="ed-account-number" value="${supplier.our_account_number || ''}" placeholder="e.g. the \"Charge To\" number on their invoices" /></div>
+            <div><label style="margin-top:0">ABN</label><input id="ed-abn" value="${supplier.abn || ''}" /></div>
+          </div>
+
           <p class="subtitle" style="margin-top:14px;">Bank details - needed to pay this supplier via Airwallex.</p>
           <label>Account name</label>
           <input id="ed-bank-name" value="${supplier.bank_account_name || ''}" />
@@ -435,6 +441,8 @@
           credit_terms_type: overlay.querySelector('#ed-terms-type').value,
           credit_terms_days: parseInt(overlay.querySelector('#ed-terms-days').value) || 0,
           bank_account_name: overlay.querySelector('#ed-bank-name').value.trim() || null,
+          our_account_number: overlay.querySelector('#ed-account-number').value.trim() || null,
+          abn: overlay.querySelector('#ed-abn').value.trim() || null,
           bsb: overlay.querySelector('#ed-bsb').value.trim() || null,
           bank_account_number: overlay.querySelector('#ed-account').value.trim() || null,
           notes: overlay.querySelector('#ed-notes').value.trim() || null,

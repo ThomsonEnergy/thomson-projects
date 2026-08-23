@@ -186,63 +186,8 @@
       input.click();
     }
 
-    async function resolveSupplierAndHandoff(extractedSupplierName, uploadType, extractedPayload, file) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><p class="subtitle">Working out which supplier this is...</p></div>`;
-      document.body.appendChild(overlay);
-
-      const match = await findMatchingSupplier(extractedSupplierName);
-      const fileBase64 = await fileToBase64(file);
-
-      function proceedTo(supplierId) {
-        sessionStorage.setItem('pending_upload', JSON.stringify({
-          type: uploadType, extracted: extractedPayload, fileBase64, fileName: file.name, fileType: file.type,
-        }));
-        window.location.href = `/supplier-detail.html?id=${supplierId}&resume_upload=1`;
-      }
-
-      if (match) {
-        overlay.querySelector('.card').innerHTML = `
-          <h2>Is this ${match.name}?</h2>
-          <p class="subtitle" style="margin-bottom:14px;">The document says "${extractedSupplierName}".</p>
-          <button id="rs-yes-btn">Yes, that's ${match.name}</button>
-          <button type="button" class="secondary" id="rs-no-btn">No, pick a different supplier</button>`;
-        overlay.querySelector('#rs-yes-btn').addEventListener('click', () => proceedTo(match.id));
-        overlay.querySelector('#rs-no-btn').addEventListener('click', () => showManualPick());
-      } else {
-        showNewSupplierPrompt();
-      }
-
-      function showManualPick() {
-        overlay.querySelector('.card').innerHTML = `
-          <h2>Pick the supplier</h2>
-          <select id="rs-manual-select"><option value="">-- Select --</option>${allSuppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
-          <p class="subtitle" style="margin:10px 0;">Or</p>
-          <button type="button" class="secondary" id="rs-new-instead-btn">This is actually a new supplier</button>
-          <div style="margin-top:14px;"><button id="rs-manual-continue-btn">Continue</button></div>`;
-        overlay.querySelector('#rs-new-instead-btn').addEventListener('click', () => showNewSupplierPrompt());
-        overlay.querySelector('#rs-manual-continue-btn').addEventListener('click', () => {
-          const id = overlay.querySelector('#rs-manual-select').value;
-          if (id) proceedTo(id);
-        });
-      }
-
-      async function showNewSupplierPrompt() {
-        overlay.querySelector('.card').innerHTML = `<h2>Creating supplier</h2><p class="subtitle">Setting up "${extractedSupplierName}" - you can add contact details, bank details, or adjust credit terms anytime from their page.</p>`;
-        const { data: created, error } = await supabaseClient.from('suppliers').insert({
-          name: extractedSupplierName || 'Unknown supplier',
-          credit_terms_type: 'net_days',
-          credit_terms_days: 30,
-        }).select('id').single();
-        if (error) {
-          overlay.querySelector('.card').innerHTML = `<h2>Couldn't create the supplier</h2><div class="error-box">${error.message}</div><button type="button" class="secondary" id="rs-new-err-close">Close</button>`;
-          overlay.querySelector('#rs-new-err-close').addEventListener('click', () => overlay.remove());
-          return;
-        }
-        proceedTo(created.id);
-      }
-    }
+    // resolveSupplierAndHandoff now lives in supabase-client.js, shared
+    // with the Stock page's own "Upload pricelist" button.
 
     document.getElementById('upload-bill-btn').addEventListener('click', () => pickFileAndRun(async (file) => {
       const overlay = document.createElement('div');
@@ -259,7 +204,7 @@
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
         overlay.remove();
-        await resolveSupplierAndHandoff(data.extracted.supplier, 'bill', data.extracted, file);
+        await resolveSupplierAndHandoff(data.extracted, 'bill', data.extracted, file);
       } catch (err) {
         overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="ub-close">Close</button>`;
         overlay.querySelector('#ub-close').addEventListener('click', () => overlay.remove());
@@ -269,17 +214,11 @@
     document.getElementById('upload-pricelist-btn').addEventListener('click', () => pickFileAndRun(async (file) => {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list...</p></div>`;
+      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
       document.body.appendChild(overlay);
       try {
         const fileBase64 = await fileToBase64(file);
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/extract-pricelist', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ fileBase64, mediaType: file.type }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+        const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', fileBase64, file.type);
         overlay.remove();
         await resolveSupplierAndHandoff(data.supplier, 'pricelist', { items: data.items }, file);
       } catch (err) {
@@ -295,15 +234,9 @@
       document.body.appendChild(overlay);
       try {
         const fileBase64 = await fileToBase64(file);
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/extract-statement', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ fileBase64, mediaType: file.type }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+        const data = await runBackgroundExtraction('statement', 'extract-statement-background', fileBase64, file.type);
         overlay.remove();
-        await resolveSupplierAndHandoff(data.extracted.supplier, 'statement', data.extracted, file);
+        await resolveSupplierAndHandoff(data, 'statement', data, file);
       } catch (err) {
         overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that statement</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="us-close">Close</button>`;
         overlay.querySelector('#us-close').addEventListener('click', () => overlay.remove());

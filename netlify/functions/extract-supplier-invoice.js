@@ -34,6 +34,13 @@ exports.handler = async (event) => {
     const prompt = `This is a supplier invoice or bill for an electrical/solar contracting business. Extract the following as accurately as possible:
 
 - supplier: the supplier/vendor's business name
+- our_account_number: the account number THIS SUPPLIER uses to identify US as their customer - often labelled "Charge To", "Customer Account", "Account No", "Customer No", or similar, shown near the billing address. This is NOT their ABN and NOT their own bank details - it's specifically the number that identifies our account with them. Null if not shown.
+- abn: the supplier's own ABN, if shown
+- contact_phone: the supplier's phone number, if shown
+- contact_email: the supplier's email address, if shown
+- bank_account_name: the account name for paying them by bank transfer, if shown
+- bsb: their BSB, if shown
+- bank_account_number: their bank account number, if shown
 - bill_number: their invoice or bill number
 - bill_date: the invoice date, as YYYY-MM-DD
 - line_items: an array of every line item, each with:

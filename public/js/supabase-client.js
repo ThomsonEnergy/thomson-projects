@@ -135,16 +135,36 @@ function fuzzyMatchScore(a, b) {
   return matches / Math.max(wordsA.size, wordsB.length);
 }
 
-// Given a supplier name pulled off an uploaded document, finds the best
-// matching existing supplier record. Returns null if nothing scores well
-// enough to trust - the caller should offer to create a new supplier
-// rather than silently guessing wrong.
-async function findMatchingSupplier(extractedName) {
-  if (!extractedName) return null;
+// Given fields pulled off an uploaded document, finds the best matching
+// existing supplier - checked in the order real invoices proved most
+// reliable: their account number for us (the same MMEM account shows
+// different logos across Haymans/Greentech/TLE but an identical "Charge
+// To" number), then ABN, then their own bank details, and only as a
+// last resort, fuzzy business name matching. Returns null if nothing
+// matches confidently enough - the caller should offer to create a new
+// supplier rather than silently guessing wrong.
+async function findMatchingSupplier(fields) {
+  const { name, ourAccountNumber, abn, bsb, bankAccountNumber } = typeof fields === 'string' ? { name: fields } : fields;
   const { data: suppliers } = await supabaseClient.from('suppliers').select('*');
+  const list = suppliers || [];
+
+  if (ourAccountNumber) {
+    const match = list.find(s => s.our_account_number && s.our_account_number.trim() === String(ourAccountNumber).trim());
+    if (match) return match;
+  }
+  if (abn) {
+    const normalizedAbn = String(abn).replace(/\s/g, '');
+    const match = list.find(s => s.abn && s.abn.replace(/\s/g, '') === normalizedAbn);
+    if (match) return match;
+  }
+  if (bsb && bankAccountNumber) {
+    const match = list.find(s => s.bsb === bsb && s.bank_account_number === bankAccountNumber);
+    if (match) return match;
+  }
+
   let best = null, bestScore = 0;
-  (suppliers || []).forEach(s => {
-    const score = fuzzyMatchScore(s.name, extractedName);
+  list.forEach(s => {
+    const score = fuzzyMatchScore(s.name, name);
     if (score > bestScore) { bestScore = score; best = s; }
   });
   return bestScore >= 0.5 ? best : null;
@@ -212,4 +232,111 @@ function gmailComposeUrl({ to = '', subject = '', body = '' } = {}) {
 // plus the stage's position, not stored - position is 1-indexed.
 function costCentreNumber(jobNumber, position) {
   return jobNumber ? `${jobNumber}-${position}` : `-${position}`;
+}
+
+// Kicks off a background extraction function and polls the resulting job
+// row until it's done. Used for pricelist/statement extraction, which can
+// genuinely run past a normal function's ~10s ceiling for a long document.
+async function runBackgroundExtraction(jobType, functionName, fileBase64, mediaType) {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { data: job, error: jobErr } = await supabaseClient.from('ai_extraction_jobs').insert({
+    job_type: jobType, status: 'pending', created_by: user.id,
+  }).select('id').single();
+  if (jobErr) throw jobErr;
+
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  fetch(`/.netlify/functions/${functionName}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ jobId: job.id, fileBase64, mediaType }),
+  }).catch(() => {}); // fire and forget - result comes from polling the job row, not this response
+
+  const maxAttempts = 60; // ~3 minutes at 3s intervals - a genuinely stuck job should surface an error well before this
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const { data: row } = await supabaseClient.from('ai_extraction_jobs').select('*').eq('id', job.id).single();
+    if (row?.status === 'complete') return row.result;
+    if (row?.status === 'failed') throw new Error(row.error || 'Extraction failed');
+  }
+  throw new Error('This is taking longer than expected - try again shortly, or check with a smaller file.');
+}
+
+// Shared between the Suppliers page and the Stock page's "Upload
+// pricelist" button - given a document's extracted supplier info, either
+// confirms a match, lets the person pick manually, or creates a brand
+// new supplier automatically, then hands off to that supplier's own page
+// with the extraction already done (no re-uploading, no re-running AI).
+async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload, file) {
+  const matchFields = {
+    name: extracted.supplier || extracted, // bills/statements pass the object, pricelist passes just the name string
+    ourAccountNumber: extracted.our_account_number,
+    abn: extracted.abn,
+    bsb: extracted.bsb,
+    bankAccountNumber: extracted.bank_account_number,
+  };
+  const extractedSupplierName = matchFields.name;
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+  overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><p class="subtitle">Working out which supplier this is...</p></div>`;
+  document.body.appendChild(overlay);
+
+  const match = await findMatchingSupplier(matchFields);
+  const fileBase64 = await fileToBase64(file);
+
+  function proceedTo(supplierId) {
+    sessionStorage.setItem('pending_upload', JSON.stringify({
+      type: uploadType, extracted: extractedPayload, fileBase64, fileName: file.name, fileType: file.type,
+    }));
+    window.location.href = `/supplier-detail.html?id=${supplierId}&resume_upload=1`;
+  }
+
+  if (match) {
+    overlay.querySelector('.card').innerHTML = `
+      <h2>Is this ${match.name}?</h2>
+      <p class="subtitle" style="margin-bottom:14px;">${matchFields.ourAccountNumber ? `Matched by account number ${matchFields.ourAccountNumber}.` : (matchFields.abn ? `Matched by ABN.` : `The document says "${extractedSupplierName}".`)}</p>
+      <button id="rs-yes-btn">Yes, that's ${match.name}</button>
+      <button type="button" class="secondary" id="rs-no-btn">No, pick a different supplier</button>`;
+    overlay.querySelector('#rs-yes-btn').addEventListener('click', () => proceedTo(match.id));
+    overlay.querySelector('#rs-no-btn').addEventListener('click', () => showManualPick());
+  } else {
+    showNewSupplierPrompt();
+  }
+
+  async function showManualPick() {
+    const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
+    overlay.querySelector('.card').innerHTML = `
+      <h2>Pick the supplier</h2>
+      <select id="rs-manual-select"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+      <p class="subtitle" style="margin:10px 0;">Or</p>
+      <button type="button" class="secondary" id="rs-new-instead-btn">This is actually a new supplier</button>
+      <div style="margin-top:14px;"><button id="rs-manual-continue-btn">Continue</button></div>`;
+    overlay.querySelector('#rs-new-instead-btn').addEventListener('click', () => showNewSupplierPrompt());
+    overlay.querySelector('#rs-manual-continue-btn').addEventListener('click', () => {
+      const id = overlay.querySelector('#rs-manual-select').value;
+      if (id) proceedTo(id);
+    });
+  }
+
+  async function showNewSupplierPrompt() {
+    overlay.querySelector('.card').innerHTML = `<h2>Creating supplier</h2><p class="subtitle">Setting up "${extractedSupplierName}" - you can add or adjust anything anytime from their page.</p>`;
+    const { data: created, error } = await supabaseClient.from('suppliers').insert({
+      name: extractedSupplierName || 'Unknown supplier',
+      credit_terms_type: 'net_days',
+      credit_terms_days: 30,
+      our_account_number: matchFields.ourAccountNumber || null,
+      abn: matchFields.abn || null,
+      contact_phone: extracted.contact_phone || null,
+      contact_email: extracted.contact_email || null,
+      bank_account_name: extracted.bank_account_name || null,
+      bsb: matchFields.bsb || null,
+      bank_account_number: matchFields.bankAccountNumber || null,
+    }).select('id').single();
+    if (error) {
+      overlay.querySelector('.card').innerHTML = `<h2>Couldn't create the supplier</h2><div class="error-box">${error.message}</div><button type="button" class="secondary" id="rs-new-err-close">Close</button>`;
+      overlay.querySelector('#rs-new-err-close').addEventListener('click', () => overlay.remove());
+      return;
+    }
+    proceedTo(created.id);
+  }
 }

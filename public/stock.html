@@ -34,7 +34,10 @@
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
         <input id="stock-search" placeholder="Search by name, category, or supplier..." style="max-width:320px;" />
-        <button id="add-material-btn">+ Add material</button>
+        <div>
+          <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
+          <button id="add-material-btn">+ Add material</button>
+        </div>
       </div>
       <div id="stock-list"><p class="subtitle">Loading...</p></div>
     </div>
@@ -168,6 +171,30 @@
     }
 
     document.getElementById('add-material-btn').addEventListener('click', () => openMaterialPanel(null));
+
+    document.getElementById('upload-pricelist-btn').addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.pdf,.jpg,.jpeg,.png';
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+        overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
+        document.body.appendChild(overlay);
+        try {
+          const fileBase64 = await fileToBase64(file);
+          const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', fileBase64, file.type);
+          overlay.remove();
+          await resolveSupplierAndHandoff(data.supplier, 'pricelist', { items: data.items }, file);
+        } catch (err) {
+          overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="sp-close">Close</button>`;
+          overlay.querySelector('#sp-close').addEventListener('click', () => overlay.remove());
+        }
+      };
+      input.click();
+    });
 
     (async function () {
       const session = await requireLogin();
