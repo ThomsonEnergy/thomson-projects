@@ -588,3 +588,61 @@ function uploadInvoiceForPo(po) {
   };
   input.click();
 }
+
+// Shared searchable material picker for PO line items - replaces a plain
+// dropdown (unworkable with a large materials list) with type-ahead
+// search, while still allowing a free-text item that isn't in Stock at
+// all yet (e.g. a one-off "10A power point") rather than forcing a full
+// Stock record to be created just to order something.
+function buildMaterialSearchRow(materials, containerId) {
+  const row = document.createElement('div');
+  row.className = 'po-material-line';
+  row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:6px; margin-bottom:6px; position:relative;';
+  row.innerHTML = `
+    <div style="position:relative;">
+      <input class="po-line-search" placeholder="Search Stock or type a new item..." autocomplete="off" style="font-size:13px;" />
+      <input type="hidden" class="po-line-material-id" />
+      <div class="po-line-results" style="position:absolute; top:100%; left:0; right:0; z-index:10; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:none;"></div>
+    </div>
+    <input class="po-line-qty" type="number" step="1" value="1" placeholder="Qty" style="font-size:13px;" />
+    <input class="po-line-cost" type="number" step="0.01" value="0" placeholder="Unit cost" style="font-size:13px;" />
+    <button type="button" class="secondary po-remove-line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
+  document.getElementById(containerId).appendChild(row);
+
+  const searchInput = row.querySelector('.po-line-search');
+  const resultsEl = row.querySelector('.po-line-results');
+  const materialIdInput = row.querySelector('.po-line-material-id');
+
+  searchInput.addEventListener('input', (e) => {
+    materialIdInput.value = ''; // typing again means whatever was selected no longer applies
+    const q = e.target.value.trim().toLowerCase();
+    if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+    const matches = materials.filter(m => m.name.toLowerCase().includes(q)).slice(0, 8);
+    if (!matches.length) { resultsEl.style.display = 'none'; return; }
+    resultsEl.innerHTML = matches.map(m => `<div class="po-line-pick" data-id="${m.id}" data-name="${m.name}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${m.name} <span class="subtitle">(${money(m.cost_price)})</span></div>`).join('');
+    resultsEl.style.display = 'block';
+    resultsEl.querySelectorAll('.po-line-pick').forEach(pick => {
+      pick.addEventListener('click', () => {
+        searchInput.value = pick.dataset.name;
+        materialIdInput.value = pick.dataset.id;
+        row.querySelector('.po-line-cost').value = pick.dataset.cost;
+        resultsEl.style.display = 'none';
+      });
+    });
+  });
+  searchInput.addEventListener('blur', () => setTimeout(() => { resultsEl.style.display = 'none'; }, 200));
+
+  row.querySelector('.po-remove-line').addEventListener('click', () => row.remove());
+  return row;
+}
+
+// Reads every .po-material-line row inside a container into plain line
+// item objects - materialId is null for a free-text item not in Stock.
+function readMaterialLineRows(containerId) {
+  return [...document.querySelectorAll(`#${containerId} .po-material-line`)].map(row => ({
+    materialId: row.querySelector('.po-line-material-id').value || null,
+    description: row.querySelector('.po-line-search').value.trim(),
+    quantity: parseFloat(row.querySelector('.po-line-qty').value) || 0,
+    unit_cost: parseFloat(row.querySelector('.po-line-cost').value) || 0,
+  })).filter(l => l.description && l.quantity > 0);
+}

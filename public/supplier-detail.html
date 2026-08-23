@@ -525,13 +525,31 @@
         if (matchedPO) autoMatchedPoId = matchedPO.id;
       }
 
+      const matchedPOForLines = autoMatchedPoId ? (openPOs || []).find(po => po.id === autoMatchedPoId) : null;
+      const genericPoLines = matchedPOForLines ? (matchedPOForLines.purchase_order_line_items || []).filter(pl => !pl.material_id) : [];
+
       const lineItems = (extracted.line_items || []).map(li => {
         let bestMatch = null, bestScore = 0;
         materials.forEach(m => {
           const score = fuzzyMatchScore(m.name, li.description);
           if (score > bestScore) { bestScore = score; bestMatch = m; }
         });
-        return { ...li, suggestedMatchId: bestScore >= 0.3 ? bestMatch?.id : null };
+
+        // A generic PO line (e.g. "10A power point", no Stock link) that
+        // this specific invoiced item plausibly fulfils - offer to
+        // update the PO to the real item, never done automatically.
+        let genericPoMatch = null, genericPoScore = 0;
+        genericPoLines.forEach(pl => {
+          const score = fuzzyMatchScore(pl.description, li.description);
+          if (score > genericPoScore) { genericPoScore = score; genericPoMatch = pl; }
+        });
+
+        return {
+          ...li,
+          suggestedMatchId: bestScore >= 0.3 ? bestMatch?.id : null,
+          genericPoLineId: genericPoScore >= 0.3 ? genericPoMatch?.id : null,
+          genericPoLineDescription: genericPoScore >= 0.3 ? genericPoMatch?.description : null,
+        };
       });
 
       const nameWarning = extracted.supplier && !fuzzyMatchScore(currentSupplier.name, extracted.supplier)
@@ -592,6 +610,11 @@
                   ${materials.map(m => `<option value="${m.id}" ${li.suggestedMatchId === m.id ? 'selected' : ''}>${m.name} (currently ${money(m.cost_price)})</option>`).join('')}
                 </select>
                 ${li.suggestedMatchId ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Suggested match - check this is actually the same item before confirming.</p>` : ''}
+                ${li.genericPoLineId ? `
+                  <label style="margin-top:8px; display:flex; align-items:flex-start; gap:6px; font-size:12px;">
+                    <input type="checkbox" class="rli-replace-generic" data-po-line-id="${li.genericPoLineId}" checked style="width:auto; margin-top:2px;" />
+                    Update the PO's "${li.genericPoLineDescription}" to this specific item
+                  </label>` : ''}
               </div>`).join('')}
           </div>
 
@@ -741,12 +764,25 @@
               }).eq('id', materialId);
             }
 
+            // If accepted, update the PO's generic line item to reflect
+            // what was actually invoiced - never done without the
+            // person seeing and confirming it on the review screen.
+            const replaceCheckbox = row.querySelector('.rli-replace-generic');
+            let replacedGenericPoLineId = null;
+            if (replaceCheckbox && replaceCheckbox.checked) {
+              const genericPoLineId = replaceCheckbox.dataset.poLineId;
+              await supabaseClient.from('purchase_order_line_items').update({
+                material_id: materialId, description,
+              }).eq('id', genericPoLineId);
+              replacedGenericPoLineId = genericPoLineId;
+            }
+
             // Flag against the linked PO, if one was chosen - either the
             // item isn't on that PO at all, or it's genuinely priced
             // higher than what the PO expected.
             let flagReason = null;
-            let poLineItemId = null;
-            if (linkedPO) {
+            let poLineItemId = replacedGenericPoLineId;
+            if (linkedPO && !poLineItemId) {
               const poLine = (linkedPO.purchase_order_line_items || []).find(pl => pl.material_id === materialId);
               if (!poLine) {
                 flagReason = 'Not on the linked PO';

@@ -230,7 +230,7 @@
           <label style="margin-top:0">Supplier</label>
           <select id="csp-supplier"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
           <label style="margin-top:14px;">Items</label>
-          <div id="csp-items"></div>
+          <div id="csp-items-container"></div>
           <button type="button" class="secondary" id="csp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
           <div style="margin-top:14px;">
             <button id="csp-save-btn">Create PO</button>
@@ -240,23 +240,8 @@
         </div>`;
       document.body.appendChild(overlay);
 
-      function addLineRow() {
-        const row = document.createElement('div');
-        row.className = 'csp-line';
-        row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:6px; margin-bottom:6px;';
-        row.innerHTML = `
-          <select class="csp-line-material" style="font-size:13px;">${allMaterials.map(m => `<option value="${m.id}" data-cost="${m.cost_price}">${m.name}</option>`).join('')}</select>
-          <input class="csp-line-qty" type="number" step="1" value="1" placeholder="Qty" style="font-size:13px;" />
-          <input class="csp-line-cost" type="number" step="0.01" value="${allMaterials[0]?.cost_price || 0}" placeholder="Unit cost" style="font-size:13px;" />
-          <button type="button" class="secondary csp-remove-line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
-        overlay.querySelector('#csp-items').appendChild(row);
-        row.querySelector('.csp-remove-line').addEventListener('click', () => row.remove());
-        row.querySelector('.csp-line-material').addEventListener('change', (e) => {
-          row.querySelector('.csp-line-cost').value = e.target.selectedOptions[0].dataset.cost || 0;
-        });
-      }
-      addLineRow();
-      overlay.querySelector('#csp-add-line-btn').addEventListener('click', addLineRow);
+      buildMaterialSearchRow(allMaterials, 'csp-items-container');
+      overlay.querySelector('#csp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(allMaterials, 'csp-items-container'));
 
       overlay.querySelector('#csp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#csp-save-btn').addEventListener('click', async () => {
@@ -276,14 +261,10 @@
           }).select('id').single();
           if (poErr) throw poErr;
 
-          const lines = [...overlay.querySelectorAll('.csp-line')].map(row => ({
-            po_id: newPo.id,
-            material_id: row.querySelector('.csp-line-material').value,
-            description: row.querySelector('.csp-line-material').selectedOptions[0].textContent,
-            quantity: parseFloat(row.querySelector('.csp-line-qty').value) || 0,
-            unit_cost: parseFloat(row.querySelector('.csp-line-cost').value) || 0,
-            added_by: user.id,
-          })).filter(l => l.quantity > 0);
+          const lines = readMaterialLineRows('csp-items-container').map(l => ({
+            po_id: newPo.id, material_id: l.materialId, description: l.description,
+            quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
+          }));
           if (lines.length) {
             const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(lines);
             if (liErr) throw liErr;

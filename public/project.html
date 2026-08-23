@@ -886,6 +886,7 @@
 
     async function openCreatePoPanel(projectId, centres) {
       const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
+      const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
@@ -908,7 +909,7 @@
 
           <div id="cp-fixed-section">
             <label>Line items</label>
-            <div id="cp-fixed-items"></div>
+            <div id="cp-fixed-items-container"></div>
             <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add line</button>
           </div>
           <div id="cp-open-section" style="display:none;">
@@ -927,20 +928,8 @@
         </div>`;
       document.body.appendChild(overlay);
 
-      function addFixedLineRow() {
-        const row = document.createElement('div');
-        row.className = 'cp-fixed-line';
-        row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:6px; margin-bottom:6px;';
-        row.innerHTML = `
-          <input class="cp-line-desc" placeholder="Description" style="font-size:13px;" />
-          <input class="cp-line-qty" type="number" step="0.01" value="1" placeholder="Qty" style="font-size:13px;" />
-          <input class="cp-line-cost" type="number" step="0.01" placeholder="Unit cost" style="font-size:13px;" />
-          <button type="button" class="secondary cp-remove-line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
-        overlay.querySelector('#cp-fixed-items').appendChild(row);
-        row.querySelector('.cp-remove-line').addEventListener('click', () => row.remove());
-      }
-      addFixedLineRow();
-      overlay.querySelector('#cp-add-line-btn').addEventListener('click', addFixedLineRow);
+      buildMaterialSearchRow(materials || [], 'cp-fixed-items-container');
+      overlay.querySelector('#cp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'cp-fixed-items-container'));
 
       overlay.querySelectorAll('input[name="cp-type"]').forEach(radio => {
         radio.addEventListener('change', (e) => {
@@ -983,15 +972,10 @@
           if (poErr) throw poErr;
 
           if (poType === 'fixed') {
-            const lines = [...overlay.querySelectorAll('.cp-fixed-line')]
-              .map(row => ({
-                po_id: newPo.id,
-                description: row.querySelector('.cp-line-desc').value.trim(),
-                quantity: parseFloat(row.querySelector('.cp-line-qty').value) || 0,
-                unit_cost: parseFloat(row.querySelector('.cp-line-cost').value) || 0,
-                added_by: user.id,
-              }))
-              .filter(l => l.description);
+            const lines = readMaterialLineRows('cp-fixed-items-container').map(l => ({
+              po_id: newPo.id, material_id: l.materialId, description: l.description,
+              quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
+            }));
             if (lines.length) {
               const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(lines);
               if (liErr) throw liErr;
