@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Supplier Bills - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Supplier Bills</h1>
+    <p class="subtitle">Manual log for now - scanning a bill and having AI extract the details automatically is planned for a later phase.</p>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="margin:0;">Bills</h2>
+        <button id="add-bill-btn">+ Add bill</button>
+      </div>
+      <div id="bills-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let projectOptions = [];
+
+    async function loadBills() {
+      const listEl = document.getElementById('bills-list');
+      const { data, error } = await supabaseClient
+        .from('supplier_bills')
+        .select('*, projects(name, job_number)')
+        .order('bill_date', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No supplier bills logged yet.</p>`; return; }
+
+      listEl.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Supplier</th><th>Bill #</th><th>Date</th><th>Job</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(b => `
+              <tr>
+                <td data-label="Supplier">${b.supplier_name}</td>
+                <td data-label="Bill #">${b.bill_number || '-'}</td>
+                <td data-label="Date">${b.bill_date ? new Date(b.bill_date).toLocaleDateString('en-AU') : '-'}</td>
+                <td data-label="Job">${b.projects ? `#${b.projects.job_number || '-'} ${b.projects.name}` : '-'}</td>
+                <td class="num" data-label="Amount">${money(b.amount)}</td>
+                <td data-label="Status">${b.paid ? '<span class="badge accepted">Paid</span>' : '<span class="badge sent">Unpaid</span>'}</td>
+                <td data-label=""><button class="secondary edit-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Edit</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      listEl.querySelectorAll('.edit-bill-btn').forEach(btn => {
+        btn.addEventListener('click', () => openBillPanel(data.find(b => b.id === btn.dataset.id)));
+      });
+    }
+
+    function openBillPanel(bill) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>${bill ? 'Edit bill' : 'Add bill'}</h2>
+          <label style="margin-top:0">Supplier</label>
+          <input id="bill-supplier" value="${bill?.supplier_name || ''}" />
+          <div class="grid cols-2">
+            <div><label>Bill number</label><input id="bill-number" value="${bill?.bill_number || ''}" /></div>
+            <div><label>Date</label><input type="date" id="bill-date" value="${bill?.bill_date || ''}" /></div>
+          </div>
+          <div class="grid cols-2">
+            <div><label>Amount</label><input id="bill-amount" type="number" step="0.01" value="${bill?.amount || 0}" /></div>
+            <div><label>PO reference</label><input id="bill-po" value="${bill?.po_reference || ''}" /></div>
+          </div>
+          <label>Job (optional)</label>
+          <select id="bill-project"><option value="">-- None --</option>${projectOptions.map(p => `<option value="${p.id}" ${bill?.project_id === p.id ? 'selected' : ''}>${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</option>`).join('')}</select>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+            <input type="checkbox" id="bill-paid" ${bill?.paid ? 'checked' : ''} style="width:auto;" /> Paid
+          </label>
+          <label>Notes</label>
+          <textarea id="bill-notes" style="min-height:60px;">${bill?.notes || ''}</textarea>
+          <div style="margin-top:14px; display:flex; justify-content:space-between;">
+            <div>
+              <button id="bill-save-btn">Save</button>
+              <button type="button" class="secondary" id="bill-cancel-btn">Cancel</button>
+            </div>
+            ${bill ? `<button type="button" class="secondary" id="bill-delete-btn" style="color:var(--red);">Delete</button>` : ''}
+          </div>
+          <div id="bill-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#bill-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#bill-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#bill-msg');
+        const supplier = overlay.querySelector('#bill-supplier').value.trim();
+        if (!supplier) { msg.innerHTML = `<div class="error-box">Supplier is required.</div>`; return; }
+        const fields = {
+          supplier_name: supplier,
+          bill_number: overlay.querySelector('#bill-number').value.trim() || null,
+          bill_date: overlay.querySelector('#bill-date').value || null,
+          amount: parseFloat(overlay.querySelector('#bill-amount').value) || 0,
+          po_reference: overlay.querySelector('#bill-po').value.trim() || null,
+          project_id: overlay.querySelector('#bill-project').value || null,
+          paid: overlay.querySelector('#bill-paid').checked,
+          notes: overlay.querySelector('#bill-notes').value.trim() || null,
+        };
+        const { error } = bill
+          ? await supabaseClient.from('supplier_bills').update(fields).eq('id', bill.id)
+          : await supabaseClient.from('supplier_bills').insert(fields);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        overlay.remove();
+        await loadBills();
+      });
+
+      if (bill) {
+        overlay.querySelector('#bill-delete-btn').addEventListener('click', async () => {
+          if (!confirm(`Delete this bill from ${bill.supplier_name}?`)) return;
+          const { error } = await supabaseClient.from('supplier_bills').delete().eq('id', bill.id);
+          if (error) { alert(error.message); return; }
+          overlay.remove();
+          await loadBills();
+        });
+      }
+    }
+
+    document.getElementById('add-bill-btn').addEventListener('click', () => openBillPanel(null));
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('supplier-bills');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      const { data: projects } = await supabaseClient.from('projects').select('id, name, job_number').neq('pipeline_stage', 'archived').order('created_at', { ascending: false }).limit(200);
+      projectOptions = projects || [];
+      await loadBills();
+    })();
+  </script>
+</body>
+</html>

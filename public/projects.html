@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Projects - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Projects</h1>
+    <p class="subtitle">Every project with its financial position at a glance. For the pipeline board (moving jobs between stages), see Job pipeline instead.</p>
+
+    <div class="grid cols-4">
+      <div class="stat"><div class="label">Total quoted</div><div class="value" id="stat-total">-</div></div>
+      <div class="stat"><div class="label">Signed</div><div class="value" id="stat-signed">-</div></div>
+      <div class="stat"><div class="label">Invoiced</div><div class="value" id="stat-invoiced">-</div></div>
+      <div class="stat"><div class="label">WIP (signed, not yet invoiced)</div><div class="value" id="stat-wip">-</div></div>
+    </div>
+
+    <div class="card">
+      <input id="project-search" placeholder="Search by name, client, or job number..." style="margin-bottom:14px; max-width:320px;" />
+      <div id="projects-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let allRows = [];
+
+    async function loadProjects() {
+      const listEl = document.getElementById('projects-list');
+      const { data: projects, error } = await supabaseClient
+        .from('projects')
+        .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(quoted_amount, invoices(labour_amount, material_amount, stc_amount))')
+        .neq('pipeline_stage', 'archived')
+        .order('created_at', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      allRows = (projects || []).map(p => {
+        const totalQuoted = (p.cost_centres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
+        const isSigned = !!p.job_number;
+        const signed = isSigned ? totalQuoted : 0;
+        const invoiced = (p.cost_centres || []).reduce((s, c) =>
+          s + (c.invoices || []).reduce((s2, inv) => s2 + (Number(inv.labour_amount) || 0) + (Number(inv.material_amount) || 0) - (Number(inv.stc_amount) || 0), 0), 0);
+        const wip = Math.max(0, signed - invoiced);
+        return { ...p, totalQuoted, signed, invoiced, wip, isSigned };
+      });
+
+      renderProjects();
+    }
+
+    function renderProjects() {
+      const listEl = document.getElementById('projects-list');
+      const q = document.getElementById('project-search').value.trim().toLowerCase();
+      const filtered = q
+        ? allRows.filter(p => (p.name || '').toLowerCase().includes(q) || (p.client_name || '').toLowerCase().includes(q) || String(p.job_number || '').includes(q) || String(p.quote_number || '').includes(q))
+        : allRows;
+
+      const totals = filtered.reduce((acc, p) => ({
+        total: acc.total + p.totalQuoted, signed: acc.signed + p.signed, invoiced: acc.invoiced + p.invoiced, wip: acc.wip + p.wip,
+      }), { total: 0, signed: 0, invoiced: 0, wip: 0 });
+      document.getElementById('stat-total').textContent = money(totals.total);
+      document.getElementById('stat-signed').textContent = money(totals.signed);
+      document.getElementById('stat-invoiced').textContent = money(totals.invoiced);
+      document.getElementById('stat-wip').textContent = money(totals.wip);
+
+      if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No projects match.</p>`; return; }
+
+      listEl.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>#</th><th>Name</th><th>Client</th><th class="num">Total quoted</th><th class="num">Signed</th><th class="num">Invoiced</th><th class="num">WIP</th></tr></thead>
+          <tbody>
+            ${filtered.map(p => `
+              <tr class="project-row-link" data-id="${p.id}" style="cursor:pointer;">
+                <td data-label="#">${p.job_number ? '#' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '-')}</td>
+                <td data-label="Name">${p.name}</td>
+                <td data-label="Client">${p.client_name || '-'}</td>
+                <td class="num" data-label="Total quoted">${money(p.totalQuoted)}</td>
+                <td class="num" data-label="Signed">${p.isSigned ? money(p.signed) : '<span class="subtitle">Not signed</span>'}</td>
+                <td class="num" data-label="Invoiced">${money(p.invoiced)}</td>
+                <td class="num" data-label="WIP">${money(p.wip)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      listEl.querySelectorAll('.project-row-link').forEach(row => {
+        row.addEventListener('click', () => { window.location.href = `/project.html?id=${row.dataset.id}`; });
+      });
+    }
+
+    document.getElementById('project-search').addEventListener('input', renderProjects);
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('projects');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      await loadProjects();
+    })();
+  </script>
+</body>
+</html>

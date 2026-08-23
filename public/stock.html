@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Stock - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Stock</h1>
+    <p class="subtitle">Materials on hand - cost and sell price, so job costing has real numbers to work from once this feeds into quoting.</p>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+        <input id="stock-search" placeholder="Search by name, category, or supplier..." style="max-width:320px;" />
+        <button id="add-material-btn">+ Add material</button>
+      </div>
+      <div id="stock-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let allMaterials = [];
+
+    async function loadMaterials() {
+      const listEl = document.getElementById('stock-list');
+      const { data, error } = await supabaseClient.from('materials').select('*').order('name');
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      allMaterials = data || [];
+      renderMaterials();
+    }
+
+    function renderMaterials() {
+      const listEl = document.getElementById('stock-list');
+      const q = document.getElementById('stock-search').value.trim().toLowerCase();
+      const filtered = q
+        ? allMaterials.filter(m => (m.name || '').toLowerCase().includes(q) || (m.category || '').toLowerCase().includes(q) || (m.supplier || '').toLowerCase().includes(q))
+        : allMaterials;
+
+      if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No materials yet - add one to get started.</p>`; return; }
+
+      listEl.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Name</th><th>Category</th><th>Supplier</th><th class="num">Cost</th><th class="num">Sell</th><th class="num">Qty on hand</th><th></th></tr></thead>
+          <tbody>
+            ${filtered.map(m => `
+              <tr>
+                <td data-label="Name">${m.name}</td>
+                <td data-label="Category">${m.category || '-'}</td>
+                <td data-label="Supplier">${m.supplier || '-'}</td>
+                <td class="num" data-label="Cost">${money(m.cost_price)}</td>
+                <td class="num" data-label="Sell">${money(m.sell_price)}</td>
+                <td class="num" data-label="Qty">${m.quantity_on_hand}</td>
+                <td data-label="">
+                  <button class="secondary edit-material-btn" data-id="${m.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      listEl.querySelectorAll('.edit-material-btn').forEach(btn => {
+        btn.addEventListener('click', () => openMaterialPanel(allMaterials.find(m => m.id === btn.dataset.id)));
+      });
+    }
+
+    document.getElementById('stock-search').addEventListener('input', renderMaterials);
+
+    function openMaterialPanel(material) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>${material ? 'Edit material' : 'Add material'}</h2>
+          <label style="margin-top:0">Name</label>
+          <input id="mat-name" value="${material?.name || ''}" />
+          <div class="grid cols-2">
+            <div>
+              <label>Category</label>
+              <input id="mat-category" value="${material?.category || ''}" placeholder="e.g. Cable" />
+            </div>
+            <div>
+              <label>Supplier</label>
+              <input id="mat-supplier" value="${material?.supplier || ''}" />
+            </div>
+          </div>
+          <div class="grid cols-3">
+            <div>
+              <label>Cost price</label>
+              <input id="mat-cost" type="number" step="0.01" value="${material?.cost_price || 0}" />
+            </div>
+            <div>
+              <label>Sell price</label>
+              <input id="mat-sell" type="number" step="0.01" value="${material?.sell_price || 0}" />
+            </div>
+            <div>
+              <label>Qty on hand</label>
+              <input id="mat-qty" type="number" step="1" value="${material?.quantity_on_hand || 0}" />
+            </div>
+          </div>
+          <label>Notes</label>
+          <textarea id="mat-notes" style="min-height:60px;">${material?.notes || ''}</textarea>
+          <div style="margin-top:14px; display:flex; justify-content:space-between;">
+            <div>
+              <button id="mat-save-btn">Save</button>
+              <button type="button" class="secondary" id="mat-cancel-btn">Cancel</button>
+            </div>
+            ${material ? `<button type="button" class="secondary" id="mat-delete-btn" style="color:var(--red);">Delete</button>` : ''}
+          </div>
+          <div id="mat-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#mat-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#mat-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#mat-msg');
+        const name = overlay.querySelector('#mat-name').value.trim();
+        if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
+        const fields = {
+          name,
+          category: overlay.querySelector('#mat-category').value.trim() || null,
+          supplier: overlay.querySelector('#mat-supplier').value.trim() || null,
+          cost_price: parseFloat(overlay.querySelector('#mat-cost').value) || 0,
+          sell_price: parseFloat(overlay.querySelector('#mat-sell').value) || 0,
+          quantity_on_hand: parseFloat(overlay.querySelector('#mat-qty').value) || 0,
+          notes: overlay.querySelector('#mat-notes').value.trim() || null,
+        };
+        const { error } = material
+          ? await supabaseClient.from('materials').update(fields).eq('id', material.id)
+          : await supabaseClient.from('materials').insert(fields);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        overlay.remove();
+        await loadMaterials();
+      });
+
+      if (material) {
+        overlay.querySelector('#mat-delete-btn').addEventListener('click', async () => {
+          if (!confirm(`Delete ${material.name}?`)) return;
+          const { error } = await supabaseClient.from('materials').delete().eq('id', material.id);
+          if (error) { alert(error.message); return; }
+          overlay.remove();
+          await loadMaterials();
+        });
+      }
+    }
+
+    document.getElementById('add-material-btn').addEventListener('click', () => openMaterialPanel(null));
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('stock');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      await loadMaterials();
+    })();
+  </script>
+</body>
+</html>

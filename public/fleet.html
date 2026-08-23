@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Fleet - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Fleet</h1>
+    <p class="subtitle">Vehicle details, who's driving what, and upcoming rego/service dates.</p>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="margin:0;">Vehicles</h2>
+        <button id="add-vehicle-btn">+ Add vehicle</button>
+      </div>
+      <div id="fleet-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let staffOptions = [];
+
+    function daysUntil(dateStr) {
+      if (!dateStr) return null;
+      return Math.ceil((new Date(dateStr) - new Date()) / 86400000);
+    }
+
+    async function loadFleet() {
+      const listEl = document.getElementById('fleet-list');
+      const { data, error } = await supabaseClient
+        .from('fleet_vehicles')
+        .select('*, profiles(full_name)')
+        .order('rego');
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No vehicles yet - add one to get started.</p>`; return; }
+
+      listEl.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Rego</th><th>Vehicle</th><th>Assigned to</th><th>Rego expiry</th><th>Next service</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(v => {
+              const regoDays = daysUntil(v.rego_expiry);
+              const serviceDays = daysUntil(v.next_service_date);
+              const regoWarn = regoDays !== null && regoDays <= 30;
+              const serviceWarn = serviceDays !== null && serviceDays <= 30;
+              return `
+                <tr>
+                  <td data-label="Rego"><strong>${v.rego}</strong></td>
+                  <td data-label="Vehicle">${[v.year, v.make, v.model].filter(Boolean).join(' ')}</td>
+                  <td data-label="Assigned to">${v.profiles?.full_name || '-'}</td>
+                  <td data-label="Rego expiry">${v.rego_expiry ? new Date(v.rego_expiry).toLocaleDateString('en-AU') : '-'}${regoWarn ? ` <span class="badge draft" style="color:var(--red);">${regoDays}d</span>` : ''}</td>
+                  <td data-label="Next service">${v.next_service_date ? new Date(v.next_service_date).toLocaleDateString('en-AU') : '-'}${serviceWarn ? ` <span class="badge draft" style="color:var(--red);">${serviceDays}d</span>` : ''}</td>
+                  <td data-label=""><button class="secondary edit-vehicle-btn" data-id="${v.id}" style="font-size:12px; padding:6px 10px;">Edit</button></td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+
+      listEl.querySelectorAll('.edit-vehicle-btn').forEach(btn => {
+        btn.addEventListener('click', () => openVehiclePanel(data.find(v => v.id === btn.dataset.id)));
+      });
+    }
+
+    function openVehiclePanel(vehicle) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>${vehicle ? 'Edit vehicle' : 'Add vehicle'}</h2>
+          <label style="margin-top:0">Rego</label>
+          <input id="veh-rego" value="${vehicle?.rego || ''}" />
+          <div class="grid cols-3">
+            <div><label>Year</label><input id="veh-year" type="number" value="${vehicle?.year || ''}" /></div>
+            <div><label>Make</label><input id="veh-make" value="${vehicle?.make || ''}" /></div>
+            <div><label>Model</label><input id="veh-model" value="${vehicle?.model || ''}" /></div>
+          </div>
+          <label>Assigned to</label>
+          <select id="veh-staff"><option value="">-- Unassigned --</option>${staffOptions.map(s => `<option value="${s.id}" ${vehicle?.assigned_staff_id === s.id ? 'selected' : ''}>${s.full_name}</option>`).join('')}</select>
+          <div class="grid cols-2">
+            <div><label>Rego expiry</label><input type="date" id="veh-rego-expiry" value="${vehicle?.rego_expiry || ''}" /></div>
+            <div><label>Next service</label><input type="date" id="veh-service" value="${vehicle?.next_service_date || ''}" /></div>
+          </div>
+          <label>Odometer</label>
+          <input id="veh-odo" type="number" value="${vehicle?.odometer || ''}" />
+          <label>Notes</label>
+          <textarea id="veh-notes" style="min-height:60px;">${vehicle?.notes || ''}</textarea>
+          <div style="margin-top:14px; display:flex; justify-content:space-between;">
+            <div>
+              <button id="veh-save-btn">Save</button>
+              <button type="button" class="secondary" id="veh-cancel-btn">Cancel</button>
+            </div>
+            ${vehicle ? `<button type="button" class="secondary" id="veh-delete-btn" style="color:var(--red);">Delete</button>` : ''}
+          </div>
+          <div id="veh-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#veh-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#veh-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#veh-msg');
+        const rego = overlay.querySelector('#veh-rego').value.trim();
+        if (!rego) { msg.innerHTML = `<div class="error-box">Rego is required.</div>`; return; }
+        const fields = {
+          rego,
+          year: parseInt(overlay.querySelector('#veh-year').value) || null,
+          make: overlay.querySelector('#veh-make').value.trim() || null,
+          model: overlay.querySelector('#veh-model').value.trim() || null,
+          assigned_staff_id: overlay.querySelector('#veh-staff').value || null,
+          rego_expiry: overlay.querySelector('#veh-rego-expiry').value || null,
+          next_service_date: overlay.querySelector('#veh-service').value || null,
+          odometer: parseFloat(overlay.querySelector('#veh-odo').value) || null,
+          notes: overlay.querySelector('#veh-notes').value.trim() || null,
+        };
+        const { error } = vehicle
+          ? await supabaseClient.from('fleet_vehicles').update(fields).eq('id', vehicle.id)
+          : await supabaseClient.from('fleet_vehicles').insert(fields);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        overlay.remove();
+        await loadFleet();
+      });
+
+      if (vehicle) {
+        overlay.querySelector('#veh-delete-btn').addEventListener('click', async () => {
+          if (!confirm(`Delete ${vehicle.rego}?`)) return;
+          const { error } = await supabaseClient.from('fleet_vehicles').delete().eq('id', vehicle.id);
+          if (error) { alert(error.message); return; }
+          overlay.remove();
+          await loadFleet();
+        });
+      }
+    }
+
+    document.getElementById('add-vehicle-btn').addEventListener('click', () => openVehiclePanel(null));
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('fleet');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      const { data: profiles } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true);
+      staffOptions = profiles || [];
+      await loadFleet();
+    })();
+  </script>
+</body>
+</html>

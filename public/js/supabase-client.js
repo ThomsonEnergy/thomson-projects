@@ -114,6 +114,37 @@ function moneyOrHidden(n) {
   return (n === null || n === undefined) ? ' - ' : money(n);
 }
 
+// Single source of truth for the main nav - every page calls
+// renderMainNav('key') into empty <nav id="topbar-tabs"> and
+// <div id="mobile-menu-dropdown"> containers, instead of each page
+// hand-maintaining its own copy of the same 13 links (which is exactly
+// how small nav inconsistencies kept creeping in before this existed).
+const MAIN_NAV_ITEMS = [
+  { key: 'leads', label: 'Leads', href: '/leads.html' },
+  { key: 'quotes', label: 'Quotes', href: '/quotes.html' },
+  { key: 'projects', label: 'Projects', href: '/projects.html' },
+  { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html' },
+  { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html' },
+  { key: 'invoices', label: 'Invoices', href: '/invoices.html' },
+  { key: 'supplier-bills', label: 'Supplier Bills', href: '/supplier-bills.html' },
+  { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html' },
+  { key: 'clients', label: 'Clients', href: '/clients.html' },
+  { key: 'stock', label: 'Stock', href: '/stock.html' },
+  { key: 'team', label: 'Team', href: '/team.html' },
+  { key: 'dnsp', label: 'DNSP', href: '/dnsp.html' },
+  { key: 'fleet', label: 'Fleet', href: '/fleet.html' },
+];
+
+function renderMainNav(activeKey) {
+  const tabsEl = document.getElementById('topbar-tabs');
+  const dropdownEl = document.getElementById('mobile-menu-dropdown');
+  const linksHtml = (asTab) => MAIN_NAV_ITEMS.map(item =>
+    `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''}">${item.label}</a>`
+  ).join('');
+  if (tabsEl) tabsEl.innerHTML = linksHtml(true);
+  if (dropdownEl) dropdownEl.innerHTML = linksHtml(false);
+}
+
 // Shared job search - by job number, name, client name, or site address.
 // Used by the Schedule day view's draggable job panel, the Timesheets job
 // picker, and anywhere else that needs "find a job by anything about it."

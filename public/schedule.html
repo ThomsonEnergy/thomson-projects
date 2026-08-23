@@ -42,7 +42,11 @@
   }
   .cal-chip.leave { background: var(--red); color: #fff; opacity: 0.85; }
   .cal-day.holiday { background: var(--surface-1); opacity: 0.6; }
-  .cal-day.holiday .day-num::after { content: " \2022 holiday"; font-size: 9px; color: var(--muted); font-weight: 400; }
+  .cal-day.holiday .day-num { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .holiday-badge {
+    background: #eab308; color: #422006; font-size: 8px; font-weight: 600;
+    padding: 1px 5px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em;
+  }
   @media (max-width: 800px) {
     .cal-day { min-height: 60px; font-size: 10.5px; }
   }
@@ -58,10 +62,10 @@
   .day-time-header { display: flex; min-width: 900px; border-bottom: 1px solid var(--border); }
   .day-time-header .staff-col-spacer { width: 120px; flex-shrink: 0; }
   .day-time-header .hour-label { flex: 1; font-size: 11px; color: var(--muted); text-align:center; padding-bottom: 6px; }
-  .day-time-header .hour-label.holiday-hdr { color: var(--muted); opacity: 0.6; }
+  .day-time-header .hour-label.holiday-hdr { color: #eab308; }
 
   .staff-row { display: flex; min-width: 900px; border-bottom: 1px solid var(--border); }
-  .staff-row.holiday-row { background: var(--surface-1); }
+  .staff-row.holiday-row { background: rgba(234, 179, 8, 0.08); }
   .staff-name-col {
     width: 120px; flex-shrink: 0; display: flex; align-items: center;
     font-size: 13px; font-weight: 600; padding: 10px 8px;
@@ -121,27 +125,10 @@
 <body>
   <div class="topbar">
     <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
-    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown">
-      <a href="/leads.html" class="">Leads<span class="tab-total">-</span></a>
-      <a href="/sales.html" class="">Sales<span class="tab-total">-</span></a>
-      <a href="/quotes.html" class="">Quotes<span class="tab-total">-</span></a>
-      <a href="/dashboard.html" class="">Projects<span class="tab-total">-</span></a>
-      <a href="/invoices.html" class="">Invoices<span class="tab-total">-</span></a>
-      <a href="/purchase-orders.html" class="">Purchase Orders<span class="tab-total">-</span></a>
-      <a href="/timesheets.html" class="">Timesheets<span class="tab-total">-</span></a>
-    </div>
-    <nav class="topbar-tabs">
-      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">-</span></a>
-      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">-</span></a>
-      <a href="/quotes.html" class="topbar-tab">Quotes<span class="tab-total">-</span></a>
-      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">-</span></a>
-      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">-</span></a>
-      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">-</span></a>
-      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">-</span></a>
-    </nav>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
     <div class="topbar-right">
       <a href="/schedule.html" class="topbar-icon-link" title="Schedule" style="color:var(--accent);">&#128197;</a>
-      <a href="/clients.html" class="topbar-icon-link" title="Clients">&#128100;</a>
       <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
       <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
       <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
@@ -155,7 +142,7 @@
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
         <button class="secondary" id="prev-btn">&larr; Prev</button>
-        <h2 id="period-label" style="margin:0;"></h2>
+        <h2 style="margin:0;"><span id="period-label"></span> <span id="period-badges"></span></h2>
         <div style="display:flex; gap:8px; align-items:center;">
           <button class="secondary" id="view-month-btn">Month</button>
           <button class="secondary" id="view-day-btn">Day</button>
@@ -251,7 +238,7 @@
 
         html += `
           <div class="cal-day ${isOtherMonth ? 'other-month' : ''} ${dateStr === todayStr ? 'today' : ''} ${isHoliday ? 'holiday' : ''}" data-date="${dateStr}">
-            <div class="day-num">${cellDate.getDate()}</div>
+            <div class="day-num">${cellDate.getDate()}${isHoliday ? '<span class="holiday-badge">Public holiday</span>' : ''}</div>
             ${dayLeave.map(l => `<span class="cal-chip leave">${(l.profiles && l.profiles.full_name) || 'Staff'} (leave)</span>`).join('')}
             ${dayAssignments.map(a => `<span class="cal-chip">${(a.profiles && a.profiles.full_name) || 'Staff'} &middot; ${(a.projects && a.projects.name) || 'Job'}</span>`).join('')}
           </div>`;
@@ -300,6 +287,9 @@
       ]);
       await fetchHolidays(dateStr, dateStr);
       const isHoliday = publicHolidaySet.has(dateStr);
+      document.getElementById('period-badges').innerHTML = isHoliday
+        ? `<span class="holiday-badge" style="font-size:11px; padding:3px 8px; vertical-align:2px;">Public holiday</span>`
+        : '';
 
       // Reconciliation: only meaningful for days that have actually
       // happened - today's still in progress, future days haven't
@@ -802,6 +792,7 @@
       const session = await requireLogin();
       if (!session) return;
       await syncThemeFromProfile();
+      renderMainNav(null);
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();

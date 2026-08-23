@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>DNSP - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=8" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>DNSP</h1>
+    <p class="subtitle">Distribution network connection applications, tracked per job. No real DNSP portal to connect to yet - this is a reference/tracking log until that becomes possible.</p>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="margin:0;">Connection applications</h2>
+        <button id="add-dnsp-btn">+ Add record</button>
+      </div>
+      <div id="dnsp-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let projectOptions = [];
+    const STATUS_LABELS = { not_started: 'Not started', submitted: 'Submitted', approved: 'Approved', energised: 'Energised' };
+
+    async function loadDnsp() {
+      const listEl = document.getElementById('dnsp-list');
+      const { data, error } = await supabaseClient
+        .from('dnsp_records')
+        .select('*, projects(name, job_number)')
+        .order('created_at', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No DNSP records yet.</p>`; return; }
+
+      listEl.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Job</th><th>DNSP</th><th>Reference</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(d => `
+              <tr>
+                <td data-label="Job">${d.projects ? `#${d.projects.job_number || '-'} ${d.projects.name}` : '-'}</td>
+                <td data-label="DNSP">${d.dnsp_name}</td>
+                <td data-label="Reference">${d.application_reference || '-'}</td>
+                <td data-label="Status"><span class="badge draft">${STATUS_LABELS[d.status] || d.status}</span></td>
+                <td data-label=""><button class="secondary edit-dnsp-btn" data-id="${d.id}" style="font-size:12px; padding:6px 10px;">Edit</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      listEl.querySelectorAll('.edit-dnsp-btn').forEach(btn => {
+        btn.addEventListener('click', () => openDnspPanel(data.find(d => d.id === btn.dataset.id)));
+      });
+    }
+
+    function openDnspPanel(record) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>${record ? 'Edit record' : 'Add record'}</h2>
+          <label style="margin-top:0">Job (optional)</label>
+          <select id="dnsp-project"><option value="">-- None --</option>${projectOptions.map(p => `<option value="${p.id}" ${record?.project_id === p.id ? 'selected' : ''}>${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</option>`).join('')}</select>
+          <label>DNSP</label>
+          <input id="dnsp-name" value="${record?.dnsp_name || ''}" placeholder="e.g. Essential Energy, Ausgrid, Energex, Western Power" />
+          <label>Application reference</label>
+          <input id="dnsp-ref" value="${record?.application_reference || ''}" />
+          <label>Status</label>
+          <select id="dnsp-status">
+            ${Object.entries(STATUS_LABELS).map(([k, v]) => `<option value="${k}" ${record?.status === k ? 'selected' : ''}>${v}</option>`).join('')}
+          </select>
+          <label>Notes</label>
+          <textarea id="dnsp-notes" style="min-height:60px;">${record?.notes || ''}</textarea>
+          <div style="margin-top:14px; display:flex; justify-content:space-between;">
+            <div>
+              <button id="dnsp-save-btn">Save</button>
+              <button type="button" class="secondary" id="dnsp-cancel-btn">Cancel</button>
+            </div>
+            ${record ? `<button type="button" class="secondary" id="dnsp-delete-btn" style="color:var(--red);">Delete</button>` : ''}
+          </div>
+          <div id="dnsp-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#dnsp-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#dnsp-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#dnsp-msg');
+        const name = overlay.querySelector('#dnsp-name').value.trim();
+        if (!name) { msg.innerHTML = `<div class="error-box">DNSP name is required.</div>`; return; }
+        const fields = {
+          project_id: overlay.querySelector('#dnsp-project').value || null,
+          dnsp_name: name,
+          application_reference: overlay.querySelector('#dnsp-ref').value.trim() || null,
+          status: overlay.querySelector('#dnsp-status').value,
+          notes: overlay.querySelector('#dnsp-notes').value.trim() || null,
+        };
+        const { error } = record
+          ? await supabaseClient.from('dnsp_records').update(fields).eq('id', record.id)
+          : await supabaseClient.from('dnsp_records').insert(fields);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        overlay.remove();
+        await loadDnsp();
+      });
+
+      if (record) {
+        overlay.querySelector('#dnsp-delete-btn').addEventListener('click', async () => {
+          if (!confirm('Delete this record?')) return;
+          const { error } = await supabaseClient.from('dnsp_records').delete().eq('id', record.id);
+          if (error) { alert(error.message); return; }
+          overlay.remove();
+          await loadDnsp();
+        });
+      }
+    }
+
+    document.getElementById('add-dnsp-btn').addEventListener('click', () => openDnspPanel(null));
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('dnsp');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      const { data: projects } = await supabaseClient.from('projects').select('id, name, job_number').neq('pipeline_stage', 'archived').order('created_at', { ascending: false }).limit(200);
+      projectOptions = projects || [];
+      await loadDnsp();
+    })();
+  </script>
+</body>
+</html>

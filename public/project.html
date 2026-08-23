@@ -17,27 +17,10 @@
 <body>
   <div class="topbar">
     <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
-    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown">
-      <a href="/leads.html" class="">Leads<span class="tab-total">-</span></a>
-      <a href="/sales.html" class="">Sales<span class="tab-total">-</span></a>
-      <a href="/quotes.html" class="active">Quotes<span class="tab-total">-</span></a>
-      <a href="/dashboard.html" class="">Projects<span class="tab-total">-</span></a>
-      <a href="/invoices.html" class="">Invoices<span class="tab-total">-</span></a>
-      <a href="/purchase-orders.html" class="">Purchase Orders<span class="tab-total">-</span></a>
-      <a href="/timesheets.html" class="">Timesheets<span class="tab-total">-</span></a>
-    </div>
-    <nav class="topbar-tabs">
-      <a href="/leads.html" class="topbar-tab">Leads<span class="tab-total">-</span></a>
-      <a href="/sales.html" class="topbar-tab">Sales<span class="tab-total">-</span></a>
-      <a href="/quotes.html" class="topbar-tab active">Quotes<span class="tab-total">-</span></a>
-      <a href="/dashboard.html" class="topbar-tab">Projects<span class="tab-total">-</span></a>
-      <a href="/invoices.html" class="topbar-tab">Invoices<span class="tab-total">-</span></a>
-      <a href="/purchase-orders.html" class="topbar-tab">Purchase Orders<span class="tab-total">-</span></a>
-      <a href="/timesheets.html" class="topbar-tab">Timesheets<span class="tab-total">-</span></a>
-    </nav>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
     <div class="topbar-right">
       <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
-      <a href="/clients.html" class="topbar-icon-link" title="Clients">&#128100;</a>
       <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
       <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
       <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
@@ -234,6 +217,68 @@
       }
     }
 
+    async function initCcewSection(project) {
+      const el = document.getElementById('ccew-section');
+      if (!el) return;
+
+      if (project.ccew_file_path) {
+        let viewUrl = '#';
+        try { viewUrl = await getSignedDocUrl(project.ccew_file_path); } catch {}
+        el.innerHTML = `
+          <div class="success-box" style="margin-bottom:10px;">CCEW uploaded.</div>
+          <a class="btn secondary" href="${viewUrl}" target="_blank">View certificate</a>
+          <button type="button" class="secondary" id="ccew-replace-btn" style="margin-left:8px;">Replace</button>`;
+        el.querySelector('#ccew-replace-btn').addEventListener('click', () => renderCcewUploadForm(project));
+      } else if (project.ccew_not_required_reason) {
+        el.innerHTML = `
+          <div class="badge draft" style="margin-bottom:10px; display:inline-block;">Not required</div>
+          <p class="subtitle" style="margin-bottom:10px;">${project.ccew_not_required_reason}</p>
+          <button type="button" class="secondary" id="ccew-change-btn">Upload one instead / change reason</button>`;
+        el.querySelector('#ccew-change-btn').addEventListener('click', () => renderCcewUploadForm(project));
+      } else {
+        renderCcewUploadForm(project);
+      }
+    }
+
+    function renderCcewUploadForm(project) {
+      const el = document.getElementById('ccew-section');
+      el.innerHTML = `
+        <label style="margin-top:0">Upload the certificate</label>
+        <input type="file" id="ccew-file-input" accept=".pdf,.jpg,.jpeg,.png" />
+        <p class="subtitle" style="margin:10px 0 4px;">Or, if this job isn't electrical work and no CCEW applies:</p>
+        <input id="ccew-reason-input" placeholder="e.g. Not electrical work" />
+        <button id="ccew-save-reason-btn" style="margin-top:8px;">Save reason</button>
+        <div id="ccew-msg"></div>`;
+
+      el.querySelector('#ccew-file-input').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const msg = el.querySelector('#ccew-msg');
+        msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
+        try {
+          const path = await uploadPrivateFile(file, `ccew/${project.id}`);
+          const { error } = await supabaseClient.from('projects').update({ ccew_file_path: path, ccew_not_required_reason: null }).eq('id', project.id);
+          if (error) throw error;
+          project.ccew_file_path = path;
+          project.ccew_not_required_reason = null;
+          await initCcewSection(project);
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+      });
+
+      el.querySelector('#ccew-save-reason-btn').addEventListener('click', async () => {
+        const reason = el.querySelector('#ccew-reason-input').value.trim();
+        const msg = el.querySelector('#ccew-msg');
+        if (!reason) { msg.innerHTML = `<div class="error-box">Enter a reason.</div>`; return; }
+        const { error } = await supabaseClient.from('projects').update({ ccew_not_required_reason: reason, ccew_file_path: null }).eq('id', project.id);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        project.ccew_not_required_reason = reason;
+        project.ccew_file_path = null;
+        await initCcewSection(project);
+      });
+    }
+
     function render(project, pricingVisible) {
       const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const quoted = centres.reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
@@ -306,6 +351,14 @@
           </div>
           ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * (project.deposit_percent / 100))}) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
           ${project.proposal_template === 'solar' && project.pylon_link ? `<p class="subtitle" style="margin-top:6px;">Pylon design: <a class="link-quiet" href="${project.pylon_link}" target="_blank" rel="noopener">${project.pylon_link}</a></p>` : ''}
+        </div>
+        ` : ''}
+
+        ${['client_handover', 'awaiting_payment', 'archived'].includes(project.pipeline_stage) ? `
+        <div class="card">
+          <h2>Compliance - CCEW</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Submitted through the Building and Energy Commission's own website - upload the resulting certificate here for the record, or state why one isn't needed.</p>
+          <div id="ccew-section"></div>
         </div>
         ` : ''}
 
@@ -475,6 +528,7 @@
       `;
 
       loadPurchaseOrders(project.id, centres);
+      if (document.getElementById('ccew-section')) initCcewSection(project);
 
       document.querySelectorAll('.create-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => openCreateInvoicePanel(btn, project, pricingVisible));
@@ -654,6 +708,7 @@
       const session = await requireLogin();
       if (!session) return;
       syncThemeFromProfile();
+      renderMainNav('job-pipeline');
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();
