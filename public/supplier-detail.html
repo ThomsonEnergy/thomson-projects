@@ -82,7 +82,8 @@
           </div>
           <div>
             <button class="secondary" id="edit-supplier-btn" style="margin-right:8px;">Edit details</button>
-            <button class="secondary" id="upload-bill-btn">Upload bill</button>
+            <button class="secondary" id="upload-bill-btn" style="margin-right:8px;">Upload bill</button>
+            <button class="secondary" id="upload-pricelist-btn">Upload pricelist</button>
           </div>
         </div>
 
@@ -163,6 +164,122 @@
           if (file) await runExtraction(file);
         };
         input.click();
+      });
+      document.getElementById('upload-pricelist-btn').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf,.jpg,.jpeg,.png';
+        input.onchange = async (e) => {
+          const file = e.target.files[0];
+          if (file) await runPricelistExtraction(file);
+        };
+        input.click();
+      });
+    }
+
+    async function runPricelistExtraction(file) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
+      document.body.appendChild(overlay);
+
+      try {
+        const fileBase64 = await fileToBase64(file);
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/extract-pricelist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ fileBase64, mediaType: file.type }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+        overlay.remove();
+        await openPricelistReviewPanel(data.items);
+      } catch (err) {
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="pl-err-close">Close</button>`;
+        overlay.querySelector('#pl-err-close').addEventListener('click', () => overlay.remove());
+      }
+    }
+
+    async function openPricelistReviewPanel(items) {
+      const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price');
+      const materials = allMaterials || [];
+
+      const rows = items.map(item => {
+        let bestMatch = null, bestScore = 0;
+        materials.forEach(m => {
+          const score = fuzzyMatchScore(m.name, item.description);
+          if (score > bestScore) { bestScore = score; bestMatch = m; }
+        });
+        return { ...item, suggestedMatchId: bestScore >= 0.3 ? bestMatch?.id : null };
+      });
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; overflow-y:auto;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:900px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>Review price list - ${rows.length} item${rows.length === 1 ? '' : 's'} found</h2>
+          <p class="subtitle" style="margin-bottom:14px;">Uncheck anything you don't want applied. Matched items update that material's cost price - nothing else changes unless you pick "create new".</p>
+          <div id="pl-rows">
+            ${rows.map((r, i) => `
+              <div class="pl-row" data-index="${i}" style="display:grid; grid-template-columns:24px 2fr 1.5fr 1fr; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:13px;">
+                <input type="checkbox" class="pl-include" checked style="width:auto;" />
+                <span>${r.description}</span>
+                <select class="pl-match" style="font-size:12px;">
+                  <option value="__new__">+ Create as new material</option>
+                  ${materials.map(m => `<option value="${m.id}" ${r.suggestedMatchId === m.id ? 'selected' : ''}>${m.name} (currently ${money(m.cost_price)})</option>`).join('')}
+                </select>
+                <input class="pl-cost" type="number" step="0.01" value="${r.unit_cost ?? ''}" style="font-size:12px;" />
+              </div>`).join('')}
+          </div>
+          <div style="margin-top:14px;">
+            <button id="pl-confirm-btn">Apply price updates</button>
+            <button type="button" class="secondary" id="pl-cancel-btn">Cancel</button>
+          </div>
+          <div id="pl-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#pl-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#pl-confirm-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#pl-msg');
+        const confirmBtn = overlay.querySelector('#pl-confirm-btn');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Applying...';
+
+        try {
+          const { data: companySettings } = await supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).single();
+          const markup = Number(companySettings?.default_markup_percent) || 45;
+
+          let updated = 0, created = 0;
+          const rowEls = [...overlay.querySelectorAll('.pl-row')];
+          for (const rowEl of rowEls) {
+            if (!rowEl.querySelector('.pl-include').checked) continue;
+            const description = rowEl.querySelector('span').textContent.trim();
+            const unitCost = parseFloat(rowEl.querySelector('.pl-cost').value);
+            if (isNaN(unitCost)) continue;
+            const matchValue = rowEl.querySelector('.pl-match').value;
+
+            if (matchValue === '__new__') {
+              await supabaseClient.from('materials').insert({
+                name: description, cost_price: unitCost,
+                sell_price: Math.round(unitCost * (1 + markup / 100) * 100) / 100,
+                supplier_id: supplierId,
+              });
+              created++;
+            } else {
+              await supabaseClient.from('materials').update({ cost_price: unitCost }).eq('id', matchValue);
+              updated++;
+            }
+          }
+
+          overlay.remove();
+          alert(`Done - ${updated} material${updated === 1 ? '' : 's'} updated, ${created} created.`);
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Apply price updates';
+        }
       });
     }
 
