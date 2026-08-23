@@ -403,6 +403,12 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
   const sourceIsWarehouse = !!po.vehicle_id && !po.supplier_id; // pulled from the shed, not a new purchase
   const { data: vehicles } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
 
+  let defaultJobName = null;
+  if (po.project_id) {
+    const { data: proj } = await supabaseClient.from('projects').select('name, job_number').eq('id', po.project_id).maybeSingle();
+    defaultJobName = proj ? (proj.job_number ? `#${proj.job_number} ${proj.name}` : proj.name) : null;
+  }
+
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
   overlay.innerHTML = `
@@ -421,7 +427,7 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
         <div id="rl-job-selected" class="subtitle" style="margin-top:4px;"></div>
       </div>
       <div id="rl-vehicle-section" style="display:none; margin-top:8px;">
-        <select id="rl-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}">${v.vehicle_name || v.rego}</option>`).join('')}</select>
+        <select id="rl-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}" ${v.id === po.vehicle_id ? 'selected' : ''}>${v.vehicle_name || v.rego}</option>`).join('')}</select>
       </div>
       <div style="margin-top:14px;">
         <button id="rl-confirm-btn">Confirm received</button>
@@ -439,10 +445,10 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
   overlay.querySelector('#rl-dest-type').addEventListener('change', syncSections);
   syncSections();
 
-  let selectedJob = po.project_id ? { id: po.project_id } : null;
+  let selectedJob = po.project_id ? { id: po.project_id, name: defaultJobName } : null;
   const jobSearchInput = overlay.querySelector('#rl-job-search');
   if (po.project_id) {
-    overlay.querySelector('#rl-job-selected').textContent = 'This PO\'s own job (default)';
+    overlay.querySelector('#rl-job-selected').textContent = defaultJobName ? `This PO's own job: ${defaultJobName}` : 'This PO\'s own job (default)';
   }
   let jobSearchTimeout;
   jobSearchInput.addEventListener('input', (e) => {
@@ -516,7 +522,7 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
         received_by: user.id, received_at: new Date().toISOString(),
       }).eq('id', lineItem.id);
 
-      const destLabel = destType === 'job' ? (selectedJob.name || 'a job') : destType === 'vehicle' ? 'a vehicle' : 'Warehouse';
+      const destLabel = destType === 'job' ? (selectedJob.name || 'a job') : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || vehicles.find(v => v.id === vehicleId)?.rego || 'a vehicle') : 'Warehouse';
       await logActivity('purchase_order', po.id, 'item_received', `${lineItem.description} x${lineItem.quantity} received - sent to ${destLabel}`);
       if (destType === 'job') {
         await logActivity('project', selectedJob.id, 'material_received', `${lineItem.description} x${lineItem.quantity} received from PO ${po.po_number || ''}, costed to this job`);
