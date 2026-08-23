@@ -421,6 +421,11 @@
             <div><label>BSB</label><input id="ed-bsb" value="${supplier.bsb || ''}" /></div>
             <div><label>Account number</label><input id="ed-account" value="${supplier.bank_account_number || ''}" /></div>
           </div>
+          <p class="subtitle" style="margin-top:14px;">BPAY - if this supplier is paid that way instead.</p>
+          <div class="grid cols-2">
+            <div><label style="margin-top:0">Biller code</label><input id="ed-bpay-code" value="${supplier.bpay_biller_code || ''}" /></div>
+            <div><label style="margin-top:0">Reference</label><input id="ed-bpay-ref" value="${supplier.bpay_reference || ''}" /></div>
+          </div>
           <label>Notes</label>
           <textarea id="ed-notes" style="min-height:60px;">${supplier.notes || ''}</textarea>
           <div style="margin-top:14px;">
@@ -443,6 +448,8 @@
           bank_account_name: overlay.querySelector('#ed-bank-name').value.trim() || null,
           our_account_number: overlay.querySelector('#ed-account-number').value.trim() || null,
           abn: overlay.querySelector('#ed-abn').value.trim() || null,
+          bpay_biller_code: overlay.querySelector('#ed-bpay-code').value.trim() || null,
+          bpay_reference: overlay.querySelector('#ed-bpay-ref').value.trim() || null,
           bsb: overlay.querySelector('#ed-bsb').value.trim() || null,
           bank_account_number: overlay.querySelector('#ed-account').value.trim() || null,
           notes: overlay.querySelector('#ed-notes').value.trim() || null,

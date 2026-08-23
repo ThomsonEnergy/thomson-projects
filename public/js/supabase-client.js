@@ -331,6 +331,8 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
       bank_account_name: extracted.bank_account_name || null,
       bsb: matchFields.bsb || null,
       bank_account_number: matchFields.bankAccountNumber || null,
+      bpay_biller_code: extracted.bpay_biller_code || null,
+      bpay_reference: extracted.bpay_reference || null,
     }).select('id').single();
     if (error) {
       overlay.querySelector('.card').innerHTML = `<h2>Couldn't create the supplier</h2><div class="error-box">${error.message}</div><button type="button" class="secondary" id="rs-new-err-close">Close</button>`;

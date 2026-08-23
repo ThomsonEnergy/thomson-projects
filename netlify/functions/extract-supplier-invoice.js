@@ -41,6 +41,8 @@ exports.handler = async (event) => {
 - bank_account_name: the account name for paying them by bank transfer, if shown
 - bsb: their BSB, if shown
 - bank_account_number: their bank account number, if shown
+- bpay_biller_code: their BPAY Biller Code, if shown
+- bpay_reference: the BPAY reference/Ref number for paying this account, if shown
 - bill_number: their invoice or bill number
 - bill_date: the invoice date, as YYYY-MM-DD
 - line_items: an array of every line item, each with:
