@@ -438,7 +438,7 @@
           }
           if (assignment.project_id) {
             if (confirm(`Clock in to ${assignment.projects?.name || 'this job'} now? (Cancel to remove this block instead)`)) {
-              window.location.href = `/timesheets.html?clockin_project=${assignment.project_id}`;
+              window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
             } else if (confirm('Remove this schedule block?')) {
               supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
             }
@@ -718,7 +718,7 @@
 
           if (assignment.project_id) {
             if (confirm(`Clock in to ${assignment.projects?.name || 'this job'} now? (Cancel to remove this schedule block instead)`)) {
-              window.location.href = `/timesheets.html?clockin_project=${assignment.project_id}`;
+              window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
             } else if (confirm('Remove this schedule block?')) {
               supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
             }

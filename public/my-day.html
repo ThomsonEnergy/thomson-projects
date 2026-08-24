@@ -36,21 +36,40 @@
 
   <div class="wrap">
     <h1>My Day</h1>
-    <p class="subtitle">Your bookings, your tasks, and anything free to pick up. For splitting time across stages or fixing a missed entry, use <a href="/timesheets.html" class="link-quiet">Timesheets</a>.</p>
+    <p class="subtitle">Your bookings, your tasks, and anything free to pick up. For your timesheet history or requesting leave, see <a href="/timesheets.html" class="link-quiet">Timesheets</a>.</p>
 
     <div class="card">
-      <h2>Clock status</h2>
-      <div id="clock-idle-msg"><p class="subtitle">Not currently clocked in.</p></div>
+      <h2 id="clock-heading">Clock in</h2>
+      <div id="clock-idle">
+        <div id="todays-schedule"></div>
+        <div class="grid cols-3">
+          <div style="grid-column: span 2;">
+            <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
+            <input id="clock-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
+            <div id="clock-job-results"></div>
+            <div id="clock-job-selected" class="subtitle" style="margin-top:4px;"></div>
+          </div>
+        </div>
+        <div id="clock-category-row" style="margin-top:10px;">
+          <label style="margin-top:0">What's this time for</label>
+          <select id="clock-category">
+            <option value="office">Office / admin</option>
+            <option value="training">Training</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div id="clock-cost-centres" style="display:none; margin-top:10px;">
+          <label style="margin-top:0">Which stage(s) are you working on?</label>
+          <div id="clock-cc-chips"></div>
+          <p class="subtitle" id="clock-cc-hint" style="margin:6px 0 0;"></p>
+        </div>
+        <button id="clock-in-btn" style="width:100%; margin-top:14px;">Clock in</button>
+      </div>
       <div id="clock-active" style="display:none;">
-        <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-job-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
+        <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-project-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
         <button class="danger" id="clock-out-btn">Clock out</button>
       </div>
       <div id="clock-msg"></div>
-    </div>
-
-    <div class="card">
-      <h2>Today's booked jobs</h2>
-      <div id="booked-jobs"><p class="subtitle">Loading...</p></div>
     </div>
 
     <div class="card">
@@ -70,7 +89,6 @@
   <script>
     let myUserId, myRole;
     let elapsedInterval = null;
-    let activeEntry = null;
 
     function fmtDuration(ms) {
       const totalMin = Math.floor(ms / 60000);
@@ -96,69 +114,158 @@
         .limit(1)
         .maybeSingle();
 
-      activeEntry = data || null;
       clearInterval(elapsedInterval);
-
-      if (activeEntry) {
-        document.getElementById('clock-idle-msg').style.display = 'none';
+      if (data) {
+        document.getElementById('clock-idle').style.display = 'none';
         document.getElementById('clock-active').style.display = 'block';
-        document.getElementById('active-job-name').textContent = activeEntry.projects ? activeEntry.projects.name : 'General / Office';
-        document.getElementById('active-since').textContent = fmtDateTime(activeEntry.clock_in);
-        const update = () => { document.getElementById('active-elapsed').textContent = fmtDuration(Date.now() - new Date(activeEntry.clock_in).getTime()); };
+        document.getElementById('active-project-name').textContent = data.projects ? data.projects.name : 'General / Office';
+        document.getElementById('active-since').textContent = fmtDateTime(data.clock_in);
+        const update = () => { document.getElementById('active-elapsed').textContent = fmtDuration(Date.now() - new Date(data.clock_in).getTime()); };
         update();
         elapsedInterval = setInterval(update, 30000);
+        document.getElementById('clock-out-btn').onclick = async () => {
+          const { error } = await supabaseClient.from('time_entries').update({ clock_out: new Date().toISOString() }).eq('id', data.id);
+          if (error) { alert(error.message); return; }
+          await checkActiveClock();
+        };
       } else {
-        document.getElementById('clock-idle-msg').style.display = 'block';
+        document.getElementById('clock-idle').style.display = 'block';
         document.getElementById('clock-active').style.display = 'none';
       }
     }
 
-    document.getElementById('clock-out-btn').addEventListener('click', async () => {
-      if (!activeEntry) return;
-      const { error } = await supabaseClient.from('time_entries').update({ clock_out: new Date().toISOString() }).eq('id', activeEntry.id);
-      if (error) { document.getElementById('clock-msg').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-      document.getElementById('clock-msg').innerHTML = '';
-      await checkActiveClock();
-    });
-
-    async function clockIntoJob(projectId, label) {
-      const msg = document.getElementById('clock-msg');
-      msg.innerHTML = '';
-      if (activeEntry) {
-        msg.innerHTML = `<div class="error-box">You're already clocked in to ${activeEntry.projects ? activeEntry.projects.name : 'General / Office'} - clock out first.</div>`;
-        return;
-      }
-      const { error } = await supabaseClient.from('time_entries').insert({
-        staff_id: myUserId, project_id: projectId, time_category: 'job',
-      });
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-      await checkActiveClock();
-    }
-
-    async function loadBookedJobs() {
-      const el = document.getElementById('booked-jobs');
+    async function loadTodaysSchedule() {
+      const container = document.getElementById('todays-schedule');
       const { data, error } = await supabaseClient
         .from('schedule_assignments')
-        .select('id, project_id, projects(id, name, job_number, client_address)')
+        .select('id, project_id, projects(name)')
         .eq('staff_id', myUserId)
         .eq('assignment_date', todayStr());
 
-      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-      if (!data.length) { el.innerHTML = `<p class="subtitle">Nothing booked for you today.</p>`; return; }
+      if (error || !data || !data.length) { container.innerHTML = ''; return; }
 
-      el.innerHTML = data.map(a => `
-        <div class="day-item">
-          <div>
-            <a href="${a.project_id ? `/project.html?id=${a.project_id}` : '#'}" class="link-quiet">${a.projects ? (a.projects.job_number ? `J${a.projects.job_number} - ${a.projects.name}` : a.projects.name) : 'General / Office'}</a>
-            ${a.projects && a.projects.client_address ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${a.projects.client_address}</p>` : ''}
-          </div>
-          <button type="button" class="secondary quick-clock-btn" data-project-id="${a.project_id || ''}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Clock in</button>
-        </div>`).join('');
+      container.innerHTML = `
+        <p class="subtitle" style="margin-bottom:8px;">You're scheduled for today:</p>
+        <div style="margin-bottom:16px;">
+          ${data.map(a => `
+            <button type="button" class="quick-clock-btn" data-project-id="${a.project_id || ''}" style="margin:0 8px 8px 0;">
+              ${a.projects ? a.projects.name : 'General / Office'}
+            </button>`).join('')}
+        </div>`;
 
-      el.querySelectorAll('.quick-clock-btn').forEach(btn => {
-        btn.addEventListener('click', () => clockIntoJob(btn.dataset.projectId || null, ''));
+      container.querySelectorAll('.quick-clock-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          selectClockJob(btn.dataset.projectId || null, btn.textContent.trim());
+        });
       });
     }
+
+    let selectedClockCostCentres = [];
+    let selectedClockJobId = null;
+
+    function selectClockJob(projectId, label) {
+      selectedClockJobId = projectId;
+      document.getElementById('clock-job-search').value = label || '';
+      document.getElementById('clock-job-selected').textContent = projectId ? `Selected: ${label}` : '';
+      document.getElementById('clock-category-row').style.display = projectId ? 'none' : 'block';
+      loadCostCentreChips(projectId);
+    }
+
+    let clockJobSearchTimeout;
+    document.getElementById('clock-job-search').addEventListener('input', (e) => {
+      clearTimeout(clockJobSearchTimeout);
+      const q = e.target.value.trim();
+      selectedClockJobId = null;
+      document.getElementById('clock-job-selected').textContent = '';
+      document.getElementById('clock-category-row').style.display = 'block';
+      if (q.length < 2) { document.getElementById('clock-job-results').innerHTML = ''; return; }
+      clockJobSearchTimeout = setTimeout(async () => {
+        const results = await searchProjects(q);
+        const resultsEl = document.getElementById('clock-job-results');
+        if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
+        resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+        </div>`;
+        resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
+          row.addEventListener('click', () => {
+            selectClockJob(row.dataset.id, row.dataset.label);
+            resultsEl.innerHTML = '';
+          });
+        });
+      }, 250);
+    });
+
+    async function loadCostCentreChips(projectId) {
+      selectedClockCostCentres = [];
+      const wrap = document.getElementById('clock-cost-centres');
+      const chipsEl = document.getElementById('clock-cc-chips');
+      const hintEl = document.getElementById('clock-cc-hint');
+
+      if (!projectId) { wrap.style.display = 'none'; return; }
+
+      const { data: project } = await supabaseClient.from('projects').select('job_number').eq('id', projectId).maybeSingle();
+      const { data: centres, error } = await supabaseClient
+        .from('cost_centres')
+        .select('id, name')
+        .eq('project_id', projectId)
+        .order('sort_order');
+
+      if (error || !centres || !centres.length) { wrap.style.display = 'none'; return; }
+
+      wrap.style.display = 'block';
+      chipsEl.innerHTML = centres.map((c, i) => `
+        <button type="button" class="cc-chip" data-id="${c.id}">
+          <span class="cc-chip-num">${costCentreNumber(project ? project.job_number : null, i + 1)}</span> ${c.name}
+        </button>
+      `).join('');
+
+      chipsEl.querySelectorAll('.cc-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          chip.classList.toggle('selected');
+          const id = chip.dataset.id;
+          if (chip.classList.contains('selected')) {
+            selectedClockCostCentres.push(id);
+          } else {
+            selectedClockCostCentres = selectedClockCostCentres.filter(x => x !== id);
+          }
+          hintEl.textContent = selectedClockCostCentres.length > 1
+            ? `Time will be split across these ${selectedClockCostCentres.length} stages when you clock out.`
+            : '';
+        });
+      });
+    }
+
+    document.getElementById('clock-in-btn').addEventListener('click', async () => {
+      const projectId = selectedClockJobId;
+      const msg = document.getElementById('clock-msg');
+
+      const wrap = document.getElementById('clock-cost-centres');
+      if (wrap.style.display !== 'none' && selectedClockCostCentres.length === 0) {
+        msg.innerHTML = `<div class="error-box">Pick at least one stage you're working on.</div>`;
+        return;
+      }
+
+      const entry = {
+        staff_id: myUserId,
+        project_id: projectId,
+        time_category: projectId ? 'job' : document.getElementById('clock-category').value,
+      };
+      if (selectedClockCostCentres.length === 1) {
+        entry.cost_centre_id = selectedClockCostCentres[0];
+      } else if (selectedClockCostCentres.length > 1) {
+        entry.selected_cost_centre_ids = selectedClockCostCentres;
+      }
+
+      const { error } = await supabaseClient.from('time_entries').insert(entry);
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      msg.innerHTML = '';
+      selectedClockCostCentres = [];
+      selectedClockJobId = null;
+      document.getElementById('clock-job-search').value = '';
+      document.getElementById('clock-job-selected').textContent = '';
+      document.getElementById('clock-cost-centres').style.display = 'none';
+      await checkActiveClock();
+    });
 
     function taskRow(task, showPickUp) {
       return `
@@ -226,8 +333,15 @@
 
       myRole = await getMyRole();
 
+      await loadTodaysSchedule();
+
+      const deepLinkProjectId = new URLSearchParams(window.location.search).get('clockin_project');
+      if (deepLinkProjectId) {
+        const { data: project } = await supabaseClient.from('projects').select('name').eq('id', deepLinkProjectId).maybeSingle();
+        selectClockJob(deepLinkProjectId, project ? project.name : 'Job');
+      }
+
       await checkActiveClock();
-      await loadBookedJobs();
       await loadTasks();
     })();
   </script>
