@@ -94,7 +94,7 @@ function isPricingRole(role) {
 // column-level grants (see migration_007), so a role-check bug here can't
 // by itself leak pricing.
 const COST_CENTRE_COLS_BASE = 'id, project_id, name, description, sort_order';
-const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, labour_cost, material_cost, invoiced_amount, stc_total';
+const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, estimated_labour_cost, estimated_material_cost, labour_cost, material_cost, invoiced_amount, stc_total';
 const LINE_ITEM_COLS_BASE = 'id, cost_centre_id, description, item_type, sort_order, quantity';
 const LINE_ITEM_COLS_PRICING = 'unit_cost';
 

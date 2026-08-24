@@ -81,8 +81,8 @@
       const quotedAmount = Number(centre.quoted_amount) || 0;
       const remaining = Math.max(0, quotedAmount - claimedTotal);
 
-      const labourCost = Number(centre.labour_cost) || 0;
-      const materialCost = Number(centre.material_cost) || 0;
+      const labourCost = Number(centre.estimated_labour_cost) || 0;
+      const materialCost = Number(centre.estimated_material_cost) || 0;
       const costTotal = labourCost + materialCost;
       const labourShare = costTotal > 0 ? labourCost / costTotal : 1;
       const defaultLabourAmount = Math.round(remaining * labourShare * 100) / 100;
@@ -282,8 +282,8 @@
     function render(project, pricingVisible) {
       const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const quoted = centres.reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
-      const labourCostTotal = centres.reduce((s, c) => s + Number(c.labour_cost || 0), 0);
-      const materialCostTotal = centres.reduce((s, c) => s + Number(c.material_cost || 0), 0);
+      const labourCostTotal = centres.reduce((s, c) => s + Number(c.estimated_labour_cost || 0), 0);
+      const materialCostTotal = centres.reduce((s, c) => s + Number(c.estimated_material_cost || 0), 0);
       const cost = labourCostTotal + materialCostTotal;
       const invoiced = centres.reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
       const profit = quoted - cost;
@@ -296,8 +296,8 @@
 
       const content = document.getElementById('content');
       const numberLine = [
-        project.job_number ? `Job #${project.job_number}` : null,
-        project.quote_number ? `Quote #${project.quote_number}` : null,
+        project.job_number ? `J${project.job_number}` : null,
+        project.quote_number ? `Q${project.quote_number}` : null,
       ].filter(Boolean).join(' &middot; ');
 
       // Quoted-split donut (Materials/Labour/Profit) - only meaningful
@@ -329,7 +329,7 @@
         <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
           <button class="settings-tab active" data-panel="summary">Summary</button>
           <button class="settings-tab" data-panel="costcentres">Cost Centres</button>
-          <button class="settings-tab" data-panel="pos">Purchase Orders</button>
+          ${project.job_number ? `<button class="settings-tab" data-panel="pos">Purchase Orders</button>` : ''}
           <button class="settings-tab" data-panel="details">Details</button>
         </div>
 
@@ -355,7 +355,7 @@
               <div class="card">
                 <h2>Needs attention</h2>
                 <div id="summary-tasks-line"><p class="subtitle">Loading tasks...</p></div>
-                <div id="summary-po-line" style="margin-top:6px;"><p class="subtitle">Loading purchase orders...</p></div>
+                <div id="summary-po-line" style="margin-top:6px;">${project.job_number ? `<p class="subtitle">Loading purchase orders...</p>` : `<p class="subtitle">Purchase orders start once this quote is approved and becomes a job.</p>`}</div>
               </div>
 
               ${pricingVisible ? `
@@ -407,8 +407,8 @@
                         <td data-label="Stage">${c.name}</td>
                         ${pricingVisible ? `
                           <td class="num" data-label="Quoted">${moneyOrHidden(c.quoted_amount)}</td>
-                          <td class="num" data-label="Labour">${moneyOrHidden(c.labour_cost)}</td>
-                          <td class="num" data-label="Materials">${moneyOrHidden(c.material_cost)}</td>
+                          <td class="num" data-label="Labour">${moneyOrHidden(c.estimated_labour_cost)}</td>
+                          <td class="num" data-label="Materials">${moneyOrHidden(c.estimated_material_cost)}</td>
                           <td class="num" data-label="Invoiced">${moneyOrHidden(c.invoiced_amount)}</td>
                         ` : ''}
                       </tr>`).join('')}
@@ -417,7 +417,7 @@
               </div>
 
               ${centres.map((c, i) => {
-                const quotedLabour = Number(c.labour_cost) || 0;
+                const quotedLabour = Number(c.estimated_labour_cost) || 0;
                 const actualLabour = Number(c.actual_labour_cost) || 0;
                 const quotedHours = Number(c.quoted_hours) || 0;
                 const actualHours = Number(c.actual_hours) || 0;
@@ -508,6 +508,7 @@
               <div id="push-xero-msg"></div>
             </div>
 
+            ${project.job_number ? `
             <div class="settings-panel" id="panel-pos">
               <div class="card">
                 <h2>Purchase orders &amp; supplier invoices</h2>
@@ -515,11 +516,12 @@
                 <div id="po-list"></div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:${centres.length ? '16px' : '0'};">
                   <button type="button" id="create-po-btn" class="secondary">+ Create purchase order</button>
-                  ${project.job_number ? `<button type="button" id="suggest-po-btn" class="secondary">Generate PO suggestions from quote</button>` : ''}
+                  <button type="button" id="suggest-po-btn" class="secondary">Generate PO suggestions from quote</button>
                 </div>
                 <div id="po-msg"></div>
               </div>
             </div>
+            ` : ''}
 
             <div class="settings-panel" id="panel-details">
               ${(() => {
@@ -594,7 +596,7 @@
         });
       });
 
-      loadPurchaseOrders(project.id, centres);
+      if (project.job_number) loadPurchaseOrders(project.id, centres);
       loadJobTasks(project.id);
       renderActivityLog('project', project.id, 'job-activity-log');
       if (document.getElementById('ccew-section')) initCcewSection(project);
