@@ -357,8 +357,9 @@
       li.className = 'li-row';
       li.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
       const isLabour = item_type === 'labour';
+      const descPlaceholder = isLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
       li.innerHTML = `
-        <input class="li-desc" placeholder="e.g. Solar panels" value="${description}" style="font-size:13px;" />
+        <input class="li-desc" placeholder="${descPlaceholder}" value="${description}" style="font-size:13px;" />
         <select class="li-type" style="font-size:13px;">
           <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
           <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
@@ -387,6 +388,7 @@
       li.querySelector('.li-type').addEventListener('change', (e) => {
         const nowLabour = e.target.value === 'labour';
         li.querySelector('.li-qty').placeholder = nowLabour ? 'Hours' : 'Qty';
+        li.querySelector('.li-desc').placeholder = nowLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
         li.querySelector('.li-tier').style.display = nowLabour ? 'block' : 'none';
         li.querySelector('.li-cost').style.display = nowLabour ? 'none' : 'block';
         if (nowLabour) {
@@ -409,8 +411,12 @@
         li.querySelector('.li-total').textContent = money(total);
         if (li.querySelector('.li-type').value === 'labour') labour += total; else material += total;
       });
+      // Labour is priced straight off the billable rate tier's sell rate -
+      // it's already a sell price, not a cost, so markup only applies to
+      // materials (cost price -> sell price). Marking labour up again on
+      // top would double the margin already baked into the tier rate.
       const markup = parseFloat(stageRow.querySelector('.cc-markup').value) || 0;
-      const salePrice = (labour + material) * (1 + markup / 100);
+      const salePrice = material * (1 + markup / 100) + labour;
       stageRow.querySelector('.cc-labour-total').textContent = money(labour);
       stageRow.querySelector('.cc-material-total').textContent = money(material);
       stageRow.querySelector('.cc-sale-price').textContent = money(salePrice);
@@ -829,14 +835,24 @@
         estimated_material_cost: parseFloat(row.dataset.materialTotal) || 0,
         quoted_amount: parseFloat(row.dataset.salePrice) || 0,
         sort_order: i,
-        lineItems: [...row.querySelectorAll('.li-row')].map((li, j) => ({
-          description: li.querySelector('.li-desc').value.trim(),
-          item_type: li.querySelector('.li-type').value,
-          quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
-          unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
-          rate_tier_id: li.querySelector('.li-tier').value || null,
-          sort_order: j,
-        })).filter(li => li.description),
+        lineItems: [...row.querySelectorAll('.li-row')].map((li, j) => {
+          const item_type = li.querySelector('.li-type').value;
+          const rate_tier_id = li.querySelector('.li-tier').value || null;
+          let description = li.querySelector('.li-desc').value.trim();
+          // Labour description is optional - if left blank, fall back to
+          // the rate tier's own name (e.g. "Principal Electrician") rather
+          // than dropping the line entirely.
+          if (!description && item_type === 'labour' && rate_tier_id) {
+            description = RATE_TIERS.find(t => t.id === rate_tier_id)?.name || '';
+          }
+          return {
+            description, item_type,
+            quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
+            unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
+            rate_tier_id,
+            sort_order: j,
+          };
+        }).filter(li => li.description),
         photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
           description: pg.querySelector('.pg-desc').value.trim(),
           photos: JSON.parse(pg.dataset.photos || '[]').map(url => ({ url })),

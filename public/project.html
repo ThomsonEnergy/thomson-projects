@@ -80,6 +80,7 @@
     // same "block on real activity" principle as the bulk-delete feature.
 
     let editMode = false;
+    let showLineItems = false;
     let RATE_TIERS = [];
     let companySettings = {};
     let selectedClientId = null;
@@ -124,8 +125,9 @@
       li.className = 'li-row';
       li.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
       const isLabour = item_type === 'labour';
+      const descPlaceholder = isLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
       li.innerHTML = `
-        <input class="li-desc" placeholder="e.g. Solar panels" value="${description}" style="font-size:13px;" />
+        <input class="li-desc" placeholder="${descPlaceholder}" value="${description}" style="font-size:13px;" />
         <select class="li-type" style="font-size:13px;">
           <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
           <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
@@ -152,6 +154,7 @@
       li.querySelector('.li-type').addEventListener('change', (e) => {
         const nowLabour = e.target.value === 'labour';
         li.querySelector('.li-qty').placeholder = nowLabour ? 'Hours' : 'Qty';
+        li.querySelector('.li-desc').placeholder = nowLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
         li.querySelector('.li-tier').style.display = nowLabour ? 'block' : 'none';
         li.querySelector('.li-cost').style.display = nowLabour ? 'none' : 'block';
         if (nowLabour) {
@@ -172,8 +175,12 @@
         li.querySelector('.li-total').textContent = money(total);
         if (li.querySelector('.li-type').value === 'labour') labour += total; else material += total;
       });
+      // Labour is priced straight off the billable rate tier's sell rate -
+      // it's already a sell price, not a cost, so markup only applies to
+      // materials (cost price -> sell price). Marking labour up again on
+      // top would double the margin already baked into the tier rate.
       const markup = parseFloat(stageRow.querySelector('.cc-markup').value) || 0;
-      const salePrice = (labour + material) * (1 + markup / 100);
+      const salePrice = material * (1 + markup / 100) + labour;
       stageRow.querySelector('.cc-labour-total').textContent = money(labour);
       stageRow.querySelector('.cc-material-total').textContent = money(material);
       stageRow.querySelector('.cc-sale-price').textContent = money(salePrice);
@@ -804,14 +811,24 @@
         estimated_material_cost: parseFloat(row.dataset.materialTotal) || 0,
         quoted_amount: parseFloat(row.dataset.salePrice) || 0,
         sort_order: i,
-        lineItems: [...row.querySelectorAll('.li-row')].map((li, j) => ({
-          description: li.querySelector('.li-desc').value.trim(),
-          item_type: li.querySelector('.li-type').value,
-          quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
-          unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
-          rate_tier_id: li.querySelector('.li-tier').value || null,
-          sort_order: j,
-        })).filter(li => li.description),
+        lineItems: [...row.querySelectorAll('.li-row')].map((li, j) => {
+          const item_type = li.querySelector('.li-type').value;
+          const rate_tier_id = li.querySelector('.li-tier').value || null;
+          let description = li.querySelector('.li-desc').value.trim();
+          // Labour description is optional - if left blank, fall back to
+          // the rate tier's own name (e.g. "Principal Electrician") rather
+          // than dropping the line entirely.
+          if (!description && item_type === 'labour' && rate_tier_id) {
+            description = RATE_TIERS.find(t => t.id === rate_tier_id)?.name || '';
+          }
+          return {
+            description, item_type,
+            quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
+            unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
+            rate_tier_id,
+            sort_order: j,
+          };
+        }).filter(li => li.description),
         photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
           description: pg.querySelector('.pg-desc').value.trim(),
           photos: JSON.parse(pg.dataset.photos || '[]').map(url => ({ url })),
@@ -1220,7 +1237,10 @@
             <div class="settings-panel" id="panel-costcentres">
               ${editMode ? editorCostCentresHtml() : `
               <div class="card">
-                <h2>Stages</h2>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                  <h2 style="margin:0;">Stages</h2>
+                  <button type="button" id="toggle-line-items-btn" class="secondary" style="font-size:12px; padding:6px 10px;">${showLineItems ? 'Hide line items' : 'Show line items'}</button>
+                </div>
                 <table class="responsive-stack">
                   <thead>
                     <tr>
@@ -1239,7 +1259,18 @@
                           <td class="num" data-label="Materials">${moneyOrHidden(c.estimated_material_cost)}</td>
                           <td class="num" data-label="Invoiced">${moneyOrHidden(c.invoiced_amount)}</td>
                         ` : ''}
-                      </tr>`).join('')}
+                      </tr>
+                      ${showLineItems ? (c.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order).map(li => `
+                        <tr class="li-detail-row" style="background:var(--surface-2);">
+                          <td data-label="#"></td>
+                          <td data-label="Stage" style="padding-left:24px; font-size:13px; color:var(--muted);">&#8627; ${li.description}${li.item_type === 'labour' ? ` (${li.quantity} hrs)` : ` (x${li.quantity})`}</td>
+                          ${pricingVisible ? `
+                            <td class="num" data-label="Quoted">${money(Number(li.quantity) * Number(li.unit_cost))}</td>
+                            <td class="num" data-label="Labour"></td>
+                            <td class="num" data-label="Materials"></td>
+                            <td class="num" data-label="Invoiced"></td>
+                          ` : ''}
+                        </tr>`).join('') : ''}`).join('')}
                   </tbody>
                 </table>
               </div>
@@ -1447,6 +1478,12 @@
 
       const editToggleBtn = document.getElementById('edit-toggle-btn');
       if (editToggleBtn) editToggleBtn.addEventListener('click', () => enterEditMode(project));
+
+      document.getElementById('toggle-line-items-btn').addEventListener('click', () => {
+        showLineItems = !showLineItems;
+        render(project, pricingVisible);
+        document.querySelector('#job-tabs .settings-tab[data-panel="costcentres"]').click();
+      });
 
       const duplicateBtn = document.getElementById('duplicate-btn');
       if (duplicateBtn) duplicateBtn.addEventListener('click', async () => {
