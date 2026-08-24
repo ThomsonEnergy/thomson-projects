@@ -176,6 +176,7 @@ async function findMatchingSupplier(fields) {
 // hand-maintaining its own copy of the same 13 links (which is exactly
 // how small nav inconsistencies kept creeping in before this existed).
 const MAIN_NAV_ITEMS = [
+  { key: 'my-day', label: 'My Day', href: '/my-day.html' },
   { key: 'leads', label: 'Leads', href: '/leads.html' },
   { key: 'quotes', label: 'Quotes', href: '/quotes.html' },
   { key: 'projects', label: 'Projects', href: '/projects.html' },

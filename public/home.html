@@ -53,7 +53,10 @@
   </div>
 
   <div class="wrap">
-    <h1 id="greeting">Home</h1>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:4px;">
+      <h1 id="greeting" style="margin:0 0 20px;">Home</h1>
+      <a href="/my-day.html" class="btn" style="white-space:nowrap;">Clock in</a>
+    </div>
 
     <div class="quick-nav">
       <a href="/dashboard.html"><span class="icon">&#128203;</span>Job pipeline</a>
@@ -167,6 +170,21 @@
         </div>`).join('');
     }
 
+    async function loadDailyGreeting(firstName) {
+      // #greeting already shows a plain "Welcome back, {name}" fallback -
+      // only swap it out once the hyped-up version actually arrives, so
+      // there's never a blank or half-loaded heading.
+      const el = document.getElementById('greeting');
+      try {
+        const res = await fetch('/.netlify/functions/get-daily-greeting');
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load greeting');
+        el.textContent = data.message.replace('{name}', firstName || 'there');
+      } catch (err) {
+        console.error('Daily greeting failed:', err); // never block the homepage over a flaky AI call
+      }
+    }
+
     async function loadFeed() {
       const el = document.getElementById('feed-list');
       const { data: posts, error } = await supabaseClient
@@ -275,7 +293,9 @@
       const { data: profile } = await supabaseClient.from('profiles').select('role, full_name').eq('id', myUserId).maybeSingle();
       myRole = profile?.role || 'staff';
       myName = profile?.full_name || '';
-      document.getElementById('greeting').textContent = myName ? `Welcome back, ${myName.split(' ')[0]}` : 'Home';
+      const firstName = myName ? myName.split(' ')[0] : '';
+      document.getElementById('greeting').textContent = firstName ? `Welcome back, ${firstName}` : 'Home';
+      loadDailyGreeting(firstName);
 
       await loadActionItems();
       await loadFeed();
