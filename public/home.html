@@ -105,6 +105,16 @@
         items.push({ label: `You're scheduled today: ${a.projects ? a.projects.name : 'General / Office'}`, link: a.project_id ? `/project.html?id=${a.project_id}` : null });
       });
 
+      // Tasks assigned to you or your role
+      const { data: myTasks } = await supabaseClient
+        .from('job_tasks')
+        .select('id')
+        .eq('completed', false)
+        .or(`assigned_to_user_id.eq.${myUserId},assigned_to_role.eq.${myRole}`);
+      if (myTasks && myTasks.length) {
+        items.push({ label: `${myTasks.length} task${myTasks.length === 1 ? '' : 's'} assigned to you`, link: '/tasks.html' });
+      }
+
       // Jobs flagged Not Complete - relevant to everyone, no $ involved
       const { data: notComplete } = await supabaseClient
         .from('projects')

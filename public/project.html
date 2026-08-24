@@ -490,12 +490,21 @@
         </div>
 
         <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h2 style="margin:0;">Tasks</h2>
+            <button type="button" id="add-task-btn" class="secondary">+ Add task</button>
+          </div>
+          <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
+        </div>
+
+        <div class="card">
           <h2>Activity log</h2>
           <div id="job-activity-log"><p class="subtitle">Loading...</p></div>
         </div>
       `;
 
       loadPurchaseOrders(project.id, centres);
+      loadJobTasks(project.id);
       renderActivityLog('project', project.id, 'job-activity-log');
       if (document.getElementById('ccew-section')) initCcewSection(project);
 
@@ -593,6 +602,112 @@
         }
       });
 
+    }
+
+    async function loadJobTasks(projectId) {
+      const listEl = document.getElementById('job-tasks-list');
+      const [{ data: tasks, error }, { data: staff }] = await Promise.all([
+        supabaseClient.from('job_tasks').select('*').eq('project_id', projectId)
+          .order('completed', { ascending: true }).order('required_before_scheduling', { ascending: false }),
+        supabaseClient.from('profiles').select('id, full_name'),
+      ]);
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!tasks.length) { listEl.innerHTML = `<p class="subtitle">No tasks yet.</p>`; return; }
+
+      const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'Someone';
+
+      listEl.innerHTML = tasks.map(t => {
+        const who = t.assigned_to_user_id ? staffName(t.assigned_to_user_id) : t.assigned_to_role ? `Anyone in ${t.assigned_to_role}` : 'Unassigned';
+        return `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); ${t.completed ? 'opacity:0.5;' : ''}">
+            <div>
+              <span style="${t.completed ? 'text-decoration:line-through;' : ''}">${t.description}</span>
+              <p class="subtitle" style="margin:2px 0 0; font-size:12px;">${who}${t.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}</p>
+            </div>
+            ${!t.completed ? `<button type="button" class="secondary complete-job-task-btn" data-id="${t.id}" style="font-size:12px; padding:6px 10px;">Done</button>` : ''}
+          </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.complete-job-task-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          await supabaseClient.from('job_tasks').update({
+            completed: true, completed_by: user.id, completed_at: new Date().toISOString(),
+          }).eq('id', btn.dataset.id);
+          await loadJobTasks(projectId);
+        });
+      });
+
+      const addBtn = document.getElementById('add-task-btn');
+      if (addBtn) addBtn.onclick = () => openAddTaskPanel(projectId);
+    }
+
+    async function openAddTaskPanel(projectId) {
+      const { data: staff } = await supabaseClient.from('profiles').select('id, full_name').order('full_name');
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:420px; width:100%;">
+          <h2>Add task</h2>
+          <label style="margin-top:0">Description</label>
+          <input id="at-desc" placeholder="e.g. Check POs and order stock" />
+          <label>Assign to</label>
+          <select id="at-assign-type">
+            <option value="none">Leave unassigned - anyone can pick it up</option>
+            <option value="person">A specific person</option>
+            <option value="role">A role</option>
+          </select>
+          <div id="at-person-section" style="display:none; margin-top:8px;">
+            <select id="at-person">${(staff || []).map(s => `<option value="${s.id}">${s.full_name}</option>`).join('')}</select>
+          </div>
+          <div id="at-role-section" style="display:none; margin-top:8px;">
+            <select id="at-role">
+              <option value="admin">Admin</option>
+              <option value="finance">Finance</option>
+              <option value="sales">Sales</option>
+              <option value="staff">Staff</option>
+            </select>
+          </div>
+          <label style="margin-top:14px; display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="at-required" style="width:auto;" /> Required before this job can be scheduled
+          </label>
+          <div style="margin-top:14px;">
+            <button id="at-save-btn">Add task</button>
+            <button type="button" class="secondary" id="at-cancel-btn">Cancel</button>
+          </div>
+          <div id="at-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#at-assign-type').addEventListener('change', (e) => {
+        overlay.querySelector('#at-person-section').style.display = e.target.value === 'person' ? 'block' : 'none';
+        overlay.querySelector('#at-role-section').style.display = e.target.value === 'role' ? 'block' : 'none';
+      });
+
+      overlay.querySelector('#at-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#at-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#at-msg');
+        const description = overlay.querySelector('#at-desc').value.trim();
+        if (!description) { msg.innerHTML = `<div class="error-box">Enter a description.</div>`; return; }
+        const assignType = overlay.querySelector('#at-assign-type').value;
+
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const { error } = await supabaseClient.from('job_tasks').insert({
+            project_id: projectId,
+            description,
+            assigned_to_user_id: assignType === 'person' ? overlay.querySelector('#at-person').value : null,
+            assigned_to_role: assignType === 'role' ? overlay.querySelector('#at-role').value : null,
+            required_before_scheduling: overlay.querySelector('#at-required').checked,
+            created_by: user.id,
+          });
+          if (error) throw error;
+          overlay.remove();
+          await loadJobTasks(projectId);
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+      });
     }
 
     async function loadPurchaseOrders(projectId, centres) {
