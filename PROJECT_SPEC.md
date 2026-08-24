@@ -1,343 +1,453 @@
-# Thomson Projects - Build Spec
+# Thomson Projects — Build Spec
 
-Reference doc for Thomson Energy's internal project management/quoting app (thomsonprojects.netlify.app). Originally built to supplement ServiceM8 for staged/multi-stage jobs; the plan is to drop ServiceM8 entirely - including reactive/small jobs - once this app can fully cover that workflow. This file lives in the repo root and is kept current there directly - no separate re-upload step needed.
+Reference doc for Thomson Energy's internal project management/quoting app (thomsonprojects.netlify.app). Save this in the repo root and update as decisions change.
 
-**Stack:** Netlify (Git-connected deploys, serverless functions) - Supabase (Postgres, auth, storage) - Xero (Accounting API + Payroll AU API) - Anthropic API (AI extraction/generation) - Airwallex (payment links, not yet built) - Formbay (STC submission/trading, integration exploration underway, see #27)
+**Stack:** Netlify (Git-connected deploys, serverless functions) · Supabase (Postgres, auth, storage) · Xero (Accounting API + Payroll AU API — future phase) · Anthropic API (AI extraction/generation) · Airwallex (payment links) · Twilio (SMS/calling — future phase)
 
-**Deployment workflow:** Repo folder is the source of truth. Each build session: edit files in place, commit + push, Netlify auto-deploys. Always run Supabase migrations before or alongside the Netlify deploy.
+**Deployment workflow:** Permanent local GitHub Desktop clone as source of truth. Each build session: edit files in place in that folder, GitHub Desktop shows the diff, commit + push, Netlify auto-deploys. **Always run Supabase migrations before or alongside the Netlify deploy** — deploying first causes clean failures, not data corruption, but still causes downtime.
+
+**ServiceM8: dropped entirely.** No integration, no per-stage push, no SM8 buttons or functions anywhere in the app. Reactive/small jobs run through a native in-app workflow (§9, replacing old SM8 spec).
+
+**Ordering note:** sections below are laid out roughly in the order work should happen — built/live items first, then near-term fixes, then features that depend on earlier ones, then longer-range/lower-priority items. Dependencies are called out inline where one item requires another to exist first.
 
 ---
 
-## 1. Time Tracking
+## PART A — Built & Live
 
-- Staff log time in-app against job/stage
-- **Built:** app pushes timesheets to Xero Payroll AU API as `DRAFT`, tagged with the job's Xero tracking option, triggered manually from Timesheets by Admin/Finance for a given pay period - safe to re-run, already-pushed hours are skipped rather than duplicated
+### A1. Time Tracking (built, Xero push is future phase)
+- Staff log time in-app against job/stage: clock in/out tied to jobs, multi-cost-centre time split with sliders, manual entry editing, leave requests with approval workflow, staff scheduling calendar
 - Employees, pay templates, payroll calendars remain configured directly in Xero
-- Leave requests still go through the in-app leave workflow (built) or Xero UI/Xero Me app
-- Bookkeeper reviews and posts pay runs in Xero as normal
-- Ordinary Hours earnings rate ID and the job Tracking Category ID are both set once in Settings > Xero Mapping - since neither is visible anywhere in Xero's own screens (they're internal API-only IDs), a "Look up IDs from Xero" button in Settings calls Xero directly and lists them for one-click selection
+- Leave requests still go through Xero UI / Xero Me app, or the in-app leave workflow already built
+- **Future phase:** app pushes timesheets to Xero Payroll AU API as `DRAFT` on a schedule (e.g. weekly); bookkeeper reviews/posts pay runs as normal; timesheet lines carry a Tracking Category (job/stage) for cost reporting — requires "Timesheet Categories" enabled under Xero Payroll Settings first
 
-## 2. Invoicing
+### A2. Numbering (built — foundational, no Xero dependency)
+- Progress claims: sequential from **PC2000**, one global counter, not per-job
+- Projects: separate 7000-series (7001, 7002...), permanent ID shown everywhere in-app
+- Quotes: 1000-series · Invoices: SI3000-series
+- Cost centre numbers computed as job#-position
+- All sequences are atomic Postgres functions, editable in Settings
+- **Key principle:** numbering is built and works independently of any Xero wiring — separation of concerns, deliberate
 
-Invoicing is app-first: an invoice is created and sent to the client entirely from within the app - the client never sees Xero. Xero receives the same numbers afterward, as a second step, purely for the bookkeeper's records.
+### A3. Proposal Templates (built)
+- **New Build**: multi-stage, deposit (10% default, editable), full scope of works (AI-assisted with document upload), per-stage photo groups, T&Cs, photo category = electrical
+- **Solar Proposal**: Pylon design link prominent on cover, photo category = solar
+- **Quick Estimate**: single cost centre, no deposit. Requires formal sign-off, not informational only — disclaimer text editable from Settings. Invoiced from actuals, not the estimate figure.
+- **Time & Materials**: single cost centre, no quote/approval step — job goes straight to booked, invoiced from actuals when done
 
-**Job numbering (changed from original plan):**
-- Quote number is drawn once, atomically, at the moment a quote is created - permanent, never reassigned
-- **Job number is NOT assigned at creation.** A database trigger assigns it automatically the moment the project's pipeline stage crosses into "Quote Approved" or beyond (or immediately for Time & Materials / a Direct Job, both of which skip approval entirely). No job number showing is itself the signal that a quote hasn't been approved yet - deliberate, so status is readable from the number alone
-- Cost centre numbers are computed on the fly as `{job number}-{stage position}` (e.g. `7014-2`) - not stored, so reordering/adding stages never leaves stale numbers behind
+### A4. Photo Library (built)
+- Tagged by category: electrical / solar / general
+- Templates only surface relevant category by default
 
-**Invoices are their own table, not columns on a stage:**
-- A stage can be claimed more than once - progressive/partial billing - so each invoice is its own row referencing the stage, rather than one invoice per stage
-- Sales invoices: sequential, starting at **SI3000**, one global counter. Prefix and starting number both editable in Settings > Numbering
-- **Standalone invoices** (no job or quote attached) are also supported - for a one-off charge, callout, or anything outside the job pipeline. Created from the Invoices tab directly: pick or create a client, describe what it's for, set the amount
-- Both the invoice's Labour/Materials split and the invoice number itself are editable in a confirmation step before anything is created - not locked to the full quoted total or an auto-assigned number, so a partial claim or a manually-chosen number both work
-- The client-facing invoice page shows the **actual itemized quote line items** (matching how they were written in the quote), not a collapsed Labour/Materials summary - plus a claim summary section (stage total, claimed to date, this claim, remaining) and a list of previous claims on that stage, styled after the old SimPro invoice layout (header bar, Bill To, itemized table, claim summary as effectively a "second page")
+### A5. UI Theme (built)
+- **Navy Pro** — indigo-led, light background
+- **Dark Trade** — charcoal background, electric blue accent
+- User-level setting, saved to Supabase, persists across devices
+- Toggle in Settings → Appearance, switches instantly, no reload
+- Hamburger nav (replacing scrolling tab strip), mobile-first, Timesheets as mobile landing page
 
-**STCs (Small-scale Technology Certificates):**
-- STC entitlement is set once per stage at quote time (`stc_total`)
-- Applied per-invoice as a post-GST credit - shown on the client invoice as "Total inc GST" then "STC Credit: -$X" then "Balance Due", matching real solar-invoice conventions
-- If an STC credit isn't applied on a given claim, the claim summary explicitly says so ("will be credited on a future invoice") rather than silently omitting it
-- Client's `client_type` (Individual/Company, set on the Clients page) drives which Xero account code and tax type the STC line uses automatically when pushed - individual assignment is GST-free, company assignment attracts GST
+### A6. Job Pipeline Board (built — 10 stages)
+1. **Lead** — manual entry
+2. **Draft Quote** — manual
+3. **Quote Approved** — auto, client accepts on-screen
+4. **Deposit Paid** — auto (future: tied to Xero showing deposit paid)
+5. **Ready to Book** — auto, follows deposit paid
+6. **Job Booked** — manual, staff assigns dates/crew
+7. **Job Not Complete** — manual flag (reason: parts/access/weather/other), logged to activity log
+8. **Client Handover** — auto, final checklist/sign-off completed
+9. **Awaiting Payment** — auto, final invoice generated
+10. **Archived** (off board) — auto (future: tied to Xero showing invoice paid)
 
-**Xero push, as a separate step:**
-- Pushing an already-created invoice to Xero copies its exact numbers across as a DRAFT - Labour and Materials as two lines, plus a third STC Credit line when applicable
-- Xero account codes (set in Settings > Xero Mapping, admin-only): 2001 Materials Sell, 2002 Labour Sell, 2003 STC Credits GST Free (Individual), 2004 STC Credits GST Inc (Company), 2005 STC Trading Variance (manual/bank-rec use only, not posted to programmatically - see below)
-- Reference field carries job context, e.g. "Job 7014 - Sales Invoice 2 of 3 (Rough In)"
-- A Xero webhook (subscribed to the Invoices topic) marks the invoice paid in-app automatically once Xero shows it settled - verified via HMAC signature using a Webhook Key (separate from the Client Secret) stored in Settings > API Keys
+**Manual-only transitions:** Draft Quote, Job Booked, Job Not Complete, and Not Complete → Job Booked (never automatic)
 
-**STC settlement variance (a bookkeeping habit, not an app feature):** the amount credited to a customer at quote time and what Formbay/the STC buyer actually pays weeks later won't always match exactly. Since the app has no visibility into that payment (only Xero's bank feed does), the fix lives entirely in Xero: when reconciling that payment, split the bank line across the STC asset account (2003/2004, clearing it back toward zero) and account 2005 (the variance, income or expense depending on direction). No screen needed in the app for this - it's a five-second habit change to a reconciliation step the bookkeeper already does.
+### A7. Navigation & Branding (built)
+- Logo top right of app header
+- Hamburger nav: Leads · Sales · Quotes · Projects · Invoices · Purchase Orders · Timesheets
+- Each tab shows a running total inline, opens a summary view (stat cards + list)
+- "Projects" tab is the job pipeline board (§A6)
 
-## 3. Payment Details & Airwallex
+### A8. Favicon & Home Screen Icon (built)
+- "TE" monogram mark for favicon/home screen icon
+- Standard PWA icon set + manifest.json in place
 
-**Built:** Settings > Payment Terms (admin-only) has structured bank fields - bank name, account name, BSB, account number - shown properly formatted on the client invoice. Payment reference is always the invoice number itself, no separate field needed.
+### A9. Prebuilds (built — see Part D for AI generation/import additions)
+- Record structure: name, internal part number, client-facing description, category/subcategory, bundle of components
+- Components: labour line (hours × role/rate) or material line (item × cost)
+- On a quote: pick prebuild, set quantity, every component scales automatically
+- Client sees description + total price only; internal view shows full breakdown
+- Editable per use without changing the master template
+- Part number is internal-only, not locked to a supplier SKU
+- Xero coding: labour → Labour Income account, materials → Materials/Trading Income account (future phase)
+- Categories: Electrical (Lighting/Power/Trenching/Cable Runs), Solar (Panels/Batteries/Inverters), searchable/filterable
 
-**Not yet built - Airwallex Payment Links:** chosen over Stripe because Thomson Energy banks with Airwallex, so funds settle directly into the existing account. Plan: generate a Payment Link per invoice via Airwallex's Create Payment Link API, invoice number as reference/title, shown alongside the bank transfer details on the invoice; a `payment_intent.succeeded` webhook auto-marks the invoice paid (same pattern as the Xero webhook already built). **Before building:** needs real Airwallex API docs and sandbox credentials confirmed first - same approach taken with Xero and Formbay, since guessing at endpoint shapes for a payments API isn't something to do blind.
+### A10. Purchase Orders — fully rebuilt (built)
+- Sequential numbering from PO2000, prefix/next-number editable in Settings, same atomic-counter pattern as quotes/jobs/invoices
+- Central Purchase Orders page (`purchase-orders.html`) - stats (pending, needs approval, received this month), every PO across job/Stock/vehicle destinations in one searchable list, one reliable "+ Create PO" button
+- Three PO destinations: a job, Stock (general, not job-specific), or a vehicle - a vehicle PO with no supplier means pulled from Warehouse stock, not a new purchase
+- Two PO types: Fixed (locked once created) and Open-ended (any staff member can add items, optional budget cap)
+- Per-line-item receiving - each item ticked off individually and sent to a specific destination (Warehouse, a searched job costing straight to it, or a specific vehicle), defaulting sensibly based on the PO's own destination but always overridable
+- Searchable material picker on every PO creation screen, with the option to type a brand-new item not yet in Stock at all
+- Reconciliation on generic items - if a PO line was created generic and the actual invoice shows something specific, offers to update the PO's line item to match, accept or deny
+- Upload invoice directly into a specific PO (photo/file), skipping supplier selection since the PO already knows it
+- PO-number auto-matching - if an uploaded invoice references its own order number, auto-links instead of requiring manual selection
 
-## 4. Cost/Profit Dashboard - not yet built
+### A11. Supplier Invoice Upload — AI extraction (built)
+- Extracts supplier name, our account number, ABN, contact details, bank details, BPAY details, our order reference (for PO auto-matching), and line items
+- Hierarchical supplier matching: their account number for us > ABN > their bank details > fuzzy business name - built after real invoices showed the same account under different trading names/logos
+- New supplier auto-creation with sensible defaults, editable later
 
-- Labour actuals: pulled from Xero Payroll (native once timesheets are pushed there - already happening, see #1)
-- Job expenses: pulled from Xero Accounting API, filtered by Tracking Category matching job/stage codes
-- Compared against app's own quote line items -> quoted vs actual vs profit
-- **Decided approach:** no per-job overhead allocation - added complexity for a number that's still just an estimate. Per-job view shows gross profit only (revenue - direct labour - direct materials, quoted vs actual, labour margin vs materials margin split). A separate net P&L (total revenue and overhead pulled from Xero P&L, run monthly at business level) answers "is the business profitable overall," kept deliberately separate from job-level figures
-- **Depends on:** Billable Rates (#28) and Materials Database (#29) existing first, so the underlying cost data is actually accurate rather than built on estimates
+### A10a. Stock locations - Warehouse + vehicles (built)
+- Warehouse and each stock-holding vehicle are separate rows per material; `materials.quantity_on_hand` is a trigger-maintained total (always the sum of all locations)
+- Fleet vehicles have a `holds_stock` toggle; a vehicle with it on gets its own stock page and "Create PO for this vehicle" (shed-pull vs supplier-purchase choice)
+- Stock page shows Total stock cost, below-minimum count, per-material minimum quantities, a location breakdown per material, and "Suggest restock PO" for anything below minimum
 
-## 5. Supplier Invoice Upload - not yet built
+### A10b. Job tasks (built)
+- Tasks added at quote stage (or any time after) carry straight through to the job automatically, since a quote and its eventual job are the same underlying record
+- Assignable to a specific person, a role, or left unassigned for anyone free to pick up
+- Dedicated Tasks page shows assigned-to-you, assigned-to-your-role, and open tasks; a "Required before scheduling" flag exists on each task, though nothing currently blocks scheduling automatically since that hook depends on Part I's automation chain being built
+- Home page "Needs attention" panel shows a count of tasks assigned to you or your role
 
-- Upload PDF or photo of a supplier invoice
-- Anthropic API extracts: supplier, invoice number, date, line items, quantities, unit costs, GST, total
-- Match against open POs by supplier + PO number
-- **Review/confirm screen required** before saving - no blind auto-save, extraction isn't perfect
-- Line items carry their own job/stage ID, reassignable after the fact - updates cost attribution and PO received-status on both jobs
-- PO status recalculates if a reconciled line item is later moved
-- Finalized invoice pushes to Xero as a **Bill**, tracking category per line item
-- Manual entry fallback needed for low-quality scans
-- **Bundle with Materials Database (#29)** when built - this is explicitly how that database gets populated from real purchases, building one without the other means typing every material in by hand
+### A10c. Universal activity log (built)
+- One shared table for every entity type rather than a separate log per feature - `logActivity()` and `renderActivityLog()` are the two shared functions
+- Fully instrumented: Purchase Orders (creation, per-item receiving, fully-received milestone). Partially instrumented: Jobs (PO creation and material receipt against the job), Suppliers (bill approval)
+- Not yet instrumented: quotes, invoices, stock/material edits, settings changes - the shared functions make this straightforward to add when needed
 
-## 6. Reactive Jobs (replaces ServiceM8) - not yet built as a full workflow
+### A10d. Number-first display convention (built)
+- Every job/quote reference across the app now follows one consistent format via shared `projectRef()`/`projectNumberOnly()` functions: `J{jobNumber} - {name}` once a job number exists, falling back to `Q{quoteNumber} - {name}` before approval
+- Matches the existing PO2000/SI3000 convention - now Q for quotes and J for jobs use the same letter-prefix pattern
+- Applied to every search picker, dropdown, and label across the app (Purchase Orders, Schedule, Timesheets, Tasks, Suppliers, invoices, cost centre numbers)
 
-ServiceM8 is being dropped entirely, including for reactive/small jobs.
-
-- **Quick job entry**: address, client, description - no cost centres/stages, no quote/approval step, no proposal generation
-- Reuses the same in-app field features as staged projects: notes, photos, checklists, staff assignment
-- Time logged the same way as staged-project time, flows to Xero Payroll the same way
-- Materials/parts logged as simple line items (no markup/margin structure needed the way staged quotes have)
-- Invoiced directly to Xero on completion
-- **Open decision:** does a reactive job get its own numbering series, or share the 7000-series? Does it need any sign-off, or go straight to booked?
-- **A related, simpler capability is already built:** "New job - no quote" on the Projects tab creates a job directly (name, client, site address), skipping the quote/approval step entirely and landing straight in Job Booked with a job number assigned immediately. This isn't the full Reactive Jobs workflow described above (no notes/photos/checklist scaffolding tailored to small jobs, no lightweight materials-logging flow) but covers the immediate "I need to invoice something that was never quoted" need via the Invoices tab's standalone invoice tool. Worth treating the full Reactive Jobs workflow as building *on top of* this rather than from scratch
-- **Cutover plan:** run in parallel with ServiceM8 for a period before dropping it entirely
-
-## 7. In-App Field Features (Web App / PWA)
-
-- Notes: timestamped, diary-style, per job/stage
-- Photos & files: Supabase storage
-- Checklists: per stage type
-- Staff assignment: per stage or per task
-- **Offline support is a later, separate phase** - not attempted yet. Start with SWMS/Take 5 as the first offline test case eventually
-
-## 8. Roles & Permissions
-
+### A12. Roles & Permissions (built)
 | Role | Access |
 |---|---|
 | Admin | Everything |
 | Finance | Xero-level data: invoices, payments, P&L, POs |
 | Sales | Job-level pricing/quoting, no Xero/payroll |
-| Staff | Jobs, notes, photos, checklists - no pricing/cost data |
+| Staff | Jobs, notes, photos, checklists — no pricing/cost data |
 
-- Enforced via Supabase Row Level Security at the database level, not just hidden in UI
-- **Settings restructure (built):** Company Details, Xero Mapping, Numbering, and Payment Terms & T&Cs are now admin-only, hidden from Finance/Sales/Staff entirely (previously visible to more roles than intended)
-- Activity log (#12, not yet built) will follow the same role restrictions once it exists
+- Enforced via **Supabase Row Level Security** at the database level — pricing fields must not be present in API responses to Staff logins, not just visually hidden.
+- Activity log (§A13) follows the same role restrictions
 
-## 9. Proposal Templates
-
-- **New Build**: multi-stage, deposit (10% default), full scope of works, per-stage photo groups, T&Cs, photo category = electrical
-- **Solar Proposal**: Pylon design link prominent on cover, photo category = solar
-- **Quick Estimate**: single cost centre, no deposit, editable "estimate only" disclaimer banner, formal Accept-button flow (same as other templates, just no deposit/payment schedule shown). Invoiced from actuals, not the estimate figure
-- **Time & Materials**: single cost centre, no quote/approval step - job goes straight to booked
-- **Direct Job (built, new):** not really a "template" in the proposal sense - created via the Projects tab's "New job - no quote" button, skips the quote wizard and cost-centre/stage builder entirely, straight to Job Booked with a job number assigned immediately
-
-## 10. Photo Library
-
-- Tagged by category: electrical / solar / general
-- Templates only surface relevant category by default
-
-## 11. Field Forms (with digital signature capture) - not yet built
-
-- **SWMS**, **Take 5**, **Variation Form**, **Solar Inspection**, **Electrical Inspection** - see full detail in earlier spec drafts if needed, unchanged from original plan
-- **Open decision:** do inspection forms auto-generate a client-facing compliance certificate PDF, or stay internal-only?
-
-## 12. Job Activity Log - not yet built
-
-- Per-job timestamped feed: created, line item changes, file/photo uploads, invoice generated/sent, PO created/received, variation submitted/signed, staff assigned
+### A13. Job Activity Log — not yet built
+- Per-job timestamped feed: created, line item changes (old→new value), file/photo uploads, invoice generated/sent, PO created/received, variation submitted/signed, staff assigned
 - Auto-populated as a side effect of using the app
-- Role-restricted same as elsewhere: Staff see the fact of an action but not $ amounts
-
-## 13. UI Theme
-
-- **Navy Pro** (indigo-led, light background) and **Dark Trade** (charcoal, electric blue accent)
-- User-level setting, saved to Supabase, persists across devices
-- Toggle in Settings > Appearance, switches instantly
-
-## 14. Job Pipeline Board
-
-**Stages (left to right):**
-1. Lead - manual entry
-2. Draft Quote - manual
-3. **Quote Approved** - auto, client accepts on-screen. **This is also the trigger point for job number assignment** (see #2) - moving a card into this stage (or any stage after it) draws a job number automatically if one doesn't already exist
-4. Deposit Paid - auto, Xero shows deposit invoice paid
-5. Ready to Book - auto, follows deposit paid
-6. Job Booked - manual, staff assigns dates/crew
-7. Job Not Complete - manual flag (reason: parts/access/weather/other)
-8. Client Handover - auto, final checklist/sign-off completed
-9. Awaiting Payment - auto, final invoice generated
-10. Archived (off board) - auto, Xero shows invoice paid
-
-**Manual-only transitions:** Draft Quote, Job Booked, Job Not Complete, and Not Complete -> Job Booked
-
-## 15. Navigation & Branding
-
-- Logo top right of app header, links to the Home page (#26)
-- Top nav: Leads - Sales - Quotes - Projects - Invoices - Purchase Orders - Timesheets
-- **Mobile nav (built, fixed a real bug):** a hamburger menu replaces the horizontal-scroll tab strip on narrow screens. A CSS ordering bug meant the hamburger button was hidden regardless of screen width for a period - fixed
-- **Landing page (changed):** everyone lands on the new Home page (#26) after login, on both mobile and desktop - previously mobile defaulted to Timesheets and desktop to the Projects board
-
-## 16. Favicon & Home Screen Icon
-
-- "TE" monogram mark, full PWA icon set + manifest.json in place
-- Favicon caching issues are almost always a browser-cache problem, not a deployment problem - confirmed working correctly once cache is cleared
-
-## 17. Settings & Configuration
-
-| Category | Access | Contains |
-|---|---|---|
-| Company Details | Admin only | Name, ABN, address, phone, website, licences, logo, tagline, Google Maps API key |
-| Xero Mapping | Admin only | Account codes + tax type per category, Xero connection IDs (tracking category, ordinary earnings rate), "Look up IDs from Xero" tool |
-| Numbering | Admin only | Next quote/job/invoice numbers, invoice prefix |
-| Payment Terms & T&Cs | Admin only | Terms text, Quick Estimate disclaimer, structured bank details |
-| Quoting Defaults | Pricing roles | Default markup %, default deposit % |
-| Job Defaults | Everyone | (was "ServiceM8 Defaults" - repurposed since ServiceM8 was dropped) |
-| Photo Categories | Everyone | Electrical / Solar / General |
-| Prebuild Categories | Pricing roles | Electrical/Solar subcategories |
-| Users & Roles | Admin only | See #18 |
-| API Keys | Admin only | Anthropic, Pylon, Xero (Client ID/Secret/Webhook Key), Formbay |
-| Appearance | Everyone | Theme toggle |
-
-## 18. User Management
-
-- Users live in Supabase Auth; managed via an Admin-only Users screen in Settings
-- **Two ways to give someone access (built):**
-  - Send an invite email (Supabase sends it, they set their own password) - **note:** Supabase's default email sender is testing-only and rate-limited; reliable delivery needs a real SMTP provider configured in Supabase Dashboard > Authentication > SMTP Settings, which hasn't been done yet as of this writing
-  - **Set a password directly** (with a Generate button) and give it to them yourself - built specifically as a workaround for the above
-  - Existing users also get a "Set password" action for the same reason
-- **Editable name (fixed a bug):** the Users table previously had no working way to edit an existing user's name - fixed, inline editable now
-- **Full profile screen (built):** click "Profile" on any user - editable name, mobile number, photo upload, notes, and a repeatable industry licence list (name/number/expiry date)
-- **Deliberately not yet built:** KPIs, wage/rate, industry allowances (travel/tool/leading hand) - noted for later
-- **Not yet built:** tagging each user with a Billable Rate tier - depends on Billable Rates (#28) existing first
-
-## 19. Prebuilds
-
-- Record structure, components, quoting behaviour: unchanged from original plan
-- **Not yet refactored** to reference the Materials Database (#29) as backing table - still stores standalone cost/material lines, correctly waiting on #29 to exist first
-
-## 20. Lead Capture (from the marketing website)
-
-- Unchanged from original plan - shared Supabase project with the marketing site, `leads` table, auto pipeline-card creation, file attachments via private storage
-
-## 21. AI Quote Helper
-
-- One button on the quote builder drafts a scope-of-works description per stage, then writes the full scope-of-works document
-- **Extended (built):** the AI now also suggests a fitting **name** for each stage based on the brief, not just the description - replaces generic placeholder names (Site Power/Rough In/etc.) when they don't actually suit the job, while keeping the same number of stages
-- Optional supporting documents (plans, electricity bills) can be attached and referenced
-
-## 22. Client Base
-
-- `clients` table, `client_contacts` for per-role contacts, client picker with auto-create-on-save
-- **`client_type` field (built):** Individual or Company, drives STC tax coding automatically (see #2)
-- **CSV import, substantially rebuilt (built):**
-  - Works with any CSV, not just ServiceM8 exports (renamed from "Import from ServiceM8" to just "Import")
-  - AI-assisted column mapping - reads actual header names and sample values to guess which column is Name/Email/Phone/Address, rather than fixed keyword matching alone
-  - Email and Phone support **multiple fallback columns** (e.g. a file with separate Mobile/Telephone/Billing Mobile/Billing Telephone columns) - tries each in order, uses the first non-empty value, so no one's number gets dropped just because it was recorded in a different column
-  - **Optional billing/alternate contact mapping:** a Billing Phone/Email creates an "accounts" client_contacts entry; an Alternate/Mobile phone creates a "job" contact, but only if it's actually different from the main phone (no pointless duplicate)
-  - **Duplicate detection is name-based**, not email/phone-based (multiple real clients can legitimately share a phone/email - families, shared office lines). Same-named rows (within the file, or matching an existing client) get a per-field merge tool - pick the best email from one version, the best phone from another - producing exactly one client per group rather than several
-  - **Incomplete records** (no email and no phone, even after checking all fallback columns) get flagged with inline fields to fill in directly, or a checkbox to exclude, with select-all/none for fast batch handling
-- **Not yet built:** the Client hub cards described in the original Part E of the spec (one place per client showing every linked job/quote/invoice) - currently the Clients page has an edit form and contact list, but no such hub view
-
-## 23. Timesheets, Leave, and Staff Schedule
-
-- Unchanged from original plan - clock in/out, leave requests, Schedule calendar, mobile-friendly entries table, today's-schedule quick clock-in, multi-cost-centre time splitting with linked sliders, manual entry editing
-- **Cost centre picker at clock-in (built):** after picking a job, numbered stage chips appear (e.g. "7014-2 Rough In") - tap one for a single stage, tap several if bouncing between them during the session. Single tap ties the entry straight to that stage; multiple taps clock in against the job as a whole and the Split tool picks up exactly those tapped stages (not the job's full stage list) when clocking out
-- **Slider bugs fixed:** dragging used to be impossible because every movement re-rendered the whole panel, tearing the slider out from under the cursor - rewritten to update in place. Rebalancing used to redistribute across every other slider including ones already set - rewritten to a waterfall model where adjusting one slider only shifts the ones after it (or before it, if it's the last one), so earlier choices never get disturbed
-
-## 24. Xero Integration
-
-- **Custom Connection** (client_credentials grant), Client ID/Secret from the Xero Developer Portal, stored in Settings > API Keys
-- Granular scopes: accounting.contacts, accounting.invoices, accounting.settings.read (payroll scopes added when Payroll work began)
-- No tenant-id header needed - Custom Connections are locked to one organisation already
-- Tokens requested fresh per server-side call rather than cached/refreshed - simpler, one extra API call per Xero-touching function run
-- Webhook (Invoices topic) verified via HMAC-SHA256 using a Webhook Key separate from the Client Secret - a real bug was found and fixed here: failures were returning 401 with no logged reason, making it impossible to tell "wrong key" from "no signature" from "key not saved yet." Now logs which failure mode was hit (without ever logging the actual secret)
-
-## 25. Formbay Integration (STC submission & payment) - exploration underway, not built
-
-- Formbay handles STC application submission/compliance and (separately) STC trading/sale
-- Confirmed via their public API reference (api-doc.formbay.com.au): a real REST API exists for job/form submission (Form, Formset, Assignment objects) - this half is buildable
-- **Not confirmed:** the OAuth2 token exchange endpoint (missing from their public docs), and whether payment/settlement data is exposed via API at all, or only in their web dashboard. A possible separate Trading API (trading.formbay.com.au) may be where payment data actually lives, if anywhere
-- A diagnostic tool exists in Settings (Test Formbay Connection) that tries several plausible auth methods against their API and reports exactly what comes back - built specifically so a support request to Formbay could include concrete evidence rather than a vague "how does your API work"
-- **Next step:** waiting on a reply from Formbay support before building anything real here
-
-## 26. Home Page - built, not in original plan
-
-- New landing page (see #15) with three parts:
-  - **Quick nav:** one-tap cards to every major section
-  - **Needs attention:** pulls from data that already exists - today's schedule, jobs flagged "Job Not Complete," (pricing roles) draft quotes sitting unfinished and invoices overdue past 14 days, (Admin/Finance) pending leave requests
-  - **Company feed:** post a message, everyone can like and comment - a plain company noticeboard, not pricing-restricted, every role reads and participates equally
-
-## 27. Auth Persistence & Biometric Login - not yet built
-
-- Persist the Supabase Auth refresh token locally so staff aren't prompted for username/password every time they open the app
-- Face ID / biometric unlock via the WebAuthn API (supported by iOS Safari and Android Chrome) - not a native-app-only feature
-- 2FA explicitly left out - not required by Xero's machine-to-machine connection, and adds friction that isn't wanted
-
-## 28. Billable Rates - not yet built
-
-- Settings > Billable Rates: hourly rate tiers (Apprentice/Tradesman/Licensed Electrician/Supervisor), each with a cost rate and sell rate
-- Each staff profile tagged with their applicable tier
-- Jobs automatically roll up logged timesheet hours x rate into a running labour cost per job/stage, in real time
-- "Labour" becomes its own selectable line item type in the quote builder and invoice - hours x sell rate
-
-## 29. Materials Database - not yet built, likely its own build phase
-
-- New table: material name, cost price, sell price, category, supplier
-- Populated/updated from PO uploads (ties into the existing PO tracker) or supplier price list uploads (AI extraction - bundle with #5)
-- Materials selectable as quote/invoice line items alongside labour and prebuilds
-- Prebuilds (#19) refactored to reference this table rather than storing standalone lines
-
-## 30. AI-Assisted Prebuild Creation & Takeoff/Wholesaler Loop - not yet built
-
-- Depends on #28 and #29 existing first - the AI needs something concrete to match components against
-- From a text description or an uploaded prebuild list, AI generates a part number, client-facing description, and labour/material components - review before save, never auto-saved
-- Plan-reading: a named part number gets added to a takeoff list for wholesaler pricing; a generic mention gets a default item. Wholesaler quotes get matched back against the takeoff list to update costs
-- **Open decision:** manual pairing fallback or flag-only when a wholesaler line doesn't match a part number exactly?
-
-## 31. Client & Job Card UX Overhaul - not yet built
-
-- **Client hub cards:** one place per client showing every linked job/quote/invoice - currently missing, flagged in #22
-- **Tabbed job/quote cards:** Notes / Scope of Works / Cost Centres as tabs instead of one long scrolling page - pure UX polish, no dependencies, lower urgency than the hub cards
-- **Materials export by cost centre:** download a job's full materials list split by stage, for sending to suppliers - depends on #29/#30, reuse the same export logic as the takeoff list rather than building a second one
-
-## 32. Supplier Payments via Purchase Orders (Airwallex) - not yet built, vision documented
-
-Extends Supplier Invoice Upload (#5) with a pay-from-PO workflow, rather than paying suppliers off an end-of-month statement.
-
-- **AI cross-check before payment:** when a supplier invoice/statement is uploaded, AI checks every line against the app's own PO and stock records - confirming each item was either costed to a specific job or received into stock, so nothing gets paid for that was never actually received
-- **Overcharge detection:** matches part numbers against the app's own invoice history for that supplier, flagging if the same item has crept up in price since last time - a human reviews the flag, never an automatic rejection
-- **Pay-from-PO:** once a PO is marked received and approved, Accounts can pay the supplier directly against that specific PO, rather than waiting for a monthly statement reconciliation. Likely lives on the Purchase Orders tab, or a dedicated "Pay Suppliers" tab if POs and payments end up needing visually separate views
-- **Airwallex handles the actual payment execution** - the app only ever proposes a payment (which PO, which supplier, which amount), it never has custody of funds or unilateral power to move money
-- **Confirmed via Airwallex's own API docs: a genuine "maker-checker" approval workflow already exists on their side**, not something this app needs to build or enforce itself:
-  - The app creates a Transfer via Airwallex's API to pay a supplier
-  - If Airwallex's Transfer Approval Workflow is enabled on the account, that transfer lands in `IN_APPROVAL` status rather than executing immediately
-  - A webhook (`payout.transfer.in_approval`) notifies the app it's pending
-  - **The actual approval happens by logging into the Airwallex web app directly** - not this app - going through Airwallex's own login and already-standard 2FA
-  - Only once approved there does the transfer proceed to `SCHEDULED` and pay out
-  - Airwallex explicitly recommends **separation of duties**: whoever triggers the payment from within the app should not be the same person configured as an approver in Airwallex - so the person marking a PO "ready to pay" and the person who logs into Airwallex to actually approve it can genuinely be two different people, a real two-person control rather than just a 2FA prompt to the same person
-- **Action needed before building:** confirm the Transfer Approval Workflow is actually enabled on the Airwallex account (may need switching on under Airwallex web app > Settings > Approvals, or may need to be requested from Airwallex support - one line in their docs suggests "creating a transfer to be submitted for approval is available upon request")
-- **Sequencing:** this depends on Materials Database (#29) existing for the overcharge-detection-by-part-number piece to have real historical price data to check against, and naturally extends the same AI extraction engine planned for #5 - not a separate build from scratch
+- Role-restricted: Staff see the fact of an action but not $ amounts or pricing changes
+- Ties into planned Twilio SMS logging (Part G) once that's built
 
 ---
+
+## PART B — Near-Term Fixes & Settings/User Management
+
+### B1. Known Bugs (fix)
+1. **User invite email not sending** — Settings → Users shows "pending" but no invite email actually sends. Likely Supabase Auth email/SMTP config issue.
+2. **Admin can't edit user names** — Settings → Users has no working update path for existing users.
+
+### B2. Settings Restructure (planned)
+- New "Admin Only" sub-category/visibility flag for settings that rarely change and shouldn't be seen by non-admin roles — at minimum Company Details and Xero Mapping; consider extending to Numbering and Payment Terms/T&Cs
+
+**Settings categories (current + planned):**
+| Category | Contains |
+|---|---|
+| **Company Details** *(Admin Only)* | Name, ABN, address, phone, website, licences, logo, tagline |
+| **Xero Mapping** *(Admin Only, future phase)* | Account codes + tax type per line item type |
+| **Numbering** | Next PC invoice, project, quote, invoice numbers |
+| **Quoting Defaults** | Default markup % (45%), default deposit % (10%) |
+| **Payment Terms & T&Cs** | Editable text blocks, including Quick Estimate disclaimer |
+| **Payment Details** *(new — planned)* | Bank name, account name, BSB, account number — shown on invoices; payment reference auto-populated with invoice number (SI3000-series) |
+| **Photo Categories** | Electrical / Solar / General — extendable |
+| **Prebuild Categories** | Electrical (Lighting/Power/Trenching/Cable Runs), Solar (Panels/Batteries/Inverters) — extendable |
+| **Billable Rates** *(new — planned, see Part D)* | Hourly rate tiers (Apprentice/Tradesman/Licensed Electrician/Supervisor), cost rate + sell rate each |
+| **Users & Roles** | Staff accounts, role assignment |
+| **Appearance** | Theme toggle (Navy Pro / Dark Trade) |
+
+### B3. User Management Overhaul (planned)
+- Fixes B1 bugs as part of this work
+- Admin-generated password option, as an alternative to invite-only (for when email delivery is unreliable)
+- Full user profile screen (click into a user): editable name, mobile number, industry licences + expiry, photo, notes; later: KPIs, wage/rate, industry allowances (travel, tool, leading hand, etc.)
+- Each user tagged with a billable rate tier (see Part D)
+
+### B4. Auth Persistence & Biometric Login (new — planned)
+- **Stay logged in:** persist Supabase Auth refresh token locally so staff aren't prompted for username/password every time they open the app — only on token expiry, explicit logout, or reinstall
+- **Face ID / biometric unlock:** achievable in a PWA via the **WebAuthn API** (supported by iOS Safari and Android Chrome's platform authenticators) — not a native-app-only feature. Flow: staff log in once with username/password, then opt in to "enable Face ID"; subsequent app opens prompt the device's biometric authenticator instead of a login form, tied to the persisted Supabase session
+- 2FA considered and explicitly left out for now — not required by Xero (Xero connection is machine-to-machine, client_credentials grant, no human login involved) and adds friction that isn't currently wanted
+
+### B5. Custom Domain — projects.thomsonenergy.com.au (new — planned, no extra cost)
+- Point the existing thomsonenergy.com.au domain at the app via a subdomain, replacing thomsonprojects.netlify.app
+- **No additional cost** — custom domains/subdomains are free on Netlify's standard hosting, and the domain itself is already owned/paid for
+- **Setup:** Netlify → Domain management → add `projects.thomsonenergy.com.au` → Netlify provides a CNAME target → add that CNAME record in the domain's existing DNS settings → Netlify auto-issues SSL
+- **Does not affect** existing email (MX records) or the main website (root domain A/CNAME records) — entirely separate DNS record
+- **Sequencing note:** best done before webhook-dependent integrations (Xero, Airwallex, Twilio — Parts C, H, G3) are wired up, since webhook URLs are registered against a specific domain and would need updating if changed after the fact
+
+---
+
+## PART C — Payments
+
+### C1. Payment Details & Bank Transfer (built)
+- Settings → Payment Details: bank name, account name, BSB, account number, shown on invoices
+- Invoice payment reference auto-populated with the invoice number (SI3000-series)
+
+### C2. Airwallex Payment Links (built)
+- **Decision:** Airwallex chosen over Stripe because Thomson Energy banks with Airwallex — funds settle directly into the existing account rather than a separate payout relationship
+- Payment link generated on-demand when the client clicks "Pay online" on their invoice link, via `get-or-create-payment-link.js`
+- Webhook verifies HMAC signature, marks the invoice paid on `payment_link.paid`
+- Single-source balance calculation (`get_invoice_balance_due()`) avoids GST drift between client-side and server-side totals
+- Supplier payments run the other direction - `run-supplier-payments.js` batches a supplier's due bills into one transfer, triggered manually ("Run payments due today"), never auto-executed - Airwallex's own maker-checker approval gate is the real safety net regardless of how the transfer gets created
+- **Cost:** ~1.65% + $0.30 per paid transaction (domestic), no cost for the link itself; Explore plan is $0/month if $5k+ deposits/balance maintained, else $29/month
+
+### C3. Supplier Invoice Upload — AI Extraction (built)
+- See A11 for full detail - built and working, including PO-number auto-matching and the generic-item reconciliation flow
+- Not yet built: pushing the finalized bill to Xero as a Bill (depends on Xero being wired up, Part H)
+
+
+### C4. Tax & Account Coding per Line Item (future phase, when Xero wired up)
+- `TaxType` toggle per line: GST on Income / GST Free Income / BAS Excluded
+- `AccountCode` per line item, mapped from a locked lookup table (line item type → correct Xero account code + valid tax types), so mismatched combinations can't be pushed
+- Example: STC credits code to a separate income account from standard Service Income
+- **Action needed:** confirm actual Xero chart-of-accounts codes with bookkeeper before building the mapping table
+
+---
+
+## PART D — Labour Costing, Materials Database & Prebuild AI (sizeable, likely its own build phase)
+
+**Dependency order within this part:** D1 (billable rates) and D2 (materials database) need to exist before D3 (prebuild AI generation) or D4 (takeoff/wholesaler loop) can work, since the AI needs something concrete to match components against.
+
+### D1. Billable Rates (planned)
+- Settings → Billable Rates: hourly rate tiers (e.g. Apprentice, Tradesman, Licensed Electrician, Supervisor), each with a cost rate (what's paid) and sell rate (what's billed)
+- Each staff user profile (§B3) tagged with their applicable rate tier
+- Jobs automatically roll up logged timesheet hours × rate into a running labour cost per job/stage, in real time (not just at invoice time)
+- "Labour" becomes its own selectable line item type in the quote builder and invoice — hours × sell rate — integrated with the existing markup/cost-centre structure
+
+### D2. Materials Database (planned)
+- New table: material name, cost price, sell price, category, supplier
+- Populated/updated automatically when a PO is uploaded (ties into A10 PO tracker) or when a supplier price list is uploaded (AI extraction, same pattern as C3)
+- Materials selectable as quote/invoice line items alongside labour and prebuilds
+- **Prebuilds (A9) to be refactored** to reference this materials database as their backing table, rather than storing standalone cost/material lines
+
+### D3. AI-Assisted Prebuild Creation (new — planned)
+- **From a text description:** describe the prebuild (e.g. "8W downlight install with plug base and 10m cable run") and the AI:
+  - Generates an internal part number following the existing numbering convention
+  - Writes the client-facing description (the line item text customers see)
+  - Breaks it into labour components (hours × rate tier, from D1) and material components (from D2, or flags new materials to add)
+  - Populates the prebuild record for review — not auto-saved; pricing/scope on a reusable template needs a check before it goes live
+- **From an uploaded document:** upload an existing prebuild list (spreadsheet, doc, whatever format currently exists) and the AI reads it, extracts the same structure, and builds prebuild records from it
+  - **Style/tone control:** a style guide can be given up front (e.g. "short and plain, no jargon" vs "full spec detail") so generated client-facing text matches house style rather than mirroring the source document
+  - Same review-before-save principle — bulk import without a check screen risks propagating errors across many prebuilds at once
+- Both entry points (short prompt vs uploaded document) feed the same underlying AI extraction/generation engine and output shape — one function, two inputs, not two separate features
+
+### D4. Plan-Reading Takeoff & Wholesaler Quote Loop (new — planned)
+- When AI reads a plan/spec document as part of prebuild generation (D3) or scope-of-works generation (A3):
+  - **No specific part number given** (e.g. plan just says "downlights throughout"): AI specs a generic/standard item from the existing prebuild or materials database default
+  - **Specific part number given** (e.g. a named brand/SKU called out in the plan): AI uses that exact part in the prebuild, **and** adds it to a **takeoff list** — a consolidated list of every specific part number required across the whole plan, with quantities, formatted ready to send to a wholesaler for pricing
+- **Wholesaler quote comes back** → upload it → AI reads it, matches each line to the part numbers from the takeoff list, and updates the cost price on the corresponding prebuild/material entries
+- **Review/confirm screen required** before price updates save, consistent with C3's principle
+- **Open decision:** if a wholesaler's line doesn't match a part number exactly (different SKU format, slight description mismatch), does the review screen allow manual pairing to the right database row, or just flag "no match found"? Needs a fallback either way — to be decided at build time
+- Specific parts need to exist in (or be added to) the Materials Database (D2) — same table, not a separate parts list
+- This is a third input mode for the same AI extraction engine as D3: plan document in → prebuild + takeoff out; wholesaler quote in → price updates out
+
+### D5. Cost/Profit Reporting (decided approach — simplified)
+- **No per-job overhead allocation.** Considered allocating monthly overhead to jobs by share of labour hours, but decided against it — added complexity for a number that's still just an estimate, and delays when a job's profit figure is "final" pending month-end data.
+- **Per-job gross profit only:** revenue − direct labour − direct materials, quoted vs actual, with labour margin vs materials margin split visible. This is the job-level dashboard number.
+- **Separate net P&L, run monthly at business level:** total revenue and total overhead pulled from Xero P&L for the period (future phase, once Xero wired up) — answers "is the business profitable overall," kept separate from job-level figures.
+- Job expenses (materials/POs) still tracked per job via Purchase Orders (A10)
+
+---
+
+## PART E — Client, Quote & Job Card Overhaul (new — planned)
+
+**Design goal for this part: keep it simple and easy to learn** — small learning curve is a stated priority, not just a nice-to-have.
+
+### E1. Client Cards (new — planned)
+- Each client card shows, in one place:
+  - Client address
+  - List of all site addresses associated with that client (a client may have multiple properties/sites)
+  - List of job numbers associated with the client
+  - List of quotes associated with the client
+  - List of invoices associated with the client
+- Effectively a client-level hub — click through from any of these lists into the actual quote/job/invoice record
+
+### E2. Quote & Job Cards — Tabbed Layout (new — planned)
+- Quote cards and job cards get a consistent tabbed interface, e.g.:
+  - **Notes** tab
+  - **Scope of Works (SOW)** tab
+  - **Cost Centres** tab
+- Clicking into a Cost Centre shows its breakdown: labour components and material components for that cost centre specifically (not the whole job at once)
+- Keeps each view focused and uncluttered — supports the small-learning-curve goal by not showing everything at once
+
+### E3. Materials List Export by Cost Centre (new — planned)
+- At any time, download a full materials list for an entire job, split by cost centre
+- Purpose: send directly to suppliers for quoting/pricing — same underlying need as the takeoff list in D4, but at the job level rather than the plan-reading stage
+- Should reuse the same export/formatting logic as D4's takeoff list where possible, rather than building a second, separate export feature
+
+---
+
+## PART F — Reactive Jobs Workflow (native — replaces dropped ServiceM8 integration)
+
+*Still to design/build. Placeholder for whatever replaces the old SM8 per-stage push flow for reactive/small jobs.*
+- Needs: job creation, status flow, materials/checklist handling, invoicing — all in-app, no external system
+- **Open decision:** how closely should this mirror the staged-project pipeline (A6) vs a lighter simplified flow?
+
+---
+
+## PART G — Field Forms, Offline Support & Communications (longer-range)
+
+### G1. Field Forms (with digital signature capture) — not yet built
+- **SWMS** — task/hazard/control/PPE breakdown, plant/equipment used, each worker signs on site, re-signable per day for multi-day jobs
+- **Take 5** — 5 prompts (stop/look/assess/control/monitor), optional photo, single sign-off, done fresh per shift
+- **Variation Form** — description, reason, cost impact (labour/materials/markup/new total), sign-off on-screen or sent as client link, locks and feeds into job's running cost total once signed
+- **Solar Inspection** — array/inverter/isolator/earthing checks, compliance photo checklist, pass/fail, inspector signature
+- **Electrical Inspection** — switchboard/RCD/circuit checks, compliance photo checklist, pass/fail, inspector signature
+- **Open decision:** do inspection forms auto-generate a client-facing compliance certificate PDF, or stay internal-only?
+- Submitted forms auto-generate a clean PDF for the job record/compliance file
+
+### G2. Offline Support (revisited — now planned, was previously deferred)
+- **Decision reversed:** originally deferred as "not worth the complexity at this stage" — now confirmed as necessary for field use and added to the roadmap so the rest of the build doesn't make it harder to retrofit later
+- **Core pattern (standard PWA offline architecture):**
+  - Service worker caches the app shell so the app loads with no connection
+  - IndexedDB as a local write queue — photos, files, notes, timesheet entries save locally first (tagged "pending sync"), shown in the UI immediately, given a local temp ID until synced
+  - Background sync / reconnect-triggered flush pushes the queue to Supabase once signal returns
+- **Known hard parts to design for up front, not bolt on later:**
+  - Photo/file uploads need chunking + retry logic for patchy (not just fully offline) connections — common in the field
+  - Conflict handling needed if two staff edit the same job while both offline (simplest: last-write-wins, but can silently overwrite notes — needs a deliberate decision, not a default)
+  - Timesheet clock in/out must timestamp at the moment of the local action, not at sync time
+  - Complex UI state (e.g. multi-cost-centre sliders) needs to work fully against local data and reconcile on sync — more involved than a simple form queue
+- **Scoped rollout, not all-at-once:** Phase 1 = build the offline queue/sync infrastructure and prove it via SWMS/Take 5 forms (self-contained, no live data dependencies, lowest risk) before extending to notes, photos, and timesheets
+- **Implication for current build:** new features (photos, files, notes, timesheets, forms) should be built with this local-queue pattern in mind from the start where practical, to avoid a costly retrofit
+
+### G3. SMS & Calling (Twilio) — new, future phase
+- Existing Twilio account/number in use (currently routed through ServiceM8's call setup) — to be brought in-house into Thomson Projects directly, not via Twilio Flex (Flex is a full separate contact-centre product, ~£90/user/month, with its own UI outside the app — unnecessary given the existing Twilio account and in-house build approach)
+- **SMS:** inbound/outbound texts via Twilio Messaging API + Netlify webhook function; messages logged to a table tied to client/job, visible and sendable by any logged-in staff member from within the app; ties into Job Activity Log (A13)
+- **Calling — multi-user shared number:**
+  - Simplest option: Twilio `<Dial>` with multiple numbers/`client:` identities rings all available staff simultaneously, first to answer connects (no separate routing engine needed)
+  - Fuller option: Twilio Voice SDK embedded as an in-app softphone (access token per staff member) for calls handled entirely inside the app rather than bridged to personal mobiles
+  - Call logs (duration, timestamp, staff member) recorded against client/job automatically
+- Credentials (Account SID, Auth Token) stored as Netlify env vars, same pattern as other integrations
+- Suggested build order: SMS first (simplest, immediate value) → shared-number simultaneous ring (click-to-call/bridge, low complexity) → full in-app softphone (highest complexity, lowest priority)
+
+### G4. Push Notifications & Badge Count (new — planned)
+- **Home screen widgets are not possible for a PWA on iOS** — WidgetKit is native-app-only, Apple doesn't expose it to web apps. Ruled out unless the app is ever wrapped/rebuilt as a native iOS app (a materially bigger undertaking, not currently planned).
+- **Push notifications:** iOS has supported Web Push for home-screen PWAs since iOS 16.4, Android Chrome has long supported it — realistic "at-a-glance" alternative to widgets
+  - Trigger on events like: new SMS received (ties into G3 Twilio SMS), lead assigned, quote approved, invoice paid, job flagged "Not Complete"
+  - Needs a push subscription registered per device (Web Push API) and a Netlify function to send notifications on the relevant app events
+- **Badge count on the home screen icon:** via the Badging API (supported in iOS/Android PWA mode) — shows unread count (e.g. unread SMS messages) directly on the app icon without opening the app
+  - Ties directly into G3's SMS inbox — badge count = unread messages, clears when opened/read
+- Both features build on the same underlying event triggers as the Job Activity Log (A13) and SMS (G3), so should be sequenced alongside or after those rather than as a standalone earlier build
+
+---
+
+## PART H — Xero Integration (future phase, wired up last)
+
+### H1. Xero Connection
+- Custom Connection (machine-to-machine, client_credentials grant) — correct for a single-org internal tool; no human login involved, so Xero's 2FA policies for human users don't apply here
+- Granular scopes required (not broad legacy scopes): invoices, contacts, accounts, payroll/timesheets AU, tracking categories
+- Tokens: 30-minute expiry, re-request rather than refresh
+- Timesheet Categories must be enabled in Xero UI before API work
+- Credentials stored as Netlify environment variables
+- **Recommended sequence:** numbering (done) → invoice UI against DB → wire Xero push last
+
+### H2. Payroll
+- Drop Employment Hero; push timesheets directly to Xero Payroll AU API
+- **Open decision:** confirm actual current status of Employment Hero cutover with bookkeeper — don't drop EH until Xero payroll push is tested and working
+
+### H3. Invoicing to Xero
+- Staged projects invoiced from the app directly to Xero's Invoices API
+- Progress claim invoices carry job context in Reference field (see A2 numbering)
+
+### H4. Cost/Profit Dashboard (Xero-dependent extension of D5)
+- Pull labour actuals from Xero Payroll, job expenses from Xero Accounting API filtered by Tracking Category
+- Compared against app's own quote line items → quoted vs actual vs profit
+- Feeds into the net P&L view described in D5
+
+---
+
+## PART I — Quote Acceptance → Job Automation Chain (new — planned, not yet built)
+
+**Vision:** once a client accepts a quote on their link, the job should progress through the pipeline largely on its own, with manual scheduling still always available as an override.
+
+**Step 1 — Accept → choose → pay**
+- Client accepts on their token-based link (existing `accept_quote` RPC)
+- A popup asks: pay the deposit, or pay in full
+- Whichever is chosen, a real invoice is created for that amount **from the client's own link** — needs a new public/token-safe function, since existing invoice creation is staff-only and authenticated
+- Job number is drawn at this point (already the existing trigger point - see §2 numbering)
+- Client is shown a payment page for that exact invoice: pay online (Airwallex), or pay by bank transfer
+
+**Step 2 — Payment confirmed → Deposit Paid**
+- Extend the existing Airwallex webhook (already marks invoices paid) to also auto-advance the job's pipeline stage to Deposit Paid once that invoice clears
+
+**Step 3 — Deposit Paid → PO suggestion + notify the quoter**
+- Reuse the existing "Generate PO suggestions from quote" logic (already built on the job page), but trigger it automatically on entering Deposit Paid rather than requiring a manual click
+- Surface this to whoever originally quoted the job - no notifications system exists yet; likely extends the existing Home page "Needs attention" panel (already built for overdue invoices etc.) rather than a new system
+- Quoter reviews the suggested POs and sends them out (still a human action, not automatic)
+
+**Step 4 — All POs received → Ready to Book**
+- Once every PO for that job is marked fully received (existing per-line-item receiving system), auto-advance the pipeline stage to Ready to Book
+- Manual scheduling remains available at any point regardless of stage - this is an accelerant, not a lock
+
+**Key principle carried through:** every step that involves money or committing to a supplier stays a real, visible action a human can see and, where relevant, click - automation moves the job forward, it doesn't hide what happened.
+
+**Dependencies:** Step 1 is the foundation everything else builds on (needs the new client-facing invoice-creation function). Steps 2-4 are each fairly small once Step 1 exists, since they're mostly "watch for X, then flip pipeline stage to Y" logic on top of features already built.
+
+---
+
+## PART J — Quote/Job Page Redesign (planned, not yet built)
+
+**Vision:** replace the current long-scrolling single page with a tabbed layout, taking inspiration from SimPro's structure (screenshots reviewed) but adapted to what this app already has.
+
+**Tabs:** Summary (default) / Cost Centres / Purchase Orders / Details (client quote link + CCEW)
+
+**Summary tab content depends on job status:**
+- Still a quote (no job number yet) - pie chart (Materials / Labour / Profit split from the quoted estimate) + estimate breakdown table
+- Has a job number - two bar charts (Actual vs Invoiced, Actual vs Estimated) using real quoted-vs-actual data already tracked (billable rates + `job_material_usage`), plus a breakdown table with Actual and Estimate side by side
+- Persistent Activity/Timeline panel on the right side of every tab, pulling from the existing `activity_log`
+
+**Agreed improvements beyond a straight SimPro copy**, since this app has data SimPro's version doesn't:
+- Materials cost split by source (from existing stock vs newly purchased) using `job_material_usage.source`
+- PO status shown directly on Summary ("3 of 4 POs fully received", "$2,400 still pending") - an at-a-glance scheduling-readiness signal
+- Reuse the existing labour-cost budget bar pattern instead of introducing a new generic bar chart style, for visual consistency
+- Job-level "needs attention" flags (tasks outstanding, bills needing approval, POs not received) surfaced on Summary
+- Role-aware by default - Staff see progress/status without dollar figures, matching existing pricing-role restrictions elsewhere
+
+**Cost Centres tab:** same idea, scoped to one stage - its own charts/breakdown plus Parts & Labour for that stage specifically.
+
+## PART K — Site Inspection & Solar Pricing/Design (open, not yet scoped)
+
+Two related but distinct ideas raised together, neither built or fully scoped yet:
+
+**Site inspection checklist on quotes:**
+- A toggle on the quote: "does this need a site inspection?"
+- If yes, reveals a configurable set of inspection questions/photo requirements
+- Reference material reviewed: Runbase (a solar-specific quoting tool) screenshots showing conditional logic (Yes/No answers dynamically show/hide subsequent requirements), mandatory photo checklists with progress tracking, AI photo analysis (e.g. switchboard analysis), and property/owner details feeding STC/REC registry requirements
+- **Explicitly not a straight copy** - Runbase's checklist is solar-specific and the business does both electrical and solar work, so this needs its own scoping session to define what's actually needed, not a port of someone else's questions
+
+**Solar pricing/design tool + Pylon integration:**
+- Runbase reference also showed an in-house pricing tool (panels/inverters/batteries with quantities, roof type, gateway, install kits, STC deeming year/month, recommended vs quoted sale price with uplift %)
+- Stated goal: price within this app, use Pylon only for the technical design/calculations and panel layout (Pylon is currently just a reference link on the solar proposal template - client clicks through to view the interactive design, no data flows back)
+- **Open question, needs real research before any commitment:** does Pylon expose an API that can return panel/inverter/battery counts or layout data programmatically? This determines whether "price here, design in Pylon" is achievable via integration or would require rebuilding pricing logic independently of whatever Pylon produces
+- Not scoped further pending that research and a dedicated design session
 
 ## Explicitly Dropped
-
-- Editable Word doc proposal workflow
-- **ServiceM8 integration** - replaced by the native Reactive Jobs workflow (#6) and, for the simplest cases, the Direct Job + standalone invoice tools already built
-- 2FA - left out, see #27
+- **ServiceM8** — dropped entirely, not just for staged jobs. All SM8 buttons/functions removed. Replaced by native Reactive Jobs workflow (Part F, still to design).
+- **Employment Hero** — dropped, timesheets push directly to Xero Payroll AU API instead (see H2 for cutover confirmation caveat).
+- Editable Word doc proposal workflow — decided against, unnecessary complexity.
+- 2FA — considered when discussing auth persistence; explicitly left out for now (see B4).
 
 ---
 
-## Current State Summary (as of this revision)
-
-**Fully built and live:** Time tracking + Xero payroll push, invoicing (app-first, STC handling, standalone invoices, webhook payment sync), Xero connection, proposal templates + Direct Job, photo library, roles/permissions + settings admin-gating, job pipeline board with numbering-on-approval, favicon, user management overhaul, client base + AI CSV import, AI quote helper (now with stage naming), timesheets/leave/schedule with cost-centre clock-in, the Home page.
-
-**Not yet built, roughly in the order it makes sense to tackle them:**
-1. Airwallex Payment Links (#3) - standalone, no dependencies, needs real API docs first
-2. Billable Rates (#28) - foundational for accurate job costing
-3. Materials Database (#29) + Supplier Invoice AI Extraction (#5) - bundle together, the latter is how the former gets populated
-4. Cost/Profit Dashboard (#4) - only meaningful once #28+#29 exist
-5. Client hub cards (#31) - small, standalone, good quick win any time
-6. Reactive Jobs workflow (#6) - timing depends on urgency of dropping ServiceM8 for small jobs
-7. Tabbed job/quote cards (#31) - polish, no dependencies
-8. Auth persistence & biometric login (#27) - quality of life, standalone
-9. AI Prebuild Creation + Takeoff/Wholesaler loop (#30) - needs #28+#29 solid first
-10. Materials export by cost centre (#31) - needs #29/#30
-11. Job Activity Log (#12) - could be pulled earlier if better audit trails are wanted sooner
-12. Field Forms, Offline Support, SMS/Calling (#11, #7's offline note, Twilio) - longer-range, correctly last
-13. Formbay integration (#25) - blocked on their support reply, not a sequencing choice
-14. Supplier Payments via Purchase Orders (#32) - depends on #29 (Materials Database) for the overcharge-detection piece, and extends #5's AI extraction engine
+## Key Principles
+- **Separation of concerns for numbering:** Project/job/quote/invoice numbers are internal Postgres sequences with no Xero dependency — built and working independently of any Xero wiring.
+- **Deploy sequencing matters:** Always run Supabase migrations before or alongside Netlify deploys.
+- **Settings-driven configuration:** Key values (numbering starts, disclaimer text, markup defaults, etc.) editable from Settings rather than hardcoded.
+- **API keys and credentials** stored as Netlify environment variables or in the Supabase database — never hardcoded.
+- **Drag performance:** avoid re-rendering entire components on every drag event; waterfall redistribution model for multi-slider panels (multi-cost-centre time/quote sliders).
+- **Review before save:** any AI-driven data entry (supplier invoice extraction, prebuild generation/import, wholesaler quote price updates) requires a review/confirm screen — no blind auto-save, since errors would otherwise propagate silently.
+- **Simplicity as a design goal:** client/quote/job card overhaul (Part E) is explicitly meant to keep a small learning curve — favour focused, tabbed views over dense all-at-once screens.
+- **Build order matters for dependent features:** e.g. Billable Rates + Materials Database (D1/D2) must exist before AI Prebuild Generation (D3) or Takeoff/Wholesaler matching (D4) can work.
 
 ---
 
 ## Open Decisions
-
-- [ ] Reactive jobs: own numbering series, or share the 7000-series?
-- [ ] Reactive jobs: any sign-off step needed, or straight to booked?
-- [ ] Inspection forms: auto-generate client-facing compliance PDF, or internal-only?
-- [ ] Confirm Employment Hero -> Xero Payroll cutover timing with bookkeeper (payroll push is built and testable, but don't drop EH until it's been trusted for a full pay cycle)
-- [ ] Wholesaler quote matching fallback: manual pairing option, or flag-only, when a line doesn't match a part number exactly?
-- [ ] Formbay: waiting on their support reply re: token endpoint and whether payment data is exposed via API at all
+- [ ] Reactive Jobs workflow (Part F): how closely should it mirror the staged pipeline vs a lighter flow?
+- [ ] Inspection forms (G1): auto-generate client-facing compliance PDF, or internal-only?
+- [ ] Confirm Xero chart-of-accounts codes for each income category with bookkeeper (C4)
+- [ ] Confirm Employment Hero → Xero Payroll cutover timing (H2) — don't drop EH until Xero payroll push is tested and working
+- [ ] Wholesaler quote matching fallback (D4): manual pairing option, or flag-only, when a line doesn't match a part number exactly?
+- [ ] Site inspection checklist (Part K): what questions/photos does this business actually need, given both electrical and solar work - not a straight port of the Runbase reference
+- [ ] Pylon API research (Part K): does it expose panel/inverter/battery/layout data programmatically, which determines whether "price here, design in Pylon" is achievable
