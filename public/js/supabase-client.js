@@ -696,3 +696,76 @@ async function renderActivityLog(entityType, entityId, containerId) {
       <span class="subtitle" style="white-space:nowrap;">${e.profiles?.full_name || 'Someone'} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
     </div>`).join('');
 }
+
+// Shared safety check before deleting a quote/job - blocks (rather than
+// just warns) if real activity already exists against it, since an
+// invoice, PO, or logged time represents something that actually
+// happened and shouldn't just disappear via a bulk delete.
+async function checkProjectHasActivity(project) {
+  const reasons = [];
+  const invoiced = (project.cost_centres || []).reduce((s, c) => s + (Number(c.invoiced_amount) || 0), 0);
+  if (invoiced > 0) reasons.push(`has ${money(invoiced)} invoiced`);
+
+  const { count: poCount } = await supabaseClient.from('purchase_orders').select('id', { count: 'exact', head: true }).eq('project_id', project.id);
+  if (poCount > 0) reasons.push(`has ${poCount} purchase order${poCount === 1 ? '' : 's'}`);
+
+  const { count: timeCount } = await supabaseClient.from('time_entries').select('id', { count: 'exact', head: true }).eq('project_id', project.id);
+  if (timeCount > 0) reasons.push(`has ${timeCount} logged time ${timeCount === 1 ? 'entry' : 'entries'}`);
+
+  return reasons;
+}
+
+// Deletes a project after the caller has already run the activity
+// check. Cascade behavior on cost_centres' foreign key isn't something
+// I can verify locally (that table predates the migration files I have
+// visibility into), so this explicitly cleans up dependent records in
+// the correct order rather than assuming the database will do it.
+async function deleteProject(projectId) {
+  const { data: centres } = await supabaseClient.from('cost_centres').select('id').eq('project_id', projectId);
+  const centreIds = (centres || []).map(c => c.id);
+
+  if (centreIds.length) {
+    await supabaseClient.from('cost_centre_line_items').delete().in('cost_centre_id', centreIds);
+    await supabaseClient.from('cost_centre_photo_groups').delete().in('cost_centre_id', centreIds);
+    await supabaseClient.from('cost_centres').delete().in('id', centreIds);
+  }
+
+  const { error } = await supabaseClient.from('projects').delete().eq('id', projectId);
+  if (error) throw error;
+}
+
+// The two correct ways to change a material's Warehouse stock - used
+// everywhere Warehouse quantity changes, so material_stock_by_location
+// (and the trigger-maintained materials.quantity_on_hand total) never
+// drifts out of sync the way direct writes to quantity_on_hand did.
+
+// Adds (or subtracts, if negative) a quantity - for bills arriving,
+// materials being drawn for a job, etc. Never goes below zero.
+async function adjustWarehouseStock(materialId, quantityDelta) {
+  const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', materialId).eq('location_type', 'warehouse').maybeSingle();
+  if (whRow) {
+    await supabaseClient.from('material_stock_by_location').update({
+      quantity: Math.max(0, Number(whRow.quantity) + quantityDelta), updated_at: new Date().toISOString(),
+    }).eq('id', whRow.id);
+  } else {
+    await supabaseClient.from('material_stock_by_location').insert({
+      material_id: materialId, location_type: 'warehouse', quantity: Math.max(0, quantityDelta),
+    });
+  }
+}
+
+// Sets Warehouse quantity to an exact value - for manual admin edits
+// where the person is stating "we have X of these", not adding to
+// whatever's already recorded.
+async function setWarehouseStock(materialId, absoluteQuantity) {
+  const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('id').eq('material_id', materialId).eq('location_type', 'warehouse').maybeSingle();
+  if (whRow) {
+    await supabaseClient.from('material_stock_by_location').update({
+      quantity: Math.max(0, absoluteQuantity), updated_at: new Date().toISOString(),
+    }).eq('id', whRow.id);
+  } else {
+    await supabaseClient.from('material_stock_by_location').insert({
+      material_id: materialId, location_type: 'warehouse', quantity: Math.max(0, absoluteQuantity),
+    });
+  }
+}

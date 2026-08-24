@@ -759,17 +759,15 @@
               const { data: newMat, error: matErr } = await supabaseClient.from('materials').insert({
                 name: description, cost_price: unitCost,
                 sell_price: Math.round(unitCost * (1 + markup / 100) * 100) / 100,
-                quantity_on_hand: quantity, supplier_id: supplierId,
+                supplier_id: supplierId,
               }).select('id').single();
               if (matErr) throw matErr;
               materialId = newMat.id;
+              await adjustWarehouseStock(materialId, quantity);
             } else {
               materialId = matchValue;
-              const existing = materials.find(m => m.id === materialId);
-              await supabaseClient.from('materials').update({
-                cost_price: unitCost,
-                quantity_on_hand: (Number(existing?.quantity_on_hand) || 0) + quantity,
-              }).eq('id', materialId);
+              await supabaseClient.from('materials').update({ cost_price: unitCost }).eq('id', materialId);
+              await adjustWarehouseStock(materialId, quantity);
             }
 
             // If accepted, update the PO's generic line item to reflect

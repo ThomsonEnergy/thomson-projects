@@ -818,24 +818,13 @@
           let created = 0;
 
           // Deduct what's covered by existing stock and cost it straight
-          // to the job - this portion is never ordered at all. Track a
-          // running tally rather than re-reading the original cached
-          // quantity each time, in case the same material covers more
-          // than one stage.
-          const runningQuantities = {};
+          // to the job - this portion is never ordered at all.
           for (const item of fromStock) {
             await supabaseClient.from('job_material_usage').insert({
               project_id: projectId, cost_centre_id: item.costCentreId, material_id: item.materialId,
               quantity: item.quantity, unit_cost: item.unit_cost, source: 'from_stock', created_by: user.id,
             });
-            if (!(item.materialId in runningQuantities)) {
-              const currentMaterial = materials.find(m => m.id === item.materialId);
-              runningQuantities[item.materialId] = Number(currentMaterial?.quantity_on_hand) || 0;
-            }
-            runningQuantities[item.materialId] = Math.max(0, runningQuantities[item.materialId] - item.quantity);
-            await supabaseClient.from('materials').update({
-              quantity_on_hand: runningQuantities[item.materialId],
-            }).eq('id', item.materialId);
+            await adjustWarehouseStock(item.materialId, -item.quantity);
           }
 
           for (const groupEl of overlay.querySelectorAll('.sp-group')) {

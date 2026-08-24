@@ -187,20 +187,25 @@
         const msg = overlay.querySelector('#mat-msg');
         const name = overlay.querySelector('#mat-name').value.trim();
         if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
+        const quantityValue = parseFloat(overlay.querySelector('#mat-qty').value) || 0;
         const fields = {
           name,
           category: overlay.querySelector('#mat-category').value.trim() || null,
           supplier_id: overlay.querySelector('#mat-supplier').value || null,
           cost_price: parseFloat(overlay.querySelector('#mat-cost').value) || 0,
           sell_price: parseFloat(overlay.querySelector('#mat-sell').value) || 0,
-          quantity_on_hand: parseFloat(overlay.querySelector('#mat-qty').value) || 0,
           minimum_quantity: parseFloat(overlay.querySelector('#mat-minimum').value) || 0,
           notes: overlay.querySelector('#mat-notes').value.trim() || null,
         };
-        const { error } = material
-          ? await supabaseClient.from('materials').update(fields).eq('id', material.id)
-          : await supabaseClient.from('materials').insert(fields);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (material) {
+          const { error } = await supabaseClient.from('materials').update(fields).eq('id', material.id);
+          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+          await setWarehouseStock(material.id, quantityValue);
+        } else {
+          const { data: newMat, error } = await supabaseClient.from('materials').insert(fields).select('id').single();
+          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+          await setWarehouseStock(newMat.id, quantityValue);
+        }
         overlay.remove();
         await loadMaterials();
       });
