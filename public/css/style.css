@@ -426,6 +426,14 @@ html[data-theme="navy"] .success-box {
   .settings-tab { white-space: nowrap; }
 }
 
+.job-tab-layout { display: flex; gap: 20px; align-items: flex-start; }
+.job-tab-main { flex: 1; min-width: 0; }
+.job-activity-sidebar { width: 320px; flex-shrink: 0; position: sticky; top: 20px; }
+@media (max-width: 900px) {
+  .job-tab-layout { flex-direction: column; }
+  .job-activity-sidebar { width: 100%; position: static; }
+}
+
 .theme-options {
   display: grid;
   grid-template-columns: 1fr 1fr;

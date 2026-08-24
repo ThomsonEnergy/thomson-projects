@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=8" />
+<link rel="stylesheet" href="/css/style.css?v=9" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -282,18 +282,39 @@
     function render(project, pricingVisible) {
       const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const quoted = centres.reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
-      const cost = centres.reduce((s, c) => s + Number(c.labour_cost || 0) + Number(c.material_cost || 0), 0);
+      const labourCostTotal = centres.reduce((s, c) => s + Number(c.labour_cost || 0), 0);
+      const materialCostTotal = centres.reduce((s, c) => s + Number(c.material_cost || 0), 0);
+      const cost = labourCostTotal + materialCostTotal;
       const invoiced = centres.reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
       const profit = quoted - cost;
       const pctComplete = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
       const remaining = Math.max(0, quoted - invoiced);
       const quoteUrl = `${window.location.origin}/quote.html?token=${project.quote_token}`;
+      const actualLabourTotal = centres.reduce((s, c) => s + Number(c.actual_labour_cost || 0), 0);
+      const quotedHoursTotal = centres.reduce((s, c) => s + Number(c.quoted_hours || 0), 0);
+      const actualHoursTotal = centres.reduce((s, c) => s + Number(c.actual_hours || 0), 0);
 
       const content = document.getElementById('content');
       const numberLine = [
-        project.job_number ? `J${project.job_number}` : null,
-        project.quote_number ? `Q${project.quote_number}` : null,
+        project.job_number ? `Job #${project.job_number}` : null,
+        project.quote_number ? `Quote #${project.quote_number}` : null,
       ].filter(Boolean).join(' &middot; ');
+
+      // Quoted-split donut (Materials/Labour/Profit) - only meaningful
+      // when there's a positive quote and cost hasn't blown past it;
+      // otherwise a slice would go negative, which conic-gradient can't
+      // render, so we fall back to a plain text line instead.
+      const donutOk = pricingVisible && quoted > 0 && profit >= 0;
+      let materialsPct = 0, labourPct = 0;
+      if (donutOk) {
+        materialsPct = Math.min(100, Math.round((materialCostTotal / quoted) * 1000) / 10);
+        labourPct = Math.min(100 - materialsPct, Math.round((labourCostTotal / quoted) * 1000) / 10);
+      }
+      const profitPct = donutOk ? Math.max(0, Math.round((100 - materialsPct - labourPct) * 10) / 10) : 0;
+
+      const overallBudgetPercent = labourCostTotal > 0 ? Math.round((actualLabourTotal / labourCostTotal) * 100) : 0;
+      const overallIsOver = overallBudgetPercent > 100;
+
       content.innerHTML = `
         <h1>${project.name}</h1>
         <p class="subtitle">${project.client_name} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
@@ -302,206 +323,276 @@
             <a class="btn secondary" href="/new-project.html?id=${project.id}">Edit quote</a>
             <button id="duplicate-btn" class="secondary">Duplicate as new project</button>
           ` : ''}
+          <div id="action-msg"></div>
         </div>
 
-        ${pricingVisible ? `
-          <div class="grid cols-4">
-            <div class="stat"><div class="label">Quoted total</div><div class="value">${money(quoted)}</div></div>
-            <div class="stat"><div class="label">Cost allocated</div><div class="value">${money(cost)}</div></div>
-            <div class="stat"><div class="label">Profit (quoted - cost)</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
-            <div class="stat"><div class="label">Left to invoice</div><div class="value">${money(remaining)}</div></div>
-          </div>
-
-          <div class="card" style="margin-top:20px;">
-            <h2>Progress</h2>
-            <div class="progress-track"><div class="progress-fill" style="width:${pctComplete}%"></div></div>
-            <p class="subtitle" style="margin:8px 0 0;">${pctComplete}% invoiced (${money(invoiced)} of ${money(quoted)})</p>
-          </div>
-        ` : ''}
-
-        ${(() => {
-          const contactRows = [
-            { label: 'Project manager', c: project.project_manager },
-            { label: 'Site supervisor', c: project.site_contact },
-            { label: 'Job contact', c: project.job_contact },
-            { label: 'Sales contact', c: project.sales_contact },
-            { label: 'Accounts contact', c: project.accounts_contact },
-          ].filter(r => r.c && r.c.name);
-          if (!contactRows.length) return '';
-          return `
-        <div class="card">
-          <h2>Who's running this job</h2>
-          <table>
-            <thead><tr><th>Role</th><th>Name</th><th>Phone</th><th>Email</th></tr></thead>
-            <tbody>
-              ${contactRows.map(r => `<tr><td>${r.label}</td><td>${r.c.name || ''}</td><td>${r.c.phone ? `<a class="link-quiet" href="tel:${r.c.phone}">${r.c.phone}</a>` : ''}</td><td>${r.c.email ? `<a class="link-quiet" href="mailto:${r.c.email}">${r.c.email}</a>` : ''}</td></tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-        })()}
-
-        ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) ? `
-        <div class="card">
-          <h2>Client quote link</h2>
-          <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
-          <input readonly value="${quoteUrl}" style="margin-bottom:10px;" onclick="this.select()" />
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <a class="btn secondary" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Quote: ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your quote here:\n' + quoteUrl + '\n\nThanks,\nThomson Energy' })}">Email quote to client</a>
-            <a class="btn secondary" target="_blank" href="${quoteUrl}${quoteUrl.includes('?') ? '&' : '?'}print=1">Download PDF</a>
-          </div>
-          ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * (project.deposit_percent / 100))}) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
-          ${project.proposal_template === 'solar' && project.pylon_link ? `<p class="subtitle" style="margin-top:6px;">Pylon design: <a class="link-quiet" href="${project.pylon_link}" target="_blank" rel="noopener">${project.pylon_link}</a></p>` : ''}
-        </div>
-        ` : ''}
-
-        ${['client_handover', 'awaiting_payment', 'archived'].includes(project.pipeline_stage) ? `
-        <div class="card">
-          <h2>Compliance - CCEW</h2>
-          <p class="subtitle" style="margin-bottom:10px;">Submitted through the Building and Energy Commission's own website - upload the resulting certificate here for the record, or state why one isn't needed.</p>
-          <div id="ccew-section"></div>
-        </div>
-        ` : ''}
-
-        <div class="card">
-          <h2>Stages</h2>
-          <table class="responsive-stack">
-            <thead>
-              <tr>
-                <th>#</th><th>Stage</th>
-                ${pricingVisible ? '<th class="num">Quoted</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">Invoiced</th>' : ''}
-              </tr>
-            </thead>
-            <tbody>
-              ${centres.map((c, i) => `
-                <tr>
-                  <td data-label="#">${costCentreNumber(project.job_number, i + 1)}</td>
-                  <td data-label="Stage">${c.name}</td>
-                  ${pricingVisible ? `
-                    <td class="num" data-label="Quoted">${moneyOrHidden(c.quoted_amount)}</td>
-                    <td class="num" data-label="Labour">${moneyOrHidden(c.labour_cost)}</td>
-                    <td class="num" data-label="Materials">${moneyOrHidden(c.material_cost)}</td>
-                    <td class="num" data-label="Invoiced">${moneyOrHidden(c.invoiced_amount)}</td>
-                  ` : ''}
-                </tr>`).join('')}
-            </tbody>
-          </table>
+        <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
+          <button class="settings-tab active" data-panel="summary">Summary</button>
+          <button class="settings-tab" data-panel="costcentres">Cost Centres</button>
+          <button class="settings-tab" data-panel="pos">Purchase Orders</button>
+          <button class="settings-tab" data-panel="details">Details</button>
         </div>
 
-        ${centres.map((c, i) => {
-          const quotedLabour = Number(c.labour_cost) || 0;
-          const actualLabour = Number(c.actual_labour_cost) || 0;
-          const quotedHours = Number(c.quoted_hours) || 0;
-          const actualHours = Number(c.actual_hours) || 0;
-          const budgetPercent = quotedLabour > 0 ? Math.round((actualLabour / quotedLabour) * 100) : 0;
-          const isOver = budgetPercent > 100;
+        <div class="job-tab-layout">
+          <div class="job-tab-main">
 
-          if (pricingVisible) {
-            const marginPercent = quotedLabour > 0 ? Math.round(((quotedLabour - actualLabour) / quotedLabour) * 100) : null;
-            return `
-            <div class="card">
-              <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - labour</h2>
-              <p class="subtitle" style="margin-bottom:14px;">Labour only - full gross profit needs materials cost too, once the materials database exists.</p>
-              <div class="grid cols-3">
-                <div>
-                  <p class="subtitle" style="margin:0 0 4px;">Quoted</p>
-                  <p style="font-size:20px; font-weight:600; margin:0;">${money(quotedLabour)}</p>
+            <div class="settings-panel active" id="panel-summary">
+              ${pricingVisible ? `
+                <div class="grid cols-4">
+                  <div class="stat"><div class="label">Quoted total</div><div class="value">${money(quoted)}</div></div>
+                  <div class="stat"><div class="label">Cost allocated</div><div class="value">${money(cost)}</div></div>
+                  <div class="stat"><div class="label">Profit (quoted - cost)</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
+                  <div class="stat"><div class="label">Left to invoice</div><div class="value">${money(remaining)}</div></div>
                 </div>
-                <div>
-                  <p class="subtitle" style="margin:0 0 4px;">Actual cost</p>
-                  <p style="font-size:20px; font-weight:600; margin:0;">${money(actualLabour)}</p>
+
+                <div class="card" style="margin-top:20px;">
+                  <h2>Progress</h2>
+                  <div class="progress-track"><div class="progress-fill" style="width:${pctComplete}%"></div></div>
+                  <p class="subtitle" style="margin:8px 0 0;">${pctComplete}% invoiced (${money(invoiced)} of ${money(quoted)})</p>
                 </div>
-                <div>
-                  <p class="subtitle" style="margin:0 0 4px;">Labour margin</p>
-                  <p style="font-size:20px; font-weight:600; margin:0; color:${marginPercent === null ? 'inherit' : marginPercent >= 0 ? 'var(--green)' : 'var(--red)'};">${marginPercent === null ? '-' : marginPercent + '%'}</p>
-                </div>
+              ` : ''}
+
+              <div class="card">
+                <h2>Needs attention</h2>
+                <div id="summary-tasks-line"><p class="subtitle">Loading tasks...</p></div>
+                <div id="summary-po-line" style="margin-top:6px;"><p class="subtitle">Loading purchase orders...</p></div>
               </div>
-            </div>`;
-          }
 
-          // Staff/Sales - hours only, budget-% bar (driven by real cost
-          // internally, never shown as a dollar figure) so two apprentices
-          // taking more hours at a lower rate can still correctly show as
-          // under budget, rather than falsely flagging on hours alone.
-          const barWidthPercent = Math.min(100, budgetPercent);
-          const trackScale = isOver ? budgetPercent : 100;
-          const markerPosition = isOver ? Math.round((100 / trackScale) * 100 * 10) / 10 : null;
-          return `
-          <div class="card">
-            <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - labour</h2>
-            <p class="subtitle" style="margin-bottom:14px;">${actualHours} hrs logged - ${quotedHours} hrs quoted</p>
-            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-              <span class="subtitle">Labour budget</span>
-              <span style="font-weight:600; color:${isOver ? 'var(--red)' : 'var(--green)'};">${budgetPercent}%</span>
-            </div>
-            <div style="position:relative; background:var(--surface-2); border-radius:999px; height:10px; overflow:${isOver ? 'visible' : 'hidden'};">
-              <div style="background:${isOver ? 'var(--red)' : 'var(--green)'}; width:${isOver ? '100%' : barWidthPercent + '%'}; height:100%; border-radius:999px;"></div>
-              ${isOver ? `<div style="position:absolute; left:${markerPosition}%; top:-4px; width:2px; height:18px; background:var(--text);"></div>` : ''}
-            </div>
-            ${isOver ? `<div style="position:relative; height:14px;"><span style="position:absolute; left:${markerPosition}%; transform:translateX(-50%); font-size:11px; color:var(--muted);">100%</span></div>` : ''}
-            <p class="subtitle" style="margin-top:8px; color:${isOver ? 'var(--red)' : 'var(--green)'};">${isOver ? (budgetPercent - 100) + '% over' : (100 - budgetPercent) + '% remaining'}</p>
-          </div>`;
-        }).join('')}
+              ${pricingVisible ? `
+                <div class="card">
+                  <h2>Quoted split</h2>
+                  ${donutOk ? `
+                    <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
+                      <div style="width:120px; height:120px; border-radius:50%; flex-shrink:0; background:conic-gradient(var(--accent) 0% ${materialsPct}%, var(--green) ${materialsPct}% ${materialsPct + labourPct}%, ${profit >= 0 ? 'var(--muted)' : 'var(--red)'} ${materialsPct + labourPct}% 100%);"></div>
+                      <div>
+                        <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent); margin-right:8px;"></span>Materials - ${money(materialCostTotal)} (${materialsPct}%)</p>
+                        <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--green); margin-right:8px;"></span>Labour - ${money(labourCostTotal)} (${labourPct}%)</p>
+                        <p style="margin:0;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--muted); margin-right:8px;"></span>Profit - ${money(profit)} (${profitPct}%)</p>
+                      </div>
+                    </div>
+                  ` : `<p class="subtitle">${quoted > 0 ? `Cost (${money(cost)}) has passed the quoted total (${money(quoted)}) - no split to show.` : 'Add quoted amounts to a stage to see the split.'}</p>`}
+                </div>
+              ` : ''}
 
-        ${pricingVisible ? centres.map((c, i) => {
-          const stageInvoices = (c.invoices || []).slice().sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
-          const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
-          const quotedAmt = Number(c.quoted_amount) || 0;
-          const remaining = Math.max(0, quotedAmt - claimedTotal);
-          const stcApplied = stageInvoices.reduce((s, inv) => s + Number(inv.stc_amount || 0), 0);
-          const stcRemaining = Math.max(0, Number(c.stc_total || 0) - stcApplied);
-          return `
-          <div class="card">
-            <h2>${costCentreNumber(project.job_number, i + 1)} ${c.name} - claims</h2>
-            ${stageInvoices.length ? `
-              <table class="responsive-stack">
-                <thead><tr><th>Invoice</th><th class="num">Amount</th><th>Sent</th><th></th></tr></thead>
-                <tbody>
-                  ${stageInvoices.map(inv => `
+              ${labourCostTotal > 0 || actualHoursTotal > 0 ? `
+                <div class="card">
+                  <h2 style="margin-bottom:2px;">Overall labour budget</h2>
+                  <p class="subtitle" style="margin-bottom:14px;">${actualHoursTotal} hrs logged - ${quotedHoursTotal} hrs quoted, across every stage.</p>
+                  <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                    <span class="subtitle">Labour budget</span>
+                    <span style="font-weight:600; color:${overallIsOver ? 'var(--red)' : 'var(--green)'};">${overallBudgetPercent}%</span>
+                  </div>
+                  <div style="background:var(--surface-2); border-radius:999px; height:10px; overflow:hidden;">
+                    <div style="background:${overallIsOver ? 'var(--red)' : 'var(--green)'}; width:${Math.min(100, overallBudgetPercent)}%; height:100%; border-radius:999px;"></div>
+                  </div>
+                  <p class="subtitle" style="margin-top:8px; color:${overallIsOver ? 'var(--red)' : 'var(--green)'};">${overallIsOver ? (overallBudgetPercent - 100) + '% over' : (100 - overallBudgetPercent) + '% remaining'}</p>
+                </div>
+              ` : ''}
+            </div>
+
+            <div class="settings-panel" id="panel-costcentres">
+              <div class="card">
+                <h2>Stages</h2>
+                <table class="responsive-stack">
+                  <thead>
                     <tr>
-                      <td data-label="Invoice">${inv.invoice_number}</td>
-                      <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
-                      <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
-                      <td data-label="">
-                        ${inv.paid_at ? `<span class="badge accepted">Paid</span>` : `<span class="badge sent" style="margin-right:6px;">Sent</span>`}
-                        <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:6px;">View</a>
-                        ${!inv.xero_invoice_id ? `<button class="secondary push-xero-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>` : `<span class="subtitle" style="font-size:11px;">In Xero</span>`}
-                      </td>
-                    </tr>`).join('')}
-                </tbody>
-              </table>
-            ` : `<p class="subtitle">No claims raised yet.</p>`}
+                      <th>#</th><th>Stage</th>
+                      ${pricingVisible ? '<th class="num">Quoted</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">Invoiced</th>' : ''}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${centres.map((c, i) => `
+                      <tr>
+                        <td data-label="#">${costCentreNumber(project.job_number, i + 1)}</td>
+                        <td data-label="Stage">${c.name}</td>
+                        ${pricingVisible ? `
+                          <td class="num" data-label="Quoted">${moneyOrHidden(c.quoted_amount)}</td>
+                          <td class="num" data-label="Labour">${moneyOrHidden(c.labour_cost)}</td>
+                          <td class="num" data-label="Materials">${moneyOrHidden(c.material_cost)}</td>
+                          <td class="num" data-label="Invoiced">${moneyOrHidden(c.invoiced_amount)}</td>
+                        ` : ''}
+                      </tr>`).join('')}
+                  </tbody>
+                </table>
+              </div>
 
-            <p class="subtitle" style="margin-top:14px;">Claimed to date: <strong style="color:var(--text);">${money(claimedTotal)}</strong> of ${money(quotedAmt)}. Remaining: <strong style="color:var(--text);">${money(remaining)}</strong>.</p>
-            ${c.stc_total > 0 ? `<p class="subtitle">STC entitlement: ${money(c.stc_total)} - applied so far: ${money(stcApplied)}, remaining: ${money(stcRemaining)}.</p>` : ''}
-            ${remaining > 0 ? `<button class="secondary create-invoice-btn" data-id="${c.id}" style="margin-top:6px;">Create &amp; send next claim</button>` : ''}
-          </div>`;
-        }).join('') : ''}
-        <div id="push-xero-msg"></div>
+              ${centres.map((c, i) => {
+                const quotedLabour = Number(c.labour_cost) || 0;
+                const actualLabour = Number(c.actual_labour_cost) || 0;
+                const quotedHours = Number(c.quoted_hours) || 0;
+                const actualHours = Number(c.actual_hours) || 0;
+                const budgetPercent = quotedLabour > 0 ? Math.round((actualLabour / quotedLabour) * 100) : 0;
+                const isOver = budgetPercent > 100;
 
-        <div class="card">
-          <h2>Purchase orders &amp; supplier invoices</h2>
-          <p class="subtitle" style="margin-bottom:14px;">Tracked separately so costs aren't double-counted.</p>
-          <div id="po-list"></div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:${centres.length ? '16px' : '0'};">
-            <button type="button" id="create-po-btn" class="secondary">+ Create purchase order</button>
-            ${project.job_number ? `<button type="button" id="suggest-po-btn" class="secondary">Generate PO suggestions from quote</button>` : ''}
+                if (pricingVisible) {
+                  const marginPercent = quotedLabour > 0 ? Math.round(((quotedLabour - actualLabour) / quotedLabour) * 100) : null;
+                  return `
+                  <div class="card">
+                    <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - labour</h2>
+                    <p class="subtitle" style="margin-bottom:14px;">Labour only - full gross profit needs materials cost too, once the materials database exists.</p>
+                    <div class="grid cols-3">
+                      <div>
+                        <p class="subtitle" style="margin:0 0 4px;">Quoted</p>
+                        <p style="font-size:20px; font-weight:600; margin:0;">${money(quotedLabour)}</p>
+                      </div>
+                      <div>
+                        <p class="subtitle" style="margin:0 0 4px;">Actual cost</p>
+                        <p style="font-size:20px; font-weight:600; margin:0;">${money(actualLabour)}</p>
+                      </div>
+                      <div>
+                        <p class="subtitle" style="margin:0 0 4px;">Labour margin</p>
+                        <p style="font-size:20px; font-weight:600; margin:0; color:${marginPercent === null ? 'inherit' : marginPercent >= 0 ? 'var(--green)' : 'var(--red)'};">${marginPercent === null ? '-' : marginPercent + '%'}</p>
+                      </div>
+                    </div>
+                  </div>`;
+                }
+
+                // Staff/Sales - hours only, budget-% bar (driven by real cost
+                // internally, never shown as a dollar figure) so two apprentices
+                // taking more hours at a lower rate can still correctly show as
+                // under budget, rather than falsely flagging on hours alone.
+                const barWidthPercent = Math.min(100, budgetPercent);
+                const trackScale = isOver ? budgetPercent : 100;
+                const markerPosition = isOver ? Math.round((100 / trackScale) * 100 * 10) / 10 : null;
+                return `
+                <div class="card">
+                  <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - labour</h2>
+                  <p class="subtitle" style="margin-bottom:14px;">${actualHours} hrs logged - ${quotedHours} hrs quoted</p>
+                  <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                    <span class="subtitle">Labour budget</span>
+                    <span style="font-weight:600; color:${isOver ? 'var(--red)' : 'var(--green)'};">${budgetPercent}%</span>
+                  </div>
+                  <div style="position:relative; background:var(--surface-2); border-radius:999px; height:10px; overflow:${isOver ? 'visible' : 'hidden'};">
+                    <div style="background:${isOver ? 'var(--red)' : 'var(--green)'}; width:${isOver ? '100%' : barWidthPercent + '%'}; height:100%; border-radius:999px;"></div>
+                    ${isOver ? `<div style="position:absolute; left:${markerPosition}%; top:-4px; width:2px; height:18px; background:var(--text);"></div>` : ''}
+                  </div>
+                  ${isOver ? `<div style="position:relative; height:14px;"><span style="position:absolute; left:${markerPosition}%; transform:translateX(-50%); font-size:11px; color:var(--muted);">100%</span></div>` : ''}
+                  <p class="subtitle" style="margin-top:8px; color:${isOver ? 'var(--red)' : 'var(--green)'};">${isOver ? (budgetPercent - 100) + '% over' : (100 - budgetPercent) + '% remaining'}</p>
+                </div>`;
+              }).join('')}
+
+              ${pricingVisible ? centres.map((c, i) => {
+                const stageInvoices = (c.invoices || []).slice().sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+                const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
+                const quotedAmt = Number(c.quoted_amount) || 0;
+                const remaining = Math.max(0, quotedAmt - claimedTotal);
+                const stcApplied = stageInvoices.reduce((s, inv) => s + Number(inv.stc_amount || 0), 0);
+                const stcRemaining = Math.max(0, Number(c.stc_total || 0) - stcApplied);
+                return `
+                <div class="card">
+                  <h2>${costCentreNumber(project.job_number, i + 1)} ${c.name} - claims</h2>
+                  ${stageInvoices.length ? `
+                    <table class="responsive-stack">
+                      <thead><tr><th>Invoice</th><th class="num">Amount</th><th>Sent</th><th></th></tr></thead>
+                      <tbody>
+                        ${stageInvoices.map(inv => `
+                          <tr>
+                            <td data-label="Invoice">${inv.invoice_number}</td>
+                            <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
+                            <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
+                            <td data-label="">
+                              ${inv.paid_at ? `<span class="badge accepted">Paid</span>` : `<span class="badge sent" style="margin-right:6px;">Sent</span>`}
+                              <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:6px;">View</a>
+                              ${!inv.xero_invoice_id ? `<button class="secondary push-xero-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>` : `<span class="subtitle" style="font-size:11px;">In Xero</span>`}
+                            </td>
+                          </tr>`).join('')}
+                      </tbody>
+                    </table>
+                  ` : `<p class="subtitle">No claims raised yet.</p>`}
+
+                  <p class="subtitle" style="margin-top:14px;">Claimed to date: <strong style="color:var(--text);">${money(claimedTotal)}</strong> of ${money(quotedAmt)}. Remaining: <strong style="color:var(--text);">${money(remaining)}</strong>.</p>
+                  ${c.stc_total > 0 ? `<p class="subtitle">STC entitlement: ${money(c.stc_total)} - applied so far: ${money(stcApplied)}, remaining: ${money(stcRemaining)}.</p>` : ''}
+                  ${remaining > 0 ? `<button class="secondary create-invoice-btn" data-id="${c.id}" style="margin-top:6px;">Create &amp; send next claim</button>` : ''}
+                </div>`;
+              }).join('') : ''}
+              <div id="push-xero-msg"></div>
+            </div>
+
+            <div class="settings-panel" id="panel-pos">
+              <div class="card">
+                <h2>Purchase orders &amp; supplier invoices</h2>
+                <p class="subtitle" style="margin-bottom:14px;">Tracked separately so costs aren't double-counted.</p>
+                <div id="po-list"></div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:${centres.length ? '16px' : '0'};">
+                  <button type="button" id="create-po-btn" class="secondary">+ Create purchase order</button>
+                  ${project.job_number ? `<button type="button" id="suggest-po-btn" class="secondary">Generate PO suggestions from quote</button>` : ''}
+                </div>
+                <div id="po-msg"></div>
+              </div>
+            </div>
+
+            <div class="settings-panel" id="panel-details">
+              ${(() => {
+                const contactRows = [
+                  { label: 'Project manager', c: project.project_manager },
+                  { label: 'Site supervisor', c: project.site_contact },
+                  { label: 'Job contact', c: project.job_contact },
+                  { label: 'Sales contact', c: project.sales_contact },
+                  { label: 'Accounts contact', c: project.accounts_contact },
+                ].filter(r => r.c && r.c.name);
+                if (!contactRows.length) return '';
+                return `
+              <div class="card">
+                <h2>Who's running this job</h2>
+                <table>
+                  <thead><tr><th>Role</th><th>Name</th><th>Phone</th><th>Email</th></tr></thead>
+                  <tbody>
+                    ${contactRows.map(r => `<tr><td>${r.label}</td><td>${r.c.name || ''}</td><td>${r.c.phone ? `<a class="link-quiet" href="tel:${r.c.phone}">${r.c.phone}</a>` : ''}</td><td>${r.c.email ? `<a class="link-quiet" href="mailto:${r.c.email}">${r.c.email}</a>` : ''}</td></tr>`).join('')}
+                  </tbody>
+                </table>
+              </div>`;
+              })()}
+
+              ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) ? `
+              <div class="card">
+                <h2>Client quote link</h2>
+                <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
+                <input readonly value="${quoteUrl}" style="margin-bottom:10px;" onclick="this.select()" />
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  <a class="btn secondary" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Quote: ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your quote here:\n' + quoteUrl + '\n\nThanks,\nThomson Energy' })}">Email quote to client</a>
+                  <a class="btn secondary" target="_blank" href="${quoteUrl}${quoteUrl.includes('?') ? '&' : '?'}print=1">Download PDF</a>
+                </div>
+                ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * (project.deposit_percent / 100))}) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
+                ${project.proposal_template === 'solar' && project.pylon_link ? `<p class="subtitle" style="margin-top:6px;">Pylon design: <a class="link-quiet" href="${project.pylon_link}" target="_blank" rel="noopener">${project.pylon_link}</a></p>` : ''}
+              </div>
+              ` : ''}
+
+              ${['client_handover', 'awaiting_payment', 'archived'].includes(project.pipeline_stage) ? `
+              <div class="card">
+                <h2>Compliance - CCEW</h2>
+                <p class="subtitle" style="margin-bottom:10px;">Submitted through the Building and Energy Commission's own website - upload the resulting certificate here for the record, or state why one isn't needed.</p>
+                <div id="ccew-section"></div>
+              </div>
+              ` : ''}
+
+              <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                  <h2 style="margin:0;">Tasks</h2>
+                  <button type="button" id="add-task-btn" class="secondary">+ Add task</button>
+                </div>
+                <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
+              </div>
+            </div>
+
           </div>
-          <div id="po-msg"></div>
-        </div>
 
-        <div class="card">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-            <h2 style="margin:0;">Tasks</h2>
-            <button type="button" id="add-task-btn" class="secondary">+ Add task</button>
+          <div class="job-activity-sidebar">
+            <div class="card">
+              <h2>Activity log</h2>
+              <div id="job-activity-log"><p class="subtitle">Loading...</p></div>
+            </div>
           </div>
-          <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
-        </div>
-
-        <div class="card">
-          <h2>Activity log</h2>
-          <div id="job-activity-log"><p class="subtitle">Loading...</p></div>
         </div>
       `;
+
+      document.querySelectorAll('#job-tabs .settings-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#job-tabs .settings-tab').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.job-tab-main .settings-panel').forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+        });
+      });
 
       loadPurchaseOrders(project.id, centres);
       loadJobTasks(project.id);
@@ -606,12 +697,22 @@
 
     async function loadJobTasks(projectId) {
       const listEl = document.getElementById('job-tasks-list');
+      const summaryEl = document.getElementById('summary-tasks-line');
       const [{ data: tasks, error }, { data: staff }] = await Promise.all([
         supabaseClient.from('job_tasks').select('*').eq('project_id', projectId)
           .order('completed', { ascending: true }).order('required_before_scheduling', { ascending: false }),
         supabaseClient.from('profiles').select('id, full_name'),
       ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      if (summaryEl) {
+        const outstanding = (tasks || []).filter(t => !t.completed);
+        const requiredOutstanding = outstanding.filter(t => t.required_before_scheduling);
+        summaryEl.innerHTML = !outstanding.length
+          ? `<p class="subtitle">No open tasks.</p>`
+          : `<p class="subtitle">${outstanding.length} task${outstanding.length === 1 ? '' : 's'} outstanding${requiredOutstanding.length ? `, <span style="color:var(--red);">${requiredOutstanding.length} required before scheduling</span>` : ''}.</p>`;
+      }
+
       if (!tasks.length) { listEl.innerHTML = `<p class="subtitle">No tasks yet.</p>`; return; }
 
       const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'Someone';
@@ -726,13 +827,21 @@
       if (suggestBtn) suggestBtn.onclick = () => openSuggestPoPanel(projectId, centres);
 
       const listEl = document.getElementById('po-list');
+      const summaryEl = document.getElementById('summary-po-line');
       if (error) {
         listEl.innerHTML = `<div class="error-box">${error.message}</div>`;
+        if (summaryEl) summaryEl.innerHTML = `<div class="error-box">${error.message}</div>`;
         return;
       }
       if (!pos.length) {
         listEl.innerHTML = `<p class="subtitle">No purchase orders logged yet.</p>`;
+        if (summaryEl) summaryEl.innerHTML = `<p class="subtitle">No purchase orders yet.</p>`;
         return;
+      }
+
+      if (summaryEl) {
+        const receivedCount = pos.filter(po => po.received).length;
+        summaryEl.innerHTML = `<p class="subtitle">${receivedCount} of ${pos.length} purchase order${pos.length === 1 ? '' : 's'} fully received.</p>`;
       }
 
       const stageName = (id) => (centres.find(c => c.id === id) || {}).name || 'Whole project';

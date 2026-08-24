@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=8" />
+<link rel="stylesheet" href="/css/style.css?v=9" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -81,38 +81,127 @@
         return;
       }
 
-      list.innerHTML = projects.map(p => {
+      const rows = projects.map((p, i) => {
         const stageCount = p.cost_centres.length;
         const stageLabel = `${stageCount} stage${stageCount === 1 ? '' : 's'}`;
         const nameDisplay = `${p.quote_number ? '#' + p.quote_number + ' - ' : ''}${p.name}`;
-        if (!pricingVisible) {
+        const isLast = i === projects.length - 1;
+        const rowInner = !pricingVisible ? `
+              <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
+                <div>
+                  <div class="name">${nameDisplay}</div>
+                  <div class="meta">${p.client_name} &middot; ${stageLabel}</div>
+                </div>
+                <div style="text-align:right; min-width:160px;">
+                  <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
+                </div>
+              </a>` : (() => {
+          const quoted = p.cost_centres.reduce((s, c) => s + Number(c.quoted_amount), 0);
+          const invoiced = p.cost_centres.reduce((s, c) => s + Number(c.invoiced_amount), 0);
+          const pctInvoiced = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
           return `
-            <a class="project-list-item" href="/project.html?id=${p.id}">
-              <div>
-                <div class="name">${nameDisplay}</div>
-                <div class="meta">${p.client_name} &middot; ${stageLabel}</div>
-              </div>
-              <div style="text-align:right; min-width:160px;">
-                <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
-              </div>
-            </a>`;
-        }
-        const quoted = p.cost_centres.reduce((s, c) => s + Number(c.quoted_amount), 0);
-        const invoiced = p.cost_centres.reduce((s, c) => s + Number(c.invoiced_amount), 0);
-        const pctInvoiced = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
+              <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
+                <div>
+                  <div class="name">${nameDisplay}</div>
+                  <div class="meta">${p.client_name} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
+                </div>
+                <div style="text-align:right; min-width:160px;">
+                  <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
+                  <div class="meta" style="margin-top:6px;">${pctInvoiced}% invoiced</div>
+                </div>
+              </a>`;
+        })();
+
+        if (!pricingVisible) return rowInner;
         return `
-          <a class="project-list-item" href="/project.html?id=${p.id}">
-            <div>
-              <div class="name">${nameDisplay}</div>
-              <div class="meta">${p.client_name} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
-            </div>
-            <div style="text-align:right; min-width:160px;">
-              <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
-              <div class="meta" style="margin-top:6px;">${pctInvoiced}% invoiced</div>
-            </div>
-          </a>`;
+          <div style="display:flex; align-items:center; gap:10px; ${isLast ? '' : 'border-bottom:1px solid var(--border);'}">
+            <input type="checkbox" class="quote-select" data-id="${p.id}" style="width:auto; flex-shrink:0;" />
+            <div style="flex:1; min-width:0;">${rowInner}</div>
+          </div>`;
       }).join('');
+
+      list.innerHTML = (pricingVisible ? `
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <label style="display:flex; align-items:center; gap:8px; margin:0;">
+            <input type="checkbox" id="select-all-quotes" style="width:auto;" /> Select all
+          </label>
+          <button type="button" id="bulk-delete-btn" class="secondary" style="display:none;">Delete selected</button>
+        </div>
+        <div id="bulk-delete-msg"></div>
+      ` : '') + rows;
+
+      if (pricingVisible) wireBulkDelete(projects);
     })();
+
+    function wireBulkDelete(projects) {
+      const selectAll = document.getElementById('select-all-quotes');
+      const deleteBtn = document.getElementById('bulk-delete-btn');
+      const msg = document.getElementById('bulk-delete-msg');
+
+      function selectedCheckboxes() { return [...document.querySelectorAll('.quote-select:checked')]; }
+      function refreshDeleteBtn() {
+        const n = selectedCheckboxes().length;
+        deleteBtn.style.display = n ? 'inline-flex' : 'none';
+        deleteBtn.textContent = `Delete selected (${n})`;
+      }
+
+      selectAll.addEventListener('change', () => {
+        document.querySelectorAll('.quote-select').forEach(cb => { cb.checked = selectAll.checked; });
+        refreshDeleteBtn();
+      });
+      document.querySelectorAll('.quote-select').forEach(cb => {
+        cb.addEventListener('change', () => {
+          if (!cb.checked) selectAll.checked = false;
+          refreshDeleteBtn();
+        });
+      });
+
+      deleteBtn.addEventListener('click', async () => {
+        const ids = selectedCheckboxes().map(cb => cb.dataset.id);
+        if (!ids.length) return;
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Checking...';
+        msg.innerHTML = '';
+
+        const blocked = [];
+        const clear = [];
+        for (const id of ids) {
+          const project = projects.find(p => p.id === id);
+          const reasons = await checkProjectHasActivity(project);
+          if (reasons.length) blocked.push({ project, reasons });
+          else clear.push(project);
+        }
+
+        const parts = [];
+        if (blocked.length) {
+          parts.push(`<div class="error-box">Not deleted, has real activity against it:<ul style="margin:6px 0 0 18px;">${blocked.map(b => `<li>${b.project.name} - ${b.reasons.join(', ')}</li>`).join('')}</ul></div>`);
+        }
+        if (!clear.length) {
+          msg.innerHTML = parts.join('');
+          deleteBtn.disabled = false;
+          refreshDeleteBtn();
+          return;
+        }
+        if (!confirm(`Delete ${clear.length} quote${clear.length === 1 ? '' : 's'} permanently? This can't be undone.\n\n${clear.map(p => p.name).join('\n')}`)) {
+          deleteBtn.disabled = false;
+          refreshDeleteBtn();
+          return;
+        }
+
+        deleteBtn.textContent = 'Deleting...';
+        try {
+          for (const p of clear) await deleteProject(p.id);
+          parts.push(`<div class="success-box">Deleted ${clear.length} quote${clear.length === 1 ? '' : 's'}.</div>`);
+          msg.innerHTML = parts.join('');
+          location.reload();
+        } catch (err) {
+          parts.push(`<div class="error-box">${err.message}</div>`);
+          msg.innerHTML = parts.join('');
+          deleteBtn.disabled = false;
+          refreshDeleteBtn();
+        }
+      });
+    }
   </script>
 </body>
 </html>
