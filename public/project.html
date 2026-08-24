@@ -1121,7 +1121,16 @@
     function render(project, pricingVisible) {
       const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const quoted = centres.reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
-      const labourCostTotal = centres.reduce((s, c) => s + Number(c.estimated_labour_cost || 0), 0);
+      // estimated_labour_cost is a SELL total (hours x the rate tier's sell
+      // rate - there's no separate cost rate in this app), not a cost. For
+      // the cost/profit breakdown below we need an actual cost, so it's
+      // backed out using the same cost->sell relationship materials use
+      // (sell = cost x (1 + markup%)), per stage since markup% varies.
+      const labourSellTotal = centres.reduce((s, c) => s + Number(c.estimated_labour_cost || 0), 0);
+      const labourCostTotal = centres.reduce((s, c) => {
+        const markupFactor = 1 + (Number(c.markup_percent) || 45) / 100;
+        return s + (Number(c.estimated_labour_cost) || 0) / markupFactor;
+      }, 0);
       const materialCostTotal = centres.reduce((s, c) => s + Number(c.estimated_material_cost || 0), 0);
       const cost = labourCostTotal + materialCostTotal;
       const invoiced = centres.reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
@@ -1151,7 +1160,7 @@
       }
       const profitPct = donutOk ? Math.max(0, Math.round((100 - materialsPct - labourPct) * 10) / 10) : 0;
 
-      const overallBudgetPercent = labourCostTotal > 0 ? Math.round((actualLabourTotal / labourCostTotal) * 100) : 0;
+      const overallBudgetPercent = labourSellTotal > 0 ? Math.round((actualLabourTotal / labourSellTotal) * 100) : 0;
       const overallIsOver = overallBudgetPercent > 100;
 
       content.innerHTML = `
@@ -1218,7 +1227,7 @@
                 </div>
               ` : ''}
 
-              ${labourCostTotal > 0 || actualHoursTotal > 0 ? `
+              ${labourSellTotal > 0 || actualHoursTotal > 0 ? `
                 <div class="card">
                   <h2 style="margin-bottom:2px;">Overall labour budget</h2>
                   <p class="subtitle" style="margin-bottom:14px;">${actualHoursTotal} hrs logged - ${quotedHoursTotal} hrs quoted, across every stage.</p>
