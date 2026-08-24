@@ -41,7 +41,7 @@
       const centreCols = await costCentreColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols}, invoices(*), cost_centre_line_items(id, item_type, description, quantity, unit_cost)),
+        .select(`*, cost_centres(${centreCols}, invoices(*), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order), cost_centre_photo_groups(*)),
           project_manager:client_contacts!project_manager_contact_id(name, phone, email),
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
@@ -69,6 +69,828 @@
       }
 
       return project;
+    }
+
+    // ============ Full quote editor (ported from new-project.html) ============
+    // Lets a quote (no job_number yet) be edited entirely on this page instead
+    // of navigating to new-project.html's separate scrolling form. Deliberately
+    // NOT offered once a job_number exists - the save path below deletes and
+    // re-inserts every cost centre, which would orphan any real invoices, POs,
+    // or logged time already attached once a quote's been approved. That's the
+    // same "block on real activity" principle as the bulk-delete feature.
+
+    let editMode = false;
+    let RATE_TIERS = [];
+    let companySettings = {};
+    let selectedClientId = null;
+    let referencePhotos = [];
+    let sowDocs = [];
+    let assignedContactIds = {};
+    let currentTemplate = 'new_build';
+    let _prebuildsCache = null;
+
+    const TEMPLATE_INFO = {
+      new_build: {
+        note: 'Multi-stage project with a deposit and full scope of works.',
+        photoCategory: 'electrical', singleStage: false, showDeposit: true, showPylon: false,
+      },
+      solar: {
+        note: 'Pylon design link is prominent on the cover page. Defaults to a single stage - add more if needed.',
+        photoCategory: 'solar', singleStage: false, showDeposit: true, showPylon: true,
+      },
+      quick_estimate: {
+        note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page - invoiced from actual hours and materials, not this figure.',
+        photoCategory: 'general', singleStage: true, showDeposit: false, showPylon: false,
+      },
+      time_and_materials: {
+        note: 'No quote or approval step - saving sends the job straight to booked, invoiced from actuals when done. No client-facing proposal is created.',
+        photoCategory: 'general', singleStage: true, showDeposit: false, showPylon: false,
+      },
+    };
+
+    function renumberEditStages() {
+      document.querySelectorAll('#cc-rows .cc-row').forEach((row, i) => {
+        const label = row.querySelector('.cc-number');
+        if (label) label.textContent = `(stage ${i + 1})`;
+      });
+    }
+
+    function lineItemTotal(li) {
+      return (parseFloat(li.querySelector('.li-qty').value) || 0) * (parseFloat(li.querySelector('.li-cost').value) || 0);
+    }
+
+    function addLineItem(stageRow, { description = '', item_type = 'material', quantity = 1, unit_cost = '', rate_tier_id = '' } = {}) {
+      const li = document.createElement('div');
+      li.className = 'li-row';
+      li.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
+      const isLabour = item_type === 'labour';
+      li.innerHTML = `
+        <input class="li-desc" placeholder="e.g. Solar panels" value="${description}" style="font-size:13px;" />
+        <select class="li-type" style="font-size:13px;">
+          <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
+          <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
+        </select>
+        <input class="li-qty" type="number" step="0.01" value="${quantity}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="font-size:13px;" />
+        <select class="li-tier" style="font-size:13px; display:${isLabour ? 'block' : 'none'};">
+          <option value="">-- Select tier --</option>
+          ${RATE_TIERS.map(t => `<option value="${t.id}" data-rate="${t.sell_rate}" ${rate_tier_id === t.id ? 'selected' : ''}>${t.name} ($${t.sell_rate}/hr)</option>`).join('')}
+        </select>
+        <input class="li-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px; display:${isLabour ? 'none' : 'block'};" />
+        <div class="li-total" style="font-size:13px; font-weight:600;">$0.00</div>
+        <button type="button" class="secondary li-remove" style="padding:6px 10px; font-size:12px;">x</button>
+      `;
+      stageRow.querySelector('.li-rows').appendChild(li);
+      const recalc = () => updateStageTotals(stageRow);
+
+      li.querySelector('.li-qty').addEventListener('input', recalc);
+      li.querySelector('.li-cost').addEventListener('input', recalc);
+      li.querySelector('.li-tier').addEventListener('change', (e) => {
+        const selected = e.target.selectedOptions[0];
+        li.querySelector('.li-cost').value = selected?.dataset.rate || '';
+        recalc();
+      });
+      li.querySelector('.li-type').addEventListener('change', (e) => {
+        const nowLabour = e.target.value === 'labour';
+        li.querySelector('.li-qty').placeholder = nowLabour ? 'Hours' : 'Qty';
+        li.querySelector('.li-tier').style.display = nowLabour ? 'block' : 'none';
+        li.querySelector('.li-cost').style.display = nowLabour ? 'none' : 'block';
+        if (nowLabour) {
+          const selected = li.querySelector('.li-tier').selectedOptions[0];
+          li.querySelector('.li-cost').value = selected?.dataset.rate || '';
+        }
+        recalc();
+      });
+      li.querySelector('.li-remove').addEventListener('click', () => { li.remove(); recalc(); });
+      updateStageTotals(stageRow);
+    }
+
+    function updateStageTotals(stageRow) {
+      const items = [...stageRow.querySelectorAll('.li-row')];
+      let labour = 0, material = 0;
+      items.forEach(li => {
+        const total = lineItemTotal(li);
+        li.querySelector('.li-total').textContent = money(total);
+        if (li.querySelector('.li-type').value === 'labour') labour += total; else material += total;
+      });
+      const markup = parseFloat(stageRow.querySelector('.cc-markup').value) || 0;
+      const salePrice = (labour + material) * (1 + markup / 100);
+      stageRow.querySelector('.cc-labour-total').textContent = money(labour);
+      stageRow.querySelector('.cc-material-total').textContent = money(material);
+      stageRow.querySelector('.cc-sale-price').textContent = money(salePrice);
+      stageRow.dataset.labourTotal = labour.toFixed(2);
+      stageRow.dataset.materialTotal = material.toFixed(2);
+      stageRow.dataset.salePrice = salePrice.toFixed(2);
+      updateEditTotal();
+    }
+
+    async function getPrebuilds() {
+      if (_prebuildsCache) return _prebuildsCache;
+      const { data, error } = await supabaseClient.from('prebuilds').select('*, prebuild_components(*)').order('category').order('name');
+      _prebuildsCache = error ? [] : data;
+      return _prebuildsCache;
+    }
+
+    async function openPrebuildPicker(stageRow) {
+      const prebuilds = await getPrebuilds();
+      if (!prebuilds.length) { alert('No prebuilds set up yet. Add some under Settings > Prebuild Categories.'); return; }
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:480px; width:90%; max-height:80vh; overflow-y:auto;">
+          <h2>Add a prebuild</h2>
+          <select id="prebuild-select" style="margin-bottom:12px;">
+            ${prebuilds.map(p => `<option value="${p.id}">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''} - ${p.name}</option>`).join('')}
+          </select>
+          <label style="margin-top:0">Quantity</label>
+          <input id="prebuild-qty" type="number" value="1" min="1" step="1" />
+          <div style="margin-top:16px; text-align:right;">
+            <button type="button" class="secondary" id="prebuild-cancel">Cancel</button>
+            <button type="button" id="prebuild-confirm">Add to stage</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#prebuild-cancel').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      overlay.querySelector('#prebuild-confirm').addEventListener('click', () => {
+        const prebuild = prebuilds.find(p => p.id === overlay.querySelector('#prebuild-select').value);
+        const qty = parseFloat(overlay.querySelector('#prebuild-qty').value) || 1;
+        (prebuild.prebuild_components || []).forEach(comp => {
+          addLineItem(stageRow, {
+            description: `${prebuild.name} - ${comp.description}`,
+            item_type: comp.item_type,
+            quantity: (parseFloat(comp.quantity) || 0) * qty,
+            unit_cost: comp.unit_cost,
+          });
+        });
+        overlay.remove();
+      });
+    }
+
+    function addRow({ name = '', description = '', markup_percent = null, stc_total = 0, lineItems = [], photoGroups = [] } = {}) {
+      const rowsEl = document.getElementById('cc-rows');
+      const defaultMarkup = markup_percent !== null ? markup_percent : (parseFloat(document.getElementById('default-markup').value) || 45);
+      const div = document.createElement('div');
+      div.className = 'cc-row';
+      div.dataset.name = name;
+      div.innerHTML = `
+        <div class="cc-row-top">
+          <div>
+            <label style="margin-top:0">Stage name <span class="cc-number" style="color:var(--muted); font-weight:400;"></span></label>
+            <input class="cc-name" placeholder="e.g. Rough In" value="${name}" />
+          </div>
+          <div>
+            <label style="margin-top:0">Description</label>
+            <input class="cc-desc" placeholder="What's covered in this stage" value="${description}" />
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <label style="margin-top:0">Line items</label>
+          <div class="li-rows"></div>
+          <button type="button" class="secondary li-add" style="font-size:12px; padding:6px 12px;">+ Add line item</button>
+          <button type="button" class="secondary prebuild-add" style="font-size:12px; padding:6px 12px;">+ Add prebuild</button>
+        </div>
+        <div style="margin-top:16px;">
+          <label style="margin-top:0">Photos for this stage</label>
+          <div class="photo-groups"></div>
+          <button type="button" class="secondary pg-add" style="font-size:12px; padding:6px 12px;">+ Add photo group</button>
+        </div>
+        <div class="cc-row-costs" style="grid-template-columns: 1fr 1fr 0.7fr 1fr;">
+          <div><label style="margin-top:0">Labour total</label><div class="readout cc-labour-total">$0.00</div></div>
+          <div><label style="margin-top:0">Materials total</label><div class="readout cc-material-total">$0.00</div></div>
+          <div><label style="margin-top:0">Markup %</label><input class="cc-markup" type="number" step="1" value="${defaultMarkup}" /></div>
+          <div><label style="margin-top:0">Sale price</label><div class="readout cc-sale-price">$0.00</div></div>
+        </div>
+        <div class="grid cols-3" style="margin-top:10px;">
+          <div><label style="margin-top:0">STC entitlement (if any)</label><input class="cc-stc-total" type="number" step="0.01" value="${stc_total}" placeholder="0.00" /></div>
+        </div>
+        <div style="text-align:right; margin-top:10px;">
+          <button type="button" class="secondary remove-row">Remove stage</button>
+        </div>`;
+      rowsEl.appendChild(div);
+      renumberEditStages();
+
+      div.querySelector('.cc-markup').addEventListener('input', () => updateStageTotals(div));
+      div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); });
+      div.querySelector('.li-add').addEventListener('click', () => addLineItem(div));
+      div.querySelector('.prebuild-add').addEventListener('click', () => openPrebuildPicker(div));
+      div.querySelector('.pg-add').addEventListener('click', () => addPhotoGroup(div));
+      div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateEditTotal(); renumberEditStages(); });
+      if (TEMPLATE_INFO[currentTemplate].singleStage) div.querySelector('.remove-row').style.display = 'none';
+
+      if (lineItems.length) lineItems.forEach(li => addLineItem(div, li));
+      else addLineItem(div);
+
+      photoGroups.forEach(pg => addPhotoGroup(div, pg));
+    }
+
+    function addPhotoGroup(stageRow, { description = '', photos = [] } = {}) {
+      const pg = document.createElement('div');
+      pg.className = 'pg-row';
+      pg.style.cssText = 'border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px;';
+      pg.dataset.photos = JSON.stringify(photos);
+      pg.innerHTML = `
+        <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${description}" style="margin-bottom:8px;" />
+        <div class="pg-thumbs" style="margin-bottom:8px;"></div>
+        <input type="file" class="pg-file" accept="image/*" multiple style="font-size:12px;" />
+        <button type="button" class="secondary pg-upload" style="font-size:12px; padding:6px 12px; margin-left:6px;">Upload</button>
+        <button type="button" class="secondary pg-remove" style="font-size:12px; padding:6px 12px;">Remove group</button>
+      `;
+      stageRow.querySelector('.photo-groups').appendChild(pg);
+
+      const renderThumbs = () => {
+        const arr = JSON.parse(pg.dataset.photos);
+        renderPhotoThumbs(pg.querySelector('.pg-thumbs'), arr, () => { pg.dataset.photos = JSON.stringify(arr); });
+      };
+      renderThumbs();
+
+      pg.querySelector('.pg-upload').addEventListener('click', async () => {
+        const fileInput = pg.querySelector('.pg-file');
+        if (!fileInput.files.length) return;
+        const urls = await uploadPhotos(fileInput.files, 'stage-photos');
+        const arr = JSON.parse(pg.dataset.photos);
+        arr.push(...urls);
+        pg.dataset.photos = JSON.stringify(arr);
+        fileInput.value = '';
+        renderThumbs();
+      });
+      pg.querySelector('.pg-remove').addEventListener('click', () => pg.remove());
+    }
+
+    function updateEditTotal() {
+      const prices = [...document.querySelectorAll('#cc-rows .cc-row')].map(r => parseFloat(r.dataset.salePrice) || 0);
+      const el = document.getElementById('total-display');
+      if (el) el.textContent = money(prices.reduce((a, b) => a + b, 0));
+    }
+
+    function applyEditTemplate(template) {
+      currentTemplate = template;
+      document.querySelectorAll('.template-option').forEach(btn => btn.classList.toggle('active', btn.dataset.template === template));
+      const info = TEMPLATE_INFO[template];
+      document.getElementById('template-note').textContent = info.note;
+      document.getElementById('add-row').style.display = info.singleStage ? 'none' : 'inline-flex';
+      document.querySelectorAll('.remove-row').forEach(btn => { btn.style.display = info.singleStage ? 'none' : 'inline-flex'; });
+      if (info.singleStage) [...document.querySelectorAll('.cc-row')].slice(1).forEach(row => row.remove());
+
+      const depositCard = document.getElementById('deposit-card');
+      if (depositCard) depositCard.style.display = info.showDeposit ? 'block' : 'none';
+      if (!info.showDeposit) document.getElementById('p-deposit').value = 0;
+
+      const disclaimerCard = document.getElementById('estimate-disclaimer-card');
+      const disclaimerField = document.getElementById('p-estimate-disclaimer');
+      disclaimerCard.style.display = template === 'quick_estimate' ? 'block' : 'none';
+      if (template === 'quick_estimate' && !disclaimerField.value.trim()) {
+        disclaimerField.value = companySettings.default_estimate_disclaimer
+          || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.';
+      }
+
+      document.getElementById('pylon-card').style.display = info.showPylon ? 'block' : 'none';
+      if (!info.showPylon) { document.getElementById('p-pylon-link').value = ''; document.getElementById('p-pylon-id').value = ''; }
+    }
+
+    function setSelectedEditClient(client) {
+      selectedClientId = client ? client.id : null;
+      const note = document.getElementById('selected-client-note');
+      if (client) {
+        note.innerHTML = `Using existing client: <strong>${client.name}</strong>. Edits below only apply to this quote unless you also update it on the <a class="link-quiet" href="/clients.html" target="_blank">Clients page</a>.`;
+        document.getElementById('p-client').value = client.name || '';
+        document.getElementById('p-email').value = client.email || '';
+        document.getElementById('p-phone').value = client.phone || '';
+        document.getElementById('p-address').value = client.address || '';
+        document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
+      } else {
+        note.textContent = 'No client selected - search above, or just fill in the fields below to create one when you save.';
+      }
+      document.getElementById('client-search-results').style.display = 'none';
+    }
+
+    const JOB_CONTACT_TYPES = [
+      { key: 'project_manager_contact_id', type: 'project_manager', label: 'Project manager' },
+      { key: 'site_contact_id', type: 'site', label: 'Site supervisor' },
+      { key: 'job_contact_id', type: 'job', label: 'Job contact' },
+      { key: 'sales_contact_id', type: 'sales', label: 'Sales contact' },
+      { key: 'accounts_contact_id', type: 'accounts', label: 'Accounts contact' },
+    ];
+
+    async function loadEditJobContactPickers(clientId, preselected = {}) {
+      const card = document.getElementById('job-contacts-card');
+      const container = document.getElementById('job-contacts-selects');
+      assignedContactIds = { ...preselected };
+      if (!clientId) { card.style.display = 'none'; return; }
+
+      const { data: contacts, error } = await supabaseClient.from('client_contacts').select('*').eq('client_id', clientId);
+      if (error || !contacts || !contacts.length) { card.style.display = 'none'; return; }
+
+      card.style.display = 'block';
+      container.innerHTML = JOB_CONTACT_TYPES.map(t => {
+        const options = contacts.filter(c => c.contact_type === t.type);
+        if (!options.length) return '';
+        return `
+          <div>
+            <label style="margin-top:0">${t.label}</label>
+            <select class="job-contact-select" data-key="${t.key}">
+              <option value="">-- Not assigned --</option>
+              ${options.map(c => `<option value="${c.id}" ${preselected[t.key] === c.id ? 'selected' : ''}>${c.name || c.phone || c.email}</option>`).join('')}
+            </select>
+          </div>`;
+      }).join('');
+
+      if (!container.innerHTML.trim()) { card.style.display = 'none'; return; }
+      container.querySelectorAll('.job-contact-select').forEach(sel => {
+        sel.addEventListener('change', () => { assignedContactIds[sel.dataset.key] = sel.value || null; });
+        assignedContactIds[sel.dataset.key] = sel.value || null;
+      });
+    }
+
+    function renderEditSowDocList() {
+      const el = document.getElementById('sow-doc-list');
+      if (!sowDocs.length) { el.innerHTML = ''; return; }
+      el.innerHTML = sowDocs.map((d, i) => `
+        <div style="display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:6px 10px; margin:0 8px 8px 0; font-size:12px;">
+          ${d.name}
+          <button type="button" data-i="${i}" class="sow-doc-remove" style="padding:2px 6px; font-size:11px;">x</button>
+        </div>`).join('');
+      el.querySelectorAll('.sow-doc-remove').forEach(btn => {
+        btn.addEventListener('click', () => { sowDocs.splice(parseInt(btn.dataset.i), 1); renderEditSowDocList(); });
+      });
+    }
+
+    function loadEditAddressAutocomplete(apiKey) {
+      if (!apiKey) return;
+      if (window.google && window.google.maps) { initEditAddressAutocomplete(); return; }
+      window._initEditAddressAutocomplete = initEditAddressAutocomplete;
+      if (document.getElementById('google-places-script')) return;
+      const script = document.createElement('script');
+      script.id = 'google-places-script';
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=_initEditAddressAutocomplete`;
+      script.async = true;
+      document.head.appendChild(script);
+    }
+
+    function initEditAddressAutocomplete() {
+      const input = document.getElementById('p-address');
+      if (!input) return;
+      const autocomplete = new google.maps.places.Autocomplete(input, {
+        componentRestrictions: { country: 'au' }, fields: ['formatted_address'], types: ['address'],
+      });
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place && place.formatted_address) input.value = place.formatted_address;
+      });
+    }
+
+    function editorPanelHtml() {
+      return `
+        <div class="card">
+          <h2>Proposal template</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Changes what this quote asks for and how it's presented to the client.</p>
+          <div class="grid cols-4" id="template-picker">
+            <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
+            <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
+            <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
+            <button type="button" class="secondary template-option" data-template="time_and_materials">Time &amp; Materials</button>
+          </div>
+          <p class="subtitle" id="template-note" style="margin:12px 0 0;"></p>
+        </div>
+
+        <div class="card" id="estimate-disclaimer-card" style="display:none;">
+          <h2>Estimate wording</h2>
+          <textarea id="p-estimate-disclaimer" style="min-height:80px;"></textarea>
+        </div>
+
+        <div class="card">
+          <h2>Project &amp; client</h2>
+          <label style="margin-top:0">Project name</label>
+          <input id="p-name" placeholder="e.g. 14 Miller St - New Build" required />
+          <label>Proposal subtitle (optional)</label>
+          <input id="p-subtitle" placeholder="e.g. Grid-Connected Solar Photovoltaic System" />
+
+          <label>Client</label>
+          <div style="display:flex; gap:8px; align-items:start;">
+            <div style="flex:1; position:relative;">
+              <input id="client-search-input" placeholder="Search existing clients by name, email, or phone..." autocomplete="off" />
+              <div id="client-search-results" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-top:4px; max-height:220px; overflow-y:auto; z-index:10;"></div>
+            </div>
+            <button type="button" class="secondary" id="clear-client-btn" style="flex-shrink:0;">Clear</button>
+          </div>
+          <p class="subtitle" id="selected-client-note" style="margin:6px 0 0;">No client selected - search above, or just fill in the fields below to create one when you save.</p>
+
+          <div class="grid cols-3" style="margin-top:14px;">
+            <div><label style="margin-top:0">Client name</label><input id="p-client" required /></div>
+            <div><label style="margin-top:0">Client email</label><input id="p-email" type="email" placeholder="for sending the quote" /></div>
+            <div><label style="margin-top:0">Client phone</label><input id="p-phone" /></div>
+          </div>
+          <div class="grid cols-3">
+            <div style="grid-column: span 2;"><label>Site address</label><input id="p-address" /></div>
+            <div>
+              <label>Payment terms</label>
+              <select id="p-payment-terms">
+                <option value="cod">COD</option>
+                <option value="net_7">Net 7 days</option>
+                <option value="net_14">Net 14 days</option>
+                <option value="net_30">Net 30 days</option>
+              </select>
+            </div>
+          </div>
+          <p class="subtitle" style="margin-top:6px;"><a class="link-quiet" href="/clients.html" target="_blank">Manage clients &amp; contacts &rarr;</a></p>
+        </div>
+
+        <div class="card" id="job-contacts-card" style="display:none;">
+          <h2>Who's running this job</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Picked from this client's contact list.</p>
+          <div class="grid cols-3" id="job-contacts-selects"></div>
+        </div>
+
+        <div class="card">
+          <h2>Write the scope of works with AI</h2>
+          <p class="subtitle" style="margin-bottom:10px;">A few rough notes, plus anything useful to attach - plans, drawings, or an electricity bill.</p>
+          <textarea id="p-brief" placeholder="e.g. Single storey new build, 3 bed 2 bath, standard fitout, ducted air con, solar-ready switchboard"></textarea>
+          <label>Supporting documents (optional)</label>
+          <div id="sow-doc-list" style="margin-bottom:8px;"></div>
+          <input type="file" id="sow-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple />
+          <button type="button" id="sow-doc-upload-btn" class="secondary" style="margin-top:10px;">Upload documents</button>
+          <div id="sow-doc-msg"></div>
+          <button type="button" id="generate-scope-btn" style="margin-top:16px;">Generate scope of works with AI</button>
+          <div id="generate-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2>Scope of works document</h2>
+          <textarea id="p-sow" style="min-height:260px;" placeholder="Paste your scope of works here..."></textarea>
+        </div>
+
+        <div class="card">
+          <h2>What it will look like</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Reference photos, renders, or similar completed jobs.</p>
+          <div id="reference-thumbs" style="margin-bottom:10px;"></div>
+          <input type="file" id="reference-file" accept="image/*" multiple />
+          <button type="button" id="reference-upload-btn" class="secondary" style="margin-top:10px;">Upload photos</button>
+          <div id="reference-msg"></div>
+        </div>
+
+        <div class="card" id="deposit-card">
+          <h2>Payment schedule</h2>
+          <div style="max-width:160px;"><label style="margin-top:0">Deposit %</label><input id="p-deposit" type="number" step="1" value="10" /></div>
+        </div>
+
+        <div class="card" id="pylon-card">
+          <h2>Pylon system design</h2>
+          <label style="margin-top:0">Pylon proposal link</label>
+          <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." />
+          <div class="grid cols-3" style="margin-top:10px;">
+            <div style="grid-column: span 2;"><label>Pylon project ID (optional, for pulling system data)</label><input id="p-pylon-id" placeholder="Requires a Pylon API key set up in Netlify" /></div>
+            <div style="display:flex; align-items:end;"><button type="button" class="secondary" id="pylon-pull-btn" style="width:100%;">Pull from Pylon</button></div>
+          </div>
+          <div id="pylon-msg"></div>
+        </div>
+
+        <div class="card">
+          <h2>Terms and conditions</h2>
+          <textarea id="p-terms" style="min-height:180px;"></textarea>
+        </div>`;
+    }
+
+    function editorCostCentresHtml() {
+      return `
+        <div class="card">
+          <h2>Stages / cost centres</h2>
+          <div style="max-width:220px; margin-bottom:16px;"><label style="margin-top:0">Default markup %</label><input id="default-markup" type="number" step="1" value="45" /></div>
+          <div id="cc-rows"></div>
+          <button type="button" class="secondary" id="add-row">+ Add stage</button>
+        </div>
+        <div class="card">
+          <h2>Total</h2>
+          <div class="stat" style="max-width:220px;"><div class="label">Quoted total</div><div class="value" id="total-display">$0.00</div></div>
+        </div>`;
+    }
+
+    async function enterEditMode(project) {
+      editMode = true;
+      if (!RATE_TIERS.length) {
+        const { data: tiersData } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
+        RATE_TIERS = tiersData || [];
+      }
+      if (!Object.keys(companySettings).length) {
+        const { data: settingsRow } = await supabaseClient.from('company_settings')
+          .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
+        companySettings = settingsRow || {};
+      }
+      render(project, true);
+    }
+
+    async function wireEditForm(project) {
+      document.querySelectorAll('.template-option').forEach(btn => btn.addEventListener('click', () => applyEditTemplate(btn.dataset.template)));
+
+      document.getElementById('clear-client-btn').addEventListener('click', () => {
+        document.getElementById('client-search-input').value = '';
+        setSelectedEditClient(null);
+        loadEditJobContactPickers(null);
+      });
+
+      let clientSearchTimeout = null;
+      document.getElementById('client-search-input').addEventListener('input', (e) => {
+        clearTimeout(clientSearchTimeout);
+        const q = e.target.value.trim();
+        const resultsEl = document.getElementById('client-search-results');
+        if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+        clientSearchTimeout = setTimeout(async () => {
+          const { data, error } = await supabaseClient.from('clients').select('*')
+            .or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(8);
+          if (error || !data || !data.length) {
+            resultsEl.innerHTML = `<div style="padding:10px 12px; font-size:13px; color:var(--muted);">No matches</div>`;
+            resultsEl.style.display = 'block';
+            return;
+          }
+          resultsEl.innerHTML = data.map(c => `
+            <div class="client-result" data-id="${c.id}" style="padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">
+              <div style="font-weight:600;">${c.name}</div>
+              <div style="color:var(--muted); font-size:12px;">${[c.email, c.phone].filter(Boolean).join(' &middot; ')}</div>
+            </div>`).join('');
+          resultsEl.querySelectorAll('.client-result').forEach(row => {
+            row.addEventListener('click', () => {
+              const client = data.find(c => c.id === row.dataset.id);
+              document.getElementById('client-search-input').value = client.name;
+              setSelectedEditClient(client);
+              loadEditJobContactPickers(client.id);
+            });
+          });
+          resultsEl.style.display = 'block';
+        }, 250);
+      });
+
+      document.getElementById('sow-doc-upload-btn').addEventListener('click', async () => {
+        const fileInput = document.getElementById('sow-doc-file');
+        const msg = document.getElementById('sow-doc-msg');
+        if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more files first.</div>`; return; }
+        msg.innerHTML = '';
+        try {
+          for (const file of fileInput.files) {
+            const path = await uploadPrivateFile(file, 'sow-source');
+            sowDocs.push({ path, name: file.name, mime: file.type });
+          }
+          renderEditSowDocList();
+          fileInput.value = '';
+        } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+      });
+
+      document.getElementById('generate-scope-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('generate-scope-btn');
+        const msg = document.getElementById('generate-msg');
+        const brief = document.getElementById('p-brief').value.trim();
+        const projectName = document.getElementById('p-name').value.trim();
+        const rows = [...document.querySelectorAll('#cc-rows .cc-row')];
+        const stageNames = rows.map(r => r.dataset.name).filter(Boolean);
+        if (!brief) { msg.innerHTML = `<div class="error-box">Add a few notes first.</div>`; return; }
+        if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first.</div>`; return; }
+
+        btn.disabled = true;
+        msg.innerHTML = '';
+        try {
+          btn.textContent = 'Drafting stage names and descriptions...';
+          const scopeRes = await fetch('/.netlify/functions/generate-scope', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames }),
+          });
+          const scopeJson = await scopeRes.json();
+          if (!scopeJson.ok) throw new Error(scopeJson.error);
+
+          rows.forEach((row, i) => {
+            const stage = scopeJson.stages[i];
+            if (!stage) return;
+            if (stage.name) { row.querySelector('.cc-name').value = stage.name; row.dataset.name = stage.name.trim(); }
+            if (stage.description) row.querySelector('.cc-desc').value = stage.description;
+          });
+          renumberEditStages();
+
+          const updatedStageNames = rows.map(r => r.dataset.name).filter(Boolean);
+          const updatedDescriptions = Object.fromEntries(rows.map(r => [r.dataset.name, r.querySelector('.cc-desc').value]));
+
+          btn.textContent = 'Writing scope of works...';
+          const sowRes = await fetch('/.netlify/functions/generate-sow', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectName: projectName || 'This project', brief, stageNames: updatedStageNames,
+              stageDescriptions: updatedDescriptions, documentPaths: sowDocs.map(d => d.path),
+            }),
+          });
+          const sowJson = await sowRes.json();
+          if (!sowJson.ok) throw new Error(sowJson.error);
+          document.getElementById('p-sow').value = sowJson.sow;
+          msg.innerHTML = `<div class="success-box">Stage names, descriptions, and scope of works drafted. Review and edit as needed.</div>`;
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Generate scope of works with AI';
+        }
+      });
+
+      document.getElementById('reference-upload-btn').addEventListener('click', async () => {
+        const fileInput = document.getElementById('reference-file');
+        const msg = document.getElementById('reference-msg');
+        if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more photos first.</div>`; return; }
+        msg.innerHTML = '';
+        try {
+          const urls = await uploadPhotos(fileInput.files, 'reference');
+          referencePhotos.push(...urls);
+          renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
+          fileInput.value = '';
+        } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+      });
+
+      document.getElementById('pylon-pull-btn').addEventListener('click', async () => {
+        const msg = document.getElementById('pylon-msg');
+        const pylonProjectId = document.getElementById('p-pylon-id').value.trim();
+        if (!pylonProjectId) { msg.innerHTML = `<div class="error-box">Enter a Pylon project ID first.</div>`; return; }
+        msg.innerHTML = '';
+        try {
+          const res = await fetch('/.netlify/functions/pylon-sync', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId: project.id, pylonProjectId }),
+          });
+          const json = await res.json();
+          if (!json.ok) throw new Error(json.error);
+          msg.innerHTML = `<div class="success-box">Pulled data from Pylon.</div>`;
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message} (Pylon's API needs verifying against your actual access, see SETUP.md)</div>`;
+        }
+      });
+
+      document.getElementById('add-row').addEventListener('click', () => addRow());
+      document.getElementById('save-edit-btn').addEventListener('click', () => saveEdits(project));
+      document.getElementById('cancel-edit-btn').addEventListener('click', () => { editMode = false; render(project, true); });
+
+      applyEditTemplate(project.proposal_template || 'new_build');
+      document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';
+      document.getElementById('p-name').value = project.name || '';
+      document.getElementById('p-subtitle').value = project.proposal_subtitle || '';
+      document.getElementById('p-client').value = project.client_name || '';
+      document.getElementById('p-email').value = project.client_email || '';
+      document.getElementById('p-phone').value = project.client_phone || '';
+      document.getElementById('p-address').value = project.client_address || '';
+      document.getElementById('p-sow').value = project.sow_text || '';
+      document.getElementById('p-terms').value = project.terms_text || '';
+      document.getElementById('p-deposit').value = project.deposit_percent;
+      document.getElementById('p-pylon-link').value = project.pylon_link || '';
+      document.getElementById('p-pylon-id').value = project.pylon_project_id || '';
+
+      selectedClientId = project.client_id || null;
+      referencePhotos = (project.reference_photos || []).map(p => p.url || p);
+      renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
+      sowDocs = [];
+      renderEditSowDocList();
+
+      if (project.client_id) {
+        const { data: client } = await supabaseClient.from('clients').select('*').eq('id', project.client_id).maybeSingle();
+        if (client) {
+          document.getElementById('client-search-input').value = client.name;
+          document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
+          document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${client.name}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+        }
+        await loadEditJobContactPickers(project.client_id, {
+          project_manager_contact_id: project.project_manager_contact_id,
+          site_contact_id: project.site_contact_id,
+          job_contact_id: project.job_contact_id,
+          sales_contact_id: project.sales_contact_id,
+          accounts_contact_id: project.accounts_contact_id,
+        });
+      }
+
+      const stages = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+      stages.forEach(stage => {
+        addRow({
+          name: stage.name, description: stage.description, markup_percent: stage.markup_percent, stc_total: stage.stc_total || 0,
+          lineItems: (stage.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order)
+            .map(li => ({ description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id })),
+          photoGroups: (stage.cost_centre_photo_groups || []).slice().sort((a, b) => a.sort_order - b.sort_order)
+            .map(pg => ({ description: pg.description, photos: (pg.photos || []).map(p => p.url || p) })),
+        });
+      });
+      if (!stages.length) addRow({ name: 'Stage 1' });
+      updateEditTotal();
+      loadEditAddressAutocomplete(companySettings.google_maps_api_key);
+    }
+
+    async function saveEdits(project) {
+      const msg = document.getElementById('edit-msg');
+      const saveBtn = document.getElementById('save-edit-btn');
+      msg.innerHTML = '';
+
+      const reasons = await checkProjectHasActivity(project);
+      if (reasons.length) {
+        msg.innerHTML = `<div class="error-box">Can't save stage changes - this quote already ${reasons.join(', ')}. Editing here would delete and re-create every stage, which isn't safe once real activity is attached.</div>`;
+        return;
+      }
+
+      const name = document.getElementById('p-name').value.trim();
+      const client_name = document.getElementById('p-client').value.trim();
+      const client_email = document.getElementById('p-email').value.trim();
+      const client_phone = document.getElementById('p-phone').value.trim();
+      const client_address = document.getElementById('p-address').value.trim();
+      const payment_terms = document.getElementById('p-payment-terms').value;
+      const sow_text = document.getElementById('p-sow').value;
+      const proposal_subtitle = document.getElementById('p-subtitle').value.trim();
+      const terms_text = document.getElementById('p-terms').value;
+      const deposit_percent = parseFloat(document.getElementById('p-deposit').value) || 0;
+      const pylon_link = document.getElementById('p-pylon-link').value.trim();
+      const pylon_project_id = document.getElementById('p-pylon-id').value.trim();
+
+      const stageRows = [...document.querySelectorAll('#cc-rows .cc-row')];
+      const stagesPayload = stageRows.map((row, i) => ({
+        name: row.querySelector('.cc-name').value.trim(),
+        description: row.querySelector('.cc-desc').value.trim(),
+        markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
+        stc_total: parseFloat(row.querySelector('.cc-stc-total').value) || 0,
+        estimated_labour_cost: parseFloat(row.dataset.labourTotal) || 0,
+        estimated_material_cost: parseFloat(row.dataset.materialTotal) || 0,
+        quoted_amount: parseFloat(row.dataset.salePrice) || 0,
+        sort_order: i,
+        lineItems: [...row.querySelectorAll('.li-row')].map((li, j) => ({
+          description: li.querySelector('.li-desc').value.trim(),
+          item_type: li.querySelector('.li-type').value,
+          quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
+          unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
+          rate_tier_id: li.querySelector('.li-tier').value || null,
+          sort_order: j,
+        })).filter(li => li.description),
+        photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
+          description: pg.querySelector('.pg-desc').value.trim(),
+          photos: JSON.parse(pg.dataset.photos || '[]').map(url => ({ url })),
+          sort_order: j,
+        })).filter(pg => pg.description || pg.photos.length),
+      })).filter(s => s.name);
+
+      if (!name || !client_name || stagesPayload.length === 0) {
+        msg.innerHTML = `<div class="error-box">Please fill in the project name, client name, and at least one stage.</div>`;
+        return;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      try {
+        let clientId = selectedClientId;
+        const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, address: client_address || null, payment_terms };
+        if (clientId) {
+          await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
+        } else {
+          const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert(clientFields).select().single();
+          if (clientErr) throw clientErr;
+          clientId = newClient.id;
+        }
+
+        const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
+        const allPhotos = (settings && settings.portfolio_photos) || [];
+        const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
+        const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
+
+        const projectFields = {
+          name, client_id: clientId, client_name, client_email, client_phone, client_address,
+          sow_text, proposal_subtitle, terms_text, deposit_percent, pylon_link, pylon_project_id,
+          reference_photos: referencePhotos.map(url => ({ url })),
+          cover_photos: coverPhotos,
+          proposal_template: currentTemplate,
+          estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
+          project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
+          site_contact_id: assignedContactIds.site_contact_id || null,
+          job_contact_id: assignedContactIds.job_contact_id || null,
+          sales_contact_id: assignedContactIds.sales_contact_id || null,
+          accounts_contact_id: assignedContactIds.accounts_contact_id || null,
+        };
+
+        const { error: updateErr } = await supabaseClient.from('projects').update(projectFields).eq('id', project.id);
+        if (updateErr) throw updateErr;
+        const { error: delErr } = await supabaseClient.from('cost_centres').delete().eq('project_id', project.id);
+        if (delErr) throw delErr;
+
+        const { data: insertedStages, error: ccErr } = await supabaseClient
+          .from('cost_centres')
+          .insert(stagesPayload.map(({ lineItems, photoGroups, ...s }) => ({ ...s, project_id: project.id })))
+          .select();
+        if (ccErr) throw ccErr;
+
+        const allLineItems = [];
+        const allPhotoGroups = [];
+        insertedStages.forEach((stage, i) => {
+          stagesPayload[i].lineItems.forEach(li => allLineItems.push({ ...li, cost_centre_id: stage.id }));
+          stagesPayload[i].photoGroups.forEach(pg => allPhotoGroups.push({ ...pg, cost_centre_id: stage.id }));
+        });
+        if (allLineItems.length) {
+          const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(allLineItems);
+          if (liErr) throw liErr;
+        }
+        if (allPhotoGroups.length) {
+          const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(allPhotoGroups);
+          if (pgErr) throw pgErr;
+        }
+
+        editMode = false;
+        const refreshed = await loadProject();
+        const myRole = await getMyRole();
+        if (refreshed) render(refreshed, isPricingRole(myRole));
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save changes';
+      }
     }
 
     function openCreateInvoicePanel(btn, project, pricingVisible) {
@@ -319,11 +1141,16 @@
         <h1>${project.name}</h1>
         <p class="subtitle">${project.client_name} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
         <div style="margin-bottom:20px;">
-          ${pricingVisible ? `
-            <a class="btn secondary" href="/new-project.html?id=${project.id}">Edit quote</a>
+          ${pricingVisible && !editMode ? `
+            ${!project.job_number ? `<button id="edit-toggle-btn" class="secondary">Edit quote</button>` : ''}
             <button id="duplicate-btn" class="secondary">Duplicate as new project</button>
           ` : ''}
+          ${editMode ? `
+            <button id="save-edit-btn">Save changes</button>
+            <button type="button" class="secondary" id="cancel-edit-btn">Cancel</button>
+          ` : ''}
           <div id="action-msg"></div>
+          <div id="edit-msg"></div>
         </div>
 
         <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
@@ -391,6 +1218,7 @@
             </div>
 
             <div class="settings-panel" id="panel-costcentres">
+              ${editMode ? editorCostCentresHtml() : `
               <div class="card">
                 <h2>Stages</h2>
                 <table class="responsive-stack">
@@ -506,6 +1334,7 @@
                 </div>`;
               }).join('') : ''}
               <div id="push-xero-msg"></div>
+              `}
             </div>
 
             ${project.job_number ? `
@@ -524,6 +1353,7 @@
             ` : ''}
 
             <div class="settings-panel" id="panel-details">
+              ${editMode ? editorPanelHtml() : `
               ${(() => {
                 const contactRows = [
                   { label: 'Project manager', c: project.project_manager },
@@ -574,6 +1404,7 @@
                 </div>
                 <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
               </div>
+              `}
             </div>
 
           </div>
@@ -596,9 +1427,15 @@
         });
       });
 
+      renderActivityLog('project', project.id, 'job-activity-log');
+
+      if (editMode) {
+        wireEditForm(project);
+        return;
+      }
+
       if (project.job_number) loadPurchaseOrders(project.id, centres);
       loadJobTasks(project.id);
-      renderActivityLog('project', project.id, 'job-activity-log');
       if (document.getElementById('ccew-section')) initCcewSection(project);
 
       document.querySelectorAll('.create-invoice-btn').forEach(btn => {
@@ -607,6 +1444,9 @@
       document.querySelectorAll('.push-xero-btn').forEach(btn => {
         btn.addEventListener('click', () => pushExistingInvoiceToXero(btn));
       });
+
+      const editToggleBtn = document.getElementById('edit-toggle-btn');
+      if (editToggleBtn) editToggleBtn.addEventListener('click', () => enterEditMode(project));
 
       const duplicateBtn = document.getElementById('duplicate-btn');
       if (duplicateBtn) duplicateBtn.addEventListener('click', async () => {
