@@ -233,7 +233,7 @@ function gmailComposeUrl({ to = '', subject = '', body = '' } = {}) {
 // Cost centre numbers (e.g. "7000-2") are computed from the job number
 // plus the stage's position, not stored - position is 1-indexed.
 function costCentreNumber(jobNumber, position) {
-  return jobNumber ? `${jobNumber}-${position}` : `-${position}`;
+  return jobNumber ? `J${jobNumber}-${position}` : `-${position}`;
 }
 
 // Kicks off a background extraction function and polls the resulting job
@@ -407,7 +407,7 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
   let defaultJobName = null;
   if (po.project_id) {
     const { data: proj } = await supabaseClient.from('projects').select('name, job_number').eq('id', po.project_id).maybeSingle();
-    defaultJobName = proj ? (proj.job_number ? `Job ${proj.job_number}` : proj.name) : null;
+    defaultJobName = proj ? (proj.job_number ? `J${proj.job_number}` : proj.name) : null;
   }
 
   const overlay = document.createElement('div');
@@ -461,11 +461,11 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
       const results = await searchProjects(q);
       const resultsEl = overlay.querySelector('#rl-job-results');
       resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-        ${results.map(p => `<div class="rl-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</div>`).join('')}
+        ${results.map(p => `<div class="rl-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
       </div>`;
       resultsEl.querySelectorAll('.rl-job-pick').forEach(row => {
         row.addEventListener('click', () => {
-          selectedJob = { id: row.dataset.id, name: row.dataset.jobNumber ? `Job ${row.dataset.jobNumber}` : row.dataset.name };
+          selectedJob = { id: row.dataset.id, name: row.dataset.jobNumber ? `J${row.dataset.jobNumber}` : row.dataset.name };
           jobSearchInput.value = row.dataset.name;
           overlay.querySelector('#rl-job-selected').textContent = `Selected: ${row.dataset.name}`;
           resultsEl.innerHTML = '';
@@ -769,4 +769,25 @@ async function setWarehouseStock(materialId, absoluteQuantity) {
       material_id: materialId, location_type: 'warehouse', quantity: Math.max(0, absoluteQuantity),
     });
   }
+}
+
+// Consistent number-first formatting for jobs and quotes, used
+// everywhere a project gets referenced - a job number always wins once
+// one exists (an approved job), falling back to the quote number
+// before it's approved, matching the same numbering-over-naming
+// convention already used for POs (PO2000) and invoices (SI3000).
+function projectRef(project) {
+  if (!project) return '';
+  if (project.job_number) return `J${project.job_number} - ${project.name}`;
+  if (project.quote_number) return `Q${project.quote_number} - ${project.name}`;
+  return project.name || '';
+}
+
+// Just the number+prefix on its own, no name - for compact contexts
+// like table columns where the name already has its own column.
+function projectNumberOnly(project) {
+  if (!project) return '-';
+  if (project.job_number) return `J${project.job_number}`;
+  if (project.quote_number) return `Q${project.quote_number}`;
+  return '-';
 }

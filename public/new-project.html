@@ -991,8 +991,8 @@
       document.getElementById('page-title').textContent = 'Edit quote';
       currentJobNumber = project.job_number;
       document.getElementById('page-numbers').textContent = [
-        project.quote_number ? `Quote #${project.quote_number}` : null,
-        project.job_number ? `Job #${project.job_number}` : null,
+        project.quote_number ? `Q${project.quote_number}` : null,
+        project.job_number ? `J${project.job_number}` : null,
       ].filter(Boolean).join(' · ');
       applyTemplate(project.proposal_template || 'new_build');
       document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';

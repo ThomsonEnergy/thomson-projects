@@ -82,7 +82,7 @@
         <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
           <h2>${record ? 'Edit record' : 'Add record'}</h2>
           <label style="margin-top:0">Job (optional)</label>
-          <select id="dnsp-project"><option value="">-- None --</option>${projectOptions.map(p => `<option value="${p.id}" ${record?.project_id === p.id ? 'selected' : ''}>${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</option>`).join('')}</select>
+          <select id="dnsp-project"><option value="">-- None --</option>${projectOptions.map(p => `<option value="${p.id}" ${record?.project_id === p.id ? 'selected' : ''}>${projectRef(p)}</option>`).join('')}</select>
           <label>DNSP</label>
           <input id="dnsp-name" value="${record?.dnsp_name || ''}" placeholder="e.g. Essential Energy, Ausgrid, Energex, Western Power" />
           <label>Application reference</label>
@@ -147,7 +147,7 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
-      const { data: projects } = await supabaseClient.from('projects').select('id, name, job_number').neq('pipeline_stage', 'archived').order('created_at', { ascending: false }).limit(200);
+      const { data: projects } = await supabaseClient.from('projects').select('id, name, job_number, quote_number').neq('pipeline_stage', 'archived').order('created_at', { ascending: false }).limit(200);
       projectOptions = projects || [];
       await loadDnsp();
     })();

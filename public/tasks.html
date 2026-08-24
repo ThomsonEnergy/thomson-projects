@@ -56,7 +56,7 @@
           <div>
             <a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>
             <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
-              ${task.projects?.job_number ? 'Job ' + task.projects.job_number : (task.projects?.name || '')}
+              ${task.projects?.job_number ? 'J' + task.projects.job_number : (task.projects?.name || '')}
               ${task.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
             </p>
           </div>

@@ -108,7 +108,7 @@
               ${project.client_address ? `<p class="subtitle" style="margin:2px 0 0;">${project.client_address}</p>` : ''}
             </div>
             <div class="meta-box">
-              ${!isStandalone ? `<div><span class="k">Job No.</span>${project.job_number}</div>` : ''}
+              ${!isStandalone ? `<div><span class="k">Job No.</span>J${project.job_number}</div>` : ''}
               <div><span class="k">${isStandalone ? 'For' : 'Stage'}</span>${cc.name}</div>
             </div>
           </div>
@@ -141,7 +141,7 @@
         ${!isStandalone ? `
         <div class="card">
           <h2 style="margin-bottom:2px;">Claim summary</h2>
-          <p class="subtitle" style="margin-bottom:16px;">${cc.name} &middot; Job ${project.job_number}</p>
+          <p class="subtitle" style="margin-bottom:16px;">${cc.name} &middot; J${project.job_number}</p>
           <table>
             <thead><tr><th></th><th class="num">Total</th><th class="num">Claimed to date</th><th class="num">This claim</th><th class="num">Remaining</th></tr></thead>
             <tbody>

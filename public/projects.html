@@ -94,7 +94,7 @@
           <tbody>
             ${filtered.map(p => `
               <tr class="project-row-link" data-id="${p.id}" style="cursor:pointer;">
-                <td data-label="#">${p.job_number ? '#' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '-')}</td>
+                <td data-label="#">${p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '-')}</td>
                 <td data-label="Name">${p.name}</td>
                 <td data-label="Client">${p.client_name || '-'}</td>
                 <td class="num" data-label="Total quoted">${money(p.totalQuoted)}</td>

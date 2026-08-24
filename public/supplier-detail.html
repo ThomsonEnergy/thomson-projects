@@ -659,7 +659,7 @@
             const results = await searchProjects(q);
             const resultsEl = overlay.querySelector('#rev-po-job-results');
             resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-              ${results.map(p => `<div class="rev-job-pick" data-id="${p.id}" data-name="${p.name}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</div>`).join('')}
+              ${results.map(p => `<div class="rev-job-pick" data-id="${p.id}" data-name="${p.name}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
             </div>`;
             resultsEl.querySelectorAll('.rev-job-pick').forEach(row => {
               row.addEventListener('click', () => {

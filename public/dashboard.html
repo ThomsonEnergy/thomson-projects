@@ -232,7 +232,7 @@
       function cardHtml(p) {
         return `
           <div class="pipeline-card" data-id="${p.id}">
-            <a class="name" href="/project.html?id=${p.id}">${p.job_number ? '#' + p.job_number + ' - ' : ''}${p.name}</a>
+            <a class="name" href="/project.html?id=${p.id}">${projectRef(p)}</a>
             <div class="client">${p.client_name || ''}</div>
             <select class="stage-select" data-id="${p.id}">
               ${STAGES.map(s => `<option value="${s.key}" ${s.key === p.pipeline_stage ? 'selected' : ''}>${s.label}</option>`).join('')}

@@ -291,8 +291,8 @@
 
       const content = document.getElementById('content');
       const numberLine = [
-        project.job_number ? `Job #${project.job_number}` : null,
-        project.quote_number ? `Quote #${project.quote_number}` : null,
+        project.job_number ? `J${project.job_number}` : null,
+        project.quote_number ? `Q${project.quote_number}` : null,
       ].filter(Boolean).join(' &middot; ');
       content.innerHTML = `
         <h1>${project.name}</h1>

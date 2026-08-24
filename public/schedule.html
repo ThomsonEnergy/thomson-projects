@@ -502,7 +502,7 @@
           const resultsEl = overlay.querySelector('#mobile-add-job-results');
           if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-            ${results.map(p => `<div class="mob-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${p.job_number ? '#' + p.job_number + ' ' : ''}${p.name}</div>`).join('')}
+            ${results.map(p => `<div class="mob-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
           </div>`;
           resultsEl.querySelectorAll('.mob-job-pick').forEach(row => {
             row.addEventListener('click', () => {
@@ -739,7 +739,7 @@
       resultsEl.innerHTML = results.map(p => `
         <div class="job-card" draggable="true" data-project='${JSON.stringify({ id: p.id, name: p.name, job_number: p.job_number }).replace(/'/g, '&apos;')}'>
           <div class="jc-title">${p.name}</div>
-          <div class="jc-meta">${p.job_number ? 'Job #' + p.job_number : (p.quote_number ? 'Quote #' + p.quote_number : '')} ${p.client_address ? '- ' + p.client_address : ''}</div>
+          <div class="jc-meta">${p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '')} ${p.client_address ? '- ' + p.client_address : ''}</div>
         </div>`).join('');
       resultsEl.querySelectorAll('.job-card').forEach(card => {
         card.addEventListener('dragstart', (e) => {
