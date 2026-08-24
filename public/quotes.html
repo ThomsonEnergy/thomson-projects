@@ -81,64 +81,111 @@
         return;
       }
 
-      const rows = projects.map((p, i) => {
-        const stageCount = p.cost_centres.length;
-        const stageLabel = `${stageCount} stage${stageCount === 1 ? '' : 's'}`;
-        const nameDisplay = `${p.quote_number ? '#' + p.quote_number + ' - ' : ''}${p.name}`;
-        const isLast = i === projects.length - 1;
-        const rowInner = !pricingVisible ? `
-              <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
-                <div>
-                  <div class="name">${nameDisplay}</div>
-                  <div class="meta">${p.client_name} &middot; ${stageLabel}</div>
-                </div>
-                <div style="text-align:right; min-width:160px;">
-                  <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
-                </div>
-              </a>` : (() => {
-          const quoted = p.cost_centres.reduce((s, c) => s + Number(c.quoted_amount), 0);
-          const invoiced = p.cost_centres.reduce((s, c) => s + Number(c.invoiced_amount), 0);
-          const pctInvoiced = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
+      // Once a quote's been accepted it's really a job, not a quote in
+      // progress any more - kept out of the Active tab so it doesn't
+      // clutter the list of things that still need sales attention.
+      const active = projects.filter(p => p.status === 'draft' || p.status === 'sent');
+      const archived = projects.filter(p => p.status !== 'draft' && p.status !== 'sent');
+      const sentQuotes = active.filter(p => p.status === 'sent');
+      const pendingQuotes = active.filter(p => p.status === 'draft');
+
+      function buildRowsHtml(rowProjects) {
+        return rowProjects.map((p, i) => {
+          const stageCount = p.cost_centres.length;
+          const stageLabel = `${stageCount} stage${stageCount === 1 ? '' : 's'}`;
+          const nameDisplay = `${p.quote_number ? '#' + p.quote_number + ' - ' : ''}${p.name}`;
+          const isLast = i === rowProjects.length - 1;
+          const rowInner = !pricingVisible ? `
+                <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
+                  <div>
+                    <div class="name">${nameDisplay}</div>
+                    <div class="meta">${p.client_name} &middot; ${stageLabel}</div>
+                  </div>
+                  <div style="text-align:right; min-width:160px;">
+                    <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
+                  </div>
+                </a>` : (() => {
+            const quoted = p.cost_centres.reduce((s, c) => s + Number(c.quoted_amount), 0);
+            const invoiced = p.cost_centres.reduce((s, c) => s + Number(c.invoiced_amount), 0);
+            const pctInvoiced = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
+            return `
+                <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
+                  <div>
+                    <div class="name">${nameDisplay}</div>
+                    <div class="meta">${p.client_name} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
+                  </div>
+                  <div style="text-align:right; min-width:160px;">
+                    <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
+                    <div class="meta" style="margin-top:6px;">${pctInvoiced}% invoiced</div>
+                  </div>
+                </a>`;
+          })();
+
+          if (!pricingVisible) return rowInner;
           return `
-              <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
-                <div>
-                  <div class="name">${nameDisplay}</div>
-                  <div class="meta">${p.client_name} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
-                </div>
-                <div style="text-align:right; min-width:160px;">
-                  <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
-                  <div class="meta" style="margin-top:6px;">${pctInvoiced}% invoiced</div>
-                </div>
-              </a>`;
-        })();
+            <div style="display:flex; align-items:center; gap:10px; ${isLast ? '' : 'border-bottom:1px solid var(--border);'}">
+              <input type="checkbox" class="quote-select" data-id="${p.id}" style="width:auto; flex-shrink:0;" />
+              <div style="flex:1; min-width:0;">${rowInner}</div>
+            </div>`;
+        }).join('');
+      }
 
-        if (!pricingVisible) return rowInner;
+      function bulkBarHtml() {
+        if (!pricingVisible) return '';
         return `
-          <div style="display:flex; align-items:center; gap:10px; ${isLast ? '' : 'border-bottom:1px solid var(--border);'}">
-            <input type="checkbox" class="quote-select" data-id="${p.id}" style="width:auto; flex-shrink:0;" />
-            <div style="flex:1; min-width:0;">${rowInner}</div>
-          </div>`;
-      }).join('');
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+            <label style="display:flex; align-items:center; gap:8px; margin:0;">
+              <input type="checkbox" class="select-all-quotes" style="width:auto;" /> Select all
+            </label>
+            <button type="button" class="bulk-delete-btn secondary" style="display:none;">Delete selected</button>
+          </div>
+          <div class="bulk-delete-msg"></div>`;
+      }
 
-      list.innerHTML = (pricingVisible ? `
-        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-          <label style="display:flex; align-items:center; gap:8px; margin:0;">
-            <input type="checkbox" id="select-all-quotes" style="width:auto;" /> Select all
-          </label>
-          <button type="button" id="bulk-delete-btn" class="secondary" style="display:none;">Delete selected</button>
+      function sectionHtml(title, sectionProjects) {
+        return `
+          <h3 style="margin:20px 0 10px;">${title} (${sectionProjects.length})</h3>
+          ${sectionProjects.length ? buildRowsHtml(sectionProjects) : `<p class="subtitle">None.</p>`}`;
+      }
+
+      list.innerHTML = `
+        <div class="settings-tabs" id="quotes-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:16px; overflow-x:auto;">
+          <button class="settings-tab active" data-panel="active">Active (${active.length})</button>
+          <button class="settings-tab" data-panel="archived">Archived (${archived.length})</button>
         </div>
-        <div id="bulk-delete-msg"></div>
-      ` : '') + rows;
+        <div class="settings-panel active" id="panel-active">
+          ${bulkBarHtml()}
+          ${sectionHtml('Sent to client', sentQuotes)}
+          ${sectionHtml('Pending', pendingQuotes)}
+        </div>
+        <div class="settings-panel" id="panel-archived">
+          ${bulkBarHtml()}
+          <h3 style="margin:0 0 10px;">Approved &amp; beyond (${archived.length})</h3>
+          ${archived.length ? buildRowsHtml(archived) : `<p class="subtitle">No approved quotes yet - accepted quotes move here once the client signs off.</p>`}
+        </div>`;
 
-      if (pricingVisible) wireBulkDelete(projects);
+      document.querySelectorAll('#quotes-tabs .settings-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#quotes-tabs .settings-tab').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('#list .settings-panel').forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+        });
+      });
+
+      if (pricingVisible) {
+        wireBulkDelete(document.getElementById('panel-active'), projects);
+        wireBulkDelete(document.getElementById('panel-archived'), projects);
+      }
     })();
 
-    function wireBulkDelete(projects) {
-      const selectAll = document.getElementById('select-all-quotes');
-      const deleteBtn = document.getElementById('bulk-delete-btn');
-      const msg = document.getElementById('bulk-delete-msg');
+    function wireBulkDelete(panel, projects) {
+      const selectAll = panel.querySelector('.select-all-quotes');
+      const deleteBtn = panel.querySelector('.bulk-delete-btn');
+      const msg = panel.querySelector('.bulk-delete-msg');
+      if (!selectAll) return;
 
-      function selectedCheckboxes() { return [...document.querySelectorAll('.quote-select:checked')]; }
+      function selectedCheckboxes() { return [...panel.querySelectorAll('.quote-select:checked')]; }
       function refreshDeleteBtn() {
         const n = selectedCheckboxes().length;
         deleteBtn.style.display = n ? 'inline-flex' : 'none';
@@ -146,10 +193,10 @@
       }
 
       selectAll.addEventListener('change', () => {
-        document.querySelectorAll('.quote-select').forEach(cb => { cb.checked = selectAll.checked; });
+        panel.querySelectorAll('.quote-select').forEach(cb => { cb.checked = selectAll.checked; });
         refreshDeleteBtn();
       });
-      document.querySelectorAll('.quote-select').forEach(cb => {
+      panel.querySelectorAll('.quote-select').forEach(cb => {
         cb.addEventListener('change', () => {
           if (!cb.checked) selectAll.checked = false;
           refreshDeleteBtn();
