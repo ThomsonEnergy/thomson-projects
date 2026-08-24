@@ -15,7 +15,30 @@
   @media print {
     .topbar, #accept-section { display: none; }
     body { background: white; color: black; }
-    .card { border: 1px solid #ccc; background: white; }
+    .card { border: 1px solid #ccc; background: white; page-break-inside: avoid; }
+
+    /* The cover is an intentional dark branded photo banner - force it
+       to actually print with its real colors, rather than being
+       flattened to black-on-white like the rest of the page. Without
+       this, the dark background gets stripped (browsers default to not
+       printing background colors/images to save ink) but the light
+       text colors don't, leaving white text invisible against
+       unprinted white space - what looked like faint "ghost" text. */
+    .cover-banner, .cover-scrim, .cover-photo-grid img, .cover-details, .cover-logo-badge {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    .cover-banner {
+      background: #1a1f27 !important;
+      color: #fff !important;
+      page-break-inside: avoid;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .cover-title, .cover-eyebrow { color: #fff !important; }
+    .cover-subtitle, .cover-tagline { color: #cfd6e2 !important; }
+    .cover-details { background: rgba(0,0,0,0.35) !important; color: #cfd6e2 !important; }
   }
   .cover-banner {
     position: relative;
