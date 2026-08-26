@@ -68,6 +68,22 @@
           .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
       }
 
+      // Real material cost accrued so far - only line items actually
+      // received count, so a PO that's just been placed doesn't inflate
+      // "accrued" before anything's landed.
+      if (project.job_number) {
+        const { data: poRows } = await supabaseClient
+          .from('purchase_orders')
+          .select('purchase_order_line_items(quantity, unit_cost, received)')
+          .eq('project_id', projectId);
+        project.accrued_material_cost = (poRows || []).reduce((s, po) =>
+          s + (po.purchase_order_line_items || [])
+                .filter(li => li.received)
+                .reduce((s2, li) => s2 + Number(li.quantity) * Number(li.unit_cost), 0), 0);
+      } else {
+        project.accrued_material_cost = 0;
+      }
+
       return project;
     }
 
@@ -1139,6 +1155,18 @@
       const quotedHoursTotal = centres.reduce((s, c) => s + Number(c.quoted_hours || 0), 0);
       const actualHoursTotal = centres.reduce((s, c) => s + Number(c.actual_hours || 0), 0);
 
+      // "Cost allocated" and "Profit" on jobs must always reflect real
+      // spend, never the estimate - accrued labour comes from logged
+      // timesheets (actual_labour_cost, per stage), accrued materials
+      // from PO line items that have actually been received.
+      const accruedMaterialTotal = Number(project.accrued_material_cost) || 0;
+      const accruedTotal = actualLabourTotal + accruedMaterialTotal;
+      const accruedProfit = quoted - accruedTotal;
+      const costBarMax = Math.max(cost, accruedTotal, 1);
+      const estimatedBarPct = Math.round((cost / costBarMax) * 100);
+      const accruedBarPct = Math.round((accruedTotal / costBarMax) * 100);
+      const accruedOverEstimate = accruedTotal > cost;
+
       const content = document.getElementById('content');
       const numberLine = [
         project.job_number ? `J${project.job_number}` : null,
@@ -1191,8 +1219,8 @@
               ${pricingVisible ? `
                 <div class="grid cols-4">
                   <div class="stat"><div class="label">Quoted total</div><div class="value">${money(quoted)}</div></div>
-                  <div class="stat"><div class="label">Cost allocated</div><div class="value">${money(cost)}</div></div>
-                  <div class="stat"><div class="label">Profit (quoted - cost)</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
+                  <div class="stat"><div class="label">Cost allocated</div><div class="value" id="cost-allocated-value" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:4px;" title="Click to see the timesheets behind this figure">${money(accruedTotal)}</div></div>
+                  <div class="stat"><div class="label">Profit (quoted - cost)</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
                   <div class="stat"><div class="label">Left to invoice</div><div class="value">${money(remaining)}</div></div>
                 </div>
 
@@ -1201,13 +1229,41 @@
                   <div class="progress-track"><div class="progress-fill" style="width:${pctComplete}%"></div></div>
                   <p class="subtitle" style="margin:8px 0 0;">${pctComplete}% invoiced (${money(invoiced)} of ${money(quoted)})</p>
                 </div>
+
+                <div class="card" style="margin-top:20px;">
+                  <h2 style="margin-bottom:14px;">Estimated vs accrued cost</h2>
+                  <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span class="subtitle">Estimated</span>
+                    <span style="font-weight:600;">${money(cost)}</span>
+                  </div>
+                  <div style="background:var(--surface-2); border-radius:999px; height:10px; overflow:hidden; margin-bottom:14px;">
+                    <div style="background:var(--muted); width:${estimatedBarPct}%; height:100%; border-radius:999px;"></div>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span class="subtitle">Accrued (real)</span>
+                    <span style="font-weight:600; color:${accruedOverEstimate ? 'var(--red)' : 'var(--green)'};">${money(accruedTotal)}</span>
+                  </div>
+                  <div style="background:var(--surface-2); border-radius:999px; height:10px; overflow:hidden;">
+                    <div style="background:${accruedOverEstimate ? 'var(--red)' : 'var(--green)'}; width:${accruedBarPct}%; height:100%; border-radius:999px;"></div>
+                  </div>
+                  <p class="subtitle" style="margin-top:8px;">Accrued = actual labour cost from timesheets + received purchase order line items.</p>
+                </div>
               ` : ''}
 
               <div class="card">
                 <h2>Needs attention</h2>
-                <div id="summary-tasks-line"><p class="subtitle">Loading tasks...</p></div>
-                <div id="summary-po-line" style="margin-top:6px;">${project.job_number ? `<p class="subtitle">Loading purchase orders...</p>` : `<p class="subtitle">Purchase orders start once this quote is approved and becomes a job.</p>`}</div>
+                <div id="summary-po-line">${project.job_number ? `<p class="subtitle">Loading purchase orders...</p>` : `<p class="subtitle">Purchase orders start once this quote is approved and becomes a job.</p>`}</div>
               </div>
+
+              ${!editMode ? `
+              <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                  <h2 style="margin:0;">Tasks</h2>
+                  <button type="button" id="add-task-btn" class="secondary">+ Add task</button>
+                </div>
+                <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
+              </div>
+              ` : ''}
 
               ${pricingVisible ? `
                 <div class="card">
@@ -1434,14 +1490,6 @@
                 <div id="ccew-section"></div>
               </div>
               ` : ''}
-
-              <div class="card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                  <h2 style="margin:0;">Tasks</h2>
-                  <button type="button" id="add-task-btn" class="secondary">+ Add task</button>
-                </div>
-                <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
-              </div>
               `}
             </div>
 
@@ -1500,6 +1548,9 @@
       loadDocuments(project.id);
       wireDocumentUpload(project);
       if (document.getElementById('ccew-section')) initCcewSection(project);
+
+      const costAllocatedEl = document.getElementById('cost-allocated-value');
+      if (costAllocatedEl) costAllocatedEl.addEventListener('click', () => openTimesheetDrilldown(project, pricingVisible));
 
       document.querySelectorAll('.create-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => openCreateInvoicePanel(btn, project, pricingVisible));
@@ -1720,6 +1771,158 @@
           msg.innerHTML = `<div class="error-box">${err.message}</div>`;
         }
       });
+    }
+
+    // The "Cost allocated" stat's accrued labour figure is a sum of real
+    // clocked time - this lets whoever can see that stat drill into the
+    // timesheet entries behind it, and (admin only) correct which stage
+    // an entry's hours are attributed to, or reclassify it as office/
+    // training/other time entirely.
+    async function openTimesheetDrilldown(project, pricingVisible) {
+      const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+      const myRole = await getMyRole();
+      const isAdmin = myRole === 'admin';
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:640px; width:100%; max-height:85vh; overflow-y:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <h2 style="margin:0;">Timesheets on this job</h2>
+            <button type="button" class="secondary" id="td-close-btn">Close</button>
+          </div>
+          <p class="subtitle" style="margin-bottom:14px;">${isAdmin ? 'As admin you can correct which stage an entry belongs to, or move it to office/non-job time.' : 'Read-only - admins can edit the cost centre / office time split.'}</p>
+          <div id="td-msg"></div>
+          <div id="td-list"><p class="subtitle">Loading...</p></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#td-close-btn').addEventListener('click', () => overlay.remove());
+
+      const centreName = (id) => centres.find(c => c.id === id)?.name || 'Unknown stage';
+      const stageLabel = (entry) => {
+        if (entry.time_category && entry.time_category !== 'job') {
+          return entry.time_category.charAt(0).toUpperCase() + entry.time_category.slice(1);
+        }
+        const ids = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
+          ? entry.selected_cost_centre_ids
+          : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
+        return ids.length ? ids.map(centreName).join(', ') : 'Unassigned';
+      };
+      const hoursFor = (entry) => entry.clock_out
+        ? Math.round(((new Date(entry.clock_out) - new Date(entry.clock_in)) / 3600000) * 100) / 100
+        : null;
+
+      async function refreshList() {
+        const listEl = overlay.querySelector('#td-list');
+        const { data: entries, error } = await supabaseClient
+          .from('time_entries')
+          .select('id, staff_id, clock_in, clock_out, cost_centre_id, selected_cost_centre_ids, time_category, profiles(full_name)')
+          .eq('project_id', project.id)
+          .order('clock_in', { ascending: false });
+        if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No timesheet entries logged against this job yet.</p>`; return; }
+
+        listEl.innerHTML = `
+          <table class="responsive-stack">
+            <thead><tr><th>Staff</th><th>Date</th><th class="num">Hours</th><th>Stage / category</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+            <tbody>
+              ${entries.map(e => {
+                const hrs = hoursFor(e);
+                return `
+                <tr data-entry-id="${e.id}">
+                  <td data-label="Staff">${e.profiles?.full_name || 'Unknown'}</td>
+                  <td data-label="Date">${new Date(e.clock_in).toLocaleDateString()}</td>
+                  <td class="num" data-label="Hours">${hrs === null ? 'In progress' : hrs.toFixed(2)}</td>
+                  <td data-label="Stage / category">${stageLabel(e)}</td>
+                  ${isAdmin ? `<td><button type="button" class="secondary td-edit-btn" data-id="${e.id}" style="font-size:12px; padding:4px 8px;">Edit</button></td>` : ''}
+                </tr>
+                <tr class="td-edit-row" data-edit-for="${e.id}" style="display:none;"><td colspan="${isAdmin ? 5 : 4}"></td></tr>`;
+              }).join('')}
+            </tbody>
+          </table>`;
+
+        if (!isAdmin) return;
+        listEl.querySelectorAll('.td-edit-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const entry = entries.find(e => e.id === btn.dataset.id);
+            openEditRow(entry);
+          });
+        });
+      }
+
+      function openEditRow(entry) {
+        const editCell = overlay.querySelector(`tr[data-edit-for="${entry.id}"] td`);
+        const selectedIds = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
+          ? entry.selected_cost_centre_ids
+          : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
+        const category = entry.time_category && entry.time_category !== 'job' ? entry.time_category : 'job';
+
+        editCell.innerHTML = `
+          <div style="padding:10px; background:var(--surface-2); border-radius:8px;">
+            <label style="margin-top:0;">Category</label>
+            <select class="td-category">
+              <option value="job" ${category === 'job' ? 'selected' : ''}>Job - split across stage(s) below</option>
+              <option value="office" ${category === 'office' ? 'selected' : ''}>Office / admin</option>
+              <option value="training" ${category === 'training' ? 'selected' : ''}>Training</option>
+              <option value="other" ${category === 'other' ? 'selected' : ''}>Other</option>
+            </select>
+            <div class="td-stage-section" style="margin-top:8px; ${category === 'job' ? '' : 'display:none;'}">
+              <label>Stage(s) - tick every stage this entry's hours count against</label>
+              ${centres.map(c => `
+                <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:6px;">
+                  <input type="checkbox" class="td-stage-check" value="${c.id}" style="width:auto;" ${selectedIds.includes(c.id) ? 'checked' : ''} />
+                  ${c.name}
+                </label>`).join('')}
+            </div>
+            <div style="margin-top:12px;">
+              <button type="button" class="td-save-btn">Save</button>
+              <button type="button" class="secondary td-cancel-btn">Cancel</button>
+            </div>
+            <div class="td-edit-msg"></div>
+          </div>`;
+        editCell.closest('tr').style.display = 'table-row';
+
+        editCell.querySelector('.td-category').addEventListener('change', (e) => {
+          editCell.querySelector('.td-stage-section').style.display = e.target.value === 'job' ? '' : 'none';
+        });
+        editCell.querySelector('.td-cancel-btn').addEventListener('click', () => {
+          editCell.closest('tr').style.display = 'none';
+          editCell.innerHTML = '';
+        });
+        editCell.querySelector('.td-save-btn').addEventListener('click', async () => {
+          const msg = editCell.querySelector('.td-edit-msg');
+          const newCategory = editCell.querySelector('.td-category').value;
+          const checkedIds = Array.from(editCell.querySelectorAll('.td-stage-check:checked')).map(el => el.value);
+          if (newCategory === 'job' && !checkedIds.length) {
+            msg.innerHTML = `<div class="error-box">Tick at least one stage, or choose a non-job category.</div>`;
+            return;
+          }
+          try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch('/.netlify/functions/admin-update-time-entry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({
+                entryId: entry.id,
+                project_id: newCategory === 'job' ? project.id : null,
+                cost_centre_id: newCategory === 'job' && checkedIds.length === 1 ? checkedIds[0] : null,
+                selected_cost_centre_ids: newCategory === 'job' && checkedIds.length > 1 ? checkedIds : null,
+                time_category: newCategory,
+              }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Update failed');
+
+            await refreshList();
+            const refreshed = await loadProject();
+            if (refreshed) render(refreshed, pricingVisible);
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          }
+        });
+      }
+
+      await refreshList();
     }
 
     async function loadDocuments(projectId) {
