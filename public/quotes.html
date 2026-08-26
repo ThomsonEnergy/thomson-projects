@@ -81,13 +81,13 @@
         return;
       }
 
-      // Once a quote's been accepted it's really a job, not a quote in
-      // progress any more - kept out of the Active tab so it doesn't
-      // clutter the list of things that still need sales attention.
-      const active = projects.filter(p => p.status === 'draft' || p.status === 'sent');
+      // Three distinct groups, not two - Active means still pending (never
+      // sent), Sent to Client is its own tab once it has been, and Archived
+      // is anything accepted and beyond (it's really a job by then, not a
+      // quote in progress any more).
+      const pendingQuotes = projects.filter(p => p.status === 'draft');
+      const sentQuotes = projects.filter(p => p.status === 'sent');
       const archived = projects.filter(p => p.status !== 'draft' && p.status !== 'sent');
-      const sentQuotes = active.filter(p => p.status === 'sent');
-      const pendingQuotes = active.filter(p => p.status === 'draft');
 
       function buildRowsHtml(rowProjects) {
         return rowProjects.map((p, i) => {
@@ -142,25 +142,22 @@
           <div class="bulk-delete-msg"></div>`;
       }
 
-      function sectionHtml(title, sectionProjects) {
-        return `
-          <h3 style="margin:20px 0 10px;">${title} (${sectionProjects.length})</h3>
-          ${sectionProjects.length ? buildRowsHtml(sectionProjects) : `<p class="subtitle">None.</p>`}`;
-      }
-
       list.innerHTML = `
         <div class="settings-tabs" id="quotes-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:16px; overflow-x:auto;">
-          <button class="settings-tab active" data-panel="active">Active (${active.length})</button>
+          <button class="settings-tab active" data-panel="active">Active (${pendingQuotes.length})</button>
+          <button class="settings-tab" data-panel="sent">Sent to Client (${sentQuotes.length})</button>
           <button class="settings-tab" data-panel="archived">Archived (${archived.length})</button>
         </div>
         <div class="settings-panel active" id="panel-active">
           ${bulkBarHtml()}
-          ${sectionHtml('Sent to client', sentQuotes)}
-          ${sectionHtml('Pending', pendingQuotes)}
+          ${pendingQuotes.length ? buildRowsHtml(pendingQuotes) : `<p class="subtitle">No pending quotes - still need to be sent to the client.</p>`}
+        </div>
+        <div class="settings-panel" id="panel-sent">
+          ${bulkBarHtml()}
+          ${sentQuotes.length ? buildRowsHtml(sentQuotes) : `<p class="subtitle">Nothing sent to a client yet.</p>`}
         </div>
         <div class="settings-panel" id="panel-archived">
           ${bulkBarHtml()}
-          <h3 style="margin:0 0 10px;">Approved &amp; beyond (${archived.length})</h3>
           ${archived.length ? buildRowsHtml(archived) : `<p class="subtitle">No approved quotes yet - accepted quotes move here once the client signs off.</p>`}
         </div>`;
 
@@ -175,6 +172,7 @@
 
       if (pricingVisible) {
         wireBulkDelete(document.getElementById('panel-active'), projects);
+        wireBulkDelete(document.getElementById('panel-sent'), projects);
         wireBulkDelete(document.getElementById('panel-archived'), projects);
       }
     })();
