@@ -739,7 +739,7 @@
       resultsEl.innerHTML = results.map(p => `
         <div class="job-card" draggable="true" data-project='${JSON.stringify({ id: p.id, name: p.name, job_number: p.job_number }).replace(/'/g, '&apos;')}'>
           <div class="jc-title">${p.name}</div>
-          <div class="jc-meta">${p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '')} ${p.client_address ? '- ' + p.client_address : ''}</div>
+          <div class="jc-meta">${p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '')} ${p.client_address ? '- ' + mapsLink(p.client_address) : ''}</div>
         </div>`).join('');
       resultsEl.querySelectorAll('.job-card').forEach(card => {
         card.addEventListener('dragstart', (e) => {

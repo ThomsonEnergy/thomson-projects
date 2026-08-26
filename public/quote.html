@@ -142,7 +142,7 @@
               ${licenseParts ? `<span>${licenseParts}</span>` : ''}
             </div>` : ''}
         </div>
-        <p class="subtitle" style="margin:0 0 24px;">Prepared for ${project.client_name}${project.client_address ? ' &middot; ' + project.client_address : ''}</p>
+        <p class="subtitle" style="margin:0 0 24px;">Prepared for ${project.client_name}${project.client_address ? ' &middot; ' + mapsLink(project.client_address) : ''}</p>
         ${template === 'quick_estimate' ? `<div class="card" style="border-color:var(--accent); margin-bottom:24px;"><p style="margin:0; font-weight:600;">${project.estimate_disclaimer_text || 'Estimate only - final invoice based on actual hours and materials used.'}</p></div>` : ''}
       `;
 

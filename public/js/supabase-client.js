@@ -114,6 +114,19 @@ function moneyOrHidden(n) {
   return (n === null || n === undefined) ? ' - ' : money(n);
 }
 
+// Wraps a plain address string as a link that opens it in Google Maps in a
+// new tab - a plain maps search URL, no API key needed (unlike the Places
+// Autocomplete used on the address input fields). Returns '' for a falsy
+// address so it drops out cleanly of .filter(Boolean).join(...) patterns.
+// stopPropagation guards against the many places an address sits inside a
+// whole-row click handler (e.g. a client list row that opens on click) -
+// without it, clicking the address would both open Maps and trigger
+// whatever the row itself does.
+function mapsLink(address) {
+  if (!address) return '';
+  return `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" rel="noopener" class="link-quiet" onclick="event.stopPropagation()">${address}</a>`;
+}
+
 // Shared across the Suppliers and supplier-detail pages - both need to
 // read a file for AI extraction and fuzzy-match text against existing
 // records, so these live here once rather than being copy-pasted twice.

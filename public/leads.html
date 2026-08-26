@@ -122,7 +122,7 @@
               <div class="meta">
                 ${sourceLabel(l.source)} &middot; ${timeAgo(l.created_at)}
                 ${l.phone ? ' &middot; ' + l.phone : ''}${l.email ? ' &middot; ' + l.email : ''}
-                ${l.address_formatted ? ' &middot; ' + l.address_formatted : ''}
+                ${l.address_formatted ? ' &middot; ' + mapsLink(l.address_formatted) : ''}
                 ${attachments.length ? ` &middot; <span class="lead-attachments-btn" data-paths='${JSON.stringify(attachments.map(a => a.path))}' data-names='${JSON.stringify(attachments.map(a => a.name))}' style="color:var(--accent); cursor:pointer;">${attachments.length} file${attachments.length === 1 ? '' : 's'} attached</span>` : ''}
               </div>
             </div>

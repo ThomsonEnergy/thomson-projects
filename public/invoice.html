@@ -76,7 +76,7 @@
       const balanceDue = Number(inv.balance_due);
       const isPaid = !!inv.paid_at;
 
-      const detailParts = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
+      const detailParts = [s.abn ? `ABN ${s.abn}` : '', mapsLink(s.address), s.phone, s.website].filter(Boolean);
 
       const previouslyClaimed = previousClaims.reduce((sum, p) => sum + Number(p.labour_amount) + Number(p.material_amount), 0);
       const quotedAmount = Number(cc.quoted_amount) || 0;
@@ -105,7 +105,7 @@
             <div style="grid-column: span 2;">
               <p class="subtitle" style="margin:0 0 4px; text-transform:uppercase; font-size:11px;">Bill to</p>
               <p style="margin:0; font-weight:600;">${project.client_name}</p>
-              ${project.client_address ? `<p class="subtitle" style="margin:2px 0 0;">${project.client_address}</p>` : ''}
+              ${project.client_address ? `<p class="subtitle" style="margin:2px 0 0;">${mapsLink(project.client_address)}</p>` : ''}
             </div>
             <div class="meta-box">
               ${!isStandalone ? `<div><span class="k">Job No.</span>J${project.job_number}</div>` : ''}

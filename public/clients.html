@@ -248,7 +248,7 @@
         <div class="project-list-item" data-id="${c.id}" style="cursor:pointer;">
           <div>
             <div class="name">${c.name}</div>
-            <div class="meta">${[c.email, c.phone, c.address].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}</div>
+            <div class="meta">${[c.email, c.phone, mapsLink(c.address)].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}</div>
           </div>
           <div style="text-align:right;">
             <span class="badge draft">${(c.payment_terms || 'cod').replace('_', ' ').toUpperCase()}</span>
