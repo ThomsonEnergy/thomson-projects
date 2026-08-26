@@ -104,10 +104,6 @@
         note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page - invoiced from actual hours and materials, not this figure.',
         photoCategory: 'general', singleStage: true, showDeposit: false, showPylon: false,
       },
-      time_and_materials: {
-        note: 'No quote or approval step - saving sends the job straight to booked, invoiced from actuals when done. No client-facing proposal is created.',
-        photoCategory: 'general', singleStage: true, showDeposit: false, showPylon: false,
-      },
     };
 
     function renumberEditStages() {
@@ -451,13 +447,13 @@
         <div class="card">
           <h2>Proposal template</h2>
           <p class="subtitle" style="margin-bottom:10px;">Changes what this quote asks for and how it's presented to the client.</p>
-          <div class="grid cols-4" id="template-picker">
+          <div class="grid cols-3" id="template-picker">
             <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
             <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
             <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
-            <button type="button" class="secondary template-option" data-template="time_and_materials">Time &amp; Materials</button>
           </div>
           <p class="subtitle" id="template-note" style="margin:12px 0 0;"></p>
+          <p class="subtitle" style="margin-top:6px;">Need to skip the quote entirely? Use "+ New job (no quote)" on the Job pipeline board instead.</p>
         </div>
 
         <div class="card" id="estimate-disclaimer-card" style="display:none;">
