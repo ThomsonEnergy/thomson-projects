@@ -159,6 +159,31 @@
         });
       }
 
+      if (myRole === 'admin') {
+        const in30 = new Date(today.getTime() + 30 * 86400000);
+        const in30Str = `${in30.getFullYear()}-${String(in30.getMonth() + 1).padStart(2, '0')}-${String(in30.getDate()).padStart(2, '0')}`;
+
+        const { data: credentials } = await supabaseClient
+          .from('company_credentials')
+          .select('name, expiry_date')
+          .not('expiry_date', 'is', null)
+          .lte('expiry_date', in30Str);
+        (credentials || []).forEach(c => {
+          const isExpired = c.expiry_date < todayStr;
+          items.push({ label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${c.name} (${new Date(c.expiry_date).toLocaleDateString('en-AU')})`, link: '/settings.html' });
+        });
+
+        const [{ data: expiringLicences }, { data: staffForLicences }] = await Promise.all([
+          supabaseClient.from('profile_licences').select('profile_id, licence_name, expiry_date').not('expiry_date', 'is', null).lte('expiry_date', in30Str),
+          supabaseClient.from('profiles').select('id, full_name'),
+        ]);
+        (expiringLicences || []).forEach(l => {
+          const isExpired = l.expiry_date < todayStr;
+          const who = (staffForLicences || []).find(s => s.id === l.profile_id)?.full_name || 'a staff member';
+          items.push({ label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${who}'s ${l.licence_name} (${new Date(l.expiry_date).toLocaleDateString('en-AU')})`, link: '/settings.html' });
+        });
+      }
+
       if (!items.length) {
         el.innerHTML = `<p class="subtitle">Nothing needs your attention right now.</p>`;
         return;

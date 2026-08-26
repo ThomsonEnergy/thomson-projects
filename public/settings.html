@@ -44,6 +44,7 @@
         <button class="settings-tab" data-panel="prebuilds" data-pricing-only="1">Prebuild Categories</button>
         <button class="settings-tab" data-panel="users" data-admin-only="1">Users &amp; Roles</button>
         <button class="settings-tab" data-panel="apikeys" data-admin-only="1">API Keys</button>
+        <button class="settings-tab" data-panel="insurance" data-admin-only="1">Insurance &amp; Licensing</button>
         <button class="settings-tab" data-panel="appearance">Appearance</button>
       </div>
 
@@ -466,6 +467,24 @@
           </div>
         </div>
 
+        <!-- Insurance & Licensing -->
+        <div class="settings-panel" id="panel-insurance" data-admin-only="1">
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <h2 style="margin:0;">Company insurance &amp; licences</h2>
+              <button type="button" id="add-credential-btn" class="secondary">+ Add</button>
+            </div>
+            <p class="subtitle" style="margin-bottom:14px;">Upload a Certificate of Currency or licence document and it reads the type, reference number, and expiry date automatically - review before saving.</p>
+            <div id="credentials-list"><p class="subtitle">Loading...</p></div>
+          </div>
+
+          <div class="card">
+            <h2>Employee licences</h2>
+            <p class="subtitle" style="margin-bottom:14px;">Also shown on the Team page and in each person's profile under Users &amp; Roles - it's the same record either way.</p>
+            <div id="employee-licences-list"><p class="subtitle">Loading...</p></div>
+          </div>
+        </div>
+
         <!-- Appearance -->
         <div class="settings-panel" id="panel-appearance">
           <div class="card">
@@ -758,6 +777,280 @@
         ? `<div class="error-box">${error.message}</div>`
         : `<div class="success-box">Saved.</div>`;
     });
+
+    // --- Insurance & Licensing ---
+
+    function expiryBadge(dateStr) {
+      if (!dateStr) return `<span class="subtitle">No expiry set</span>`;
+      const days = Math.ceil((new Date(dateStr) - new Date(new Date().toDateString())) / 86400000);
+      const dateLabel = new Date(dateStr).toLocaleDateString('en-AU');
+      if (days < 0) return `<span style="color:var(--red); font-weight:600;">Expired ${dateLabel}</span>`;
+      if (days <= 30) return `<span style="color:var(--red); font-weight:600;">${dateLabel} (${days}d)</span>`;
+      return dateLabel;
+    }
+
+    async function runCredentialExtraction(file) {
+      const base64 = await fileToBase64(file);
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/extract-credential-doc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ fileBase64: base64, mediaType: file.type }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+      return data.extracted;
+    }
+
+    async function loadCompanyCredentials() {
+      const el = document.getElementById('credentials-list');
+      const { data, error } = await supabaseClient.from('company_credentials').select('*').order('expiry_date', { ascending: true, nullsFirst: false });
+      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) { el.innerHTML = `<p class="subtitle">Nothing added yet.</p>`; return; }
+
+      el.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Type</th><th>Name</th><th>Provider</th><th>Reference</th><th>Expiry</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(c => `
+              <tr>
+                <td data-label="Type"><span class="badge draft">${c.credential_type}</span></td>
+                <td data-label="Name">${c.name}${c.file_path ? ` <a href="#" class="link-quiet cred-view" data-path="${c.file_path}" style="font-size:12px;">(view)</a>` : ''}</td>
+                <td data-label="Provider">${c.provider || '-'}</td>
+                <td data-label="Reference">${c.reference_number || '-'}</td>
+                <td data-label="Expiry">${expiryBadge(c.expiry_date)}</td>
+                <td data-label="">
+                  <button type="button" class="secondary cred-edit-btn" data-id="${c.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
+                  <button type="button" class="secondary cred-delete-btn" data-id="${c.id}" style="font-size:12px; padding:6px 10px;">Delete</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      el.querySelectorAll('.cred-view').forEach(a => a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { window.open(await getSignedDocUrl(a.dataset.path), '_blank'); } catch (err) { alert(err.message); }
+      }));
+      el.querySelectorAll('.cred-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+        openCredentialPanel(data.find(c => c.id === btn.dataset.id));
+      }));
+      el.querySelectorAll('.cred-delete-btn').forEach(btn => btn.addEventListener('click', async () => {
+        if (!confirm('Delete this? This cannot be undone.')) return;
+        const { error: delErr } = await supabaseClient.from('company_credentials').delete().eq('id', btn.dataset.id);
+        if (delErr) { alert(delErr.message); return; }
+        await loadCompanyCredentials();
+      }));
+    }
+
+    function openCredentialPanel(existing) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      let filePath = existing?.file_path || null;
+      let fileName = existing?.file_name || null;
+      overlay.innerHTML = `
+        <div class="card" style="max-width:480px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>${existing ? 'Edit' : 'Add'} insurance / licence</h2>
+          <label style="margin-top:0">Certificate (optional - reads it automatically)</label>
+          <input type="file" id="cred-file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
+          <div id="cred-file-status" class="subtitle" style="margin:4px 0 10px;">${fileName ? `Attached: ${fileName}` : ''}</div>
+          <label>Type</label>
+          <select id="cred-type">
+            <option value="insurance" ${existing?.credential_type !== 'licence' ? 'selected' : ''}>Insurance</option>
+            <option value="licence" ${existing?.credential_type === 'licence' ? 'selected' : ''}>Licence</option>
+          </select>
+          <label>Name</label>
+          <input id="cred-name" placeholder="e.g. Public Liability Insurance" value="${existing?.name || ''}" />
+          <label>Provider / issuer</label>
+          <input id="cred-provider" placeholder="e.g. QBE, or the Building and Energy Commission" value="${existing?.provider || ''}" />
+          <div class="grid cols-2">
+            <div><label style="margin-top:0">Reference / policy number</label><input id="cred-reference" value="${existing?.reference_number || ''}" /></div>
+            <div><label style="margin-top:0">Expiry date</label><input id="cred-expiry" type="date" value="${existing?.expiry_date || ''}" /></div>
+          </div>
+          <div style="margin-top:14px;">
+            <button id="cred-save-btn">${existing ? 'Save changes' : 'Add'}</button>
+            <button type="button" class="secondary" id="cred-cancel-btn">Cancel</button>
+          </div>
+          <div id="cred-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#cred-cancel-btn').addEventListener('click', () => overlay.remove());
+
+      overlay.querySelector('#cred-file').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const status = overlay.querySelector('#cred-file-status');
+        status.textContent = 'Reading document...';
+        try {
+          const extracted = await runCredentialExtraction(file);
+          if (extracted.credential_type) overlay.querySelector('#cred-type').value = extracted.credential_type;
+          if (extracted.name) overlay.querySelector('#cred-name').value = extracted.name;
+          if (extracted.provider) overlay.querySelector('#cred-provider').value = extracted.provider;
+          if (extracted.reference_number) overlay.querySelector('#cred-reference').value = extracted.reference_number;
+          if (extracted.expiry_date) overlay.querySelector('#cred-expiry').value = extracted.expiry_date;
+          filePath = await uploadPrivateFile(file, 'credentials');
+          fileName = file.name;
+          status.innerHTML = `<span style="color:var(--green);">Read successfully - review the fields below before saving.</span>`;
+        } catch (err) {
+          status.innerHTML = `<div class="error-box">${err.message} - you can still fill in the fields manually.</div>`;
+          try { filePath = await uploadPrivateFile(file, 'credentials'); fileName = file.name; } catch {}
+        }
+      });
+
+      overlay.querySelector('#cred-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#cred-msg');
+        const name = overlay.querySelector('#cred-name').value.trim();
+        if (!name) { msg.innerHTML = `<div class="error-box">Enter a name.</div>`; return; }
+        const payload = {
+          credential_type: overlay.querySelector('#cred-type').value,
+          name,
+          provider: overlay.querySelector('#cred-provider').value.trim() || null,
+          reference_number: overlay.querySelector('#cred-reference').value.trim() || null,
+          expiry_date: overlay.querySelector('#cred-expiry').value || null,
+          file_path: filePath,
+          file_name: fileName,
+        };
+        try {
+          const { error } = existing
+            ? await supabaseClient.from('company_credentials').update(payload).eq('id', existing.id)
+            : await supabaseClient.from('company_credentials').insert(payload);
+          if (error) throw error;
+          overlay.remove();
+          await loadCompanyCredentials();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+      });
+    }
+
+    document.getElementById('add-credential-btn').addEventListener('click', () => openCredentialPanel(null));
+
+    async function loadEmployeeLicencesSummary() {
+      const el = document.getElementById('employee-licences-list');
+      const [{ data: staff }, { data: licences, error }] = await Promise.all([
+        supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
+        supabaseClient.from('profile_licences').select('*').order('expiry_date', { ascending: true, nullsFirst: false }),
+      ]);
+      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      el.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Employee</th><th>Licence</th><th>Number</th><th>Expiry</th><th></th></tr></thead>
+          <tbody>
+            ${(licences || []).map(l => {
+              const staffName = (staff || []).find(s => s.id === l.profile_id)?.full_name || 'Unknown';
+              return `
+              <tr>
+                <td data-label="Employee">${staffName}</td>
+                <td data-label="Licence">${l.licence_name}${l.file_path ? ` <a href="#" class="link-quiet lic-view" data-path="${l.file_path}" style="font-size:12px;">(view)</a>` : ''}</td>
+                <td data-label="Number">${l.licence_number || '-'}</td>
+                <td data-label="Expiry">${expiryBadge(l.expiry_date)}</td>
+                <td data-label="">
+                  <button type="button" class="secondary lic-edit-btn" data-id="${l.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
+                  <button type="button" class="secondary lic-delete-btn" data-id="${l.id}" style="font-size:12px; padding:6px 10px;">Delete</button>
+                </td>
+              </tr>`;
+            }).join('') || `<tr><td colspan="5"><p class="subtitle">No licences recorded yet.</p></td></tr>`}
+          </tbody>
+        </table>
+        <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <label style="margin:0;">Add a licence for</label>
+          <select id="new-licence-employee" style="max-width:280px;">${(staff || []).map(s => `<option value="${s.id}">${s.full_name}</option>`).join('')}</select>
+          <button type="button" id="add-employee-licence-btn" class="secondary">+ Add licence</button>
+        </div>`;
+
+      el.querySelectorAll('.lic-view').forEach(a => a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { window.open(await getSignedDocUrl(a.dataset.path), '_blank'); } catch (err) { alert(err.message); }
+      }));
+      el.querySelectorAll('.lic-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+        const l = licences.find(x => x.id === btn.dataset.id);
+        openEmployeeLicencePanel(l.profile_id, (staff.find(s => s.id === l.profile_id) || {}).full_name || 'Unknown', l);
+      }));
+      el.querySelectorAll('.lic-delete-btn').forEach(btn => btn.addEventListener('click', async () => {
+        if (!confirm('Delete this licence record? This cannot be undone.')) return;
+        const { error: delErr } = await supabaseClient.from('profile_licences').delete().eq('id', btn.dataset.id);
+        if (delErr) { alert(delErr.message); return; }
+        await loadEmployeeLicencesSummary();
+      }));
+      const addBtn = document.getElementById('add-employee-licence-btn');
+      if (addBtn) addBtn.addEventListener('click', () => {
+        const profileId = document.getElementById('new-licence-employee').value;
+        const name = (staff.find(s => s.id === profileId) || {}).full_name || 'Unknown';
+        openEmployeeLicencePanel(profileId, name, null);
+      });
+    }
+
+    function openEmployeeLicencePanel(profileId, employeeName, existing) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      let filePath = existing?.file_path || null;
+      let fileName = existing?.file_name || null;
+      overlay.innerHTML = `
+        <div class="card" style="max-width:480px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>${existing ? 'Edit' : 'Add'} licence - ${employeeName}</h2>
+          <label style="margin-top:0">Certificate (optional - reads it automatically)</label>
+          <input type="file" id="elic-file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
+          <div id="elic-file-status" class="subtitle" style="margin:4px 0 10px;">${fileName ? `Attached: ${fileName}` : ''}</div>
+          <label>Licence name</label>
+          <input id="elic-name" placeholder="e.g. Electrical Licence" value="${existing?.licence_name || ''}" />
+          <div class="grid cols-2">
+            <div><label style="margin-top:0">Number</label><input id="elic-number" value="${existing?.licence_number || ''}" /></div>
+            <div><label style="margin-top:0">Expiry date</label><input id="elic-expiry" type="date" value="${existing?.expiry_date || ''}" /></div>
+          </div>
+          <div style="margin-top:14px;">
+            <button id="elic-save-btn">${existing ? 'Save changes' : 'Add'}</button>
+            <button type="button" class="secondary" id="elic-cancel-btn">Cancel</button>
+          </div>
+          <div id="elic-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#elic-cancel-btn').addEventListener('click', () => overlay.remove());
+
+      overlay.querySelector('#elic-file').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const status = overlay.querySelector('#elic-file-status');
+        status.textContent = 'Reading document...';
+        try {
+          const extracted = await runCredentialExtraction(file);
+          if (extracted.name) overlay.querySelector('#elic-name').value = extracted.name;
+          if (extracted.reference_number) overlay.querySelector('#elic-number').value = extracted.reference_number;
+          if (extracted.expiry_date) overlay.querySelector('#elic-expiry').value = extracted.expiry_date;
+          filePath = await uploadPrivateFile(file, 'credentials');
+          fileName = file.name;
+          status.innerHTML = `<span style="color:var(--green);">Read successfully - review the fields below before saving.</span>`;
+        } catch (err) {
+          status.innerHTML = `<div class="error-box">${err.message} - you can still fill in the fields manually.</div>`;
+          try { filePath = await uploadPrivateFile(file, 'credentials'); fileName = file.name; } catch {}
+        }
+      });
+
+      overlay.querySelector('#elic-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#elic-msg');
+        const licence_name = overlay.querySelector('#elic-name').value.trim();
+        if (!licence_name) { msg.innerHTML = `<div class="error-box">Enter a licence name.</div>`; return; }
+        const payload = {
+          profile_id: profileId,
+          licence_name,
+          licence_number: overlay.querySelector('#elic-number').value.trim() || null,
+          expiry_date: overlay.querySelector('#elic-expiry').value || null,
+          file_path: filePath,
+          file_name: fileName,
+        };
+        try {
+          const { error } = existing
+            ? await supabaseClient.from('profile_licences').update(payload).eq('id', existing.id)
+            : await supabaseClient.from('profile_licences').insert(payload);
+          if (error) throw error;
+          overlay.remove();
+          await loadEmployeeLicencesSummary();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+      });
+    }
 
     // --- Role-based tab gating ---
     let myRole = 'staff';
@@ -1573,6 +1866,8 @@
       if (myRole === 'admin') {
         await loadUsers();
         await loadApiKeys();
+        await loadCompanyCredentials();
+        await loadEmployeeLicencesSummary();
       }
       if (isPricingRoleLocal(myRole)) {
         clearPrebuildForm();

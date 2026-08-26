@@ -38,7 +38,7 @@
 
   <div class="wrap wide">
     <h1>Team</h1>
-    <p class="subtitle">Everyone at Thomson Energy. Rates, allowances, and licences are managed by an admin under Settings &gt; Users &amp; Roles.</p>
+    <p class="subtitle">Everyone at Thomson Energy. Rates and allowances are managed by an admin under Settings &gt; Users &amp; Roles - licences are shown below where recorded, and can also be managed under Settings &gt; Insurance &amp; Licensing.</p>
 
     <div class="card">
       <div id="team-list" class="team-grid"><p class="subtitle">Loading...</p></div>
@@ -48,19 +48,28 @@
   <script src="/js/supabase-client.js?v=2"></script>
   <script src="/js/theme.js"></script>
   <script>
+    function licenceExpiryLabel(dateStr) {
+      if (!dateStr) return `<span class="subtitle">no expiry set</span>`;
+      const days = Math.ceil((new Date(dateStr) - new Date(new Date().toDateString())) / 86400000);
+      const dateLabel = new Date(dateStr).toLocaleDateString('en-AU');
+      if (days < 0) return `<span style="color:var(--red); font-weight:600;">expired ${dateLabel}</span>`;
+      if (days <= 30) return `<span style="color:var(--red); font-weight:600;">${dateLabel} (${days}d)</span>`;
+      return `<span class="subtitle">${dateLabel}</span>`;
+    }
+
     async function loadTeam() {
       const listEl = document.getElementById('team-list');
-      const { data, error } = await supabaseClient
-        .from('profiles')
-        .select('id, full_name, role, mobile_number, photo_url, active')
-        .eq('active', true)
-        .order('full_name');
+      const [{ data, error }, { data: licences }] = await Promise.all([
+        supabaseClient.from('profiles').select('id, full_name, role, mobile_number, photo_url, active').eq('active', true).order('full_name'),
+        supabaseClient.from('profile_licences').select('*'),
+      ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (!data.length) { listEl.innerHTML = `<p class="subtitle">No active team members.</p>`; return; }
 
       const roleLabels = { admin: 'Admin', finance: 'Finance', sales: 'Sales', staff: 'Staff' };
       listEl.innerHTML = data.map(p => {
         const initials = (p.full_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+        const myLicences = (licences || []).filter(l => l.profile_id === p.id);
         return `
           <div class="team-card">
             ${p.photo_url
@@ -68,7 +77,11 @@
               : `<div class="team-avatar-fallback">${initials}</div>`}
             <p style="font-weight:600; margin:0 0 2px;">${p.full_name || 'Unnamed'}</p>
             <p class="subtitle" style="margin:0 0 6px;">${roleLabels[p.role] || p.role}</p>
-            ${p.mobile_number ? `<p class="subtitle" style="margin:0; font-size:12px;">${p.mobile_number}</p>` : ''}
+            ${p.mobile_number ? `<p class="subtitle" style="margin:0 0 6px; font-size:12px;">${p.mobile_number}</p>` : ''}
+            ${myLicences.length ? `
+              <div style="text-align:left; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
+                ${myLicences.map(l => `<p style="margin:0 0 4px; font-size:11px;">${l.licence_name}: ${licenceExpiryLabel(l.expiry_date)}</p>`).join('')}
+              </div>` : ''}
           </div>`;
       }).join('');
     }
