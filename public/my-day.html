@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>My Day - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=9" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .day-item {
+    display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+    padding:10px 0; border-bottom:1px solid var(--border);
+  }
+  .day-item:last-child { border-bottom:none; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>My Day</h1>
+    <p class="subtitle">Your bookings, your tasks, and anything free to pick up. For your timesheet history or requesting leave, see <a href="/timesheets.html" class="link-quiet">Timesheets</a>.</p>
+
+    <div class="card">
+      <h2 id="clock-heading">Clock in</h2>
+      <div id="clock-idle">
+        <div id="todays-schedule"></div>
+        <div class="grid cols-3">
+          <div style="grid-column: span 2;">
+            <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
+            <input id="clock-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
+            <div id="clock-job-results"></div>
+            <div id="clock-job-selected" class="subtitle" style="margin-top:4px;"></div>
+          </div>
+        </div>
+        <div id="clock-category-row" style="margin-top:10px;">
+          <label style="margin-top:0">What's this time for</label>
+          <select id="clock-category">
+            <option value="office">Office / admin</option>
+            <option value="training">Training</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div id="clock-cost-centres" style="display:none; margin-top:10px;">
+          <label style="margin-top:0">Which stage(s) are you working on?</label>
+          <div id="clock-cc-chips"></div>
+          <p class="subtitle" id="clock-cc-hint" style="margin:6px 0 0;"></p>
+        </div>
+        <button id="clock-in-btn" style="width:100%; margin-top:14px;">Clock in</button>
+      </div>
+      <div id="clock-active" style="display:none;">
+        <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-project-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
+        <button class="danger" id="clock-out-btn">Clock out</button>
+      </div>
+      <div id="clock-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Your scheduled tasks</h2>
+      <div id="my-tasks"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Free tasks - up for grabs</h2>
+      <p class="subtitle" style="margin-bottom:8px;">Unassigned tasks. Pick one up if you reckon you can do it.</p>
+      <div id="open-tasks"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=2"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let myUserId, myRole;
+    let elapsedInterval = null;
+
+    function fmtDuration(ms) {
+      const totalMin = Math.floor(ms / 60000);
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      return `${h}h ${m}m`;
+    }
+    function fmtDateTime(iso) {
+      return new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+    function todayStr() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    async function checkActiveClock() {
+      const { data } = await supabaseClient
+        .from('time_entries')
+        .select('*, projects(name)')
+        .eq('staff_id', myUserId)
+        .is('clock_out', null)
+        .order('clock_in', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      clearInterval(elapsedInterval);
+      if (data) {
+        document.getElementById('clock-idle').style.display = 'none';
+        document.getElementById('clock-active').style.display = 'block';
+        document.getElementById('active-project-name').textContent = data.projects ? data.projects.name : 'General / Office';
+        document.getElementById('active-since').textContent = fmtDateTime(data.clock_in);
+        const update = () => { document.getElementById('active-elapsed').textContent = fmtDuration(Date.now() - new Date(data.clock_in).getTime()); };
+        update();
+        elapsedInterval = setInterval(update, 30000);
+        document.getElementById('clock-out-btn').onclick = async () => {
+          const { error } = await supabaseClient.from('time_entries').update({ clock_out: new Date().toISOString() }).eq('id', data.id);
+          if (error) { alert(error.message); return; }
+          await checkActiveClock();
+        };
+      } else {
+        document.getElementById('clock-idle').style.display = 'block';
+        document.getElementById('clock-active').style.display = 'none';
+      }
+    }
+
+    async function loadTodaysSchedule() {
+      const container = document.getElementById('todays-schedule');
+      const { data, error } = await supabaseClient
+        .from('schedule_assignments')
+        .select('id, project_id, projects(name)')
+        .eq('staff_id', myUserId)
+        .eq('assignment_date', todayStr());
+
+      if (error || !data || !data.length) { container.innerHTML = ''; return; }
+
+      container.innerHTML = `
+        <p class="subtitle" style="margin-bottom:8px;">You're scheduled for today:</p>
+        <div style="margin-bottom:16px;">
+          ${data.map(a => `
+            <button type="button" class="quick-clock-btn" data-project-id="${a.project_id || ''}" style="margin:0 8px 8px 0;">
+              ${a.projects ? a.projects.name : 'General / Office'}
+            </button>`).join('')}
+        </div>`;
+
+      container.querySelectorAll('.quick-clock-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          selectClockJob(btn.dataset.projectId || null, btn.textContent.trim());
+        });
+      });
+    }
+
+    let selectedClockCostCentres = [];
+    let selectedClockJobId = null;
+
+    function selectClockJob(projectId, label) {
+      selectedClockJobId = projectId;
+      document.getElementById('clock-job-search').value = label || '';
+      document.getElementById('clock-job-selected').textContent = projectId ? `Selected: ${label}` : '';
+      document.getElementById('clock-category-row').style.display = projectId ? 'none' : 'block';
+      loadCostCentreChips(projectId);
+    }
+
+    let clockJobSearchTimeout;
+    document.getElementById('clock-job-search').addEventListener('input', (e) => {
+      clearTimeout(clockJobSearchTimeout);
+      const q = e.target.value.trim();
+      selectedClockJobId = null;
+      document.getElementById('clock-job-selected').textContent = '';
+      document.getElementById('clock-category-row').style.display = 'block';
+      if (q.length < 2) { document.getElementById('clock-job-results').innerHTML = ''; return; }
+      clockJobSearchTimeout = setTimeout(async () => {
+        const results = await searchProjects(q);
+        const resultsEl = document.getElementById('clock-job-results');
+        if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
+        resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+        </div>`;
+        resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
+          row.addEventListener('click', () => {
+            selectClockJob(row.dataset.id, row.dataset.label);
+            resultsEl.innerHTML = '';
+          });
+        });
+      }, 250);
+    });
+
+    async function loadCostCentreChips(projectId) {
+      selectedClockCostCentres = [];
+      const wrap = document.getElementById('clock-cost-centres');
+      const chipsEl = document.getElementById('clock-cc-chips');
+      const hintEl = document.getElementById('clock-cc-hint');
+
+      if (!projectId) { wrap.style.display = 'none'; return; }
+
+      const { data: project } = await supabaseClient.from('projects').select('job_number').eq('id', projectId).maybeSingle();
+      const { data: centres, error } = await supabaseClient
+        .from('cost_centres')
+        .select('id, name')
+        .eq('project_id', projectId)
+        .order('sort_order');
+
+      if (error || !centres || !centres.length) { wrap.style.display = 'none'; return; }
+
+      wrap.style.display = 'block';
+      chipsEl.innerHTML = centres.map((c, i) => `
+        <button type="button" class="cc-chip" data-id="${c.id}">
+          <span class="cc-chip-num">${costCentreNumber(project ? project.job_number : null, i + 1)}</span> ${c.name}
+        </button>
+      `).join('');
+
+      chipsEl.querySelectorAll('.cc-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          chip.classList.toggle('selected');
+          const id = chip.dataset.id;
+          if (chip.classList.contains('selected')) {
+            selectedClockCostCentres.push(id);
+          } else {
+            selectedClockCostCentres = selectedClockCostCentres.filter(x => x !== id);
+          }
+          hintEl.textContent = selectedClockCostCentres.length > 1
+            ? `Time will be split across these ${selectedClockCostCentres.length} stages when you clock out.`
+            : '';
+        });
+      });
+    }
+
+    document.getElementById('clock-in-btn').addEventListener('click', async () => {
+      const projectId = selectedClockJobId;
+      const msg = document.getElementById('clock-msg');
+
+      const wrap = document.getElementById('clock-cost-centres');
+      if (wrap.style.display !== 'none' && selectedClockCostCentres.length === 0) {
+        msg.innerHTML = `<div class="error-box">Pick at least one stage you're working on.</div>`;
+        return;
+      }
+
+      const entry = {
+        staff_id: myUserId,
+        project_id: projectId,
+        time_category: projectId ? 'job' : document.getElementById('clock-category').value,
+      };
+      if (selectedClockCostCentres.length === 1) {
+        entry.cost_centre_id = selectedClockCostCentres[0];
+      } else if (selectedClockCostCentres.length > 1) {
+        entry.selected_cost_centre_ids = selectedClockCostCentres;
+      }
+
+      const { error } = await supabaseClient.from('time_entries').insert(entry);
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      msg.innerHTML = '';
+      selectedClockCostCentres = [];
+      selectedClockJobId = null;
+      document.getElementById('clock-job-search').value = '';
+      document.getElementById('clock-job-selected').textContent = '';
+      document.getElementById('clock-cost-centres').style.display = 'none';
+      await checkActiveClock();
+    });
+
+    function taskRow(task, showPickUp) {
+      return `
+        <div class="day-item">
+          <div>
+            <a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>
+            <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
+              ${task.projects?.job_number ? 'J' + task.projects.job_number : (task.projects?.name || '')}
+              ${task.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
+            </p>
+          </div>
+          <div style="display:flex; gap:6px; flex-shrink:0;">
+            ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">I can do this</button>` : ''}
+            <button type="button" class="secondary complete-task-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">Done</button>
+          </div>
+        </div>`;
+    }
+
+    async function loadTasks() {
+      const { data: allTasks, error } = await supabaseClient
+        .from('job_tasks')
+        .select('*, projects(name, job_number)')
+        .eq('completed', false)
+        .order('required_before_scheduling', { ascending: false })
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        document.getElementById('my-tasks').innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+
+      const mine = allTasks.filter(t => t.assigned_to_user_id === myUserId || (!t.assigned_to_user_id && t.assigned_to_role === myRole));
+      const open = allTasks.filter(t => !t.assigned_to_user_id && !t.assigned_to_role);
+
+      document.getElementById('my-tasks').innerHTML = mine.length ? mine.map(t => taskRow(t, false)).join('') : '<p class="subtitle">Nothing scheduled to you right now.</p>';
+      document.getElementById('open-tasks').innerHTML = open.length ? open.map(t => taskRow(t, true)).join('') : '<p class="subtitle">Nothing unassigned right now.</p>';
+
+      document.querySelectorAll('.complete-task-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await supabaseClient.from('job_tasks').update({
+            completed: true, completed_by: myUserId, completed_at: new Date().toISOString(),
+          }).eq('id', btn.dataset.id);
+          await loadTasks();
+        });
+      });
+      document.querySelectorAll('.pick-up-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await supabaseClient.from('job_tasks').update({ assigned_to_user_id: myUserId }).eq('id', btn.dataset.id);
+          await loadTasks();
+        });
+      });
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      myUserId = session.user.id;
+      syncThemeFromProfile();
+      renderMainNav('my-day');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      myRole = await getMyRole();
+
+      await loadTodaysSchedule();
+
+      const deepLinkProjectId = new URLSearchParams(window.location.search).get('clockin_project');
+      if (deepLinkProjectId) {
+        const { data: project } = await supabaseClient.from('projects').select('name').eq('id', deepLinkProjectId).maybeSingle();
+        selectClockJob(deepLinkProjectId, project ? project.name : 'Job');
+      }
+
+      await checkActiveClock();
+      await loadTasks();
+    })();
+  </script>
+</body>
+</html>

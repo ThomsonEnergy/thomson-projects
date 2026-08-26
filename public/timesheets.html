@@ -29,40 +29,29 @@
 
   <div class="wrap">
     <h1>Timesheets</h1>
-    <p class="subtitle">Clock time against a job, request leave. Pushing to Xero Payroll comes in a later phase - this all works natively for now.</p>
+    <p class="subtitle">Your timesheet history, leave, and pay-week overview. Clock in/out from <a href="/my-day.html" class="link-quiet">My Day</a>.</p>
 
     <div class="card">
-      <h2 id="clock-heading">Clock in</h2>
-      <div id="clock-idle">
-        <div id="todays-schedule"></div>
-        <div class="grid cols-3">
-          <div style="grid-column: span 2;">
-            <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
-            <input id="clock-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
-            <div id="clock-job-results"></div>
-            <div id="clock-job-selected" class="subtitle" style="margin-top:4px;"></div>
-          </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <h2 style="margin:0;">Pay week</h2>
+        <div>
+          <button type="button" class="secondary" id="week-prev">&larr; Previous</button>
+          <span class="subtitle" id="week-range" style="margin:0 10px; font-weight:600;"></span>
+          <button type="button" class="secondary" id="week-next">Next &rarr;</button>
         </div>
-        <div id="clock-category-row" style="margin-top:10px;">
-          <label style="margin-top:0">What's this time for</label>
-          <select id="clock-category">
-            <option value="office">Office / admin</option>
-            <option value="training">Training</option>
-            <option value="other">Other</option>
-          </select>
-        </div>
-        <div id="clock-cost-centres" style="display:none; margin-top:10px;">
-          <label style="margin-top:0">Which stage(s) are you working on?</label>
-          <div id="clock-cc-chips"></div>
-          <p class="subtitle" id="clock-cc-hint" style="margin:6px 0 0;"></p>
-        </div>
-        <button id="clock-in-btn" style="width:100%; margin-top:14px;">Clock in</button>
       </div>
-      <div id="clock-active" style="display:none;">
-        <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-project-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
-        <button class="danger" id="clock-out-btn">Clock out</button>
-      </div>
-      <div id="clock-msg"></div>
+      <p class="subtitle" style="margin:8px 0 0;">Pay week runs Friday to Thursday.</p>
+    </div>
+
+    <div class="card">
+      <h2>Your timesheet this week</h2>
+      <div id="my-week-days"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card" id="team-week-card" style="display:none;">
+      <h2>Team timesheets</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Hours logged per day for the pay week above.</p>
+      <div id="team-week-table"><p class="subtitle">Loading...</p></div>
     </div>
 
     <div class="card">
@@ -176,7 +165,6 @@
   <script>
     let myUserId = null;
     let myProfileName = '';
-    let elapsedInterval = null;
 
     function fmtDuration(ms) {
       const totalMin = Math.floor(ms / 60000);
@@ -201,172 +189,179 @@
       document.getElementById('manual-project').insertAdjacentHTML('beforeend', optionsHtml);
     }
 
-    async function checkActiveClock() {
-      const { data } = await supabaseClient
+    // ---------- pay week (Friday - Thursday) helpers ----------
+
+    function getPayWeekStart(d) {
+      const diff = (d.getDay() - 5 + 7) % 7; // days since the most recent Friday
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+    }
+    function addDays(d, n) {
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+    }
+    function localDateStr(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    function fmtDayLabel(d) {
+      return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+    }
+
+    let weekStart = getPayWeekStart(new Date());
+    let canSeeTeamWeek = false;
+
+    function renderWeekRange() {
+      const end = addDays(weekStart, 6);
+      document.getElementById('week-range').textContent =
+        `${weekStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} - ${end.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    }
+
+    async function refreshWeekViews() {
+      renderWeekRange();
+      await loadMyWeek();
+      if (canSeeTeamWeek) {
+        await loadTeamWeek();
+        // Push-to-Xero dates default to the week currently being reviewed -
+        // still editable before pushing, this is just a sensible starting point.
+        document.getElementById('xero-push-start').value = localDateStr(weekStart);
+        document.getElementById('xero-push-end').value = localDateStr(addDays(weekStart, 6));
+      }
+    }
+
+    document.getElementById('week-prev').addEventListener('click', () => { weekStart = addDays(weekStart, -7); refreshWeekViews(); });
+    document.getElementById('week-next').addEventListener('click', () => { weekStart = addDays(weekStart, 7); refreshWeekViews(); });
+
+    async function loadMyWeek() {
+      const el = document.getElementById('my-week-days');
+      el.innerHTML = '<p class="subtitle">Loading...</p>';
+
+      const rangeStart = weekStart;
+      const rangeEndExclusive = addDays(weekStart, 7);
+
+      const { data: entries, error } = await supabaseClient
         .from('time_entries')
-        .select('*, projects(name)')
+        .select('id, project_id, cost_centre_id, selected_cost_centre_ids, clock_in, clock_out, projects(name, job_number)')
         .eq('staff_id', myUserId)
-        .is('clock_out', null)
-        .order('clock_in', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .gte('clock_in', rangeStart.toISOString())
+        .lt('clock_in', rangeEndExclusive.toISOString())
+        .order('clock_in');
+      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
-      clearInterval(elapsedInterval);
-      if (data) {
-        document.getElementById('clock-idle').style.display = 'none';
-        document.getElementById('clock-active').style.display = 'block';
-        document.getElementById('active-project-name').textContent = data.projects ? data.projects.name : 'General / Office';
-        document.getElementById('active-since').textContent = fmtDateTime(data.clock_in);
-        const update = () => { document.getElementById('active-elapsed').textContent = fmtDuration(Date.now() - new Date(data.clock_in).getTime()); };
-        update();
-        elapsedInterval = setInterval(update, 30000);
-        document.getElementById('clock-out-btn').onclick = async () => {
-          const { error } = await supabaseClient.from('time_entries').update({ clock_out: new Date().toISOString() }).eq('id', data.id);
-          if (error) { alert(error.message); return; }
-          await checkActiveClock();
-          await loadMyEntries();
-        };
-      } else {
-        document.getElementById('clock-idle').style.display = 'block';
-        document.getElementById('clock-active').style.display = 'none';
-      }
-    }
-
-    async function loadTodaysSchedule() {
-      const container = document.getElementById('todays-schedule');
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-      const { data, error } = await supabaseClient
-        .from('schedule_assignments')
-        .select('id, project_id, projects(name)')
+      const { data: leave } = await supabaseClient
+        .from('leave_requests')
+        .select('start_date, end_date, leave_type')
         .eq('staff_id', myUserId)
-        .eq('assignment_date', todayStr);
+        .eq('status', 'approved')
+        .lte('start_date', localDateStr(addDays(weekStart, 6)))
+        .gte('end_date', localDateStr(weekStart));
 
-      if (error || !data || !data.length) { container.innerHTML = ''; return; }
-
-      container.innerHTML = `
-        <p class="subtitle" style="margin-bottom:8px;">You're scheduled for today:</p>
-        <div style="margin-bottom:16px;">
-          ${data.map(a => `
-            <button type="button" class="quick-clock-btn" data-project-id="${a.project_id || ''}" style="margin:0 8px 8px 0;">
-              ${a.projects ? a.projects.name : 'General / Office'}
-            </button>`).join('')}
-        </div>`;
-
-      container.querySelectorAll('.quick-clock-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          selectClockJob(btn.dataset.projectId || null, btn.textContent.trim());
-        });
+      // Batch-fetch the names of every stage referenced this week, rather
+      // than a query per entry.
+      const ccIds = new Set();
+      (entries || []).forEach(e => {
+        if (e.cost_centre_id) ccIds.add(e.cost_centre_id);
+        (e.selected_cost_centre_ids || []).forEach(id => ccIds.add(id));
       });
-    }
-
-    let selectedClockCostCentres = [];
-    let selectedClockJobId = null;
-
-    function selectClockJob(projectId, label) {
-      selectedClockJobId = projectId;
-      document.getElementById('clock-job-search').value = label || '';
-      document.getElementById('clock-job-selected').textContent = projectId ? `Selected: ${label}` : '';
-      document.getElementById('clock-category-row').style.display = projectId ? 'none' : 'block';
-      loadCostCentreChips(projectId);
-    }
-
-    let clockJobSearchTimeout;
-    document.getElementById('clock-job-search').addEventListener('input', (e) => {
-      clearTimeout(clockJobSearchTimeout);
-      const q = e.target.value.trim();
-      selectedClockJobId = null;
-      document.getElementById('clock-job-selected').textContent = '';
-      document.getElementById('clock-category-row').style.display = 'block';
-      if (q.length < 2) { document.getElementById('clock-job-results').innerHTML = ''; return; }
-      clockJobSearchTimeout = setTimeout(async () => {
-        const results = await searchProjects(q);
-        const resultsEl = document.getElementById('clock-job-results');
-        if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
-        resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
-        </div>`;
-        resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
-          row.addEventListener('click', () => {
-            selectClockJob(row.dataset.id, row.dataset.label);
-            resultsEl.innerHTML = '';
-          });
-        });
-      }, 250);
-    });
-
-    async function loadCostCentreChips(projectId) {
-      selectedClockCostCentres = [];
-      const wrap = document.getElementById('clock-cost-centres');
-      const chipsEl = document.getElementById('clock-cc-chips');
-      const hintEl = document.getElementById('clock-cc-hint');
-
-      if (!projectId) { wrap.style.display = 'none'; return; }
-
-      const project = cachedProjects.find(p => p.id === projectId);
-      const { data: centres, error } = await supabaseClient
-        .from('cost_centres')
-        .select('id, name')
-        .eq('project_id', projectId)
-        .order('sort_order');
-
-      if (error || !centres || !centres.length) { wrap.style.display = 'none'; return; }
-
-      wrap.style.display = 'block';
-      chipsEl.innerHTML = centres.map((c, i) => `
-        <button type="button" class="cc-chip" data-id="${c.id}">
-          <span class="cc-chip-num">${costCentreNumber(project ? project.job_number : null, i + 1)}</span> ${c.name}
-        </button>
-      `).join('');
-
-      chipsEl.querySelectorAll('.cc-chip').forEach(chip => {
-        chip.addEventListener('click', () => {
-          chip.classList.toggle('selected');
-          const id = chip.dataset.id;
-          if (chip.classList.contains('selected')) {
-            selectedClockCostCentres.push(id);
-          } else {
-            selectedClockCostCentres = selectedClockCostCentres.filter(x => x !== id);
-          }
-          hintEl.textContent = selectedClockCostCentres.length > 1
-            ? `Time will be split across these ${selectedClockCostCentres.length} stages when you clock out.`
-            : '';
-        });
-      });
-    }
-
-    document.getElementById('clock-in-btn').addEventListener('click', async () => {
-      const projectId = selectedClockJobId;
-      const msg = document.getElementById('clock-msg');
-
-      const wrap = document.getElementById('clock-cost-centres');
-      if (wrap.style.display !== 'none' && selectedClockCostCentres.length === 0) {
-        msg.innerHTML = `<div class="error-box">Pick at least one stage you're working on.</div>`;
-        return;
+      let ccMap = {};
+      if (ccIds.size) {
+        const { data: centres } = await supabaseClient.from('cost_centres').select('id, name').in('id', [...ccIds]);
+        (centres || []).forEach(c => { ccMap[c.id] = c.name; });
       }
 
-      const entry = {
-        staff_id: myUserId,
-        project_id: projectId,
-        time_category: projectId ? 'job' : document.getElementById('clock-category').value,
-      };
-      if (selectedClockCostCentres.length === 1) {
-        entry.cost_centre_id = selectedClockCostCentres[0];
-      } else if (selectedClockCostCentres.length > 1) {
-        entry.selected_cost_centre_ids = selectedClockCostCentres;
-      }
+      const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+      el.innerHTML = days.map(day => {
+        const dStr = localDateStr(day);
+        const dayEntries = (entries || []).filter(e => localDateStr(new Date(e.clock_in)) === dStr);
+        const onLeave = (leave || []).find(l => dStr >= l.start_date && dStr <= l.end_date);
+        const totalMs = dayEntries.reduce((s, e) => s + (e.clock_out ? new Date(e.clock_out) - new Date(e.clock_in) : 0), 0);
 
-      const { error } = await supabaseClient.from('time_entries').insert(entry);
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-      msg.innerHTML = '';
-      selectedClockCostCentres = [];
-      selectedClockJobId = null;
-      document.getElementById('clock-job-search').value = '';
-      document.getElementById('clock-job-selected').textContent = '';
-      document.getElementById('clock-cost-centres').style.display = 'none';
-      await checkActiveClock();
-    });
+        let bodyHtml;
+        if (dayEntries.length) {
+          bodyHtml = dayEntries.map(e => {
+            const jobLabel = e.projects ? (e.projects.job_number ? `J${e.projects.job_number} - ${e.projects.name}` : e.projects.name) : 'General / Office';
+            const dur = e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : 'In progress';
+            let splitNote = '';
+            if (e.project_id) {
+              if (e.selected_cost_centre_ids && e.selected_cost_centre_ids.length > 1) {
+                splitNote = `<span class="subtitle" style="font-size:12px;">Split: ${e.selected_cost_centre_ids.map(id => ccMap[id] || '?').join(', ')}</span>`;
+              } else if (e.cost_centre_id) {
+                splitNote = `<span class="subtitle" style="font-size:12px;">${ccMap[e.cost_centre_id] || 'Stage selected'}</span>`;
+              } else if (e.clock_out) {
+                splitNote = `<span style="font-size:12px; color:var(--red);">No stage selected</span>`;
+              }
+            }
+            return `<div style="display:flex; justify-content:space-between; gap:8px; padding:4px 0; font-size:13px;">
+              <span>${jobLabel}${splitNote ? ' &middot; ' + splitNote : ''}</span>
+              <span class="subtitle">${dur}</span>
+            </div>`;
+          }).join('');
+        } else if (onLeave) {
+          bodyHtml = `<p class="subtitle" style="margin:4px 0 0;">On ${onLeave.leave_type} leave</p>`;
+        } else {
+          bodyHtml = `<p class="subtitle" style="margin:4px 0 0;">No entry</p>`;
+        }
+
+        const status = dayEntries.length ? 'accepted' : (onLeave ? 'in_progress' : 'draft');
+        const statusLabel = dayEntries.length ? fmtDuration(totalMs) : (onLeave ? 'Leave' : 'No entry');
+
+        return `
+          <div style="padding:10px 0; border-bottom:1px solid var(--border);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <strong>${fmtDayLabel(day)}</strong>
+              <span class="badge ${status}">${statusLabel}</span>
+            </div>
+            ${bodyHtml}
+          </div>`;
+      }).join('');
+    }
+
+    async function loadTeamWeek() {
+      const el = document.getElementById('team-week-table');
+      el.innerHTML = '<p class="subtitle">Loading...</p>';
+
+      const { data: staff, error: staffErr } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
+      if (staffErr) { el.innerHTML = `<div class="error-box">${staffErr.message}</div>`; return; }
+
+      const rangeStart = weekStart;
+      const rangeEndExclusive = addDays(weekStart, 7);
+      const { data: entries, error } = await supabaseClient
+        .from('time_entries')
+        .select('staff_id, clock_in, clock_out')
+        .gte('clock_in', rangeStart.toISOString())
+        .lt('clock_in', rangeEndExclusive.toISOString());
+      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+      const hoursFor = (staffId, dStr) => (entries || [])
+        .filter(e => e.staff_id === staffId && e.clock_out && localDateStr(new Date(e.clock_in)) === dStr)
+        .reduce((s, e) => s + (new Date(e.clock_out) - new Date(e.clock_in)), 0) / 3600000;
+
+      el.innerHTML = `
+        <div style="overflow-x:auto;">
+        <table class="responsive-stack">
+          <thead><tr>
+            <th>Staff</th>
+            ${days.map(d => `<th class="num">${d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric' })}</th>`).join('')}
+            <th class="num">Total</th>
+          </tr></thead>
+          <tbody>
+            ${(staff || []).map(s => {
+              const dayHours = days.map(d => hoursFor(s.id, localDateStr(d)));
+              const total = dayHours.reduce((a, b) => a + b, 0);
+              return `<tr>
+                <td data-label="Staff">${s.full_name || 'Unnamed'}</td>
+                ${dayHours.map((h, i) => `<td class="num" data-label="${days[i].toLocaleDateString('en-AU', { weekday: 'short' })}">${h ? h.toFixed(1) : '-'}</td>`).join('')}
+                <td class="num" data-label="Total" style="font-weight:600;">${total.toFixed(1)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        </div>`;
+    }
+
+    function initTeamWeekCard(myRole) {
+      if (myRole !== 'admin' && myRole !== 'finance') return;
+      canSeeTeamWeek = true;
+      document.getElementById('team-week-card').style.display = 'block';
+    }
 
     function isoToDatePart(iso) {
       if (!iso) return '';
@@ -474,7 +469,7 @@
           .eq('id', id);
         if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
         await loadMyEntries();
-        await checkActiveClock();
+        await loadMyWeek();
       });
     }
 
@@ -686,7 +681,7 @@
       document.getElementById('manual-end-time').value = '';
       msg.innerHTML = '';
       await loadMyEntries();
-      await checkActiveClock();
+      await loadMyWeek();
     });
 
     document.getElementById('request-leave-btn').addEventListener('click', async () => {
@@ -868,14 +863,8 @@
 
       const myRole = await getMyRole();
       await loadProjectOptions();
-      await loadTodaysSchedule();
-
-      const deepLinkProjectId = new URLSearchParams(window.location.search).get('clockin_project');
-      if (deepLinkProjectId) {
-        const project = cachedProjects.find(p => p.id === deepLinkProjectId);
-        selectClockJob(deepLinkProjectId, project ? project.name : 'Job');
-      }
-      await checkActiveClock();
+      initTeamWeekCard(myRole);
+      await refreshWeekViews();
       await loadMyEntries();
       await loadMyLeave();
       await loadApprovals(myRole);
