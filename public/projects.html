@@ -32,14 +32,21 @@
     <p class="subtitle">Every project with its financial position at a glance. For the pipeline board (moving jobs between stages), see Job pipeline instead.</p>
 
     <div class="grid cols-4">
-      <div class="stat"><div class="label">Total quoted</div><div class="value" id="stat-total">-</div></div>
-      <div class="stat"><div class="label">Signed</div><div class="value" id="stat-signed">-</div></div>
-      <div class="stat"><div class="label">Invoiced</div><div class="value" id="stat-invoiced">-</div></div>
-      <div class="stat"><div class="label">WIP (signed, not yet invoiced)</div><div class="value" id="stat-wip">-</div></div>
+      <div class="stat"><div class="label">Total signed</div><div class="value" id="stat-signed">-</div></div>
+      <div class="stat"><div class="label">Cost outlayed</div><div class="value" id="stat-cost">-</div></div>
+      <div class="stat"><div class="label">Total partial invoiced</div><div class="value" id="stat-invoiced">-</div></div>
+      <div class="stat"><div class="label">Total pending</div><div class="value" id="stat-pending">-</div></div>
     </div>
 
     <div class="card">
-      <input id="project-search" placeholder="Search by name, client, or job number..." style="margin-bottom:14px; max-width:320px;" />
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+        <input id="project-search" placeholder="Search by name, client, or job number..." style="max-width:320px; margin:0;" />
+        <div style="display:flex; align-items:center; gap:10px;">
+          <label style="display:flex; align-items:center; gap:6px; margin:0;"><input type="checkbox" id="select-all-projects" style="width:auto;" /> Select all</label>
+          <button type="button" id="bulk-delete-projects-btn" class="secondary" style="display:none;">Delete selected</button>
+        </div>
+      </div>
+      <div id="bulk-delete-projects-msg"></div>
       <div id="projects-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
@@ -51,21 +58,60 @@
 
     async function loadProjects() {
       const listEl = document.getElementById('projects-list');
-      const { data: projects, error } = await supabaseClient
-        .from('projects')
-        .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(quoted_amount, invoices(labour_amount, material_amount, stc_amount))')
-        .neq('pipeline_stage', 'archived')
-        .order('created_at', { ascending: false });
+      const [{ data: projects, error }, { data: poRows }, { data: timeEntries }, { data: profilesData }, { data: tiers }] = await Promise.all([
+        supabaseClient.from('projects')
+          .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoices(labour_amount, material_amount, stc_amount))')
+          .neq('pipeline_stage', 'archived')
+          .order('created_at', { ascending: false }),
+        supabaseClient.from('purchase_orders').select('project_id, amount, status, purchase_order_line_items(quantity, unit_cost)').neq('status', 'ordered'),
+        supabaseClient.from('time_entries').select('project_id, staff_id, cost_centre_id, clock_in, clock_out').not('clock_out', 'is', null).not('project_id', 'is', null),
+        supabaseClient.from('profiles').select('id, rate_tier_id'),
+        supabaseClient.from('billable_rate_tiers').select('id, sell_rate'),
+      ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      // Materials actually incurred, per project - only POs that have been
+      // received/invoiced/paid count as real cost; 'ordered' hasn't
+      // actually happened yet.
+      const materialCostByProject = {};
+      (poRows || []).forEach(po => {
+        const items = po.purchase_order_line_items || [];
+        const total = items.length ? items.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0) : Number(po.amount) || 0;
+        materialCostByProject[po.project_id] = (materialCostByProject[po.project_id] || 0) + total;
+      });
+
+      // Actual labour cost, per project - hours logged x the staff member's
+      // billable rate tier (sell rate, the only rate tracked), backed out
+      // to a cost the same way the job page's cost/profit breakdown does
+      // (sell = cost x (1+markup%)) - using the time entry's own stage
+      // markup where it's tied to one, else a flat 45% default.
+      const sellRateByProfile = {};
+      (profilesData || []).forEach(p => {
+        const tier = (tiers || []).find(t => t.id === p.rate_tier_id);
+        sellRateByProfile[p.id] = tier ? Number(tier.sell_rate) : 0;
+      });
+      const markupByCostCentre = {};
+      (projects || []).forEach(p => (p.cost_centres || []).forEach(c => { markupByCostCentre[c.id] = Number(c.markup_percent) || 45; }));
+
+      const labourCostByProject = {};
+      (timeEntries || []).forEach(te => {
+        const hours = (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000;
+        if (!(hours > 0)) return;
+        const sellRate = sellRateByProfile[te.staff_id] || 0;
+        const markup = te.cost_centre_id && markupByCostCentre[te.cost_centre_id] != null ? markupByCostCentre[te.cost_centre_id] : 45;
+        const cost = (hours * sellRate) / (1 + markup / 100);
+        labourCostByProject[te.project_id] = (labourCostByProject[te.project_id] || 0) + cost;
+      });
 
       allRows = (projects || []).map(p => {
         const totalQuoted = (p.cost_centres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
         const isSigned = !!p.job_number;
         const signed = isSigned ? totalQuoted : 0;
+        const pending = isSigned ? 0 : totalQuoted;
         const invoiced = (p.cost_centres || []).reduce((s, c) =>
           s + (c.invoices || []).reduce((s2, inv) => s2 + (Number(inv.labour_amount) || 0) + (Number(inv.material_amount) || 0) - (Number(inv.stc_amount) || 0), 0), 0);
-        const wip = Math.max(0, signed - invoiced);
-        return { ...p, totalQuoted, signed, invoiced, wip, isSigned };
+        const costOutlayed = (materialCostByProject[p.id] || 0) + (labourCostByProject[p.id] || 0);
+        return { ...p, totalQuoted, signed, pending, invoiced, costOutlayed, isSigned };
       });
 
       renderProjects();
@@ -79,28 +125,29 @@
         : allRows;
 
       const totals = filtered.reduce((acc, p) => ({
-        total: acc.total + p.totalQuoted, signed: acc.signed + p.signed, invoiced: acc.invoiced + p.invoiced, wip: acc.wip + p.wip,
-      }), { total: 0, signed: 0, invoiced: 0, wip: 0 });
-      document.getElementById('stat-total').textContent = money(totals.total);
+        signed: acc.signed + p.signed, cost: acc.cost + p.costOutlayed, invoiced: acc.invoiced + p.invoiced, pending: acc.pending + p.pending,
+      }), { signed: 0, cost: 0, invoiced: 0, pending: 0 });
       document.getElementById('stat-signed').textContent = money(totals.signed);
+      document.getElementById('stat-cost').textContent = money(totals.cost);
       document.getElementById('stat-invoiced').textContent = money(totals.invoiced);
-      document.getElementById('stat-wip').textContent = money(totals.wip);
+      document.getElementById('stat-pending').textContent = money(totals.pending);
 
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No projects match.</p>`; return; }
 
       listEl.innerHTML = `
         <table class="responsive-stack">
-          <thead><tr><th>#</th><th>Name</th><th>Client</th><th class="num">Total quoted</th><th class="num">Signed</th><th class="num">Invoiced</th><th class="num">WIP</th></tr></thead>
+          <thead><tr><th></th><th>#</th><th>Name</th><th>Client</th><th class="num">Signed</th><th class="num">Pending</th><th class="num">Cost outlayed</th><th class="num">Partial invoiced</th></tr></thead>
           <tbody>
             ${filtered.map(p => `
               <tr class="project-row-link" data-id="${p.id}" style="cursor:pointer;">
+                <td data-label=""><input type="checkbox" class="project-select" data-id="${p.id}" style="width:auto;" onclick="event.stopPropagation()" /></td>
                 <td data-label="#">${p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '-')}</td>
                 <td data-label="Name">${p.name}</td>
                 <td data-label="Client">${p.client_name || '-'}</td>
-                <td class="num" data-label="Total quoted">${money(p.totalQuoted)}</td>
                 <td class="num" data-label="Signed">${p.isSigned ? money(p.signed) : '<span class="subtitle">Not signed</span>'}</td>
-                <td class="num" data-label="Invoiced">${money(p.invoiced)}</td>
-                <td class="num" data-label="WIP">${money(p.wip)}</td>
+                <td class="num" data-label="Pending">${p.isSigned ? '<span class="subtitle">-</span>' : money(p.pending)}</td>
+                <td class="num" data-label="Cost outlayed">${money(p.costOutlayed)}</td>
+                <td class="num" data-label="Partial invoiced">${money(p.invoiced)}</td>
               </tr>`).join('')}
           </tbody>
         </table>`;
@@ -108,6 +155,78 @@
       listEl.querySelectorAll('.project-row-link').forEach(row => {
         row.addEventListener('click', () => { window.location.href = `/project.html?id=${row.dataset.id}`; });
       });
+      wireBulkDeleteProjects(filtered);
+    }
+
+    function wireBulkDeleteProjects(rows) {
+      const selectAll = document.getElementById('select-all-projects');
+      const deleteBtn = document.getElementById('bulk-delete-projects-btn');
+      const msg = document.getElementById('bulk-delete-projects-msg');
+
+      function selectedCheckboxes() { return [...document.querySelectorAll('.project-select:checked')]; }
+      function refreshDeleteBtn() {
+        const n = selectedCheckboxes().length;
+        deleteBtn.style.display = n ? 'inline-flex' : 'none';
+        deleteBtn.textContent = `Delete selected (${n})`;
+      }
+
+      selectAll.checked = false;
+      selectAll.onchange = () => {
+        document.querySelectorAll('.project-select').forEach(cb => { cb.checked = selectAll.checked; });
+        refreshDeleteBtn();
+      };
+      document.querySelectorAll('.project-select').forEach(cb => {
+        cb.addEventListener('change', () => {
+          if (!cb.checked) selectAll.checked = false;
+          refreshDeleteBtn();
+        });
+      });
+
+      deleteBtn.onclick = async () => {
+        const ids = selectedCheckboxes().map(cb => cb.dataset.id);
+        if (!ids.length) return;
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Checking...';
+        msg.innerHTML = '';
+
+        const blocked = [];
+        const clear = [];
+        for (const id of ids) {
+          const project = rows.find(p => p.id === id);
+          const reasons = await checkProjectHasActivity(project);
+          if (reasons.length) blocked.push({ project, reasons });
+          else clear.push(project);
+        }
+
+        const parts = [];
+        if (blocked.length) {
+          parts.push(`<div class="error-box">Not deleted, has real activity against it:<ul style="margin:6px 0 0 18px;">${blocked.map(b => `<li>${b.project.name} - ${b.reasons.join(', ')}</li>`).join('')}</ul></div>`);
+        }
+        if (!clear.length) {
+          msg.innerHTML = parts.join('');
+          deleteBtn.disabled = false;
+          refreshDeleteBtn();
+          return;
+        }
+        if (!confirm(`Delete ${clear.length} project${clear.length === 1 ? '' : 's'} permanently? This can't be undone.\n\n${clear.map(p => p.name).join('\n')}`)) {
+          deleteBtn.disabled = false;
+          refreshDeleteBtn();
+          return;
+        }
+
+        deleteBtn.textContent = 'Deleting...';
+        try {
+          for (const p of clear) await deleteProject(p.id);
+          parts.push(`<div class="success-box">Deleted ${clear.length} project${clear.length === 1 ? '' : 's'}.</div>`);
+          msg.innerHTML = parts.join('');
+          await loadProjects();
+        } catch (err) {
+          parts.push(`<div class="error-box">${err.message}</div>`);
+          msg.innerHTML = parts.join('');
+          deleteBtn.disabled = false;
+          refreshDeleteBtn();
+        }
+      };
     }
 
     document.getElementById('project-search').addEventListener('input', renderProjects);
