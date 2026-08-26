@@ -81,6 +81,7 @@
 
     let editMode = false;
     let showLineItems = false;
+    let selectedDocFolder = 'All';
     let RATE_TIERS = [];
     let companySettings = {};
     let selectedClientId = null;
@@ -1184,6 +1185,7 @@
           <button class="settings-tab" data-panel="costcentres">Cost Centres</button>
           ${project.job_number ? `<button class="settings-tab" data-panel="pos">Purchase Orders</button>` : ''}
           <button class="settings-tab" data-panel="details">Details</button>
+          ${!editMode ? `<button class="settings-tab" data-panel="documents">Documents</button>` : ''}
         </div>
 
         <div class="job-tab-layout">
@@ -1447,6 +1449,29 @@
               `}
             </div>
 
+            ${!editMode ? `
+            <div class="settings-panel" id="panel-documents">
+              <div class="card">
+                <h2>Documents</h2>
+                <p class="subtitle" style="margin-bottom:14px;">Shared between the quote and the job - it's the same list either way, since they're the same underlying record.</p>
+                <div id="doc-folder-pills" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px;"></div>
+                <div id="documents-list"><p class="subtitle">Loading...</p></div>
+              </div>
+              <div class="card">
+                <h2>Upload</h2>
+                <label style="margin-top:0">Folder</label>
+                <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap;">
+                  <select id="doc-folder-select" style="flex:1; min-width:160px;"><option value="General">General</option></select>
+                  <span class="subtitle">or</span>
+                  <input id="doc-new-folder" placeholder="New folder name" style="flex:1; min-width:160px;" />
+                </div>
+                <input type="file" id="doc-file-input" multiple />
+                <button type="button" id="doc-upload-btn" class="secondary" style="margin-top:10px;">Upload</button>
+                <div id="doc-upload-msg"></div>
+              </div>
+            </div>
+            ` : ''}
+
           </div>
 
           <div class="job-activity-sidebar">
@@ -1476,6 +1501,8 @@
 
       if (project.job_number) loadPurchaseOrders(project.id, centres);
       loadJobTasks(project.id);
+      loadDocuments(project.id);
+      wireDocumentUpload(project);
       if (document.getElementById('ccew-section')) initCcewSection(project);
 
       document.querySelectorAll('.create-invoice-btn').forEach(btn => {
@@ -1695,6 +1722,102 @@
           await loadJobTasks(projectId);
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+      });
+    }
+
+    async function loadDocuments(projectId) {
+      const listEl = document.getElementById('documents-list');
+      const pillsEl = document.getElementById('doc-folder-pills');
+      const folderSelect = document.getElementById('doc-folder-select');
+
+      const { data: docs, error } = await supabaseClient
+        .from('project_documents')
+        .select('*, profiles(full_name)')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      const folders = [...new Set((docs || []).map(d => d.folder))].sort();
+      const folderOptions = ['General', ...folders.filter(f => f !== 'General')];
+      folderSelect.innerHTML = folderOptions.map(f => `<option value="${f}">${f}</option>`).join('');
+
+      pillsEl.innerHTML = ['All', ...folders].map(f => `
+        <button type="button" class="secondary doc-folder-pill" data-folder="${f}" style="font-size:12px; padding:6px 12px; ${f === selectedDocFolder ? 'background:var(--accent-dim); color:var(--accent);' : ''}">${f}</button>
+      `).join('');
+      pillsEl.querySelectorAll('.doc-folder-pill').forEach(btn => {
+        btn.addEventListener('click', () => { selectedDocFolder = btn.dataset.folder; loadDocuments(projectId); });
+      });
+
+      const visible = selectedDocFolder === 'All' ? (docs || []) : (docs || []).filter(d => d.folder === selectedDocFolder);
+      if (!visible.length) {
+        listEl.innerHTML = `<p class="subtitle">No documents${selectedDocFolder === 'All' ? '' : ' in this folder'} yet.</p>`;
+        return;
+      }
+
+      listEl.innerHTML = visible.map(d => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); gap:10px;">
+          <div style="min-width:0;">
+            <a href="#" class="link-quiet doc-view-link" data-path="${d.file_path}" style="font-weight:600;">${d.file_name}</a>
+            <p class="subtitle" style="margin:2px 0 0; font-size:12px;">${d.folder} &middot; ${d.profiles?.full_name || 'Someone'} &middot; ${new Date(d.created_at).toLocaleDateString('en-AU')}</p>
+          </div>
+          <button type="button" class="secondary doc-delete-btn" data-id="${d.id}" data-path="${d.file_path}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Delete</button>
+        </div>`).join('');
+
+      listEl.querySelectorAll('.doc-view-link').forEach(a => {
+        a.addEventListener('click', async (e) => {
+          e.preventDefault();
+          try {
+            const url = await getSignedDocUrl(a.dataset.path);
+            window.open(url, '_blank');
+          } catch (err) { alert(err.message); }
+        });
+      });
+      listEl.querySelectorAll('.doc-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this document? This removes the file permanently.')) return;
+          try {
+            await supabaseClient.storage.from('project-documents').remove([btn.dataset.path]);
+            const { error: delErr } = await supabaseClient.from('project_documents').delete().eq('id', btn.dataset.id);
+            if (delErr) throw delErr;
+            await logActivity('project', projectId, 'document_deleted', 'Deleted a document');
+            await loadDocuments(projectId);
+          } catch (err) { alert(err.message); }
+        });
+      });
+    }
+
+    function wireDocumentUpload(project) {
+      document.getElementById('doc-upload-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('doc-upload-btn');
+        const fileInput = document.getElementById('doc-file-input');
+        const msg = document.getElementById('doc-upload-msg');
+        const newFolder = document.getElementById('doc-new-folder').value.trim();
+        const folder = newFolder || document.getElementById('doc-folder-select').value || 'General';
+        if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more files first.</div>`; return; }
+
+        msg.innerHTML = '';
+        btn.disabled = true;
+        btn.textContent = 'Uploading...';
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          for (const file of fileInput.files) {
+            const path = await uploadPrivateFile(file, `documents/${project.id}`);
+            const { error } = await supabaseClient.from('project_documents').insert({
+              project_id: project.id, folder, file_path: path, file_name: file.name, mime_type: file.type, uploaded_by: user.id,
+            });
+            if (error) throw error;
+          }
+          await logActivity('project', project.id, 'documents_uploaded', `Uploaded ${fileInput.files.length} document${fileInput.files.length === 1 ? '' : 's'} to ${folder}`);
+          fileInput.value = '';
+          document.getElementById('doc-new-folder').value = '';
+          selectedDocFolder = folder;
+          await loadDocuments(project.id);
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Upload';
         }
       });
     }
