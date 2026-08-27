@@ -65,8 +65,8 @@
           .neq('pipeline_stage', 'archived')
           .order('created_at', { ascending: false }),
         supabaseClient.from('purchase_orders').select('project_id, amount, status, purchase_order_line_items(quantity, unit_cost)').neq('status', 'ordered'),
-        supabaseClient.from('time_entries').select('project_id, staff_id, cost_centre_id, clock_in, clock_out').not('clock_out', 'is', null).not('project_id', 'is', null),
-        supabaseClient.from('profiles').select('id, rate_tier_id'),
+        supabaseClient.from('time_entries').select('id, project_id, staff_id, clock_in, clock_out').not('clock_out', 'is', null).not('project_id', 'is', null),
+        supabaseClient.from('profiles').select('id, rate_tier_id, ordinary_rate, rate_1_5x, rate_2x'),
         supabaseClient.from('billable_rate_tiers').select('id, sell_rate'),
       ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
@@ -81,27 +81,71 @@
         materialCostByProject[po.project_id] = (materialCostByProject[po.project_id] || 0) + total;
       });
 
-      // Actual labour cost, per project - hours logged x the staff member's
-      // billable rate tier (sell rate, the only rate tracked), backed out
-      // to a cost the same way the job page's cost/profit breakdown does
-      // (sell = cost x (1+markup%)) - using the time entry's own stage
-      // markup where it's tied to one, else a flat 45% default.
+      // Actual labour cost, per project - each employee's real pay rate
+      // (profiles.ordinary_rate/rate_1_5x/rate_2x), banded by the same
+      // weekly overtime rule used on the job page: first 38 hrs in the pay
+      // week (Fri-Thu) at ordinary rate, 38-48 at 1.5x, 48+ at 2x. The
+      // threshold is on the employee's TOTAL hours that week across every
+      // project, so each touched (staff, pay week) needs its full set of
+      // entries - not just the ones on this project - to band correctly.
+      // Falls back to the billable sell rate only when a profile doesn't
+      // have real pay rates configured yet.
+      function getPayWeekStart(d) {
+        const diff = (d.getDay() - 5 + 7) % 7;
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+      }
+      function entryHours(te) { return (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000; }
+
       const sellRateByProfile = {};
       (profilesData || []).forEach(p => {
         const tier = (tiers || []).find(t => t.id === p.rate_tier_id);
         sellRateByProfile[p.id] = tier ? Number(tier.sell_rate) : 0;
       });
-      const markupByCostCentre = {};
-      (projects || []).forEach(p => (p.cost_centres || []).forEach(c => { markupByCostCentre[c.id] = Number(c.markup_percent) || 45; }));
+
+      const weekKeys = new Set();
+      (timeEntries || []).forEach(te => {
+        weekKeys.add(`${te.staff_id}|${getPayWeekStart(new Date(te.clock_in)).toISOString()}`);
+      });
+      const costById = new Map();
+      await Promise.all([...weekKeys].map(async (key) => {
+        const [staffId, wkIso] = key.split('|');
+        const wkStart = new Date(wkIso);
+        const wkEnd = new Date(wkStart);
+        wkEnd.setDate(wkEnd.getDate() + 7);
+        const { data: weekEntries } = await supabaseClient
+          .from('time_entries')
+          .select('id, clock_in, clock_out')
+          .eq('staff_id', staffId)
+          .gte('clock_in', wkStart.toISOString())
+          .lt('clock_in', wkEnd.toISOString())
+          .not('clock_out', 'is', null)
+          .order('clock_in', { ascending: true });
+
+        const profile = (profilesData || []).find(p => p.id === staffId);
+        const fallbackOrdinary = sellRateByProfile[staffId] || 0;
+        const ordinaryRate = Number(profile?.ordinary_rate) || fallbackOrdinary;
+        const rate15 = Number(profile?.rate_1_5x) || fallbackOrdinary * 1.5;
+        const rate2 = Number(profile?.rate_2x) || fallbackOrdinary * 2;
+        const bands = [{ from: 0, to: 38, rate: ordinaryRate }, { from: 38, to: 48, rate: rate15 }, { from: 48, to: Infinity, rate: rate2 }];
+
+        let cumulative = 0;
+        (weekEntries || []).forEach(te => {
+          const hours = entryHours(te);
+          const start = cumulative, end = cumulative + hours;
+          let cost = 0;
+          bands.forEach(band => {
+            const overlapStart = Math.max(start, band.from);
+            const overlapEnd = Math.min(end, band.to);
+            if (overlapEnd > overlapStart) cost += (overlapEnd - overlapStart) * band.rate;
+          });
+          costById.set(te.id, cost);
+          cumulative = end;
+        });
+      }));
 
       const labourCostByProject = {};
       (timeEntries || []).forEach(te => {
-        const hours = (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000;
-        if (!(hours > 0)) return;
-        const sellRate = sellRateByProfile[te.staff_id] || 0;
-        const markup = te.cost_centre_id && markupByCostCentre[te.cost_centre_id] != null ? markupByCostCentre[te.cost_centre_id] : 45;
-        const cost = (hours * sellRate) / (1 + markup / 100);
-        labourCostByProject[te.project_id] = (labourCostByProject[te.project_id] || 0) + cost;
+        labourCostByProject[te.project_id] = (labourCostByProject[te.project_id] || 0) + (costById.get(te.id) || 0);
       });
 
       allRows = (projects || []).map(p => {
