@@ -2177,6 +2177,13 @@
     async function loadJobTasks(projectId) {
       const listEl = document.getElementById('job-tasks-list');
       const summaryEl = document.getElementById('summary-tasks-line');
+
+      // Wired up unconditionally, before any early return below - otherwise
+      // a load error (e.g. job_tasks not migrated yet) leaves "+ Add task"
+      // silently unresponsive with no listener attached at all.
+      const addBtn = document.getElementById('add-task-btn');
+      if (addBtn) addBtn.onclick = () => openAddTaskPanel(projectId);
+
       const [{ data: tasks, error }, { data: staff }] = await Promise.all([
         supabaseClient.from('job_tasks').select('*').eq('project_id', projectId)
           .order('completed', { ascending: true }).order('required_before_scheduling', { ascending: false }),
@@ -2195,14 +2202,22 @@
       if (!tasks.length) { listEl.innerHTML = `<p class="subtitle">No tasks yet.</p>`; return; }
 
       const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'Someone';
+      const today = new Date(); today.setHours(0, 0, 0, 0);
 
       listEl.innerHTML = tasks.map(t => {
         const who = t.assigned_to_user_id ? staffName(t.assigned_to_user_id) : t.assigned_to_role ? `Anyone in ${t.assigned_to_role}` : 'Unassigned';
+        const isOverdue = t.due_date && !t.completed && new Date(t.due_date) < today;
+        const dueLabel = t.due_date ? `Due ${new Date(t.due_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}` : '';
         return `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); ${t.completed ? 'opacity:0.5;' : ''}">
             <div>
               <span style="${t.completed ? 'text-decoration:line-through;' : ''}">${t.description}</span>
-              <p class="subtitle" style="margin:2px 0 0; font-size:12px;">${who}${t.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}</p>
+              <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
+                ${who}
+                ${dueLabel ? ` &middot; <span style="${isOverdue ? 'color:var(--red);' : ''}">${dueLabel}</span>` : ''}
+                ${t.schedule_assignment_id ? ` &middot; On calendar` : ''}
+                ${t.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
+              </p>
             </div>
             ${!t.completed ? `<button type="button" class="secondary complete-job-task-btn" data-id="${t.id}" style="font-size:12px; padding:6px 10px;">Done</button>` : ''}
           </div>`;
@@ -2217,13 +2232,13 @@
           await loadJobTasks(projectId);
         });
       });
-
-      const addBtn = document.getElementById('add-task-btn');
-      if (addBtn) addBtn.onclick = () => openAddTaskPanel(projectId);
     }
 
     async function openAddTaskPanel(projectId) {
-      const { data: staff } = await supabaseClient.from('profiles').select('id, full_name').order('full_name');
+      const [{ data: staff }, { data: project }] = await Promise.all([
+        supabaseClient.from('profiles').select('id, full_name').order('full_name'),
+        supabaseClient.from('projects').select('job_number').eq('id', projectId).single(),
+      ]);
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
@@ -2248,6 +2263,11 @@
               <option value="staff">Staff</option>
             </select>
           </div>
+          <label>Due date (optional)</label>
+          <input type="date" id="at-due-date" />
+          <label id="at-calendar-row" style="margin-top:14px; display:none; align-items:center; gap:8px;">
+            <input type="checkbox" id="at-add-to-calendar" style="width:auto;" /> Also put this on their Schedule for that date
+          </label>
           <label style="margin-top:14px; display:flex; align-items:center; gap:8px;">
             <input type="checkbox" id="at-required" style="width:auto;" /> Required before this job can be scheduled
           </label>
@@ -2259,10 +2279,23 @@
         </div>`;
       document.body.appendChild(overlay);
 
+      // "Add to calendar" only makes sense with a specific person and a
+      // date to schedule them on - shown as a plain label/checkbox rather
+      // than disabled, so it's obvious why it's hidden rather than looking
+      // broken.
+      function refreshCalendarRowVisibility() {
+        const assignType = overlay.querySelector('#at-assign-type').value;
+        const hasDate = !!overlay.querySelector('#at-due-date').value;
+        overlay.querySelector('#at-calendar-row').style.display = (assignType === 'person' && hasDate) ? 'flex' : 'none';
+        if (!(assignType === 'person' && hasDate)) overlay.querySelector('#at-add-to-calendar').checked = false;
+      }
+
       overlay.querySelector('#at-assign-type').addEventListener('change', (e) => {
         overlay.querySelector('#at-person-section').style.display = e.target.value === 'person' ? 'block' : 'none';
         overlay.querySelector('#at-role-section').style.display = e.target.value === 'role' ? 'block' : 'none';
+        refreshCalendarRowVisibility();
       });
+      overlay.querySelector('#at-due-date').addEventListener('change', refreshCalendarRowVisibility);
 
       overlay.querySelector('#at-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#at-save-btn').addEventListener('click', async () => {
@@ -2270,15 +2303,39 @@
         const description = overlay.querySelector('#at-desc').value.trim();
         if (!description) { msg.innerHTML = `<div class="error-box">Enter a description.</div>`; return; }
         const assignType = overlay.querySelector('#at-assign-type').value;
+        const dueDate = overlay.querySelector('#at-due-date').value || null;
+        const addToCalendar = overlay.querySelector('#at-add-to-calendar').checked;
+        const personId = assignType === 'person' ? overlay.querySelector('#at-person').value : null;
 
+        const saveBtn = overlay.querySelector('#at-save-btn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Adding...';
         try {
           const { data: { user } } = await supabaseClient.auth.getUser();
+
+          let scheduleAssignmentId = null;
+          if (addToCalendar && personId && dueDate) {
+            const { data: assignment, error: schedErr } = await supabaseClient
+              .from('schedule_assignments')
+              .insert({
+                staff_id: personId, project_id: projectId,
+                block_type: project?.job_number ? 'job' : 'site_visit',
+                assignment_date: dueDate, start_time: '07:00', end_time: '15:00',
+              })
+              .select('id')
+              .single();
+            if (schedErr) throw schedErr;
+            scheduleAssignmentId = assignment.id;
+          }
+
           const { error } = await supabaseClient.from('job_tasks').insert({
             project_id: projectId,
             description,
-            assigned_to_user_id: assignType === 'person' ? overlay.querySelector('#at-person').value : null,
+            assigned_to_user_id: personId,
             assigned_to_role: assignType === 'role' ? overlay.querySelector('#at-role').value : null,
             required_before_scheduling: overlay.querySelector('#at-required').checked,
+            due_date: dueDate,
+            schedule_assignment_id: scheduleAssignmentId,
             created_by: user.id,
           });
           if (error) throw error;
@@ -2286,6 +2343,8 @@
           await loadJobTasks(projectId);
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Add task';
         }
       });
     }
