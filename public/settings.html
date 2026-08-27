@@ -31,11 +31,27 @@
     <h1>Settings</h1>
     <p class="subtitle">Anything that could change without a code change lives here, so a detail update doesn't need a redeploy.</p>
 
+    <div class="card" id="dev-mode-card" style="display:none;">
+      <h2>Dev Mode</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Unlocks Company Details, Xero Mapping, and API Keys below, plus bulk-delete on Quotes/Projects/Timesheets, for 20 minutes.</p>
+      <div id="dev-mode-locked">
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="password" id="dev-mode-password" placeholder="Dev mode password" style="max-width:220px; margin:0;" />
+          <button type="button" id="dev-mode-unlock-btn">Enable Dev Mode</button>
+        </div>
+        <div id="dev-mode-msg"></div>
+      </div>
+      <div id="dev-mode-unlocked" style="display:none;">
+        <p style="margin:0;">Dev Mode active - <span id="dev-mode-remaining"></span> remaining.</p>
+        <button type="button" class="secondary" id="dev-mode-lock-btn" style="margin-top:8px;">Turn off now</button>
+      </div>
+    </div>
+
     <div class="settings-layout">
       <div class="settings-tabs">
-        <button class="settings-tab active" data-panel="company" data-admin-only="1">Company Details</button>
-        <button class="settings-tab" data-panel="xero" data-admin-only="1">Xero Mapping</button>
-        <button class="settings-tab" data-panel="numbering" data-admin-only="1">Numbering</button>
+        <button class="settings-tab" data-panel="company" data-admin-only="1" data-dev-only="1">Company Details</button>
+        <button class="settings-tab" data-panel="xero" data-admin-only="1" data-dev-only="1">Xero Mapping</button>
+        <button class="settings-tab active" data-panel="numbering" data-admin-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
         <button class="settings-tab" data-panel="billable-rates" data-pricing-only="1">Billable Rates</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
@@ -43,7 +59,7 @@
         <button class="settings-tab" data-panel="photos">Photo Categories</button>
         <button class="settings-tab" data-panel="prebuilds" data-pricing-only="1">Prebuild Categories</button>
         <button class="settings-tab" data-panel="users" data-admin-only="1">Users &amp; Roles</button>
-        <button class="settings-tab" data-panel="apikeys" data-admin-only="1">API Keys</button>
+        <button class="settings-tab" data-panel="apikeys" data-admin-only="1" data-dev-only="1">API Keys</button>
         <button class="settings-tab" data-panel="insurance" data-admin-only="1">Insurance &amp; Licensing</button>
         <button class="settings-tab" data-panel="appearance">Appearance</button>
       </div>
@@ -51,7 +67,7 @@
       <div class="settings-content">
 
         <!-- Company Details -->
-        <div class="settings-panel active" id="panel-company" data-admin-only="1">
+        <div class="settings-panel" id="panel-company" data-admin-only="1" data-dev-only="1">
           <div class="card">
             <h2>Logo and branding</h2>
             <p class="subtitle" style="margin-bottom:10px;">Your logo appears on the client proposal cover page.</p>
@@ -117,7 +133,7 @@
         </div>
 
         <!-- Xero Mapping -->
-        <div class="settings-panel" id="panel-xero" data-admin-only="1">
+        <div class="settings-panel" id="panel-xero" data-admin-only="1" data-dev-only="1">
           <div class="card">
             <h2>Xero account mapping</h2>
             <p class="subtitle" style="margin-bottom:14px;">
@@ -174,7 +190,7 @@
         </div>
 
         <!-- Numbering -->
-        <div class="settings-panel" id="panel-numbering" data-admin-only="1">
+        <div class="settings-panel active" id="panel-numbering" data-admin-only="1">
           <div class="card">
             <h2>Numbering</h2>
             <p class="subtitle" style="margin-bottom:14px;">
@@ -413,7 +429,7 @@
         </div>
 
         <!-- API Keys -->
-        <div class="settings-panel" id="panel-apikeys">
+        <div class="settings-panel" id="panel-apikeys" data-admin-only="1" data-dev-only="1">
           <div class="card">
             <h2>Integration keys</h2>
             <p class="subtitle" style="margin-bottom:10px;">
@@ -1084,7 +1100,67 @@
           }
         });
       }
+
+      document.getElementById('dev-mode-card').style.display = myRole === 'admin' ? 'block' : 'none';
+      if (myRole === 'admin') refreshDevModeUI();
     }
+
+    // --- Dev Mode ---
+    let devModeTimer = null;
+
+    function applyDevModeGating() {
+      const active = isDevModeActive();
+      document.querySelectorAll('[data-dev-only="1"]').forEach(el => {
+        if (myRole !== 'admin') return; // already hidden by admin gating - don't override that
+        const stillActive = el.classList.contains('active');
+        el.style.display = active ? '' : 'none';
+        if (!active && stillActive) {
+          document.querySelector('.settings-tab[data-panel="numbering"]').click();
+        }
+      });
+    }
+
+    function refreshDevModeUI() {
+      const active = isDevModeActive();
+      document.getElementById('dev-mode-locked').style.display = active ? 'none' : 'block';
+      document.getElementById('dev-mode-unlocked').style.display = active ? 'block' : 'none';
+      if (active) {
+        document.getElementById('dev-mode-remaining').textContent = `${devModeMinutesRemaining()}m`;
+        if (!devModeTimer) {
+          devModeTimer = setInterval(() => {
+            if (!isDevModeActive()) { clearInterval(devModeTimer); devModeTimer = null; }
+            refreshDevModeUI();
+          }, 30000);
+        }
+      }
+      applyDevModeGating();
+    }
+
+    document.getElementById('dev-mode-unlock-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('dev-mode-msg');
+      const password = document.getElementById('dev-mode-password').value;
+      if (!password) { msg.innerHTML = `<div class="error-box">Enter the password.</div>`; return; }
+      msg.innerHTML = '';
+      try {
+        const res = await authedFetch('/.netlify/functions/verify-dev-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Incorrect password');
+        setDevModeExpiry(data.expiresAt);
+        document.getElementById('dev-mode-password').value = '';
+        refreshDevModeUI();
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+    });
+
+    document.getElementById('dev-mode-lock-btn').addEventListener('click', () => {
+      clearDevMode();
+      refreshDevModeUI();
+    });
 
     // --- Users & Roles ---
     async function authedFetch(url, options = {}) {

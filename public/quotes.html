@@ -121,7 +121,7 @@
                 </a>`;
           })();
 
-          if (!pricingVisible) return rowInner;
+          if (!pricingVisible || !isDevModeActive()) return rowInner;
           return `
             <div style="display:flex; align-items:center; gap:10px; ${isLast ? '' : 'border-bottom:1px solid var(--border);'}">
               <input type="checkbox" class="quote-select" data-id="${p.id}" style="width:auto; flex-shrink:0;" />
@@ -132,6 +132,9 @@
 
       function bulkBarHtml() {
         if (!pricingVisible) return '';
+        if (!isDevModeActive()) {
+          return `<p class="subtitle" style="margin-bottom:10px;">Enable Dev Mode in Settings to bulk-select and delete quotes.</p>`;
+        }
         return `
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
             <label style="display:flex; align-items:center; gap:8px; margin:0;">

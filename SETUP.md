@@ -42,6 +42,7 @@ This is separate from a claude.ai login. It's a pay-per-use API account:
    - `SUPABASE_SERVICE_ROLE_KEY` — the service_role key from step 1.6
    - `SERVICEM8_API_KEY` — the key from step 2
    - `ANTHROPIC_API_KEY` — the key from step 3, if you set that up
+   - `DEV_MODE_PASSWORD` — the password for unlocking Dev Mode (Settings page, admin-only) - a time-limited (20 min) unlock for API Keys, Company Details, Xero Mapping, and bulk-delete on Quotes/Projects/Timesheets. Checked server-side by a Netlify function, never shipped to the browser. Pick your own value here rather than reusing one from elsewhere.
 4. Trigger a deploy (Deploys tab > Trigger deploy).
 5. Under **Domain settings**, add a custom domain like `projects.thomsonenergy.com.au` and
    point it at this Netlify site with a CNAME record in whoever manages your DNS (probably the

@@ -41,10 +41,11 @@
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
         <input id="project-search" placeholder="Search by name, client, or job number..." style="max-width:320px; margin:0;" />
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div id="bulk-delete-projects-controls" style="display:none; align-items:center; gap:10px;">
           <label style="display:flex; align-items:center; gap:6px; margin:0;"><input type="checkbox" id="select-all-projects" style="width:auto;" /> Select all</label>
           <button type="button" id="bulk-delete-projects-btn" class="secondary" style="display:none;">Delete selected</button>
         </div>
+        <p class="subtitle" id="bulk-delete-projects-hint" style="margin:0;">Enable Dev Mode in Settings to bulk-select and delete projects.</p>
       </div>
       <div id="bulk-delete-projects-msg"></div>
       <div id="projects-list"><p class="subtitle">Loading...</p></div>
@@ -134,13 +135,17 @@
 
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No projects match.</p>`; return; }
 
+      const devMode = isDevModeActive();
+      document.getElementById('bulk-delete-projects-controls').style.display = devMode ? 'flex' : 'none';
+      document.getElementById('bulk-delete-projects-hint').style.display = devMode ? 'none' : 'block';
+
       listEl.innerHTML = `
         <table class="responsive-stack">
-          <thead><tr><th></th><th>#</th><th>Name</th><th>Client</th><th class="num">Signed</th><th class="num">Pending</th><th class="num">Cost outlayed</th><th class="num">Partial invoiced</th></tr></thead>
+          <thead><tr>${devMode ? '<th></th>' : ''}<th>#</th><th>Name</th><th>Client</th><th class="num">Signed</th><th class="num">Pending</th><th class="num">Cost outlayed</th><th class="num">Partial invoiced</th></tr></thead>
           <tbody>
             ${filtered.map(p => `
               <tr class="project-row-link" data-id="${p.id}" style="cursor:pointer;">
-                <td data-label=""><input type="checkbox" class="project-select" data-id="${p.id}" style="width:auto;" onclick="event.stopPropagation()" /></td>
+                ${devMode ? `<td data-label=""><input type="checkbox" class="project-select" data-id="${p.id}" style="width:auto;" onclick="event.stopPropagation()" /></td>` : ''}
                 <td data-label="#">${p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '-')}</td>
                 <td data-label="Name">${p.name}</td>
                 <td data-label="Client">${p.client_name || '-'}</td>
