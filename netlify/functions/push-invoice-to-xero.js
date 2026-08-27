@@ -3,7 +3,10 @@
 // Pricing roles only. Copies an already-created, already-sent invoice
 // across to Xero as a DRAFT, for the bookkeeper's records - the client
 // never sees Xero, they already have the invoice link from the app.
-// Handles both job-linked claims and standalone invoices with no job.
+// Handles standalone invoices, legacy single-stage job claims (cost_centre_id
+// set directly on the invoice), and multi-stage job claims (project_id set,
+// one row per claimed cost centre in invoice_claims) - one Xero line item
+// per stage per category (Labour/Materials/STC) for the multi-stage case.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { xeroRequest } = require('./_shared/xero-client');
@@ -66,7 +69,7 @@ exports.handler = async (event) => {
 
     const { data: invoice, error: invErr } = await supabaseAdmin
       .from('invoices')
-      .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients(name, email, client_type, xero_contact_id)')
+      .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients(name, email, client_type, xero_contact_id), invoice_claims(*, cost_centres(name, sort_order))')
       .eq('id', invoiceId)
       .single();
     if (invErr || !invoice) throw new Error('Invoice not found');
@@ -74,14 +77,22 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'This invoice has already been pushed to Xero.' }) };
     }
 
-    const centre = invoice.cost_centres;
-    const project = centre?.projects;
-    const isStandalone = !centre;
+    const isMultiStage = !!invoice.project_id;
+    const centre = invoice.cost_centres; // only set for a legacy single-stage job claim
+    const isStandalone = !isMultiStage && !centre;
+
+    let project = null;
+    if (isMultiStage) {
+      const { data: proj } = await supabaseAdmin.from('projects').select('*, clients(client_type, xero_contact_id)').eq('id', invoice.project_id).single();
+      project = proj;
+    } else if (centre) {
+      project = centre.projects;
+    }
 
     // Everything below is branched: job-linked claims get a job-tagged
     // reference and tracking; standalone invoices just get a plain
     // description and no tracking, since there's no job to tag them to.
-    let contactName, contactEmail, clientType, jobNumber, reference, contactStoreTable, contactStoreId, existingXeroContactId;
+    let contactName, contactEmail, clientType, jobNumber, contactStoreTable, contactStoreId, existingXeroContactId;
 
     if (isStandalone) {
       const client = invoice.clients;
@@ -89,7 +100,6 @@ exports.handler = async (event) => {
       contactEmail = client?.email;
       clientType = client?.client_type || 'individual';
       jobNumber = null;
-      reference = invoice.description || 'Invoice';
       contactStoreTable = 'clients';
       contactStoreId = invoice.client_id;
       existingXeroContactId = client?.xero_contact_id;
@@ -101,14 +111,6 @@ exports.handler = async (event) => {
       contactStoreTable = 'projects';
       contactStoreId = project.id;
       existingXeroContactId = project.xero_contact_id;
-
-      const { data: allCentres } = await supabaseAdmin
-        .from('cost_centres')
-        .select('id, sort_order')
-        .eq('project_id', project.id)
-        .order('sort_order');
-      const stageIndex = allCentres.findIndex(c => c.id === centre.id);
-      reference = `Job ${jobNumber} - Sales Invoice ${stageIndex + 1} of ${allCentres.length} (${centre.name})`;
     }
 
     const { data: mappings } = await supabaseAdmin.from('xero_account_mapping').select('*');
@@ -130,39 +132,91 @@ exports.handler = async (event) => {
       ? [{ TrackingCategoryID: settings.xero_tracking_category_id, TrackingOptionID: trackingOptionId }]
       : undefined;
 
-    const lineDescription = isStandalone ? (invoice.description || 'Invoice') : centre.name;
-    const lineItems = [
-      {
-        Description: `${lineDescription} - Labour`,
-        Quantity: 1,
-        UnitAmount: Number(invoice.labour_amount) || 0,
-        AccountCode: labourMap.xero_account_code,
-        TaxType: labourMap.xero_tax_type,
-        Tracking: trackingBlock,
-      },
-    ];
-    if (Number(invoice.material_amount) > 0) {
-      lineItems.push({
-        Description: `${lineDescription} - Materials`,
-        Quantity: 1,
-        UnitAmount: Number(invoice.material_amount),
-        AccountCode: materialsMap.xero_account_code,
-        TaxType: materialsMap.xero_tax_type,
-        Tracking: trackingBlock,
+    let reference, lineItems;
+    if (isMultiStage) {
+      const claims = (invoice.invoice_claims || []).slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0));
+      const stageNames = claims.map(c => c.cost_centres?.name).filter(Boolean);
+      reference = `Job ${jobNumber} - Sales Invoice (${stageNames.join(', ')})`;
+      lineItems = [];
+      claims.forEach(c => {
+        const stageName = c.cost_centres?.name || 'Stage';
+        lineItems.push({
+          Description: `${stageName} - Labour`,
+          Quantity: 1,
+          UnitAmount: Number(c.labour_amount) || 0,
+          AccountCode: labourMap.xero_account_code,
+          TaxType: labourMap.xero_tax_type,
+          Tracking: trackingBlock,
+        });
+        if (Number(c.material_amount) > 0) {
+          lineItems.push({
+            Description: `${stageName} - Materials`,
+            Quantity: 1,
+            UnitAmount: Number(c.material_amount),
+            AccountCode: materialsMap.xero_account_code,
+            TaxType: materialsMap.xero_tax_type,
+            Tracking: trackingBlock,
+          });
+        }
+        if (Number(c.stc_amount) > 0) {
+          if (!stcMap) throw new Error(`No Xero mapping found for STC credits (${clientType}) - set it up in Settings > Xero Mapping first.`);
+          lineItems.push({
+            Description: `${stageName} - STC Credit`,
+            Quantity: 1,
+            UnitAmount: -Number(c.stc_amount),
+            AccountCode: stcMap.xero_account_code,
+            TaxType: stcMap.xero_tax_type,
+            Tracking: trackingBlock,
+          });
+        }
       });
-    }
-    if (Number(invoice.stc_amount) > 0) {
-      if (!stcMap) {
-        throw new Error(`No Xero mapping found for STC credits (${clientType}) - set it up in Settings > Xero Mapping first.`);
+    } else {
+      if (!isStandalone) {
+        const { data: allCentres } = await supabaseAdmin
+          .from('cost_centres')
+          .select('id, sort_order')
+          .eq('project_id', project.id)
+          .order('sort_order');
+        const stageIndex = allCentres.findIndex(c => c.id === centre.id);
+        reference = `Job ${jobNumber} - Sales Invoice ${stageIndex + 1} of ${allCentres.length} (${centre.name})`;
+      } else {
+        reference = invoice.description || 'Invoice';
       }
-      lineItems.push({
-        Description: 'STC Credit',
-        Quantity: 1,
-        UnitAmount: -Number(invoice.stc_amount),
-        AccountCode: stcMap.xero_account_code,
-        TaxType: stcMap.xero_tax_type,
-        Tracking: trackingBlock,
-      });
+
+      const lineDescription = isStandalone ? (invoice.description || 'Invoice') : centre.name;
+      lineItems = [
+        {
+          Description: `${lineDescription} - Labour`,
+          Quantity: 1,
+          UnitAmount: Number(invoice.labour_amount) || 0,
+          AccountCode: labourMap.xero_account_code,
+          TaxType: labourMap.xero_tax_type,
+          Tracking: trackingBlock,
+        },
+      ];
+      if (Number(invoice.material_amount) > 0) {
+        lineItems.push({
+          Description: `${lineDescription} - Materials`,
+          Quantity: 1,
+          UnitAmount: Number(invoice.material_amount),
+          AccountCode: materialsMap.xero_account_code,
+          TaxType: materialsMap.xero_tax_type,
+          Tracking: trackingBlock,
+        });
+      }
+      if (Number(invoice.stc_amount) > 0) {
+        if (!stcMap) {
+          throw new Error(`No Xero mapping found for STC credits (${clientType}) - set it up in Settings > Xero Mapping first.`);
+        }
+        lineItems.push({
+          Description: 'STC Credit',
+          Quantity: 1,
+          UnitAmount: -Number(invoice.stc_amount),
+          AccountCode: stcMap.xero_account_code,
+          TaxType: stcMap.xero_tax_type,
+          Tracking: trackingBlock,
+        });
+      }
     }
 
     const result = await xeroRequest('accounting', 'Invoices', {

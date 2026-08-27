@@ -1,9 +1,11 @@
 // POST /api/create-invoice
-// Body EITHER: { costCentreId, labourAmount, materialAmount, stcAmount, claimPercent, invoiceNumber }
-//   for a job-linked claim, OR
+// Body EITHER: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent }], invoiceNumber }
+//   for a job-linked claim - one invoice, one row per cost centre included
+//   (a single-stage claim is just claims.length === 1), OR
 // { clientId, description, labourAmount, materialAmount, invoiceNumber }
 //   for a standalone invoice with no job/quote behind it.
-// Pricing roles only. Creates a new row in the invoices table.
+// Pricing roles only. Creates a new row in the invoices table (plus one
+// invoice_claims row per claimed cost centre for a job-linked claim).
 
 const crypto = require('crypto');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
@@ -21,7 +23,8 @@ exports.handler = async (event) => {
 
   try {
     const {
-      costCentreId,
+      projectId,
+      claims,
       clientId,
       description,
       labourAmount = 0,
@@ -31,20 +34,30 @@ exports.handler = async (event) => {
       invoiceNumber: overrideNumber,
     } = JSON.parse(event.body || '{}');
 
-    if (!costCentreId && !clientId) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Either costCentreId (job claim) or clientId (standalone invoice) is required' }) };
+    const isJobClaim = !!projectId && Array.isArray(claims) && claims.length > 0;
+    if (!isJobClaim && !clientId) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Either projectId+claims (job claim) or clientId (standalone invoice) is required' }) };
     }
 
-    let invoicedAmountBefore = 0;
-    if (costCentreId) {
-      const { data: centre, error: centreErr } = await supabaseAdmin
-        .from('cost_centres')
-        .select('id, invoiced_amount')
-        .eq('id', costCentreId)
-        .single();
-      if (centreErr || !centre) throw new Error('Cost centre not found');
-      invoicedAmountBefore = Number(centre.invoiced_amount) || 0;
+    const claimRows = isJobClaim
+      ? claims
+          .map(c => ({
+            cost_centre_id: c.costCentreId,
+            labour_amount: Number(c.labourAmount) || 0,
+            material_amount: Number(c.materialAmount) || 0,
+            stc_amount: Number(c.stcAmount) || 0,
+            claim_percent: c.claimPercent != null ? Number(c.claimPercent) : null,
+          }))
+          .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount) > 0)
+      : [];
+    if (isJobClaim && !claimRows.length) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'At least one cost centre needs a non-zero claim amount' }) };
     }
+
+    const totalLabour = isJobClaim ? claimRows.reduce((s, c) => s + c.labour_amount, 0) : Number(labourAmount) || 0;
+    const totalMaterial = isJobClaim ? claimRows.reduce((s, c) => s + c.material_amount, 0) : Number(materialAmount) || 0;
+    const totalStc = isJobClaim ? claimRows.reduce((s, c) => s + c.stc_amount, 0) : Number(stcAmount) || 0;
+    const totalAmount = totalLabour + totalMaterial;
 
     let invoiceNumberStr = overrideNumber;
     if (!invoiceNumberStr) {
@@ -54,32 +67,48 @@ exports.handler = async (event) => {
       invoiceNumberStr = `${companySettings?.invoice_number_prefix || 'SI'}${drawnNumber}`;
     }
 
+    let overallClaimPercent = Number(claimPercent) || 100;
+    if (isJobClaim) {
+      const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('quoted_amount').eq('project_id', projectId);
+      const projectTotal = (allCentres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
+      overallClaimPercent = projectTotal > 0 ? Math.round((totalAmount / projectTotal) * 10000) / 100 : null;
+    }
+
     const invoiceToken = crypto.randomUUID();
-    const totalAmount = (Number(labourAmount) || 0) + (Number(materialAmount) || 0);
 
     const { data: insertedInvoice, error: insErr } = await supabaseAdmin
       .from('invoices')
       .insert({
-        cost_centre_id: costCentreId || null,
-        client_id: costCentreId ? null : clientId,
-        description: costCentreId ? null : (description || null),
+        project_id: isJobClaim ? projectId : null,
+        cost_centre_id: null, // stage detail for job-linked claims always lives in invoice_claims now
+        client_id: isJobClaim ? null : clientId,
+        description: isJobClaim ? null : (description || null),
         invoice_number: invoiceNumberStr,
         invoice_token: invoiceToken,
-        labour_amount: Number(labourAmount) || 0,
-        material_amount: Number(materialAmount) || 0,
-        stc_amount: Number(stcAmount) || 0,
-        claim_percent: Number(claimPercent) || 100,
+        labour_amount: totalLabour,
+        material_amount: totalMaterial,
+        stc_amount: totalStc,
+        claim_percent: overallClaimPercent,
         created_by: user.id,
       })
       .select('id')
       .single();
     if (insErr) throw insErr;
 
-    if (costCentreId) {
-      await supabaseAdmin
+    if (isJobClaim) {
+      const { error: claimsErr } = await supabaseAdmin
+        .from('invoice_claims')
+        .insert(claimRows.map(c => ({ ...c, invoice_id: insertedInvoice.id })));
+      if (claimsErr) throw claimsErr;
+
+      const { data: centresBefore } = await supabaseAdmin
         .from('cost_centres')
-        .update({ invoiced_amount: invoicedAmountBefore + totalAmount })
-        .eq('id', costCentreId);
+        .select('id, invoiced_amount')
+        .in('id', claimRows.map(c => c.cost_centre_id));
+      await Promise.all(claimRows.map(c => {
+        const before = Number((centresBefore || []).find(cc => cc.id === c.cost_centre_id)?.invoiced_amount) || 0;
+        return supabaseAdmin.from('cost_centres').update({ invoiced_amount: before + c.labour_amount + c.material_amount }).eq('id', c.cost_centre_id);
+      }));
     }
 
     // No Airwallex payment link is created here. It's generated on demand

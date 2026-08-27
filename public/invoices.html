@@ -54,7 +54,7 @@
       const listEl = document.getElementById('invoices-list');
       const { data, error } = await supabaseClient
         .from('invoices')
-        .select(`*, cost_centres(name, project_id, projects(name, job_number, client_name))`)
+        .select(`*, cost_centres(name, project_id, projects(name, job_number, client_name)), projects(name, job_number, client_name), invoice_claims(cost_centres(name))`)
         .order('sent_at', { ascending: false });
 
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
@@ -96,7 +96,10 @@
           <tbody>
             ${data.map(inv => {
               const cc = inv.cost_centres;
-              const project = cc?.projects;
+              const claimStages = (inv.invoice_claims || []).map(ic => ic.cost_centres?.name).filter(Boolean);
+              const project = cc?.projects || inv.projects;
+              const projectId = cc?.project_id || inv.project_id;
+              const stageLabel = cc ? (cc.name || '-') : (claimStages.length ? (claimStages.length > 1 ? `${claimStages.length} stages` : claimStages[0]) : '-');
               const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
               const daysSince = (now - new Date(inv.sent_at)) / 86400000;
               const isOverdue = !inv.paid_at && daysSince > DUE_DAYS;
@@ -104,7 +107,7 @@
                 <tr>
                   <td data-label="Invoice">${inv.invoice_number}</td>
                   <td data-label="Job">${project ? `#${project.job_number || '-'} ${project.name}` : '-'}</td>
-                  <td data-label="Stage">${cc?.name || '-'}</td>
+                  <td data-label="Stage" title="${claimStages.join(', ')}">${stageLabel}</td>
                   <td class="num" data-label="Amount">${money(amount)}</td>
                   <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
                   <td data-label="Status">
@@ -115,7 +118,7 @@
                   </td>
                   <td data-label="">
                     <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:8px;">View</a>
-                    ${project ? `<a class="link-quiet" href="/project.html?id=${cc.project_id}" style="font-size:12px;">Job</a>` : ''}
+                    ${project && projectId ? `<a class="link-quiet" href="/project.html?id=${projectId}" style="font-size:12px;">Job</a>` : ''}
                   </td>
                 </tr>`;
             }).join('')}

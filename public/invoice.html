@@ -16,6 +16,7 @@
     .topbar { display: none; }
     body { background: white; color: black; }
     .card { border: 1px solid #ccc; background: white; }
+    .page-break { page-break-before: always; }
   }
   .inv-header-bar { display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; margin-bottom:20px; }
   .inv-header-bar div { flex:1; padding:12px 16px; text-align:center; border-right:1px solid var(--border); }
@@ -43,7 +44,7 @@
     const token = new URLSearchParams(window.location.search).get('token');
 
     async function load() {
-      const { data, error } = await supabaseClient.rpc('get_invoice_by_token_v2', { p_token: token });
+      const { data, error } = await supabaseClient.rpc('get_invoice_by_token_v3', { p_token: token });
       const content = document.getElementById('content');
       if (error || !data) {
         content.innerHTML = `<div class="error-box">This invoice link isn't valid. Please check the link or contact us.</div>`;
@@ -51,11 +52,11 @@
       }
 
       const inv = data.invoice;
-      const cc = data.cost_centre;
-      const project = data.project;
+      const project = data.project || {};
       const s = data.company || {};
-      const lineItems = data.line_items || [];
-      const previousClaims = data.previous_claims || [];
+      const claims = data.claims || [];
+      const previousInvoices = data.previous_invoices || [];
+      const isStandalone = !!data.is_standalone;
 
       if (s.logo_url) {
         document.getElementById('brand-mark').innerHTML = `<img src="${s.logo_url}" style="max-height:28px;" />`;
@@ -75,18 +76,10 @@
       // place, specifically so the two can never drift apart again.
       const balanceDue = Number(inv.balance_due);
       const isPaid = !!inv.paid_at;
+      const isMultiStage = claims.length > 1;
 
       const detailParts = [s.abn ? `ABN ${s.abn}` : '', mapsLink(s.address), s.phone, s.website].filter(Boolean);
-
-      const previouslyClaimed = previousClaims.reduce((sum, p) => sum + Number(p.labour_amount) + Number(p.material_amount), 0);
-      const quotedAmount = Number(cc.quoted_amount) || 0;
-      const claimedToDate = previouslyClaimed + subtotal;
-      const remaining = Math.max(0, quotedAmount - claimedToDate);
-
-      const stcTotal = Number(cc.stc_total) || 0;
-      const stcAppliedPreviously = 0; // previous_claims doesn't carry stc breakdown separately here, kept simple
-      const stcRemaining = Math.max(0, stcTotal - stcAmount - stcAppliedPreviously);
-      const isStandalone = !project.job_number;
+      const stageLabel = isStandalone ? '' : (isMultiStage ? claims.map(c => c.cost_centre_name).join(', ') : (claims[0]?.cost_centre_name || ''));
 
       content.innerHTML = `
         <div class="card">
@@ -104,12 +97,12 @@
           <div class="grid cols-3" style="margin-bottom:20px;">
             <div style="grid-column: span 2;">
               <p class="subtitle" style="margin:0 0 4px; text-transform:uppercase; font-size:11px;">Bill to</p>
-              <p style="margin:0; font-weight:600;">${project.client_name}</p>
+              <p style="margin:0; font-weight:600;">${project.client_name || ''}</p>
               ${project.client_address ? `<p class="subtitle" style="margin:2px 0 0;">${mapsLink(project.client_address)}</p>` : ''}
             </div>
             <div class="meta-box">
-              ${!isStandalone ? `<div><span class="k">Job No.</span>J${project.job_number}</div>` : ''}
-              <div><span class="k">${isStandalone ? 'For' : 'Stage'}</span>${cc.name}</div>
+              ${!isStandalone && project.job_number ? `<div><span class="k">Job No.</span>J${project.job_number}</div>` : ''}
+              <div><span class="k">${isStandalone ? 'For' : (isMultiStage ? 'Stages' : 'Stage')}</span>${isStandalone ? (inv.description || 'Invoice') : stageLabel}</div>
             </div>
           </div>
 
@@ -119,15 +112,18 @@
             <div>${isPaid ? '<div class="label">Status</div><div class="val" style="color:var(--green);">Paid</div>' : '<div class="label">Status</div><div class="val">Awaiting payment</div>'}</div>
           </div>
 
-          <h2 style="margin-bottom:10px;">${cc.name}</h2>
-          ${lineItems.length ? `
+          ${isStandalone ? `
+            <h2 style="margin-bottom:10px;">${inv.description || 'Invoice'}</h2>
+            <p class="subtitle">Labour and materials as invoiced.</p>
+          ` : `
+            <h2 style="margin-bottom:10px;">Invoice summary</h2>
             <table>
-              <thead><tr><th>Item</th><th class="num">Quantity</th><th class="num">Unit Price</th><th class="num">Total</th></tr></thead>
+              <thead><tr><th>Stage</th><th class="num">Amount</th></tr></thead>
               <tbody>
-                ${lineItems.map(li => `<tr><td>${li.description}</td><td class="num">${li.quantity}</td><td class="num">${money(li.unit_cost)}</td><td class="num">${money(li.quantity * li.unit_cost)}</td></tr>`).join('')}
+                ${claims.map(c => `<tr><td>${c.cost_centre_name}</td><td class="num">${money(Number(c.labour_amount) + Number(c.material_amount) - Number(c.stc_amount || 0))}</td></tr>`).join('')}
               </tbody>
             </table>
-          ` : `<p class="subtitle">${isStandalone ? 'Labour and materials as invoiced.' : cc.name + ' - labour and materials as quoted.'}</p>`}
+          `}
 
           <div style="text-align:right; margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
             <p class="subtitle" style="margin:0;">Subtotal: ${money(subtotal)}</p>
@@ -139,43 +135,61 @@
         </div>
 
         ${!isStandalone ? `
-        <div class="card">
-          <h2 style="margin-bottom:2px;">Claim summary</h2>
-          <p class="subtitle" style="margin-bottom:16px;">${cc.name} &middot; J${project.job_number}</p>
-          <table>
-            <thead><tr><th></th><th class="num">Total</th><th class="num">Claimed to date</th><th class="num">This claim</th><th class="num">Remaining</th></tr></thead>
-            <tbody>
-              <tr>
-                <td>Stage value</td>
-                <td class="num">${money(quotedAmount)}</td>
-                <td class="num">${money(claimedToDate)} (${quotedAmount ? Math.round((claimedToDate / quotedAmount) * 100) : 0}%)</td>
-                <td class="num">${money(subtotal)}</td>
-                <td class="num">${money(remaining)}</td>
-              </tr>
-              ${stcTotal > 0 ? `
-              <tr>
-                <td>STC credit</td>
-                <td class="num">${money(stcTotal)}</td>
-                <td class="num">${money(stcAppliedPreviously)}</td>
-                <td class="num">${money(stcAmount)}</td>
-                <td class="num">${money(stcRemaining)}</td>
-              </tr>` : ''}
-            </tbody>
-          </table>
-          ${stcTotal > 0 ? (stcAmount > 0
-            ? `<p class="subtitle" style="margin-top:12px;">This customer is entitled to a ${money(stcTotal)} STC credit. ${money(stcAmount)} of it is applied on this claim.</p>`
-            : `<p class="subtitle" style="margin-top:12px;">This customer is entitled to a ${money(stcTotal)} STC credit. It has not been applied on this claim - it will be credited on a future invoice for this stage.</p>`
-          ) : ''}
+        <div class="card page-break">
+          <h2 style="margin-bottom:2px;">Claim breakdown</h2>
+          <p class="subtitle" style="margin-bottom:16px;">Which section this invoice covers, and how much of each.${project.job_number ? ` J${project.job_number}` : ''}</p>
+          ${claims.map(c => {
+            const claimedBefore = Number(c.claimed_before) || 0;
+            const thisClaim = Number(c.labour_amount) + Number(c.material_amount);
+            const quotedAmount = Number(c.quoted_amount) || 0;
+            const claimedToDate = claimedBefore + thisClaim;
+            const remaining = Math.max(0, quotedAmount - claimedToDate);
+            const stcTotal = Number(c.stc_total) || 0;
+            const stcAmt = Number(c.stc_amount) || 0;
+            const lineItems = c.line_items || [];
+            return `
+            <div style="margin-bottom:22px; padding-bottom:18px; border-bottom:1px solid var(--border);">
+              <h3 style="margin-bottom:8px;">${c.cost_centre_name}</h3>
+              ${lineItems.length ? `
+                <table style="margin-bottom:10px;">
+                  <thead><tr><th>Item</th><th class="num">Quantity</th><th class="num">Unit Price</th><th class="num">Total</th></tr></thead>
+                  <tbody>
+                    ${lineItems.map(li => `<tr><td>${li.description}</td><td class="num">${li.quantity}</td><td class="num">${money(li.unit_cost)}</td><td class="num">${money(li.quantity * li.unit_cost)}</td></tr>`).join('')}
+                  </tbody>
+                </table>
+              ` : `<p class="subtitle" style="margin-bottom:10px;">Labour and materials as quoted.</p>`}
+              <table>
+                <thead><tr><th></th><th class="num">Total</th><th class="num">Claimed to date</th><th class="num">This claim</th><th class="num">Remaining</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>Stage value</td>
+                    <td class="num">${money(quotedAmount)}</td>
+                    <td class="num">${money(claimedToDate)} (${quotedAmount ? Math.round((claimedToDate / quotedAmount) * 100) : 0}%)</td>
+                    <td class="num">${money(thisClaim)}</td>
+                    <td class="num">${money(remaining)}</td>
+                  </tr>
+                  ${stcTotal > 0 ? `
+                  <tr>
+                    <td>STC credit</td>
+                    <td class="num">${money(stcTotal)}</td>
+                    <td class="num">-</td>
+                    <td class="num">${money(stcAmt)}</td>
+                    <td class="num">${money(Math.max(0, stcTotal - stcAmt))}</td>
+                  </tr>` : ''}
+                </tbody>
+              </table>
+            </div>`;
+          }).join('')}
         </div>
         ` : ''}
 
-        ${previousClaims.length ? `
+        ${previousInvoices.length ? `
         <div class="card">
           <h2>Previous claims</h2>
           <table>
             <thead><tr><th>Invoice</th><th class="num">Amount</th><th>Date</th></tr></thead>
             <tbody>
-              ${previousClaims.map(p => `<tr><td>${p.invoice_number}</td><td class="num">${money(Number(p.labour_amount) + Number(p.material_amount))}</td><td>${new Date(p.sent_at).toLocaleDateString('en-AU')}</td></tr>`).join('')}
+              ${previousInvoices.map(p => `<tr><td>${p.invoice_number}</td><td class="num">${money(p.amount)}</td><td>${new Date(p.sent_at).toLocaleDateString('en-AU')}</td></tr>`).join('')}
             </tbody>
           </table>
         </div>` : ''}

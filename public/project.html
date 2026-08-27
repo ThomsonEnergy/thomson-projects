@@ -41,7 +41,7 @@
       const centreCols = await costCentreColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols}, invoices(*), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order), cost_centre_photo_groups(*)),
+        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, paid_at, xero_invoice_id)), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order), cost_centre_photo_groups(*)),
           project_manager:client_contacts!project_manager_contact_id(name, phone, email),
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
@@ -1245,98 +1245,210 @@
       }
     }
 
-    function openCreateInvoicePanel(btn, project, pricingVisible) {
-      const centreId = btn.dataset.id;
-      const centre = project.cost_centres.find(c => c.id === centreId);
-      if (!centre) return;
-
-      const stageInvoices = centre.invoices || [];
+    // Merges legacy single-stage invoices (linked via invoices.cost_centre_id
+    // directly) with new multi-stage claims (linked via invoice_claims,
+    // invoice.cost_centre_id left null) into one list per cost centre - the
+    // two never overlap for the same invoice, since a new invoice always
+    // uses invoice_claims. Shared by the per-stage claims card and the
+    // "Invoice project" modal so remaining-to-claim can never drift between
+    // the two.
+    function stageClaimSummary(c) {
+      const legacyInvoices = (c.invoices || []).map(inv => ({
+        invoice_number: inv.invoice_number, invoice_token: inv.invoice_token, sent_at: inv.sent_at,
+        paid_at: inv.paid_at, xero_invoice_id: inv.xero_invoice_id, id: inv.id,
+        labour_amount: inv.labour_amount, material_amount: inv.material_amount, stc_amount: inv.stc_amount,
+      }));
+      const claimInvoices = (c.invoice_claims || []).map(ic => ({
+        invoice_number: ic.invoices?.invoice_number, invoice_token: ic.invoices?.invoice_token, sent_at: ic.invoices?.sent_at,
+        paid_at: ic.invoices?.paid_at, xero_invoice_id: ic.invoices?.xero_invoice_id, id: ic.invoices?.id,
+        labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount,
+      }));
+      const stageInvoices = [...legacyInvoices, ...claimInvoices].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
       const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
-      const quotedAmount = Number(centre.quoted_amount) || 0;
-      const remaining = Math.max(0, quotedAmount - claimedTotal);
+      const quotedAmt = Number(c.quoted_amount) || 0;
+      const remaining = Math.max(0, quotedAmt - claimedTotal);
+      const stcApplied = stageInvoices.reduce((s, inv) => s + Number(inv.stc_amount || 0), 0);
+      const stcRemaining = Math.max(0, Number(c.stc_total || 0) - stcApplied);
+      return { stageInvoices, claimedTotal, quotedAmt, remaining, stcApplied, stcRemaining };
+    }
 
+    // Splits a stage's claimed $ into labour/materials using the same ratio
+    // as its estimated cost breakdown - matches how each stage's own
+    // estimated_labour_cost/estimated_material_cost split was already being
+    // used to default a single-stage claim before this was project-wide.
+    function splitLabourMaterial(centre, amount) {
       const labourCost = Number(centre.estimated_labour_cost) || 0;
       const materialCost = Number(centre.estimated_material_cost) || 0;
       const costTotal = labourCost + materialCost;
       const labourShare = costTotal > 0 ? labourCost / costTotal : 1;
-      const defaultLabourAmount = Math.round(remaining * labourShare * 100) / 100;
-      const defaultMaterialAmount = Math.round((remaining - defaultLabourAmount) * 100) / 100;
+      const labourAmount = Math.round(amount * labourShare * 100) / 100;
+      const materialAmount = Math.round((amount - labourAmount) * 100) / 100;
+      return { labourAmount, materialAmount };
+    }
 
-      const stcApplied = stageInvoices.reduce((s, inv) => s + Number(inv.stc_amount || 0), 0);
-      const stcRemaining = Math.max(0, Number(centre.stc_total || 0) - stcApplied);
+    // One invoice, multiple stage-claim lines: either a single % of the
+    // whole project's contract value (distributed across every stage in
+    // proportion to its quoted amount, capped at each stage's own
+    // remaining balance and waterfalled to other stages if capped), or a
+    // hand-picked amount per stage. opts.preselectCentreId starts the
+    // panel in per-stage mode with just that one stage checked - the entry
+    // point from a single stage's own "Create & send next claim" button.
+    function openInvoiceProjectPanel(project, pricingVisible, opts = {}) {
+      const centres = (project.cost_centres || []).map(c => ({ centre: c, ...stageClaimSummary(c) })).filter(x => x.remaining > 0.004);
+      if (!centres.length) return;
+      const projectRemaining = centres.reduce((s, x) => s + x.remaining, 0);
+      const mode = opts.preselectCentreId ? 'stage' : 'project';
 
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
-        <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Create &amp; send ${stageInvoices.length ? 'next claim' : 'invoice'}</h2>
-          <p class="subtitle" style="margin-bottom:12px;">${centre.name} &middot; ${money(remaining)} remaining to claim. Adjust the amounts or invoice number if this claim shouldn't be for the full remaining balance.</p>
+        <div class="card" style="max-width:640px; width:100%; max-height:88vh; overflow-y:auto;">
+          <h2>Invoice project</h2>
+          <p class="subtitle" style="margin-bottom:12px;">${money(projectRemaining)} remaining to claim across ${centres.length} stage${centres.length === 1 ? '' : 's'}.</p>
 
-          <label style="margin-top:0">Invoice number</label>
-          <input id="create-invoice-number" placeholder="Leave blank to auto-assign the next number" />
-
-          <div class="grid cols-3">
-            <div>
-              <label>Labour amount</label>
-              <input type="number" step="0.01" id="create-invoice-labour" value="${defaultLabourAmount}" />
-            </div>
-            <div>
-              <label>Materials amount</label>
-              <input type="number" step="0.01" id="create-invoice-materials" value="${defaultMaterialAmount}" />
-            </div>
-            <div>
-              <label>Total</label>
-              <input id="create-invoice-total" readonly style="background:var(--surface); color:var(--muted);" />
-            </div>
+          <div style="display:flex; gap:16px; margin-bottom:14px;">
+            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="inv-mode" value="project" ${mode === 'project' ? 'checked' : ''} style="width:auto;" /> Whole project %</label>
+            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="inv-mode" value="stage" ${mode === 'stage' ? 'checked' : ''} style="width:auto;" /> Choose per stage</label>
           </div>
 
-          ${stcRemaining > 0 ? `
-            <label>STC credit to apply on this claim</label>
-            <input type="number" step="0.01" id="create-invoice-stc" value="${stcRemaining}" />
-            <p class="subtitle" style="margin:4px 0 0;">${money(stcRemaining)} STC credit outstanding for this stage. Set to 0 to defer it to a later claim - it'll still show as owing on the claim summary either way.</p>
-          ` : '<input type="hidden" id="create-invoice-stc" value="0" />'}
-
-          <div style="margin-top:14px;">
-            <button id="create-invoice-confirm-btn">Create &amp; send</button>
-            <button type="button" class="secondary" id="create-invoice-cancel-btn">Cancel</button>
+          <div id="inv-mode-project" style="${mode === 'project' ? '' : 'display:none;'}">
+            <label style="margin-top:0">Claim this % of the total contract value</label>
+            <input type="number" id="inv-project-pct" min="0" max="100" step="1" value="100" />
+            <p class="subtitle" id="inv-project-preview" style="margin-top:8px;"></p>
           </div>
-          <div id="create-invoice-panel-msg"></div>
+
+          <div id="inv-mode-stage" style="${mode === 'stage' ? '' : 'display:none;'}">
+            <table class="responsive-stack">
+              <thead><tr><th></th><th>Stage</th><th class="num">Remaining</th><th class="num">Claim %</th><th class="num">Claim $</th></tr></thead>
+              <tbody>
+                ${centres.map(x => `
+                  <tr>
+                    <td data-label=""><input type="checkbox" class="inv-stage-check" data-id="${x.centre.id}" style="width:auto;" ${opts.preselectCentreId ? (opts.preselectCentreId === x.centre.id ? 'checked' : '') : 'checked'} /></td>
+                    <td data-label="Stage">${x.centre.name}${x.stcRemaining > 0 ? `<br><span class="subtitle" style="font-size:11px;">${money(x.stcRemaining)} STC credit outstanding</span>` : ''}</td>
+                    <td class="num" data-label="Remaining">${money(x.remaining)}</td>
+                    <td class="num" data-label="Claim %"><input type="number" class="inv-stage-pct" data-id="${x.centre.id}" min="0" max="100" step="1" value="${!opts.preselectCentreId || opts.preselectCentreId === x.centre.id ? 100 : 0}" style="width:70px;" /></td>
+                    <td class="num" data-label="Claim $"><input type="number" class="inv-stage-amt" data-id="${x.centre.id}" step="0.01" style="width:100px;" /></td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <label style="margin-top:14px;">Invoice number</label>
+          <input id="inv-invoice-number" placeholder="Leave blank to auto-assign the next number" />
+
+          <p style="margin-top:14px; font-size:16px;">Total this claim: <strong id="inv-total-display">$0.00</strong></p>
+
+          <div style="margin-top:8px;">
+            <button id="inv-confirm-btn">Create &amp; send</button>
+            <button type="button" class="secondary" id="inv-cancel-btn">Cancel</button>
+          </div>
+          <div id="inv-panel-msg"></div>
         </div>`;
 
-      function updateTotal() {
-        const l = parseFloat(overlay.querySelector('#create-invoice-labour').value) || 0;
-        const m = parseFloat(overlay.querySelector('#create-invoice-materials').value) || 0;
-        const s = parseFloat(overlay.querySelector('#create-invoice-stc').value) || 0;
-        overlay.querySelector('#create-invoice-total').value = money(l + m - s);
-      }
-      overlay.querySelector('#create-invoice-labour').addEventListener('input', updateTotal);
-      overlay.querySelector('#create-invoice-materials').addEventListener('input', updateTotal);
-      const stcInput = overlay.querySelector('#create-invoice-stc');
-      if (stcInput) stcInput.addEventListener('input', updateTotal);
+      // Returns the current claim per stage, as {costCentreId, labourAmount,
+      // materialAmount, stcAmount, claimPercent}[] - the single source both
+      // the live preview and the submit handler read from, so what's shown
+      // is always exactly what gets sent.
+      function computeClaims() {
+        const selectedMode = overlay.querySelector('input[name="inv-mode"]:checked').value;
+        if (selectedMode === 'project') {
+          const pct = Math.max(0, Math.min(100, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
+          let targetTotal = projectRemaining * (pct / 100);
+          // Proportional-to-remaining, capped per stage, waterfalled: any
+          // amount a stage can't absorb (because pct x its remaining alone
+          // would be fine, but rounding/edge cases could push it over) is
+          // redistributed across stages that still have headroom.
+          const allocated = {};
+          let pool = centres.map(x => ({ id: x.centre.id, cap: x.remaining, given: 0 }));
+          let toDistribute = targetTotal;
+          for (let pass = 0; pass < 3 && toDistribute > 0.004 && pool.some(p => p.given < p.cap); pass++) {
+            const headroomTotal = pool.reduce((s, p) => s + (p.cap - p.given), 0);
+            if (headroomTotal <= 0) break;
+            pool.forEach(p => {
+              const share = (p.cap - p.given) / headroomTotal * toDistribute;
+              const give = Math.min(share, p.cap - p.given);
+              p.given += give;
+            });
+            const given = pool.reduce((s, p) => s + p.given, 0);
+            toDistribute = targetTotal - given;
+          }
+          pool.forEach(p => { allocated[p.id] = Math.round(p.given * 100) / 100; });
+          return centres.map(x => {
+            const amt = allocated[x.centre.id] || 0;
+            const { labourAmount, materialAmount } = splitLabourMaterial(x.centre, amt);
+            const stcAmount = amt >= x.remaining - 0.01 ? x.stcRemaining : 0; // full stage claimed -> pick up its STC credit too
+            return { costCentreId: x.centre.id, labourAmount, materialAmount, stcAmount, claimPercent: x.quotedAmt > 0 ? Math.round(((x.claimedTotal + amt) / x.quotedAmt) * 10000) / 100 : null };
+          }).filter(c => c.labourAmount + c.materialAmount + c.stcAmount > 0);
+        }
 
-      overlay.querySelector('#create-invoice-cancel-btn').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#create-invoice-confirm-btn').addEventListener('click', async () => {
-        const confirmBtn = overlay.querySelector('#create-invoice-confirm-btn');
-        const panelMsg = overlay.querySelector('#create-invoice-panel-msg');
+        return centres
+          .filter(x => overlay.querySelector(`.inv-stage-check[data-id="${x.centre.id}"]`)?.checked)
+          .map(x => {
+            const amtInput = overlay.querySelector(`.inv-stage-amt[data-id="${x.centre.id}"]`);
+            const amt = Math.max(0, Math.min(x.remaining, parseFloat(amtInput.value) || 0));
+            const { labourAmount, materialAmount } = splitLabourMaterial(x.centre, amt);
+            const stcAmount = amt >= x.remaining - 0.01 ? x.stcRemaining : 0;
+            return { costCentreId: x.centre.id, labourAmount, materialAmount, stcAmount, claimPercent: x.quotedAmt > 0 ? Math.round(((x.claimedTotal + amt) / x.quotedAmt) * 10000) / 100 : null };
+          })
+          .filter(c => c.labourAmount + c.materialAmount + c.stcAmount > 0);
+      }
+
+      function refreshStagePctFromDollar(centreId) {
+        const x = centres.find(c => c.centre.id === centreId);
+        const amtInput = overlay.querySelector(`.inv-stage-amt[data-id="${centreId}"]`);
+        const pctInput = overlay.querySelector(`.inv-stage-pct[data-id="${centreId}"]`);
+        const amt = Math.max(0, Math.min(x.remaining, parseFloat(amtInput.value) || 0));
+        pctInput.value = x.remaining > 0 ? Math.round((amt / x.remaining) * 100) : 0;
+      }
+      function refreshStageDollarFromPct(centreId) {
+        const x = centres.find(c => c.centre.id === centreId);
+        const pctInput = overlay.querySelector(`.inv-stage-pct[data-id="${centreId}"]`);
+        const amtInput = overlay.querySelector(`.inv-stage-amt[data-id="${centreId}"]`);
+        const pct = Math.max(0, Math.min(100, parseFloat(pctInput.value) || 0));
+        amtInput.value = Math.round(x.remaining * (pct / 100) * 100) / 100;
+      }
+      centres.forEach(x => refreshStageDollarFromPct(x.centre.id));
+
+      function refresh() {
+        const claims = computeClaims();
+        const total = claims.reduce((s, c) => s + c.labourAmount + c.materialAmount + c.stcAmount, 0);
+        overlay.querySelector('#inv-total-display').textContent = money(total);
+        const pctPreview = overlay.querySelector('#inv-project-preview');
+        if (pctPreview) {
+          const pct = Math.max(0, Math.min(100, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
+          pctPreview.textContent = `${money(projectRemaining * (pct / 100))} across ${claims.length} stage${claims.length === 1 ? '' : 's'}.`;
+        }
+      }
+
+      overlay.querySelectorAll('input[name="inv-mode"]').forEach(r => r.addEventListener('change', () => {
+        const selectedMode = overlay.querySelector('input[name="inv-mode"]:checked').value;
+        overlay.querySelector('#inv-mode-project').style.display = selectedMode === 'project' ? '' : 'none';
+        overlay.querySelector('#inv-mode-stage').style.display = selectedMode === 'stage' ? '' : 'none';
+        refresh();
+      }));
+      overlay.querySelector('#inv-project-pct').addEventListener('input', refresh);
+      overlay.querySelectorAll('.inv-stage-check').forEach(cb => cb.addEventListener('change', refresh));
+      overlay.querySelectorAll('.inv-stage-pct').forEach(inp => inp.addEventListener('input', () => { refreshStageDollarFromPct(inp.dataset.id); refresh(); }));
+      overlay.querySelectorAll('.inv-stage-amt').forEach(inp => inp.addEventListener('input', () => { refreshStagePctFromDollar(inp.dataset.id); refresh(); }));
+
+      overlay.querySelector('#inv-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#inv-confirm-btn').addEventListener('click', async () => {
+        const confirmBtn = overlay.querySelector('#inv-confirm-btn');
+        const panelMsg = overlay.querySelector('#inv-panel-msg');
+        const claims = computeClaims();
+        if (!claims.length) { panelMsg.innerHTML = `<div class="error-box">Select at least one stage with a non-zero claim.</div>`; return; }
+
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Creating...';
-
         try {
           const { data: { session } } = await supabaseClient.auth.getSession();
-          const labourAmt = parseFloat(overlay.querySelector('#create-invoice-labour').value) || 0;
-          const materialAmt = parseFloat(overlay.querySelector('#create-invoice-materials').value) || 0;
-          const claimPercent = quotedAmount > 0 ? Math.round(((claimedTotal + labourAmt + materialAmt) / quotedAmount) * 10000) / 100 : 100;
-
           const res = await fetch('/.netlify/functions/create-invoice', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
             body: JSON.stringify({
-              costCentreId: centreId,
-              labourAmount: labourAmt,
-              materialAmount: materialAmt,
-              stcAmount: parseFloat(overlay.querySelector('#create-invoice-stc').value) || 0,
-              claimPercent,
-              invoiceNumber: overlay.querySelector('#create-invoice-number').value.trim() || null,
+              projectId: project.id,
+              claims,
+              invoiceNumber: overlay.querySelector('#inv-invoice-number').value.trim() || null,
             }),
           });
           const data = await res.json();
@@ -1353,7 +1465,7 @@
             </div>
             <p class="subtitle" style="margin-top:6px;">Gmail opens in a new tab ready to send - the PDF downloads separately, so you'll need to attach it yourself once Gmail's open (no browser can auto-attach a file for you). The client's invoice page already has a Pay Online option alongside your bank details, generated automatically - nothing else to do here.</p>`;
           confirmBtn.style.display = 'none';
-          overlay.querySelector('#create-invoice-cancel-btn').textContent = 'Close';
+          overlay.querySelector('#inv-cancel-btn').textContent = 'Close';
 
           const refreshed = await loadProject();
           if (refreshed) render(refreshed, pricingVisible);
@@ -1365,7 +1477,7 @@
       });
 
       document.body.appendChild(overlay);
-      updateTotal();
+      refresh();
     }
 
     async function pushExistingInvoiceToXero(btn) {
@@ -1551,6 +1663,7 @@
                   <h2>Progress</h2>
                   <div class="progress-track"><div class="progress-fill" style="width:${pctComplete}%"></div></div>
                   <p class="subtitle" style="margin:8px 0 0;">${pctComplete}% invoiced (${money(invoiced)} of ${money(quoted)})</p>
+                  ${remaining > 0 ? `<button class="secondary" id="invoice-project-btn" style="margin-top:12px;">Invoice project...</button>` : ''}
                 </div>
 
                 <div class="card" style="margin-top:20px;">
@@ -1718,12 +1831,7 @@
               }).join('')}
 
               ${pricingVisible ? centres.map((c, i) => {
-                const stageInvoices = (c.invoices || []).slice().sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
-                const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
-                const quotedAmt = Number(c.quoted_amount) || 0;
-                const remaining = Math.max(0, quotedAmt - claimedTotal);
-                const stcApplied = stageInvoices.reduce((s, inv) => s + Number(inv.stc_amount || 0), 0);
-                const stcRemaining = Math.max(0, Number(c.stc_total || 0) - stcApplied);
+                const { stageInvoices, claimedTotal, quotedAmt, remaining, stcApplied, stcRemaining } = stageClaimSummary(c);
                 return `
                 <div class="card">
                   <h2>${costCentreNumber(project.job_number, i + 1)} ${c.name} - claims</h2>
@@ -1886,8 +1994,10 @@
       if (costAllocatedEl) costAllocatedEl.addEventListener('click', () => openTimesheetDrilldown(project, pricingVisible));
 
       document.querySelectorAll('.create-invoice-btn').forEach(btn => {
-        btn.addEventListener('click', () => openCreateInvoicePanel(btn, project, pricingVisible));
+        btn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible, { preselectCentreId: btn.dataset.id }));
       });
+      const invoiceProjectBtn = document.getElementById('invoice-project-btn');
+      if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
       document.querySelectorAll('.push-xero-btn').forEach(btn => {
         btn.addEventListener('click', () => pushExistingInvoiceToXero(btn));
       });
