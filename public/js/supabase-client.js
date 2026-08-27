@@ -387,12 +387,12 @@ function renderPoLineItemsReceivable(po, canEdit) {
     if (li.received) {
       const destLabel = li.destination_type === 'job' ? 'Job' : li.destination_type === 'vehicle' ? 'Vehicle' : 'Warehouse';
       return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
-        <span>${li.description} x${li.quantity}</span>
+        <span>${li.description} — ${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}</span>
         <span class="badge accepted" style="font-size:11px;">Received - ${destLabel}</span>
       </div>`;
     }
     return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
-      <span>${li.description} x${li.quantity} - ${money(li.quantity * li.unit_cost)}</span>
+      <span>${li.description} — ${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}</span>
       ${canEdit ? `<button type="button" class="secondary receive-line-item-btn" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">Receive</button>` : '<span class="subtitle" style="font-size:11px;">Not yet received</span>'}
     </div>`;
   }).join('');
