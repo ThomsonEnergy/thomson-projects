@@ -54,15 +54,39 @@
         return null;
       }
 
-      // Real labour cost/hours per stage - fetched here (async RPCs) so
-      // render() itself can stay a plain synchronous template function.
+      // Real labour hours/cost per stage - computed directly from
+      // time_entries rather than the get_stage_actual_hours/
+      // get_stage_actual_labour_cost database functions, which were
+      // undercounting hours (only entries with a direct cost_centre_id
+      // match, missing ones still tagged via selected_cost_centre_ids
+      // pending a split) and returning the raw billable SELL rate as if
+      // it were a cost. Matches an entry to a stage the same way
+      // checkCostCentreHasActivity does - direct match or still-pending
+      // split candidate - and derives cost from sell the same way the
+      // Summary tab's Cost estimate does (sell = cost x (1+markup%)),
+      // since a billable rate is a sell rate, not a cost.
+      const [{ data: allTimeEntries }, { data: allProfiles }, { data: allTiers }] = await Promise.all([
+        supabaseClient.from('time_entries').select('cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out').eq('project_id', projectId).not('clock_out', 'is', null),
+        supabaseClient.from('profiles').select('id, rate_tier_id'),
+        supabaseClient.from('billable_rate_tiers').select('id, sell_rate'),
+      ]);
+      const sellRateByProfile = {};
+      (allProfiles || []).forEach(p => {
+        const tier = (allTiers || []).find(t => t.id === p.rate_tier_id);
+        sellRateByProfile[p.id] = tier ? Number(tier.sell_rate) : 0;
+      });
+
       for (const centre of project.cost_centres || []) {
-        const [{ data: actualCost }, { data: actualHours }] = await Promise.all([
-          supabaseClient.rpc('get_stage_actual_labour_cost', { p_cost_centre_id: centre.id }),
-          supabaseClient.rpc('get_stage_actual_hours', { p_cost_centre_id: centre.id }),
-        ]);
-        centre.actual_labour_cost = Number(actualCost) || 0;
-        centre.actual_hours = Number(actualHours) || 0;
+        const matchingEntries = (allTimeEntries || []).filter(te =>
+          te.cost_centre_id === centre.id || (te.selected_cost_centre_ids || []).includes(centre.id));
+        const hours = matchingEntries.reduce((s, te) => s + (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000, 0);
+        const sellCost = matchingEntries.reduce((s, te) => {
+          const h = (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000;
+          return s + h * (sellRateByProfile[te.staff_id] || 0);
+        }, 0);
+        const markupFactor = 1 + (Number(centre.markup_percent) || 45) / 100;
+        centre.actual_hours = Math.round(hours * 100) / 100;
+        centre.actual_labour_cost = sellCost / markupFactor;
         centre.quoted_hours = (centre.cost_centre_line_items || [])
           .filter(li => li.item_type === 'labour')
           .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
@@ -1527,7 +1551,7 @@
               ${labourSellTotal > 0 || actualHoursTotal > 0 ? `
                 <div class="card">
                   <h2 style="margin-bottom:2px;">Overall labour budget</h2>
-                  <p class="subtitle" style="margin-bottom:14px;">${actualHoursTotal} hrs logged - ${quotedHoursTotal} hrs quoted, across every stage.</p>
+                  <p class="subtitle" style="margin-bottom:14px;">${actualHoursTotal.toFixed(1)} hrs logged - ${quotedHoursTotal.toFixed(1)} hrs quoted, across every stage.</p>
                   <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
                     <span class="subtitle">Labour budget</span>
                     <span style="font-weight:600; color:${overallIsOver ? 'var(--red)' : 'var(--green)'};">${overallBudgetPercent}%</span>
@@ -1622,7 +1646,7 @@
                 return `
                 <div class="card">
                   <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - labour</h2>
-                  <p class="subtitle" style="margin-bottom:14px;">${actualHours} hrs logged - ${quotedHours} hrs quoted</p>
+                  <p class="subtitle" style="margin-bottom:14px;">${actualHours.toFixed(1)} hrs logged - ${quotedHours.toFixed(1)} hrs quoted</p>
                   <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
                     <span class="subtitle">Labour budget</span>
                     <span style="font-weight:600; color:${isOver ? 'var(--red)' : 'var(--green)'};">${budgetPercent}%</span>
