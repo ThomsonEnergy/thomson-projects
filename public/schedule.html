@@ -217,7 +217,7 @@
       const rangeEnd = dateToStr(gridEndDate);
 
       const [{ data: assignments }, { data: leave }] = await Promise.all([
-        supabaseClient.from('schedule_assignments').select('*, profiles(full_name), projects(name)').gte('assignment_date', rangeStart).lte('assignment_date', rangeEnd),
+        supabaseClient.from('schedule_assignments').select('*, profiles(full_name), projects(name, job_number, quote_number)').gte('assignment_date', rangeStart).lte('assignment_date', rangeEnd),
         supabaseClient.from('leave_requests').select('*, profiles(full_name)').eq('status', 'approved').lte('start_date', rangeEnd).gte('end_date', rangeStart),
       ]);
       await fetchHolidays(rangeStart, rangeEnd);
@@ -240,7 +240,7 @@
           <div class="cal-day ${isOtherMonth ? 'other-month' : ''} ${dateStr === todayStr ? 'today' : ''} ${isHoliday ? 'holiday' : ''}" data-date="${dateStr}">
             <div class="day-num">${cellDate.getDate()}${isHoliday ? '<span class="holiday-badge">Public holiday</span>' : ''}</div>
             ${dayLeave.map(l => `<span class="cal-chip leave">${(l.profiles && l.profiles.full_name) || 'Staff'} (leave)</span>`).join('')}
-            ${dayAssignments.map(a => `<span class="cal-chip">${(a.profiles && a.profiles.full_name) || 'Staff'} &middot; ${(a.projects && a.projects.name) || 'Job'}</span>`).join('')}
+            ${dayAssignments.map(a => `<span class="cal-chip">${(a.profiles && a.profiles.full_name) || 'Staff'} &middot; ${a.projects ? projectRef(a.projects) : 'Job'}</span>`).join('')}
           </div>`;
       }
       document.getElementById('cal-grid').innerHTML = html;
@@ -281,7 +281,7 @@
       const windowEnd = new Date(dateStr + 'T00:00:00'); windowEnd.setDate(windowEnd.getDate() + 2);
 
       const [{ data: assignments }, { data: leave }, { data: dayTimeEntries }] = await Promise.all([
-        supabaseClient.from('schedule_assignments').select('*, profiles(id, full_name), projects(id, name, job_number)').eq('assignment_date', dateStr),
+        supabaseClient.from('schedule_assignments').select('*, profiles(id, full_name), projects(id, name, job_number, quote_number)').eq('assignment_date', dateStr),
         supabaseClient.from('leave_requests').select('*, profiles(id, full_name)').eq('status', 'approved').lte('start_date', dateStr).gte('end_date', dateStr),
         supabaseClient.from('time_entries').select('staff_id, project_id, time_category, clock_in, clock_out').gte('clock_in', windowStart.toISOString()).lte('clock_in', windowEnd.toISOString()).not('clock_out', 'is', null),
       ]);
@@ -437,7 +437,7 @@
             return;
           }
           if (assignment.project_id) {
-            if (confirm(`Clock in to ${assignment.projects?.name || 'this job'} now? (Cancel to remove this block instead)`)) {
+            if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this block instead)`)) {
               window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
             } else if (confirm('Remove this schedule block?')) {
               supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
@@ -502,13 +502,13 @@
           const resultsEl = overlay.querySelector('#mobile-add-job-results');
           if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-            ${results.map(p => `<div class="mob-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
+            ${results.map(p => `<div class="mob-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" data-quote-number="${p.quote_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
           </div>`;
           resultsEl.querySelectorAll('.mob-job-pick').forEach(row => {
             row.addEventListener('click', () => {
-              selectedProject = { id: row.dataset.id, name: row.dataset.name, job_number: row.dataset.jobNumber || null };
+              selectedProject = { id: row.dataset.id, name: row.dataset.name, job_number: row.dataset.jobNumber || null, quote_number: row.dataset.quoteNumber || null };
               overlay.querySelector('#mobile-add-job-search').value = row.dataset.name;
-              overlay.querySelector('#mobile-add-job-selected').textContent = `Selected: ${row.dataset.name}`;
+              overlay.querySelector('#mobile-add-job-selected').textContent = `Selected: ${projectRef(selectedProject)}`;
               overlay.querySelector('#mobile-add-category-row').style.display = 'none';
               resultsEl.innerHTML = '';
             });
@@ -717,7 +717,7 @@
           }
 
           if (assignment.project_id) {
-            if (confirm(`Clock in to ${assignment.projects?.name || 'this job'} now? (Cancel to remove this schedule block instead)`)) {
+            if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this schedule block instead)`)) {
               window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
             } else if (confirm('Remove this schedule block?')) {
               supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());

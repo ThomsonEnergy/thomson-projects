@@ -220,13 +220,13 @@
           const results = await searchProjects(q);
           const resultsEl = overlay.querySelector('#np-job-results');
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-            ${results.map(p => `<div class="np-job-pick" data-id="${p.id}" data-name="${p.name}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
+            ${results.map(p => `<div class="np-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" data-quote-number="${p.quote_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
           </div>`;
           resultsEl.querySelectorAll('.np-job-pick').forEach(row => {
             row.addEventListener('click', () => {
-              selectedJob = { id: row.dataset.id, name: row.dataset.name };
+              selectedJob = { id: row.dataset.id, name: row.dataset.name, job_number: row.dataset.jobNumber || null, quote_number: row.dataset.quoteNumber || null };
               jobSearchInput.value = row.dataset.name;
-              overlay.querySelector('#np-job-selected').textContent = `Selected: ${row.dataset.name}`;
+              overlay.querySelector('#np-job-selected').textContent = `Selected: ${projectRef(selectedJob)}`;
               resultsEl.innerHTML = '';
             });
           });

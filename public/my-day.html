@@ -107,7 +107,7 @@
     async function checkActiveClock() {
       const { data } = await supabaseClient
         .from('time_entries')
-        .select('*, projects(name)')
+        .select('*, projects(name, job_number, quote_number)')
         .eq('staff_id', myUserId)
         .is('clock_out', null)
         .order('clock_in', { ascending: false })
@@ -118,7 +118,7 @@
       if (data) {
         document.getElementById('clock-idle').style.display = 'none';
         document.getElementById('clock-active').style.display = 'block';
-        document.getElementById('active-project-name').textContent = data.projects ? data.projects.name : 'General / Office';
+        document.getElementById('active-project-name').textContent = data.projects ? projectRef(data.projects) : 'General / Office';
         document.getElementById('active-since').textContent = fmtDateTime(data.clock_in);
         const update = () => { document.getElementById('active-elapsed').textContent = fmtDuration(Date.now() - new Date(data.clock_in).getTime()); };
         update();
@@ -138,7 +138,7 @@
       const container = document.getElementById('todays-schedule');
       const { data, error } = await supabaseClient
         .from('schedule_assignments')
-        .select('id, project_id, projects(name)')
+        .select('id, project_id, projects(name, job_number, quote_number)')
         .eq('staff_id', myUserId)
         .eq('assignment_date', todayStr());
 
@@ -149,7 +149,7 @@
         <div style="margin-bottom:16px;">
           ${data.map(a => `
             <button type="button" class="quick-clock-btn" data-project-id="${a.project_id || ''}" style="margin:0 8px 8px 0;">
-              ${a.projects ? a.projects.name : 'General / Office'}
+              ${a.projects ? projectRef(a.projects) : 'General / Office'}
             </button>`).join('')}
         </div>`;
 
@@ -337,8 +337,8 @@
 
       const deepLinkProjectId = new URLSearchParams(window.location.search).get('clockin_project');
       if (deepLinkProjectId) {
-        const { data: project } = await supabaseClient.from('projects').select('name').eq('id', deepLinkProjectId).maybeSingle();
-        selectClockJob(deepLinkProjectId, project ? project.name : 'Job');
+        const { data: project } = await supabaseClient.from('projects').select('name, job_number, quote_number').eq('id', deepLinkProjectId).maybeSingle();
+        selectClockJob(deepLinkProjectId, project ? projectRef(project) : 'Job');
       }
 
       await checkActiveClock();

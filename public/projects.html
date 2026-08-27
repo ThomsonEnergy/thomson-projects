@@ -249,7 +249,7 @@
 
         const parts = [];
         if (blocked.length) {
-          parts.push(`<div class="error-box">Not deleted, has real activity against it:<ul style="margin:6px 0 0 18px;">${blocked.map(b => `<li>${b.project.name} - ${b.reasons.join(', ')}</li>`).join('')}</ul></div>`);
+          parts.push(`<div class="error-box">Not deleted, has real activity against it:<ul style="margin:6px 0 0 18px;">${blocked.map(b => `<li>${projectRef(b.project)} - ${b.reasons.join(', ')}</li>`).join('')}</ul></div>`);
         }
         if (!clear.length) {
           msg.innerHTML = parts.join('');
@@ -257,7 +257,7 @@
           refreshDeleteBtn();
           return;
         }
-        if (!confirm(`Delete ${clear.length} project${clear.length === 1 ? '' : 's'} permanently? This can't be undone.\n\n${clear.map(p => p.name).join('\n')}`)) {
+        if (!confirm(`Delete ${clear.length} project${clear.length === 1 ? '' : 's'} permanently? This can't be undone.\n\n${clear.map(p => projectRef(p)).join('\n')}`)) {
           deleteBtn.disabled = false;
           refreshDeleteBtn();
           return;

@@ -199,7 +199,7 @@
 
       const { data: projects, error } = await supabaseClient
         .from('projects')
-        .select('id, name, client_name, pipeline_stage, job_number')
+        .select('id, name, client_name, pipeline_stage, job_number, quote_number')
         .neq('pipeline_stage', 'archived')
         .order('created_at', { ascending: false });
 

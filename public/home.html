@@ -102,11 +102,11 @@
       // Today's schedule for this person
       const { data: mySchedule } = await supabaseClient
         .from('schedule_assignments')
-        .select('project_id, projects(name, job_number)')
+        .select('project_id, projects(name, job_number, quote_number)')
         .eq('staff_id', myUserId)
         .eq('assignment_date', todayStr);
       (mySchedule || []).forEach(a => {
-        items.push({ label: `You're scheduled today: ${a.projects ? a.projects.name : 'General / Office'}`, link: a.project_id ? `/project.html?id=${a.project_id}` : null });
+        items.push({ label: `You're scheduled today: ${a.projects ? projectRef(a.projects) : 'General / Office'}`, link: a.project_id ? `/project.html?id=${a.project_id}` : null });
       });
 
       // Tasks assigned to you or your role
@@ -135,7 +135,7 @@
           .select('id, name, quote_number')
           .eq('pipeline_stage', 'draft_quote');
         (draftQuotes || []).forEach(p => {
-          items.push({ label: `Draft quote needs finishing: ${p.name}`, link: `/new-project.html?id=${p.id}` });
+          items.push({ label: `Draft quote needs finishing: ${projectRef(p)}`, link: `/new-project.html?id=${p.id}` });
         });
 
         const { data: invoices } = await supabaseClient
