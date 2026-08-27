@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Bugs & Updates - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=9" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Bugs &amp; Updates</h1>
+    <p class="subtitle">Report something broken, or suggest a change. Answers are written to save straight to the point - specific enough that whoever picks this up (including an AI session working in the app's own repo) can act on it without needing to ask you to explain again.</p>
+
+    <div class="card">
+      <h2>New report</h2>
+      <label style="margin-top:0">Type</label>
+      <div style="display:flex; gap:16px; margin-bottom:10px;">
+        <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="report-type" value="bug" checked style="width:auto;" /> Bug - something's broken</label>
+        <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="report-type" value="update_idea" style="width:auto;" /> Update idea - something to add or change</label>
+      </div>
+
+      <label>Title</label>
+      <input id="report-title" placeholder="Short summary, e.g. 'Create PO button does nothing on a new job'" />
+
+      <label>Page or feature (optional)</label>
+      <input id="report-page" placeholder="e.g. Job pipeline board, Quotes, Settings > Xero Mapping" />
+
+      <label id="report-description-label">What's happening?</label>
+      <textarea id="report-description" placeholder="Describe it as precisely as you can - what you clicked, what you expected, what actually happened." style="min-height:100px;"></textarea>
+
+      <div id="expected-behavior-field">
+        <label>What should happen instead?</label>
+        <textarea id="report-expected" placeholder="Optional, but the more specific this is the less back-and-forth is needed later." style="min-height:70px;"></textarea>
+      </div>
+
+      <button id="submit-report-btn" style="margin-top:14px;">Submit</button>
+      <div id="submit-report-msg"></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="margin:0;">Open (<span id="count-open">-</span>)</h2>
+      </div>
+      <div id="open-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>In Progress (<span id="count-in-progress">-</span>)</h2>
+      <div id="in-progress-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Resolved (<span id="count-resolved">-</span>)</h2>
+      <div id="resolved-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=2"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    async function syncToRepo() {
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        await fetch('/.netlify/functions/sync-bugs-to-repo', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+      } catch (err) {
+        console.error('Sync to repo failed:', err); // never block the in-app action over this
+      }
+    }
+
+    document.querySelectorAll('input[name="report-type"]').forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        const isBug = e.target.value === 'bug';
+        document.getElementById('report-description-label').textContent = isBug ? "What's happening?" : 'What do you want?';
+        document.getElementById('expected-behavior-field').style.display = isBug ? 'block' : 'none';
+      });
+    });
+
+    document.getElementById('submit-report-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('submit-report-btn');
+      const msg = document.getElementById('submit-report-msg');
+      const report_type = document.querySelector('input[name="report-type"]:checked').value;
+      const title = document.getElementById('report-title').value.trim();
+      const description = document.getElementById('report-description').value.trim();
+      if (!title || !description) { msg.innerHTML = `<div class="error-box">Enter a title and description.</div>`; return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+      try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const { error } = await supabaseClient.from('bug_reports').insert({
+          report_type, title,
+          page_or_feature: document.getElementById('report-page').value.trim() || null,
+          description,
+          expected_behavior: report_type === 'bug' ? (document.getElementById('report-expected').value.trim() || null) : null,
+          created_by: user.id,
+        });
+        if (error) throw error;
+
+        document.getElementById('report-title').value = '';
+        document.getElementById('report-page').value = '';
+        document.getElementById('report-description').value = '';
+        document.getElementById('report-expected').value = '';
+        msg.innerHTML = `<div class="success-box">Submitted.</div>`;
+        await loadReports();
+        await syncToRepo();
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Submit';
+      }
+    });
+
+    function reportCardHtml(r, staffName) {
+      const typeBadge = r.report_type === 'bug' ? `<span class="badge draft" style="color:var(--red);">Bug</span>` : `<span class="badge sent">Update idea</span>`;
+      return `
+        <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+            <div>
+              ${typeBadge}
+              <strong style="margin-left:6px;">${r.title}</strong>
+              ${r.page_or_feature ? `<p class="subtitle" style="margin:4px 0 0;">${r.page_or_feature}</p>` : ''}
+            </div>
+            <p class="subtitle" style="margin:0; font-size:12px; white-space:nowrap;">${staffName} &middot; ${new Date(r.created_at).toLocaleDateString('en-AU')}</p>
+          </div>
+          <p style="margin:10px 0 0;">${r.description}</p>
+          ${r.expected_behavior ? `<p class="subtitle" style="margin:6px 0 0;"><strong>Expected:</strong> ${r.expected_behavior}</p>` : ''}
+          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            ${r.status !== 'in_progress' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="in_progress" style="font-size:12px; padding:6px 10px;">Mark in progress</button>` : ''}
+            ${r.status !== 'resolved' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="resolved" style="font-size:12px; padding:6px 10px;">Mark resolved</button>` : ''}
+            ${r.status !== 'open' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="open" style="font-size:12px; padding:6px 10px;">Reopen</button>` : ''}
+            <button type="button" class="secondary delete-report-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Delete</button>
+          </div>
+        </div>`;
+    }
+
+    async function loadReports() {
+      const [{ data: reports, error }, { data: staff }] = await Promise.all([
+        supabaseClient.from('bug_reports').select('*').order('created_at', { ascending: false }),
+        supabaseClient.from('profiles').select('id, full_name'),
+      ]);
+      if (error) {
+        document.getElementById('open-list').innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+
+      const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'Someone';
+      const groups = {
+        open: (reports || []).filter(r => r.status === 'open'),
+        in_progress: (reports || []).filter(r => r.status === 'in_progress'),
+        resolved: (reports || []).filter(r => r.status === 'resolved'),
+      };
+
+      document.getElementById('count-open').textContent = groups.open.length;
+      document.getElementById('count-in-progress').textContent = groups.in_progress.length;
+      document.getElementById('count-resolved').textContent = groups.resolved.length;
+
+      document.getElementById('open-list').innerHTML = groups.open.length
+        ? groups.open.map(r => reportCardHtml(r, staffName(r.created_by))).join('')
+        : `<p class="subtitle">Nothing open right now.</p>`;
+      document.getElementById('in-progress-list').innerHTML = groups.in_progress.length
+        ? groups.in_progress.map(r => reportCardHtml(r, staffName(r.created_by))).join('')
+        : `<p class="subtitle">Nothing in progress.</p>`;
+      document.getElementById('resolved-list').innerHTML = groups.resolved.length
+        ? groups.resolved.map(r => reportCardHtml(r, staffName(r.created_by))).join('')
+        : `<p class="subtitle">Nothing resolved yet.</p>`;
+
+      document.querySelectorAll('.status-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const { error: updErr } = await supabaseClient.from('bug_reports').update({ status: btn.dataset.status }).eq('id', btn.dataset.id);
+          if (updErr) { alert(updErr.message); return; }
+          await loadReports();
+          await syncToRepo();
+        });
+      });
+      document.querySelectorAll('.delete-report-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this report permanently?')) return;
+          const { error: delErr } = await supabaseClient.from('bug_reports').delete().eq('id', btn.dataset.id);
+          if (delErr) { alert(delErr.message); return; }
+          await loadReports();
+          await syncToRepo();
+        });
+      });
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav(null);
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      await loadReports();
+    })();
+  </script>
+</body>
+</html>
