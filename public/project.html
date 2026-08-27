@@ -2306,7 +2306,12 @@
         if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No timesheet entries logged against this job yet.</p>`; return; }
 
         const costById = pricingVisible ? await computeEntryLabourCosts(entries.filter(e => e.clock_out)) : new Map();
-        const totalCost = [...costById.values()].reduce((s, c) => s + c, 0);
+        // Sum only THIS project's entries, not every value in costById - it
+        // also holds cost for the same employee's entries on OTHER jobs
+        // during the same pay week (computeEntryLabourCosts needs the
+        // whole week to band overtime correctly), which would otherwise
+        // inflate this total past what the rows above it actually show.
+        const totalCost = entries.reduce((s, e) => s + (costById.get(e.id) || 0), 0);
 
         listEl.innerHTML = `
           <table class="responsive-stack">
