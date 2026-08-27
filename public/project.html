@@ -133,9 +133,10 @@
       return (parseFloat(li.querySelector('.li-qty').value) || 0) * (parseFloat(li.querySelector('.li-cost').value) || 0);
     }
 
-    function addLineItem(stageRow, { description = '', item_type = 'material', quantity = 1, unit_cost = '', rate_tier_id = '' } = {}) {
+    function addLineItem(stageRow, { id = '', description = '', item_type = 'material', quantity = 1, unit_cost = '', rate_tier_id = '' } = {}) {
       const li = document.createElement('div');
       li.className = 'li-row';
+      li.dataset.id = id;
       li.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
       const isLabour = item_type === 'labour';
       const descPlaceholder = isLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
@@ -246,11 +247,12 @@
       });
     }
 
-    function addRow({ name = '', description = '', markup_percent = null, stc_total = 0, lineItems = [], photoGroups = [] } = {}) {
+    function addRow({ id = '', name = '', description = '', markup_percent = null, stc_total = 0, lineItems = [], photoGroups = [] } = {}) {
       const rowsEl = document.getElementById('cc-rows');
       const defaultMarkup = markup_percent !== null ? markup_percent : (parseFloat(document.getElementById('default-markup').value) || 45);
       const div = document.createElement('div');
       div.className = 'cc-row';
+      div.dataset.id = id;
       div.dataset.name = name;
       div.innerHTML = `
         <div class="cc-row-top">
@@ -598,6 +600,12 @@
     }
 
     async function wireEditForm(project) {
+      // Once a job number exists, editing is scoped to Cost Centres only -
+      // the Details tab (client/template/SOW/deposit/Pylon/T&Cs) stays
+      // read-only, so all of that wiring below is quote-edit only.
+      const isQuoteEdit = !project.job_number;
+
+      if (isQuoteEdit) {
       document.querySelectorAll('.template-option').forEach(btn => btn.addEventListener('click', () => applyEditTemplate(btn.dataset.template)));
 
       document.getElementById('clear-client-btn').addEventListener('click', () => {
@@ -734,60 +742,186 @@
           msg.innerHTML = `<div class="error-box">${err.message} (Pylon's API needs verifying against your actual access, see SETUP.md)</div>`;
         }
       });
+      } // end isQuoteEdit-only wiring
 
       document.getElementById('add-row').addEventListener('click', () => addRow());
       document.getElementById('save-edit-btn').addEventListener('click', () => saveEdits(project));
       document.getElementById('cancel-edit-btn').addEventListener('click', () => { editMode = false; render(project, true); });
 
-      applyEditTemplate(project.proposal_template || 'new_build');
-      document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';
-      document.getElementById('p-name').value = project.name || '';
-      document.getElementById('p-subtitle').value = project.proposal_subtitle || '';
-      document.getElementById('p-client').value = project.client_name || '';
-      document.getElementById('p-email').value = project.client_email || '';
-      document.getElementById('p-phone').value = project.client_phone || '';
-      document.getElementById('p-address').value = project.client_address || '';
-      document.getElementById('p-sow').value = project.sow_text || '';
-      document.getElementById('p-terms').value = project.terms_text || '';
-      document.getElementById('p-deposit').value = project.deposit_percent;
-      document.getElementById('p-pylon-link').value = project.pylon_link || '';
-      document.getElementById('p-pylon-id').value = project.pylon_project_id || '';
+      if (isQuoteEdit) {
+        applyEditTemplate(project.proposal_template || 'new_build');
+        document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';
+        document.getElementById('p-name').value = project.name || '';
+        document.getElementById('p-subtitle').value = project.proposal_subtitle || '';
+        document.getElementById('p-client').value = project.client_name || '';
+        document.getElementById('p-email').value = project.client_email || '';
+        document.getElementById('p-phone').value = project.client_phone || '';
+        document.getElementById('p-address').value = project.client_address || '';
+        document.getElementById('p-sow').value = project.sow_text || '';
+        document.getElementById('p-terms').value = project.terms_text || '';
+        document.getElementById('p-deposit').value = project.deposit_percent;
+        document.getElementById('p-pylon-link').value = project.pylon_link || '';
+        document.getElementById('p-pylon-id').value = project.pylon_project_id || '';
 
-      selectedClientId = project.client_id || null;
-      referencePhotos = (project.reference_photos || []).map(p => p.url || p);
-      renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
-      sowDocs = [];
-      renderEditSowDocList();
+        selectedClientId = project.client_id || null;
+        referencePhotos = (project.reference_photos || []).map(p => p.url || p);
+        renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
+        sowDocs = [];
+        renderEditSowDocList();
 
-      if (project.client_id) {
-        const { data: client } = await supabaseClient.from('clients').select('*').eq('id', project.client_id).maybeSingle();
-        if (client) {
-          document.getElementById('client-search-input').value = client.name;
-          document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
-          document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${client.name}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+        if (project.client_id) {
+          const { data: client } = await supabaseClient.from('clients').select('*').eq('id', project.client_id).maybeSingle();
+          if (client) {
+            document.getElementById('client-search-input').value = client.name;
+            document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
+            document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${client.name}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+          }
+          await loadEditJobContactPickers(project.client_id, {
+            project_manager_contact_id: project.project_manager_contact_id,
+            site_contact_id: project.site_contact_id,
+            job_contact_id: project.job_contact_id,
+            sales_contact_id: project.sales_contact_id,
+            accounts_contact_id: project.accounts_contact_id,
+          });
         }
-        await loadEditJobContactPickers(project.client_id, {
-          project_manager_contact_id: project.project_manager_contact_id,
-          site_contact_id: project.site_contact_id,
-          job_contact_id: project.job_contact_id,
-          sales_contact_id: project.sales_contact_id,
-          accounts_contact_id: project.accounts_contact_id,
-        });
+      } else {
+        // addRow()'s singleStage check still needs a real template - jobs
+        // don't show the picker, so just carry the job's own template
+        // through without touching any Details-tab DOM.
+        currentTemplate = project.proposal_template || 'new_build';
       }
 
       const stages = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
       stages.forEach(stage => {
         addRow({
+          id: stage.id,
           name: stage.name, description: stage.description, markup_percent: stage.markup_percent, stc_total: stage.stc_total || 0,
           lineItems: (stage.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order)
-            .map(li => ({ description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id })),
+            .map(li => ({ id: li.id, description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id })),
           photoGroups: (stage.cost_centre_photo_groups || []).slice().sort((a, b) => a.sort_order - b.sort_order)
             .map(pg => ({ description: pg.description, photos: (pg.photos || []).map(p => p.url || p) })),
         });
       });
       if (!stages.length) addRow({ name: 'Stage 1' });
       updateEditTotal();
-      loadEditAddressAutocomplete(companySettings.google_maps_api_key);
+      if (isQuoteEdit) loadEditAddressAutocomplete(companySettings.google_maps_api_key);
+    }
+
+    // Presents the choice - quick note vs full signed Variation - for a set
+    // of stage $ changes on an already-approved job. Resolves to a
+    // ready-to-insert variations row, or undefined if the user backs out
+    // of the whole save (not just this dialog).
+    function openVariationChoiceModal(changes) {
+      return new Promise((resolve) => {
+        const totalDelta = changes.reduce((s, c) => s + (c.new_amount - c.old_amount), 0);
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+        overlay.innerHTML = `
+          <div class="card" style="max-width:520px; width:100%; max-height:90vh; overflow-y:auto;">
+            <h2>This changes the job's quoted total</h2>
+            <p class="subtitle" style="margin-bottom:10px;">This job's quote was already approved - record why this changed.</p>
+            <table class="responsive-stack" style="margin-bottom:10px;">
+              <thead><tr><th>Stage</th><th class="num">Was</th><th class="num">Now</th><th class="num">Change</th></tr></thead>
+              <tbody>
+                ${changes.map(c => `
+                  <tr>
+                    <td data-label="Stage">${c.cost_centre_name}</td>
+                    <td class="num" data-label="Was">${money(c.old_amount)}</td>
+                    <td class="num" data-label="Now">${money(c.new_amount)}</td>
+                    <td class="num" data-label="Change" style="color:${c.new_amount >= c.old_amount ? 'var(--green)' : 'var(--red)'};">${c.new_amount >= c.old_amount ? '+' : ''}${money(c.new_amount - c.old_amount)}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+            <p style="margin:0 0 14px; font-weight:600;">Total change: <span style="color:${totalDelta >= 0 ? 'var(--green)' : 'var(--red)'};">${totalDelta >= 0 ? '+' : ''}${money(totalDelta)}</span></p>
+
+            <label style="margin-top:0">Reason for this change</label>
+            <textarea id="var-description" placeholder="e.g. Client requested an extra 4 downlights in the living room" style="min-height:70px;"></textarea>
+
+            <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="var-quick-btn">Record as quick note</button>
+              <button type="button" class="secondary" id="var-full-btn">Open full Variation Form to sign</button>
+              <button type="button" class="secondary" id="var-cancel-btn">Cancel save</button>
+            </div>
+            <div id="var-msg"></div>
+          </div>`;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#var-cancel-btn').addEventListener('click', () => { overlay.remove(); resolve(undefined); });
+
+        overlay.querySelector('#var-quick-btn').addEventListener('click', () => {
+          const description = overlay.querySelector('#var-description').value.trim();
+          if (!description) { overlay.querySelector('#var-msg').innerHTML = `<div class="error-box">Enter a reason first.</div>`; return; }
+          overlay.remove();
+          resolve({ description, changes, total_delta: totalDelta, variation_type: 'quick_note', status: 'recorded' });
+        });
+
+        overlay.querySelector('#var-full-btn').addEventListener('click', () => {
+          const description = overlay.querySelector('#var-description').value.trim();
+          if (!description) { overlay.querySelector('#var-msg').innerHTML = `<div class="error-box">Enter a reason first.</div>`; return; }
+          overlay.remove();
+          openFullVariationSignPanel(changes, totalDelta, description, resolve);
+        });
+      });
+    }
+
+    // On-screen signing only for now - a client-link remote-sign entry
+    // point (same underlying record, a second way to reach this) is a
+    // planned follow-up, not built yet.
+    function openFullVariationSignPanel(changes, totalDelta, description, resolve) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:520px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>Sign this variation</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Total change: <strong style="color:${totalDelta >= 0 ? 'var(--green)' : 'var(--red)'};">${totalDelta >= 0 ? '+' : ''}${money(totalDelta)}</strong></p>
+          <p style="margin:0 0 14px;">${description}</p>
+
+          <label style="margin-top:0">Signed by (name)</label>
+          <input id="var-signed-name" placeholder="Full name" />
+
+          <label>Signature</label>
+          <canvas id="var-sig-canvas" width="460" height="150" style="border:1px solid var(--border); border-radius:8px; background:#fff; touch-action:none; width:100%; max-width:460px; height:150px; display:block;"></canvas>
+          <button type="button" class="secondary" id="var-sig-clear-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Clear signature</button>
+
+          <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="var-sign-btn">Sign &amp; lock</button>
+            <button type="button" class="secondary" id="var-sign-cancel-btn">Cancel save</button>
+          </div>
+          <div id="var-sign-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      const canvas = overlay.querySelector('#var-sig-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      let drawing = false, hasSignature = false;
+      const pointerPos = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas.height / rect.height) };
+      };
+      canvas.addEventListener('pointerdown', (e) => { drawing = true; hasSignature = true; const p = pointerPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+      canvas.addEventListener('pointermove', (e) => { if (!drawing) return; const p = pointerPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+      const stopDrawing = () => { drawing = false; };
+      canvas.addEventListener('pointerup', stopDrawing);
+      canvas.addEventListener('pointerleave', stopDrawing);
+      overlay.querySelector('#var-sig-clear-btn').addEventListener('click', () => { ctx.clearRect(0, 0, canvas.width, canvas.height); hasSignature = false; });
+
+      overlay.querySelector('#var-sign-cancel-btn').addEventListener('click', () => { overlay.remove(); resolve(undefined); });
+
+      overlay.querySelector('#var-sign-btn').addEventListener('click', () => {
+        const signedMsg = overlay.querySelector('#var-sign-msg');
+        const signed_by_name = overlay.querySelector('#var-signed-name').value.trim();
+        if (!signed_by_name) { signedMsg.innerHTML = `<div class="error-box">Enter the signer's name.</div>`; return; }
+        if (!hasSignature) { signedMsg.innerHTML = `<div class="error-box">Draw a signature.</div>`; return; }
+        const signature_data_url = canvas.toDataURL('image/png');
+        overlay.remove();
+        resolve({
+          description, changes, total_delta: totalDelta, variation_type: 'full', status: 'signed',
+          signature_data_url, signed_by_name, signed_at: new Date().toISOString(),
+        });
+      });
     }
 
     async function saveEdits(project) {
@@ -795,27 +929,11 @@
       const saveBtn = document.getElementById('save-edit-btn');
       msg.innerHTML = '';
 
-      const reasons = await checkProjectHasActivity(project);
-      if (reasons.length) {
-        msg.innerHTML = `<div class="error-box">Can't save stage changes - this quote already ${reasons.join(', ')}. Editing here would delete and re-create every stage, which isn't safe once real activity is attached.</div>`;
-        return;
-      }
-
-      const name = document.getElementById('p-name').value.trim();
-      const client_name = document.getElementById('p-client').value.trim();
-      const client_email = document.getElementById('p-email').value.trim();
-      const client_phone = document.getElementById('p-phone').value.trim();
-      const client_address = document.getElementById('p-address').value.trim();
-      const payment_terms = document.getElementById('p-payment-terms').value;
-      const sow_text = document.getElementById('p-sow').value;
-      const proposal_subtitle = document.getElementById('p-subtitle').value.trim();
-      const terms_text = document.getElementById('p-terms').value;
-      const deposit_percent = parseFloat(document.getElementById('p-deposit').value) || 0;
-      const pylon_link = document.getElementById('p-pylon-link').value.trim();
-      const pylon_project_id = document.getElementById('p-pylon-id').value.trim();
+      const isJob = !!project.job_number;
 
       const stageRows = [...document.querySelectorAll('#cc-rows .cc-row')];
       const stagesPayload = stageRows.map((row, i) => ({
+        id: row.dataset.id || null,
         name: row.querySelector('.cc-name').value.trim(),
         description: row.querySelector('.cc-desc').value.trim(),
         markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
@@ -849,67 +967,190 @@
         })).filter(pg => pg.description || pg.photos.length),
       })).filter(s => s.name);
 
-      if (!name || !client_name || stagesPayload.length === 0) {
-        msg.innerHTML = `<div class="error-box">Please fill in the project name, client name, and at least one stage.</div>`;
+      if (stagesPayload.length === 0) {
+        msg.innerHTML = `<div class="error-box">Add at least one stage.</div>`;
         return;
+      }
+
+      if (!isJob) {
+        // ---------- Quote path: unchanged - nothing real is attached yet,
+        // so a full delete-and-reinsert is simplest and safe. ----------
+        const reasons = await checkProjectHasActivity(project);
+        if (reasons.length) {
+          msg.innerHTML = `<div class="error-box">Can't save stage changes - this quote already ${reasons.join(', ')}. Editing here would delete and re-create every stage, which isn't safe once real activity is attached.</div>`;
+          return;
+        }
+
+        const name = document.getElementById('p-name').value.trim();
+        const client_name = document.getElementById('p-client').value.trim();
+        const client_email = document.getElementById('p-email').value.trim();
+        const client_phone = document.getElementById('p-phone').value.trim();
+        const client_address = document.getElementById('p-address').value.trim();
+        const payment_terms = document.getElementById('p-payment-terms').value;
+        const sow_text = document.getElementById('p-sow').value;
+        const proposal_subtitle = document.getElementById('p-subtitle').value.trim();
+        const terms_text = document.getElementById('p-terms').value;
+        const deposit_percent = parseFloat(document.getElementById('p-deposit').value) || 0;
+        const pylon_link = document.getElementById('p-pylon-link').value.trim();
+        const pylon_project_id = document.getElementById('p-pylon-id').value.trim();
+
+        if (!name || !client_name) {
+          msg.innerHTML = `<div class="error-box">Please fill in the project name and client name.</div>`;
+          return;
+        }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        try {
+          let clientId = selectedClientId;
+          const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, address: client_address || null, payment_terms };
+          if (clientId) {
+            await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
+          } else {
+            const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert(clientFields).select().single();
+            if (clientErr) throw clientErr;
+            clientId = newClient.id;
+          }
+
+          const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
+          const allPhotos = (settings && settings.portfolio_photos) || [];
+          const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
+          const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
+
+          const projectFields = {
+            name, client_id: clientId, client_name, client_email, client_phone, client_address,
+            sow_text, proposal_subtitle, terms_text, deposit_percent, pylon_link, pylon_project_id,
+            reference_photos: referencePhotos.map(url => ({ url })),
+            cover_photos: coverPhotos,
+            proposal_template: currentTemplate,
+            estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
+            project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
+            site_contact_id: assignedContactIds.site_contact_id || null,
+            job_contact_id: assignedContactIds.job_contact_id || null,
+            sales_contact_id: assignedContactIds.sales_contact_id || null,
+            accounts_contact_id: assignedContactIds.accounts_contact_id || null,
+          };
+
+          const { error: updateErr } = await supabaseClient.from('projects').update(projectFields).eq('id', project.id);
+          if (updateErr) throw updateErr;
+          const { error: delErr } = await supabaseClient.from('cost_centres').delete().eq('project_id', project.id);
+          if (delErr) throw delErr;
+
+          const { data: insertedStages, error: ccErr } = await supabaseClient
+            .from('cost_centres')
+            .insert(stagesPayload.map(({ id, lineItems, photoGroups, ...s }) => ({ ...s, project_id: project.id })))
+            .select();
+          if (ccErr) throw ccErr;
+
+          const allLineItems = [];
+          const allPhotoGroups = [];
+          insertedStages.forEach((stage, i) => {
+            stagesPayload[i].lineItems.forEach(li => allLineItems.push({ ...li, cost_centre_id: stage.id }));
+            stagesPayload[i].photoGroups.forEach(pg => allPhotoGroups.push({ ...pg, cost_centre_id: stage.id }));
+          });
+          if (allLineItems.length) {
+            const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(allLineItems);
+            if (liErr) throw liErr;
+          }
+          if (allPhotoGroups.length) {
+            const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(allPhotoGroups);
+            if (pgErr) throw pgErr;
+          }
+
+          editMode = false;
+          const refreshed = await loadProject();
+          const myRole = await getMyRole();
+          if (refreshed) render(refreshed, isPricingRole(myRole));
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save changes';
+        }
+        return;
+      }
+
+      // ---------- Job path: non-destructive. Existing stages are UPDATEd
+      // in place (preserving the id every invoice/PO/timesheet entry
+      // downstream might reference), only genuinely new stages get
+      // inserted, and a stage can only be removed if nothing real is
+      // attached to it specifically. Line items/photo groups within a
+      // surviving stage are still delete-and-reinsert - nothing else
+      // references their ids directly, so that stays simple. ----------
+      const existingCentres = project.cost_centres || [];
+      const keptIds = stagesPayload.map(s => s.id).filter(Boolean);
+      const removedCentres = existingCentres.filter(c => !keptIds.includes(c.id));
+
+      for (const centre of removedCentres) {
+        const reasons = await checkCostCentreHasActivity(centre);
+        if (reasons.length) {
+          msg.innerHTML = `<div class="error-box">Can't remove "${centre.name}" - it ${reasons.join(', ')}. Adjust its line items instead of deleting the stage, or add it back.</div>`;
+          return;
+        }
+      }
+
+      const changes = [];
+      stagesPayload.forEach(s => {
+        if (!s.id) {
+          changes.push({ cost_centre_id: null, cost_centre_name: s.name, old_amount: 0, new_amount: s.quoted_amount });
+          return;
+        }
+        const original = existingCentres.find(c => c.id === s.id);
+        if (!original) return;
+        const oldAmount = Number(original.quoted_amount) || 0;
+        if (Math.abs(s.quoted_amount - oldAmount) >= 0.01) {
+          changes.push({ cost_centre_id: s.id, cost_centre_name: s.name, old_amount: oldAmount, new_amount: s.quoted_amount });
+        }
+      });
+      removedCentres.forEach(c => {
+        changes.push({ cost_centre_id: c.id, cost_centre_name: c.name, old_amount: Number(c.quoted_amount) || 0, new_amount: 0 });
+      });
+
+      let pendingVariation = null;
+      if (changes.length) {
+        pendingVariation = await openVariationChoiceModal(changes);
+        if (pendingVariation === undefined) return; // backed out of the whole save
       }
 
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving...';
       try {
-        let clientId = selectedClientId;
-        const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, address: client_address || null, payment_terms };
-        if (clientId) {
-          await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
-        } else {
-          const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert(clientFields).select().single();
-          if (clientErr) throw clientErr;
-          clientId = newClient.id;
+        for (const s of stagesPayload) {
+          const { id, lineItems, photoGroups, ...fields } = s;
+          let centreId = id;
+          if (centreId) {
+            const { error } = await supabaseClient.from('cost_centres').update(fields).eq('id', centreId);
+            if (error) throw error;
+          } else {
+            const { data: newCentre, error } = await supabaseClient.from('cost_centres').insert({ ...fields, project_id: project.id }).select().single();
+            if (error) throw error;
+            centreId = newCentre.id;
+          }
+
+          const { error: delLiErr } = await supabaseClient.from('cost_centre_line_items').delete().eq('cost_centre_id', centreId);
+          if (delLiErr) throw delLiErr;
+          if (lineItems.length) {
+            const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(lineItems.map(li => ({ ...li, cost_centre_id: centreId })));
+            if (liErr) throw liErr;
+          }
+
+          const { error: delPgErr } = await supabaseClient.from('cost_centre_photo_groups').delete().eq('cost_centre_id', centreId);
+          if (delPgErr) throw delPgErr;
+          if (photoGroups.length) {
+            const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(photoGroups.map(pg => ({ ...pg, cost_centre_id: centreId })));
+            if (pgErr) throw pgErr;
+          }
         }
 
-        const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
-        const allPhotos = (settings && settings.portfolio_photos) || [];
-        const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
-        const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
-
-        const projectFields = {
-          name, client_id: clientId, client_name, client_email, client_phone, client_address,
-          sow_text, proposal_subtitle, terms_text, deposit_percent, pylon_link, pylon_project_id,
-          reference_photos: referencePhotos.map(url => ({ url })),
-          cover_photos: coverPhotos,
-          proposal_template: currentTemplate,
-          estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
-          project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
-          site_contact_id: assignedContactIds.site_contact_id || null,
-          job_contact_id: assignedContactIds.job_contact_id || null,
-          sales_contact_id: assignedContactIds.sales_contact_id || null,
-          accounts_contact_id: assignedContactIds.accounts_contact_id || null,
-        };
-
-        const { error: updateErr } = await supabaseClient.from('projects').update(projectFields).eq('id', project.id);
-        if (updateErr) throw updateErr;
-        const { error: delErr } = await supabaseClient.from('cost_centres').delete().eq('project_id', project.id);
-        if (delErr) throw delErr;
-
-        const { data: insertedStages, error: ccErr } = await supabaseClient
-          .from('cost_centres')
-          .insert(stagesPayload.map(({ lineItems, photoGroups, ...s }) => ({ ...s, project_id: project.id })))
-          .select();
-        if (ccErr) throw ccErr;
-
-        const allLineItems = [];
-        const allPhotoGroups = [];
-        insertedStages.forEach((stage, i) => {
-          stagesPayload[i].lineItems.forEach(li => allLineItems.push({ ...li, cost_centre_id: stage.id }));
-          stagesPayload[i].photoGroups.forEach(pg => allPhotoGroups.push({ ...pg, cost_centre_id: stage.id }));
-        });
-        if (allLineItems.length) {
-          const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(allLineItems);
-          if (liErr) throw liErr;
+        if (removedCentres.length) {
+          const { error: delCentreErr } = await supabaseClient.from('cost_centres').delete().in('id', removedCentres.map(c => c.id));
+          if (delCentreErr) throw delCentreErr;
         }
-        if (allPhotoGroups.length) {
-          const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(allPhotoGroups);
-          if (pgErr) throw pgErr;
+
+        if (pendingVariation) {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const { error: varErr } = await supabaseClient.from('variations').insert({ ...pendingVariation, project_id: project.id, created_by: user.id });
+          if (varErr) throw varErr;
+          await logActivity('project', project.id, 'variation_recorded', pendingVariation.description);
         }
 
         editMode = false;
@@ -1193,7 +1434,7 @@
         <p class="subtitle">${project.client_name} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
         <div style="margin-bottom:20px;">
           ${pricingVisible && !editMode ? `
-            ${!project.job_number ? `<button id="edit-toggle-btn" class="secondary">Edit quote</button>` : ''}
+            <button id="edit-toggle-btn" class="secondary">${project.job_number ? 'Edit stages' : 'Edit quote'}</button>
             <button id="duplicate-btn" class="secondary">Duplicate as new project</button>
           ` : ''}
           ${editMode ? `
@@ -1207,7 +1448,7 @@
         <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
           <button class="settings-tab active" data-panel="summary">Summary</button>
           <button class="settings-tab" data-panel="costcentres">Cost Centres</button>
-          ${project.job_number ? `<button class="settings-tab" data-panel="pos">Purchase Orders</button>` : ''}
+          ${project.job_number && !editMode ? `<button class="settings-tab" data-panel="pos">Purchase Orders</button>` : ''}
           <button class="settings-tab" data-panel="details">Details</button>
           ${!editMode ? `<button class="settings-tab" data-panel="documents">Documents</button>` : ''}
         </div>
@@ -1433,7 +1674,7 @@
               `}
             </div>
 
-            ${project.job_number ? `
+            ${project.job_number && !editMode ? `
             <div class="settings-panel" id="panel-pos">
               <div class="card">
                 <h2>Purchase orders &amp; supplier invoices</h2>
@@ -1449,7 +1690,7 @@
             ` : ''}
 
             <div class="settings-panel" id="panel-details">
-              ${editMode ? editorPanelHtml() : `
+              ${editMode && !project.job_number ? editorPanelHtml() : `
               ${(() => {
                 const contactRows = [
                   { label: 'Project manager', c: project.project_manager },
@@ -1490,6 +1731,14 @@
                 <h2>Compliance - CCEW</h2>
                 <p class="subtitle" style="margin-bottom:10px;">Submitted through the Building and Energy Commission's own website - upload the resulting certificate here for the record, or state why one isn't needed.</p>
                 <div id="ccew-section"></div>
+              </div>
+              ` : ''}
+
+              ${project.job_number && pricingVisible ? `
+              <div class="card">
+                <h2>Variations</h2>
+                <p class="subtitle" style="margin-bottom:14px;">Changes made to this job's stages after the quote was approved - edit a stage under Cost Centres to add another.</p>
+                <div id="variations-list"><p class="subtitle">Loading...</p></div>
               </div>
               ` : ''}
               `}
@@ -1546,6 +1795,7 @@
       }
 
       if (project.job_number) loadPurchaseOrders(project.id, centres);
+      if (document.getElementById('variations-list')) loadVariations(project.id);
       loadJobTasks(project.id);
       loadDocuments(project.id);
       wireDocumentUpload(project);
@@ -1657,6 +1907,36 @@
         }
       });
 
+    }
+
+    async function loadVariations(projectId) {
+      const listEl = document.getElementById('variations-list');
+      const [{ data: variations, error }, { data: staff }] = await Promise.all([
+        supabaseClient.from('variations').select('*').eq('project_id', projectId).order('created_at', { ascending: false }),
+        supabaseClient.from('profiles').select('id, full_name'),
+      ]);
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!variations.length) { listEl.innerHTML = `<p class="subtitle">No variations recorded.</p>`; return; }
+
+      listEl.innerHTML = variations.map(v => {
+        const who = (staff || []).find(s => s.id === v.created_by)?.full_name || 'Someone';
+        const isSigned = v.status === 'signed';
+        return `
+          <div style="border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+              <div>
+                ${isSigned ? `<span class="badge accepted">Signed</span>` : `<span class="badge draft">Quick note</span>`}
+                <span style="margin-left:6px; font-weight:600; color:${Number(v.total_delta) >= 0 ? 'var(--green)' : 'var(--red)'};">${Number(v.total_delta) >= 0 ? '+' : ''}${money(v.total_delta)}</span>
+              </div>
+              <p class="subtitle" style="margin:0; font-size:12px;">${who} &middot; ${new Date(v.created_at).toLocaleDateString('en-AU')}</p>
+            </div>
+            <p style="margin:8px 0 0;">${v.description}</p>
+            <div style="margin-top:8px; font-size:13px;">
+              ${(v.changes || []).map(c => `<div class="subtitle">${c.cost_centre_name}: ${money(c.old_amount)} &rarr; ${money(c.new_amount)}</div>`).join('')}
+            </div>
+            ${isSigned ? `<p class="subtitle" style="margin-top:8px;">Signed by ${v.signed_by_name} on ${new Date(v.signed_at).toLocaleDateString('en-AU')}</p>` : ''}
+          </div>`;
+      }).join('');
     }
 
     async function loadJobTasks(projectId) {

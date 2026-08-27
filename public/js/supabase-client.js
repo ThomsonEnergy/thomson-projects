@@ -755,6 +755,27 @@ async function checkProjectHasActivity(project) {
   return reasons;
 }
 
+// Same idea as checkProjectHasActivity, but scoped to one stage - used
+// when a job's edit removes a stage that used to exist, so only the
+// specific stage being removed gets blocked, not the whole save.
+async function checkCostCentreHasActivity(costCentre) {
+  const reasons = [];
+  const invoiced = Number(costCentre.invoiced_amount) || 0;
+  if (invoiced > 0) reasons.push(`has ${money(invoiced)} invoiced`);
+
+  const { count: poCount } = await supabaseClient.from('purchase_orders').select('id', { count: 'exact', head: true }).eq('cost_centre_id', costCentre.id);
+  if (poCount > 0) reasons.push(`has ${poCount} purchase order${poCount === 1 ? '' : 's'}`);
+
+  const [{ count: directTimeCount }, { count: splitTimeCount }] = await Promise.all([
+    supabaseClient.from('time_entries').select('id', { count: 'exact', head: true }).eq('cost_centre_id', costCentre.id),
+    supabaseClient.from('time_entries').select('id', { count: 'exact', head: true }).contains('selected_cost_centre_ids', [costCentre.id]),
+  ]);
+  const timeCount = (directTimeCount || 0) + (splitTimeCount || 0);
+  if (timeCount > 0) reasons.push(`has ${timeCount} logged time ${timeCount === 1 ? 'entry' : 'entries'}`);
+
+  return reasons;
+}
+
 // Deletes a project after the caller has already run the activity
 // check. Cascade behavior on cost_centres' foreign key isn't something
 // I can verify locally (that table predates the migration files I have
