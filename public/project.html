@@ -37,50 +37,26 @@
     const params = new URLSearchParams(window.location.search);
     const projectId = params.get('id');
 
-    async function loadProject() {
-      const centreCols = await costCentreColumns();
-      const { data: project, error } = await supabaseClient
-        .from('projects')
-        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, paid_at, xero_invoice_id)), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order), cost_centre_photo_groups(*)),
-          project_manager:client_contacts!project_manager_contact_id(name, phone, email),
-          site_contact:client_contacts!site_contact_id(name, phone, email),
-          job_contact:client_contacts!job_contact_id(name, phone, email),
-          sales_contact:client_contacts!sales_contact_id(name, phone, email),
-          accounts_contact:client_contacts!accounts_contact_id(name, phone, email)`)
-        .eq('id', projectId)
-        .single();
-      if (error) {
-        document.getElementById('content').innerHTML = `<div class="error-box">${error.message}</div>`;
-        return null;
-      }
+    function getPayWeekStart(d) {
+      const diff = (d.getDay() - 5 + 7) % 7; // days since the most recent Friday
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+    }
+    function entryHours(te) { return (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000; }
 
-      // Real labour hours/cost per stage - computed directly from
-      // time_entries rather than the get_stage_actual_hours/
-      // get_stage_actual_labour_cost database functions, which were
-      // undercounting hours (only entries with a direct cost_centre_id
-      // match, missing ones still tagged via selected_cost_centre_ids
-      // pending a split) and returning the billable SELL rate as if it
-      // were a cost.
-      //
-      // Real cost now comes from each employee's actual pay rates
-      // (profiles.ordinary_rate / rate_1_5x / rate_2x - captured in
-      // Settings but never actually applied anywhere until now), banded
-      // by a WEEKLY overtime rule: first 38 hrs/pay-week ordinary,
-      // 38-48 at 1.5x, 48+ at 2x (rate_2_5x stays available on the
-      // profile but isn't auto-applied by this rule). Overtime is a
-      // threshold on the employee's TOTAL hours that week across every
-      // job, not just this one, so an entry on this stage can still land
-      // partly in a higher band depending on what else they worked that
-      // week - hence pulling each touched employee's full pay week
-      // rather than just this project's entries.
-      function getPayWeekStart(d) {
-        const diff = (d.getDay() - 5 + 7) % 7; // days since the most recent Friday
-        return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
-      }
-      function entryHours(te) { return (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000; }
-
-      const [{ data: allTimeEntries }, { data: allProfiles }, { data: allTiers }] = await Promise.all([
-        supabaseClient.from('time_entries').select('id, cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out').eq('project_id', projectId).not('clock_out', 'is', null),
+    // Real cost per time_entry, from each employee's actual pay rates
+    // (profiles.ordinary_rate / rate_1_5x / rate_2x - captured in Settings
+    // but never actually applied anywhere until now), banded by a WEEKLY
+    // overtime rule: first 38 hrs/pay-week ordinary, 38-48 at 1.5x, 48+ at
+    // 2x (rate_2_5x stays available on the profile but isn't auto-applied
+    // by this rule). Overtime is a threshold on the employee's TOTAL hours
+    // that week across every job, not just one project, so an entry can
+    // still land partly in a higher band depending on what else they
+    // worked that week - hence pulling each touched employee's full pay
+    // week rather than just the entries passed in. Shared by loadProject()
+    // (per-stage accrued cost) and the timesheet drilldown (itemised
+    // per-entry cost), so the two can never disagree.
+    async function computeEntryLabourCosts(timeEntries) {
+      const [{ data: allProfiles }, { data: allTiers }] = await Promise.all([
         supabaseClient.from('profiles').select('id, rate_tier_id, ordinary_rate, rate_1_5x, rate_2x'),
         supabaseClient.from('billable_rate_tiers').select('id, sell_rate'),
       ]);
@@ -90,10 +66,10 @@
         sellRateByProfile[p.id] = tier ? Number(tier.sell_rate) : 0;
       });
 
-      // One (employee, pay week) fetch per unique combination this job's
+      // One (employee, pay week) fetch per unique combination the passed-in
       // entries touch - typically a handful, not per-entry.
       const weekKeys = new Set();
-      (allTimeEntries || []).forEach(te => {
+      (timeEntries || []).forEach(te => {
         weekKeys.add(`${te.staff_id}|${getPayWeekStart(new Date(te.clock_in)).toISOString()}`);
       });
       const costById = new Map();
@@ -136,6 +112,36 @@
           cumulative = end;
         });
       }));
+      return costById;
+    }
+
+    async function loadProject() {
+      const centreCols = await costCentreColumns();
+      const { data: project, error } = await supabaseClient
+        .from('projects')
+        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, paid_at, xero_invoice_id)), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order), cost_centre_photo_groups(*)),
+          project_manager:client_contacts!project_manager_contact_id(name, phone, email),
+          site_contact:client_contacts!site_contact_id(name, phone, email),
+          job_contact:client_contacts!job_contact_id(name, phone, email),
+          sales_contact:client_contacts!sales_contact_id(name, phone, email),
+          accounts_contact:client_contacts!accounts_contact_id(name, phone, email)`)
+        .eq('id', projectId)
+        .single();
+      if (error) {
+        document.getElementById('content').innerHTML = `<div class="error-box">${error.message}</div>`;
+        return null;
+      }
+
+      // Real labour hours/cost per stage - computed directly from
+      // time_entries rather than the get_stage_actual_hours/
+      // get_stage_actual_labour_cost database functions, which were
+      // undercounting hours (only entries with a direct cost_centre_id
+      // match, missing ones still tagged via selected_cost_centre_ids
+      // pending a split) and returning the billable SELL rate as if it
+      // were a cost.
+      const allTimeEntriesRes = await supabaseClient.from('time_entries').select('id, cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out').eq('project_id', projectId).not('clock_out', 'is', null);
+      const allTimeEntries = allTimeEntriesRes.data;
+      const costById = await computeEntryLabourCosts(allTimeEntries || []);
 
       for (const centre of project.cost_centres || []) {
         const matchingEntries = (allTimeEntries || []).filter(te =>
@@ -2255,18 +2261,22 @@
       const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
       const myRole = await getMyRole();
       const isAdmin = myRole === 'admin';
+      const colCount = 4 + (pricingVisible ? 1 : 0) + (isAdmin ? 1 : 0);
 
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
-        <div class="card" style="max-width:640px; width:100%; max-height:85vh; overflow-y:auto;">
+        <div class="card" style="max-width:720px; width:100%; max-height:85vh; overflow-y:auto;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <h2 style="margin:0;">Timesheets on this job</h2>
+            <h2 style="margin:0;">Accrued cost on this job</h2>
             <button type="button" class="secondary" id="td-close-btn">Close</button>
           </div>
           <p class="subtitle" style="margin-bottom:14px;">${isAdmin ? 'As admin you can correct which stage an entry belongs to, or move it to office/non-job time.' : 'Read-only - admins can edit the cost centre / office time split.'}</p>
           <div id="td-msg"></div>
+          <h3 style="margin-bottom:8px;">Timesheets</h3>
           <div id="td-list"><p class="subtitle">Loading...</p></div>
+          <h3 style="margin:22px 0 8px;">Purchase orders received</h3>
+          <div id="td-po-list"><p class="subtitle">Loading...</p></div>
         </div>`;
       document.body.appendChild(overlay);
       overlay.querySelector('#td-close-btn').addEventListener('click', () => overlay.remove());
@@ -2295,23 +2305,29 @@
         if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
         if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No timesheet entries logged against this job yet.</p>`; return; }
 
+        const costById = pricingVisible ? await computeEntryLabourCosts(entries.filter(e => e.clock_out)) : new Map();
+        const totalCost = [...costById.values()].reduce((s, c) => s + c, 0);
+
         listEl.innerHTML = `
           <table class="responsive-stack">
-            <thead><tr><th>Staff</th><th>Date</th><th class="num">Hours</th><th>Stage / category</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+            <thead><tr><th>Staff</th><th>Date</th><th class="num">Hours</th><th>Stage / category</th>${pricingVisible ? '<th class="num">Cost</th>' : ''}${isAdmin ? '<th></th>' : ''}</tr></thead>
             <tbody>
               ${entries.map(e => {
                 const hrs = hoursFor(e);
+                const cost = costById.get(e.id);
                 return `
                 <tr data-entry-id="${e.id}">
                   <td data-label="Staff">${e.profiles?.full_name || 'Unknown'}</td>
                   <td data-label="Date">${new Date(e.clock_in).toLocaleDateString()}</td>
                   <td class="num" data-label="Hours">${hrs === null ? 'In progress' : hrs.toFixed(2)}</td>
                   <td data-label="Stage / category">${stageLabel(e)}</td>
+                  ${pricingVisible ? `<td class="num" data-label="Cost">${cost === undefined ? '-' : money(cost)}</td>` : ''}
                   ${isAdmin ? `<td><button type="button" class="secondary td-edit-btn" data-id="${e.id}" style="font-size:12px; padding:4px 8px;">Edit</button></td>` : ''}
                 </tr>
-                <tr class="td-edit-row" data-edit-for="${e.id}" style="display:none;"><td colspan="${isAdmin ? 5 : 4}"></td></tr>`;
+                <tr class="td-edit-row" data-edit-for="${e.id}" style="display:none;"><td colspan="${colCount}"></td></tr>`;
               }).join('')}
             </tbody>
+            ${pricingVisible ? `<tfoot><tr><td colspan="${colCount - 1 - (isAdmin ? 1 : 0)}" style="text-align:right; font-weight:600;">Total labour cost</td><td class="num" style="font-weight:600;">${money(totalCost)}</td>${isAdmin ? '<td></td>' : ''}</tr></tfoot>` : ''}
           </table>`;
 
         if (!isAdmin) return;
@@ -2321,6 +2337,45 @@
             openEditRow(entry);
           });
         });
+      }
+
+      async function refreshPoList() {
+        const listEl = overlay.querySelector('#td-po-list');
+        if (!pricingVisible) { listEl.innerHTML = `<p class="subtitle">Pricing details are hidden for your role.</p>`; return; }
+
+        const { data: pos, error } = await supabaseClient
+          .from('purchase_orders')
+          .select('id, po_number, cost_centre_id, suppliers(name), supplier_name, purchase_order_line_items(description, quantity, unit_cost, received)')
+          .eq('project_id', project.id);
+        if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+        const receivedRows = [];
+        (pos || []).forEach(po => {
+          const supplierLabel = po.suppliers?.name || po.supplier_name || 'Unknown supplier';
+          (po.purchase_order_line_items || []).filter(li => li.received).forEach(li => {
+            receivedRows.push({ ...li, supplierLabel, poNumber: po.po_number, stage: centreName(po.cost_centre_id) });
+          });
+        });
+
+        if (!receivedRows.length) { listEl.innerHTML = `<p class="subtitle">No purchase order line items received yet - only received items count as accrued cost, not just approved/ordered ones.</p>`; return; }
+
+        const totalMaterial = receivedRows.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
+        listEl.innerHTML = `
+          <table class="responsive-stack">
+            <thead><tr><th>Item</th><th>Supplier</th><th>Stage</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Total</th></tr></thead>
+            <tbody>
+              ${receivedRows.map(li => `
+                <tr>
+                  <td data-label="Item">${li.description}${li.poNumber ? ` <span class="subtitle" style="font-size:11px;">(${li.poNumber})</span>` : ''}</td>
+                  <td data-label="Supplier">${li.supplierLabel}</td>
+                  <td data-label="Stage">${li.stage}</td>
+                  <td class="num" data-label="Qty">${li.quantity}</td>
+                  <td class="num" data-label="Unit cost">${money(li.unit_cost)}</td>
+                  <td class="num" data-label="Total">${money(Number(li.quantity) * Number(li.unit_cost))}</td>
+                </tr>`).join('')}
+            </tbody>
+            <tfoot><tr><td colspan="5" style="text-align:right; font-weight:600;">Total received materials cost</td><td class="num" style="font-weight:600;">${money(totalMaterial)}</td></tr></tfoot>
+          </table>`;
       }
 
       function openEditRow(entry) {
@@ -2395,7 +2450,7 @@
         });
       }
 
-      await refreshList();
+      await Promise.all([refreshList(), refreshPoList()]);
     }
 
     async function loadDocuments(projectId) {
