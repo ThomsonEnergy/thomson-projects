@@ -1217,13 +1217,14 @@
 
             <div class="settings-panel active" id="panel-summary">
               ${pricingVisible ? `
-                <div class="grid cols-4">
-                  <div class="stat"><div class="label">Quoted total</div><div class="value">${money(quoted)}</div></div>
-                  <div class="stat"><div class="label">Cost allocated</div><div class="value" id="cost-allocated-value" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:4px;" title="Click to see the timesheets behind this figure">${money(accruedTotal)}</div></div>
-                  <div class="stat"><div class="label">Profit (quoted - cost)</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
-                  <div class="stat"><div class="label">Left to invoice</div><div class="value">${money(remaining)}</div></div>
+                <div class="grid cols-${project.job_number ? '4' : '3'}">
+                  <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
+                  <div class="stat"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
+                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
+                  ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
                 </div>
 
+                ${project.job_number ? `
                 <div class="card" style="margin-top:20px;">
                   <h2>Progress</h2>
                   <div class="progress-track"><div class="progress-fill" style="width:${pctComplete}%"></div></div>
@@ -1241,13 +1242,14 @@
                   </div>
                   <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                     <span class="subtitle">Accrued (real)</span>
-                    <span style="font-weight:600; color:${accruedOverEstimate ? 'var(--red)' : 'var(--green)'};">${money(accruedTotal)}</span>
+                    <span id="cost-allocated-value" style="font-weight:600; cursor:pointer; text-decoration:underline dotted; text-underline-offset:4px; color:${accruedOverEstimate ? 'var(--red)' : 'var(--green)'};" title="Click to see the timesheets behind this figure">${money(accruedTotal)}</span>
                   </div>
                   <div style="background:var(--surface-2); border-radius:999px; height:10px; overflow:hidden;">
                     <div style="background:${accruedOverEstimate ? 'var(--red)' : 'var(--green)'}; width:${accruedBarPct}%; height:100%; border-radius:999px;"></div>
                   </div>
-                  <p class="subtitle" style="margin-top:8px;">Accrued = actual labour cost from timesheets + received purchase order line items.</p>
+                  <p class="subtitle" style="margin-top:8px;">Accrued = actual labour cost from timesheets + received purchase order line items. Click the accrued figure to see the timesheets behind it.</p>
                 </div>
+                ` : ''}
               ` : ''}
 
               <div class="card">
