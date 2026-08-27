@@ -1625,6 +1625,18 @@
       }
       const profitPct = donutOk ? Math.max(0, Math.round((100 - materialsPct - labourPct) * 10) / 10) : 0;
 
+      // Job split - the same breakdown, but from real spend instead of the
+      // estimate: accrued materials/labour (see "Estimated vs accrued
+      // cost" above) against the quoted total, so it's directly
+      // comparable to the Quoted split donut next to it.
+      const jobDonutOk = pricingVisible && !!project.job_number && quoted > 0 && accruedProfit >= 0;
+      let actualMaterialsPct = 0, actualLabourPct = 0;
+      if (jobDonutOk) {
+        actualMaterialsPct = Math.min(100, Math.round((accruedMaterialTotal / quoted) * 1000) / 10);
+        actualLabourPct = Math.min(100 - actualMaterialsPct, Math.round((actualLabourTotal / quoted) * 1000) / 10);
+      }
+      const actualProfitPct = jobDonutOk ? Math.max(0, Math.round((100 - actualMaterialsPct - actualLabourPct) * 10) / 10) : 0;
+
       const overallBudgetPercent = labourSellTotal > 0 ? Math.round((actualLabourTotal / labourSellTotal) * 100) : 0;
       const overallIsOver = overallBudgetPercent > 100;
 
@@ -1663,6 +1675,13 @@
                   <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
                   ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
                 </div>
+
+                ${project.job_number ? `
+                <div class="grid cols-2" style="margin-top:10px;">
+                  <div class="stat"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
+                </div>
+                ` : ''}
 
                 ${project.job_number ? `
                 <div class="card" style="margin-top:20px;">
@@ -1709,18 +1728,37 @@
               ` : ''}
 
               ${pricingVisible ? `
-                <div class="card">
-                  <h2>Quoted split</h2>
-                  ${donutOk ? `
-                    <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
-                      <div style="width:120px; height:120px; border-radius:50%; flex-shrink:0; background:conic-gradient(var(--accent) 0% ${materialsPct}%, var(--green) ${materialsPct}% ${materialsPct + labourPct}%, ${profit >= 0 ? 'var(--muted)' : 'var(--red)'} ${materialsPct + labourPct}% 100%);"></div>
-                      <div>
-                        <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent); margin-right:8px;"></span>Materials - ${money(materialCostTotal)} (${materialsPct}%)</p>
-                        <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--green); margin-right:8px;"></span>Labour - ${money(labourCostTotal)} (${labourPct}%)</p>
-                        <p style="margin:0;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--muted); margin-right:8px;"></span>Profit - ${money(profit)} (${profitPct}%)</p>
+                <div class="grid ${project.job_number ? 'cols-2' : ''}">
+                  <div class="card">
+                    <h2>Quoted split</h2>
+                    ${donutOk ? `
+                      <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
+                        <div style="width:120px; height:120px; border-radius:50%; flex-shrink:0; background:conic-gradient(var(--accent) 0% ${materialsPct}%, var(--green) ${materialsPct}% ${materialsPct + labourPct}%, ${profit >= 0 ? 'var(--muted)' : 'var(--red)'} ${materialsPct + labourPct}% 100%);"></div>
+                        <div>
+                          <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent); margin-right:8px;"></span>Materials - ${money(materialCostTotal)} (${materialsPct}%)</p>
+                          <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--green); margin-right:8px;"></span>Labour - ${money(labourCostTotal)} (${labourPct}%)</p>
+                          <p style="margin:0;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--muted); margin-right:8px;"></span>Profit - ${money(profit)} (${profitPct}%)</p>
+                        </div>
                       </div>
-                    </div>
-                  ` : `<p class="subtitle">${quoted > 0 ? `Cost (${money(cost)}) has passed the quoted total (${money(quoted)}) - no split to show.` : 'Add quoted amounts to a stage to see the split.'}</p>`}
+                    ` : `<p class="subtitle">${quoted > 0 ? `Cost (${money(cost)}) has passed the quoted total (${money(quoted)}) - no split to show.` : 'Add quoted amounts to a stage to see the split.'}</p>`}
+                  </div>
+
+                  ${project.job_number ? `
+                  <div class="card">
+                    <h2>Job split</h2>
+                    <p class="subtitle" style="margin:0 0 12px;">Same breakdown, from real spend so far.</p>
+                    ${jobDonutOk ? `
+                      <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
+                        <div style="width:120px; height:120px; border-radius:50%; flex-shrink:0; background:conic-gradient(var(--accent) 0% ${actualMaterialsPct}%, var(--green) ${actualMaterialsPct}% ${actualMaterialsPct + actualLabourPct}%, ${accruedProfit >= 0 ? 'var(--muted)' : 'var(--red)'} ${actualMaterialsPct + actualLabourPct}% 100%);"></div>
+                        <div>
+                          <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent); margin-right:8px;"></span>Materials - ${money(accruedMaterialTotal)} (${actualMaterialsPct}%)</p>
+                          <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--green); margin-right:8px;"></span>Labour - ${money(actualLabourTotal)} (${actualLabourPct}%)</p>
+                          <p style="margin:0;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--muted); margin-right:8px;"></span>Profit - ${money(accruedProfit)} (${actualProfitPct}%)</p>
+                        </div>
+                      </div>
+                    ` : `<p class="subtitle">${quoted > 0 ? `Accrued cost (${money(accruedTotal)}) has passed the quoted total (${money(quoted)}) - no split to show.` : 'Add quoted amounts to a stage to see the split.'}</p>`}
+                  </div>
+                  ` : ''}
                 </div>
               ` : ''}
 
