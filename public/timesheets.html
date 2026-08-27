@@ -54,6 +54,17 @@
       <div id="team-week-table"><p class="subtitle">Loading...</p></div>
     </div>
 
+    <div class="card" id="dev-mode-entries-card" style="display:none;">
+      <h2>All entries this week</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Only visible with Dev Mode active (Settings). Bulk-select and delete individual clock in/out entries.</p>
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <label style="display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" id="select-all-entries" style="width:auto;" /> Select all</label>
+        <button type="button" id="bulk-delete-entries-btn" class="secondary" style="display:none;">Delete selected</button>
+      </div>
+      <div id="bulk-delete-entries-msg"></div>
+      <div id="dev-mode-entries-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
         <h2 style="margin:0;">My recent entries</h2>
@@ -207,6 +218,7 @@
 
     let weekStart = getPayWeekStart(new Date());
     let canSeeTeamWeek = false;
+    let canSeeDevEntries = false;
 
     function renderWeekRange() {
       const end = addDays(weekStart, 6);
@@ -224,6 +236,7 @@
         document.getElementById('xero-push-start').value = localDateStr(weekStart);
         document.getElementById('xero-push-end').value = localDateStr(addDays(weekStart, 6));
       }
+      if (canSeeDevEntries) await loadDevModeEntries();
     }
 
     document.getElementById('week-prev').addEventListener('click', () => { weekStart = addDays(weekStart, -7); refreshWeekViews(); });
@@ -361,6 +374,89 @@
       if (myRole !== 'admin' && myRole !== 'finance') return;
       canSeeTeamWeek = true;
       document.getElementById('team-week-card').style.display = 'block';
+    }
+
+    function initDevModeEntriesCard(myRole) {
+      if (myRole !== 'admin' || !isDevModeActive()) return;
+      canSeeDevEntries = true;
+      document.getElementById('dev-mode-entries-card').style.display = 'block';
+    }
+
+    async function loadDevModeEntries() {
+      const listEl = document.getElementById('dev-mode-entries-list');
+      const rangeStart = weekStart;
+      const rangeEndExclusive = addDays(weekStart, 7);
+      const [{ data: entries, error }, { data: staff }] = await Promise.all([
+        supabaseClient.from('time_entries').select('id, staff_id, project_id, clock_in, clock_out, projects(name)')
+          .gte('clock_in', rangeStart.toISOString()).lt('clock_in', rangeEndExclusive.toISOString())
+          .order('clock_in', { ascending: false }),
+        supabaseClient.from('profiles').select('id, full_name'),
+      ]);
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No entries this week.</p>`; return; }
+
+      listEl.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th></th><th>Staff</th><th>Job</th><th>Clocked in</th><th>Clocked out</th><th class="num">Duration</th></tr></thead>
+          <tbody>
+            ${entries.map(e => {
+              const staffName = (staff || []).find(s => s.id === e.staff_id)?.full_name || 'Unknown';
+              return `
+              <tr>
+                <td data-label=""><input type="checkbox" class="entry-select" data-id="${e.id}" style="width:auto;" /></td>
+                <td data-label="Staff">${staffName}</td>
+                <td data-label="Job">${e.projects ? e.projects.name : 'General / Office'}</td>
+                <td data-label="Clocked in">${fmtDateTime(e.clock_in)}</td>
+                <td data-label="Clocked out">${e.clock_out ? fmtDateTime(e.clock_out) : '<span class="badge in_progress">In progress</span>'}</td>
+                <td class="num" data-label="Duration">${e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : ''}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+
+      wireBulkDeleteEntries();
+    }
+
+    function wireBulkDeleteEntries() {
+      const selectAll = document.getElementById('select-all-entries');
+      const deleteBtn = document.getElementById('bulk-delete-entries-btn');
+      const msg = document.getElementById('bulk-delete-entries-msg');
+
+      function selectedCheckboxes() { return [...document.querySelectorAll('.entry-select:checked')]; }
+      function refreshDeleteBtn() {
+        const n = selectedCheckboxes().length;
+        deleteBtn.style.display = n ? 'inline-flex' : 'none';
+        deleteBtn.textContent = `Delete selected (${n})`;
+      }
+
+      selectAll.checked = false;
+      selectAll.onchange = () => {
+        document.querySelectorAll('.entry-select').forEach(cb => { cb.checked = selectAll.checked; });
+        refreshDeleteBtn();
+      };
+      document.querySelectorAll('.entry-select').forEach(cb => {
+        cb.addEventListener('change', () => {
+          if (!cb.checked) selectAll.checked = false;
+          refreshDeleteBtn();
+        });
+      });
+
+      deleteBtn.onclick = async () => {
+        const ids = selectedCheckboxes().map(cb => cb.dataset.id);
+        if (!ids.length) return;
+        if (!confirm(`Delete ${ids.length} timesheet entr${ids.length === 1 ? 'y' : 'ies'} permanently? This can't be undone.`)) return;
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Deleting...';
+        const { error } = await supabaseClient.from('time_entries').delete().in('id', ids);
+        if (error) {
+          msg.innerHTML = `<div class="error-box">${error.message}</div>`;
+          deleteBtn.disabled = false;
+          refreshDeleteBtn();
+          return;
+        }
+        msg.innerHTML = `<div class="success-box">Deleted ${ids.length} entr${ids.length === 1 ? 'y' : 'ies'}.</div>`;
+        await loadDevModeEntries();
+      };
     }
 
     function isoToDatePart(iso) {
@@ -864,6 +960,7 @@
       const myRole = await getMyRole();
       await loadProjectOptions();
       initTeamWeekCard(myRole);
+      initDevModeEntriesCard(myRole);
       await refreshWeekViews();
       await loadMyEntries();
       await loadMyLeave();

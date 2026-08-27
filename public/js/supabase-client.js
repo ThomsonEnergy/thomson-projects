@@ -127,6 +127,31 @@ function mapsLink(address) {
   return `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" rel="noopener" class="link-quiet" onclick="event.stopPropagation()">${address}</a>`;
 }
 
+// Dev Mode - a time-limited unlock (20 min) for the most dangerous admin
+// actions (API keys, company details, Xero mapping, bulk-delete). The
+// password is verified server-side by verify-dev-mode.js, never shipped to
+// the browser - this is a UI-layer gate, same trust level as the rest of
+// this app's admin-only tabs, not a database-level enforcement.
+const DEV_MODE_STORAGE_KEY = 'te-dev-mode-expires';
+
+function isDevModeActive() {
+  const exp = parseInt(localStorage.getItem(DEV_MODE_STORAGE_KEY) || '0', 10);
+  return exp > Date.now();
+}
+
+function devModeMinutesRemaining() {
+  const exp = parseInt(localStorage.getItem(DEV_MODE_STORAGE_KEY) || '0', 10);
+  return Math.max(0, Math.ceil((exp - Date.now()) / 60000));
+}
+
+function setDevModeExpiry(expiresAt) {
+  localStorage.setItem(DEV_MODE_STORAGE_KEY, String(expiresAt));
+}
+
+function clearDevMode() {
+  localStorage.removeItem(DEV_MODE_STORAGE_KEY);
+}
+
 // Shared across the Suppliers and supplier-detail pages - both need to
 // read a file for AI extraction and fuzzy-match text against existing
 // records, so these live here once rather than being copy-pasted twice.
