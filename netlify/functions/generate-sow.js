@@ -25,7 +25,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { projectName, brief, stageNames = [], stageDescriptions = {}, documentPaths = [] } = JSON.parse(event.body);
+    const { projectName, brief, stageNames = [], stageDescriptions = {}, documentPaths = [], style = 'story' } = JSON.parse(event.body);
     if (!brief) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'A project brief is required' }) };
     }
@@ -53,6 +53,25 @@ exports.handler = async (event) => {
 
     const stageList = stageNames.map(n => `- ${n}${stageDescriptions[n] ? ': ' + stageDescriptions[n] : ''}`).join('\n');
 
+    // Two house styles, picked by whoever's building the quote - matched
+    // to two real past SOWs the business was happy with, extracted down
+    // to the pattern (not their specific job content) so new ones follow
+    // the same shape without repeating someone else's job details.
+    const styleGuide = style === 'structured' ? `STYLE: Structured & numbered - for commercial builders/developers.
+Formal and precise, written for a professional reading it alongside a contract. Structure:
+1. Open with one short paragraph stating what the scope covers overall - no marketing language, just what's being done and why (e.g. a make-safe followed by reconnection, or a full system install).
+2. Break the work into numbered sub-sections by discipline/phase, each with its own short heading and a bulleted list underneath - e.g. "Supply of Equipment", "Installation Works", "Electrical Works", "Network & Regulatory Applications" (only if relevant - DNSP applications, STC/battery rebate lodgement), "Testing & Commissioning", "Compliance & Documentation". Not every job needs every section - use only the ones relevant to the stages given. For a small/simple job, a single "Inclusions" bulleted list is enough instead of multiple numbered sub-sections.
+3. Cite the specific relevant AS/NZS standard where it's natural to (e.g. AS/NZS 3000, AS/NZS 5033 for solar DC wiring, AS/NZS 4777.2 for inverter commissioning) - only where genuinely applicable, don't force it.
+4. Always end with an "Exclusions" section (bulleted) - job-specific exclusions plus standard ones like "any works not specifically listed above" and non-electrical trade work (building, plumbing, etc.), and note that anything excluded found necessary once work starts is treated as a variation requiring written client approval before proceeding (except genuine safety work).
+5. If the brief or attached documents mention something site-specific worth flagging (an existing defect, an access constraint, a condition that could turn into extra chargeable work) - add a short "Site-Specific Notes" section describing it factually, and only add a recommendation/next-step section if it's the kind of issue that genuinely warrants one (e.g. a roof condition affecting a 25+ year installation). Don't invent a site issue that isn't actually implied by the brief/documents.
+Bullet points are short phrases starting with a gerund or plain verb (Disconnection of..., Supply and installation of..., Testing of...), not full sentences with lots of padding.` : `STYLE: Story-flowing - for residential homeowners.
+Warm, plain-English, and educational - written for someone who isn't an electrician and wants to understand what they're buying and why it's a good choice, not just a checklist of tasks. Structure:
+1. Open with one short paragraph introducing what the system/job is and why this approach/equipment is a solid choice (e.g. reliability, how common/proven it is) - light reassurance, not a hard sell.
+2. A second short paragraph on how the system actually works end-to-end, in plain terms.
+3. Then one section per major component or phase of the job, each with a short bolded heading naming that component (including its size/spec if relevant, e.g. "Solar Power System - 10kW"), followed by one or two short paragraphs: what it is, how it fits into the whole system, and the tangible benefit to the homeowner day-to-day. Skip anything not relevant to this particular job.
+4. Close with a short "complete solution" wrap-up paragraph, then a short numbered list of the key benefits/highlights of the finished system.
+No numbered sections, no formal Exclusions clause, no standards citations, no legalistic language - this reads like a knowledgeable tradesperson explaining things to a friend, not a contract.`;
+
     const promptText = `You are writing a scope-of-works document for an electrical contractor's client-facing quote.
 
 Project: ${projectName || 'This project'}
@@ -63,7 +82,9 @@ ${stageList}
 
 ${docBlocks.length ? 'Reference any attached plans, drawings, or electricity bills where relevant to ground the scope in what they actually show (e.g. existing switchboard capacity, circuit count, meter details).' : ''}
 
-Write a clear, professional scope-of-works document (plain text, a few short paragraphs and/or a bulleted list where that reads better — no markdown headers, no marketing language). It should read like something a licensed electrician wrote for a client to sign off on, covering what's included stage by stage. Do not include pricing.`;
+${styleGuide}
+
+Write the scope of works now (plain text - no markdown headers/asterisks, use plain numbering or a heading line where the style calls for it). Do not include pricing.`;
 
     const content = [{ type: 'text', text: promptText }, ...docBlocks];
 

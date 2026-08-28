@@ -119,7 +119,13 @@
       <p class="subtitle" style="margin:6px 0 0; font-size:12px;">PDF plans/drawings or photos of bills work best. A handful of files, not a full folder.</p>
       <div id="sow-doc-msg"></div>
 
-      <button type="button" id="generate-scope-btn" style="margin-top:16px;">Generate scope of works with AI</button>
+      <label style="margin-top:16px;">Scope of works style</label>
+      <div style="display:flex; gap:16px; margin-bottom:4px;">
+        <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="sow-style" value="story" checked style="width:auto;" /> Story-flowing (residential homeowners)</label>
+        <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="sow-style" value="structured" style="width:auto;" /> Structured &amp; numbered (commercial builders)</label>
+      </div>
+
+      <button type="button" id="generate-scope-btn" style="margin-top:10px;">Generate scope of works with AI</button>
       <div id="generate-msg"></div>
     </div>
 
@@ -679,6 +685,7 @@
         const updatedDescriptions = Object.fromEntries(rows.map(r => [r.dataset.name, r.querySelector('.cc-desc').value]));
 
         btn.textContent = 'Writing scope of works...';
+        const sowStyle = document.querySelector('input[name="sow-style"]:checked').value;
         const sowRes = await fetch('/.netlify/functions/generate-sow', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -688,6 +695,7 @@
             stageNames: updatedStageNames,
             stageDescriptions: updatedDescriptions,
             documentPaths: sowDocs.map(d => d.path),
+            style: sowStyle,
           }),
         });
         const sowJson = await sowRes.json();
