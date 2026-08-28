@@ -52,10 +52,13 @@
   <script>
     async function loadInvoices() {
       const listEl = document.getElementById('invoices-list');
-      const { data, error } = await supabaseClient
-        .from('invoices')
-        .select(`*, cost_centres(name, project_id, projects(name, job_number, client_name)), projects(name, job_number, client_name), invoice_claims(cost_centres(name))`)
-        .order('sent_at', { ascending: false });
+      const [{ data, error }, { data: mappings }] = await Promise.all([
+        supabaseClient
+          .from('invoices')
+          .select(`*, cost_centres(name, project_id, projects(name, job_number, client_name, clients(client_type))), projects(name, job_number, client_name, clients(client_type)), invoice_claims(*, cost_centres(name, sort_order))`)
+          .order('sent_at', { ascending: false }),
+        supabaseClient.from('xero_account_mapping').select('*'),
+      ]);
 
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (!data.length) {
@@ -99,6 +102,7 @@
               const claimStages = (inv.invoice_claims || []).map(ic => ic.cost_centres?.name).filter(Boolean);
               const project = cc?.projects || inv.projects;
               const projectId = cc?.project_id || inv.project_id;
+              const clientType = project?.clients?.client_type || 'individual';
               const stageLabel = cc ? (cc.name || '-') : (claimStages.length ? (claimStages.length > 1 ? `${claimStages.length} stages` : claimStages[0]) : '-');
               const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
               const daysSince = (now - new Date(inv.sent_at)) / 86400000;
@@ -118,12 +122,25 @@
                   </td>
                   <td data-label="">
                     <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:8px;">View</a>
-                    ${project && projectId ? `<a class="link-quiet" href="/project.html?id=${projectId}" style="font-size:12px;">Job</a>` : ''}
+                    ${project && projectId ? `<a class="link-quiet" href="/project.html?id=${projectId}" style="font-size:12px; margin-right:8px;">Job</a>` : ''}
+                    <button type="button" class="secondary xero-toggle-btn" data-id="${inv.id}" style="font-size:12px; padding:4px 8px;">Xero breakdown</button>
                   </td>
+                </tr>
+                <tr class="xero-row" data-for="${inv.id}" style="display:none;">
+                  <td colspan="7" style="background:var(--surface-2);">${xeroBreakdownHtml(inv, mappings, clientType)}</td>
                 </tr>`;
             }).join('')}
           </tbody>
         </table>`;
+
+      listEl.querySelectorAll('.xero-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const row = listEl.querySelector(`.xero-row[data-for="${btn.dataset.id}"]`);
+          const showing = row.style.display !== 'none';
+          row.style.display = showing ? 'none' : 'table-row';
+          btn.textContent = showing ? 'Xero breakdown' : 'Hide breakdown';
+        });
+      });
     }
 
     function openStandaloneInvoicePanel() {

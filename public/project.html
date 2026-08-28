@@ -1512,14 +1512,15 @@
     // Internal view of every invoice raised for this job - shown as its own
     // tab rather than only a link out to the client-facing page, and
     // specifically showing how each one will actually post to Xero: split
-    // into Labour/Materials/STC lines per stage, coded to the accounts set
-    // in Settings > Xero Mapping - mirroring exactly what push-invoice-to-
-    // xero.js sends. Each invoice pushes to Xero on its own; never bundled
-    // together by project.
+    // into Labour/Materials/STC groups (not by stage - that's how Xero
+    // actually codes them), using the accounts set in Settings > Xero
+    // Mapping. Same xeroBreakdownHtml() the standalone Invoices list uses,
+    // so the two can never disagree. Each invoice pushes to Xero on its
+    // own; never bundled together by project.
     async function loadJobInvoices(project) {
       const listEl = document.getElementById('job-invoices-list');
       const [{ data: invoices, error }, { data: mappings }, { data: client }] = await Promise.all([
-        supabaseClient.from('invoices').select('*, invoice_claims(*, cost_centres(name, sort_order))').eq('project_id', project.id).order('sent_at', { ascending: false }),
+        supabaseClient.from('invoices').select('*, cost_centres(name), invoice_claims(*, cost_centres(name, sort_order))').eq('project_id', project.id).order('sent_at', { ascending: false }),
         supabaseClient.from('xero_account_mapping').select('*'),
         project.client_id ? supabaseClient.from('clients').select('client_type').eq('id', project.client_id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
@@ -1527,54 +1528,22 @@
       if (!invoices.length) { listEl.innerHTML = `<p class="subtitle">No invoices raised yet.</p>`; return; }
 
       const clientType = client?.client_type || 'individual';
-      const labourMap = (mappings || []).find(m => m.category === 'labour');
-      const materialsMap = (mappings || []).find(m => m.category === 'materials');
-      const stcMap = (mappings || []).find(m => m.category === (clientType === 'company' ? 'stc_credits_company' : 'stc_credits_individual'));
-      const centreName = (id) => (project.cost_centres || []).find(c => c.id === id)?.name || 'Stage';
 
-      listEl.innerHTML = invoices.map(inv => {
-        // Mirrors invoice_claims when present (a multi-stage claim), else
-        // synthesizes one claim from the invoice's own totals for a legacy
-        // single-stage invoice (cost_centre_id set directly, no
-        // invoice_claims rows).
-        const claims = (inv.invoice_claims && inv.invoice_claims.length)
-          ? inv.invoice_claims.slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
-              .map(ic => ({ stageName: ic.cost_centres?.name || centreName(ic.cost_centre_id), labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount }))
-          : [{ stageName: inv.cost_centre_id ? centreName(inv.cost_centre_id) : (inv.description || 'Invoice'), labour_amount: inv.labour_amount, material_amount: inv.material_amount, stc_amount: inv.stc_amount }];
-
-        const xeroLines = [];
-        claims.forEach(c => {
-          if (Number(c.labour_amount) > 0) xeroLines.push({ desc: `${c.stageName} - Labour`, amount: Number(c.labour_amount), map: labourMap });
-          if (Number(c.material_amount) > 0) xeroLines.push({ desc: `${c.stageName} - Materials`, amount: Number(c.material_amount), map: materialsMap });
-          if (Number(c.stc_amount) > 0) xeroLines.push({ desc: `${c.stageName} - STC Credit`, amount: -Number(c.stc_amount), map: stcMap });
-        });
-
-        return `
-          <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
-              <div>
-                <strong>${inv.invoice_number}</strong>
-                <span class="badge ${inv.paid_at ? 'accepted' : 'sent'}" style="margin-left:6px;">${inv.paid_at ? 'Paid' : 'Awaiting payment'}</span>
-                <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</p>
-              </div>
-              <div>
-                <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:10px;">View client-facing invoice</a>
-                ${inv.xero_invoice_id ? '<span class="subtitle" style="font-size:12px;">In Xero</span>' : `<button type="button" class="secondary push-xero-tab-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>`}
-              </div>
+      listEl.innerHTML = invoices.map(inv => `
+        <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+            <div>
+              <strong>${inv.invoice_number}</strong>
+              <span class="badge ${inv.paid_at ? 'accepted' : 'sent'}" style="margin-left:6px;">${inv.paid_at ? 'Paid' : 'Awaiting payment'}</span>
+              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</p>
             </div>
-            <table style="margin-top:12px;">
-              <thead><tr><th>Xero line</th><th>Account</th><th class="num">Amount</th></tr></thead>
-              <tbody>
-                ${xeroLines.map(l => `
-                  <tr>
-                    <td>${l.desc}</td>
-                    <td>${l.map ? `${l.map.xero_account_code} (${l.map.xero_tax_type})` : '<span style="color:var(--red);">Not mapped - set this in Settings &gt; Xero Mapping</span>'}</td>
-                    <td class="num">${money(l.amount)}</td>
-                  </tr>`).join('')}
-              </tbody>
-            </table>
-          </div>`;
-      }).join('') + `<div id="job-invoices-msg"></div>`;
+            <div>
+              <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:10px;">View client-facing invoice</a>
+              ${inv.xero_invoice_id ? '<span class="subtitle" style="font-size:12px;">In Xero</span>' : `<button type="button" class="secondary push-xero-tab-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>`}
+            </div>
+          </div>
+          <div style="margin-top:12px;">${xeroBreakdownHtml(inv, mappings, clientType)}</div>
+        </div>`).join('') + `<div id="job-invoices-msg"></div>`;
 
       listEl.querySelectorAll('.push-xero-tab-btn').forEach(btn => {
         btn.addEventListener('click', () => pushExistingInvoiceToXero(btn, 'job-invoices-msg'));

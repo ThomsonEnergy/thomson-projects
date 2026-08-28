@@ -869,3 +869,62 @@ function projectNumberOnly(project) {
   if (project.quote_number) return `Q${project.quote_number}`;
   return '-';
 }
+
+// Resolves one invoice row into a flat list of per-stage claims - mirrors
+// invoice_claims when present (a multi-stage claim), else synthesizes one
+// claim from the invoice's own totals for a legacy single-stage invoice
+// (cost_centre_id set directly, no invoice_claims rows). Needs the invoice
+// fetched with both invoice_claims(*, cost_centres(name, sort_order)) and
+// cost_centres(name) embedded - nothing else is looked up externally, so
+// this works the same wherever an invoice is fetched from.
+function invoiceClaimRows(invoice) {
+  if (invoice.invoice_claims && invoice.invoice_claims.length) {
+    return invoice.invoice_claims.slice()
+      .sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
+      .map(ic => ({ stageName: ic.cost_centres?.name || 'Stage', labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount }));
+  }
+  return [{
+    stageName: invoice.cost_centres?.name || invoice.description || 'Invoice',
+    labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount,
+  }];
+}
+
+// Groups an invoice's claims by Xero category (Labour/Materials/STC
+// credit) instead of by stage - this is how Xero actually receives it
+// (push-invoice-to-xero.js sends one line per stage per category), and
+// how it should read for anyone checking the coding before pushing.
+// clientType picks the right STC mapping (a company vs an individual
+// gets credited to a different account). Drops any category with
+// nothing in it.
+function xeroCategoryGroups(invoice, mappings, clientType) {
+  const rows = invoiceClaimRows(invoice);
+  const labourMap = (mappings || []).find(m => m.category === 'labour');
+  const materialsMap = (mappings || []).find(m => m.category === 'materials');
+  const stcMap = (mappings || []).find(m => m.category === (clientType === 'company' ? 'stc_credits_company' : 'stc_credits_individual'));
+  return [
+    { label: 'Labour', map: labourMap, lines: rows.map(r => ({ stageName: r.stageName, amount: Number(r.labour_amount) || 0 })).filter(l => l.amount > 0) },
+    { label: 'Materials', map: materialsMap, lines: rows.map(r => ({ stageName: r.stageName, amount: Number(r.material_amount) || 0 })).filter(l => l.amount > 0) },
+    { label: 'STC Credit', map: stcMap, lines: rows.map(r => ({ stageName: r.stageName, amount: -(Number(r.stc_amount) || 0) })).filter(l => l.amount !== 0) },
+  ].filter(g => g.lines.length);
+}
+
+// Renders the category-grouped breakdown above as HTML - a per-stage line
+// only shows when a category spans more than one stage, since most
+// invoices are single-stage and a stage-vs-total line repeating the same
+// number twice is just noise.
+function xeroBreakdownHtml(invoice, mappings, clientType) {
+  const groups = xeroCategoryGroups(invoice, mappings, clientType);
+  if (!groups.length) return `<p class="subtitle">Nothing to post.</p>`;
+  return groups.map(g => {
+    const total = g.lines.reduce((s, l) => s + l.amount, 0);
+    return `
+      <div style="margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; gap:10px; font-weight:600;">
+          <span>${g.label}</span>
+          <span style="text-align:right; font-weight:400;">${g.map ? `${g.map.xero_account_code} (${g.map.xero_tax_type})` : '<span style="color:var(--red);">Not mapped - set this in Settings &gt; Xero Mapping</span>'}</span>
+        </div>
+        ${g.lines.length > 1 ? g.lines.map(l => `<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); padding-left:12px;"><span>${l.stageName}</span><span>${money(l.amount)}</span></div>`).join('') : ''}
+        <div style="display:flex; justify-content:space-between; font-size:13px; ${g.lines.length > 1 ? 'border-top:1px solid var(--border); margin-top:2px; padding-top:2px;' : ''}"><span>${g.lines.length === 1 ? g.lines[0].stageName : 'Subtotal'}</span><span>${money(total)}</span></div>
+      </div>`;
+  }).join('');
+}
