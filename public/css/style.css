@@ -292,7 +292,7 @@ td.num, th.num { text-align: right; }
 }
 .badge.draft { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
 .badge.sent { background: var(--accent-dim); color: var(--accent); }
-.badge.accepted, .badge.in_progress { background: var(--accent-dim); color: var(--green); }
+.badge.accepted, .badge.in_progress, .badge.approved { background: var(--accent-dim); color: var(--green); }
 .badge.complete { background: var(--accent-dim); color: var(--green); }
 
 .progress-track {

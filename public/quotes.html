@@ -64,6 +64,7 @@
       const { data: projects, error } = await supabaseClient
         .from('projects')
         .select(`*, cost_centres(${centreCols})`)
+        .is('job_number', null)
         .order('created_at', { ascending: false });
 
       const list = document.getElementById('list');
@@ -81,13 +82,15 @@
         return;
       }
 
-      // Three distinct groups, not two - Active means still pending (never
-      // sent), Sent to Client is its own tab once it has been, and Archived
-      // is anything accepted and beyond (it's really a job by then, not a
-      // quote in progress any more).
+      // Four distinct groups - Active means still pending (never sent),
+      // Sent to Client once it has been, Approved once accepted (the
+      // quote itself is now a frozen record - the job that was created
+      // from it is a separate project entirely, not shown here), and
+      // Archived for anything else (withdrawn, expired, etc).
       const pendingQuotes = projects.filter(p => p.status === 'draft');
       const sentQuotes = projects.filter(p => p.status === 'sent');
-      const archived = projects.filter(p => p.status !== 'draft' && p.status !== 'sent');
+      const approvedQuotes = projects.filter(p => p.status === 'approved');
+      const archived = projects.filter(p => !['draft', 'sent', 'approved'].includes(p.status));
 
       function buildRowsHtml(rowProjects) {
         return rowProjects.map((p, i) => {
@@ -149,6 +152,7 @@
         <div class="settings-tabs" id="quotes-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:16px; overflow-x:auto;">
           <button class="settings-tab active" data-panel="active">Active (${pendingQuotes.length})</button>
           <button class="settings-tab" data-panel="sent">Sent to Client (${sentQuotes.length})</button>
+          <button class="settings-tab" data-panel="approved">Approved (${approvedQuotes.length})</button>
           <button class="settings-tab" data-panel="archived">Archived (${archived.length})</button>
         </div>
         <div class="settings-panel active" id="panel-active">
@@ -159,9 +163,13 @@
           ${bulkBarHtml()}
           ${sentQuotes.length ? buildRowsHtml(sentQuotes) : `<p class="subtitle">Nothing sent to a client yet.</p>`}
         </div>
+        <div class="settings-panel" id="panel-approved">
+          ${bulkBarHtml()}
+          ${approvedQuotes.length ? buildRowsHtml(approvedQuotes) : `<p class="subtitle">No approved quotes yet - a quote stays here as a frozen record once accepted; the job it becomes is a separate record, in Projects.</p>`}
+        </div>
         <div class="settings-panel" id="panel-archived">
           ${bulkBarHtml()}
-          ${archived.length ? buildRowsHtml(archived) : `<p class="subtitle">No approved quotes yet - accepted quotes move here once the client signs off.</p>`}
+          ${archived.length ? buildRowsHtml(archived) : `<p class="subtitle">Nothing archived.</p>`}
         </div>`;
 
       document.querySelectorAll('#quotes-tabs .settings-tab').forEach(btn => {
@@ -176,6 +184,7 @@
       if (pricingVisible) {
         wireBulkDelete(document.getElementById('panel-active'), projects);
         wireBulkDelete(document.getElementById('panel-sent'), projects);
+        wireBulkDelete(document.getElementById('panel-approved'), projects);
         wireBulkDelete(document.getElementById('panel-archived'), projects);
       }
     })();

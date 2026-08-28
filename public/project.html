@@ -65,7 +65,8 @@
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
           sales_contact:client_contacts!sales_contact_id(name, phone, email),
-          accounts_contact:client_contacts!accounts_contact_id(name, phone, email)`)
+          accounts_contact:client_contacts!accounts_contact_id(name, phone, email),
+          source_quote:projects!source_quote_id(id, quote_token, quote_number)`)
         .eq('id', projectId)
         .single();
       if (error) {
@@ -112,6 +113,19 @@
                 .reduce((s2, li) => s2 + Number(li.quantity) * Number(li.unit_cost), 0), 0);
       } else {
         project.accrued_material_cost = 0;
+      }
+
+      // A quote never becomes the job in place any more - approval spins
+      // up a separate project row (see create-job-from-quote.js). Once
+      // approved, this looks up that job so "Go to job" can link straight
+      // to it, rather than just reloading this same page and hoping.
+      if (!project.job_number && project.status === 'approved') {
+        const { data: resultingJob } = await supabaseClient
+          .from('projects')
+          .select('id, job_number')
+          .eq('source_quote_id', project.id)
+          .maybeSingle();
+        project.resulting_job = resultingJob || null;
       }
 
       return project;
@@ -1709,7 +1723,10 @@
       const estimatedBarPct = Math.round((cost / costBarMax) * 100);
       const accruedBarPct = Math.round((accruedTotal / costBarMax) * 100);
       const accruedOverEstimate = accruedTotal > cost;
-      const isAccepted = ['accepted', 'in_progress', 'complete'].includes(project.status);
+      const isAccepted = ['accepted', 'approved', 'in_progress', 'complete'].includes(project.status);
+      // A quote that's been approved is a frozen historical record - the
+      // job it became is a separate project, edited from there instead.
+      const isFrozenQuote = !project.job_number && project.status === 'approved';
 
       const content = document.getElementById('content');
       const numberLine = [
@@ -1747,12 +1764,14 @@
       content.innerHTML = `
         <h1>${project.name}</h1>
         <p class="subtitle">${project.client_name} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
+        ${isFrozenQuote && project.approved_at ? `<p class="subtitle" style="margin-top:2px;">Approved ${new Date(project.approved_at).toLocaleDateString('en-AU')}${project.approval_note ? ' - ' + project.approval_note : ' - approved online by the client'}</p>` : ''}
         <div style="margin-bottom:20px;">
           ${pricingVisible && !editMode ? `
-            <button id="edit-toggle-btn" class="secondary">${project.job_number ? 'Edit stages' : 'Edit quote'}</button>
+            ${!isFrozenQuote ? `<button id="edit-toggle-btn" class="secondary">${project.job_number ? 'Edit stages' : 'Edit quote'}</button>` : ''}
             <button id="duplicate-btn" class="secondary">Duplicate as new project</button>
-            ${project.job_number && project.quote_token ? `<a class="btn secondary" href="/quote.html?token=${project.quote_token}" target="_blank">Go to quote</a>` : ''}
-            ${!project.job_number && isAccepted ? `<button type="button" class="secondary" id="go-to-job-btn">Go to job</button>` : ''}
+            ${project.job_number && project.source_quote?.quote_token ? `<a class="btn secondary" href="/quote.html?token=${project.source_quote.quote_token}" target="_blank">Go to quote</a>` : ''}
+            ${isFrozenQuote && project.resulting_job ? `<a class="btn secondary" href="/project.html?id=${project.resulting_job.id}">Go to job${project.resulting_job.job_number ? ' (J' + project.resulting_job.job_number + ')' : ''}</a>` : ''}
+            ${!project.job_number && !isAccepted ? `<button type="button" class="secondary" id="mark-approved-btn">Mark approved manually</button>` : ''}
           ` : ''}
           ${editMode ? `
             <button id="save-edit-btn">Save changes</button>
@@ -2173,12 +2192,8 @@
         document.querySelector('#job-tabs .settings-tab[data-panel="costcentres"]').click();
       });
 
-      // Job numbers are assigned automatically the moment a quote is
-      // accepted - this button only ever shows for the rare case where
-      // this page was already loaded before that happened, so a reload
-      // is all it takes to pick up the job number that's already there.
-      const goToJobBtn = document.getElementById('go-to-job-btn');
-      if (goToJobBtn) goToJobBtn.addEventListener('click', () => location.reload());
+      const markApprovedBtn = document.getElementById('mark-approved-btn');
+      if (markApprovedBtn) markApprovedBtn.addEventListener('click', () => openMarkApprovedPanel(project));
 
       const duplicateBtn = document.getElementById('duplicate-btn');
       if (duplicateBtn) duplicateBtn.addEventListener('click', async () => {
@@ -2276,6 +2291,57 @@
         }
       });
 
+    }
+
+    // For an approval that didn't happen through the client clicking
+    // Approve on their own quote page - a phone call, an email, an
+    // in-person signature. Requires a note recording how/when consent was
+    // actually given, since there's no client click to point to. Does
+    // exactly what online acceptance does otherwise: freezes this quote
+    // and creates the job as a separate record (manually-approve-quote.js).
+    function openMarkApprovedPanel(project) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:480px; width:100%;">
+          <h2>Mark this quote approved</h2>
+          <p class="subtitle" style="margin-bottom:12px;">For when the client agreed some other way - by phone, email, or in person - rather than clicking Approve on their own quote page. This does the same thing that would: the quote is frozen as approved, and a new job record is created from it.</p>
+          <label style="margin-top:0">How and when was this approved?</label>
+          <textarea id="ma-note" placeholder="e.g. Approved by phone call with Jane Smith, 28 Aug 2026" style="min-height:80px;"></textarea>
+          <div style="margin-top:14px;">
+            <button id="ma-confirm-btn">Mark approved</button>
+            <button type="button" class="secondary" id="ma-cancel-btn">Cancel</button>
+          </div>
+          <div id="ma-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#ma-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#ma-confirm-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#ma-msg');
+        const note = overlay.querySelector('#ma-note').value.trim();
+        if (!note) { msg.innerHTML = `<div class="error-box">A note on how/when the client approved is required.</div>`; return; }
+
+        const confirmBtn = overlay.querySelector('#ma-confirm-btn');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Marking approved...';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/manually-approve-quote', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ quoteId: project.id, note }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not mark this quote approved');
+          overlay.remove();
+          location.reload();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Mark approved';
+        }
+      });
     }
 
     async function loadVariations(projectId) {
