@@ -176,7 +176,7 @@
               ${centres.map(c => `<tr><td>${c.name}, due on completion</td><td class="num">${money(c.quoted_amount * (1 - depositPercent / 100))}</td></tr>`).join('')}
             </tbody>
           </table>
-          <p class="subtitle" style="margin-top:14px;">For projects spanning multiple months, we'll partially claim on each milestone at the end of the month based on the % of completion we're at, rather than waiting until the full stage is finished.</p>
+          <p class="subtitle" style="margin-top:14px;">For projects that span multiple months, we reserve the right to invoice each milestone in part at the end of the month, based on the percentage of that stage completed at the time, rather than waiting until it is fully finished.</p>
         </div>`;
 
       const sowHtml = project.sow_text ? `
