@@ -83,11 +83,11 @@ To make this automatic:
 - Alternative: if your Netlify plan supports Scheduled Functions, you can configure `sync-costs`
   to run on a schedule directly in Netlify instead.
 
-- If you already ran `schema.sql` before, you'll also need `migration_001_markup.sql`,
-  `migration_002_photos_terms.sql`, `migration_003_sow_lineitems_branding.sql`,
-  `migration_004_photos_deposit_pylon.sql`, and `migration_005_purchase_orders.sql`, run them
-  in that order in the Supabase SQL Editor. If you're setting up fresh, the current
-  `schema.sql` already includes everything.
+- If you already ran `schema.sql` before, you'll also need every `migration_0NN_*.sql` file in
+  this folder, run in numeric order, in the Supabase SQL Editor - see `README.md` for the full
+  list and `migration_audit_diagnostic.sql` to check which ones your database is still missing.
+  If you're setting up fresh, the current `schema.sql` already includes everything up to the
+  point it was last regenerated; you'll still want to run any migrations numbered after that.
 
 ## Pylon (solar design software)
 
