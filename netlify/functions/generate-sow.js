@@ -65,12 +65,11 @@ Formal and precise, written for a professional reading it alongside a contract. 
 4. Always end with an "Exclusions" section (bulleted) - job-specific exclusions plus standard ones like "any works not specifically listed above" and non-electrical trade work (building, plumbing, etc.), and note that anything excluded found necessary once work starts is treated as a variation requiring written client approval before proceeding (except genuine safety work).
 5. If the brief or attached documents mention something site-specific worth flagging (an existing defect, an access constraint, a condition that could turn into extra chargeable work) - add a short "Site-Specific Notes" section describing it factually, and only add a recommendation/next-step section if it's the kind of issue that genuinely warrants one (e.g. a roof condition affecting a 25+ year installation). Don't invent a site issue that isn't actually implied by the brief/documents.
 Bullet points are short phrases starting with a gerund or plain verb (Disconnection of..., Supply and installation of..., Testing of...), not full sentences with lots of padding.` : `STYLE: Story-flowing - for residential homeowners.
-Warm, plain-English, and educational - written for someone who isn't an electrician and wants to understand what they're buying and why it's a good choice, not just a checklist of tasks. Structure:
-1. Open with one short paragraph introducing what the system/job is and why this approach/equipment is a solid choice (e.g. reliability, how common/proven it is) - light reassurance, not a hard sell.
-2. A second short paragraph on how the system actually works end-to-end, in plain terms.
-3. Then one section per major component or phase of the job, each with a short bolded heading naming that component (including its size/spec if relevant, e.g. "Solar Power System - 10kW"), followed by one or two short paragraphs: what it is, how it fits into the whole system, and the tangible benefit to the homeowner day-to-day. Skip anything not relevant to this particular job.
-4. Close with a short "complete solution" wrap-up paragraph, then a short numbered list of the key benefits/highlights of the finished system.
-No numbered sections, no formal Exclusions clause, no standards citations, no legalistic language - this reads like a knowledgeable tradesperson explaining things to a friend, not a contract.`;
+Plain-English and direct - written for someone who isn't an electrician, explaining what's being installed and how it works. Not a sales pitch: no reassurance lines, no "peace of mind"/benefit-selling language, no padding sentences. Structure:
+1. Open with one short paragraph stating what the system/job is and how it works end-to-end, in plain terms.
+2. Then one section per major component or phase of the job, each with a short bolded heading naming that component (including its size/spec if relevant, e.g. "Solar Power System - 10kW"), followed by exactly one short paragraph: what it is and how it fits into the system. Skip anything not relevant to this particular job.
+3. Close with a short bulleted list of what's included overall - no wrap-up paragraph.
+No numbered sections, no formal Exclusions clause, no standards citations, no legalistic language. Direct and informative - explains what's happening and why it's built that way, without over-explaining or dressing it up.`;
 
     const promptText = `You are writing a scope-of-works document for an electrical contractor's client-facing quote.
 
