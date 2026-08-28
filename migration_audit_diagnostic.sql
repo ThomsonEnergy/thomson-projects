@@ -159,4 +159,7 @@ select '057', 'job_task_scheduling',
 union all
 select '058', 'team_licences_visible_to_all_staff',
   case when exists (select 1 from pg_policies where tablename = 'profile_licences' and policyname = 'staff can view all profile licences') then 'present' else 'MISSING' end
+union all
+select '059', 'profiles_visible_to_all_staff',
+  case when exists (select 1 from pg_policies where tablename = 'profiles' and policyname = 'staff can view all profiles') then 'present' else 'MISSING' end
 order by 1;
