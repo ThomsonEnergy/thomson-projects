@@ -156,4 +156,7 @@ select '056', 'fix_invoice_constraint',
 union all
 select '057', 'job_task_scheduling',
   case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'due_date') then 'present' else 'MISSING' end
+union all
+select '058', 'team_licences_visible_to_all_staff',
+  case when exists (select 1 from pg_policies where tablename = 'profile_licences' and policyname = 'staff can view all profile licences') then 'present' else 'MISSING' end
 order by 1;
