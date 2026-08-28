@@ -2413,7 +2413,7 @@
       const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'Someone';
       const today = new Date(); today.setHours(0, 0, 0, 0);
 
-      listEl.innerHTML = tasks.map(t => {
+      function taskRowHtml(t) {
         const who = t.assigned_to_user_id ? staffName(t.assigned_to_user_id) : t.assigned_to_role ? `Anyone in ${t.assigned_to_role}` : 'Unassigned';
         const isOverdue = t.due_date && !t.completed && new Date(t.due_date) < today;
         const dueLabel = t.due_date ? `Due ${new Date(t.due_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}` : '';
@@ -2430,7 +2430,20 @@
             </div>
             ${!t.completed ? `<button type="button" class="secondary complete-job-task-btn" data-id="${t.id}" style="font-size:12px; padding:6px 10px;">Done</button>` : ''}
           </div>`;
-      }).join('');
+      }
+
+      const prejobTasks = tasks.filter(t => t.task_type !== 'onsite');
+      const onsiteTasks = tasks.filter(t => t.task_type === 'onsite');
+
+      listEl.innerHTML = `
+        <div style="margin-bottom:16px;">
+          <h3 style="font-size:14px; margin:0 0 4px;">Prejob / office / handover</h3>
+          ${prejobTasks.length ? prejobTasks.map(taskRowHtml).join('') : '<p class="subtitle">None.</p>'}
+        </div>
+        <div>
+          <h3 style="font-size:14px; margin:0 0 4px;">Onsite</h3>
+          ${onsiteTasks.length ? onsiteTasks.map(taskRowHtml).join('') : '<p class="subtitle">None.</p>'}
+        </div>`;
 
       listEl.querySelectorAll('.complete-job-task-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -2457,6 +2470,11 @@
           <h2>Add task</h2>
           <label style="margin-top:0">Description</label>
           <input id="at-desc" placeholder="e.g. Check POs and order stock" />
+          <label>Type</label>
+          <select id="at-task-type">
+            <option value="prejob">Prejob - office / handover docs</option>
+            <option value="onsite">Onsite</option>
+          </select>
           <label>Assign to</label>
           <select id="at-assign-type">
             <option value="none">Leave unassigned - anyone can pick it up</option>
@@ -2542,6 +2560,7 @@
           const { error } = await supabaseClient.from('job_tasks').insert({
             project_id: projectId,
             description,
+            task_type: overlay.querySelector('#at-task-type').value,
             assigned_to_user_id: personId,
             assigned_to_role: assignType === 'role' ? overlay.querySelector('#at-role').value : null,
             required_before_scheduling: overlay.querySelector('#at-required').checked,

@@ -171,4 +171,7 @@ select '061', 'quote_job_split',
 union all
 select '062', 'job_titles_and_finance_profile_access',
   case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'job_title') then 'present' else 'MISSING' end
+union all
+select '063', 'job_task_types',
+  case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'task_type') then 'present' else 'MISSING' end
 order by 1;

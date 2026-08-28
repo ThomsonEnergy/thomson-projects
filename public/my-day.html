@@ -68,6 +68,7 @@
       <div id="clock-active" style="display:none;">
         <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-project-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
         <button class="danger" id="clock-out-btn">Clock out</button>
+        <div id="active-job-card" style="display:none;"></div>
       </div>
       <div id="clock-msg"></div>
     </div>
@@ -128,10 +129,47 @@
           if (error) { alert(error.message); return; }
           await checkActiveClock();
         };
+        await renderActiveJobCard(data.project_id);
       } else {
         document.getElementById('clock-idle').style.display = 'block';
         document.getElementById('clock-active').style.display = 'none';
       }
+    }
+
+    // Shown under the "clocked in to X" banner once someone's clocked into
+    // an actual job (not general office/training time) - the whole thing
+    // is a link through to the project so they can jump straight into it,
+    // and it surfaces the SOW plus outstanding tasks right there without
+    // needing to go searching for the job first.
+    async function renderActiveJobCard(projectId) {
+      const cardEl = document.getElementById('active-job-card');
+      if (!projectId) { cardEl.style.display = 'none'; cardEl.innerHTML = ''; return; }
+
+      const [{ data: project }, { data: tasks }] = await Promise.all([
+        supabaseClient.from('projects').select('id, name, job_number, quote_number, sow_text').eq('id', projectId).maybeSingle(),
+        supabaseClient.from('job_tasks').select('id, description, task_type').eq('project_id', projectId).eq('completed', false).order('created_at'),
+      ]);
+      if (!project) { cardEl.style.display = 'none'; cardEl.innerHTML = ''; return; }
+
+      const onsiteTasks = (tasks || []).filter(t => t.task_type === 'onsite');
+      const prejobTasks = (tasks || []).filter(t => t.task_type !== 'onsite');
+      const sowPreview = project.sow_text ? (project.sow_text.length > 400 ? project.sow_text.slice(0, 400) + '...' : project.sow_text) : '';
+
+      cardEl.style.display = 'block';
+      cardEl.innerHTML = `
+        <a href="/project.html?id=${project.id}" class="link-quiet" style="display:block; border:1px solid var(--border); border-radius:12px; padding:14px; margin-top:14px;">
+          <p style="font-weight:600; margin:0 0 8px;">${projectRef(project)}</p>
+          ${sowPreview ? `<p class="subtitle" style="margin:0 0 12px; white-space:pre-wrap;">${sowPreview}</p>` : ''}
+          ${onsiteTasks.length ? `
+            <p style="margin:0 0 4px; font-weight:600; font-size:13px;">Onsite tasks</p>
+            ${onsiteTasks.map(t => `<p class="subtitle" style="margin:0 0 4px; font-size:13px;">- ${t.description}</p>`).join('')}
+          ` : ''}
+          ${prejobTasks.length ? `
+            <p style="margin:${onsiteTasks.length ? '10px' : '0'} 0 4px; font-weight:600; font-size:13px;">Prejob / office / handover tasks</p>
+            ${prejobTasks.map(t => `<p class="subtitle" style="margin:0 0 4px; font-size:13px;">- ${t.description}</p>`).join('')}
+          ` : ''}
+          ${!onsiteTasks.length && !prejobTasks.length ? `<p class="subtitle" style="margin:0;">No outstanding tasks on this job.</p>` : ''}
+        </a>`;
     }
 
     async function loadTodaysSchedule() {
@@ -171,6 +209,59 @@
       loadCostCentreChips(projectId);
     }
 
+    // Renders a list of pickable jobs into the search dropdown - used both
+    // for the "most recent jobs" default suggestions (shown before typing)
+    // and for live search-as-you-type matches.
+    function renderJobPickResults(results, label) {
+      const resultsEl = document.getElementById('clock-job-results');
+      if (!results.length) {
+        resultsEl.innerHTML = label ? '' : `<p class="subtitle" style="margin-top:4px;">No matches.</p>`;
+        return;
+      }
+      resultsEl.innerHTML = `
+        ${label ? `<p class="subtitle" style="margin:6px 0 2px; font-size:12px;">${label}</p>` : ''}
+        <div style="border:1px solid var(--border); border-radius:8px; ${label ? '' : 'margin-top:6px;'}">
+          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+        </div>`;
+      resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
+        row.addEventListener('click', () => {
+          selectClockJob(row.dataset.id, row.dataset.label);
+          resultsEl.innerHTML = '';
+        });
+      });
+    }
+
+    // Most-recently-clocked-into jobs, de-duplicated by project and most
+    // recent first - shown as default suggestions before anyone's typed
+    // anything, since it's almost always one of these.
+    let recentJobsCache = null;
+    async function fetchRecentJobs(limit = 8) {
+      const { data } = await supabaseClient
+        .from('time_entries')
+        .select('project_id, clock_in, projects(id, name, job_number, quote_number, client_name)')
+        .eq('staff_id', myUserId)
+        .not('project_id', 'is', null)
+        .order('clock_in', { ascending: false })
+        .limit(50);
+      const seen = new Set();
+      const recent = [];
+      for (const row of data || []) {
+        if (!row.projects || seen.has(row.project_id)) continue;
+        seen.add(row.project_id);
+        recent.push(row.projects);
+        if (recent.length >= limit) break;
+      }
+      return recent;
+    }
+    async function showRecentJobSuggestions() {
+      if (!recentJobsCache) recentJobsCache = await fetchRecentJobs();
+      renderJobPickResults(recentJobsCache, 'Recent jobs');
+    }
+
+    document.getElementById('clock-job-search').addEventListener('focus', (e) => {
+      if (e.target.value.trim().length < 2) showRecentJobSuggestions();
+    });
+
     let clockJobSearchTimeout;
     document.getElementById('clock-job-search').addEventListener('input', (e) => {
       clearTimeout(clockJobSearchTimeout);
@@ -178,20 +269,11 @@
       selectedClockJobId = null;
       document.getElementById('clock-job-selected').textContent = '';
       document.getElementById('clock-category-row').style.display = 'block';
+      if (q.length === 0) { showRecentJobSuggestions(); return; }
       if (q.length < 2) { document.getElementById('clock-job-results').innerHTML = ''; return; }
       clockJobSearchTimeout = setTimeout(async () => {
         const results = await searchProjects(q);
-        const resultsEl = document.getElementById('clock-job-results');
-        if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
-        resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
-        </div>`;
-        resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
-          row.addEventListener('click', () => {
-            selectClockJob(row.dataset.id, row.dataset.label);
-            resultsEl.innerHTML = '';
-          });
-        });
+        renderJobPickResults(results);
       }, 250);
     });
 
@@ -300,8 +382,22 @@
       const mine = allTasks.filter(t => t.assigned_to_user_id === myUserId || (!t.assigned_to_user_id && t.assigned_to_role === myRole));
       const open = allTasks.filter(t => !t.assigned_to_user_id && !t.assigned_to_role);
 
-      document.getElementById('my-tasks').innerHTML = mine.length ? mine.map(t => taskRow(t, false)).join('') : '<p class="subtitle">Nothing scheduled to you right now.</p>';
-      document.getElementById('open-tasks').innerHTML = open.length ? open.map(t => taskRow(t, true)).join('') : '<p class="subtitle">Nothing unassigned right now.</p>';
+      function splitByType(list, showPickUp) {
+        const onsite = list.filter(t => t.task_type === 'onsite');
+        const prejob = list.filter(t => t.task_type !== 'onsite');
+        return `
+          <div style="margin-bottom:14px;">
+            <h3 style="font-size:14px; margin:0 0 4px;">Onsite</h3>
+            ${onsite.length ? onsite.map(t => taskRow(t, showPickUp)).join('') : '<p class="subtitle">None.</p>'}
+          </div>
+          <div>
+            <h3 style="font-size:14px; margin:0 0 4px;">Prejob / office / handover</h3>
+            ${prejob.length ? prejob.map(t => taskRow(t, showPickUp)).join('') : '<p class="subtitle">None.</p>'}
+          </div>`;
+      }
+
+      document.getElementById('my-tasks').innerHTML = mine.length ? splitByType(mine, false) : '<p class="subtitle">Nothing scheduled to you right now.</p>';
+      document.getElementById('open-tasks').innerHTML = open.length ? splitByType(open, true) : '<p class="subtitle">Nothing unassigned right now.</p>';
 
       document.querySelectorAll('.complete-task-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
