@@ -111,4 +111,49 @@ select '041', 'po_numbering',
 union all
 select '042', 'activity_log',
   case when exists (select 1 from information_schema.tables where table_name = 'activity_log') then 'present' else 'MISSING' end
+union all
+select '043', 'job_tasks',
+  case when exists (select 1 from information_schema.tables where table_name = 'job_tasks') then 'present' else 'MISSING' end
+union all
+select '044', 'markup',
+  case when exists (select 1 from information_schema.columns where table_name = 'cost_centres' and column_name = 'markup_percent') then 'present' else 'MISSING' end
+union all
+select '045', 'photos_terms',
+  case when exists (select 1 from information_schema.tables where table_name = 'company_settings') then 'present' else 'MISSING' end
+union all
+select '046', 'sow_lineitems_branding',
+  case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'company_name') then 'present' else 'MISSING' end
+union all
+select '047', 'photos_deposit_pylon',
+  case when exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'pylon_link') then 'present' else 'MISSING' end
+union all
+select '048', 'purchase_orders',
+  case when exists (select 1 from information_schema.tables where table_name = 'purchase_orders') then 'present' else 'MISSING' end
+union all
+select '049', 'daily_greetings',
+  case when exists (select 1 from information_schema.tables where table_name = 'daily_greetings') then 'present' else 'MISSING' end
+union all
+select '050', 'project_documents',
+  case when exists (select 1 from information_schema.tables where table_name = 'project_documents') then 'present' else 'MISSING' end
+union all
+select '051', 'insurance_licensing',
+  case when exists (select 1 from information_schema.tables where table_name = 'company_credentials') then 'present' else 'MISSING' end
+union all
+select '052', 'job_tasks (duplicate of 043)',
+  case when exists (select 1 from information_schema.tables where table_name = 'job_tasks') then 'present' else 'MISSING' end
+union all
+select '053', 'bug_reports',
+  case when exists (select 1 from information_schema.tables where table_name = 'bug_reports') then 'present' else 'MISSING' end
+union all
+select '054', 'variations',
+  case when exists (select 1 from information_schema.tables where table_name = 'variations') then 'present' else 'MISSING' end
+union all
+select '055', 'multi_stage_invoices',
+  case when exists (select 1 from information_schema.tables where table_name = 'invoice_claims') then 'present' else 'MISSING' end
+union all
+select '056', 'fix_invoice_constraint',
+  case when exists (select 1 from information_schema.check_constraints where constraint_name = 'invoices_client_or_stage_check' and check_clause like '%project_id%') then 'present' else 'MISSING' end
+union all
+select '057', 'job_task_scheduling',
+  case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'due_date') then 'present' else 'MISSING' end
 order by 1;
