@@ -155,17 +155,18 @@
                 <label style="margin-top:0">Label</label>
                 <input id="xm-label" placeholder="e.g. STC Credits" />
               </div>
-              <div>
-                <label style="margin-top:0">Xero account code</label>
-                <input id="xm-account-code" placeholder="e.g. 270" />
+              <div id="xm-account-code-wrap">
+                <label style="margin-top:0">Xero account</label>
+                <select id="xm-account-code"><option value="">Loading from Xero...</option></select>
               </div>
-              <div>
+              <div id="xm-tax-type-wrap">
                 <label style="margin-top:0">Xero tax type</label>
-                <input id="xm-tax-type" placeholder="e.g. OUTPUT2" />
+                <select id="xm-tax-type"><option value="">Loading from Xero...</option></select>
               </div>
             </div>
             <button id="xm-add-btn" style="margin-top:10px;">Add category</button>
             <div id="xm-add-msg"></div>
+            <p class="subtitle" id="xm-chart-error" style="margin-top:10px; display:none;"></p>
           </div>
 
           <div class="card">
@@ -1783,22 +1784,83 @@
     });
 
     // --- Xero Mapping ---
+    // Pulls the real chart of accounts and tax rates straight from Xero so
+    // every code/tax-type field here is a dropdown of what actually exists
+    // in this org, instead of free text - typing the human label Xero
+    // shows in its own UI ("GST on Income") instead of the API's real
+    // TaxType code ("OUTPUT2") is exactly how a mismatch slips through
+    // undetected until an invoice gets rejected on push.
+    let xeroChart = null;
+    async function fetchXeroChart() {
+      if (xeroChart) return xeroChart;
+      try {
+        const res = await authedFetch('/.netlify/functions/get-xero-chart-of-accounts');
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not load the chart of accounts from Xero');
+        xeroChart = { accounts: data.accounts, taxRates: data.taxRates };
+      } catch (err) {
+        xeroChart = { accounts: [], taxRates: [], error: err.message };
+      }
+      return xeroChart;
+    }
+
+    // Builds a <select>'s options from the live chart, always including the
+    // currently-stored value as an option even if it no longer matches
+    // anything real in Xero (renamed/deleted account, or - as with the bug
+    // this replaces - a human label stored where an API code belongs) so
+    // it's visible and gently flagged rather than silently vanishing.
+    function accountOptionsHtml(accounts, currentCode) {
+      const known = accounts.some(a => a.code === currentCode);
+      const currentOption = currentCode && !known ? `<option value="${currentCode}" selected>${currentCode} (current - not found in Xero)</option>` : '';
+      return `<option value="">-- Select account --</option>${currentOption}` +
+        accounts.map(a => `<option value="${a.code}" ${a.code === currentCode ? 'selected' : ''}>${a.code} - ${a.name} (${a.type})</option>`).join('');
+    }
+    function taxTypeOptionsHtml(taxRates, currentTaxType) {
+      const known = taxRates.some(t => t.taxType === currentTaxType);
+      const currentOption = currentTaxType && !known ? `<option value="${currentTaxType}" selected>${currentTaxType} (current - not a valid Xero tax type)</option>` : '';
+      return `<option value="">-- Select tax type --</option>${currentOption}` +
+        taxRates.map(t => `<option value="${t.taxType}" ${t.taxType === currentTaxType ? 'selected' : ''}>${t.name}</option>`).join('');
+    }
+
     async function loadXeroMapping() {
       const listEl = document.getElementById('xero-mapping-list');
-      const { data, error } = await supabaseClient.from('xero_account_mapping').select('*').order('label');
+      const [{ data, error }, chart] = await Promise.all([
+        supabaseClient.from('xero_account_mapping').select('*').order('label'),
+        fetchXeroChart(),
+      ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      const errorEl = document.getElementById('xm-chart-error');
+      if (chart.error) {
+        errorEl.style.display = 'block';
+        errorEl.innerHTML = `<span style="color:var(--red);">Couldn't load your chart of accounts from Xero (${chart.error}) - falling back to plain text entry below.</span>`;
+      } else {
+        errorEl.style.display = 'none';
+      }
+
+      document.getElementById('xm-account-code-wrap').innerHTML = chart.accounts.length
+        ? `<label style="margin-top:0">Xero account</label><select id="xm-account-code">${accountOptionsHtml(chart.accounts, '')}</select>`
+        : `<label style="margin-top:0">Xero account code</label><input id="xm-account-code" placeholder="e.g. 270" />`;
+      document.getElementById('xm-tax-type-wrap').innerHTML = chart.taxRates.length
+        ? `<label style="margin-top:0">Xero tax type</label><select id="xm-tax-type">${taxTypeOptionsHtml(chart.taxRates, '')}</select>`
+        : `<label style="margin-top:0">Xero tax type</label><input id="xm-tax-type" placeholder="e.g. OUTPUT2" />`;
+
       if (!data.length) { listEl.innerHTML = `<p class="subtitle">No categories yet - add one below.</p>`; return; }
 
       listEl.innerHTML = `
         <table>
-          <thead><tr><th>Label</th><th>Internal key</th><th>Account code</th><th>Tax type</th><th></th></tr></thead>
+          <thead><tr><th>Label</th><th>Internal key</th><th>Account</th><th>Tax type</th><th></th></tr></thead>
           <tbody>
             ${data.map(m => `
               <tr data-id="${m.id}">
                 <td>${m.label}</td>
                 <td style="color:var(--muted); font-size:12px;">${m.category}</td>
-                <td><input class="xm-edit-code" value="${m.xero_account_code}" style="width:90px;" /></td>
-                <td><input class="xm-edit-tax" value="${m.xero_tax_type}" style="width:110px;" /></td>
+                <td>${chart.accounts.length
+                  ? `<select class="xm-edit-code">${accountOptionsHtml(chart.accounts, m.xero_account_code)}</select>`
+                  : `<input class="xm-edit-code" value="${m.xero_account_code}" style="width:90px;" />`}</td>
+                <td>${chart.taxRates.length
+                  ? `<select class="xm-edit-tax">${taxTypeOptionsHtml(chart.taxRates, m.xero_tax_type)}</select>`
+                  : `<input class="xm-edit-tax" value="${m.xero_tax_type}" style="width:110px;" />`}</td>
                 <td style="text-align:right;">
                   <button class="secondary xm-save-btn" style="font-size:12px; padding:6px 10px;">Save</button>
                   <button class="secondary danger xm-delete-btn" style="font-size:12px; padding:6px 10px;">Delete</button>
@@ -1849,8 +1911,6 @@
       msg.innerHTML = '';
       document.getElementById('xm-category').value = '';
       document.getElementById('xm-label').value = '';
-      document.getElementById('xm-account-code').value = '';
-      document.getElementById('xm-tax-type').value = '';
       await loadXeroMapping();
     });
 
