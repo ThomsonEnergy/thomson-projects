@@ -244,13 +244,28 @@
       if (acceptBtn) {
         acceptBtn.addEventListener('click', async () => {
           acceptBtn.disabled = true;
-          const { error: acceptErr } = await supabaseClient.rpc('accept_quote', { p_token: token });
-          if (acceptErr) {
-            document.getElementById('accept-error').innerHTML = `<div class="error-box" style="margin-bottom:16px;">${acceptErr.message}</div>`;
+          acceptBtn.textContent = 'Approving...';
+          try {
+            const res = await fetch('/.netlify/functions/accept-quote', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token }),
+            });
+            const result = await res.json();
+            if (!res.ok || !result.ok) throw new Error(result.error || 'Could not approve this quote');
+            // A deposit is due on acceptance - straight to the invoice/pay
+            // page rather than leaving them accepted with no way to pay
+            // until a staff member gets to it.
+            if (result.invoiceToken) {
+              window.location.href = `/invoice.html?token=${result.invoiceToken}`;
+              return;
+            }
+            load();
+          } catch (err) {
+            document.getElementById('accept-error').innerHTML = `<div class="error-box" style="margin-bottom:16px;">${err.message}</div>`;
             acceptBtn.disabled = false;
-            return;
+            acceptBtn.textContent = template === 'quick_estimate' ? 'Approve estimate' : 'Approve quote';
           }
-          load();
         });
       }
     }
