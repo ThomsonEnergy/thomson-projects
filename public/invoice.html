@@ -134,6 +134,27 @@
           </div>
         </div>
 
+        ${!isPaid ? `
+        <div class="card">
+          <h2>Payment details</h2>
+          <button id="pay-online-btn" data-token="${token}" style="background:var(--accent); color:var(--accent-contrast); padding:12px 24px; border-radius:8px; border:none; font-weight:600; font-size:15px; cursor:pointer; margin-bottom:16px;">Pay online now</button>
+          <div id="pay-online-msg"></div>
+          <p class="subtitle" style="margin-bottom:16px;">Or pay by direct deposit using the details below.</p>
+          ${s.bank_name || s.bank_account_number ? `
+            <table>
+              <tbody>
+                ${s.bank_account_name ? `<tr><td>Account name</td><td>${s.bank_account_name}</td></tr>` : ''}
+                ${s.bank_name ? `<tr><td>Bank</td><td>${s.bank_name}</td></tr>` : ''}
+                ${s.bank_bsb ? `<tr><td>BSB</td><td>${s.bank_bsb}</td></tr>` : ''}
+                ${s.bank_account_number ? `<tr><td>Account number</td><td>${s.bank_account_number}</td></tr>` : ''}
+                <tr><td>Reference</td><td><strong>${inv.invoice_number}</strong></td></tr>
+              </tbody>
+            </table>
+          ` : ''}
+          ${s.payment_details_text ? `<p class="subtitle" style="white-space:pre-wrap; margin-top:10px;">${s.payment_details_text}</p>` : ''}
+          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? `<p class="subtitle">Contact us for payment details.</p>` : ''}
+        </div>` : ''}
+
         ${!isStandalone ? `
         <div class="card page-break">
           <h2 style="margin-bottom:2px;">Claim breakdown</h2>
@@ -192,27 +213,6 @@
               ${previousInvoices.map(p => `<tr><td>${p.invoice_number}</td><td class="num">${money(p.amount)}</td><td>${new Date(p.sent_at).toLocaleDateString('en-AU')}</td></tr>`).join('')}
             </tbody>
           </table>
-        </div>` : ''}
-
-        ${!isPaid ? `
-        <div class="card">
-          <h2>Payment details</h2>
-          <button id="pay-online-btn" data-token="${token}" style="background:var(--accent); color:var(--accent-contrast); padding:12px 24px; border-radius:8px; border:none; font-weight:600; font-size:15px; cursor:pointer; margin-bottom:16px;">Pay online now</button>
-          <div id="pay-online-msg"></div>
-          <p class="subtitle" style="margin-bottom:16px;">Or pay by direct deposit using the details below.</p>
-          ${s.bank_name || s.bank_account_number ? `
-            <table>
-              <tbody>
-                ${s.bank_account_name ? `<tr><td>Account name</td><td>${s.bank_account_name}</td></tr>` : ''}
-                ${s.bank_name ? `<tr><td>Bank</td><td>${s.bank_name}</td></tr>` : ''}
-                ${s.bank_bsb ? `<tr><td>BSB</td><td>${s.bank_bsb}</td></tr>` : ''}
-                ${s.bank_account_number ? `<tr><td>Account number</td><td>${s.bank_account_number}</td></tr>` : ''}
-                <tr><td>Reference</td><td><strong>${inv.invoice_number}</strong></td></tr>
-              </tbody>
-            </table>
-          ` : ''}
-          ${s.payment_details_text ? `<p class="subtitle" style="white-space:pre-wrap; margin-top:10px;">${s.payment_details_text}</p>` : ''}
-          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? `<p class="subtitle">Contact us for payment details.</p>` : ''}
         </div>` : ''}
       `;
 
