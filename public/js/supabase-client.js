@@ -715,6 +715,27 @@ async function logActivity(entityType, entityId, action, description) {
   }
 }
 
+// Every job-linked purchase order gets a matching follow-up task
+// automatically, so a delivery doesn't quietly fall through the cracks -
+// left unassigned, so whoever's watching the job can pick it up. Only
+// called where a PO is being newly ordered against a real job (never for
+// a stock/vehicle PO with no project, or one created after the fact from
+// an already-reconciled supplier bill - there's nothing to "follow up"
+// on there).
+async function createPoFollowUpTask(projectId, poNumber, supplierName) {
+  if (!projectId) return;
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    await supabaseClient.from('job_tasks').insert({
+      project_id: projectId,
+      description: `Follow up PO${poNumber ? ' ' + poNumber : ''} with ${supplierName || 'the supplier'}`,
+      created_by: user?.id || null,
+    });
+  } catch (err) {
+    console.error('PO follow-up task creation failed:', err); // never block the PO creation over this
+  }
+}
+
 async function renderActivityLog(entityType, entityId, containerId) {
   const containerEl = document.getElementById(containerId);
   if (!containerEl) return;

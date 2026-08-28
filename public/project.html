@@ -3081,14 +3081,16 @@
             if (!groupEl.querySelector('.sp-include').checked) continue;
             const supplierId = groupEl.dataset.supplierId;
             const group = matched[supplierId];
+            const poNumber = await drawNextPoNumber();
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: group.supplierName,
-              po_number: await drawNextPoNumber(),
+              po_number: poNumber,
               po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials',
             }).select('id').single();
             if (poErr) throw poErr;
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${group.supplierName} (auto-suggested from quote)`);
+            await createPoFollowUpTask(projectId, poNumber, group.supplierName);
             await supabaseClient.from('purchase_order_line_items').insert(
               group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
@@ -3106,14 +3108,16 @@
           });
           for (const [supplierId, items] of Object.entries(manualGroups)) {
             const supplierName = suppliers.find(s => s.id === supplierId)?.name || 'Unknown';
+            const poNumber = await drawNextPoNumber();
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: supplierName,
-              po_number: await drawNextPoNumber(),
+              po_number: poNumber,
               po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials (manually assigned)',
             }).select('id').single();
             if (poErr) throw poErr;
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${supplierName} (auto-suggested, manually assigned)`);
+            await createPoFollowUpTask(projectId, poNumber, supplierName);
             await supabaseClient.from('purchase_order_line_items').insert(
               items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
@@ -3219,6 +3223,7 @@
           if (poErr) throw poErr;
           await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${supplierName}`);
           await logActivity('project', projectId, 'po_created', `PO ${newPo.po_number || ''} created for ${supplierName}`);
+          await createPoFollowUpTask(projectId, newPo.po_number, supplierName);
 
           if (poType === 'fixed') {
             const lines = readMaterialLineRows('cp-fixed-items-container').map(l => ({

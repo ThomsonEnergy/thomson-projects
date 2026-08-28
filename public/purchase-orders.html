@@ -259,6 +259,7 @@
           if (poErr) throw poErr;
           const destLabel = destType === 'job' ? selectedJob.name : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || 'a vehicle') : 'Stock';
           await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${supplierName || 'Warehouse pull'} - ${destLabel}`);
+          if (destType === 'job') await createPoFollowUpTask(selectedJob.id, newPo.po_number, supplierName);
 
           const lines = readMaterialLineRows('np-items-container').map(l => ({
             po_id: newPo.id, material_id: l.materialId, description: l.description,
