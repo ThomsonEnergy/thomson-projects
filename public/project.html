@@ -1539,6 +1539,7 @@
             </div>
             <div>
               <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:10px;">View client-facing invoice</a>
+              ${!inv.paid_at ? `<button type="button" class="secondary edit-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Edit</button>` : ''}
               ${inv.xero_invoice_id ? '<span class="subtitle" style="font-size:12px;">In Xero</span>' : `<button type="button" class="secondary push-xero-tab-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>`}
             </div>
           </div>
@@ -1548,6 +1549,124 @@
       listEl.querySelectorAll('.push-xero-tab-btn').forEach(btn => {
         btn.addEventListener('click', () => pushExistingInvoiceToXero(btn, 'job-invoices-msg'));
       });
+      listEl.querySelectorAll('.edit-invoice-btn').forEach(btn => {
+        btn.addEventListener('click', () => openEditInvoicePanel(invoices.find(i => i.id === btn.dataset.invoiceId), project));
+      });
+    }
+
+    // Lets an unpaid invoice's claim amounts be corrected after the fact -
+    // per stage, split into Labour/Materials/STC (the actual invoice_claims
+    // granularity; a legacy single-stage invoice just gets one row here).
+    // Adjusts each touched cost centre's invoiced_amount by the delta
+    // between old and new (never overwrites it outright, since that figure
+    // aggregates every invoice on that stage, not just this one), and - if
+    // this invoice has already been pushed to Xero - re-sends it via
+    // update-invoice-in-xero so the two never drift apart.
+    function openEditInvoicePanel(invoice, project) {
+      const isMultiStage = invoice.invoice_claims && invoice.invoice_claims.length > 0;
+      const rows = isMultiStage
+        ? invoice.invoice_claims.slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
+            .map(ic => ({ id: ic.id, cost_centre_id: ic.cost_centre_id, stageName: ic.cost_centres?.name || 'Stage', labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0 }))
+        : [{
+            id: null,
+            cost_centre_id: invoice.cost_centre_id || null,
+            stageName: invoice.cost_centre_id ? (invoice.cost_centres?.name || 'Stage') : (invoice.description || 'Invoice'),
+            labour: Number(invoice.labour_amount) || 0, material: Number(invoice.material_amount) || 0, stc: Number(invoice.stc_amount) || 0,
+          }];
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:560px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Edit ${invoice.invoice_number}</h2>
+          <p class="subtitle" style="margin-bottom:12px;">${invoice.xero_invoice_id ? 'Already pushed to Xero - saving will push these changes there too.' : 'Not yet pushed to Xero - saving just updates the amounts here.'}</p>
+          <table>
+            <thead><tr><th>Stage</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">STC credit</th></tr></thead>
+            <tbody>
+              ${rows.map((r, i) => `
+                <tr>
+                  <td>${r.stageName}</td>
+                  <td class="num"><input type="number" step="0.01" class="ei-labour" data-i="${i}" value="${r.labour}" style="width:100px;" /></td>
+                  <td class="num"><input type="number" step="0.01" class="ei-material" data-i="${i}" value="${r.material}" style="width:100px;" /></td>
+                  <td class="num"><input type="number" step="0.01" class="ei-stc" data-i="${i}" value="${r.stc}" style="width:100px;" /></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+          <p style="margin-top:12px;">Total: <strong id="ei-total"></strong></p>
+          <div style="margin-top:10px;">
+            <button id="ei-save-btn">Save${invoice.xero_invoice_id ? ' &amp; push to Xero' : ''}</button>
+            <button type="button" class="secondary" id="ei-cancel-btn">Cancel</button>
+          </div>
+          <div id="ei-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      function readValues() {
+        return rows.map((r, i) => ({
+          ...r,
+          labour: parseFloat(overlay.querySelector(`.ei-labour[data-i="${i}"]`).value) || 0,
+          material: parseFloat(overlay.querySelector(`.ei-material[data-i="${i}"]`).value) || 0,
+          stc: parseFloat(overlay.querySelector(`.ei-stc[data-i="${i}"]`).value) || 0,
+        }));
+      }
+      function updateTotal() {
+        const vals = readValues();
+        const total = vals.reduce((s, r) => s + r.labour + r.material - r.stc, 0);
+        overlay.querySelector('#ei-total').textContent = money(total);
+      }
+      overlay.querySelectorAll('input').forEach(inp => inp.addEventListener('input', updateTotal));
+
+      overlay.querySelector('#ei-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#ei-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#ei-msg');
+        const saveBtn = overlay.querySelector('#ei-save-btn');
+        const saveBtnLabel = saveBtn.textContent;
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        try {
+          const newRows = readValues();
+
+          for (let i = 0; i < rows.length; i++) {
+            const oldRow = rows[i], newRow = newRows[i];
+            if (!newRow.cost_centre_id) continue;
+            const delta = (newRow.labour + newRow.material) - (oldRow.labour + oldRow.material);
+            if (Math.abs(delta) < 0.001) continue;
+            const { data: centre } = await supabaseClient.from('cost_centres').select('invoiced_amount').eq('id', newRow.cost_centre_id).single();
+            await supabaseClient.from('cost_centres').update({ invoiced_amount: (Number(centre?.invoiced_amount) || 0) + delta }).eq('id', newRow.cost_centre_id);
+          }
+
+          if (isMultiStage) {
+            await Promise.all(newRows.map(r => supabaseClient.from('invoice_claims').update({ labour_amount: r.labour, material_amount: r.material, stc_amount: r.stc }).eq('id', r.id)));
+          }
+
+          const totalLabour = newRows.reduce((s, r) => s + r.labour, 0);
+          const totalMaterial = newRows.reduce((s, r) => s + r.material, 0);
+          const totalStc = newRows.reduce((s, r) => s + r.stc, 0);
+          await supabaseClient.from('invoices').update({ labour_amount: totalLabour, material_amount: totalMaterial, stc_amount: totalStc }).eq('id', invoice.id);
+
+          await logActivity('project', project.id, 'invoice_edited', `Edited invoice ${invoice.invoice_number}`);
+
+          if (invoice.xero_invoice_id) {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch('/.netlify/functions/update-invoice-in-xero', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({ invoiceId: invoice.id }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Saved here, but pushing the update to Xero failed');
+          }
+
+          overlay.remove();
+          location.reload();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          saveBtn.disabled = false;
+          saveBtn.textContent = saveBtnLabel;
+        }
+      });
+
+      updateTotal();
     }
 
     async function initCcewSection(project) {

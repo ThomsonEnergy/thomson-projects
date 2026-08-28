@@ -1,13 +1,11 @@
-// POST /api/push-invoice-to-xero
+// POST /api/update-invoice-in-xero
 // Body: { invoiceId }
-// Pricing roles only. Copies an already-created, already-sent invoice
-// across to Xero as a DRAFT, for the bookkeeper's records - the client
-// never sees Xero, they already have the invoice link from the app.
-// Handles standalone invoices, legacy single-stage job claims (cost_centre_id
-// set directly on the invoice), and multi-stage job claims (project_id set,
-// one row per claimed cost centre in invoice_claims) - one Xero line item
-// per stage per category (Labour/Materials/STC) for the multi-stage case.
-// See update-invoice-in-xero.js for re-sending edits after this.
+// Pricing roles only. Re-sends an invoice already pushed to Xero, so an
+// edit made here (amounts changed on its claim lines) actually lands in
+// Xero too, rather than the two silently drifting apart. Only works while
+// the Xero invoice is still DRAFT or SUBMITTED - once it's been approved
+// in Xero (or paid), Xero itself won't accept line-item changes, and this
+// surfaces that as a normal error rather than silently doing nothing.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { xeroRequest } = require('./_shared/xero-client');
@@ -31,20 +29,23 @@ exports.handler = async (event) => {
     }
 
     const { invoice, contactId, reference, lineItems } = await buildXeroInvoicePayload(supabaseAdmin, invoiceId);
-    if (invoice.xero_invoice_id) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'This invoice has already been pushed to Xero - use update-invoice-in-xero to push edits instead.' }) };
+    if (!invoice.xero_invoice_id) {
+      return { statusCode: 400, body: JSON.stringify({ error: "This invoice hasn't been pushed to Xero yet - use push-invoice-to-xero instead." }) };
     }
 
+    // Including the existing InvoiceID updates that invoice in place
+    // rather than creating a new one - the same endpoint Xero uses for
+    // both create and update.
     const result = await xeroRequest('accounting', 'Invoices', {
       method: 'POST',
       body: {
         Invoices: [{
+          InvoiceID: invoice.xero_invoice_id,
           Type: 'ACCREC',
           Contact: { ContactID: contactId },
           LineItems: lineItems,
           Reference: reference,
           InvoiceNumber: invoice.invoice_number,
-          Status: 'DRAFT',
         }],
       },
     });
@@ -52,13 +53,10 @@ exports.handler = async (event) => {
     const xeroInvoice = result.Invoices[0];
     await supabaseAdmin
       .from('invoices')
-      .update({
-        xero_invoice_id: xeroInvoice.InvoiceID,
-        xero_invoice_status: xeroInvoice.Status,
-      })
+      .update({ xero_invoice_status: xeroInvoice.Status })
       .eq('id', invoiceId);
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, invoiceId: xeroInvoice.InvoiceID, invoiceNumber: invoice.invoice_number }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, invoiceNumber: invoice.invoice_number, status: xeroInvoice.Status }) };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
