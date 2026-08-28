@@ -275,6 +275,37 @@ function costCentreNumber(jobNumber, position) {
   return jobNumber ? `J${jobNumber}-${position}` : `-${position}`;
 }
 
+// STC (Small-scale Technology Certificate) quantity, per the Clean Energy
+// Regulator's published formula (cer.gov.au/schemes/renewable-energy-target
+// /small-scale-renewable-energy-scheme/small-scale-technology-certificates):
+// system size (kW) x postcode zone rating x deeming years, rounded down.
+// Deeming years = years remaining until the scheme ends in 2030 inclusive -
+// a system installed in year Y is deemed for (2031 - Y) years (2026 -> 5,
+// 2030 -> 1, per the Regulator's own worked examples).
+//
+// Zone rating is a manual pick, not looked up from the address - the
+// Regulator's postcode-to-zone table is only published as a PDF, not
+// something this can reliably parse. Zone 3 covers the whole east coast
+// from about Sydney to Brisbane/the Gold Coast (i.e. this business's own
+// service area), so it's the sane default; only override it for a job
+// genuinely outside that band.
+const STC_ZONES = [
+  { rating: 1.622, label: 'Zone 1 (far north QLD/NT/WA)' },
+  { rating: 1.536, label: 'Zone 2' },
+  { rating: 1.382, label: 'Zone 3 (most of the east coast - Sydney to Brisbane/Gold Coast)' },
+  { rating: 1.185, label: 'Zone 4 (Tasmania, far south NSW/VIC coast)' },
+];
+
+function stcDeemingYears(installYear) {
+  return Math.max(0, 2031 - (installYear || new Date().getFullYear()));
+}
+
+function calculateStcQuantity({ kw, zoneRating, installYear }) {
+  const deemingYears = stcDeemingYears(installYear);
+  if (!kw || !zoneRating || !deemingYears) return 0;
+  return Math.floor(kw * zoneRating * deemingYears);
+}
+
 // Turns a project's raw pylon_data (the attributes object pulled from
 // Pylon's solar_designs API - see netlify/functions/pylon-sync.js) into a
 // one-line plain-text hardware summary, e.g. "10.56kW system - 24x Longi

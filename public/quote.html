@@ -121,6 +121,7 @@
       const template = project.proposal_template || 'new_build';
       const centres = data.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const total = centres.reduce((sum, c) => sum + Number(c.quoted_amount), 0);
+      const stcTotal = centres.reduce((sum, c) => sum + Number(c.stc_total || 0), 0);
       const isAccepted = ['accepted', 'approved', 'in_progress', 'complete'].includes(project.status);
       const coverPhotos = (project.cover_photos || []).map(p => p.url || p).slice(0, 3);
       const referencePhotos = (project.reference_photos || []).map(p => p.url || p);
@@ -229,6 +230,7 @@
           <div style="text-align:right; margin-top:16px; font-size:20px; font-weight:700;">
             Total: ${money(total)}
           </div>
+          ${stcTotal > 0 ? `<p class="subtitle" style="text-align:right; margin-top:8px;">Includes an estimated STC credit of ${money(stcTotal)}, applied against your invoice once the system is installed and registered.</p>` : ''}
         </div>
 
         ${referenceHtml}

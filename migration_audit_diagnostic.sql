@@ -174,4 +174,7 @@ select '062', 'job_titles_and_finance_profile_access',
 union all
 select '063', 'job_task_types',
   case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'task_type') then 'present' else 'MISSING' end
+union all
+select '064', 'stc_calculator',
+  case when exists (select 1 from information_schema.columns where table_name = 'cost_centres' and column_name = 'stc_system_kw') then 'present' else 'MISSING' end
 order by 1;

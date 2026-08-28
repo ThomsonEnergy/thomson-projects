@@ -291,9 +291,19 @@
       });
     }
 
-    function addRow({ id = '', name = '', description = '', markup_percent = null, stc_total = 0, lineItems = [], photoGroups = [] } = {}) {
+    let pylonKw = null;
+
+    function addRow({
+      id = '', name = '', description = '', markup_percent = null, stc_total = 0,
+      stc_system_kw = null, stc_zone_rating = null, stc_install_year = null, stc_price_per_certificate = null,
+      lineItems = [], photoGroups = [],
+    } = {}) {
       const rowsEl = document.getElementById('cc-rows');
       const defaultMarkup = markup_percent !== null ? markup_percent : (parseFloat(document.getElementById('default-markup').value) || 45);
+      const defaultStcPrice = stc_price_per_certificate ?? (parseFloat(document.getElementById('default-stc-price').value) || 35);
+      const defaultStcZone = Number(stc_zone_rating ?? (parseFloat(document.getElementById('default-stc-zone').value) || 1.382));
+      const defaultStcKw = stc_system_kw ?? pylonKw ?? '';
+      const defaultStcYear = stc_install_year || new Date().getFullYear();
       const div = document.createElement('div');
       div.className = 'cc-row';
       div.dataset.id = id;
@@ -326,14 +336,45 @@
           <div><label style="margin-top:0">Markup %</label><input class="cc-markup" type="number" step="1" value="${defaultMarkup}" /></div>
           <div><label style="margin-top:0">Sale price</label><div class="readout cc-sale-price">$0.00</div></div>
         </div>
-        <div class="grid cols-3" style="margin-top:10px;">
-          <div><label style="margin-top:0">STC entitlement (if any)</label><input class="cc-stc-total" type="number" step="0.01" value="${stc_total}" placeholder="0.00" /></div>
+        <div style="margin-top:10px; padding:12px; background:var(--surface-2); border-radius:8px;">
+          <label style="margin-top:0; font-weight:600;">STC credit (optional)</label>
+          <div class="grid cols-4" style="margin-top:6px;">
+            <div><label style="margin-top:0; font-size:12px;">System size (kW)</label><input class="cc-stc-kw" type="number" step="0.01" value="${defaultStcKw}" placeholder="0.00" /></div>
+            <div>
+              <label style="margin-top:0; font-size:12px;">Zone rating</label>
+              <select class="cc-stc-zone">
+                ${STC_ZONES.map(z => `<option value="${z.rating}" ${defaultStcZone === z.rating ? 'selected' : ''}>${z.label}</option>`).join('')}
+              </select>
+            </div>
+            <div><label style="margin-top:0; font-size:12px;">Install year</label><input class="cc-stc-year" type="number" step="1" value="${defaultStcYear}" /></div>
+            <div><label style="margin-top:0; font-size:12px;">$ per STC</label><input class="cc-stc-price" type="number" step="0.01" value="${defaultStcPrice}" /></div>
+          </div>
+          <p class="subtitle cc-stc-calc-line" style="margin:8px 0 0;"></p>
+          <label style="margin-top:10px;">STC total ($) - auto-filled from the calculator above, or type your own</label>
+          <input class="cc-stc-total" type="number" step="0.01" value="${stc_total}" placeholder="0.00" />
         </div>
         <div style="text-align:right; margin-top:10px;">
           <button type="button" class="secondary remove-row">Remove stage</button>
         </div>`;
       rowsEl.appendChild(div);
       renumberEditStages();
+
+      function recalcStc() {
+        const kw = parseFloat(div.querySelector('.cc-stc-kw').value) || 0;
+        const zoneRating = parseFloat(div.querySelector('.cc-stc-zone').value) || 0;
+        const installYear = parseInt(div.querySelector('.cc-stc-year').value, 10) || new Date().getFullYear();
+        const price = parseFloat(div.querySelector('.cc-stc-price').value) || 0;
+        const qty = calculateStcQuantity({ kw, zoneRating, installYear });
+        div.querySelector('.cc-stc-calc-line').textContent = qty
+          ? `= ${qty} STCs x ${money(price)} = ${money(qty * price)}`
+          : '';
+        if (qty) div.querySelector('.cc-stc-total').value = (qty * price).toFixed(2);
+      }
+      div.querySelectorAll('.cc-stc-kw, .cc-stc-zone, .cc-stc-year, .cc-stc-price').forEach(el => {
+        el.addEventListener('input', recalcStc);
+        el.addEventListener('change', recalcStc);
+      });
+      recalcStc();
 
       div.querySelector('.cc-markup').addEventListener('input', () => updateStageTotals(div));
       div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); });
@@ -626,7 +667,16 @@
       return `
         <div class="card">
           <h2>Stages / cost centres</h2>
-          <div style="max-width:220px; margin-bottom:16px;"><label style="margin-top:0">Default markup %</label><input id="default-markup" type="number" step="1" value="45" /></div>
+          <div class="grid cols-3" style="margin-bottom:16px;">
+            <div><label style="margin-top:0">Default markup %</label><input id="default-markup" type="number" step="1" value="45" /></div>
+            <div><label style="margin-top:0">Default $ per STC</label><input id="default-stc-price" type="number" step="0.01" value="35" /></div>
+            <div>
+              <label style="margin-top:0">Default STC zone</label>
+              <select id="default-stc-zone">
+                ${STC_ZONES.map(z => `<option value="${z.rating}" ${z.rating === 1.382 ? 'selected' : ''}>${z.label}</option>`).join('')}
+              </select>
+            </div>
+          </div>
           <div id="cc-rows"></div>
           <button type="button" class="secondary" id="add-row">+ Add stage</button>
         </div>
@@ -845,11 +895,14 @@
         currentTemplate = project.proposal_template || 'new_build';
       }
 
+      pylonKw = project.pylon_data?.summary?.dc_output_kw || null;
       const stages = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
       stages.forEach(stage => {
         addRow({
           id: stage.id,
           name: stage.name, description: stage.description, markup_percent: stage.markup_percent, stc_total: stage.stc_total || 0,
+          stc_system_kw: stage.stc_system_kw, stc_zone_rating: stage.stc_zone_rating,
+          stc_install_year: stage.stc_install_year, stc_price_per_certificate: stage.stc_price_per_certificate,
           lineItems: (stage.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order)
             .map(li => ({ id: li.id, description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id })),
           photoGroups: (stage.cost_centre_photo_groups || []).slice().sort((a, b) => a.sort_order - b.sort_order)
@@ -992,6 +1045,10 @@
         description: row.querySelector('.cc-desc').value.trim(),
         markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
         stc_total: parseFloat(row.querySelector('.cc-stc-total').value) || 0,
+        stc_system_kw: parseFloat(row.querySelector('.cc-stc-kw').value) || null,
+        stc_zone_rating: parseFloat(row.querySelector('.cc-stc-zone').value) || 1.382,
+        stc_install_year: parseInt(row.querySelector('.cc-stc-year').value, 10) || null,
+        stc_price_per_certificate: parseFloat(row.querySelector('.cc-stc-price').value) || null,
         estimated_labour_cost: parseFloat(row.dataset.labourTotal) || 0,
         estimated_material_cost: parseFloat(row.dataset.materialTotal) || 0,
         quoted_amount: parseFloat(row.dataset.salePrice) || 0,

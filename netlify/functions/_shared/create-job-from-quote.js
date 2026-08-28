@@ -171,6 +171,10 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
       estimated_material_cost: s.estimated_material_cost,
       quoted_amount: s.quoted_amount,
       stc_total: s.stc_total,
+      stc_system_kw: s.stc_system_kw,
+      stc_zone_rating: s.stc_zone_rating,
+      stc_install_year: s.stc_install_year,
+      stc_price_per_certificate: s.stc_price_per_certificate,
     })))
     .select();
   if (stagesErr) throw stagesErr;
