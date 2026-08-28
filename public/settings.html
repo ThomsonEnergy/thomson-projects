@@ -1245,16 +1245,51 @@
 
     function myLicenceRowHtml(l) {
       return `
-        <div class="my-licence-row" data-id="${l.id || ''}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-          <input class="my-licence-name" value="${l.licence_name || ''}" placeholder="Licence name" style="flex:2;" />
-          <input class="my-licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1;" />
-          <input class="my-licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1;" />
-          <button type="button" class="secondary remove-my-licence-btn" style="padding:8px 10px;">&times;</button>
+        <div class="my-licence-row" data-id="${l.id || ''}" data-file-path="${l.file_path || ''}" data-file-name="${l.file_name || ''}" style="margin-bottom:12px; padding:10px; background:var(--surface-2); border-radius:8px;">
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+            <input class="my-licence-name" value="${l.licence_name || ''}" placeholder="Licence name" style="flex:2; margin:0;" />
+            <input class="my-licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1; margin:0;" />
+            <input class="my-licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1; margin:0;" />
+            <button type="button" class="secondary remove-my-licence-btn" style="padding:8px 10px;">&times;</button>
+          </div>
+          <label style="margin:0 0 4px; font-size:12px;">Upload the certificate/licence document and it'll fill the fields above in automatically</label>
+          <input type="file" class="my-licence-file" accept="image/*,.pdf" style="margin:0;" />
+          ${l.file_path ? `<a href="#" class="link-quiet my-licence-view" style="font-size:12px; margin-left:8px;">View uploaded file</a>` : ''}
+          <div class="my-licence-scan-msg" style="margin-top:4px;"></div>
         </div>`;
     }
-    function wireMyLicenceRemoveButtons() {
+    function wireMyLicenceRows() {
       document.querySelectorAll('.remove-my-licence-btn').forEach(btn => {
         btn.onclick = () => btn.closest('.my-licence-row').remove();
+      });
+      document.querySelectorAll('.my-licence-view').forEach(a => {
+        a.onclick = async (e) => {
+          e.preventDefault();
+          const row = a.closest('.my-licence-row');
+          try { window.open(await getSignedDocUrl(row.dataset.filePath), '_blank'); } catch (err) { alert(err.message); }
+        };
+      });
+      document.querySelectorAll('.my-licence-file').forEach(input => {
+        input.onchange = async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const row = input.closest('.my-licence-row');
+          const scanMsg = row.querySelector('.my-licence-scan-msg');
+          scanMsg.innerHTML = `<p class="subtitle" style="margin:0; font-size:12px;">Uploading and reading document...</p>`;
+          try {
+            const filePath = await uploadPrivateFile(file, 'licence-docs');
+            row.dataset.filePath = filePath;
+            row.dataset.fileName = file.name;
+
+            const extracted = await runCredentialExtraction(file);
+            if (extracted.name) row.querySelector('.my-licence-name').value = extracted.name;
+            if (extracted.reference_number) row.querySelector('.my-licence-number').value = extracted.reference_number;
+            if (extracted.expiry_date) row.querySelector('.my-licence-expiry').value = extracted.expiry_date;
+            scanMsg.innerHTML = `<p class="subtitle" style="margin:0; font-size:12px; color:var(--green);">Read successfully - check the fields above before saving.</p>`;
+          } catch (err) {
+            scanMsg.innerHTML = `<div class="error-box" style="font-size:12px;">${err.message}</div>`;
+          }
+        };
       });
     }
 
@@ -1280,7 +1315,7 @@
       document.getElementById('my-bank-account-number').value = profile?.bank_account_number || '';
 
       document.getElementById('my-licence-rows').innerHTML = (licences || []).map(myLicenceRowHtml).join('');
-      wireMyLicenceRemoveButtons();
+      wireMyLicenceRows();
     }
 
     document.getElementById('my-profile-photo-input').addEventListener('change', async (e) => {
@@ -1310,7 +1345,7 @@
 
     document.getElementById('my-add-licence-btn').addEventListener('click', () => {
       document.getElementById('my-licence-rows').insertAdjacentHTML('beforeend', myLicenceRowHtml({ licence_name: '', licence_number: '', expiry_date: '' }));
-      wireMyLicenceRemoveButtons();
+      wireMyLicenceRows();
     });
 
     document.getElementById('my-licences-save-btn').addEventListener('click', async () => {
@@ -1326,6 +1361,8 @@
             licence_name: row.querySelector('.my-licence-name').value.trim(),
             licence_number: row.querySelector('.my-licence-number').value.trim() || null,
             expiry_date: row.querySelector('.my-licence-expiry').value || null,
+            file_path: row.dataset.filePath || null,
+            file_name: row.dataset.fileName || null,
           }))
           .filter(l => l.licence_name);
         if (newLicences.length) {

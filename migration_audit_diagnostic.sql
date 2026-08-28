@@ -168,4 +168,7 @@ select '060', 'pay_rate_masking_and_self_service_profile',
 union all
 select '061', 'quote_job_split',
   case when exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'source_quote_id') then 'present' else 'MISSING' end
+union all
+select '062', 'job_titles_and_finance_profile_access',
+  case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'job_title') then 'present' else 'MISSING' end
 order by 1;

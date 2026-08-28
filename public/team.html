@@ -57,33 +57,71 @@
       return `<span class="subtitle">${dateLabel}</span>`;
     }
 
+    let teamCanEditTitles = false;
+
     async function loadTeam() {
       const listEl = document.getElementById('team-list');
-      const [{ data, error }, { data: licences }] = await Promise.all([
-        supabaseClient.from('profiles').select('id, full_name, role, mobile_number, photo_url, active').eq('active', true).order('full_name'),
+      const [{ data, error }, { data: licences }, emailsResult] = await Promise.all([
+        supabaseClient.from('profiles').select('id, full_name, role, job_title, mobile_number, photo_url, active').eq('active', true).order('full_name'),
         supabaseClient.from('profile_licences').select('*'),
+        // Email lives in Supabase Auth, not profiles - only readable via
+        // the service role, so it comes from a small serverless function
+        // rather than a direct table query.
+        (async () => {
+          try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch('/.netlify/functions/list-staff-emails', { headers: { Authorization: `Bearer ${session.access_token}` } });
+            const json = await res.json();
+            return res.ok && json.ok ? json.emails : [];
+          } catch { return []; }
+        })(),
       ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (!data.length) { listEl.innerHTML = `<p class="subtitle">No active team members.</p>`; return; }
 
+      const emailById = Object.fromEntries((emailsResult || []).map(e => [e.id, e.email]));
       const roleLabels = { admin: 'Admin', finance: 'Finance', sales: 'Sales', staff: 'Staff' };
       listEl.innerHTML = data.map(p => {
         const initials = (p.full_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
         const myLicences = (licences || []).filter(l => l.profile_id === p.id);
+        const email = emailById[p.id];
         return `
-          <div class="team-card">
+          <div class="team-card" data-id="${p.id}">
             ${p.photo_url
               ? `<img class="team-avatar" src="${p.photo_url}" />`
               : `<div class="team-avatar-fallback">${initials}</div>`}
             <p style="font-weight:600; margin:0 0 2px;">${p.full_name || 'Unnamed'}</p>
-            <p class="subtitle" style="margin:0 0 6px;">${roleLabels[p.role] || p.role}</p>
-            ${p.mobile_number ? `<p class="subtitle" style="margin:0 0 6px; font-size:12px;">${p.mobile_number}</p>` : ''}
+            <p class="subtitle job-title-display" style="margin:0 0 6px;">${p.job_title || roleLabels[p.role] || p.role}</p>
+            ${teamCanEditTitles ? `<button type="button" class="secondary edit-title-btn" style="font-size:11px; padding:3px 8px; margin-bottom:6px;">Edit title</button>` : ''}
+            ${p.mobile_number ? `<p class="subtitle" style="margin:0 0 4px; font-size:12px;"><a class="link-quiet" href="tel:${p.mobile_number}">${p.mobile_number}</a></p>` : ''}
+            ${email ? `<p class="subtitle" style="margin:0 0 6px; font-size:12px;"><a class="link-quiet" href="mailto:${email}">${email}</a></p>` : ''}
             ${myLicences.length ? `
               <div style="text-align:left; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
                 ${myLicences.map(l => `<p style="margin:0 0 4px; font-size:11px;">${l.licence_name}: ${licenceExpiryLabel(l.expiry_date)}</p>`).join('')}
               </div>` : ''}
           </div>`;
       }).join('');
+
+      if (teamCanEditTitles) {
+        listEl.querySelectorAll('.edit-title-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const card = btn.closest('.team-card');
+            const display = card.querySelector('.job-title-display');
+            const current = display.textContent;
+            display.outerHTML = `<div class="job-title-edit" style="display:flex; gap:6px; margin-bottom:6px;">
+              <input class="job-title-input" value="${current}" style="margin:0; font-size:13px; padding:6px 8px;" />
+              <button type="button" class="job-title-save-btn" style="font-size:11px; padding:3px 8px;">Save</button>
+            </div>`;
+            btn.style.display = 'none';
+            card.querySelector('.job-title-save-btn').addEventListener('click', async () => {
+              const value = card.querySelector('.job-title-input').value.trim();
+              const { error: updErr } = await supabaseClient.from('profiles').update({ job_title: value || null }).eq('id', card.dataset.id);
+              if (updErr) { alert(updErr.message); return; }
+              await loadTeam();
+            });
+          });
+        });
+      }
     }
 
     (async function () {
@@ -96,6 +134,8 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+      const myRole = await getMyRole();
+      teamCanEditTitles = myRole === 'admin' || myRole === 'finance';
       await loadTeam();
     })();
   </script>
