@@ -2229,6 +2229,8 @@
           await supabaseClient.from('job_tasks').update({
             completed: true, completed_by: user.id, completed_at: new Date().toISOString(),
           }).eq('id', btn.dataset.id);
+          const task = tasks.find(t => t.id === btn.dataset.id);
+          await logActivity('project', projectId, 'task_completed', `Task completed: ${task?.description || ''}`);
           await loadJobTasks(projectId);
         });
       });
@@ -2339,6 +2341,8 @@
             created_by: user.id,
           });
           if (error) throw error;
+          const who = personId ? staff.find(s => s.id === personId)?.full_name : (assignType === 'role' ? overlay.querySelector('#at-role').value : null);
+          await logActivity('project', projectId, 'task_added', `Task added: ${description}${who ? ` (assigned to ${who})` : ''}`);
           overlay.remove();
           await loadJobTasks(projectId);
         } catch (err) {
