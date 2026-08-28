@@ -6,6 +6,11 @@ status change. Read this when asked to check for bugs or update ideas.
 
 ## Open
 
+### Update idea: Invoice structure
+- **Reported:** 28 Aug 2026, 11:28 pm by Jasper Thomson
+- **What they want:** Invoice should say Deposit on it when it’s a deposit invoice. Also in phone view the words run off the page
+- **Record id:** 0562c371-eecf-440b-8fdc-ad9e4b1de2cd
+
 ### Update idea: add timsheets from the your timesheets this week.
 - **Reported:** 27 Aug 2026, 08:31 pm by Jasper Thomson
 - **Page/feature:** timesheets tab
