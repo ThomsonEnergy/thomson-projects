@@ -2193,10 +2193,19 @@
             .single();
           if (loadErr) throw loadErr;
 
+          // Same draw new-project.html uses for a brand-new quote - a
+          // duplicate is a new draft quote too (its own quote_number, no
+          // job_number - that gets assigned automatically once it's
+          // actually accepted, same as any other quote), not a clone of
+          // whatever numbering the source project already had.
+          const { data: quoteNum, error: qErr } = await supabaseClient.rpc('get_next_number', { counter_name: 'quote' });
+          if (qErr) throw qErr;
+
           const { data: newProject, error: insErr } = await supabaseClient
             .from('projects')
             .insert({
               name: `${fullProject.name} (copy)`,
+              quote_number: quoteNum,
               client_name: fullProject.client_name,
               client_email: fullProject.client_email,
               client_address: fullProject.client_address,
