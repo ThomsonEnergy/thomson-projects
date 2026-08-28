@@ -1606,6 +1606,7 @@
       const estimatedBarPct = Math.round((cost / costBarMax) * 100);
       const accruedBarPct = Math.round((accruedTotal / costBarMax) * 100);
       const accruedOverEstimate = accruedTotal > cost;
+      const isAccepted = ['accepted', 'in_progress', 'complete'].includes(project.status);
 
       const content = document.getElementById('content');
       const numberLine = [
@@ -1647,6 +1648,8 @@
           ${pricingVisible && !editMode ? `
             <button id="edit-toggle-btn" class="secondary">${project.job_number ? 'Edit stages' : 'Edit quote'}</button>
             <button id="duplicate-btn" class="secondary">Duplicate as new project</button>
+            ${project.job_number && project.quote_token ? `<a class="btn secondary" href="/quote.html?token=${project.quote_token}" target="_blank">Go to quote</a>` : ''}
+            ${!project.job_number && isAccepted ? `<button type="button" class="secondary" id="go-to-job-btn">Go to job</button>` : ''}
           ` : ''}
           ${editMode ? `
             <button id="save-edit-btn">Save changes</button>
@@ -2054,6 +2057,13 @@
         render(project, pricingVisible);
         document.querySelector('#job-tabs .settings-tab[data-panel="costcentres"]').click();
       });
+
+      // Job numbers are assigned automatically the moment a quote is
+      // accepted - this button only ever shows for the rare case where
+      // this page was already loaded before that happened, so a reload
+      // is all it takes to pick up the job number that's already there.
+      const goToJobBtn = document.getElementById('go-to-job-btn');
+      if (goToJobBtn) goToJobBtn.addEventListener('click', () => location.reload());
 
       const duplicateBtn = document.getElementById('duplicate-btn');
       if (duplicateBtn) duplicateBtn.addEventListener('click', async () => {
