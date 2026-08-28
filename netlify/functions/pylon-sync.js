@@ -1,18 +1,21 @@
 const fetch = require('node-fetch');
-const { createClient } = require('@supabase/supabase-js');
+const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { getAdminClient } = require('./_shared/require-admin');
 
-// NOTE: this is a best-effort starting point, not a verified integration.
-// Pylon's API requires contacting their support team to get API access and
-// exact endpoint/auth details (see https://getpylon.com/developers/). Once
-// you have that, you will very likely need to adjust the URL and auth header
-// below, and the field names read back from the response. Until then, the
-// reliable option is just pasting the Pylon proposal link into the project
-// (the "Pylon design link" field), which works today with no API needed.
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+// Pulls a hardware summary (panel/inverter/battery counts) from Pylon's
+// documented solar_designs API (https://app.getpylon.com/docs/api) so it
+// can be shown as plain text right on our own quote page. This is as far
+// as integration goes - Pylon's proposal page itself can't be embedded
+// (it sends X-Frame-Options: SAMEORIGIN, confirmed against a live
+// proposal link) and its API doesn't expose production or ROI figures at
+// all, only hardware counts - the full interactive design + ROI calc
+// still only exists behind the Pylon link itself.
+//
+// NOTE: the field names read below (module_types/inverter_types/
+// storage_types/summary.dc_output_kw) are taken from Pylon's docs, not
+// verified against a live response - the raw response is logged below so
+// if this comes back empty or errors once a real API key is set, check
+// the function logs against https://app.getpylon.com/docs/api and adjust.
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -22,16 +25,15 @@ exports.handler = async (event) => {
   try {
     const { projectId, pylonProjectId } = JSON.parse(event.body);
     if (!projectId || !pylonProjectId) {
-      return { statusCode: 400, body: 'projectId and pylonProjectId are required' };
+      return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'projectId and pylonProjectId are required' }) };
     }
 
-    const apiKey = process.env.PYLON_API_KEY;
-    if (!apiKey) throw new Error('PYLON_API_KEY is not set in Netlify environment variables');
+    const apiKey = await getIntegrationKey('pylon');
+    const supabaseAdmin = getAdminClient();
 
-    // Best-effort guess at Pylon's REST shape, confirm the real path/auth with
-    // Pylon support and update this line once known.
-    const res = await fetch(`https://api.getpylon.com/v1/projects/${pylonProjectId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+    const query = new URLSearchParams({ 'fields[solar_designs]': 'summary,module_types,inverter_types,storage_types' });
+    const res = await fetch(`https://api.getpylon.com/v1/solar_designs/${encodeURIComponent(pylonProjectId)}?${query}`, {
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/vnd.api+json' },
     });
 
     if (!res.ok) {
@@ -39,9 +41,11 @@ exports.handler = async (event) => {
       throw new Error(`Pylon API request failed: ${res.status} ${text}`);
     }
 
-    const pylonData = await res.json();
+    const json = await res.json();
+    console.log('Pylon solar design response:', JSON.stringify(json));
+    const pylonData = json.data?.attributes || {};
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('projects')
       .update({ pylon_data: pylonData, pylon_project_id: pylonProjectId })
       .eq('id', projectId);

@@ -275,6 +275,22 @@ function costCentreNumber(jobNumber, position) {
   return jobNumber ? `J${jobNumber}-${position}` : `-${position}`;
 }
 
+// Turns a project's raw pylon_data (the attributes object pulled from
+// Pylon's solar_designs API - see netlify/functions/pylon-sync.js) into a
+// one-line plain-text hardware summary, e.g. "10.56kW system - 24x Longi
+// LR5-54HTH 440W - 1x SolarEdge SE10000H - 1x Tesla Powerwall 2 13.5kWh".
+// Pylon's API doesn't expose production/ROI figures at all, only hardware
+// counts, so that's all this can ever show - the full interactive design
+// and ROI calc still lives behind the Pylon link itself.
+function pylonSystemSummary(pylonData) {
+  if (!pylonData || typeof pylonData !== 'object') return '';
+  const parts = [];
+  if (pylonData.summary?.dc_output_kw) parts.push(`${pylonData.summary.dc_output_kw}kW system`);
+  [...(pylonData.module_types || []), ...(pylonData.inverter_types || []), ...(pylonData.storage_types || [])]
+    .forEach(item => { if (item?.description) parts.push(`${item.quantity || 1}x ${item.description}`); });
+  return parts.join(' &middot; ');
+}
+
 // Kicks off a background extraction function and polls the resulting job
 // row until it's done. Used for pricelist/statement extraction, which can
 // genuinely run past a normal function's ~10s ceiling for a long document.

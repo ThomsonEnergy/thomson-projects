@@ -179,7 +179,7 @@
       <div class="grid cols-3" style="margin-top:10px;">
         <div style="grid-column: span 2;">
           <label>Pylon project ID (optional, for pulling system data)</label>
-          <input id="p-pylon-id" placeholder="Requires a Pylon API key set up in Netlify" />
+          <input id="p-pylon-id" placeholder="Requires a Pylon API key set up under Settings > API Keys" />
         </div>
         <div style="display:flex; align-items:end;">
           <button type="button" class="secondary" id="pylon-pull-btn" style="width:100%;">Pull from Pylon</button>
@@ -750,9 +750,10 @@
         });
         const json = await res.json();
         if (!json.ok) throw new Error(json.error);
-        msg.innerHTML = `<div class="success-box">Pulled data from Pylon.</div>`;
+        const summary = pylonSystemSummary(json.pylonData);
+        msg.innerHTML = `<div class="success-box">Pulled from Pylon.${summary ? ' ' + summary : ' No hardware summary came back - check the function logs against the field names in the Pylon API docs.'}</div>`;
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message} (Pylon's API needs verifying against your actual access, see SETUP.md)</div>`;
+        msg.innerHTML = `<div class="error-box">${err.message} (check Settings &gt; API Keys &gt; Pylon, and that this Pylon project ID is correct)</div>`;
       }
     });
 

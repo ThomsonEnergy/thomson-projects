@@ -140,7 +140,6 @@
             <p class="cover-eyebrow">${template === 'quick_estimate' ? 'Estimate' : 'Proposal'}</p>
             <h1 class="cover-title">${project.name}</h1>
             <p class="cover-subtitle">${project.proposal_subtitle || ('Prepared for ' + project.client_name)}</p>
-            ${template === 'solar' && project.pylon_link ? `<div style="margin-top:18px;"><a class="btn" href="${project.pylon_link}" target="_blank" rel="noopener">View interactive system design</a></div>` : ''}
           </div>
           ${(detailParts.length || licenseParts) ? `
             <div class="cover-details">
@@ -185,6 +184,16 @@
           <p class="subtitle" style="white-space:pre-wrap; line-height:1.7; color:var(--text);">${project.sow_text}</p>
         </div>` : '';
 
+      const pylonSummary = pylonSystemSummary(project.pylon_data);
+      const pylonHtml = (template === 'solar' && project.pylon_link) ? `
+        <div class="card">
+          <h2>System design</h2>
+          ${pylonSummary
+            ? `<p style="margin:0 0 14px; line-height:1.7;">${pylonSummary}</p>`
+            : `<p class="subtitle" style="margin:0 0 14px;">See the full interactive design, panel layout, and return-on-investment calculation below.</p>`}
+          <a class="btn" href="${project.pylon_link}" target="_blank" rel="noopener">View interactive design &amp; ROI &rarr;</a>
+        </div>` : '';
+
       const referenceHtml = referencePhotos.length ? `
         <div class="card">
           <h2>What it will look like</h2>
@@ -202,6 +211,7 @@
       content.innerHTML = `
         ${coverHtml}
         ${sowHtml}
+        ${pylonHtml}
 
         <div class="card">
           <h2>Investment summary</h2>

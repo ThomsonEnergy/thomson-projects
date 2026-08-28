@@ -91,16 +91,28 @@ To make this automatic:
 
 ## Pylon (solar design software)
 
-The reliable option, which works right away: paste the link to your Pylon proposal into the
-"Pylon proposal link" field on a quote. It shows as a "View interactive system design" button
-on the client's proposal page.
+Pylon's own interactive proposal page can't be embedded in our quote - confirmed by checking a
+real Pylon proposal link, it sends `X-Frame-Options: SAMEORIGIN`, which every browser treats as
+a hard instruction to refuse framing it from any other domain. So the "Pylon proposal link"
+field always opens Pylon in a new tab via a button on the client's proposal page - that part
+isn't going to change unless Pylon offers a different embeddable link (worth asking their
+support about).
 
-Pulling data automatically from Pylon's API is best-effort. Pylon requires contacting their
-support team to get API access and the exact request format (see
-https://getpylon.com/developers/), which isn't something I could verify without your account.
-`netlify/functions/pylon-sync.js` has a starting point, once you have real Pylon API access,
-add `PYLON_API_KEY` to Netlify's environment variables and adjust the URL/response handling in
-that file to match what Pylon actually gives you.
+What does show inline on the quote is a plain-text hardware summary (panel/inverter/battery
+counts, e.g. "10.56kW system - 24x Longi LR5-54HTH 440W - 1x SolarEdge SE10000H"), pulled from
+Pylon's documented API (https://app.getpylon.com/docs/api) via the "Pull from Pylon" button.
+Pylon's API does not expose production or ROI figures at all - only hardware counts - so the
+full interactive design and ROI calculation always stays behind the Pylon link itself.
+
+To use it: create a Pylon API token (in Pylon, under Settings > API), then paste it into this
+app's own Settings > API Keys > Pylon field (not a Netlify environment variable - it's read from
+the `api_keys` table so it can be rotated without a redeploy). `netlify/functions/pylon-sync.js`
+calls Pylon's `GET /v1/solar_designs/{id}` endpoint - the field names it reads
+(`module_types`/`inverter_types`/`storage_types`/`summary.dc_output_kw`) come from Pylon's docs
+but haven't been verified against a live response from your account. If the "Pull from Pylon"
+button comes back with no summary or an error, check the Netlify function logs (it logs the raw
+Pylon response) against the current docs and adjust the field names in that file if Pylon's
+actual response differs.
 
 - Purchase orders and supplier invoices logged in this tool are kept separate from the
   labour/material actuals synced from ServiceM8, on purpose, so nothing gets double-counted.
