@@ -364,7 +364,7 @@
         const statusLabel = dayEntries.length ? fmtDuration(totalMs) : (onLeave ? 'Leave' : 'No entry');
 
         return `
-          <div style="padding:10px 0; border-bottom:1px solid var(--border);">
+          <div class="my-week-day" data-date="${dStr}" style="padding:10px 0; border-bottom:1px solid var(--border); cursor:pointer;" title="Click to add a timesheet entry for this day">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <strong>${fmtDayLabel(day)}</strong>
               <span class="badge ${status}">${statusLabel}</span>
@@ -372,6 +372,10 @@
             ${bodyHtml}
           </div>`;
       }).join('');
+
+      el.querySelectorAll('.my-week-day').forEach(dayEl => {
+        dayEl.addEventListener('click', () => openManualEntryFormForDate(dayEl.dataset.date));
+      });
     }
 
     async function loadTeamWeek() {
@@ -543,14 +547,14 @@
           <thead><tr><th>Job</th><th>Clocked in</th><th>Clocked out</th><th class="num">Duration</th><th></th></tr></thead>
           <tbody>
             ${data.map(e => `
-              <tr data-id="${e.id}" data-project-id="${e.project_id || ''}" data-clock-in="${e.clock_in}" data-clock-out="${e.clock_out || ''}" data-selected-cost-centres='${JSON.stringify(e.selected_cost_centre_ids || null)}'>
+              <tr data-id="${e.id}" data-project-id="${e.project_id || ''}" data-cost-centre-id="${e.cost_centre_id || ''}" data-clock-in="${e.clock_in}" data-clock-out="${e.clock_out || ''}" data-selected-cost-centres='${JSON.stringify(e.selected_cost_centre_ids || null)}' data-xero-pushed="${e.xero_pushed_at ? 'true' : 'false'}">
                 <td data-label="Job">${e.projects ? projectRef(e.projects) : 'General / Office'}</td>
                 <td data-label="Clocked in">${fmtDateTime(e.clock_in)}</td>
                 <td data-label="Clocked out">${e.clock_out ? fmtDateTime(e.clock_out) : '<span class="badge in_progress">In progress</span>'}</td>
                 <td class="num" data-label="Duration">${e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : ''}</td>
                 <td data-label="" style="text-align:right;">
                   <button type="button" class="secondary edit-entry-btn" style="font-size:12px; padding:6px 10px;">Edit</button>
-                  ${e.clock_out ? `<button type="button" class="secondary split-entry-btn" style="font-size:12px; padding:6px 10px;">Split</button>` : ''}
+                  ${e.clock_out && !e.xero_pushed_at ? `<button type="button" class="secondary split-entry-btn" style="font-size:12px; padding:6px 10px;">Split</button>` : ''}
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -564,8 +568,47 @@
       });
     }
 
+    // Once an entry's hours have been sent to Xero (xero_pushed_at set),
+    // the time itself is locked - Xero already has it, and there's no
+    // signal here to un-push a timesheet retroactively. The job/stage
+    // stays editable either way, for the common case of clocking in
+    // against the wrong job by mistake.
+    let editSelectedCostCentres = [];
+    async function loadEditCostCentreChips(row, projectId, preselectedIds) {
+      editSelectedCostCentres = [];
+      const wrap = row.querySelector('.edit-cost-centres');
+      const chipsEl = row.querySelector('.edit-cc-chips');
+      if (!projectId) { wrap.style.display = 'none'; return; }
+
+      const project = cachedProjects.find(p => p.id === projectId);
+      const { data: centres, error } = await supabaseClient
+        .from('cost_centres')
+        .select('id, name')
+        .eq('project_id', projectId)
+        .order('sort_order');
+      if (error || !centres || !centres.length) { wrap.style.display = 'none'; return; }
+
+      wrap.style.display = 'block';
+      chipsEl.innerHTML = centres.map((c, i) => `
+        <button type="button" class="cc-chip ${preselectedIds.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
+          <span class="cc-chip-num">${costCentreNumber(project ? project.job_number : null, i + 1)}</span> ${c.name}
+        </button>`).join('');
+      editSelectedCostCentres = centres.filter(c => preselectedIds.includes(c.id)).map(c => c.id);
+      chipsEl.querySelectorAll('.cc-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          chip.classList.toggle('selected');
+          const id = chip.dataset.id;
+          if (chip.classList.contains('selected')) editSelectedCostCentres.push(id);
+          else editSelectedCostCentres = editSelectedCostCentres.filter(x => x !== id);
+        });
+      });
+    }
+
     function openEntryEditor(row) {
       const id = row.dataset.id;
+      const isPushed = row.dataset.xeroPushed === 'true';
+      const currentSelectedCC = JSON.parse(row.dataset.selectedCostCentres || 'null')
+        || (row.dataset.costCentreId ? [row.dataset.costCentreId] : []);
       const projectOptions = `<option value="">General / Office</option>` +
         cachedProjects.map(p => `<option value="${p.id}" ${p.id === row.dataset.projectId ? 'selected' : ''}>${projectRef(p)}</option>`).join('');
 
@@ -574,18 +617,23 @@
       row.innerHTML = `
         <td colspan="5" style="padding:0; display:block;">
           <div style="padding:14px; background:var(--surface-2); border-radius:8px; margin:6px 0; width:100%; box-sizing:border-box;">
+            ${isPushed ? `<p class="subtitle" style="margin:0 0 10px;">This entry's time has already been sent to Xero and can't be changed - the job/stage can still be corrected below if it was logged against the wrong one.</p>` : ''}
             <label style="margin-top:0">Job</label>
             <select class="edit-project">${projectOptions}</select>
+            <div class="edit-cost-centres" style="display:none; margin-top:8px;">
+              <label style="margin-top:0">Stage(s)</label>
+              <div class="edit-cc-chips"></div>
+            </div>
             <label>Date</label>
-            <input type="date" class="edit-date" value="${isoToDatePart(row.dataset.clockIn)}" />
+            <input type="date" class="edit-date" value="${isoToDatePart(row.dataset.clockIn)}" ${isPushed ? 'disabled' : ''} />
             <div style="display:flex; gap:10px;">
               <div style="flex:1;">
                 <label>Start time</label>
-                <input type="time" class="edit-start-time" value="${isoToTimePart(row.dataset.clockIn)}" />
+                <input type="time" class="edit-start-time" value="${isoToTimePart(row.dataset.clockIn)}" ${isPushed ? 'disabled' : ''} />
               </div>
               <div style="flex:1;">
                 <label>Finish time</label>
-                <input type="time" class="edit-end-time" value="${isoToTimePart(row.dataset.clockOut)}" />
+                <input type="time" class="edit-end-time" value="${isoToTimePart(row.dataset.clockOut)}" ${isPushed ? 'disabled' : ''} />
               </div>
             </div>
             <button class="save-entry-btn" style="margin-top:10px;">Save</button>
@@ -594,23 +642,34 @@
           </div>
         </td>`;
 
+      loadEditCostCentreChips(row, row.dataset.projectId || null, currentSelectedCC);
+      row.querySelector('.edit-project').addEventListener('change', (e) => {
+        loadEditCostCentreChips(row, e.target.value || null, []);
+      });
+
       row.querySelector('.cancel-entry-btn').addEventListener('click', () => loadMyEntries());
       row.querySelector('.save-entry-btn').addEventListener('click', async () => {
         const msg = row.querySelector('.edit-entry-msg');
-        const dateVal = row.querySelector('.edit-date').value;
-        const startVal = row.querySelector('.edit-start-time').value;
-        const endVal = row.querySelector('.edit-end-time').value;
         const projectId = row.querySelector('.edit-project').value || null;
 
-        if (!dateVal || !startVal) { msg.innerHTML = `<div class="error-box">Date and start time are required.</div>`; return; }
-        const clockIn = combineDateTime(dateVal, startVal);
-        const clockOut = endVal ? combineDateTime(dateVal, endVal) : null;
-        if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Finish time must be after start time - shifts can't cross midnight here, log it as two entries instead.</div>`; return; }
+        const update = { project_id: projectId };
+        if (editSelectedCostCentres.length === 1) { update.cost_centre_id = editSelectedCostCentres[0]; update.selected_cost_centre_ids = null; }
+        else if (editSelectedCostCentres.length > 1) { update.cost_centre_id = null; update.selected_cost_centre_ids = editSelectedCostCentres; }
+        else { update.cost_centre_id = null; update.selected_cost_centre_ids = null; }
 
-        const { error } = await supabaseClient
-          .from('time_entries')
-          .update({ clock_in: clockIn.toISOString(), clock_out: clockOut ? clockOut.toISOString() : null, project_id: projectId })
-          .eq('id', id);
+        if (!isPushed) {
+          const dateVal = row.querySelector('.edit-date').value;
+          const startVal = row.querySelector('.edit-start-time').value;
+          const endVal = row.querySelector('.edit-end-time').value;
+          if (!dateVal || !startVal) { msg.innerHTML = `<div class="error-box">Date and start time are required.</div>`; return; }
+          const clockIn = combineDateTime(dateVal, startVal);
+          const clockOut = endVal ? combineDateTime(dateVal, endVal) : null;
+          if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Finish time must be after start time - shifts can't cross midnight here, log it as two entries instead.</div>`; return; }
+          update.clock_in = clockIn.toISOString();
+          update.clock_out = clockOut ? clockOut.toISOString() : null;
+        }
+
+        const { error } = await supabaseClient.from('time_entries').update(update).eq('id', id);
         if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
         await loadMyEntries();
         await loadMyWeek();
@@ -790,6 +849,20 @@
       });
 
       document.body.appendChild(overlay);
+    }
+
+    // Shared by the "+ Add missed entry" button (today's date) and
+    // clicking a day in "Your timesheet this week" (that day's date) -
+    // one form, opened pre-filled for whichever date was meant.
+    function openManualEntryFormForDate(dateStr) {
+      const form = document.getElementById('manual-entry-form');
+      form.style.display = 'block';
+      document.getElementById('manual-date').value = dateStr;
+      document.getElementById('manual-project').value = '';
+      document.getElementById('manual-cost-centres').style.display = 'none';
+      manualSelectedCostCentres = [];
+      document.getElementById('manual-start-time').focus();
+      form.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     document.getElementById('add-manual-entry-btn').addEventListener('click', () => {
