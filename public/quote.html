@@ -83,10 +83,15 @@
 <body>
   <div class="topbar">
     <span id="brand-mark" class="brand">PROPOSAL</span>
-    <button class="secondary" onclick="window.print()">Print / Save as PDF</button>
+    <div class="topbar-right">
+      <div id="topbar-total" style="text-align:right;"></div>
+      <div id="topbar-accept"></div>
+      <button class="secondary" onclick="window.print()">Print / Save as PDF</button>
+    </div>
   </div>
 
   <div class="wrap" style="max-width:800px;">
+    <div id="accept-error"></div>
     <div id="content"><p class="subtitle">Loading your proposal...</p></div>
   </div>
 
@@ -116,6 +121,7 @@
       const template = project.proposal_template || 'new_build';
       const centres = data.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const total = centres.reduce((sum, c) => sum + Number(c.quoted_amount), 0);
+      const isAccepted = project.status === 'accepted' || project.status === 'in_progress' || project.status === 'complete';
       const coverPhotos = (project.cover_photos || []).map(p => p.url || p).slice(0, 3);
       const referencePhotos = (project.reference_photos || []).map(p => p.url || p);
       const depositPercent = Number(project.deposit_percent) || 0;
@@ -219,26 +225,27 @@
         ${paymentScheduleHtml}
         ${termsHtml}
 
+        ${isAccepted ? `
         <div class="card" id="accept-section">
-          ${project.status === 'accepted' || project.status === 'in_progress' || project.status === 'complete'
-            ? `<p class="success-box" style="display:inline-block">${template === 'quick_estimate' ? 'Estimate accepted, thank you.' : 'Quote accepted, thank you.'} Work will begin as scheduled.</p>`
-            : `
-              <h2>Ready to go ahead?</h2>
-              <p class="subtitle">${template === 'quick_estimate' ? 'Accepting this estimate lets us schedule the work.' : 'Accepting this quote lets us schedule the work.'}</p>
-              <button id="accept-btn">${template === 'quick_estimate' ? 'Accept this estimate' : 'Accept this quote'}</button>
-              <div id="accept-msg"></div>
-            `}
-        </div>
+          <p class="success-box" style="display:inline-block">${template === 'quick_estimate' ? 'Estimate accepted, thank you.' : 'Quote accepted, thank you.'} Work will begin as scheduled.</p>
+        </div>` : ''}
       `;
+
+      document.getElementById('topbar-total').innerHTML = `
+        <p class="subtitle" style="margin:0 0 2px; font-size:10px; text-transform:uppercase; letter-spacing:0.04em;">Total</p>
+        <p style="margin:0; font-weight:700; font-size:16px;">${money(total)}</p>
+      `;
+      document.getElementById('topbar-accept').innerHTML = isAccepted
+        ? `<span class="badge accepted">${template === 'quick_estimate' ? 'Estimate accepted' : 'Quote accepted'}</span>`
+        : `<button id="accept-btn">${template === 'quick_estimate' ? 'Approve estimate' : 'Approve quote'}</button>`;
 
       const acceptBtn = document.getElementById('accept-btn');
       if (acceptBtn) {
         acceptBtn.addEventListener('click', async () => {
           acceptBtn.disabled = true;
           const { error: acceptErr } = await supabaseClient.rpc('accept_quote', { p_token: token });
-          const msg = document.getElementById('accept-msg');
           if (acceptErr) {
-            msg.innerHTML = `<div class="error-box">${acceptErr.message}</div>`;
+            document.getElementById('accept-error').innerHTML = `<div class="error-box" style="margin-bottom:16px;">${acceptErr.message}</div>`;
             acceptBtn.disabled = false;
             return;
           }
