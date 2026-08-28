@@ -49,9 +49,10 @@
 
     <div class="settings-layout">
       <div class="settings-tabs">
+        <button class="settings-tab active" data-panel="my-profile">My Profile</button>
         <button class="settings-tab" data-panel="company" data-admin-only="1" data-dev-only="1">Company Details</button>
         <button class="settings-tab" data-panel="xero" data-admin-only="1" data-dev-only="1">Xero Mapping</button>
-        <button class="settings-tab active" data-panel="numbering" data-admin-only="1">Numbering</button>
+        <button class="settings-tab" data-panel="numbering" data-admin-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
         <button class="settings-tab" data-panel="billable-rates" data-pricing-only="1">Billable Rates</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
@@ -190,8 +191,66 @@
           </div>
         </div>
 
+        <!-- My Profile - self-service, every role -->
+        <div class="settings-panel active" id="panel-my-profile">
+          <div class="card">
+            <h2>My profile</h2>
+            <div style="display:flex; gap:16px; align-items:start; margin-bottom:10px;">
+              <img id="my-profile-photo-preview" style="width:80px; height:80px; border-radius:50%; object-fit:cover; background:var(--surface-2); display:none;" />
+              <div style="flex:1;">
+                <label style="margin-top:0">Photo</label>
+                <input type="file" id="my-profile-photo-input" accept="image/*" />
+              </div>
+            </div>
+            <label>Mobile number</label>
+            <input id="my-profile-mobile" />
+            <button id="my-profile-save-btn" style="margin-top:14px;">Save</button>
+            <div id="my-profile-msg"></div>
+          </div>
+
+          <div class="card">
+            <h2>My pay rates</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Set by an admin or finance - you can see them here, but not change them yourself.</p>
+            <div class="grid cols-4">
+              <div class="stat"><div class="label">Ordinary ($/hr)</div><div class="value" id="my-rate-ordinary">-</div></div>
+              <div class="stat"><div class="label">1.5x ($/hr)</div><div class="value" id="my-rate-1-5x">-</div></div>
+              <div class="stat"><div class="label">2x ($/hr)</div><div class="value" id="my-rate-2x">-</div></div>
+              <div class="stat"><div class="label">2.5x ($/hr)</div><div class="value" id="my-rate-2-5x">-</div></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>My licences</h2>
+            <div id="my-licence-rows"></div>
+            <button type="button" class="secondary" id="my-add-licence-btn" style="font-size:12px; padding:6px 10px;">+ Add licence</button>
+            <button id="my-licences-save-btn" style="margin-top:14px; display:block;">Save licences</button>
+            <div id="my-licences-msg"></div>
+          </div>
+
+          <div class="card">
+            <h2>My bank account</h2>
+            <p class="subtitle" style="margin-bottom:10px;">For payroll - only visible to you and admin/finance.</p>
+            <div class="grid cols-3">
+              <div>
+                <label style="margin-top:0">Account name</label>
+                <input id="my-bank-account-name" />
+              </div>
+              <div>
+                <label style="margin-top:0">BSB</label>
+                <input id="my-bank-bsb" placeholder="000-000" />
+              </div>
+              <div>
+                <label style="margin-top:0">Account number</label>
+                <input id="my-bank-account-number" />
+              </div>
+            </div>
+            <button id="my-bank-save-btn" style="margin-top:10px;">Save bank details</button>
+            <div id="my-bank-msg"></div>
+          </div>
+        </div>
+
         <!-- Numbering -->
-        <div class="settings-panel active" id="panel-numbering" data-admin-only="1">
+        <div class="settings-panel" id="panel-numbering" data-admin-only="1">
           <div class="card">
             <h2>Numbering</h2>
             <p class="subtitle" style="margin-bottom:14px;">
@@ -1181,17 +1240,134 @@
       ).join('');
     }
 
+    // --- My Profile (self-service, every role) ---
+    let myProfileUserId = null;
+
+    function myLicenceRowHtml(l) {
+      return `
+        <div class="my-licence-row" data-id="${l.id || ''}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <input class="my-licence-name" value="${l.licence_name || ''}" placeholder="Licence name" style="flex:2;" />
+          <input class="my-licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1;" />
+          <input class="my-licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1;" />
+          <button type="button" class="secondary remove-my-licence-btn" style="padding:8px 10px;">&times;</button>
+        </div>`;
+    }
+    function wireMyLicenceRemoveButtons() {
+      document.querySelectorAll('.remove-my-licence-btn').forEach(btn => {
+        btn.onclick = () => btn.closest('.my-licence-row').remove();
+      });
+    }
+
+    async function loadMyProfile(userId) {
+      myProfileUserId = userId;
+      const [{ data: profile }, { data: rates }, { data: licences }] = await Promise.all([
+        supabaseClient.from('profiles').select('mobile_number, photo_url, bank_account_name, bank_bsb, bank_account_number').eq('id', userId).single(),
+        supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle(),
+        supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date'),
+      ]);
+
+      document.getElementById('my-profile-mobile').value = profile?.mobile_number || '';
+      const photoPreview = document.getElementById('my-profile-photo-preview');
+      if (profile?.photo_url) { photoPreview.src = profile.photo_url; photoPreview.style.display = 'block'; }
+
+      document.getElementById('my-rate-ordinary').textContent = rates?.ordinary_rate != null ? money(rates.ordinary_rate) : 'Not set';
+      document.getElementById('my-rate-1-5x').textContent = rates?.rate_1_5x != null ? money(rates.rate_1_5x) : 'Not set';
+      document.getElementById('my-rate-2x').textContent = rates?.rate_2x != null ? money(rates.rate_2x) : 'Not set';
+      document.getElementById('my-rate-2-5x').textContent = rates?.rate_2_5x != null ? money(rates.rate_2_5x) : 'Not set';
+
+      document.getElementById('my-bank-account-name').value = profile?.bank_account_name || '';
+      document.getElementById('my-bank-bsb').value = profile?.bank_bsb || '';
+      document.getElementById('my-bank-account-number').value = profile?.bank_account_number || '';
+
+      document.getElementById('my-licence-rows').innerHTML = (licences || []).map(myLicenceRowHtml).join('');
+      wireMyLicenceRemoveButtons();
+    }
+
+    document.getElementById('my-profile-photo-input').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const msg = document.getElementById('my-profile-msg');
+      try {
+        const [url] = await uploadPhotos([file], 'staff-photos');
+        const { error } = await supabaseClient.from('profiles').update({ photo_url: url }).eq('id', myProfileUserId);
+        if (error) throw error;
+        const preview = document.getElementById('my-profile-photo-preview');
+        preview.src = url;
+        preview.style.display = 'block';
+        msg.innerHTML = `<div class="success-box">Photo updated.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+    });
+
+    document.getElementById('my-profile-save-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('my-profile-msg');
+      const { error } = await supabaseClient.from('profiles')
+        .update({ mobile_number: document.getElementById('my-profile-mobile').value.trim() || null })
+        .eq('id', myProfileUserId);
+      msg.innerHTML = error ? `<div class="error-box">${error.message}</div>` : `<div class="success-box">Saved.</div>`;
+    });
+
+    document.getElementById('my-add-licence-btn').addEventListener('click', () => {
+      document.getElementById('my-licence-rows').insertAdjacentHTML('beforeend', myLicenceRowHtml({ licence_name: '', licence_number: '', expiry_date: '' }));
+      wireMyLicenceRemoveButtons();
+    });
+
+    document.getElementById('my-licences-save-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('my-licences-msg');
+      try {
+        // Replace-all, same approach the admin panel uses - simplest way
+        // to handle add/edit/remove in one save given how few licences a
+        // person typically has.
+        await supabaseClient.from('profile_licences').delete().eq('profile_id', myProfileUserId);
+        const newLicences = [...document.querySelectorAll('.my-licence-row')]
+          .map(row => ({
+            profile_id: myProfileUserId,
+            licence_name: row.querySelector('.my-licence-name').value.trim(),
+            licence_number: row.querySelector('.my-licence-number').value.trim() || null,
+            expiry_date: row.querySelector('.my-licence-expiry').value || null,
+          }))
+          .filter(l => l.licence_name);
+        if (newLicences.length) {
+          const { error } = await supabaseClient.from('profile_licences').insert(newLicences);
+          if (error) throw error;
+        }
+        msg.innerHTML = `<div class="success-box">Licences saved.</div>`;
+        await loadMyProfile(myProfileUserId);
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+    });
+
+    document.getElementById('my-bank-save-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('my-bank-msg');
+      const { error } = await supabaseClient.from('profiles').update({
+        bank_account_name: document.getElementById('my-bank-account-name').value.trim() || null,
+        bank_bsb: document.getElementById('my-bank-bsb').value.trim() || null,
+        bank_account_number: document.getElementById('my-bank-account-number').value.trim() || null,
+      }).eq('id', myProfileUserId);
+      msg.innerHTML = error ? `<div class="error-box">${error.message}</div>` : `<div class="success-box">Saved.</div>`;
+    });
+
     async function openUserProfilePanel(userId) {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `<div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;"><p class="subtitle">Loading...</p></div>`;
       document.body.appendChild(overlay);
 
-      const { data: profile, error } = await supabaseClient.from('profiles').select('*').eq('id', userId).single();
+      // Pay rates come from a separate secure view, not the profiles row
+      // directly - the base table's rate columns are locked to admin/
+      // finance (or the row's own owner) at the database level, so a
+      // direct select on profiles can no longer see them at all.
+      const { data: profile, error } = await supabaseClient.from('profiles')
+        .select('id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id, bank_account_name, bank_bsb, bank_account_number')
+        .eq('id', userId).single();
+      const { data: rates } = await supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle();
       const { data: licences } = await supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date');
       const { data: allowances } = await supabaseClient.from('employee_allowances').select('*').eq('profile_id', userId);
       const { data: rateTiers } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
       if (error) { overlay.querySelector('.card').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (rates) Object.assign(profile, rates);
 
       function renderLicenceRows(list) {
         return (list || []).map(l => `
@@ -1997,6 +2173,7 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+      await loadMyProfile(session.user.id);
       await loadSettings();
       await applyAdminGating();
       if (myRole === 'admin') {

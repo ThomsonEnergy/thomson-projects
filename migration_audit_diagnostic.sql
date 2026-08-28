@@ -162,4 +162,7 @@ select '058', 'team_licences_visible_to_all_staff',
 union all
 select '059', 'profiles_visible_to_all_staff',
   case when exists (select 1 from pg_policies where tablename = 'profiles' and policyname = 'staff can view all profiles') then 'present' else 'MISSING' end
+union all
+select '060', 'pay_rate_masking_and_self_service_profile',
+  case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'bank_bsb') then 'present' else 'MISSING' end
 order by 1;

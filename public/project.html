@@ -37,82 +37,23 @@
     const params = new URLSearchParams(window.location.search);
     const projectId = params.get('id');
 
-    function getPayWeekStart(d) {
-      const diff = (d.getDay() - 5 + 7) % 7; // days since the most recent Friday
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
-    }
     function entryHours(te) { return (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000; }
 
-    // Real cost per time_entry, from each employee's actual pay rates
-    // (profiles.ordinary_rate / rate_1_5x / rate_2x - captured in Settings
-    // but never actually applied anywhere until now), banded by a WEEKLY
-    // overtime rule: first 38 hrs/pay-week ordinary, 38-48 at 1.5x, 48+ at
-    // 2x (rate_2_5x stays available on the profile but isn't auto-applied
-    // by this rule). Overtime is a threshold on the employee's TOTAL hours
-    // that week across every job, not just one project, so an entry can
-    // still land partly in a higher band depending on what else they
-    // worked that week - hence pulling each touched employee's full pay
-    // week rather than just the entries passed in. Shared by loadProject()
-    // (per-stage accrued cost) and the timesheet drilldown (itemised
-    // per-entry cost), so the two can never disagree.
-    async function computeEntryLabourCosts(timeEntries) {
-      const [{ data: allProfiles }, { data: allTiers }] = await Promise.all([
-        supabaseClient.from('profiles').select('id, rate_tier_id, ordinary_rate, rate_1_5x, rate_2x'),
-        supabaseClient.from('billable_rate_tiers').select('id, sell_rate'),
-      ]);
-      const sellRateByProfile = {};
-      (allProfiles || []).forEach(p => {
-        const tier = (allTiers || []).find(t => t.id === p.rate_tier_id);
-        sellRateByProfile[p.id] = tier ? Number(tier.sell_rate) : 0;
+    // Real accrued labour cost, per stage, from each employee's actual pay
+    // rates - computed entirely server-side now (get-accrued-labour-cost.js)
+    // so an individual's ordinary_rate/rate_1_5x/rate_2x never has to
+    // reach any browser, no matter who's viewing this page. Pay rates stay
+    // visible only to admin/finance (Settings > Users & Roles).
+    async function fetchAccruedLabourCost(projectIds) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/get-accrued-labour-cost', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ projectIds }),
       });
-
-      // One (employee, pay week) fetch per unique combination the passed-in
-      // entries touch - typically a handful, not per-entry.
-      const weekKeys = new Set();
-      (timeEntries || []).forEach(te => {
-        weekKeys.add(`${te.staff_id}|${getPayWeekStart(new Date(te.clock_in)).toISOString()}`);
-      });
-      const costById = new Map();
-      await Promise.all([...weekKeys].map(async (key) => {
-        const [staffId, wkIso] = key.split('|');
-        const wkStart = new Date(wkIso);
-        const wkEnd = new Date(wkStart);
-        wkEnd.setDate(wkEnd.getDate() + 7);
-        const { data: weekEntries } = await supabaseClient
-          .from('time_entries')
-          .select('id, clock_in, clock_out')
-          .eq('staff_id', staffId)
-          .gte('clock_in', wkStart.toISOString())
-          .lt('clock_in', wkEnd.toISOString())
-          .not('clock_out', 'is', null)
-          .order('clock_in', { ascending: true });
-
-        const profile = (allProfiles || []).find(p => p.id === staffId);
-        // Falls back to the billable sell rate (times the same
-        // multiplier for the 1.5x/2x bands) only when a real pay rate
-        // hasn't been set up for this person - an imperfect stand-in,
-        // but better than treating unconfigured staff as free.
-        const fallbackOrdinary = sellRateByProfile[staffId] || 0;
-        const ordinaryRate = Number(profile?.ordinary_rate) || fallbackOrdinary;
-        const rate15 = Number(profile?.rate_1_5x) || fallbackOrdinary * 1.5;
-        const rate2 = Number(profile?.rate_2x) || fallbackOrdinary * 2;
-        const bands = [{ from: 0, to: 38, rate: ordinaryRate }, { from: 38, to: 48, rate: rate15 }, { from: 48, to: Infinity, rate: rate2 }];
-
-        let cumulative = 0;
-        (weekEntries || []).forEach(te => {
-          const hours = entryHours(te);
-          const start = cumulative, end = cumulative + hours;
-          let cost = 0;
-          bands.forEach(band => {
-            const overlapStart = Math.max(start, band.from);
-            const overlapEnd = Math.min(end, band.to);
-            if (overlapEnd > overlapStart) cost += (overlapEnd - overlapStart) * band.rate;
-          });
-          costById.set(te.id, cost);
-          cumulative = end;
-        });
-      }));
-      return costById;
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Could not load accrued labour cost');
+      return data.byProject;
     }
 
     async function loadProject() {
@@ -132,24 +73,26 @@
         return null;
       }
 
-      // Real labour hours/cost per stage - computed directly from
-      // time_entries rather than the get_stage_actual_hours/
-      // get_stage_actual_labour_cost database functions, which were
-      // undercounting hours (only entries with a direct cost_centre_id
-      // match, missing ones still tagged via selected_cost_centre_ids
-      // pending a split) and returning the billable SELL rate as if it
-      // were a cost.
-      const allTimeEntriesRes = await supabaseClient.from('time_entries').select('id, cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out').eq('project_id', projectId).not('clock_out', 'is', null);
-      const allTimeEntries = allTimeEntriesRes.data;
-      const costById = await computeEntryLabourCosts(allTimeEntries || []);
-
+      // Real labour hours/cost per stage - fetched from a serverless
+      // function that computes it from time_entries server-side, rather
+      // than the get_stage_actual_hours/get_stage_actual_labour_cost
+      // database functions (which were undercounting hours - only entries
+      // with a direct cost_centre_id match, missing ones still tagged via
+      // selected_cost_centre_ids pending a split - and returning the
+      // billable SELL rate as if it were a cost), and rather than fetching
+      // pay rates directly here, which would expose every employee's
+      // ordinary_rate/rate_1_5x/rate_2x to whoever's browser loaded this
+      // page. See get-accrued-labour-cost.js.
+      let accruedByCentre = {};
+      try {
+        const byProject = await fetchAccruedLabourCost([projectId]);
+        accruedByCentre = byProject[projectId]?.byCentre || {};
+      } catch (err) {
+        console.error('Accrued labour cost fetch failed:', err.message);
+      }
       for (const centre of project.cost_centres || []) {
-        const matchingEntries = (allTimeEntries || []).filter(te =>
-          te.cost_centre_id === centre.id || (te.selected_cost_centre_ids || []).includes(centre.id));
-        const hours = matchingEntries.reduce((s, te) => s + entryHours(te), 0);
-        const trueCost = matchingEntries.reduce((s, te) => s + (costById.get(te.id) || 0), 0);
-        centre.actual_hours = Math.round(hours * 100) / 100;
-        centre.actual_labour_cost = trueCost;
+        centre.actual_hours = accruedByCentre[centre.id]?.actualHours || 0;
+        centre.actual_labour_cost = accruedByCentre[centre.id]?.actualLabourCost || 0;
         centre.quoted_hours = (centre.cost_centre_line_items || [])
           .filter(li => li.item_type === 'labour')
           .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
@@ -2544,7 +2487,12 @@
       const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
       const myRole = await getMyRole();
       const isAdmin = myRole === 'admin';
-      const colCount = 4 + (pricingVisible ? 1 : 0) + (isAdmin ? 1 : 0);
+      // Itemised per-entry cost is narrower than pricingVisible (Admin/
+      // Finance/Sales) - dividing one entry's cost by its hours is
+      // functionally the same as reading that employee's pay rate, which
+      // stays Admin/Finance only, not Sales.
+      const isFinanceOrAdmin = myRole === 'admin' || myRole === 'finance';
+      const colCount = 4 + (isFinanceOrAdmin ? 1 : 0) + (isAdmin ? 1 : 0);
 
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
@@ -2588,17 +2536,31 @@
         if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
         if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No timesheet entries logged against this job yet.</p>`; return; }
 
-        const costById = pricingVisible ? await computeEntryLabourCosts(entries.filter(e => e.clock_out)) : new Map();
+        let costById = new Map();
+        if (isFinanceOrAdmin) {
+          try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch('/.netlify/functions/get-itemised-labour-cost', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({ projectId: project.id }),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) costById = new Map(Object.entries(data.costByEntryId));
+          } catch (err) {
+            console.error('Itemised labour cost fetch failed:', err.message);
+          }
+        }
         // Sum only THIS project's entries, not every value in costById - it
         // also holds cost for the same employee's entries on OTHER jobs
-        // during the same pay week (computeEntryLabourCosts needs the
-        // whole week to band overtime correctly), which would otherwise
-        // inflate this total past what the rows above it actually show.
+        // during the same pay week (needed server-side to band overtime
+        // correctly), which would otherwise inflate this total past what
+        // the rows above it actually show.
         const totalCost = entries.reduce((s, e) => s + (costById.get(e.id) || 0), 0);
 
         listEl.innerHTML = `
           <table class="responsive-stack">
-            <thead><tr><th>Staff</th><th>Date</th><th class="num">Hours</th><th>Stage / category</th>${pricingVisible ? '<th class="num">Cost</th>' : ''}${isAdmin ? '<th></th>' : ''}</tr></thead>
+            <thead><tr><th>Staff</th><th>Date</th><th class="num">Hours</th><th>Stage / category</th>${isFinanceOrAdmin ? '<th class="num">Cost</th>' : ''}${isAdmin ? '<th></th>' : ''}</tr></thead>
             <tbody>
               ${entries.map(e => {
                 const hrs = hoursFor(e);
@@ -2609,13 +2571,13 @@
                   <td data-label="Date">${new Date(e.clock_in).toLocaleDateString()}</td>
                   <td class="num" data-label="Hours">${hrs === null ? 'In progress' : hrs.toFixed(2)}</td>
                   <td data-label="Stage / category">${stageLabel(e)}</td>
-                  ${pricingVisible ? `<td class="num" data-label="Cost">${cost === undefined ? '-' : money(cost)}</td>` : ''}
+                  ${isFinanceOrAdmin ? `<td class="num" data-label="Cost">${cost === undefined ? '-' : money(cost)}</td>` : ''}
                   ${isAdmin ? `<td><button type="button" class="secondary td-edit-btn" data-id="${e.id}" style="font-size:12px; padding:4px 8px;">Edit</button></td>` : ''}
                 </tr>
                 <tr class="td-edit-row" data-edit-for="${e.id}" style="display:none;"><td colspan="${colCount}"></td></tr>`;
               }).join('')}
             </tbody>
-            ${pricingVisible ? `<tfoot><tr><td colspan="${colCount - 1 - (isAdmin ? 1 : 0)}" style="text-align:right; font-weight:600;">Total labour cost</td><td class="num" style="font-weight:600;">${money(totalCost)}</td>${isAdmin ? '<td></td>' : ''}</tr></tfoot>` : ''}
+            ${isFinanceOrAdmin ? `<tfoot><tr><td colspan="${colCount - 1 - (isAdmin ? 1 : 0)}" style="text-align:right; font-weight:600;">Total labour cost</td><td class="num" style="font-weight:600;">${money(totalCost)}</td>${isAdmin ? '<td></td>' : ''}</tr></tfoot>` : ''}
           </table>`;
 
         if (!isAdmin) return;

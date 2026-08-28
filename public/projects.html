@@ -59,15 +59,12 @@
 
     async function loadProjects() {
       const listEl = document.getElementById('projects-list');
-      const [{ data: projects, error }, { data: poRows }, { data: timeEntries }, { data: profilesData }, { data: tiers }] = await Promise.all([
+      const [{ data: projects, error }, { data: poRows }] = await Promise.all([
         supabaseClient.from('projects')
           .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoices(labour_amount, material_amount, stc_amount))')
           .neq('pipeline_stage', 'archived')
           .order('created_at', { ascending: false }),
         supabaseClient.from('purchase_orders').select('project_id, amount, status, purchase_order_line_items(quantity, unit_cost)').neq('status', 'ordered'),
-        supabaseClient.from('time_entries').select('id, project_id, staff_id, clock_in, clock_out').not('clock_out', 'is', null).not('project_id', 'is', null),
-        supabaseClient.from('profiles').select('id, rate_tier_id, ordinary_rate, rate_1_5x, rate_2x'),
-        supabaseClient.from('billable_rate_tiers').select('id, sell_rate'),
       ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
@@ -81,72 +78,28 @@
         materialCostByProject[po.project_id] = (materialCostByProject[po.project_id] || 0) + total;
       });
 
-      // Actual labour cost, per project - each employee's real pay rate
-      // (profiles.ordinary_rate/rate_1_5x/rate_2x), banded by the same
-      // weekly overtime rule used on the job page: first 38 hrs in the pay
-      // week (Fri-Thu) at ordinary rate, 38-48 at 1.5x, 48+ at 2x. The
-      // threshold is on the employee's TOTAL hours that week across every
-      // project, so each touched (staff, pay week) needs its full set of
-      // entries - not just the ones on this project - to band correctly.
-      // Falls back to the billable sell rate only when a profile doesn't
-      // have real pay rates configured yet.
-      function getPayWeekStart(d) {
-        const diff = (d.getDay() - 5 + 7) % 7;
-        return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
-      }
-      function entryHours(te) { return (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000; }
-
-      const sellRateByProfile = {};
-      (profilesData || []).forEach(p => {
-        const tier = (tiers || []).find(t => t.id === p.rate_tier_id);
-        sellRateByProfile[p.id] = tier ? Number(tier.sell_rate) : 0;
-      });
-
-      const weekKeys = new Set();
-      (timeEntries || []).forEach(te => {
-        weekKeys.add(`${te.staff_id}|${getPayWeekStart(new Date(te.clock_in)).toISOString()}`);
-      });
-      const costById = new Map();
-      await Promise.all([...weekKeys].map(async (key) => {
-        const [staffId, wkIso] = key.split('|');
-        const wkStart = new Date(wkIso);
-        const wkEnd = new Date(wkStart);
-        wkEnd.setDate(wkEnd.getDate() + 7);
-        const { data: weekEntries } = await supabaseClient
-          .from('time_entries')
-          .select('id, clock_in, clock_out')
-          .eq('staff_id', staffId)
-          .gte('clock_in', wkStart.toISOString())
-          .lt('clock_in', wkEnd.toISOString())
-          .not('clock_out', 'is', null)
-          .order('clock_in', { ascending: true });
-
-        const profile = (profilesData || []).find(p => p.id === staffId);
-        const fallbackOrdinary = sellRateByProfile[staffId] || 0;
-        const ordinaryRate = Number(profile?.ordinary_rate) || fallbackOrdinary;
-        const rate15 = Number(profile?.rate_1_5x) || fallbackOrdinary * 1.5;
-        const rate2 = Number(profile?.rate_2x) || fallbackOrdinary * 2;
-        const bands = [{ from: 0, to: 38, rate: ordinaryRate }, { from: 38, to: 48, rate: rate15 }, { from: 48, to: Infinity, rate: rate2 }];
-
-        let cumulative = 0;
-        (weekEntries || []).forEach(te => {
-          const hours = entryHours(te);
-          const start = cumulative, end = cumulative + hours;
-          let cost = 0;
-          bands.forEach(band => {
-            const overlapStart = Math.max(start, band.from);
-            const overlapEnd = Math.min(end, band.to);
-            if (overlapEnd > overlapStart) cost += (overlapEnd - overlapStart) * band.rate;
-          });
-          costById.set(te.id, cost);
-          cumulative = end;
-        });
-      }));
-
+      // Actual labour cost, per project - computed entirely server-side
+      // (get-accrued-labour-cost.js) from each employee's real pay rate,
+      // banded by the same weekly overtime rule used on the job page, so
+      // an individual's ordinary_rate/rate_1_5x/rate_2x never has to reach
+      // this (or any) browser directly.
       const labourCostByProject = {};
-      (timeEntries || []).forEach(te => {
-        labourCostByProject[te.project_id] = (labourCostByProject[te.project_id] || 0) + (costById.get(te.id) || 0);
-      });
+      if (projects && projects.length) {
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/get-accrued-labour-cost', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ projectIds: projects.map(p => p.id) }),
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) {
+            Object.entries(data.byProject).forEach(([pid, info]) => { labourCostByProject[pid] = info.totalActualLabourCost; });
+          }
+        } catch (err) {
+          console.error('Accrued labour cost fetch failed:', err.message);
+        }
+      }
 
       allRows = (projects || []).map(p => {
         const totalQuoted = (p.cost_centres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
