@@ -777,13 +777,31 @@ async function checkCostCentreHasActivity(costCentre) {
 }
 
 // Deletes a project after the caller has already run the activity
-// check. Cascade behavior on cost_centres' foreign key isn't something
-// I can verify locally (that table predates the migration files I have
-// visibility into), so this explicitly cleans up dependent records in
-// the correct order rather than assuming the database will do it.
+// check (or, in dev mode, deliberately chosen to delete it anyway).
+// Cascade behavior on several of these foreign keys isn't something I
+// can verify locally (some of these tables predate the migration files
+// I have visibility into), so this explicitly cleans up every
+// dependent record in the correct order rather than assuming the
+// database will do it - invoices/purchase orders first (since old-style
+// invoices can reference a cost_centre directly), then the cost
+// centres themselves, then the project.
 async function deleteProject(projectId) {
   const { data: centres } = await supabaseClient.from('cost_centres').select('id').eq('project_id', projectId);
   const centreIds = (centres || []).map(c => c.id);
+
+  const { data: invoices } = await supabaseClient.from('invoices').select('id').eq('project_id', projectId);
+  const invoiceIds = (invoices || []).map(i => i.id);
+  if (invoiceIds.length) {
+    await supabaseClient.from('invoice_claims').delete().in('invoice_id', invoiceIds);
+    await supabaseClient.from('invoices').delete().in('id', invoiceIds);
+  }
+
+  const { data: pos } = await supabaseClient.from('purchase_orders').select('id').eq('project_id', projectId);
+  const poIds = (pos || []).map(po => po.id);
+  if (poIds.length) {
+    await supabaseClient.from('purchase_order_line_items').delete().in('purchase_order_id', poIds);
+    await supabaseClient.from('purchase_orders').delete().in('id', poIds);
+  }
 
   if (centreIds.length) {
     await supabaseClient.from('cost_centre_line_items').delete().in('cost_centre_id', centreIds);

@@ -238,44 +238,120 @@
         deleteBtn.textContent = 'Checking...';
         msg.innerHTML = '';
 
-        const blocked = [];
-        const clear = [];
+        // Dev mode can delete any job outright - invoices, POs, and their
+        // line items all cascade away cleanly with the project (their
+        // FKs are set up for it). Logged time is the one thing worth
+        // pausing on, since it's real payroll history - if any is
+        // attached, a picker lets it be moved to a different job instead
+        // of being destroyed along with this one.
+        const withReasons = [];
         for (const id of ids) {
           const project = rows.find(p => p.id === id);
           const reasons = await checkProjectHasActivity(project);
-          if (reasons.length) blocked.push({ project, reasons });
-          else clear.push(project);
+          withReasons.push({ project, reasons });
         }
 
-        const parts = [];
-        if (blocked.length) {
-          parts.push(`<div class="error-box">Not deleted, has real activity against it:<ul style="margin:6px 0 0 18px;">${blocked.map(b => `<li>${projectRef(b.project)} - ${b.reasons.join(', ')}</li>`).join('')}</ul></div>`);
-        }
-        if (!clear.length) {
-          msg.innerHTML = parts.join('');
-          deleteBtn.disabled = false;
-          refreshDeleteBtn();
-          return;
-        }
-        if (!confirm(`Delete ${clear.length} project${clear.length === 1 ? '' : 's'} permanently? This can't be undone.\n\n${clear.map(p => projectRef(p)).join('\n')}`)) {
+        if (!confirm(`Delete ${withReasons.length} project${withReasons.length === 1 ? '' : 's'} permanently? This can't be undone.\n\n${withReasons.map(w => `${projectRef(w.project)}${w.reasons.length ? ' (' + w.reasons.join(', ') + ')' : ''}`).join('\n')}`)) {
           deleteBtn.disabled = false;
           refreshDeleteBtn();
           return;
         }
 
         deleteBtn.textContent = 'Deleting...';
+        const skipped = [];
         try {
-          for (const p of clear) await deleteProject(p.id);
-          parts.push(`<div class="success-box">Deleted ${clear.length} project${clear.length === 1 ? '' : 's'}.</div>`);
-          msg.innerHTML = parts.join('');
+          for (const { project } of withReasons) {
+            const { count: timeCount } = await supabaseClient.from('time_entries').select('id', { count: 'exact', head: true }).eq('project_id', project.id);
+            if (timeCount > 0) {
+              const outcome = await openReassignHoursModal(project, timeCount, rows.filter(p => p.id !== project.id));
+              if (outcome.action === 'cancel') { skipped.push(project); continue; }
+              if (outcome.action === 'reassign') {
+                await supabaseClient.from('time_entries').update({ project_id: outcome.targetProjectId, cost_centre_id: null, selected_cost_centre_ids: null }).eq('project_id', project.id);
+              } else {
+                await supabaseClient.from('time_entries').delete().eq('project_id', project.id);
+              }
+            }
+            await deleteProject(project.id);
+          }
+          const deletedCount = withReasons.length - skipped.length;
+          msg.innerHTML = `<div class="success-box">Deleted ${deletedCount} project${deletedCount === 1 ? '' : 's'}.${skipped.length ? ` Skipped: ${skipped.map(p => projectRef(p)).join(', ')}.` : ''}</div>`;
           await loadProjects();
         } catch (err) {
-          parts.push(`<div class="error-box">${err.message}</div>`);
-          msg.innerHTML = parts.join('');
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
           deleteBtn.disabled = false;
           refreshDeleteBtn();
         }
       };
+    }
+
+    // Offers a choice for the logged time attached to a job about to be
+    // deleted: move it onto a different job (searched the same way as
+    // every other job picker in this app), or delete it along with the
+    // job. Resolves { action: 'reassign', targetProjectId } | { action:
+    // 'delete' } | { action: 'cancel' } (skip deleting this one job).
+    function openReassignHoursModal(project, timeCount, otherProjects) {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+        overlay.innerHTML = `
+          <div class="card" style="max-width:480px; width:100%;">
+            <h2>Move logged hours first</h2>
+            <p class="subtitle" style="margin-bottom:12px;">${projectRef(project)} has ${timeCount} logged time ${timeCount === 1 ? 'entry' : 'entries'}. Move them to a different job, or delete them along with this one.</p>
+            <label style="margin-top:0">Move hours to</label>
+            <input id="rh-job-search" placeholder="Search jobs..." autocomplete="off" />
+            <div id="rh-job-results" style="position:relative;"></div>
+            <p class="subtitle" id="rh-selected" style="margin-top:6px;"></p>
+            <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="rh-move-btn" disabled>Move hours &amp; delete</button>
+              <button type="button" class="secondary" id="rh-delete-hours-btn">Delete hours too</button>
+              <button type="button" class="secondary" id="rh-cancel-btn">Skip this job</button>
+            </div>
+            <div id="rh-msg"></div>
+          </div>`;
+        document.body.appendChild(overlay);
+
+        let targetProjectId = null;
+        let searchTimeout;
+        overlay.querySelector('#rh-job-search').addEventListener('input', (e) => {
+          clearTimeout(searchTimeout);
+          targetProjectId = null;
+          overlay.querySelector('#rh-move-btn').disabled = true;
+          const q = e.target.value.trim().toLowerCase();
+          const resultsEl = overlay.querySelector('#rh-job-results');
+          if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+          searchTimeout = setTimeout(() => {
+            const matches = otherProjects.filter(p => (p.name || '').toLowerCase().includes(q) || String(p.job_number || '').includes(q) || String(p.quote_number || '').includes(q)).slice(0, 8);
+            resultsEl.innerHTML = matches.length
+              ? `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+                  ${matches.map(p => `<div class="rh-job-pick" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
+                </div>`
+              : `<p class="subtitle" style="margin-top:4px;">No matches.</p>`;
+            resultsEl.querySelectorAll('.rh-job-pick').forEach(row => {
+              row.addEventListener('click', () => {
+                targetProjectId = row.dataset.id;
+                overlay.querySelector('#rh-job-search').value = row.dataset.label;
+                overlay.querySelector('#rh-selected').textContent = `Selected: ${row.dataset.label}`;
+                overlay.querySelector('#rh-move-btn').disabled = false;
+                resultsEl.innerHTML = '';
+              });
+            });
+          }, 200);
+        });
+
+        overlay.querySelector('#rh-move-btn').addEventListener('click', () => {
+          overlay.remove();
+          resolve({ action: 'reassign', targetProjectId });
+        });
+        overlay.querySelector('#rh-delete-hours-btn').addEventListener('click', () => {
+          if (!confirm(`Permanently delete ${timeCount} logged time ${timeCount === 1 ? 'entry' : 'entries'}? This can't be undone.`)) return;
+          overlay.remove();
+          resolve({ action: 'delete' });
+        });
+        overlay.querySelector('#rh-cancel-btn').addEventListener('click', () => {
+          overlay.remove();
+          resolve({ action: 'cancel' });
+        });
+      });
     }
 
     document.getElementById('project-search').addEventListener('input', renderProjects);
