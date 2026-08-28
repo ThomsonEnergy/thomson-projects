@@ -48,15 +48,6 @@
   <script src="/js/supabase-client.js?v=2"></script>
   <script src="/js/theme.js"></script>
   <script>
-    function licenceExpiryLabel(dateStr) {
-      if (!dateStr) return `<span class="subtitle">no expiry set</span>`;
-      const days = Math.ceil((new Date(dateStr) - new Date(new Date().toDateString())) / 86400000);
-      const dateLabel = new Date(dateStr).toLocaleDateString('en-AU');
-      if (days < 0) return `<span style="color:var(--red); font-weight:600;">expired ${dateLabel}</span>`;
-      if (days <= 30) return `<span style="color:var(--red); font-weight:600;">${dateLabel} (${days}d)</span>`;
-      return `<span class="subtitle">${dateLabel}</span>`;
-    }
-
     let teamCanEditTitles = false;
 
     async function loadTeam() {
@@ -97,7 +88,7 @@
             ${email ? `<p class="subtitle" style="margin:0 0 6px; font-size:12px;"><a class="link-quiet" href="mailto:${email}">${email}</a></p>` : ''}
             ${myLicences.length ? `
               <div style="text-align:left; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
-                ${myLicences.map(l => `<p style="margin:0 0 4px; font-size:11px;">${l.licence_name}: ${licenceExpiryLabel(l.expiry_date)}</p>`).join('')}
+                ${myLicences.map(l => `<p style="margin:0 0 4px; font-size:11px;">${l.licence_name}: ${l.licence_number || '<span class="subtitle">no number set</span>'}</p>`).join('')}
               </div>` : ''}
           </div>`;
       }).join('');
