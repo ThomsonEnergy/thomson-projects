@@ -6,6 +6,12 @@ status change. Read this when asked to check for bugs or update ideas.
 
 ## Open
 
+### Update idea: Task for office/general
+- **Reported:** 30 Aug 2026, 07:04 am by Jasper Thomson
+- **Page/feature:** Task page
+- **What they want:** Should be able to create a task on the task page and assign it to a job or office if it’s not job related eg. Take bins out or mow the lawn
+- **Record id:** 2acefc3e-f8fc-4670-a785-c386a8b4977d
+
 ### Update idea: Invoice structure
 - **Reported:** 28 Aug 2026, 11:28 pm by Jasper Thomson
 - **What they want:** Invoice should say Deposit on it when it’s a deposit invoice. Also in phone view the words run off the page
