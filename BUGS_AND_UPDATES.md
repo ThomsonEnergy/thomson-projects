@@ -6,6 +6,13 @@ status change. Read this when asked to check for bugs or update ideas.
 
 ## Open
 
+### Update idea: Invoice changes
+- **Reported:** 30 Aug 2026, 07:06 am by Jasper Thomson
+- **Page/feature:** Invoice page
+- **What they want:** Should be able to select the labour charge out rate and material cost same as a normal cost center for the stand alone invoice. 
+Also I don’t want people to be able to type in an invoice number. Should always be automated.
+- **Record id:** 785fdec5-a4ee-4e94-846d-1b99e1a3f32c
+
 ### Update idea: Task for office/general
 - **Reported:** 30 Aug 2026, 07:04 am by Jasper Thomson
 - **Page/feature:** Task page
