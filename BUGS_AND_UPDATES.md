@@ -6,6 +6,12 @@ status change. Read this when asked to check for bugs or update ideas.
 
 ## Open
 
+### Update idea: adding photos to jobs
+- **Reported:** 31 Aug 2026, 01:03 am by Jasper Thomson
+- **Page/feature:** job documents page.
+- **What they want:** Make it more user friendly to upload photos and videos. also show a preview of the photos eg. grid style. so we can scroll through to see which ophoto we want. rather than just a image name
+- **Record id:** 7b6245d9-2de2-4764-8f6c-053a85236845
+
 ### Update idea: POs
 - **Reported:** 31 Aug 2026, 12:14 am by Jasper Thomson
 - **Page/feature:** Purchase orders
