@@ -6,6 +6,12 @@ status change. Read this when asked to check for bugs or update ideas.
 
 ## Open
 
+### Update idea: POs
+- **Reported:** 31 Aug 2026, 12:14 am by Jasper Thomson
+- **Page/feature:** Purchase orders
+- **What they want:** When approving POs, allow a backorder function for each line item so if an item is backordered, we can tick that its backordered and select an ETA.
+- **Record id:** a60a93eb-9735-42c6-bd7e-02d6690b84b3
+
 ### Bug: Timesheets this week
 - **Reported:** 30 Aug 2026, 09:13 pm by Jasper Thomson
 - **Page/feature:** Timesheets
