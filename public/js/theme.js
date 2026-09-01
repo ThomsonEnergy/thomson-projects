@@ -12,7 +12,16 @@
 // showing.
 
 const TE_THEME_KEY = 'te-theme';
-const TE_THEME_DEFAULT = 'dark';
+
+// No saved preference yet: default phones/tablets to dark (pure black
+// background - genuinely saves battery on an OLED screen) and anything
+// with a mouse/trackpad to light. Once someone has an explicit
+// preference (saved locally or synced from their profile), that always
+// wins over this device guess.
+function detectDeviceDefaultTheme() {
+  return (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) ? 'dark' : 'navy';
+}
+const TE_THEME_DEFAULT = detectDeviceDefaultTheme();
 
 function applyThemeInstant() {
   const saved = localStorage.getItem(TE_THEME_KEY) || TE_THEME_DEFAULT;

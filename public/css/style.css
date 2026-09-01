@@ -7,7 +7,7 @@
    =================================================================== */
 :root,
 html[data-theme="dark"] {
-  --bg: #12161c;
+  --bg: #000000; /* true black, not just dark navy - saves real battery on an OLED screen */
   --surface: #1a2029;
   --surface-2: #212938;
   --border: #2c3444;
