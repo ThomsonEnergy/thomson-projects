@@ -134,8 +134,22 @@
       }
     });
 
-    function reportCardHtml(r, staffName) {
+    function commentHtml(c, staffName) {
+      const who = c.author_type === 'claude' ? 'Claude' : staffName(c.author_id);
+      const claudeStyle = c.author_type === 'claude' ? 'background:var(--panel-2, rgba(127,127,127,0.08));' : '';
+      return `
+        <div style="border-radius:6px; padding:8px 10px; margin-top:6px; ${claudeStyle} border:1px solid var(--border);">
+          <p class="subtitle" style="margin:0 0 4px; font-size:12px;"><strong style="color:var(--text);">${who}</strong> &middot; ${new Date(c.created_at).toLocaleString('en-AU')}</p>
+          <p style="margin:0; white-space:pre-wrap;">${c.body}</p>
+        </div>`;
+    }
+
+    function reportCardHtml(r, staffName, comments) {
       const typeBadge = r.report_type === 'bug' ? `<span class="badge draft" style="color:var(--red);">Bug</span>` : `<span class="badge sent">Update idea</span>`;
+      const approvedBadge = r.approved_at
+        ? `<span class="badge sent" style="margin-left:6px;">Approved ${new Date(r.approved_at).toLocaleDateString('en-AU')}${r.approved_by ? ' by ' + staffName(r.approved_by) : ''}</span>`
+        : (isDevModeActive() ? `<button type="button" class="secondary approve-report-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Approve</button>` : `<span class="subtitle" style="font-size:12px;">Not approved yet</span>`);
+      const reportComments = comments.filter(c => c.report_id === r.id);
       return `
         <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
@@ -144,23 +158,32 @@
               <strong style="margin-left:6px;">${r.title}</strong>
               ${r.page_or_feature ? `<p class="subtitle" style="margin:4px 0 0;">${r.page_or_feature}</p>` : ''}
             </div>
-            <p class="subtitle" style="margin:0; font-size:12px; white-space:nowrap;">${staffName} &middot; ${new Date(r.created_at).toLocaleDateString('en-AU')}</p>
+            <p class="subtitle" style="margin:0; font-size:12px; white-space:nowrap;">${staffName(r.created_by)} &middot; ${new Date(r.created_at).toLocaleDateString('en-AU')}</p>
           </div>
           <p style="margin:10px 0 0;">${r.description}</p>
           ${r.expected_behavior ? `<p class="subtitle" style="margin:6px 0 0;"><strong>Expected:</strong> ${r.expected_behavior}</p>` : ''}
-          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            ${approvedBadge}
             ${r.status !== 'in_progress' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="in_progress" style="font-size:12px; padding:6px 10px;">Mark in progress</button>` : ''}
             ${r.status !== 'resolved' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="resolved" style="font-size:12px; padding:6px 10px;">Mark resolved</button>` : ''}
             ${r.status !== 'open' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="open" style="font-size:12px; padding:6px 10px;">Reopen</button>` : ''}
             <button type="button" class="secondary delete-report-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Delete</button>
           </div>
+          <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
+            ${reportComments.length ? reportComments.map(c => commentHtml(c, staffName)).join('') : `<p class="subtitle" style="margin:0; font-size:12px;">No comments yet.</p>`}
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <input type="text" class="comment-input" data-id="${r.id}" placeholder="Reply..." style="flex:1; margin:0;" />
+              <button type="button" class="secondary comment-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px; white-space:nowrap;">Reply</button>
+            </div>
+          </div>
         </div>`;
     }
 
     async function loadReports() {
-      const [{ data: reports, error }, { data: staff }] = await Promise.all([
+      const [{ data: reports, error }, { data: staff }, { data: comments }] = await Promise.all([
         supabaseClient.from('bug_reports').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('profiles').select('id, full_name'),
+        supabaseClient.from('bug_report_comments').select('*').order('created_at', { ascending: true }),
       ]);
       if (error) {
         document.getElementById('open-list').innerHTML = `<div class="error-box">${error.message}</div>`;
@@ -168,6 +191,7 @@
       }
 
       const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'Someone';
+      const allComments = comments || [];
       const groups = {
         open: (reports || []).filter(r => r.status === 'open'),
         in_progress: (reports || []).filter(r => r.status === 'in_progress'),
@@ -179,13 +203,13 @@
       document.getElementById('count-resolved').textContent = groups.resolved.length;
 
       document.getElementById('open-list').innerHTML = groups.open.length
-        ? groups.open.map(r => reportCardHtml(r, staffName(r.created_by))).join('')
+        ? groups.open.map(r => reportCardHtml(r, staffName, allComments)).join('')
         : `<p class="subtitle">Nothing open right now.</p>`;
       document.getElementById('in-progress-list').innerHTML = groups.in_progress.length
-        ? groups.in_progress.map(r => reportCardHtml(r, staffName(r.created_by))).join('')
+        ? groups.in_progress.map(r => reportCardHtml(r, staffName, allComments)).join('')
         : `<p class="subtitle">Nothing in progress.</p>`;
       document.getElementById('resolved-list').innerHTML = groups.resolved.length
-        ? groups.resolved.map(r => reportCardHtml(r, staffName(r.created_by))).join('')
+        ? groups.resolved.map(r => reportCardHtml(r, staffName, allComments)).join('')
         : `<p class="subtitle">Nothing resolved yet.</p>`;
 
       document.querySelectorAll('.status-btn').forEach(btn => {
@@ -201,6 +225,29 @@
           if (!confirm('Delete this report permanently?')) return;
           const { error: delErr } = await supabaseClient.from('bug_reports').delete().eq('id', btn.dataset.id);
           if (delErr) { alert(delErr.message); return; }
+          await loadReports();
+          await syncToRepo();
+        });
+      });
+      document.querySelectorAll('.approve-report-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const { error: appErr } = await supabaseClient.from('bug_reports').update({ approved_at: new Date().toISOString(), approved_by: user.id }).eq('id', btn.dataset.id);
+          if (appErr) { alert(appErr.message); return; }
+          await loadReports();
+          await syncToRepo();
+        });
+      });
+      document.querySelectorAll('.comment-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const input = document.querySelector(`.comment-input[data-id="${btn.dataset.id}"]`);
+          const body = input.value.trim();
+          if (!body) return;
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const { error: cErr } = await supabaseClient.from('bug_report_comments').insert({
+            report_id: btn.dataset.id, author_type: 'staff', author_id: user.id, body,
+          });
+          if (cErr) { alert(cErr.message); return; }
           await loadReports();
           await syncToRepo();
         });

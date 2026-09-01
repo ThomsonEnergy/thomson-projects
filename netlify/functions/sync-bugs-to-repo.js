@@ -1,11 +1,15 @@
 // POST /.netlify/functions/sync-bugs-to-repo
-// Any active logged-in user. Called after every bug/update-idea submission
-// or status change on the Bugs & Updates page. Rebuilds BUGS_AND_UPDATES.md
-// in full from the current bug_reports table and commits it straight to
-// the GitHub repo via the Contents API - so a future Claude Code session
-// working in this same repo folder can just read that file, no database
-// access needed. Requires GITHUB_TOKEN (a token with contents:write on this
-// repo) set as a Netlify environment variable.
+// Any active logged-in user. Called after every bug/update-idea
+// submission, approval, status change, or comment on the Bugs & Updates
+// page. Rebuilds BUGS_AND_UPDATES.md in full from the current bug_reports
+// table and commits it straight to the GitHub repo via the Contents API -
+// so a scheduled Claude Code check can just read that file, no database
+// access needed. Requires GITHUB_TOKEN (a token with contents:write on
+// this repo) set as a Netlify environment variable.
+//
+// Only APPROVED reports are included - an unapproved report never shows
+// up here at all, so a scheduled check can never act on something that
+// hasn't actually been reviewed.
 
 const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
@@ -19,7 +23,7 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function buildMarkdown(reports, profilesById) {
+function buildMarkdown(reports, commentsByReport, profilesById) {
   const named = (r) => (r.created_by && profilesById[r.created_by]) || 'Someone';
   const groups = {
     open: reports.filter(r => r.status === 'open'),
@@ -33,11 +37,21 @@ function buildMarkdown(reports, profilesById) {
       const lines = [
         `### ${r.report_type === 'bug' ? 'Bug' : 'Update idea'}: ${r.title}`,
         `- **Reported:** ${fmtDate(r.created_at)} by ${named(r)}`,
+        `- **Approved:** ${fmtDate(r.approved_at)}${r.approved_by && profilesById[r.approved_by] ? ' by ' + profilesById[r.approved_by] : ''}`,
       ];
       if (r.page_or_feature) lines.push(`- **Page/feature:** ${r.page_or_feature}`);
       lines.push(`- **${r.report_type === 'bug' ? "What's happening" : 'What they want'}:** ${r.description}`);
       if (r.expected_behavior) lines.push(`- **Expected instead:** ${r.expected_behavior}`);
       lines.push(`- **Record id:** ${r.id}`);
+
+      const comments = commentsByReport[r.id] || [];
+      if (comments.length) {
+        lines.push('- **Comments:**');
+        comments.forEach(c => {
+          const who = c.author_type === 'claude' ? 'Claude' : (profilesById[c.author_id] || 'Someone');
+          lines.push(`  - *${who}, ${fmtDate(c.created_at)}:* ${c.body}`);
+        });
+      }
       return lines.join('\n');
     }).join('\n\n') + '\n';
   };
@@ -45,8 +59,12 @@ function buildMarkdown(reports, profilesById) {
   return `# Bugs & System Updates
 
 Auto-generated from the in-app Bugs & Updates page (/bugs.html) - do not
-edit this file by hand, it gets fully regenerated on every submission or
-status change. Read this when asked to check for bugs or update ideas.
+edit this file by hand, it gets fully regenerated on every submission,
+approval, status change, or comment. Only APPROVED reports appear here -
+read this when asked to check for bugs or update ideas, and only act on
+what's listed. If something here is ambiguous, leave a comment on the
+report (via add-agent-comment.js) asking for clarification instead of
+guessing, and skip it until it's answered.
 
 ${section('Open', groups.open)}
 ${section('In Progress', groups.in_progress)}
@@ -72,14 +90,21 @@ exports.handler = async (event) => {
     const { data: reports, error } = await auth.supabaseAdmin
       .from('bug_reports')
       .select('*')
+      .not('approved_at', 'is', null)
       .order('created_at', { ascending: false });
     if (error) throw error;
+
+    const { data: comments } = reports.length
+      ? await auth.supabaseAdmin.from('bug_report_comments').select('*').in('report_id', reports.map(r => r.id)).order('created_at', { ascending: true })
+      : { data: [] };
+    const commentsByReport = {};
+    (comments || []).forEach(c => { (commentsByReport[c.report_id] ||= []).push(c); });
 
     const { data: profiles } = await auth.supabaseAdmin.from('profiles').select('id, full_name');
     const profilesById = {};
     (profiles || []).forEach(p => { profilesById[p.id] = p.full_name; });
 
-    const markdown = buildMarkdown(reports || [], profilesById);
+    const markdown = buildMarkdown(reports || [], commentsByReport, profilesById);
     const contentBase64 = Buffer.from(markdown, 'utf-8').toString('base64');
 
     const apiBase = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${FILE_PATH}`;
