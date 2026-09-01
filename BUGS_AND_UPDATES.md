@@ -24,6 +24,14 @@ guessing, and skip it until it's answered.
 - **What they want:** When approving POs, allow a backorder function for each line item so if an item is backordered, we can tick that its backordered and select an ETA.
 - **Record id:** a60a93eb-9735-42c6-bd7e-02d6690b84b3
 
+### Bug: Timesheets this week
+- **Reported:** 30 Aug 2026, 09:13 pm by Jasper Thomson
+- **Approved:** 1 Sept 2026, 08:20 am by Jasper Thomson
+- **Page/feature:** Timesheets
+- **What's happening:** Timesheets count into the next day
+- **Expected instead:** Don’t allow timesheets to count past midnight. It should carry over to the following day. Also the in and out time should show there prominently. And when clicked on it should open the split so they can edit the clock in and clock out time and control the split between each cost center all in The one place. This should be the only place to do it I think we remove the recent timesheets tab at the bottom
+- **Record id:** 7bc8e931-3fc7-4dcd-a7d2-21b04669000c
+
 ## In Progress
 
 None.
