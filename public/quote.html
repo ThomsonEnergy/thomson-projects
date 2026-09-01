@@ -122,6 +122,9 @@
       const centres = data.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const total = centres.reduce((sum, c) => sum + Number(c.quoted_amount), 0);
       const stcTotal = centres.reduce((sum, c) => sum + Number(c.stc_total || 0), 0);
+      const gstAmount = Math.round(total * 0.10 * 100) / 100;
+      const totalIncGst = total + gstAmount;
+      const totalAfterStc = totalIncGst - stcTotal;
       const isAccepted = ['accepted', 'approved', 'in_progress', 'complete'].includes(project.status);
       const coverPhotos = (project.cover_photos || []).map(p => p.url || p).slice(0, 3);
       const referencePhotos = (project.reference_photos || []).map(p => p.url || p);
@@ -217,7 +220,7 @@
         <div class="card">
           <h2>Investment summary</h2>
           <table>
-            <thead><tr><th>Stage</th><th>Description</th><th class="num">Price</th></tr></thead>
+            <thead><tr><th>Stage</th><th>Description</th><th class="num">Price (ex GST)</th></tr></thead>
             <tbody>
               ${centres.map(c => `
                 <tr>
@@ -227,10 +230,13 @@
                 </tr>`).join('')}
             </tbody>
           </table>
-          <div style="text-align:right; margin-top:16px; font-size:20px; font-weight:700;">
-            Total: ${money(total)}
+          <div style="text-align:right; margin-top:16px;">
+            <p class="subtitle" style="margin:0;">Subtotal (ex GST): ${money(total)}</p>
+            <p class="subtitle" style="margin:2px 0 0;">GST (10%): ${money(gstAmount)}</p>
+            ${stcTotal > 0 ? `<p style="margin:12px 0 0; font-size:22px; font-weight:700; color:var(--green);">STC Credit: -${money(stcTotal)}</p>` : ''}
+            <p style="margin:${stcTotal > 0 ? '10px' : '16px'} 0 0; font-size:24px; font-weight:700;">Total${stcTotal > 0 ? ' after STC credit' : ' inc GST'}: ${money(stcTotal > 0 ? totalAfterStc : totalIncGst)}</p>
           </div>
-          ${stcTotal > 0 ? `<p class="subtitle" style="text-align:right; margin-top:8px;">Includes an estimated STC credit of ${money(stcTotal)}, applied against your invoice once the system is installed and registered.</p>` : ''}
+          ${stcTotal > 0 ? `<p class="subtitle" style="text-align:right; margin-top:8px;">The STC credit is applied against your invoice once the system is installed and registered - not a separate payment.</p>` : ''}
         </div>
 
         ${referenceHtml}
