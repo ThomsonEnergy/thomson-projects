@@ -1461,26 +1461,35 @@
         const selectedMode = overlay.querySelector('input[name="inv-mode"]:checked').value;
         if (selectedMode === 'project') {
           const pct = Math.max(0, Math.min(100, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
-          let targetTotal = projectRemaining * (pct / 100);
-          // Proportional-to-remaining, capped per stage, waterfalled: any
-          // amount a stage can't absorb (because pct x its remaining alone
-          // would be fine, but rounding/edge cases could push it over) is
-          // redistributed across stages that still have headroom.
           const allocated = {};
-          let pool = centres.map(x => ({ id: x.centre.id, cap: x.remaining, given: 0 }));
-          let toDistribute = targetTotal;
-          for (let pass = 0; pass < 3 && toDistribute > 0.004 && pool.some(p => p.given < p.cap); pass++) {
-            const headroomTotal = pool.reduce((s, p) => s + (p.cap - p.given), 0);
-            if (headroomTotal <= 0) break;
-            pool.forEach(p => {
-              const share = (p.cap - p.given) / headroomTotal * toDistribute;
-              const give = Math.min(share, p.cap - p.given);
-              p.given += give;
-            });
-            const given = pool.reduce((s, p) => s + p.given, 0);
-            toDistribute = targetTotal - given;
+          if (pct >= 100) {
+            // Exactly 100% - claim each stage's remaining balance verbatim,
+            // no proportional split or rounding involved. Matters because
+            // the STC pickup below needs amt to land EXACTLY on x.remaining
+            // (not a cent or two short from waterfall rounding), otherwise
+            // a "final claim" can silently leave the STC credit unclaimed.
+            centres.forEach(x => { allocated[x.centre.id] = x.remaining; });
+          } else {
+            let targetTotal = projectRemaining * (pct / 100);
+            // Proportional-to-remaining, capped per stage, waterfalled: any
+            // amount a stage can't absorb (because pct x its remaining alone
+            // would be fine, but rounding/edge cases could push it over) is
+            // redistributed across stages that still have headroom.
+            let pool = centres.map(x => ({ id: x.centre.id, cap: x.remaining, given: 0 }));
+            let toDistribute = targetTotal;
+            for (let pass = 0; pass < 3 && toDistribute > 0.004 && pool.some(p => p.given < p.cap); pass++) {
+              const headroomTotal = pool.reduce((s, p) => s + (p.cap - p.given), 0);
+              if (headroomTotal <= 0) break;
+              pool.forEach(p => {
+                const share = (p.cap - p.given) / headroomTotal * toDistribute;
+                const give = Math.min(share, p.cap - p.given);
+                p.given += give;
+              });
+              const given = pool.reduce((s, p) => s + p.given, 0);
+              toDistribute = targetTotal - given;
+            }
+            pool.forEach(p => { allocated[p.id] = Math.round(p.given * 100) / 100; });
           }
-          pool.forEach(p => { allocated[p.id] = Math.round(p.given * 100) / 100; });
           return centres.map(x => {
             const amt = allocated[x.centre.id] || 0;
             const { labourAmount, materialAmount } = splitLabourMaterial(x.centre, amt);

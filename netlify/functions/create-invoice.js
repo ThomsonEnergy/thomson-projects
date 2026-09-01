@@ -73,18 +73,30 @@ exports.handler = async (event) => {
     let overallClaimPercent = Number(claimPercent) || 100;
     let claimLabel = isJobClaim ? null : (description || null);
     if (isJobClaim) {
-      const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('quoted_amount').eq('project_id', projectId);
+      const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('id, quoted_amount, invoiced_amount').eq('project_id', projectId);
       const projectTotal = (allCentres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
       overallClaimPercent = projectTotal > 0 ? Math.round((totalAmount / projectTotal) * 10000) / 100 : null;
 
-      // "Progress claim N" - N is how many non-deposit invoices this job
-      // already has, +1. Counted in JS rather than a .neq() filter so a
-      // null description (every progress claim raised before this label
-      // existed) still correctly counts as "not the deposit", not gets
-      // silently excluded by SQL's null != 'Deposit' => null semantics.
-      const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
-      const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit').length;
-      claimLabel = `Progress claim ${priorProgressCount + 1}`;
+      // "Final claim" if this invoice brings every stage to fully
+      // invoiced, otherwise "Progress claim N" - N is how many non-
+      // deposit invoices this job already has, +1. Counted in JS rather
+      // than a .neq() filter so a null description (every progress claim
+      // raised before this label existed) still correctly counts as "not
+      // the deposit", not gets silently excluded by SQL's
+      // null != 'Deposit' => null semantics.
+      const isFinalClaim = (allCentres || []).every(c => {
+        const claimedForThisCentre = claimRows.find(cr => cr.cost_centre_id === c.id);
+        const newInvoiced = (Number(c.invoiced_amount) || 0) + (claimedForThisCentre ? claimedForThisCentre.labour_amount + claimedForThisCentre.material_amount : 0);
+        return newInvoiced >= (Number(c.quoted_amount) || 0) - 0.01;
+      });
+
+      if (isFinalClaim) {
+        claimLabel = 'Final claim';
+      } else {
+        const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
+        const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit' && inv.description !== 'Final claim').length;
+        claimLabel = `Progress claim ${priorProgressCount + 1}`;
+      }
     }
 
     const invoiceToken = crypto.randomUUID();
