@@ -114,6 +114,29 @@ button comes back with no summary or an error, check the Netlify function logs (
 Pylon response) against the current docs and adjust the field names in that file if Pylon's
 actual response differs.
 
+## Employee onboarding -> Xero Payroll
+
+New staff fill in their own tax/super/bank/emergency-contact details and sign the employment
+contract and company policies at `/onboarding.html` (redirected there automatically on login
+until `profiles.onboarding_completed_at` is set - see `requireLogin()` in
+`public/js/supabase-client.js`). An admin sets employment type/pay type/start date/vehicle first
+(under Settings > Users & Roles > a person's Profile) since the contract draft is generated from
+those fields, and reviews/edits the auto-filled draft before marking it ready to sign - nothing
+goes to the employee unreviewed. Policy/contract text itself lives in Settings > Onboarding
+Documents.
+
+Once onboarding is complete, an admin/finance user clicks "Push to Xero" (same Users & Roles
+page) to create the employee in Xero Payroll AU via `netlify/functions/sync-employee-to-xero.js`.
+This uses the same Xero Custom Connection already set up for invoices/timesheets, but creating
+an employee needs the `payroll.employees` scope specifically - this app's existing Custom
+Connection likely doesn't have it yet (add it under the app's settings in the Xero Developer
+portal). If the push fails, the button shows exactly why and falls back to a plain summary of
+everything collected, to key into Xero by hand - Xero's own bulk-CSV employee import doesn't
+cover TFN/bank/rates either way, so there's no CSV shortcut worth building here. On success, the
+returned Xero EmployeeID is stored in the existing `xero_employee_id` column, the same one
+`push-timesheets-to-xero.js` already reads - nothing else needs to change once that scope is
+granted.
+
 - Purchase orders and supplier invoices logged in this tool are kept separate from the
   labour/material actuals synced from ServiceM8, on purpose, so nothing gets double-counted.
   If your ServiceM8 account already tracks purchase costs (via the MyPO add-on or an accounting

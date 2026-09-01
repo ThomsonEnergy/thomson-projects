@@ -11,6 +11,19 @@ async function requireLogin() {
     window.location.href = '/login.html';
     return null;
   }
+
+  // Every page calls requireLogin() as its first act, so this is the one
+  // shared place to force incomplete onboarding to finish before anyone
+  // touches the rest of the app - covers all pages without editing each
+  // one individually.
+  if (!window.location.pathname.endsWith('/onboarding.html')) {
+    const { data: profile } = await supabaseClient.from('profiles').select('onboarding_completed_at').eq('id', session.user.id).maybeSingle();
+    if (profile && !profile.onboarding_completed_at) {
+      window.location.href = '/onboarding.html';
+      return null;
+    }
+  }
+
   return session;
 }
 
@@ -304,6 +317,73 @@ function calculateStcQuantity({ kw, zoneRating, installYear }) {
   const deemingYears = stcDeemingYears(installYear);
   if (!kw || !zoneRating || !deemingYears) return 0;
   return Math.floor(kw * zoneRating * deemingYears);
+}
+
+// Auto-fills the employment contract template's [bracket] placeholders and
+// resolves the CLEAN, non-nested full-time/part-time/casual alternations
+// (hire-status, hours of work, leave, Fair Work statement) - always an
+// ADMIN-REVIEWED DRAFT, never shown to the employee directly. A few
+// sections of the source template nest alternatives too deeply to safely
+// auto-resolve without real risk of silently dropping the wrong clause
+// (Remuneration/Superannuation's Option 1/2/3 sub-blocks, and Termination's
+// tags, renamed [MANUAL: ...] in the seed text) - those are deliberately
+// left bracketed/visible for the admin to resolve by hand, same as the
+// letter date and the "Additional Hourly Rate" figure (ambiguous against
+// this app's banded overtime rates, not something worth guessing on a
+// real contract).
+function generateContractDraft(profile, templateBody) {
+  const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+  const employmentLabel = { full_time: 'full-time', part_time: 'part-time', casual: 'casual' }[profile.employment_type] || '[full-time / part-time / casual]';
+
+  const lines = templateBody.split('\n');
+  const out = [];
+  let mode = null; // null = no active alternation (always include); true/false = current selection
+  for (const raw of lines) {
+    const tag = raw.trim().toLowerCase();
+    if (tag === '[for existing permanent part-time and full-time employees]') { mode = false; continue; }
+    if (tag === '[for all new employees]') { mode = true; continue; }
+    if (tag === '[for full-time employees]') { mode = profile.employment_type === 'full_time'; continue; }
+    if (tag === '[for part-time employees]') { mode = profile.employment_type === 'part_time'; continue; }
+    if (tag === '[for casual employees]') { mode = profile.employment_type === 'casual'; continue; }
+    if (tag === '[for full-time and part-time employees]' || tag === '[for full-time or part-time employees]') { mode = profile.employment_type !== 'casual'; continue; }
+    if (tag === '[end options]' || tag === '[end of options]') { mode = null; continue; }
+    if (mode === false) continue;
+
+    let line = raw;
+    if (line.includes('[insert for Hourly Rate employees, otherwise delete]')) {
+      if (profile.pay_type !== 'hourly') continue;
+      line = line.replace('[insert for Hourly Rate employees, otherwise delete] ', '');
+    }
+    if (line.includes('[insert for Annual Salary Employees, otherwise delete]')) {
+      if (profile.pay_type !== 'salary') continue;
+      line = line.replace('[insert for Annual Salary Employees, otherwise delete] ', '');
+    }
+    out.push(line);
+  }
+
+  // Section 7 "Fully Maintained Company Vehicle" is a whole optional
+  // clause (not a same-vs-alternative pair), so it's handled as its own
+  // contiguous range rather than the tag state machine above.
+  let body = out.join('\n');
+  if (!profile.has_company_vehicle) {
+    body = body.replace(/7\. Fully Maintained Company Vehicle[\s\S]*?(?=\n8\. Apparel)/, '');
+  }
+
+  const employeeAddress = profile.residential_address || '[insert employee address]';
+  const position = profile.job_title || '[insert position]';
+  const commencementDate = fmtDate(profile.employment_start_date);
+
+  body = body
+    .replaceAll('[insert Thomson Energy Australia Pty Ltd ACN 689 985 831 letterhead]', 'Thomson Energy Australia Pty Ltd\nACN 689 985 831')
+    .replaceAll('[insert employee name]', profile.full_name || '[insert employee name]')
+    .replaceAll('[insert employee]', profile.full_name || '[insert employee]')
+    .replaceAll('[insert employee address]', employeeAddress)
+    .replaceAll('[insert position]', position)
+    .replaceAll('[full-time / part-time / casual]', employmentLabel)
+    .replaceAll('[insert location of work]', 'various client sites within the Employer\'s service area, or as otherwise directed by the Employer')
+    .replaceAll('is [insert date] (Commencement Date)', commencementDate ? `is ${commencementDate} (Commencement Date)` : 'is [insert date] (Commencement Date)');
+
+  return body;
 }
 
 // Turns a project's raw pylon_data (the attributes object pulled from

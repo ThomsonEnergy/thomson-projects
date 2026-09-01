@@ -1,5 +1,5 @@
 // POST /api/create-user-with-password
-// Body: { email, full_name, role, password }
+// Body: { email, full_name, role, password, rate_tier_id?, ordinary_rate?, rate_1_5x?, rate_2x?, rate_2_5x? }
 // Admin-only. Creates the auth user directly with a password the admin
 // sets and gives to them out of band - for when invite emails aren't
 // reliably arriving. Skips the email confirmation flow entirely
@@ -53,7 +53,14 @@ exports.handler = async (event) => {
 
     const { error: profileErr } = await supabaseAdmin
       .from('profiles')
-      .upsert({ id: created.user.id, role, full_name: fullName, active: true });
+      .upsert({
+        id: created.user.id, role, full_name: fullName, active: true,
+        rate_tier_id: body.rate_tier_id || null,
+        ordinary_rate: parseFloat(body.ordinary_rate) || null,
+        rate_1_5x: parseFloat(body.rate_1_5x) || null,
+        rate_2x: parseFloat(body.rate_2x) || null,
+        rate_2_5x: parseFloat(body.rate_2_5x) || null,
+      });
     if (profileErr) throw profileErr;
 
     return { statusCode: 200, body: JSON.stringify({ success: true, id: created.user.id }) };

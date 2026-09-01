@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || 'dark');</script>
+<title>Welcome - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=9" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .ob-steps { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
+  .ob-step-pill {
+    padding:6px 14px; border-radius:999px; font-size:12px; font-weight:600;
+    background:var(--surface-2); color:var(--muted);
+  }
+  .ob-step-pill.active { background:var(--accent-dim); color:var(--accent); }
+  .ob-step-pill.done { background:var(--accent-dim); color:var(--green); }
+  .ob-doc-body { white-space:pre-wrap; line-height:1.6; max-height:320px; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px; margin-bottom:14px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <nav class="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Welcome to Thomson Energy</h1>
+    <p class="subtitle">A few things to get sorted before you start - this only needs doing once.</p>
+
+    <div class="ob-steps" id="ob-steps"></div>
+
+    <div id="ob-content"><p class="subtitle">Loading...</p></div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=2"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let myUserId;
+    let profile = {};
+    let documents = [];
+    let signatures = [];
+    let contract = null;
+    let currentStep = 1;
+    const TOTAL_STEPS = 4;
+
+    function renderSteps() {
+      const labels = ['Your details', 'Your pay rates', 'Documents', 'Finish'];
+      document.getElementById('ob-steps').innerHTML = labels.map((label, i) => {
+        const step = i + 1;
+        const cls = step === currentStep ? 'active' : (step < currentStep ? 'done' : '');
+        return `<span class="ob-step-pill ${cls}">${step}. ${label}</span>`;
+      }).join('');
+    }
+
+    function goToStep(step) {
+      currentStep = step;
+      renderSteps();
+      if (step === 1) renderDetailsStep();
+      else if (step === 2) renderRatesStep();
+      else if (step === 3) renderDocumentsStep();
+      else renderFinishStep();
+    }
+
+    // ---------- Step 1: details ----------
+    function renderDetailsStep() {
+      const content = document.getElementById('ob-content');
+      content.innerHTML = `
+        <div class="card">
+          <h2>Your details</h2>
+          <p class="subtitle" style="margin-bottom:14px;">This is what's needed to set you up correctly for pay - tax, super, and who to contact if there's an emergency on site.</p>
+
+          <div class="grid cols-2">
+            <div>
+              <label style="margin-top:0">Date of birth</label>
+              <input type="date" id="ob-dob" value="${profile.date_of_birth || ''}" />
+            </div>
+            <div>
+              <label style="margin-top:0">Tax file number</label>
+              <input id="ob-tfn" value="${profile.tax_file_number || ''}" />
+            </div>
+          </div>
+
+          <label style="margin-top:14px;">Residential address</label>
+          <input id="ob-address" value="${profile.residential_address || ''}" />
+
+          <label style="margin-top:14px; display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="ob-smsf-toggle" style="width:auto;" ${profile.super_is_self_managed ? 'checked' : ''} /> My super fund is self-managed (SMSF)
+          </label>
+
+          <div id="ob-super-standard" style="display:${profile.super_is_self_managed ? 'none' : 'block'};">
+            <div class="grid cols-2" style="margin-top:8px;">
+              <div>
+                <label style="margin-top:0">Super fund name</label>
+                <input id="ob-super-name" value="${profile.super_fund_name || ''}" />
+              </div>
+              <div>
+                <label style="margin-top:0">Fund ABN</label>
+                <input id="ob-super-abn" value="${profile.super_fund_abn || ''}" />
+              </div>
+            </div>
+            <label style="margin-top:8px;">Member number</label>
+            <input id="ob-super-member" value="${profile.super_member_number || ''}" />
+          </div>
+          <div id="ob-super-smsf" style="display:${profile.super_is_self_managed ? 'block' : 'none'};">
+            <div class="grid cols-2" style="margin-top:8px;">
+              <div>
+                <label style="margin-top:0">SMSF ABN</label>
+                <input id="ob-smsf-abn" value="${profile.smsf_abn || ''}" />
+              </div>
+              <div>
+                <label style="margin-top:0">SMSF bank BSB</label>
+                <input id="ob-smsf-bsb" value="${profile.smsf_bank_bsb || ''}" />
+              </div>
+            </div>
+            <div class="grid cols-2" style="margin-top:8px;">
+              <div>
+                <label style="margin-top:0">SMSF bank account number</label>
+                <input id="ob-smsf-account" value="${profile.smsf_bank_account || ''}" />
+              </div>
+              <div>
+                <label style="margin-top:0">Electronic service address (ESA)</label>
+                <input id="ob-smsf-esa" value="${profile.smsf_esa || ''}" />
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+            <p style="margin:0 0 8px; font-weight:600;">Bank account for pay</p>
+            <div class="grid cols-3">
+              <div>
+                <label style="margin-top:0">Account name</label>
+                <input id="ob-bank-name" value="${profile.bank_account_name || ''}" />
+              </div>
+              <div>
+                <label style="margin-top:0">BSB</label>
+                <input id="ob-bank-bsb" value="${profile.bank_bsb || ''}" />
+              </div>
+              <div>
+                <label style="margin-top:0">Account number</label>
+                <input id="ob-bank-account" value="${profile.bank_account_number || ''}" />
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+            <p style="margin:0 0 8px; font-weight:600;">Emergency contact</p>
+            <div class="grid cols-3">
+              <div>
+                <label style="margin-top:0">Name</label>
+                <input id="ob-em-name" value="${profile.emergency_contact_name || ''}" />
+              </div>
+              <div>
+                <label style="margin-top:0">Phone</label>
+                <input id="ob-em-phone" value="${profile.emergency_contact_phone || ''}" />
+              </div>
+              <div>
+                <label style="margin-top:0">Relationship</label>
+                <input id="ob-em-relationship" value="${profile.emergency_contact_relationship || ''}" />
+              </div>
+            </div>
+          </div>
+
+          <button id="ob-details-next-btn" style="margin-top:20px;">Save &amp; continue</button>
+          <div id="ob-details-msg"></div>
+        </div>`;
+
+      document.getElementById('ob-smsf-toggle').addEventListener('change', (e) => {
+        document.getElementById('ob-super-standard').style.display = e.target.checked ? 'none' : 'block';
+        document.getElementById('ob-super-smsf').style.display = e.target.checked ? 'block' : 'none';
+      });
+
+      document.getElementById('ob-details-next-btn').addEventListener('click', async () => {
+        const msg = document.getElementById('ob-details-msg');
+        const isSmsf = document.getElementById('ob-smsf-toggle').checked;
+        const updates = {
+          date_of_birth: document.getElementById('ob-dob').value || null,
+          tax_file_number: document.getElementById('ob-tfn').value.trim() || null,
+          residential_address: document.getElementById('ob-address').value.trim() || null,
+          super_is_self_managed: isSmsf,
+          super_fund_name: isSmsf ? null : document.getElementById('ob-super-name').value.trim() || null,
+          super_fund_abn: isSmsf ? null : document.getElementById('ob-super-abn').value.trim() || null,
+          super_member_number: isSmsf ? null : document.getElementById('ob-super-member').value.trim() || null,
+          smsf_abn: isSmsf ? document.getElementById('ob-smsf-abn').value.trim() || null : null,
+          smsf_bank_bsb: isSmsf ? document.getElementById('ob-smsf-bsb').value.trim() || null : null,
+          smsf_bank_account: isSmsf ? document.getElementById('ob-smsf-account').value.trim() || null : null,
+          smsf_esa: isSmsf ? document.getElementById('ob-smsf-esa').value.trim() || null : null,
+          bank_account_name: document.getElementById('ob-bank-name').value.trim() || null,
+          bank_bsb: document.getElementById('ob-bank-bsb').value.trim() || null,
+          bank_account_number: document.getElementById('ob-bank-account').value.trim() || null,
+          emergency_contact_name: document.getElementById('ob-em-name').value.trim() || null,
+          emergency_contact_phone: document.getElementById('ob-em-phone').value.trim() || null,
+          emergency_contact_relationship: document.getElementById('ob-em-relationship').value.trim() || null,
+        };
+        const { error } = await supabaseClient.from('profiles').update(updates).eq('id', myUserId);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        Object.assign(profile, updates);
+        goToStep(2);
+      });
+    }
+
+    // ---------- Step 2: pay rates (read-only) ----------
+    function renderRatesStep() {
+      const content = document.getElementById('ob-content');
+      const rateRow = (label, value) => `
+        <div>
+          <p class="subtitle" style="margin:0 0 2px; font-size:11px; text-transform:uppercase; letter-spacing:0.04em;">${label}</p>
+          <p style="margin:0; font-size:18px; font-weight:700;">${value ? money(value) + '/hr' : '-'}</p>
+        </div>`;
+      content.innerHTML = `
+        <div class="card">
+          <h2>Your pay rates</h2>
+          <p class="subtitle" style="margin-bottom:14px;">Set by an admin - here for your reference. Get in touch with them if anything looks off.</p>
+          <div class="grid cols-4">
+            ${rateRow('Ordinary', profile.ordinary_rate)}
+            ${rateRow('1.5x', profile.rate_1_5x)}
+            ${rateRow('2x', profile.rate_2x)}
+            ${rateRow('2.5x', profile.rate_2_5x)}
+          </div>
+          <button id="ob-rates-next-btn" style="margin-top:20px;">Continue</button>
+        </div>`;
+      document.getElementById('ob-rates-next-btn').addEventListener('click', () => goToStep(3));
+    }
+
+    // ---------- Step 3: documents to review & sign ----------
+    function isSigned(documentId) {
+      return signatures.some(s => s.document_id === documentId);
+    }
+
+    function visibleDocsForStep3() {
+      // The contract only appears once an admin has reviewed the
+      // auto-filled draft and marked it ready - never the raw template.
+      return documents.filter(d => !d.is_contract || (contract && contract.status === 'ready_to_sign'));
+    }
+
+    function renderDocumentsStep() {
+      const content = document.getElementById('ob-content');
+      const visible = visibleDocsForStep3();
+      const contractPending = documents.some(d => d.is_contract) && (!contract || contract.status === 'draft');
+      const allSigned = visible.every(d => isSigned(d.id)) && !contractPending;
+
+      content.innerHTML = `
+        <div class="card">
+          <h2>Documents to review &amp; sign</h2>
+          ${contractPending ? `<div class="error-box" style="margin-bottom:14px;">Your employment contract is still being prepared by an admin - check back soon. You can still review and sign everything else below in the meantime.</div>` : ''}
+          <div id="ob-doc-list"></div>
+          ${contractPending ? `<button type="button" class="secondary" id="ob-doc-refresh-btn" style="margin-top:10px;">Refresh</button>` : ''}
+          <button id="ob-doc-next-btn" style="margin-top:20px; display:${allSigned ? 'inline-flex' : 'none'};">Continue</button>
+          ${!allSigned ? `<p class="subtitle" style="margin-top:14px;">Sign everything above to continue.</p>` : ''}
+        </div>`;
+
+      const listEl = document.getElementById('ob-doc-list');
+      listEl.innerHTML = visible.map(d => {
+        const signed = isSigned(d.id);
+        return `
+          <div style="padding:14px 0; border-bottom:1px solid var(--border);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <p style="margin:0; font-weight:600;">${d.title}</p>
+              ${signed ? '<span class="badge accepted">Signed</span>' : ''}
+            </div>
+            ${signed ? '' : `
+              <div class="ob-doc-body">${d.is_contract ? contract.generated_body : d.body}</div>
+              <button type="button" class="secondary ob-sign-btn" data-id="${d.id}">Review &amp; sign</button>
+            `}
+          </div>`;
+      }).join('') || '<p class="subtitle">Nothing to sign right now.</p>';
+
+      listEl.querySelectorAll('.ob-sign-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const doc = visible.find(d => d.id === btn.dataset.id);
+          openSignPanel(doc);
+        });
+      });
+
+      const refreshBtn = document.getElementById('ob-doc-refresh-btn');
+      if (refreshBtn) refreshBtn.addEventListener('click', async () => { await loadOnboardingData(); goToStep(3); });
+
+      const nextBtn = document.getElementById('ob-doc-next-btn');
+      if (nextBtn) nextBtn.addEventListener('click', () => goToStep(4));
+    }
+
+    // Same canvas signature pattern used for quote variations elsewhere
+    // in this app (public/project.html) - draw, capture as a PNG data
+    // URL, store alongside the signer's name and a snapshot of exactly
+    // what they signed.
+    function openSignPanel(doc) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      const bodyText = doc.is_contract ? contract.generated_body : doc.body;
+      overlay.innerHTML = `
+        <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>${doc.title}</h2>
+          <div class="ob-doc-body" style="max-height:260px;">${bodyText}</div>
+
+          <label style="margin-top:0">Your full name</label>
+          <input id="sign-name-input" placeholder="Full name" value="${profile.full_name || ''}" />
+
+          <label>Signature</label>
+          <canvas id="sign-canvas" width="460" height="150" style="border:1px solid var(--border); border-radius:8px; background:#fff; touch-action:none; width:100%; max-width:460px; height:150px; display:block;"></canvas>
+          <button type="button" class="secondary" id="sign-clear-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Clear signature</button>
+
+          <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="sign-confirm-btn">Sign &amp; continue</button>
+            <button type="button" class="secondary" id="sign-cancel-btn">Cancel</button>
+          </div>
+          <div id="sign-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      const canvas = overlay.querySelector('#sign-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      let drawing = false, hasSignature = false;
+      const pointerPos = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas.height / rect.height) };
+      };
+      canvas.addEventListener('pointerdown', (e) => { drawing = true; hasSignature = true; const p = pointerPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+      canvas.addEventListener('pointermove', (e) => { if (!drawing) return; const p = pointerPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+      const stopDrawing = () => { drawing = false; };
+      canvas.addEventListener('pointerup', stopDrawing);
+      canvas.addEventListener('pointerleave', stopDrawing);
+      overlay.querySelector('#sign-clear-btn').addEventListener('click', () => { ctx.clearRect(0, 0, canvas.width, canvas.height); hasSignature = false; });
+      overlay.querySelector('#sign-cancel-btn').addEventListener('click', () => overlay.remove());
+
+      overlay.querySelector('#sign-confirm-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#sign-msg');
+        const signedByName = overlay.querySelector('#sign-name-input').value.trim();
+        if (!signedByName) { msg.innerHTML = `<div class="error-box">Enter your name.</div>`; return; }
+        if (!hasSignature) { msg.innerHTML = `<div class="error-box">Draw a signature.</div>`; return; }
+        const { error } = await supabaseClient.from('onboarding_document_signatures').insert({
+          profile_id: myUserId,
+          document_id: doc.id,
+          document_title_snapshot: doc.title,
+          document_body_snapshot: bodyText,
+          signature_data_url: canvas.toDataURL('image/png'),
+          signed_by_name: signedByName,
+          signed_at: new Date().toISOString(),
+        });
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        overlay.remove();
+        await loadOnboardingData();
+        goToStep(3);
+      });
+    }
+
+    // ---------- Step 4: finish ----------
+    function renderFinishStep() {
+      const content = document.getElementById('ob-content');
+      const visible = visibleDocsForStep3();
+      const allSigned = visible.length && visible.every(d => isSigned(d.id));
+      content.innerHTML = `
+        <div class="card">
+          <h2>All set</h2>
+          <p class="subtitle" style="margin-bottom:14px;">${allSigned ? 'Everything\'s reviewed and signed - you\'re done.' : 'Go back and sign everything in the previous step first.'}</p>
+          <button id="ob-finish-btn" ${allSigned ? '' : 'disabled'}>Finish onboarding</button>
+          <div id="ob-finish-msg"></div>
+        </div>`;
+      document.getElementById('ob-finish-btn').addEventListener('click', async () => {
+        const msg = document.getElementById('ob-finish-msg');
+        const { error } = await supabaseClient.from('profiles').update({ onboarding_completed_at: new Date().toISOString() }).eq('id', myUserId);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        window.location.href = '/home.html';
+      });
+    }
+
+    async function loadOnboardingData() {
+      // Sensitive/masked columns (TFN, address, super, pay rates, ...)
+      // are revoked at the column level on the base table - they only
+      // come back through the *_secure views, merged in below. A plain
+      // select('*') here would error out for everyone, self included.
+      const [{ data: p }, { data: sensitive }, { data: rates }, { data: docs }, { data: sigs }, { data: c }] = await Promise.all([
+        supabaseClient.from('profiles').select(`
+          id, full_name, date_of_birth, employment_type, employment_start_date, pay_type, annual_salary, salary_includes_super,
+          has_company_vehicle, super_fund_name, super_is_self_managed, bank_account_name, bank_bsb, bank_account_number,
+          emergency_contact_name, emergency_contact_relationship, onboarding_completed_at
+        `).eq('id', myUserId).single(),
+        supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', myUserId).maybeSingle(),
+        supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', myUserId).maybeSingle(),
+        supabaseClient.from('onboarding_documents').select('*').order('sort_order'),
+        supabaseClient.from('onboarding_document_signatures').select('id, document_id').eq('profile_id', myUserId),
+        supabaseClient.from('employee_contracts').select('*').eq('profile_id', myUserId).maybeSingle(),
+      ]);
+      profile = p || {};
+      if (sensitive) Object.assign(profile, sensitive);
+      if (rates) Object.assign(profile, rates);
+      documents = docs || [];
+      signatures = sigs || [];
+      contract = c || null;
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      myUserId = session.user.id;
+      syncThemeFromProfile();
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      await loadOnboardingData();
+      goToStep(1);
+    })();
+  </script>
+</body>
+</html>

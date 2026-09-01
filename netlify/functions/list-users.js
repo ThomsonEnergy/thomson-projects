@@ -22,7 +22,7 @@ exports.handler = async (event) => {
 
     const { data: profiles, error: profileErr } = await supabaseAdmin
       .from('profiles')
-      .select('id, role, active, full_name, xero_employee_id');
+      .select('id, role, active, full_name, xero_employee_id, onboarding_completed_at, xero_payroll_status, xero_payroll_error');
     if (profileErr) throw profileErr;
 
     const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
@@ -37,6 +37,9 @@ exports.handler = async (event) => {
       role: profileById[u.id]?.role || 'staff',
       xero_employee_id: profileById[u.id]?.xero_employee_id || '',
       active: profileById[u.id]?.active ?? true,
+      onboarding_completed_at: profileById[u.id]?.onboarding_completed_at || null,
+      xero_payroll_status: profileById[u.id]?.xero_payroll_status || 'pending',
+      xero_payroll_error: profileById[u.id]?.xero_payroll_error || '',
     }));
 
     return { statusCode: 200, body: JSON.stringify({ users }) };

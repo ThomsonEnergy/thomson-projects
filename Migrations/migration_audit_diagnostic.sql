@@ -177,4 +177,10 @@ select '063', 'job_task_types',
 union all
 select '064', 'stc_calculator',
   case when exists (select 1 from information_schema.columns where table_name = 'cost_centres' and column_name = 'stc_system_kw') then 'present' else 'MISSING' end
+union all
+select '065', 'employee_onboarding',
+  case when exists (select 1 from information_schema.tables where table_name = 'employee_contracts') then 'present' else 'MISSING' end
+union all
+select '066', 'onboarding_document_seed',
+  case when exists (select 1 from onboarding_documents where is_contract) then 'present' else 'MISSING' end
 order by 1;

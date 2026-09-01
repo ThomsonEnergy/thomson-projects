@@ -60,6 +60,7 @@
         <button class="settings-tab" data-panel="photos">Photo Categories</button>
         <button class="settings-tab" data-panel="prebuilds" data-pricing-only="1">Prebuild Categories</button>
         <button class="settings-tab" data-panel="users" data-admin-only="1">Users &amp; Roles</button>
+        <button class="settings-tab" data-panel="onboarding-docs" data-admin-only="1">Onboarding Documents</button>
         <button class="settings-tab" data-panel="apikeys" data-admin-only="1" data-dev-only="1">API Keys</button>
         <button class="settings-tab" data-panel="insurance" data-admin-only="1">Insurance &amp; Licensing</button>
         <button class="settings-tab" data-panel="appearance">Appearance</button>
@@ -478,6 +479,33 @@
               <p class="subtitle" style="margin:4px 0 0;">Give this to them yourself - in person, by phone, however's reliable. They can change it once logged in via password reset.</p>
             </div>
 
+            <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+              <label style="margin-top:0">Rate tier (for quoting - see Settings &gt; Billable Rates)</label>
+              <select id="invite-rate-tier">
+                <option value="">-- None --</option>
+              </select>
+
+              <p class="subtitle" style="margin:14px 0 8px;">Pay rates (optional - can also be set later from their profile).</p>
+              <div class="grid cols-4">
+                <div>
+                  <label style="margin-top:0">Ordinary ($/hr)</label>
+                  <input id="invite-rate-ordinary" type="number" step="0.01" />
+                </div>
+                <div>
+                  <label style="margin-top:0">1.5x ($/hr)</label>
+                  <input id="invite-rate-1-5x" type="number" step="0.01" />
+                </div>
+                <div>
+                  <label style="margin-top:0">2x ($/hr)</label>
+                  <input id="invite-rate-2x" type="number" step="0.01" />
+                </div>
+                <div>
+                  <label style="margin-top:0">2.5x ($/hr)</label>
+                  <input id="invite-rate-2-5x" type="number" step="0.01" />
+                </div>
+              </div>
+            </div>
+
             <button id="invite-btn" style="margin-top:14px;">Add user</button>
             <div id="invite-msg"></div>
           </div>
@@ -485,6 +513,16 @@
           <div class="card">
             <h2>Team</h2>
             <div id="users-list"><p class="subtitle">Loading...</p></div>
+          </div>
+        </div>
+
+        <!-- Onboarding Documents -->
+        <div class="settings-panel" id="panel-onboarding-docs" data-admin-only="1">
+          <div class="card">
+            <h2>Documents new staff review &amp; sign</h2>
+            <p class="subtitle" style="margin-bottom:10px;">The employment contract is a template with placeholders - it's auto-filled per new hire and reviewed here (in Users &amp; Roles &gt; a person's Profile) before they see it, rather than edited directly. Everything else here is shown to staff exactly as written below.</p>
+            <div id="onboarding-docs-list"><p class="subtitle">Loading...</p></div>
+            <button type="button" class="secondary" id="add-onboarding-doc-btn" style="margin-top:10px;">+ Add document</button>
           </div>
         </div>
 
@@ -786,6 +824,12 @@
     async function loadRateTiers() {
       const listEl = document.getElementById('rate-tiers-list');
       const { data, error } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
+
+      const inviteTierSelect = document.getElementById('invite-rate-tier');
+      if (inviteTierSelect) {
+        inviteTierSelect.innerHTML = `<option value="">-- None --</option>${(data || []).map(t => `<option value="${t.id}">${t.name}</option>`).join('')}`;
+      }
+
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (!data.length) { listEl.innerHTML = `<p class="subtitle">No rate tiers yet - add one below.</p>`; return; }
 
@@ -1397,14 +1441,20 @@
       // finance (or the row's own owner) at the database level, so a
       // direct select on profiles can no longer see them at all.
       const { data: profile, error } = await supabaseClient.from('profiles')
-        .select('id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id, bank_account_name, bank_bsb, bank_account_number')
+        .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id, bank_account_name, bank_bsb, bank_account_number,
+          date_of_birth, employment_type, employment_start_date, pay_type, annual_salary, salary_includes_super, has_company_vehicle,
+          super_fund_name, super_is_self_managed, emergency_contact_name, emergency_contact_relationship, onboarding_completed_at`)
         .eq('id', userId).single();
       const { data: rates } = await supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle();
+      const { data: sensitive } = await supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', userId).maybeSingle();
       const { data: licences } = await supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date');
       const { data: allowances } = await supabaseClient.from('employee_allowances').select('*').eq('profile_id', userId);
       const { data: rateTiers } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
+      const { data: contract } = await supabaseClient.from('employee_contracts').select('*').eq('profile_id', userId).maybeSingle();
+      const { data: contractTemplate } = await supabaseClient.from('onboarding_documents').select('*').eq('is_contract', true).maybeSingle();
       if (error) { overlay.querySelector('.card').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (rates) Object.assign(profile, rates);
+      if (sensitive) Object.assign(profile, sensitive);
 
       function renderLicenceRows(list) {
         return (list || []).map(l => `
@@ -1484,6 +1534,86 @@
           <button type="button" class="secondary" id="add-allowance-btn" style="font-size:12px; padding:6px 10px;">+ Add allowance</button>
         </div>
 
+        <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+          <p style="margin:0 0 10px; font-weight:600;">Onboarding &amp; payroll ${profile.onboarding_completed_at ? '<span class="badge accepted" style="font-weight:400;">Onboarding complete</span>' : '<span class="badge draft" style="font-weight:400;">Onboarding not started</span>'}</p>
+
+          <div class="grid cols-3">
+            <div>
+              <label style="margin-top:0">Employment type</label>
+              <select id="profile-employment-type">
+                <option value="">-- Not set --</option>
+                <option value="full_time" ${profile.employment_type === 'full_time' ? 'selected' : ''}>Full-time</option>
+                <option value="part_time" ${profile.employment_type === 'part_time' ? 'selected' : ''}>Part-time</option>
+                <option value="casual" ${profile.employment_type === 'casual' ? 'selected' : ''}>Casual</option>
+              </select>
+            </div>
+            <div>
+              <label style="margin-top:0">Start date</label>
+              <input type="date" id="profile-start-date" value="${profile.employment_start_date || ''}" />
+            </div>
+            <div>
+              <label style="margin-top:0">Pay type</label>
+              <select id="profile-pay-type">
+                <option value="hourly" ${profile.pay_type !== 'salary' ? 'selected' : ''}>Hourly</option>
+                <option value="salary" ${profile.pay_type === 'salary' ? 'selected' : ''}>Salary</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid cols-3" style="margin-top:10px;">
+            <div>
+              <label style="margin-top:0">Annual salary (if salaried)</label>
+              <input type="number" step="0.01" id="profile-annual-salary" value="${profile.annual_salary || ''}" />
+            </div>
+            <div>
+              <label style="margin-top:22px; display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" id="profile-salary-inc-super" style="width:auto;" ${profile.salary_includes_super !== false ? 'checked' : ''} /> Salary includes super
+              </label>
+            </div>
+            <div>
+              <label style="margin-top:22px; display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" id="profile-has-vehicle" style="width:auto;" ${profile.has_company_vehicle ? 'checked' : ''} /> Gets a company vehicle
+              </label>
+            </div>
+          </div>
+
+          <p class="subtitle" style="margin:14px 0 8px;">Sensitive - visible here and to the person themself only. Mostly filled in by the employee via their own onboarding.</p>
+          <div class="grid cols-2">
+            <div>
+              <label style="margin-top:0">Date of birth</label>
+              <input type="date" id="profile-dob" value="${profile.date_of_birth || ''}" />
+            </div>
+            <div>
+              <label style="margin-top:0">Tax file number</label>
+              <input id="profile-tfn" value="${profile.tax_file_number || ''}" />
+            </div>
+          </div>
+          <label style="margin-top:10px;">Residential address</label>
+          <input id="profile-address" value="${profile.residential_address || ''}" />
+          <div class="grid cols-2" style="margin-top:10px;">
+            <div>
+              <label style="margin-top:0">Emergency contact</label>
+              <input id="profile-emergency-name" value="${profile.emergency_contact_name || ''}" placeholder="Name" />
+            </div>
+            <div>
+              <label style="margin-top:0">Relationship</label>
+              <input id="profile-emergency-relationship" value="${profile.emergency_contact_relationship || ''}" />
+            </div>
+          </div>
+          <p class="subtitle" style="margin:10px 0 0;">Super fund: ${profile.super_is_self_managed ? 'Self-managed (SMSF)' : (profile.super_fund_name || 'Not yet provided')}</p>
+        </div>
+
+        <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+          <p style="margin:0 0 8px; font-weight:600;">Employment contract ${contract ? `<span class="badge ${contract.status === 'signed' ? 'accepted' : contract.status === 'ready_to_sign' ? 'sent' : 'draft'}" style="font-weight:400;">${contract.status.replace('_', ' ')}</span>` : ''}</p>
+          <p class="subtitle" style="margin-bottom:8px;">Auto-filled from the fields above against the contract template (edit the raw template under Settings &gt; Onboarding Documents). Review and edit below, then mark ready to sign - the employee only sees it once you do.</p>
+          <button type="button" class="secondary" id="generate-contract-btn" style="font-size:12px; padding:6px 10px; margin-bottom:8px;" ${contractTemplate ? '' : 'disabled'}>${contract ? 'Regenerate draft' : 'Generate draft'}</button>
+          <textarea id="profile-contract-body" style="min-height:220px; font-family:monospace; font-size:12px; ${contract ? '' : 'display:none;'}">${contract ? contract.generated_body : ''}</textarea>
+          <div style="margin-top:8px; display:${contract ? 'flex' : 'none'}; gap:8px;" id="contract-action-row">
+            <button type="button" class="secondary" id="save-contract-draft-btn" style="font-size:12px; padding:6px 10px;">Save draft</button>
+            <button type="button" class="secondary" id="mark-contract-ready-btn" style="font-size:12px; padding:6px 10px;" ${contract && contract.status === 'ready_to_sign' ? 'disabled' : ''}>Mark ready to sign</button>
+          </div>
+          <div id="contract-msg"></div>
+        </div>
+
         <div style="margin-top:16px;">
           <button id="save-profile-btn">Save</button>
           <button type="button" class="secondary" id="close-profile-btn">Close</button>
@@ -1544,6 +1674,17 @@
             rate_1_5x: parseFloat(overlay.querySelector('#profile-rate-1-5x').value) || null,
             rate_2x: parseFloat(overlay.querySelector('#profile-rate-2x').value) || null,
             rate_2_5x: parseFloat(overlay.querySelector('#profile-rate-2-5x').value) || null,
+            employment_type: overlay.querySelector('#profile-employment-type').value || null,
+            employment_start_date: overlay.querySelector('#profile-start-date').value || null,
+            pay_type: overlay.querySelector('#profile-pay-type').value,
+            annual_salary: parseFloat(overlay.querySelector('#profile-annual-salary').value) || null,
+            salary_includes_super: overlay.querySelector('#profile-salary-inc-super').checked,
+            has_company_vehicle: overlay.querySelector('#profile-has-vehicle').checked,
+            date_of_birth: overlay.querySelector('#profile-dob').value || null,
+            tax_file_number: overlay.querySelector('#profile-tfn').value.trim() || null,
+            residential_address: overlay.querySelector('#profile-address').value.trim() || null,
+            emergency_contact_name: overlay.querySelector('#profile-emergency-name').value.trim() || null,
+            emergency_contact_relationship: overlay.querySelector('#profile-emergency-relationship').value.trim() || null,
           };
           if (photoPreview.dataset.newUrl) updates.photo_url = photoPreview.dataset.newUrl;
 
@@ -1590,6 +1731,84 @@
           saveBtn.textContent = 'Save';
         }
       });
+
+      overlay.querySelector('#generate-contract-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#contract-msg');
+        if (!contractTemplate) { msg.innerHTML = `<div class="error-box">No contract template found - add one under Settings &gt; Onboarding Documents first.</div>`; return; }
+        if (!profile.employment_type) { msg.innerHTML = `<div class="error-box">Set an employment type above first (it drives which contract clauses apply).</div>`; return; }
+        const draftBody = generateContractDraft(profile, contractTemplate.body);
+        const { error: contractErr } = await supabaseClient.from('employee_contracts')
+          .upsert({ profile_id: userId, generated_body: draftBody, status: 'draft', updated_at: new Date().toISOString() }, { onConflict: 'profile_id' });
+        if (contractErr) { msg.innerHTML = `<div class="error-box">${contractErr.message}</div>`; return; }
+        overlay.querySelector('#profile-contract-body').value = draftBody;
+        overlay.querySelector('#profile-contract-body').style.display = 'block';
+        overlay.querySelector('#contract-action-row').style.display = 'flex';
+        overlay.querySelector('#mark-contract-ready-btn').disabled = false;
+        msg.innerHTML = `<div class="success-box">Draft generated - review the sections still marked [MANUAL: ...] or in [brackets] before marking it ready to sign.</div>`;
+      });
+
+      overlay.querySelector('#save-contract-draft-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#contract-msg');
+        const { error: saveErr } = await supabaseClient.from('employee_contracts')
+          .update({ generated_body: overlay.querySelector('#profile-contract-body').value, updated_at: new Date().toISOString() })
+          .eq('profile_id', userId);
+        msg.innerHTML = saveErr ? `<div class="error-box">${saveErr.message}</div>` : `<div class="success-box">Draft saved.</div>`;
+      });
+
+      overlay.querySelector('#mark-contract-ready-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#contract-msg');
+        const { error: readyErr } = await supabaseClient.from('employee_contracts')
+          .update({ generated_body: overlay.querySelector('#profile-contract-body').value, status: 'ready_to_sign', updated_at: new Date().toISOString() })
+          .eq('profile_id', userId);
+        if (readyErr) { msg.innerHTML = `<div class="error-box">${readyErr.message}</div>`; return; }
+        msg.innerHTML = `<div class="success-box">Ready to sign - it'll now show up in this person's onboarding.</div>`;
+        overlay.querySelector('#mark-contract-ready-btn').disabled = true;
+      });
+    }
+
+    // Onboarding hasn't started, is in progress, or is done and either
+    // waiting on an admin to push it to Xero Payroll, already synced, or
+    // came back with an error last time (shown so it's obvious why -
+    // most likely the Xero Custom Connection app just needs the
+    // payroll.employees scope added, see the function's own error text).
+    function onboardingCellHtml(u) {
+      if (!u.onboarding_completed_at) return `<span class="badge draft">Not started</span>`;
+      if (u.xero_payroll_status === 'synced') return `<span class="badge accepted">Synced to Xero</span>`;
+      const errorNote = u.xero_payroll_status === 'failed' && u.xero_payroll_error
+        ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px; color:var(--red);">${u.xero_payroll_error}</p>`
+        : '';
+      return `
+        <span class="badge ${u.xero_payroll_status === 'failed' ? 'draft' : 'sent'}">${u.xero_payroll_status === 'failed' ? 'Push failed' : 'Ready to push'}</span>
+        <button type="button" class="secondary push-to-xero-btn" data-id="${u.id}" style="display:block; margin-top:4px; font-size:11px; padding:4px 8px;">Push to Xero</button>
+        ${errorNote}`;
+    }
+
+    // Shown when the live Xero Payroll push fails (most likely: the Xero
+    // Custom Connection app doesn't have the payroll.employees scope
+    // granted yet - a self-service fix in Xero's own developer portal,
+    // not something this app can do for you). Xero's own bulk-CSV
+    // employee import is "deliberately limited to basic identity and
+    // contact details" anyway - TFN/bank/rates always need manual entry
+    // regardless of import method - so this is a plain summary to key
+    // into Xero by hand, not a guessed CSV format.
+    function openXeroFallbackSummary(summary, errorMessage) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      const rows = Object.entries(summary || {}).filter(([, v]) => v !== null && v !== undefined && v !== '');
+      overlay.innerHTML = `
+        <div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Couldn't push to Xero automatically</h2>
+          <div class="error-box" style="margin-bottom:14px;">${errorMessage || 'Unknown error'}</div>
+          <p class="subtitle" style="margin-bottom:10px;">Most likely fix: add the <strong>payroll.employees</strong> scope to this Xero Custom Connection app (in Xero's developer portal), then push again. In the meantime, here's everything collected so you can enter it in Xero yourself:</p>
+          <table>
+            <tbody>
+              ${rows.map(([k, v]) => `<tr><td style="font-weight:600; white-space:nowrap;">${k}</td><td style="padding-left:12px;">${v}</td></tr>`).join('')}
+            </tbody>
+          </table>
+          <button type="button" class="secondary" id="xero-fallback-close-btn" style="margin-top:16px;">Close</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#xero-fallback-close-btn').addEventListener('click', () => overlay.remove());
     }
 
     async function loadUsers() {
@@ -1606,7 +1825,7 @@
 
         listEl.innerHTML = `
           <table class="responsive-stack">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Xero Employee ID</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Xero Employee ID</th><th>Onboarding</th><th>Status</th><th></th></tr></thead>
             <tbody>
               ${data.users.map(u => `
                 <tr data-id="${u.id}">
@@ -1614,6 +1833,7 @@
                   <td data-label="Email">${u.email}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
                   <td data-label="Role"><select class="role-select" data-id="${u.id}">${roleOptionsHtml(u.role)}</select></td>
                   <td data-label="Xero Employee ID"><input class="xero-employee-input" data-id="${u.id}" value="${u.xero_employee_id || ''}" placeholder="From Xero Payroll" style="font-size:12px;" /></td>
+                  <td data-label="Onboarding">${onboardingCellHtml(u)}</td>
                   <td data-label="Status">${u.active ? '<span class="badge accepted">Active</span>' : '<span class="badge draft">Deactivated</span>'}</td>
                   <td data-label="" style="text-align:right;">
                     <button class="secondary toggle-active-btn" data-id="${u.id}" data-active="${u.active}">
@@ -1644,6 +1864,30 @@
               .update({ xero_employee_id: input.value.trim() || null })
               .eq('id', input.dataset.id);
             if (error) alert('Could not save Xero Employee ID: ' + error.message);
+          });
+        });
+
+        listEl.querySelectorAll('.push-to-xero-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            btn.textContent = 'Pushing...';
+            try {
+              const res = await authedFetch('/.netlify/functions/sync-employee-to-xero', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profileId: btn.dataset.id }),
+              });
+              const data = await res.json();
+              if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
+              if (data.status === 'failed') {
+                openXeroFallbackSummary(data.summary, data.error);
+              }
+              await loadUsers();
+            } catch (err) {
+              alert(err.message);
+              btn.disabled = false;
+              btn.textContent = 'Push to Xero';
+            }
           });
         });
 
@@ -1739,12 +1983,19 @@
       msg.innerHTML = '';
       const btn = document.getElementById('invite-btn');
       btn.disabled = true;
+      const rateFields = {
+        rate_tier_id: document.getElementById('invite-rate-tier').value || null,
+        ordinary_rate: document.getElementById('invite-rate-ordinary').value || null,
+        rate_1_5x: document.getElementById('invite-rate-1-5x').value || null,
+        rate_2x: document.getElementById('invite-rate-2x').value || null,
+        rate_2_5x: document.getElementById('invite-rate-2-5x').value || null,
+      };
       try {
         if (method === 'email') {
           const res = await authedFetch('/.netlify/functions/invite-user', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ full_name: name, email, role }),
+            body: JSON.stringify({ full_name: name, email, role, ...rateFields }),
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Invite failed');
@@ -1754,7 +2005,7 @@
           const res = await authedFetch('/.netlify/functions/create-user-with-password', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ full_name: name, email, role, password }),
+            body: JSON.stringify({ full_name: name, email, role, password, ...rateFields }),
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Could not create user');
@@ -1763,11 +2014,81 @@
         document.getElementById('invite-name').value = '';
         document.getElementById('invite-email').value = '';
         document.getElementById('invite-password').value = '';
+        document.getElementById('invite-rate-tier').value = '';
+        document.getElementById('invite-rate-ordinary').value = '';
+        document.getElementById('invite-rate-1-5x').value = '';
+        document.getElementById('invite-rate-2x').value = '';
+        document.getElementById('invite-rate-2-5x').value = '';
         await loadUsers();
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
       }
       btn.disabled = false;
+    });
+
+    // --- Onboarding Documents ---
+    function onboardingDocRowHtml(d) {
+      return `
+        <div class="onboarding-doc-row" data-id="${d.id || ''}" style="padding:14px 0; border-bottom:1px solid var(--border);">
+          <div style="display:flex; gap:10px; align-items:center; margin-bottom:8px;">
+            <input class="od-title" value="${d.title || ''}" placeholder="Document title" style="flex:1; font-weight:600;" />
+            ${d.is_contract ? '<span class="badge sent">Contract template</span>' : `
+              <label style="display:flex; align-items:center; gap:6px; font-weight:400; white-space:nowrap;">
+                <input type="checkbox" class="od-required" style="width:auto;" ${d.is_required !== false ? 'checked' : ''} /> Required
+              </label>`}
+          </div>
+          <textarea class="od-body" style="min-height:140px;">${d.body || ''}</textarea>
+          <div style="margin-top:8px; display:flex; gap:8px;">
+            <button type="button" class="secondary od-save-btn" style="font-size:12px; padding:6px 12px;">Save</button>
+            ${d.is_contract ? '' : `<button type="button" class="secondary od-delete-btn" style="font-size:12px; padding:6px 12px;">Delete</button>`}
+          </div>
+          <div class="od-msg"></div>
+        </div>`;
+    }
+
+    async function loadOnboardingDocs() {
+      const listEl = document.getElementById('onboarding-docs-list');
+      const { data, error } = await supabaseClient.from('onboarding_documents').select('*').order('sort_order');
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No documents yet.</p>`; return; }
+
+      listEl.innerHTML = data.map(onboardingDocRowHtml).join('');
+      wireOnboardingDocRows();
+    }
+
+    function wireOnboardingDocRows() {
+      document.querySelectorAll('.onboarding-doc-row').forEach(row => {
+        row.querySelector('.od-save-btn').onclick = async () => {
+          const msg = row.querySelector('.od-msg');
+          const title = row.querySelector('.od-title').value.trim();
+          const body = row.querySelector('.od-body').value;
+          if (!title) { msg.innerHTML = `<div class="error-box">Enter a title.</div>`; return; }
+          const requiredCheckbox = row.querySelector('.od-required');
+          const fields = { title, body };
+          if (requiredCheckbox) fields.is_required = requiredCheckbox.checked;
+          const { error } = row.dataset.id
+            ? await supabaseClient.from('onboarding_documents').update(fields).eq('id', row.dataset.id)
+            : await supabaseClient.from('onboarding_documents').insert(fields);
+          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+          msg.innerHTML = `<div class="success-box">Saved.</div>`;
+          await loadOnboardingDocs();
+        };
+        const deleteBtn = row.querySelector('.od-delete-btn');
+        if (deleteBtn) {
+          deleteBtn.onclick = async () => {
+            if (!row.dataset.id) { row.remove(); return; }
+            if (!confirm('Delete this document? Past signatures of it are kept, just no longer required for new onboarding.')) return;
+            const { error } = await supabaseClient.from('onboarding_documents').delete().eq('id', row.dataset.id);
+            if (error) { alert(error.message); return; }
+            await loadOnboardingDocs();
+          };
+        }
+      });
+    }
+
+    document.getElementById('add-onboarding-doc-btn').addEventListener('click', () => {
+      document.getElementById('onboarding-docs-list').insertAdjacentHTML('beforeend', onboardingDocRowHtml({ is_required: true }));
+      wireOnboardingDocRows();
     });
 
     // --- API Keys ---
@@ -2215,6 +2536,7 @@
       await applyAdminGating();
       if (myRole === 'admin') {
         await loadUsers();
+        await loadOnboardingDocs();
         await loadApiKeys();
         await loadCompanyCredentials();
         await loadEmployeeLicencesSummary();

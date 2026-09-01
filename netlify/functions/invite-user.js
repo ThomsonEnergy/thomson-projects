@@ -1,7 +1,8 @@
 // POST /api/invite-user
-// Body: { email, full_name, role }
+// Body: { email, full_name, role, rate_tier_id?, ordinary_rate?, rate_1_5x?, rate_2x?, rate_2_5x? }
 // Admin-only. Sends a Supabase invite email and creates the matching
-// profiles row so the role is set before the person ever logs in.
+// profiles row so the role (and pay rates, if given up front) are set
+// before the person ever logs in.
 
 const { requireAdmin } = require('./_shared/require-admin');
 
@@ -44,7 +45,14 @@ exports.handler = async (event) => {
 
     const { error: profileErr } = await supabaseAdmin
       .from('profiles')
-      .upsert({ id: invited.user.id, role, full_name: fullName, active: true });
+      .upsert({
+        id: invited.user.id, role, full_name: fullName, active: true,
+        rate_tier_id: body.rate_tier_id || null,
+        ordinary_rate: parseFloat(body.ordinary_rate) || null,
+        rate_1_5x: parseFloat(body.rate_1_5x) || null,
+        rate_2x: parseFloat(body.rate_2x) || null,
+        rate_2_5x: parseFloat(body.rate_2_5x) || null,
+      });
     if (profileErr) throw profileErr;
 
     return { statusCode: 200, body: JSON.stringify({ success: true, id: invited.user.id }) };
