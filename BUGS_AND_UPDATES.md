@@ -47,6 +47,13 @@ Also I don’t want people to be able to type in an invoice number. Should alway
 - **What they want:** Should be able to create a task on the task page and assign it to a job or office if it’s not job related eg. Take bins out or mow the lawn
 - **Record id:** 2acefc3e-f8fc-4670-a785-c386a8b4977d
 
+### Update idea: add timsheets from the your timesheets this week.
+- **Reported:** 27 Aug 2026, 08:31 pm by Jasper Thomson
+- **Approved:** 1 Sept 2026, 08:20 am by Jasper Thomson
+- **Page/feature:** timesheets tab
+- **What they want:** add and edit timesheets from your timesheets this week. once they are approved and sent to xero, time shouldnt be edited but job stage or job nujmkber shoukld be editable encase they clock into wrong job
+- **Record id:** 967c4671-d4f1-43ca-aed9-504572d3c416
+
 ## In Progress
 
 None.
