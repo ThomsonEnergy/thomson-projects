@@ -40,6 +40,13 @@ guessing, and skip it until it's answered.
 Also I don’t want people to be able to type in an invoice number. Should always be automated.
 - **Record id:** 785fdec5-a4ee-4e94-846d-1b99e1a3f32c
 
+### Update idea: Task for office/general
+- **Reported:** 30 Aug 2026, 07:04 am by Jasper Thomson
+- **Approved:** 1 Sept 2026, 08:20 am by Jasper Thomson
+- **Page/feature:** Task page
+- **What they want:** Should be able to create a task on the task page and assign it to a job or office if it’s not job related eg. Take bins out or mow the lawn
+- **Record id:** 2acefc3e-f8fc-4670-a785-c386a8b4977d
+
 ## In Progress
 
 None.
