@@ -213,10 +213,10 @@
             <h2>My pay rates</h2>
             <p class="subtitle" style="margin-bottom:10px;">Set by an admin or finance - you can see them here, but not change them yourself.</p>
             <div class="grid cols-4">
-              <div class="stat"><div class="label">Ordinary ($/hr)</div><div class="value" id="my-rate-ordinary">-</div></div>
-              <div class="stat"><div class="label">1.5x ($/hr)</div><div class="value" id="my-rate-1-5x">-</div></div>
-              <div class="stat"><div class="label">2x ($/hr)</div><div class="value" id="my-rate-2x">-</div></div>
-              <div class="stat"><div class="label">2.5x ($/hr)</div><div class="value" id="my-rate-2-5x">-</div></div>
+              <div class="stat"><div class="label">Ordinary hours ($/hr)</div><div class="value" id="my-rate-ordinary">-</div></div>
+              <div class="stat"><div class="label">Overtime - first 2hrs ($/hr)</div><div class="value" id="my-rate-1-5x">-</div></div>
+              <div class="stat"><div class="label">Overtime - after that ($/hr)</div><div class="value" id="my-rate-2x">-</div></div>
+              <div class="stat"><div class="label">Public holiday ($/hr)</div><div class="value" id="my-rate-2-5x">-</div></div>
             </div>
           </div>
 
@@ -488,19 +488,19 @@
               <p class="subtitle" style="margin:14px 0 8px;">Pay rates (optional - can also be set later from their profile).</p>
               <div class="grid cols-4">
                 <div>
-                  <label style="margin-top:0">Ordinary ($/hr)</label>
+                  <label style="margin-top:0">Ordinary hours ($/hr)</label>
                   <input id="invite-rate-ordinary" type="number" step="0.01" />
                 </div>
                 <div>
-                  <label style="margin-top:0">1.5x ($/hr)</label>
+                  <label style="margin-top:0">Overtime - first 2hrs ($/hr)</label>
                   <input id="invite-rate-1-5x" type="number" step="0.01" />
                 </div>
                 <div>
-                  <label style="margin-top:0">2x ($/hr)</label>
+                  <label style="margin-top:0">Overtime - after that ($/hr)</label>
                   <input id="invite-rate-2x" type="number" step="0.01" />
                 </div>
                 <div>
-                  <label style="margin-top:0">2.5x ($/hr)</label>
+                  <label style="margin-top:0">Public holiday ($/hr)</label>
                   <input id="invite-rate-2-5x" type="number" step="0.01" />
                 </div>
               </div>
@@ -1430,6 +1430,46 @@
       msg.innerHTML = error ? `<div class="error-box">${error.message}</div>` : `<div class="success-box">Saved.</div>`;
     });
 
+    // Every remaining [bracket] in the contract template becomes an
+    // actual field here rather than left as raw text to hand-edit - which
+    // fields show depends on employment type / pay type, same as the
+    // clause selection itself (see generateContractDraft in
+    // supabase-client.js).
+    function contractAnswerFieldsHtml(profile, answers) {
+      const fields = [
+        ...CONTRACT_ANSWER_FIELDS,
+        ...contractHoursFields(profile.employment_type),
+        ...contractPayFields(profile),
+      ];
+      const defaults = { position: profile.job_title || '' };
+      return `<div class="grid cols-3" id="contract-answer-fields">
+        ${fields.map(f => `
+          <div>
+            <label style="margin-top:0; font-size:12px;">${f.label}</label>
+            <input class="contract-answer-input" data-key="${f.key}" type="${f.type}" ${f.type === 'number' ? 'step="0.01"' : ''}
+              placeholder="${f.placeholder || ''}" value="${answers[f.key] ?? defaults[f.key] ?? ''}" />
+          </div>`).join('')}
+      </div>`;
+    }
+
+    // Re-renders just the answer-field inputs when employment/pay type
+    // changes, so the right hours/pay questions show without needing to
+    // save and reopen the panel - carries forward whatever's already
+    // been typed into fields that survive the switch.
+    function refreshContractAnswerFields(overlay, baseProfile) {
+      const wrap = overlay.querySelector('#contract-answer-fields');
+      if (!wrap) return;
+      const currentAnswers = {};
+      wrap.querySelectorAll('.contract-answer-input').forEach(input => { currentAnswers[input.dataset.key] = input.value; });
+      const liveProfile = {
+        ...baseProfile,
+        employment_type: overlay.querySelector('#profile-employment-type').value,
+        pay_type: overlay.querySelector('#profile-pay-type').value,
+        salary_includes_super: overlay.querySelector('#profile-salary-inc-super').checked,
+      };
+      wrap.outerHTML = contractAnswerFieldsHtml(liveProfile, currentAnswers);
+    }
+
     async function openUserProfilePanel(userId) {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
@@ -1442,7 +1482,7 @@
       // direct select on profiles can no longer see them at all.
       const { data: profile, error } = await supabaseClient.from('profiles')
         .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id, bank_account_name, bank_bsb, bank_account_number,
-          date_of_birth, employment_type, employment_start_date, pay_type, annual_salary, salary_includes_super, has_company_vehicle,
+          date_of_birth, employment_type, employment_start_date, pay_type, annual_salary, salary_includes_super, has_company_vehicle, has_probationary_period,
           super_fund_name, super_is_self_managed, emergency_contact_name, emergency_contact_relationship, onboarding_completed_at`)
         .eq('id', userId).single();
       const { data: rates } = await supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle();
@@ -1512,19 +1552,19 @@
           <p class="subtitle" style="margin:14px 0 8px;">Actual pay rates - entered directly since award overtime rarely equals a clean multiple of ordinary time. Used to calculate real job costs from logged hours.</p>
           <div class="grid cols-4">
             <div>
-              <label style="margin-top:0">Ordinary ($/hr)</label>
+              <label style="margin-top:0">Ordinary hours ($/hr)</label>
               <input id="profile-rate-ordinary" type="number" step="0.01" value="${profile.ordinary_rate || ''}" />
             </div>
             <div>
-              <label style="margin-top:0">1.5x ($/hr)</label>
+              <label style="margin-top:0">Overtime - first 2hrs ($/hr)</label>
               <input id="profile-rate-1-5x" type="number" step="0.01" value="${profile.rate_1_5x || ''}" />
             </div>
             <div>
-              <label style="margin-top:0">2x ($/hr)</label>
+              <label style="margin-top:0">Overtime - after that ($/hr)</label>
               <input id="profile-rate-2x" type="number" step="0.01" value="${profile.rate_2x || ''}" />
             </div>
             <div>
-              <label style="margin-top:0">2.5x ($/hr)</label>
+              <label style="margin-top:0">Public holiday ($/hr)</label>
               <input id="profile-rate-2-5x" type="number" step="0.01" value="${profile.rate_2_5x || ''}" />
             </div>
           </div>
@@ -1559,7 +1599,7 @@
               </select>
             </div>
           </div>
-          <div class="grid cols-3" style="margin-top:10px;">
+          <div class="grid cols-4" style="margin-top:10px;">
             <div>
               <label style="margin-top:0">Annual salary (if salaried)</label>
               <input type="number" step="0.01" id="profile-annual-salary" value="${profile.annual_salary || ''}" />
@@ -1572,6 +1612,11 @@
             <div>
               <label style="margin-top:22px; display:flex; align-items:center; gap:8px;">
                 <input type="checkbox" id="profile-has-vehicle" style="width:auto;" ${profile.has_company_vehicle ? 'checked' : ''} /> Gets a company vehicle
+              </label>
+            </div>
+            <div>
+              <label style="margin-top:22px; display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" id="profile-has-probation" style="width:auto;" ${profile.has_probationary_period !== false ? 'checked' : ''} /> Has a probationary period
               </label>
             </div>
           </div>
@@ -1604,8 +1649,9 @@
 
         <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
           <p style="margin:0 0 8px; font-weight:600;">Employment contract ${contract ? `<span class="badge ${contract.status === 'signed' ? 'accepted' : contract.status === 'ready_to_sign' ? 'sent' : 'draft'}" style="font-weight:400;">${contract.status.replace('_', ' ')}</span>` : ''}</p>
-          <p class="subtitle" style="margin-bottom:8px;">Auto-filled from the fields above against the contract template (edit the raw template under Settings &gt; Onboarding Documents). Review and edit below, then mark ready to sign - the employee only sees it once you do.</p>
-          <button type="button" class="secondary" id="generate-contract-btn" style="font-size:12px; padding:6px 10px; margin-bottom:8px;" ${contractTemplate ? '' : 'disabled'}>${contract ? 'Regenerate draft' : 'Generate draft'}</button>
+          <p class="subtitle" style="margin-bottom:8px;">Fills in the contract template against the fields above plus these - edit the raw template under Settings &gt; Onboarding Documents if the wording itself needs to change. Review the generated draft below and edit anything it couldn't resolve, then mark ready to sign - the employee only sees it once you do.</p>
+          ${contractAnswerFieldsHtml(profile, (contract && contract.answers) || {})}
+          <button type="button" class="secondary" id="generate-contract-btn" style="font-size:12px; padding:6px 10px; margin:10px 0 8px;" ${contractTemplate ? '' : 'disabled'}>${contract ? 'Regenerate draft' : 'Generate draft'}</button>
           <textarea id="profile-contract-body" style="min-height:220px; font-family:monospace; font-size:12px; ${contract ? '' : 'display:none;'}">${contract ? contract.generated_body : ''}</textarea>
           <div style="margin-top:8px; display:${contract ? 'flex' : 'none'}; gap:8px;" id="contract-action-row">
             <button type="button" class="secondary" id="save-contract-draft-btn" style="font-size:12px; padding:6px 10px;">Save draft</button>
@@ -1657,6 +1703,10 @@
       }
       wireAllowanceRemoveButtons();
 
+      ['#profile-employment-type', '#profile-pay-type', '#profile-salary-inc-super'].forEach(sel => {
+        overlay.querySelector(sel).addEventListener('change', () => refreshContractAnswerFields(overlay, profile));
+      });
+
       overlay.querySelector('#close-profile-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#save-profile-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#profile-panel-msg');
@@ -1680,6 +1730,7 @@
             annual_salary: parseFloat(overlay.querySelector('#profile-annual-salary').value) || null,
             salary_includes_super: overlay.querySelector('#profile-salary-inc-super').checked,
             has_company_vehicle: overlay.querySelector('#profile-has-vehicle').checked,
+            has_probationary_period: overlay.querySelector('#profile-has-probation').checked,
             date_of_birth: overlay.querySelector('#profile-dob').value || null,
             tax_file_number: overlay.querySelector('#profile-tfn').value.trim() || null,
             residential_address: overlay.querySelector('#profile-address').value.trim() || null,
@@ -1735,16 +1786,34 @@
       overlay.querySelector('#generate-contract-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#contract-msg');
         if (!contractTemplate) { msg.innerHTML = `<div class="error-box">No contract template found - add one under Settings &gt; Onboarding Documents first.</div>`; return; }
-        if (!profile.employment_type) { msg.innerHTML = `<div class="error-box">Set an employment type above first (it drives which contract clauses apply).</div>`; return; }
-        const draftBody = generateContractDraft(profile, contractTemplate.body);
+
+        // Use whatever's currently in the form, not just what was loaded
+        // when the panel opened - lets employment type/pay type/vehicle
+        // be set and the contract generated in one go.
+        const liveProfile = {
+          ...profile,
+          employment_type: overlay.querySelector('#profile-employment-type').value,
+          pay_type: overlay.querySelector('#profile-pay-type').value,
+          annual_salary: parseFloat(overlay.querySelector('#profile-annual-salary').value) || null,
+          salary_includes_super: overlay.querySelector('#profile-salary-inc-super').checked,
+          has_company_vehicle: overlay.querySelector('#profile-has-vehicle').checked,
+          has_probationary_period: overlay.querySelector('#profile-has-probation').checked,
+          residential_address: overlay.querySelector('#profile-address').value.trim() || null,
+        };
+        if (!liveProfile.employment_type) { msg.innerHTML = `<div class="error-box">Set an employment type above first (it drives which contract clauses apply).</div>`; return; }
+
+        const answers = {};
+        overlay.querySelectorAll('.contract-answer-input').forEach(input => { answers[input.dataset.key] = input.value.trim(); });
+
+        const draftBody = generateContractDraft(liveProfile, contractTemplate.body, answers);
         const { error: contractErr } = await supabaseClient.from('employee_contracts')
-          .upsert({ profile_id: userId, generated_body: draftBody, status: 'draft', updated_at: new Date().toISOString() }, { onConflict: 'profile_id' });
+          .upsert({ profile_id: userId, generated_body: draftBody, answers, status: 'draft', updated_at: new Date().toISOString() }, { onConflict: 'profile_id' });
         if (contractErr) { msg.innerHTML = `<div class="error-box">${contractErr.message}</div>`; return; }
         overlay.querySelector('#profile-contract-body').value = draftBody;
         overlay.querySelector('#profile-contract-body').style.display = 'block';
         overlay.querySelector('#contract-action-row').style.display = 'flex';
         overlay.querySelector('#mark-contract-ready-btn').disabled = false;
-        msg.innerHTML = `<div class="success-box">Draft generated - review the sections still marked [MANUAL: ...] or in [brackets] before marking it ready to sign.</div>`;
+        msg.innerHTML = `<div class="success-box">Draft generated - give it a read before marking it ready to sign, particularly anything still in [brackets] it couldn't resolve.</div>`;
       });
 
       overlay.querySelector('#save-contract-draft-btn').addEventListener('click', async () => {

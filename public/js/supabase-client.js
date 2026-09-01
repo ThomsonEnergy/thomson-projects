@@ -319,19 +319,141 @@ function calculateStcQuantity({ kw, zoneRating, installYear }) {
   return Math.floor(kw * zoneRating * deemingYears);
 }
 
-// Auto-fills the employment contract template's [bracket] placeholders and
-// resolves the CLEAN, non-nested full-time/part-time/casual alternations
-// (hire-status, hours of work, leave, Fair Work statement) - always an
-// ADMIN-REVIEWED DRAFT, never shown to the employee directly. A few
-// sections of the source template nest alternatives too deeply to safely
-// auto-resolve without real risk of silently dropping the wrong clause
-// (Remuneration/Superannuation's Option 1/2/3 sub-blocks, and Termination's
-// tags, renamed [MANUAL: ...] in the seed text) - those are deliberately
-// left bracketed/visible for the admin to resolve by hand, same as the
-// letter date and the "Additional Hourly Rate" figure (ambiguous against
-// this app's banded overtime rates, not something worth guessing on a
-// real contract).
-function generateContractDraft(profile, templateBody) {
+// Every field the contract needs that ISN'T already a profile fact -
+// letter date, position, hours/days actually worked, and the few dollar
+// figures the app's own banded overtime rates don't map onto directly.
+// Shown as an actual form in the admin's contract generator, not left as
+// raw [bracket] text to hand-edit.
+const CONTRACT_ANSWER_FIELDS = [
+  { key: 'letter_date', label: 'Letter date', type: 'date' },
+  { key: 'position', label: 'Position / job title', type: 'text' },
+  { key: 'location_of_work', label: 'Location of work', type: 'text' },
+];
+
+function contractHoursFields(employmentType) {
+  if (employmentType === 'full_time') {
+    return [
+      { key: 'hours_days_count', label: 'Days worked per week (number)', type: 'text', placeholder: 'e.g. 5' },
+      { key: 'hours_day_from', label: 'Spread of hours - from day', type: 'text', placeholder: 'e.g. Monday' },
+      { key: 'hours_day_to', label: 'Spread of hours - to day', type: 'text', placeholder: 'e.g. Friday' },
+    ];
+  }
+  if (employmentType === 'part_time') {
+    return [
+      { key: 'hours_per_week', label: 'Hours per week', type: 'text', placeholder: 'e.g. 25' },
+      { key: 'hours_time_from', label: 'Spread of hours - from time', type: 'text', placeholder: 'e.g. 8:00am' },
+      { key: 'hours_time_to', label: 'Spread of hours - to time', type: 'text', placeholder: 'e.g. 4:00pm' },
+      { key: 'hours_day_from', label: 'Spread of hours - from day', type: 'text', placeholder: 'e.g. Tuesday' },
+      { key: 'hours_day_to', label: 'Spread of hours - to day', type: 'text', placeholder: 'e.g. Thursday' },
+    ];
+  }
+  // casual
+  return [
+    { key: 'hours_day_from', label: 'Rostered day range - from', type: 'text', placeholder: 'e.g. Monday' },
+    { key: 'hours_day_to', label: 'Rostered day range - to', type: 'text', placeholder: 'e.g. Sunday' },
+  ];
+}
+
+function contractPayFields(profile) {
+  if (profile.pay_type === 'salary') {
+    return profile.salary_includes_super
+      ? [{ key: 'salary_super_component', label: 'Super component of annual salary ($)', type: 'number' }]
+      : [];
+  }
+  return [
+    { key: 'travel_allowance_per_day', label: 'Travel allowance ($/day, if required to work away)', type: 'number' },
+  ];
+}
+
+function money2(n) { return (Number(n) || 0).toFixed(2); }
+
+function buildRemunerationClause(profile, answers) {
+  const rate = (n) => (n !== null && n !== undefined && n !== '') ? money2(n) : '[insert pay rate]';
+  if (profile.employment_type === 'casual') {
+    return `4. Remuneration
+4.1 You will be paid an hourly rate of $${rate(profile.ordinary_rate)} (Hourly Rate).
+4.2 The Hourly Rate is inclusive of an applicable casual loading amount of twenty-five (25) per cent of the Hourly Rate (Casual Loading Amount).
+4.3 The Casual Loading Amount is to compensate you for not having one or more of the following entitlements: (a) paid annual leave; (b) paid personal / carer's leave; (c) paid compassionate leave; (d) payment for absence on a public holiday; (e) payment in lieu of notice of termination; and/or (f) redundancy pay.
+4.4 Subject to the Terms, this is the total remuneration paid to you.
+4.5 You may also be entitled to other payments, including: penalty rates, overtime, special rates and allowances (if applicable), in accordance with any applicable modern award.
+4.6 The remuneration payable under these Terms (including any allowances) is intended to satisfy all entitlements to which you are or may become entitled in respect of the performance of work, under these Terms, any applicable modern award and/or the Fair Work Act 2009 (Cth) (Act).
+4.7 The remuneration payable under these Terms (including any allowances) may be specifically set-off against, applied to and may otherwise absorb any existing or newly-introduced payments or benefits to which you are or may become entitled under these Terms, any applicable modern award and/or the Act, including but not limited to, minimum wage rates, overtime and penalty rates, annual leave and other loadings, weekend and other penalty rates, allowances and any other monetary entitlement which may otherwise be payable to you.`;
+  }
+
+  const isPartTime = profile.employment_type === 'part_time';
+  let payClause;
+  if (profile.pay_type === 'salary') {
+    const total = Number(profile.annual_salary) || 0;
+    if (profile.salary_includes_super) {
+      const superPortion = Number(answers.salary_super_component) || 0;
+      payClause = `4.1 $${money2(total)} per annum made up of superannuation contributions of $${money2(superPortion)} and the balance of $${money2(total - superPortion)} as cash payments (Annual Salary).`;
+    } else {
+      payClause = `4.1 You will be paid an annual base salary of $${money2(total)} (Annual Salary).`;
+    }
+    if (isPartTime) {
+      payClause += `\n4.2 For the avoidance of doubt, you will be paid the appropriate pro-rata portion of the Annual Salary, according to the part-time hours that you work.`;
+    }
+  } else {
+    payClause = `4.1 You will be paid an hourly rate of $${rate(profile.ordinary_rate)} (Ordinary Hourly Rate) for the first eight (8) hours worked on any day, Monday to Friday.
+4.2 For the next two (2) hours worked on a weekday beyond the first eight (8) hours, you will be paid an hourly rate of $${rate(profile.rate_1_5x)} (Overtime Rate 1).
+4.3 For any further hours worked on a weekday beyond that, you will be paid an hourly rate of $${rate(profile.rate_2x)} (Overtime Rate 2).
+4.4 For work performed on a Saturday, you will be paid the Overtime Rate 1 for the first four (4) hours worked and the Overtime Rate 2 for any hours worked after that.
+4.5 For work performed on a Sunday, you will be paid the Overtime Rate 2 for all hours worked.
+4.6 For work performed on a public holiday, you will be paid an hourly rate of $${rate(profile.rate_2_5x)} (Public Holiday Rate) for all hours worked.
+4.7 Where you are required to work away from your usual place of residence such that, in the Employer's reasonable opinion, it is not practicable for you to return home at the end of the working day, the Employer will arrange and pay for reasonable and suitable accommodation for the duration of the assignment. You will also be paid a travel allowance of $${rate(answers.travel_allowance_per_day)} per day, including for the purpose of covering meals while you are required to work away from home.
+4.8 You may also be entitled to other payments, including: penalty rates, special rates, allowances and annual leave loading (if applicable) (Other Payments).
+4.9 For the avoidance of doubt, Other Payments are calculated based on the rate that may apply to you specified in the applicable modern award (if any).`;
+  }
+
+  return `4. Remuneration
+${payClause}
+4.10 Subject to the Terms, this is the total remuneration paid to you.
+4.11 The remuneration payable under these Terms (including any allowances) is intended to satisfy all entitlements to which you are or may become entitled in respect of the performance of work, under these Terms, any applicable modern award and/or the Fair Work Act 2009 (Cth) (Act).
+4.12 The remuneration payable under these Terms (including any allowances) may be specifically set-off against, applied to and may otherwise absorb any existing or newly-introduced payments or benefits to which you are or may become entitled under these Terms, any applicable modern award and/or the Act, including but not limited to, minimum wage rates, overtime and penalty rates, annual leave and other loadings, weekend and other penalty rates, allowances and any other monetary entitlement which may otherwise be payable to you.`;
+}
+
+function buildSuperannuationClause(profile) {
+  const standard = `5. Superannuation
+In addition to your remuneration set out in clause 4, you will receive superannuation contributions in line with the minimum compulsory contribution rate required to be paid by the Employer, in accordance with applicable legislation.`;
+  if (profile.pay_type !== 'salary') return standard;
+  return profile.salary_includes_super
+    ? `5. Superannuation
+The superannuation contribution will be deducted from the Annual Salary. In the event that the amount of superannuation contribution required to be paid by law increases then the increased amount will be deducted from the Annual Salary.`
+    : standard;
+}
+
+function buildTerminationClause(profile) {
+  const isCasual = profile.employment_type === 'casual';
+  const byYouClause = isCasual
+    ? 'You may terminate your employment with the Employer at any time, effective at the end of your current engagement.'
+    : "You may terminate your employment with the Employer by giving two (2) weeks' notice in writing to the Employer.";
+  const byEmployerNoticeClause = isCasual
+    ? 'Your employment may be terminated by the Employer at any time, effective at the end of your current engagement.'
+    : `The Employer may terminate your employment with the Employer in accordance with the following table:
+Employee's period of continuous service with the Employer on termination / Period
+Not more than 1 year / 1 week
+More than 1 year but not more than 3 years / 2 weeks
+More than 3 years but not more than 5 years / 3 weeks
+More than 5 years / 4 weeks
+The period specified above will be increased by one (1) week if you are 45 years of age or over and have completed at least two (2) years of continuous service with the Employer.`;
+  return `16. Termination of employment
+16.1 Termination by You
+${byYouClause}
+16.2 Termination by the Employer upon giving notice
+${byEmployerNoticeClause}
+16.3 By the Employer without notice
+The Employer may terminate your employment, effective immediately and without payment of any notice, where at any time, and provided always that procedural fairness has been followed, the Employer forms the view that you: (a) have committed any act of wilful or serious misconduct; (b) are in breach of any of the Terms; or (c) are continually or significantly neglectful of your Duties.`;
+}
+
+// Auto-fills the employment contract template's [bracket] placeholders
+// and resolves every full-time/part-time/casual alternation - always an
+// ADMIN-REVIEWED DRAFT, never shown to the employee directly. The
+// Remuneration/Superannuation/Termination sections nest alternatives too
+// deeply to safely auto-detect from the raw text, so those three are
+// synthesized directly from explicit answers (buildRemunerationClause
+// etc. above) rather than parsed out of the template - deterministic by
+// construction instead of guessed from bracket position.
+function generateContractDraft(profile, templateBody, answers = {}) {
   const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
   const employmentLabel = { full_time: 'full-time', part_time: 'part-time', casual: 'casual' }[profile.employment_type] || '[full-time / part-time / casual]';
 
@@ -360,18 +482,39 @@ function generateContractDraft(profile, templateBody) {
     }
     out.push(line);
   }
-
-  // Section 7 "Fully Maintained Company Vehicle" is a whole optional
-  // clause (not a same-vs-alternative pair), so it's handled as its own
-  // contiguous range rather than the tag state machine above.
   let body = out.join('\n');
+
+  // Whole-clause toggles: removed as contiguous ranges rather than
+  // same-vs-alternative pairs, since the template marks them as a single
+  // clause to delete-if-not-applicable, not a choice between two texts.
   if (!profile.has_company_vehicle) {
     body = body.replace(/7\. Fully Maintained Company Vehicle[\s\S]*?(?=\n8\. Apparel)/, '');
   }
+  if (!profile.has_probationary_period) {
+    body = body.replace(/2\.2 Probation[\s\S]*?(?=\n3\. Hours of Work)/, '');
+  }
+
+  // The three structurally-tangled sections get replaced wholesale with
+  // freshly-synthesized text instead of edited in place.
+  body = body.replace(/4\. Remuneration[\s\S]*?(?=\n5\. Superannuation)/, buildRemunerationClause(profile, answers) + '\n\n');
+  body = body.replace(/5\. Superannuation[\s\S]*?(?=\n6\. Expenses)/, buildSuperannuationClause(profile) + '\n\n');
+  body = body.replace(/16\. Termination of employment[\s\S]*?(?=\n17\. Fair Work Information Statement)/, buildTerminationClause(profile) + '\n\n');
+
+  if (profile.employment_type === 'full_time') {
+    body = body.replaceAll('[insert number of days]', answers.hours_days_count || '[insert number of days]');
+    body = body.replaceAll('[insert day] to [insert day]', `${answers.hours_day_from || '[insert day]'} to ${answers.hours_day_to || '[insert day]'}`);
+  } else if (profile.employment_type === 'part_time') {
+    body = body.replaceAll('[insert amount] hours per week', `${answers.hours_per_week || '[insert amount]'} hours per week`);
+    body = body.replaceAll('[insert time] and [insert time]', `${answers.hours_time_from || '[insert time]'} and ${answers.hours_time_to || '[insert time]'}`);
+    body = body.replaceAll('[insert day] to [insert day]', `${answers.hours_day_from || '[insert day]'} to ${answers.hours_day_to || '[insert day]'}`);
+  } else if (profile.employment_type === 'casual') {
+    body = body.replaceAll('[insert day] to [insert day]', `${answers.hours_day_from || '[insert day]'} to ${answers.hours_day_to || '[insert day]'}`);
+  }
 
   const employeeAddress = profile.residential_address || '[insert employee address]';
-  const position = profile.job_title || '[insert position]';
+  const position = answers.position || '[insert position]';
   const commencementDate = fmtDate(profile.employment_start_date);
+  const letterDate = fmtDate(answers.letter_date);
 
   body = body
     .replaceAll('[insert Thomson Energy Australia Pty Ltd ACN 689 985 831 letterhead]', 'Thomson Energy Australia Pty Ltd\nACN 689 985 831')
@@ -380,8 +523,9 @@ function generateContractDraft(profile, templateBody) {
     .replaceAll('[insert employee address]', employeeAddress)
     .replaceAll('[insert position]', position)
     .replaceAll('[full-time / part-time / casual]', employmentLabel)
-    .replaceAll('[insert location of work]', 'various client sites within the Employer\'s service area, or as otherwise directed by the Employer')
-    .replaceAll('is [insert date] (Commencement Date)', commencementDate ? `is ${commencementDate} (Commencement Date)` : 'is [insert date] (Commencement Date)');
+    .replaceAll('[insert location of work]', answers.location_of_work || '[insert location of work]')
+    .replaceAll('is [insert date] (Commencement Date)', commencementDate ? `is ${commencementDate} (Commencement Date)` : 'is [insert date] (Commencement Date)')
+    .replace('[insert date]', letterDate || '[insert date]'); // the one remaining occurrence: the letter's own date, at the top
 
   return body;
 }

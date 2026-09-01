@@ -183,4 +183,7 @@ select '065', 'employee_onboarding',
 union all
 select '066', 'onboarding_document_seed',
   case when exists (select 1 from onboarding_documents where is_contract) then 'present' else 'MISSING' end
+union all
+select '067', 'contract_answers',
+  case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'has_probationary_period') then 'present' else 'MISSING' end
 order by 1;

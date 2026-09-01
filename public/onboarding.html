@@ -221,10 +221,10 @@
           <h2>Your pay rates</h2>
           <p class="subtitle" style="margin-bottom:14px;">Set by an admin - here for your reference. Get in touch with them if anything looks off.</p>
           <div class="grid cols-4">
-            ${rateRow('Ordinary', profile.ordinary_rate)}
-            ${rateRow('1.5x', profile.rate_1_5x)}
-            ${rateRow('2x', profile.rate_2x)}
-            ${rateRow('2.5x', profile.rate_2_5x)}
+            ${rateRow('Ordinary hours', profile.ordinary_rate)}
+            ${rateRow('Overtime - first 2hrs', profile.rate_1_5x)}
+            ${rateRow('Overtime - after that', profile.rate_2x)}
+            ${rateRow('Public holiday', profile.rate_2_5x)}
           </div>
           <button id="ob-rates-next-btn" style="margin-top:20px;">Continue</button>
         </div>`;
