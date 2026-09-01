@@ -252,7 +252,7 @@
 
       document.getElementById('topbar-total').innerHTML = `
         <p class="subtitle" style="margin:0 0 2px; font-size:10px; text-transform:uppercase; letter-spacing:0.04em;">Total</p>
-        <p style="margin:0; font-weight:700; font-size:16px;">${money(total)}</p>
+        <p style="margin:0; font-weight:700; font-size:16px;">${money(stcTotal > 0 ? totalAfterStc : totalIncGst)}</p>
       `;
       document.getElementById('topbar-accept').innerHTML = isAccepted
         ? `<span class="badge accepted">${template === 'quick_estimate' ? 'Estimate accepted' : 'Quote accepted'}</span>`
