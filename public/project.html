@@ -66,7 +66,8 @@
           job_contact:client_contacts!job_contact_id(name, phone, email),
           sales_contact:client_contacts!sales_contact_id(name, phone, email),
           accounts_contact:client_contacts!accounts_contact_id(name, phone, email),
-          source_quote:projects!source_quote_id(id, quote_token, quote_number)`)
+          source_quote:projects!source_quote_id(id, quote_token, quote_number),
+          payment_milestones(*)`)
         .eq('id', projectId)
         .single();
       if (error) {
@@ -289,6 +290,45 @@
         });
         overlay.remove();
       });
+    }
+
+    // ---------- payment milestones ----------
+
+    function milestoneRowHtml(m = {}) {
+      return `
+        <div class="milestone-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <input class="milestone-label" placeholder="e.g. On booking install day" value="${m.label || ''}" style="flex:2;" />
+          <input class="milestone-percent" type="number" step="1" min="0" max="100" placeholder="%" value="${m.percent ?? ''}" style="flex:1; max-width:90px;" />
+          <button type="button" class="secondary remove-milestone-btn" style="padding:8px 10px;">&times;</button>
+        </div>`;
+    }
+
+    function refreshMilestoneTotal() {
+      const total = [...document.querySelectorAll('.milestone-percent')].reduce((s, inp) => s + (parseFloat(inp.value) || 0), 0);
+      const rowCount = document.querySelectorAll('.milestone-row').length;
+      const note = document.getElementById('milestone-total-note');
+      if (!note) return;
+      if (!rowCount) { note.textContent = ''; return; }
+      note.innerHTML = Math.round(total) === 100
+        ? `Total: ${total}% - looks right.`
+        : `<span style="color:var(--red);">Total: ${total}% - should add up to 100%.</span>`;
+    }
+
+    function wireMilestoneRows() {
+      document.querySelectorAll('.remove-milestone-btn').forEach(btn => {
+        btn.onclick = () => { btn.closest('.milestone-row').remove(); refreshMilestoneTotal(); };
+      });
+      document.querySelectorAll('.milestone-percent').forEach(inp => { inp.oninput = refreshMilestoneTotal; });
+    }
+
+    function readMilestones() {
+      return [...document.querySelectorAll('.milestone-row')]
+        .map((row, i) => ({
+          label: row.querySelector('.milestone-label').value.trim(),
+          percent: parseFloat(row.querySelector('.milestone-percent').value) || 0,
+          sort_order: i,
+        }))
+        .filter(m => m.label && m.percent > 0);
     }
 
     let pylonKw = null;
@@ -644,6 +684,13 @@
         <div class="card" id="deposit-card">
           <h2>Payment schedule</h2>
           <div style="max-width:160px;"><label style="margin-top:0">Deposit %</label><input id="p-deposit" type="number" step="1" value="10" /></div>
+          <div style="margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border);">
+            <label style="margin-top:0">Custom milestones (optional)</label>
+            <p class="subtitle" style="margin-bottom:8px;">Replaces the schedule shown to the client above with your own named stages - e.g. "10% deposit, 40% on ordering materials, 20% on booking install day, 30% on commissioning". Doesn't change what's automatically invoiced when the quote's approved - that's still the Deposit % above.</p>
+            <div id="milestone-rows"></div>
+            <button type="button" class="secondary" id="add-milestone-btn" style="font-size:12px; padding:6px 10px;">+ Add milestone</button>
+            <p class="subtitle" id="milestone-total-note" style="margin-top:6px;"></p>
+          </div>
         </div>
 
         <div class="card" id="pylon-card">
@@ -826,6 +873,17 @@
           renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
           fileInput.value = '';
         } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+      });
+
+      (project.payment_milestones || []).slice().sort((a, b) => a.sort_order - b.sort_order).forEach(m => {
+        document.getElementById('milestone-rows').insertAdjacentHTML('beforeend', milestoneRowHtml(m));
+      });
+      wireMilestoneRows();
+      refreshMilestoneTotal();
+      document.getElementById('add-milestone-btn').addEventListener('click', () => {
+        document.getElementById('milestone-rows').insertAdjacentHTML('beforeend', milestoneRowHtml());
+        wireMilestoneRows();
+        refreshMilestoneTotal();
       });
 
       document.getElementById('pylon-pull-btn').addEventListener('click', async () => {
@@ -1144,6 +1202,14 @@
 
           const { error: updateErr } = await supabaseClient.from('projects').update(projectFields).eq('id', project.id);
           if (updateErr) throw updateErr;
+
+          await supabaseClient.from('payment_milestones').delete().eq('project_id', project.id);
+          const milestonesPayload = readMilestones();
+          if (milestonesPayload.length) {
+            const { error: msErr } = await supabaseClient.from('payment_milestones').insert(milestonesPayload.map(m => ({ ...m, project_id: project.id })));
+            if (msErr) throw msErr;
+          }
+
           const { error: delErr } = await supabaseClient.from('cost_centres').delete().eq('project_id', project.id);
           if (delErr) throw delErr;
 

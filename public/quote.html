@@ -169,15 +169,20 @@
           `).join('')}
         </div>` : '';
 
+      const milestones = data.payment_milestones || [];
+      const milestoneRowsHtml = milestones.length
+        ? milestones.map(m => `<tr><td>${m.label}</td><td class="num">${money(total * (Number(m.percent) / 100))}</td></tr>`).join('')
+        : `
+          <tr><td>Deposit (${depositPercent}%), due on acceptance</td><td class="num">${money(depositAmount)}</td></tr>
+          ${centres.map(c => `<tr><td>${c.name}, due on completion</td><td class="num">${money(c.quoted_amount * (1 - depositPercent / 100))}</td></tr>`).join('')}
+        `;
+
       const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials') ? '' : `
         <div class="card">
           <h2>Payment schedule</h2>
           <table>
             <thead><tr><th>Milestone</th><th class="num">Amount</th></tr></thead>
-            <tbody>
-              <tr><td>Deposit (${depositPercent}%), due on acceptance</td><td class="num">${money(depositAmount)}</td></tr>
-              ${centres.map(c => `<tr><td>${c.name}, due on completion</td><td class="num">${money(c.quoted_amount * (1 - depositPercent / 100))}</td></tr>`).join('')}
-            </tbody>
+            <tbody>${milestoneRowsHtml}</tbody>
           </table>
           <p class="subtitle" style="margin-top:14px;">For projects that span multiple months, we reserve the right to invoice each milestone in part at the end of the month, based on the percentage of that stage completed at the time, rather than waiting until it is fully finished.</p>
         </div>`;

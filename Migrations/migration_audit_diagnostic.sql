@@ -192,4 +192,7 @@ select '068', 'invoice_labels_and_due_dates',
 union all
 select '069', 'bug_report_approval_and_comments',
   case when exists (select 1 from information_schema.tables where table_name = 'bug_report_comments') then 'present' else 'MISSING' end
+union all
+select '070', 'payment_milestones',
+  case when exists (select 1 from information_schema.tables where table_name = 'payment_milestones') then 'present' else 'MISSING' end
 order by 1;
