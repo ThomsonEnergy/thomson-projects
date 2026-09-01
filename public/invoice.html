@@ -91,6 +91,7 @@
             <div style="text-align:right;">
               <h1 style="margin:0;">Tax Invoice</h1>
               <p class="subtitle" style="margin:2px 0 0;">${inv.invoice_number}</p>
+              ${!isStandalone && inv.description ? `<p style="margin:4px 0 0; font-weight:600;">${inv.description}</p>` : ''}
             </div>
           </div>
 
@@ -108,6 +109,7 @@
 
           <div class="inv-header-bar">
             <div><div class="label">Invoice date</div><div class="val">${new Date(inv.sent_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
+            ${inv.due_date ? `<div><div class="label">Due date</div><div class="val">${new Date(inv.due_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>` : ''}
             <div class="amount"><div class="label">Amount due</div><div class="val">${money(balanceDue)}</div></div>
             <div>${isPaid ? '<div class="label">Status</div><div class="val" style="color:var(--green);">Paid</div>' : '<div class="label">Status</div><div class="val">Awaiting payment</div>'}</div>
           </div>

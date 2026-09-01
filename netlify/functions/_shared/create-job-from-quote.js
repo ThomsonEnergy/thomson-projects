@@ -16,6 +16,7 @@
 // fresh cost_centres instead of the quote's.
 
 const crypto = require('crypto');
+const { computeDueDate } = require('./compute-due-date');
 
 function splitLabourMaterial(centre, amount) {
   const labourCost = Number(centre.estimated_labour_cost) || 0;
@@ -52,6 +53,12 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
   const { data: companySettings } = await supabaseAdmin.from('company_settings').select('invoice_number_prefix').eq('id', 1).single();
   const invoiceNumberStr = `${companySettings?.invoice_number_prefix || 'SI'}${drawnNumber}`;
   const invoiceToken = crypto.randomUUID();
+  const invoiceDate = new Date().toISOString();
+
+  const { data: client } = job.client_id
+    ? await supabaseAdmin.from('clients').select('payment_terms').eq('id', job.client_id).maybeSingle()
+    : { data: null };
+  const dueDate = computeDueDate(client?.payment_terms || 'cod', invoiceDate);
 
   const { data: insertedInvoice, error: insErr } = await supabaseAdmin
     .from('invoices')
@@ -66,6 +73,8 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
       material_amount: totalMaterial,
       stc_amount: 0,
       claim_percent: depositPercent,
+      sent_at: invoiceDate,
+      due_date: dueDate,
     })
     .select('id')
     .single();

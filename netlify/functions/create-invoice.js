@@ -9,6 +9,7 @@
 
 const crypto = require('crypto');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
+const { computeDueDate } = require('./_shared/compute-due-date');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -32,6 +33,8 @@ exports.handler = async (event) => {
       stcAmount = 0,
       claimPercent = 100,
       invoiceNumber: overrideNumber,
+      sentAt,
+      dueDate: overrideDueDate,
     } = JSON.parse(event.body || '{}');
 
     const isJobClaim = !!projectId && Array.isArray(claims) && claims.length > 0;
@@ -68,13 +71,38 @@ exports.handler = async (event) => {
     }
 
     let overallClaimPercent = Number(claimPercent) || 100;
+    let claimLabel = isJobClaim ? null : (description || null);
     if (isJobClaim) {
       const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('quoted_amount').eq('project_id', projectId);
       const projectTotal = (allCentres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
       overallClaimPercent = projectTotal > 0 ? Math.round((totalAmount / projectTotal) * 10000) / 100 : null;
+
+      // "Progress claim N" - N is how many non-deposit invoices this job
+      // already has, +1. Counted in JS rather than a .neq() filter so a
+      // null description (every progress claim raised before this label
+      // existed) still correctly counts as "not the deposit", not gets
+      // silently excluded by SQL's null != 'Deposit' => null semantics.
+      const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
+      const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit').length;
+      claimLabel = `Progress claim ${priorProgressCount + 1}`;
     }
 
     const invoiceToken = crypto.randomUUID();
+    const invoiceDate = sentAt ? new Date(sentAt).toISOString() : new Date().toISOString();
+
+    // Due date defaults from the client's own payment terms (COD unless
+    // they're set up as net 7/14/30), but whoever's raising the invoice
+    // can override it below.
+    let dueDate = overrideDueDate || null;
+    if (!dueDate) {
+      const resolvedClientId = isJobClaim
+        ? (await supabaseAdmin.from('projects').select('client_id').eq('id', projectId).single()).data?.client_id
+        : clientId;
+      const { data: client } = resolvedClientId
+        ? await supabaseAdmin.from('clients').select('payment_terms').eq('id', resolvedClientId).maybeSingle()
+        : { data: null };
+      dueDate = computeDueDate(client?.payment_terms || 'cod', invoiceDate);
+    }
 
     const { data: insertedInvoice, error: insErr } = await supabaseAdmin
       .from('invoices')
@@ -82,13 +110,15 @@ exports.handler = async (event) => {
         project_id: isJobClaim ? projectId : null,
         cost_centre_id: null, // stage detail for job-linked claims always lives in invoice_claims now
         client_id: isJobClaim ? null : clientId,
-        description: isJobClaim ? null : (description || null),
+        description: claimLabel,
         invoice_number: invoiceNumberStr,
         invoice_token: invoiceToken,
         labour_amount: totalLabour,
         material_amount: totalMaterial,
         stc_amount: totalStc,
         claim_percent: overallClaimPercent,
+        sent_at: invoiceDate,
+        due_date: dueDate,
         created_by: user.id,
       })
       .select('id')

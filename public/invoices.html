@@ -169,8 +169,20 @@
           <label>What's this for</label>
           <input id="standalone-description" placeholder="e.g. Callout - switchboard fault" />
 
-          <label>Invoice number</label>
-          <input id="standalone-invoice-number" placeholder="Leave blank to auto-assign the next number" />
+          <div class="grid cols-3">
+            <div>
+              <label>Invoice number</label>
+              <input id="standalone-invoice-number" placeholder="Auto-assign" />
+            </div>
+            <div>
+              <label>Invoice date</label>
+              <input type="date" id="standalone-date" value="${new Date().toISOString().slice(0, 10)}" />
+            </div>
+            <div>
+              <label>Due date</label>
+              <input type="date" id="standalone-due-date" />
+            </div>
+          </div>
 
           <div class="grid cols-3">
             <div>
@@ -269,6 +281,8 @@
               labourAmount: parseFloat(overlay.querySelector('#standalone-labour').value) || 0,
               materialAmount: parseFloat(overlay.querySelector('#standalone-materials').value) || 0,
               invoiceNumber: overlay.querySelector('#standalone-invoice-number').value.trim() || null,
+              sentAt: overlay.querySelector('#standalone-date').value || null,
+              dueDate: overlay.querySelector('#standalone-due-date').value || null,
             }),
           });
           const data = await res.json();

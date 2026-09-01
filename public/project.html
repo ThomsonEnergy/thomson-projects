@@ -1363,8 +1363,20 @@
             </table>
           </div>
 
-          <label style="margin-top:14px;">Invoice number</label>
-          <input id="inv-invoice-number" placeholder="Leave blank to auto-assign the next number" />
+          <div class="grid cols-3" style="margin-top:14px;">
+            <div>
+              <label style="margin-top:0">Invoice number</label>
+              <input id="inv-invoice-number" placeholder="Auto-assign" />
+            </div>
+            <div>
+              <label style="margin-top:0">Invoice date</label>
+              <input type="date" id="inv-date" value="${new Date().toISOString().slice(0, 10)}" />
+            </div>
+            <div>
+              <label style="margin-top:0">Due date</label>
+              <input type="date" id="inv-due-date" placeholder="From client's payment terms" />
+            </div>
+          </div>
 
           <p style="margin-top:14px; font-size:16px;">Total this claim: <strong id="inv-total-display">$0.00</strong></p>
 
@@ -1479,6 +1491,8 @@
               projectId: project.id,
               claims,
               invoiceNumber: overlay.querySelector('#inv-invoice-number').value.trim() || null,
+              sentAt: overlay.querySelector('#inv-date').value || null,
+              dueDate: overlay.querySelector('#inv-due-date').value || null,
             }),
           });
           const data = await res.json();
@@ -1557,9 +1571,9 @@
         <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
             <div>
-              <strong>${inv.invoice_number}</strong>
+              <strong>${inv.invoice_number}</strong>${inv.description ? ` - ${inv.description}` : ''}
               <span class="badge ${inv.paid_at ? 'accepted' : 'sent'}" style="margin-left:6px;">${inv.paid_at ? 'Paid' : 'Awaiting payment'}</span>
-              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</p>
+              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${new Date(inv.sent_at).toLocaleDateString('en-AU')}${inv.due_date ? ` &middot; Due ${new Date(inv.due_date + 'T00:00:00').toLocaleDateString('en-AU')}` : ''}</p>
             </div>
             <div>
               <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:10px;">View client-facing invoice</a>
@@ -1604,6 +1618,16 @@
         <div class="card" style="max-width:560px; width:100%; max-height:85vh; overflow-y:auto;">
           <h2>Edit ${invoice.invoice_number}</h2>
           <p class="subtitle" style="margin-bottom:12px;">${invoice.xero_invoice_id ? 'Already pushed to Xero - saving will push these changes there too.' : 'Not yet pushed to Xero - saving just updates the amounts here.'}</p>
+          <div class="grid cols-2" style="margin-bottom:12px;">
+            <div>
+              <label style="margin-top:0">Invoice date</label>
+              <input type="date" id="ei-date" value="${invoice.sent_at ? new Date(invoice.sent_at).toISOString().slice(0, 10) : ''}" />
+            </div>
+            <div>
+              <label style="margin-top:0">Due date</label>
+              <input type="date" id="ei-due-date" value="${invoice.due_date || ''}" />
+            </div>
+          </div>
           <table>
             <thead><tr><th>Stage</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">STC credit</th></tr></thead>
             <tbody>
@@ -1666,7 +1690,13 @@
           const totalLabour = newRows.reduce((s, r) => s + r.labour, 0);
           const totalMaterial = newRows.reduce((s, r) => s + r.material, 0);
           const totalStc = newRows.reduce((s, r) => s + r.stc, 0);
-          await supabaseClient.from('invoices').update({ labour_amount: totalLabour, material_amount: totalMaterial, stc_amount: totalStc }).eq('id', invoice.id);
+          const newDate = overlay.querySelector('#ei-date').value;
+          const newDueDate = overlay.querySelector('#ei-due-date').value || null;
+          await supabaseClient.from('invoices').update({
+            labour_amount: totalLabour, material_amount: totalMaterial, stc_amount: totalStc,
+            sent_at: newDate ? new Date(newDate).toISOString() : invoice.sent_at,
+            due_date: newDueDate,
+          }).eq('id', invoice.id);
 
           await logActivity('project', project.id, 'invoice_edited', `Edited invoice ${invoice.invoice_number}`);
 

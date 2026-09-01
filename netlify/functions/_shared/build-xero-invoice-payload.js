@@ -115,8 +115,7 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   let reference, lineItems;
   if (isMultiStage) {
     const claims = (invoice.invoice_claims || []).slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0));
-    const stageNames = claims.map(c => c.cost_centres?.name).filter(Boolean);
-    reference = `Job ${jobNumber} - Sales Invoice (${stageNames.join(', ')})`;
+    reference = `Job ${jobNumber} - ${invoice.description || 'Sales Invoice'}`;
     lineItems = [];
     claims.forEach(c => {
       const stageName = c.cost_centres?.name || 'Stage';
@@ -152,13 +151,7 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
     });
   } else {
     if (!isStandalone) {
-      const { data: allCentres } = await supabaseAdmin
-        .from('cost_centres')
-        .select('id, sort_order')
-        .eq('project_id', project.id)
-        .order('sort_order');
-      const stageIndex = allCentres.findIndex(c => c.id === centre.id);
-      reference = `Job ${jobNumber} - Sales Invoice ${stageIndex + 1} of ${allCentres.length} (${centre.name})`;
+      reference = `Job ${jobNumber} - ${invoice.description || 'Sales Invoice'}`;
     } else {
       reference = invoice.description || 'Invoice';
     }
@@ -199,7 +192,11 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
     }
   }
 
-  return { invoice, contactId, reference, lineItems, jobNumber };
+  // Xero's Invoices endpoint takes plain YYYY-MM-DD strings for Date/DueDate.
+  const date = invoice.sent_at ? new Date(invoice.sent_at).toISOString().slice(0, 10) : undefined;
+  const dueDate = invoice.due_date || undefined;
+
+  return { invoice, contactId, reference, lineItems, jobNumber, date, dueDate };
 }
 
 module.exports = { buildXeroInvoicePayload };

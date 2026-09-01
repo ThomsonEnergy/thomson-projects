@@ -28,7 +28,7 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'invoiceId is required' }) };
     }
 
-    const { invoice, contactId, reference, lineItems } = await buildXeroInvoicePayload(supabaseAdmin, invoiceId);
+    const { invoice, contactId, reference, lineItems, date, dueDate } = await buildXeroInvoicePayload(supabaseAdmin, invoiceId);
     if (!invoice.xero_invoice_id) {
       return { statusCode: 400, body: JSON.stringify({ error: "This invoice hasn't been pushed to Xero yet - use push-invoice-to-xero instead." }) };
     }
@@ -46,6 +46,8 @@ exports.handler = async (event) => {
           LineItems: lineItems,
           Reference: reference,
           InvoiceNumber: invoice.invoice_number,
+          Date: date,
+          DueDate: dueDate,
         }],
       },
     });
