@@ -32,6 +32,14 @@ guessing, and skip it until it's answered.
 - **Expected instead:** Don’t allow timesheets to count past midnight. It should carry over to the following day. Also the in and out time should show there prominently. And when clicked on it should open the split so they can edit the clock in and clock out time and control the split between each cost center all in The one place. This should be the only place to do it I think we remove the recent timesheets tab at the bottom
 - **Record id:** 7bc8e931-3fc7-4dcd-a7d2-21b04669000c
 
+### Update idea: Invoice changes
+- **Reported:** 30 Aug 2026, 07:06 am by Jasper Thomson
+- **Approved:** 1 Sept 2026, 08:20 am by Jasper Thomson
+- **Page/feature:** Invoice page
+- **What they want:** Should be able to select the labour charge out rate and material cost same as a normal cost center for the stand alone invoice. 
+Also I don’t want people to be able to type in an invoice number. Should always be automated.
+- **Record id:** 785fdec5-a4ee-4e94-846d-1b99e1a3f32c
+
 ## In Progress
 
 None.
