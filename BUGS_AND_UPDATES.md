@@ -38,11 +38,6 @@ Also I don’t want people to be able to type in an invoice number. Should alway
 - **What they want:** Should be able to create a task on the task page and assign it to a job or office if it’s not job related eg. Take bins out or mow the lawn
 - **Record id:** 2acefc3e-f8fc-4670-a785-c386a8b4977d
 
-### Update idea: Invoice structure
-- **Reported:** 28 Aug 2026, 11:28 pm by Jasper Thomson
-- **What they want:** Invoice should say Deposit on it when it’s a deposit invoice. Also in phone view the words run off the page
-- **Record id:** 0562c371-eecf-440b-8fdc-ad9e4b1de2cd
-
 ### Update idea: add timsheets from the your timesheets this week.
 - **Reported:** 27 Aug 2026, 08:31 pm by Jasper Thomson
 - **Page/feature:** timesheets tab
@@ -51,7 +46,10 @@ Also I don’t want people to be able to type in an invoice number. Should alway
 
 ## In Progress
 
-None.
+### Update idea: Invoice structure
+- **Reported:** 28 Aug 2026, 11:28 pm by Jasper Thomson
+- **What they want:** Invoice should say Deposit on it when it’s a deposit invoice. Also in phone view the words run off the page
+- **Record id:** 0562c371-eecf-440b-8fdc-ad9e4b1de2cd
 
 ## Resolved
 
