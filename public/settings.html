@@ -1852,10 +1852,7 @@
         ${errorNote}`;
     }
 
-    // Shown when the live Xero Payroll push fails (most likely: the Xero
-    // Custom Connection app doesn't have the payroll.employees scope
-    // granted yet - a self-service fix in Xero's own developer portal,
-    // not something this app can do for you). Xero's own bulk-CSV
+    // Shown when the live Xero Payroll push fails. Xero's own bulk-CSV
     // employee import is "deliberately limited to basic identity and
     // contact details" anyway - TFN/bank/rates always need manual entry
     // regardless of import method - so this is a plain summary to key
@@ -1868,7 +1865,7 @@
         <div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;">
           <h2>Couldn't push to Xero automatically</h2>
           <div class="error-box" style="margin-bottom:14px;">${errorMessage || 'Unknown error'}</div>
-          <p class="subtitle" style="margin-bottom:10px;">Most likely fix: add the <strong>payroll.employees</strong> scope to this Xero Custom Connection app (in Xero's developer portal), then push again. In the meantime, here's everything collected so you can enter it in Xero yourself:</p>
+          <p class="subtitle" style="margin-bottom:10px;">In the meantime, here's everything collected so you can enter it in Xero yourself:</p>
           <table>
             <tbody>
               ${rows.map(([k, v]) => `<tr><td style="font-weight:600; white-space:nowrap;">${k}</td><td style="padding-left:12px;">${v}</td></tr>`).join('')}

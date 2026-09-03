@@ -2,11 +2,10 @@
 // Body: { profileId }
 // Admin/finance-only. Attempts to create this person as an employee in
 // Xero Payroll AU via the existing Custom Connection - the same
-// connection already used for Timesheets (see push-timesheets-to-xero.js),
-// but employee CREATION additionally needs the payroll.employees scope,
-// which this app's Xero Custom Connection app may not have been granted
-// yet (see SETUP.md). Field names below are read from Xero's docs, not
-// verified against a live response.
+// connection already used for Timesheets (see push-timesheets-to-xero.js).
+// Field names below are read from Xero's docs, not verified against a
+// live response - the request does reach Xero (auth/scope is fine), so
+// a failure here is a payload/validation issue, not a permissions one.
 //
 // On success: stores the returned Xero EmployeeID into the existing
 // xero_employee_id column - the same column push-timesheets-to-xero.js
