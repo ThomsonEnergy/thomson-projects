@@ -393,6 +393,7 @@ async function openClockOutModal(entry, onDone) {
   let chosenCentres = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
     ? entry.selected_cost_centre_ids.slice()
     : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
+  let splitPercentages = [];
 
   // Has today's mandatory break already been answered against another
   // entry today? Generous UTC window, exact Sydney-date match in JS -
@@ -407,7 +408,7 @@ async function openClockOutModal(entry, onDone) {
   const todayKey = sydneyDateKey(new Date());
   const breakAlreadyLogged = (recentBreaks || []).some(r => sydneyDateKey(new Date(r.clock_in)) === todayKey);
 
-  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakSkipReason: '' };
+  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '' };
 
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
@@ -415,6 +416,10 @@ async function openClockOutModal(entry, onDone) {
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function timePartLocal(d) { return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+  function totalMinutesForSplit() {
+    const mins = Math.round((new Date(state.outIso) - new Date(entry.clock_in)) / 60000);
+    return mins > 0 ? mins : 0;
+  }
 
   function renderStep1() {
     const outDate = new Date(state.outIso);
@@ -428,8 +433,8 @@ async function openClockOutModal(entry, onDone) {
             <button type="button" class="cc-chip ${chosenCentres.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
               <span class="cc-chip-num">${c.number}</span> ${c.name}
             </button>`).join('')}</div>
-          <p class="subtitle" id="cko-cc-hint" style="margin:6px 0 0;">${chosenCentres.length > 1 ? 'Time will be shared evenly across these - edit the split later from Timesheets if it needs to be uneven.' : ''}</p>
         ` : ''}
+        <div id="cko-split-section" style="display:none; margin-top:10px;"></div>
         <label>Clock-out time</label>
         <input type="time" id="cko-time" value="${timePartLocal(outDate)}" />
         <p class="subtitle" style="margin:4px 0 0;">Rounded to the nearest 15 minutes - adjust if that's not quite right.</p>
@@ -447,11 +452,18 @@ async function openClockOutModal(entry, onDone) {
           const id = chip.dataset.id;
           if (chip.classList.contains('selected')) chosenCentres.push(id);
           else chosenCentres = chosenCentres.filter(x => x !== id);
-          overlay.querySelector('#cko-cc-hint').textContent = chosenCentres.length > 1
-            ? 'Time will be shared evenly across these - edit the split later from Timesheets if it needs to be uneven.' : '';
+          splitPercentages = [];
+          refreshClockOutSplit();
         });
       });
     }
+    overlay.querySelector('#cko-time').addEventListener('input', (e) => {
+      const [hh, mm] = e.target.value.split(':').map(Number);
+      const combined = new Date(outDate);
+      if (!isNaN(hh)) combined.setHours(hh, mm || 0, 0, 0);
+      state.outIso = combined.toISOString();
+      refreshClockOutSplit();
+    });
     overlay.querySelector('#cko-cancel-btn').addEventListener('click', () => overlay.remove());
     overlay.querySelector('#cko-next-btn').addEventListener('click', () => {
       const msg = overlay.querySelector('#cko-msg');
@@ -464,12 +476,82 @@ async function openClockOutModal(entry, onDone) {
       state.outIso = combined.toISOString();
       if (breakAlreadyLogged) finalizeClockOut(); else renderStep2();
     });
+
+    refreshClockOutSplit();
+  }
+
+  // Splits the shift across stages right here (percentage sliders, same
+  // mechanics as the Timesheets split) instead of just crediting each
+  // ticked stage the full time and pointing them at Timesheets to fix it
+  // up afterwards.
+  function refreshClockOutSplit() {
+    const section = overlay.querySelector('#cko-split-section');
+    if (!section) return;
+    const totalMin = totalMinutesForSplit();
+    if (chosenCentres.length < 2 || totalMin <= 0) { section.style.display = 'none'; section.innerHTML = ''; splitPercentages = []; return; }
+
+    const splitCentres = centres.filter(c => chosenCentres.includes(c.id));
+    if (splitPercentages.length !== splitCentres.length) {
+      splitPercentages = splitCentres.map(() => Math.round(100 / splitCentres.length));
+      splitPercentages[0] += 100 - splitPercentages.reduce((a, b) => a + b, 0);
+    }
+
+    section.style.display = 'block';
+    section.innerHTML = `
+      <p class="subtitle" style="margin:0 0 8px;">Split ${fmtDuration(totalMin * 60000)} across these stages.</p>
+      <div style="display:flex; height:18px; border-radius:6px; overflow:hidden; margin-bottom:10px;">
+        ${splitCentres.map((c, i) => `<div class="cko-split-bar-seg" data-index="${i}" style="width:${splitPercentages[i]}%; background:${segmentColor(i)};"></div>`).join('')}
+      </div>
+      ${splitCentres.map((c, i) => `
+        <div style="margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:3px; gap:8px;">
+            <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${c.number}</strong> ${c.name}</span>
+            <span style="display:flex; align-items:center; gap:4px;">
+              <input type="number" min="0" max="100" value="${splitPercentages[i]}" class="cko-split-number" data-index="${i}" style="width:50px; padding:3px 5px; text-align:right;" />%
+              <span class="cko-split-label subtitle" data-index="${i}" style="min-width:60px; text-align:right;">${fmtDuration(Math.round(totalMin * splitPercentages[i] / 100) * 60000)}</span>
+            </span>
+          </div>
+          <input type="range" min="0" max="100" value="${splitPercentages[i]}" class="cko-split-slider" data-index="${i}" style="width:100%; touch-action:none;" />
+        </div>
+      `).join('')}`;
+
+    const sliders = [...section.querySelectorAll('.cko-split-slider')];
+    const numbers = [...section.querySelectorAll('.cko-split-number')];
+    const labels = [...section.querySelectorAll('.cko-split-label')];
+    const barSegs = [...section.querySelectorAll('.cko-split-bar-seg')];
+
+    function paint() {
+      sliders.forEach((s, i) => { s.value = splitPercentages[i]; });
+      numbers.forEach((n, i) => { if (document.activeElement !== n) n.value = splitPercentages[i]; });
+      labels.forEach((l, i) => { l.textContent = fmtDuration(Math.round(totalMin * splitPercentages[i] / 100) * 60000); });
+      barSegs.forEach((b, i) => { b.style.width = `${splitPercentages[i]}%`; });
+    }
+    function rebalance(idx, newVal) {
+      newVal = Math.max(0, Math.min(100, newVal));
+      const isLast = idx === splitCentres.length - 1;
+      const flexIdxs = isLast ? splitCentres.map((_, i) => i).filter(i => i < idx) : splitCentres.map((_, i) => i).filter(i => i > idx);
+      const lockedSum = splitCentres.map((_, i) => i).filter(i => i !== idx && !flexIdxs.includes(i)).reduce((s, i) => s + splitPercentages[i], 0);
+      newVal = Math.min(newVal, 100 - lockedSum);
+      splitPercentages[idx] = newVal;
+      const remaining = 100 - newVal - lockedSum;
+      const flexOldTotal = flexIdxs.reduce((s, i) => s + splitPercentages[i], 0);
+      let assigned = 0;
+      flexIdxs.forEach((i, n) => {
+        const isLastFlex = n === flexIdxs.length - 1;
+        const share = isLastFlex ? remaining - assigned : Math.round(flexOldTotal > 0 ? (splitPercentages[i] / flexOldTotal) * remaining : remaining / flexIdxs.length);
+        splitPercentages[i] = Math.max(0, share);
+        assigned += share;
+      });
+      paint();
+    }
+    sliders.forEach(s => s.addEventListener('input', () => rebalance(parseInt(s.dataset.index), parseInt(s.value))));
+    numbers.forEach(n => n.addEventListener('input', () => { const v = parseInt(n.value); if (!isNaN(v)) rebalance(parseInt(n.dataset.index), v); }));
   }
 
   function renderStep2() {
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
-        <h2>Did you take your 30-minute break today?</h2>
+        <h2>Did you take your break today?</h2>
         <p class="subtitle" style="margin-bottom:12px;">It's mandatory to take at least 30 minutes - let us know when, or why not.</p>
         <div style="display:flex; gap:10px; margin-bottom:12px;">
           <button type="button" id="cko-break-yes" class="secondary" style="flex:1;">Yes, I took it</button>
@@ -484,11 +566,16 @@ async function openClockOutModal(entry, onDone) {
       </div>`;
 
     const detailEl = overlay.querySelector('#cko-break-detail');
+    const breakMinuteOptions = [30, 45, 60, 75, 90].map(m => `<option value="${m}" ${m === state.breakMinutes ? 'selected' : ''}>${m} minutes</option>`).join('');
     overlay.querySelector('#cko-break-yes').addEventListener('click', () => {
       state.breakTaken = true;
       overlay.querySelector('#cko-break-yes').style.borderColor = 'var(--accent)';
       overlay.querySelector('#cko-break-no').style.borderColor = '';
-      detailEl.innerHTML = `<label style="margin-top:0">What time did your break start?</label><input type="time" id="cko-break-start" />`;
+      detailEl.innerHTML = `
+        <label style="margin-top:0">What time did your break start?</label>
+        <input type="time" id="cko-break-start" value="${state.breakStart}" />
+        <label>How long was it?</label>
+        <select id="cko-break-minutes">${breakMinuteOptions}</select>`;
     });
     overlay.querySelector('#cko-break-no').addEventListener('click', () => {
       state.breakTaken = false;
@@ -504,6 +591,7 @@ async function openClockOutModal(entry, onDone) {
         const startVal = overlay.querySelector('#cko-break-start')?.value;
         if (!startVal) { msg.innerHTML = `<div class="error-box">Enter when your break started.</div>`; return; }
         state.breakStart = startVal;
+        state.breakMinutes = parseInt(overlay.querySelector('#cko-break-minutes')?.value) || 30;
       } else {
         const reasonVal = overlay.querySelector('#cko-break-reason')?.value.trim();
         if (!reasonVal) { msg.innerHTML = `<div class="error-box">A quick reason is required.</div>`; return; }
@@ -514,11 +602,6 @@ async function openClockOutModal(entry, onDone) {
   }
 
   async function finalizeClockOut() {
-    const carryFields = {};
-    if (chosenCentres.length === 1) { carryFields.cost_centre_id = chosenCentres[0]; carryFields.selected_cost_centre_ids = null; }
-    else if (chosenCentres.length > 1) { carryFields.cost_centre_id = null; carryFields.selected_cost_centre_ids = chosenCentres; }
-    else { carryFields.cost_centre_id = null; carryFields.selected_cost_centre_ids = null; }
-
     const onceFields = {};
     if (state.breakTaken !== null) {
       onceFields.break_taken = state.breakTaken;
@@ -527,16 +610,67 @@ async function openClockOutModal(entry, onDone) {
         const breakStartDate = new Date(state.outIso);
         breakStartDate.setHours(hh, mm, 0, 0);
         onceFields.break_start = breakStartDate.toISOString();
-        onceFields.break_minutes = 30;
+        onceFields.break_minutes = state.breakMinutes;
       } else {
         onceFields.break_skip_reason = state.breakSkipReason;
       }
     }
 
-    const { error } = await clockOutActiveEntry(entry, { clockOutIso: state.outIso, carryFields, onceFields });
-    if (error) {
+    const doingSplit = chosenCentres.length > 1 && splitPercentages.length === chosenCentres.length;
+    let saveError = null;
+
+    if (!doingSplit) {
+      const carryFields = {};
+      if (chosenCentres.length === 1) { carryFields.cost_centre_id = chosenCentres[0]; carryFields.selected_cost_centre_ids = null; }
+      else { carryFields.cost_centre_id = null; carryFields.selected_cost_centre_ids = null; }
+      const { error } = await clockOutActiveEntry(entry, { clockOutIso: state.outIso, carryFields, onceFields });
+      saveError = error;
+    } else {
+      // Physically split today's segment across stages (sequential time
+      // ranges, same as the Timesheets split) - any portion carried past
+      // midnight keeps crediting all the ticked stages evenly rather than
+      // re-splitting again, since that combination is rare enough not to
+      // need its own slider.
+      const segments = splitAtSydneyMidnight(entry.clock_in, state.outIso);
+      const splitCentres = centres.filter(c => chosenCentres.includes(c.id));
+      const totalMin = Math.round((new Date(segments[0].clock_out) - new Date(segments[0].clock_in)) / 60000);
+      const rows = [];
+      let cursor = new Date(segments[0].clock_in);
+      splitCentres.forEach((c, i) => {
+        const isLast = i === splitCentres.length - 1;
+        const minutes = isLast ? totalMin - rows.reduce((s, r) => s + r.minutes, 0) : Math.round(totalMin * splitPercentages[i] / 100);
+        const segStart = new Date(cursor);
+        const segEnd = new Date(cursor.getTime() + minutes * 60000);
+        rows.push({ minutes, clock_in: segStart.toISOString(), clock_out: segEnd.toISOString(), cost_centre_id: c.id });
+        cursor = segEnd;
+      });
+
+      const inserts = rows.map((r, i) => ({
+        staff_id: entry.staff_id, project_id: entry.project_id, cost_centre_id: r.cost_centre_id,
+        time_category: entry.time_category, clock_in: r.clock_in, clock_out: r.clock_out,
+        ...(i === 0 ? onceFields : {}),
+      }));
+      const { error: insErr } = await supabaseClient.from('time_entries').insert(inserts);
+      if (insErr) saveError = insErr;
+
+      if (!saveError && segments.length > 1) {
+        const extra = segments.slice(1).map(seg => ({
+          staff_id: entry.staff_id, project_id: entry.project_id, cost_centre_id: null,
+          selected_cost_centre_ids: chosenCentres, time_category: entry.time_category,
+          clock_in: seg.clock_in, clock_out: seg.clock_out,
+        }));
+        const { error: e2 } = await supabaseClient.from('time_entries').insert(extra);
+        if (e2) saveError = e2;
+      }
+      if (!saveError) {
+        const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', entry.id);
+        if (delErr) saveError = delErr;
+      }
+    }
+
+    if (saveError) {
       const msg = overlay.querySelector('#cko-msg');
-      if (msg) msg.innerHTML = `<div class="error-box">${error.message}</div>`;
+      if (msg) msg.innerHTML = `<div class="error-box">${saveError.message}</div>`;
       return;
     }
     if (project) renderStep3();
