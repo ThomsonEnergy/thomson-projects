@@ -34,8 +34,8 @@
   </div>
 
   <div class="wrap">
-    <h1>Welcome to Thomson Energy</h1>
-    <p class="subtitle">A few things to get sorted before you start - this only needs doing once.</p>
+    <h1 id="ob-heading">Welcome to Thomson Energy</h1>
+    <p class="subtitle" id="ob-subheading">A few things to get sorted before you start - this only needs doing once.</p>
 
     <div class="ob-steps" id="ob-steps"></div>
 
@@ -59,6 +59,22 @@
         ...options,
         headers: { ...(options.headers || {}), Authorization: `Bearer ${session.access_token}` },
       });
+    }
+
+    // A re-issue (admin trigger, e.g. a pay rise) shows different framing
+    // than the original first-day welcome - onboarding_reissue_reason is
+    // how the page tells the two apart.
+    function renderWelcomeHeader() {
+      const headings = {
+        pay_rise: { title: 'Congratulations on your pay rise!', subtitle: 'Just a few things to confirm and re-sign given your updated rate.' },
+        details_update: { title: 'A few details to update', subtitle: 'Your admin has asked you to review and confirm some updated information.' },
+        other: { title: 'A quick update needed', subtitle: profile.onboarding_reissue_note || "Your admin's asked you to go through this again." },
+      };
+      const h = profile.onboarding_reissue_reason
+        ? (headings[profile.onboarding_reissue_reason] || headings.other)
+        : { title: 'Welcome to Thomson Energy', subtitle: 'A few things to get sorted before you start - this only needs doing once.' };
+      document.getElementById('ob-heading').textContent = h.title;
+      document.getElementById('ob-subheading').textContent = h.subtitle;
     }
 
     function renderSteps() {
@@ -310,8 +326,15 @@
     }
 
     // ---------- Step 3: documents to review & sign ----------
+    // A re-issue (pay rise, updated details, ...) bumps
+    // onboarding_cycle_started_at instead of deleting old signatures -
+    // keeps the historical record intact (see "My Profile > Documents
+    // I've signed") while still requiring a fresh signature for the
+    // current pass. First-timers have no cycle start yet, so every past
+    // signature counts (there aren't any anyway).
     function isSigned(documentId) {
-      return signatures.some(s => s.document_id === documentId);
+      const cycleStart = new Date(profile.onboarding_cycle_started_at || 0);
+      return signatures.some(s => s.document_id === documentId && new Date(s.signed_at) >= cycleStart);
     }
 
     function visibleDocsForStep3() {
@@ -447,7 +470,11 @@
         </div>`;
       document.getElementById('ob-finish-btn').addEventListener('click', async () => {
         const msg = document.getElementById('ob-finish-msg');
-        const { error } = await supabaseClient.from('profiles').update({ onboarding_completed_at: new Date().toISOString() }).eq('id', myUserId);
+        const { error } = await supabaseClient.from('profiles').update({
+          onboarding_completed_at: new Date().toISOString(),
+          onboarding_reissue_reason: null,
+          onboarding_reissue_note: null,
+        }).eq('id', myUserId);
         if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
         window.location.href = '/home.html';
       });
@@ -462,12 +489,13 @@
         supabaseClient.from('profiles').select(`
           id, full_name, date_of_birth, employment_type, employment_start_date, pay_type, annual_salary, salary_includes_super,
           has_company_vehicle, super_fund_name, super_is_self_managed, bank_account_name, bank_bsb, bank_account_number,
-          emergency_contact_name, emergency_contact_relationship, onboarding_completed_at
+          emergency_contact_name, emergency_contact_relationship, onboarding_completed_at,
+          onboarding_reissue_reason, onboarding_reissue_note, onboarding_cycle_started_at
         `).eq('id', myUserId).single(),
         supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', myUserId).maybeSingle(),
         supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', myUserId).maybeSingle(),
         supabaseClient.from('onboarding_documents').select('*').order('sort_order'),
-        supabaseClient.from('onboarding_document_signatures').select('id, document_id').eq('profile_id', myUserId),
+        supabaseClient.from('onboarding_document_signatures').select('id, document_id, signed_at').eq('profile_id', myUserId),
         supabaseClient.from('employee_contracts').select('*').eq('profile_id', myUserId).maybeSingle(),
       ]);
       profile = p || {};
@@ -490,6 +518,7 @@
       });
 
       await loadOnboardingData();
+      renderWelcomeHeader();
       goToStep(1);
     })();
   </script>

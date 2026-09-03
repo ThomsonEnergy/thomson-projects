@@ -229,6 +229,12 @@
           </div>
 
           <div class="card">
+            <h2>Documents I've signed</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Exactly what you agreed to and when - re-signing something later (e.g. after a pay rise) adds a new entry here rather than replacing the old one.</p>
+            <div id="my-signed-docs-list"><p class="subtitle">Loading...</p></div>
+          </div>
+
+          <div class="card">
             <h2>My bank account</h2>
             <p class="subtitle" style="margin-bottom:10px;">For payroll - only visible to you and admin/finance.</p>
             <div class="grid cols-3">
@@ -1364,6 +1370,50 @@
 
       document.getElementById('my-licence-rows').innerHTML = (licences || []).map(myLicenceRowHtml).join('');
       wireMyLicenceRows();
+
+      await loadMySignedDocs(userId);
+    }
+
+    async function loadMySignedDocs(userId) {
+      const listEl = document.getElementById('my-signed-docs-list');
+      const { data: sigs, error } = await supabaseClient
+        .from('onboarding_document_signatures')
+        .select('id, document_title_snapshot, document_body_snapshot, signature_data_url, signed_by_name, signed_at')
+        .eq('profile_id', userId)
+        .order('signed_at', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!sigs.length) { listEl.innerHTML = `<p class="subtitle">Nothing signed yet.</p>`; return; }
+
+      listEl.innerHTML = sigs.map(s => `
+        <div class="project-list-item" data-id="${s.id}">
+          <div>
+            <div class="name">${s.document_title_snapshot}</div>
+            <div class="meta">Signed ${new Date(s.signed_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })} as ${s.signed_by_name}</div>
+          </div>
+          <button type="button" class="secondary view-signed-doc-btn" data-id="${s.id}" style="font-size:12px; padding:6px 10px;">View</button>
+        </div>`).join('');
+
+      listEl.querySelectorAll('.view-signed-doc-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const sig = sigs.find(s => s.id === btn.dataset.id);
+          openSignedDocViewer(sig);
+        });
+      });
+    }
+
+    function openSignedDocViewer(sig) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:560px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>${sig.document_title_snapshot}</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Signed ${new Date(sig.signed_at).toLocaleString('en-AU')} as ${sig.signed_by_name} - shown exactly as it was at the time, even if the template has since changed.</p>
+          <div style="white-space:pre-wrap; line-height:1.6; max-height:320px; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px;">${sig.document_body_snapshot}</div>
+          ${sig.signature_data_url ? `<img src="${sig.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
+          <button type="button" class="secondary" id="close-signed-doc-btn" style="margin-top:14px;">Close</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#close-signed-doc-btn').addEventListener('click', () => overlay.remove());
     }
 
     document.getElementById('my-profile-photo-input').addEventListener('change', async (e) => {
@@ -1487,7 +1537,7 @@
       const { data: profile, error } = await supabaseClient.from('profiles')
         .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id, bank_account_name, bank_bsb, bank_account_number,
           date_of_birth, employment_type, employment_start_date, pay_type, annual_salary, salary_includes_super, has_company_vehicle, has_probationary_period,
-          super_fund_name, super_is_self_managed, emergency_contact_name, emergency_contact_relationship, onboarding_completed_at`)
+          super_fund_name, super_is_self_managed, emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason`)
         .eq('id', userId).single();
       const { data: rates } = await supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle();
       const { data: sensitive } = await supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', userId).maybeSingle();
@@ -1579,7 +1629,26 @@
         </div>
 
         <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
-          <p style="margin:0 0 10px; font-weight:600;">Onboarding &amp; payroll ${profile.onboarding_completed_at ? '<span class="badge accepted" style="font-weight:400;">Onboarding complete</span>' : '<span class="badge draft" style="font-weight:400;">Onboarding not started</span>'}</p>
+          <p style="margin:0 0 10px; font-weight:600;">Onboarding &amp; payroll ${profile.onboarding_completed_at ? '<span class="badge accepted" style="font-weight:400;">Onboarding complete</span>' : '<span class="badge draft" style="font-weight:400;">Onboarding not started</span>'}${profile.onboarding_reissue_reason ? ' <span class="badge sent" style="font-weight:400;">Re-issue pending</span>' : ''}</p>
+
+          ${profile.onboarding_completed_at ? `
+            <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:12px;">
+              <label style="margin-top:0">Re-issue onboarding - sends them back through it (updated pay rates and any new contract show automatically)</label>
+              <div class="grid cols-2">
+                <select id="reissue-reason">
+                  <option value="pay_rise">Pay rise</option>
+                  <option value="details_update">Update details</option>
+                  <option value="other">Other</option>
+                </select>
+                <input id="reissue-note" placeholder="Optional note shown to them" />
+              </div>
+              <label style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+                <input type="checkbox" id="reissue-needs-contract" style="width:auto;" checked /> Needs a new contract sign-off (resets it to draft for you to regenerate)
+              </label>
+              <button type="button" class="secondary" id="reissue-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Re-issue onboarding</button>
+              <div id="reissue-msg"></div>
+            </div>
+          ` : ''}
 
           <div class="grid cols-3">
             <div>
@@ -1837,13 +1906,45 @@
         msg.innerHTML = `<div class="success-box">Ready to sign - it'll now show up in this person's onboarding.</div>`;
         overlay.querySelector('#mark-contract-ready-btn').disabled = true;
       });
+
+      // Sends someone who's already onboarded back through it - old
+      // signatures stay on record (see "My Profile > Documents I've
+      // signed"), but everything needs a fresh signature from
+      // onboarding_cycle_started_at onward, and Documents step 3 stays
+      // hidden until they've done that.
+      const reissueBtn = overlay.querySelector('#reissue-btn');
+      if (reissueBtn) {
+        reissueBtn.addEventListener('click', async () => {
+          const msg = overlay.querySelector('#reissue-msg');
+          reissueBtn.disabled = true;
+          try {
+            const { error: profileErr } = await supabaseClient.from('profiles').update({
+              onboarding_completed_at: null,
+              onboarding_cycle_started_at: new Date().toISOString(),
+              onboarding_reissue_reason: overlay.querySelector('#reissue-reason').value,
+              onboarding_reissue_note: overlay.querySelector('#reissue-note').value.trim() || null,
+            }).eq('id', userId);
+            if (profileErr) throw profileErr;
+
+            if (overlay.querySelector('#reissue-needs-contract').checked && contract) {
+              const { error: contractErr } = await supabaseClient.from('employee_contracts')
+                .update({ status: 'draft', updated_at: new Date().toISOString() }).eq('profile_id', userId);
+              if (contractErr) throw contractErr;
+            }
+            msg.innerHTML = `<div class="success-box">Re-issued - they'll be sent through onboarding again next time they log in.</div>`;
+            reissueBtn.textContent = 'Re-issue onboarding';
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+            reissueBtn.disabled = false;
+          }
+        });
+      }
     }
 
     // Onboarding hasn't started, is in progress, or is done and either
     // waiting on an admin to push it to Xero Payroll, already synced, or
     // came back with an error last time (shown so it's obvious why -
-    // most likely the Xero Custom Connection app just needs the
-    // payroll.employees scope added, see the function's own error text).
+    // see the function's own error text for the actual reason).
     function onboardingCellHtml(u) {
       if (!u.onboarding_completed_at) return `<span class="badge draft">Not started</span>`;
       if (u.xero_payroll_status === 'synced') return `<span class="badge accepted">Synced to Xero</span>`;

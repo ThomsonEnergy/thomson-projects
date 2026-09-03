@@ -214,4 +214,7 @@ select '074', 'recurring_tasks',
 union all
 select '075', 'clockout_breaks',
   case when exists (select 1 from information_schema.columns where table_name = 'time_entries' and column_name = 'break_taken') then 'present' else 'MISSING' end
+union all
+select '076', 'onboarding_reissue',
+  case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'onboarding_cycle_started_at') then 'present' else 'MISSING' end
 order by 1;
