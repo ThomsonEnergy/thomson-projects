@@ -44,30 +44,8 @@
     </div>
 
     <div class="card">
-      <h2>Your timesheet this week</h2>
-      <div id="my-week-days"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card" id="team-week-card" style="display:none;">
-      <h2>Team timesheets</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Hours logged per day for the pay week above.</p>
-      <div id="team-week-table"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card" id="dev-mode-entries-card" style="display:none;">
-      <h2>All entries this week</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Only visible with Dev Mode active (Settings). Bulk-select and delete individual clock in/out entries.</p>
-      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-        <label style="display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" id="select-all-entries" style="width:auto;" /> Select all</label>
-        <button type="button" id="bulk-delete-entries-btn" class="secondary" style="display:none;">Delete selected</button>
-      </div>
-      <div id="bulk-delete-entries-msg"></div>
-      <div id="dev-mode-entries-list"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-        <h2 style="margin:0;">My recent entries</h2>
+        <h2 style="margin:0;">Your timesheet this week</h2>
         <button type="button" class="secondary" id="add-manual-entry-btn">+ Add missed entry</button>
       </div>
       <div id="manual-entry-form" style="display:none; margin-bottom:16px; padding:14px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;">
@@ -95,7 +73,25 @@
         <button type="button" class="secondary" id="manual-entry-cancel-btn" style="margin-top:10px;">Cancel</button>
         <div id="manual-entry-msg"></div>
       </div>
-      <div id="my-entries-list"><p class="subtitle">Loading...</p></div>
+      <p class="subtitle" style="margin:0 0 10px;">Click a day to add an entry, or click an existing entry to edit its time, job/stage, or split it across stages.</p>
+      <div id="my-week-days"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card" id="team-week-card" style="display:none;">
+      <h2>Team timesheets</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Hours logged per day for the pay week above.</p>
+      <div id="team-week-table"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card" id="dev-mode-entries-card" style="display:none;">
+      <h2>All entries this week</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Only visible with Dev Mode active (Settings). Bulk-select and delete individual clock in/out entries.</p>
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <label style="display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" id="select-all-entries" style="width:auto;" /> Select all</label>
+        <button type="button" id="bulk-delete-entries-btn" class="secondary" style="display:none;">Delete selected</button>
+      </div>
+      <div id="bulk-delete-entries-msg"></div>
+      <div id="dev-mode-entries-list"><p class="subtitle">Loading...</p></div>
     </div>
 
     <div class="card">
@@ -191,6 +187,9 @@
 
     function fmtDateTime(iso) {
       return new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+    function fmtTime(iso) {
+      return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
     }
 
     async function loadProjectOptions() {
@@ -299,7 +298,7 @@
 
       const { data: entries, error } = await supabaseClient
         .from('time_entries')
-        .select('id, project_id, cost_centre_id, selected_cost_centre_ids, clock_in, clock_out, projects(name, job_number, quote_number)')
+        .select('id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, clock_out, xero_pushed_at, projects(name, job_number, quote_number)')
         .eq('staff_id', myUserId)
         .gte('clock_in', rangeStart.toISOString())
         .lt('clock_in', rangeEndExclusive.toISOString())
@@ -338,6 +337,7 @@
         if (dayEntries.length) {
           bodyHtml = dayEntries.map(e => {
             const jobLabel = e.projects ? projectRef(e.projects) : 'General / Office';
+            const timesLabel = `${fmtTime(e.clock_in)} &rarr; ${e.clock_out ? fmtTime(e.clock_out) : 'now'}`;
             const dur = e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : 'In progress';
             let splitNote = '';
             if (e.project_id) {
@@ -349,8 +349,9 @@
                 splitNote = `<span style="font-size:12px; color:var(--red);">No stage selected</span>`;
               }
             }
-            return `<div style="display:flex; justify-content:space-between; gap:8px; padding:4px 0; font-size:13px;">
-              <span>${jobLabel}${splitNote ? ' &middot; ' + splitNote : ''}</span>
+            return `<div class="week-entry-row" data-id="${e.id}" data-project-id="${e.project_id || ''}" data-cost-centre-id="${e.cost_centre_id || ''}" data-selected-cost-centres='${JSON.stringify(e.selected_cost_centre_ids || null)}' data-time-category="${e.time_category || 'job'}" data-clock-in="${e.clock_in}" data-clock-out="${e.clock_out || ''}" data-xero-pushed="${e.xero_pushed_at ? 'true' : 'false'}"
+              style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; margin:4px 0; font-size:13px; border-radius:6px; background:var(--surface-2); cursor:pointer;" title="Click to edit this entry">
+              <span><strong>${timesLabel}</strong> &middot; ${jobLabel}${splitNote ? ' &middot; ' + splitNote : ''}</span>
               <span class="subtitle">${dur}</span>
             </div>`;
           }).join('');
@@ -364,8 +365,8 @@
         const statusLabel = dayEntries.length ? fmtDuration(totalMs) : (onLeave ? 'Leave' : 'No entry');
 
         return `
-          <div class="my-week-day" data-date="${dStr}" style="padding:10px 0; border-bottom:1px solid var(--border); cursor:pointer;" title="Click to add a timesheet entry for this day">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="my-week-day" data-date="${dStr}" style="padding:10px 0; border-bottom:1px solid var(--border);">
+            <div class="my-week-day-header" data-date="${dStr}" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" title="Click to add a timesheet entry for this day">
               <strong>${fmtDayLabel(day)}</strong>
               <span class="badge ${status}">${statusLabel}</span>
             </div>
@@ -373,8 +374,11 @@
           </div>`;
       }).join('');
 
-      el.querySelectorAll('.my-week-day').forEach(dayEl => {
-        dayEl.addEventListener('click', () => openManualEntryFormForDate(dayEl.dataset.date));
+      el.querySelectorAll('.my-week-day-header').forEach(headerEl => {
+        headerEl.addEventListener('click', () => openManualEntryFormForDate(headerEl.dataset.date));
+      });
+      el.querySelectorAll('.week-entry-row').forEach(row => {
+        row.addEventListener('click', () => openEntryPanel(row.dataset));
       });
     }
 
@@ -532,53 +536,85 @@
 
     let cachedProjects = [];
 
-    async function loadMyEntries() {
-      const listEl = document.getElementById('my-entries-list');
-      const { data, error } = await supabaseClient
-        .from('time_entries')
-        .select('*, projects(name, job_number, quote_number)')
-        .eq('staff_id', myUserId)
-        .order('clock_in', { ascending: false })
-        .limit(20);
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No entries yet.</p>`; return; }
-      listEl.innerHTML = `
-        <table class="responsive-stack">
-          <thead><tr><th>Job</th><th>Clocked in</th><th>Clocked out</th><th class="num">Duration</th><th></th></tr></thead>
-          <tbody>
-            ${data.map(e => `
-              <tr data-id="${e.id}" data-project-id="${e.project_id || ''}" data-cost-centre-id="${e.cost_centre_id || ''}" data-clock-in="${e.clock_in}" data-clock-out="${e.clock_out || ''}" data-selected-cost-centres='${JSON.stringify(e.selected_cost_centre_ids || null)}' data-xero-pushed="${e.xero_pushed_at ? 'true' : 'false'}">
-                <td data-label="Job">${e.projects ? projectRef(e.projects) : 'General / Office'}</td>
-                <td data-label="Clocked in">${fmtDateTime(e.clock_in)}</td>
-                <td data-label="Clocked out">${e.clock_out ? fmtDateTime(e.clock_out) : '<span class="badge in_progress">In progress</span>'}</td>
-                <td class="num" data-label="Duration">${e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : ''}</td>
-                <td data-label="" style="text-align:right;">
-                  <button type="button" class="secondary edit-entry-btn" style="font-size:12px; padding:6px 10px;">Edit</button>
-                  ${e.clock_out && !e.xero_pushed_at ? `<button type="button" class="secondary split-entry-btn" style="font-size:12px; padding:6px 10px;">Split</button>` : ''}
-                </td>
-              </tr>`).join('')}
-          </tbody>
-        </table>`;
+    // ---------- unified entry edit + split panel ----------
+    // One place to fix a mis-logged time, re-point an entry at the right
+    // job/stage, or split it across stages - replaces what used to be a
+    // separate "recent entries" table plus a standalone split-only panel.
+    // Once an entry's hours have been sent to Xero (xero_pushed_at set),
+    // the time itself is locked - Xero already has it - but the job/stage
+    // stays editable, for the common case of clocking in against the
+    // wrong job by mistake.
 
-      listEl.querySelectorAll('.edit-entry-btn').forEach(btn => {
-        btn.addEventListener('click', () => openEntryEditor(btn.closest('tr')));
-      });
-      listEl.querySelectorAll('.split-entry-btn').forEach(btn => {
-        btn.addEventListener('click', () => openSplitPanel(btn.closest('tr')));
-      });
+    function segmentColor(i) {
+      return `hsl(${(i * 137.5) % 360}, 55%, 55%)`;
     }
 
-    // Once an entry's hours have been sent to Xero (xero_pushed_at set),
-    // the time itself is locked - Xero already has it, and there's no
-    // signal here to un-push a timesheet retroactively. The job/stage
-    // stays editable either way, for the common case of clocking in
-    // against the wrong job by mistake.
-    let editSelectedCostCentres = [];
-    async function loadEditCostCentreChips(row, projectId, preselectedIds) {
-      editSelectedCostCentres = [];
-      const wrap = row.querySelector('.edit-cost-centres');
-      const chipsEl = row.querySelector('.edit-cc-chips');
-      if (!projectId) { wrap.style.display = 'none'; return; }
+    let panelSelectedCostCentres = [];
+    let panelSplitPercentages = [];
+
+    async function openEntryPanel(data) {
+      const id = data.id;
+      const isPushed = data.xeroPushed === 'true';
+      const currentSelectedCC = JSON.parse(data.selectedCostCentres || 'null')
+        || (data.costCentreId ? [data.costCentreId] : []);
+      panelSelectedCostCentres = currentSelectedCC.slice();
+      panelSplitPercentages = [];
+
+      const projectOptions = `<option value="">General / Office</option>` +
+        cachedProjects.map(p => `<option value="${p.id}" ${p.id === data.projectId ? 'selected' : ''}>${projectRef(p)}</option>`).join('');
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.dataset.centres = '[]';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Edit this entry</h2>
+          ${isPushed ? `<p class="subtitle" style="margin:0 0 10px;">This entry's time has already been sent to Xero and can't be changed - the job/stage can still be corrected below if it was logged against the wrong one.</p>` : ''}
+          <label style="margin-top:0">Job</label>
+          <select id="panel-project">${projectOptions}</select>
+          <div id="panel-cost-centres" style="display:none; margin-top:8px;">
+            <label style="margin-top:0">Stage(s)</label>
+            <div id="panel-cc-chips"></div>
+          </div>
+          <label>Date</label>
+          <input type="date" id="panel-date" value="${isoToDatePart(data.clockIn)}" ${isPushed ? 'disabled' : ''} />
+          <div style="display:flex; gap:10px;">
+            <div style="flex:1;">
+              <label>Start time</label>
+              <input type="time" id="panel-start-time" value="${isoToTimePart(data.clockIn)}" ${isPushed ? 'disabled' : ''} />
+            </div>
+            <div style="flex:1;">
+              <label>Finish time</label>
+              <input type="time" id="panel-end-time" value="${isoToTimePart(data.clockOut)}" ${isPushed ? 'disabled' : ''} />
+            </div>
+          </div>
+          <div id="panel-split-section" style="display:none; margin-top:14px; padding-top:14px; border-top:1px solid var(--border);"></div>
+          <div style="margin-top:14px;">
+            <button id="panel-save-btn">Save</button>
+            <button type="button" class="secondary" id="panel-cancel-btn">Cancel</button>
+          </div>
+          <div id="panel-msg"></div>
+        </div>`;
+
+      document.body.appendChild(overlay);
+      overlay.querySelector('#panel-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#panel-project').addEventListener('change', (e) => {
+        loadPanelCostCentreChips(overlay, e.target.value || null, [], isPushed);
+      });
+      ['panel-date', 'panel-start-time', 'panel-end-time'].forEach(elId => {
+        overlay.querySelector('#' + elId).addEventListener('input', () => refreshSplitSection(overlay, isPushed));
+      });
+      overlay.querySelector('#panel-save-btn').addEventListener('click', () => saveEntryPanel(overlay, id, isPushed));
+
+      await loadPanelCostCentreChips(overlay, data.projectId || null, currentSelectedCC, isPushed);
+    }
+
+    async function loadPanelCostCentreChips(overlay, projectId, preselectedIds, isPushed) {
+      panelSelectedCostCentres = [];
+      const wrap = overlay.querySelector('#panel-cost-centres');
+      const chipsEl = overlay.querySelector('#panel-cc-chips');
+      overlay.dataset.centres = '[]';
+      if (!projectId) { wrap.style.display = 'none'; refreshSplitSection(overlay, isPushed); return; }
 
       const project = cachedProjects.find(p => p.id === projectId);
       const { data: centres, error } = await supabaseClient
@@ -586,251 +622,164 @@
         .select('id, name')
         .eq('project_id', projectId)
         .order('sort_order');
-      if (error || !centres || !centres.length) { wrap.style.display = 'none'; return; }
+      if (error || !centres || !centres.length) { wrap.style.display = 'none'; refreshSplitSection(overlay, isPushed); return; }
+
+      const numbered = centres.map((c, i) => ({ ...c, number: costCentreNumber(project ? project.job_number : null, i + 1) }));
+      overlay.dataset.centres = JSON.stringify(numbered);
 
       wrap.style.display = 'block';
-      chipsEl.innerHTML = centres.map((c, i) => `
+      chipsEl.innerHTML = numbered.map(c => `
         <button type="button" class="cc-chip ${preselectedIds.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
-          <span class="cc-chip-num">${costCentreNumber(project ? project.job_number : null, i + 1)}</span> ${c.name}
+          <span class="cc-chip-num">${c.number}</span> ${c.name}
         </button>`).join('');
-      editSelectedCostCentres = centres.filter(c => preselectedIds.includes(c.id)).map(c => c.id);
+      panelSelectedCostCentres = numbered.filter(c => preselectedIds.includes(c.id)).map(c => c.id);
       chipsEl.querySelectorAll('.cc-chip').forEach(chip => {
         chip.addEventListener('click', () => {
           chip.classList.toggle('selected');
           const id = chip.dataset.id;
-          if (chip.classList.contains('selected')) editSelectedCostCentres.push(id);
-          else editSelectedCostCentres = editSelectedCostCentres.filter(x => x !== id);
+          if (chip.classList.contains('selected')) panelSelectedCostCentres.push(id);
+          else panelSelectedCostCentres = panelSelectedCostCentres.filter(x => x !== id);
+          panelSplitPercentages = [];
+          refreshSplitSection(overlay, isPushed);
         });
       });
+      refreshSplitSection(overlay, isPushed);
     }
 
-    function openEntryEditor(row) {
-      const id = row.dataset.id;
-      const isPushed = row.dataset.xeroPushed === 'true';
-      const currentSelectedCC = JSON.parse(row.dataset.selectedCostCentres || 'null')
-        || (row.dataset.costCentreId ? [row.dataset.costCentreId] : []);
-      const projectOptions = `<option value="">General / Office</option>` +
-        cachedProjects.map(p => `<option value="${p.id}" ${p.id === row.dataset.projectId ? 'selected' : ''}>${projectRef(p)}</option>`).join('');
+    // Shows the percentage-slider split control only once 2+ stages are
+    // picked and there's a start+finish time to divide - this used to be
+    // a separate "Split" panel, now inline so time and split save together.
+    function refreshSplitSection(overlay, isPushed) {
+      const section = overlay.querySelector('#panel-split-section');
+      const dateVal = overlay.querySelector('#panel-date').value;
+      const startVal = overlay.querySelector('#panel-start-time').value;
+      const endVal = overlay.querySelector('#panel-end-time').value;
+      const canSplit = !isPushed && panelSelectedCostCentres.length > 1 && dateVal && startVal && endVal;
 
-      // Full-width card instead of a cramped table cell - a 3-column grid
-      // inside a <td> doesn't leave enough room on a phone screen.
-      row.innerHTML = `
-        <td colspan="5" style="padding:0; display:block;">
-          <div style="padding:14px; background:var(--surface-2); border-radius:8px; margin:6px 0; width:100%; box-sizing:border-box;">
-            ${isPushed ? `<p class="subtitle" style="margin:0 0 10px;">This entry's time has already been sent to Xero and can't be changed - the job/stage can still be corrected below if it was logged against the wrong one.</p>` : ''}
-            <label style="margin-top:0">Job</label>
-            <select class="edit-project">${projectOptions}</select>
-            <div class="edit-cost-centres" style="display:none; margin-top:8px;">
-              <label style="margin-top:0">Stage(s)</label>
-              <div class="edit-cc-chips"></div>
-            </div>
-            <label>Date</label>
-            <input type="date" class="edit-date" value="${isoToDatePart(row.dataset.clockIn)}" ${isPushed ? 'disabled' : ''} />
-            <div style="display:flex; gap:10px;">
-              <div style="flex:1;">
-                <label>Start time</label>
-                <input type="time" class="edit-start-time" value="${isoToTimePart(row.dataset.clockIn)}" ${isPushed ? 'disabled' : ''} />
-              </div>
-              <div style="flex:1;">
-                <label>Finish time</label>
-                <input type="time" class="edit-end-time" value="${isoToTimePart(row.dataset.clockOut)}" ${isPushed ? 'disabled' : ''} />
-              </div>
-            </div>
-            <button class="save-entry-btn" style="margin-top:10px;">Save</button>
-            <button type="button" class="secondary cancel-entry-btn" style="margin-top:10px;">Cancel</button>
-            <div class="edit-entry-msg"></div>
-          </div>
-        </td>`;
+      if (!canSplit) { section.style.display = 'none'; section.innerHTML = ''; panelSplitPercentages = []; return; }
 
-      loadEditCostCentreChips(row, row.dataset.projectId || null, currentSelectedCC);
-      row.querySelector('.edit-project').addEventListener('change', (e) => {
-        loadEditCostCentreChips(row, e.target.value || null, []);
-      });
+      const centres = JSON.parse(overlay.dataset.centres || '[]').filter(c => panelSelectedCostCentres.includes(c.id));
+      const totalMs = combineDateTime(dateVal, endVal) - combineDateTime(dateVal, startVal);
+      if (totalMs <= 0 || centres.length < 2) { section.style.display = 'none'; section.innerHTML = ''; panelSplitPercentages = []; return; }
+      const totalMin = Math.round(totalMs / 60000);
 
-      row.querySelector('.cancel-entry-btn').addEventListener('click', () => loadMyEntries());
-      row.querySelector('.save-entry-btn').addEventListener('click', async () => {
-        const msg = row.querySelector('.edit-entry-msg');
-        const projectId = row.querySelector('.edit-project').value || null;
-
-        const update = { project_id: projectId };
-        if (editSelectedCostCentres.length === 1) { update.cost_centre_id = editSelectedCostCentres[0]; update.selected_cost_centre_ids = null; }
-        else if (editSelectedCostCentres.length > 1) { update.cost_centre_id = null; update.selected_cost_centre_ids = editSelectedCostCentres; }
-        else { update.cost_centre_id = null; update.selected_cost_centre_ids = null; }
-
-        if (!isPushed) {
-          const dateVal = row.querySelector('.edit-date').value;
-          const startVal = row.querySelector('.edit-start-time').value;
-          const endVal = row.querySelector('.edit-end-time').value;
-          if (!dateVal || !startVal) { msg.innerHTML = `<div class="error-box">Date and start time are required.</div>`; return; }
-          const clockIn = combineDateTime(dateVal, startVal);
-          const clockOut = endVal ? combineDateTime(dateVal, endVal) : null;
-          if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Finish time must be after start time - shifts can't cross midnight here, log it as two entries instead.</div>`; return; }
-          update.clock_in = clockIn.toISOString();
-          update.clock_out = clockOut ? clockOut.toISOString() : null;
-        }
-
-        const { error } = await supabaseClient.from('time_entries').update(update).eq('id', id);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-        await loadMyEntries();
-        await loadMyWeek();
-      });
-    }
-
-    // ---------- split entry across cost centres ----------
-
-    function segmentColor(i) {
-      return `hsl(${(i * 137.5) % 360}, 55%, 55%)`;
-    }
-
-    async function openSplitPanel(row) {
-      const projectId = row.dataset.projectId;
-      if (!projectId) { alert("This entry isn't tied to a job, so there's nothing to split it across."); return; }
-
-      const project = cachedProjects.find(p => p.id === projectId);
-      const jobNumber = project ? project.job_number : null;
-
-      // Fetch every stage on the job so numbering (7000-2, 7000-3...) is
-      // always correct, then narrow down to just the ones actually picked
-      // at clock-in, if any were.
-      const { data: allCentres, error } = await supabaseClient
-        .from('cost_centres')
-        .select('id, name')
-        .eq('project_id', projectId)
-        .order('sort_order');
-      if (error || !allCentres || allCentres.length < 2) {
-        alert("This job only has one stage on it, so there's nothing to split.");
-        return;
+      if (panelSplitPercentages.length !== centres.length) {
+        panelSplitPercentages = centres.map(() => Math.round(100 / centres.length));
+        panelSplitPercentages[0] += 100 - panelSplitPercentages.reduce((a, b) => a + b, 0);
       }
 
-      const numbered = allCentres.map((c, i) => ({ ...c, number: costCentreNumber(jobNumber, i + 1) }));
-      const preselected = JSON.parse(row.dataset.selectedCostCentres || 'null');
-      const centres = preselected && preselected.length > 1
-        ? numbered.filter(c => preselected.includes(c.id))
-        : numbered;
-
-      if (centres.length < 2) { alert("There's only one stage to split across here."); return; }
-
-      const totalMs = new Date(row.dataset.clockOut) - new Date(row.dataset.clockIn);
-      const totalMin = Math.round(totalMs / 60000);
-      const entryId = row.dataset.id;
-      const clockInIso = row.dataset.clockIn;
-
-      let percentages = centres.map(() => Math.round(100 / centres.length));
-      percentages[0] += 100 - percentages.reduce((a, b) => a + b, 0); // absorb rounding
-
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-
-      // Build the DOM once. Every subsequent update touches existing nodes
-      // directly rather than re-rendering - rebuilding mid-drag was what
-      // made the slider impossible to actually drag before.
-      overlay.innerHTML = `
-        <div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Split this entry across stages</h2>
-          <p class="subtitle" style="margin-bottom:12px;">Total time: ${fmtDuration(totalMs)}. Drag the sliders until the split feels right - adjusting one only shifts the ones after it.</p>
-
-          <div id="split-bar" style="display:flex; height:22px; border-radius:6px; overflow:hidden; margin-bottom:16px;">
-            ${centres.map((c, i) => `<div class="split-bar-seg" data-index="${i}" style="width:${percentages[i]}%; background:${segmentColor(i)};"></div>`).join('')}
-          </div>
-
-          ${centres.map((c, i) => `
-            <div style="margin-bottom:14px;">
-              <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
-                <span><span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:${segmentColor(i)}; margin-right:6px;"></span><strong>${c.number}</strong> ${c.name}</span>
-                <span class="split-label" data-index="${i}">${percentages[i]}% &middot; ${fmtDuration(totalMin * percentages[i] / 100 * 60000)}</span>
-              </div>
-              <input type="range" min="0" max="100" value="${percentages[i]}" class="split-slider" data-index="${i}" style="width:100%;" />
+      section.style.display = 'block';
+      section.innerHTML = `
+        <p class="subtitle" style="margin:0 0 10px;">Split the ${fmtDuration(totalMs)} across these stages instead of crediting each one the full time - drag until it feels right.</p>
+        <div style="display:flex; height:22px; border-radius:6px; overflow:hidden; margin-bottom:16px;">
+          ${centres.map((c, i) => `<div class="panel-split-bar-seg" data-index="${i}" style="width:${panelSplitPercentages[i]}%; background:${segmentColor(i)};"></div>`).join('')}
+        </div>
+        ${centres.map((c, i) => `
+          <div style="margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
+              <span><span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:${segmentColor(i)}; margin-right:6px;"></span><strong>${c.number}</strong> ${c.name}</span>
+              <span class="panel-split-label" data-index="${i}">${panelSplitPercentages[i]}% &middot; ${fmtDuration(totalMin * panelSplitPercentages[i] / 100 * 60000)}</span>
             </div>
-          `).join('')}
-
-          <div style="margin-top:10px;">
-            <button id="split-save-btn">Save split</button>
-            <button type="button" class="secondary" id="split-cancel-btn">Cancel</button>
+            <input type="range" min="0" max="100" value="${panelSplitPercentages[i]}" class="panel-split-slider" data-index="${i}" style="width:100%;" />
           </div>
-          <div id="split-msg"></div>
-        </div>`;
+        `).join('')}`;
 
-      const sliders = [...overlay.querySelectorAll('.split-slider')];
-      const labels = [...overlay.querySelectorAll('.split-label')];
-      const barSegs = [...overlay.querySelectorAll('.split-bar-seg')];
+      const sliders = [...section.querySelectorAll('.panel-split-slider')];
+      const labels = [...section.querySelectorAll('.panel-split-label')];
+      const barSegs = [...section.querySelectorAll('.panel-split-bar-seg')];
 
       function paint() {
-        sliders.forEach((s, i) => { s.value = percentages[i]; });
-        labels.forEach((l, i) => { l.textContent = `${percentages[i]}% \u00b7 ${fmtDuration(totalMin * percentages[i] / 100 * 60000)}`; });
-        barSegs.forEach((b, i) => { b.style.width = `${percentages[i]}%`; });
+        sliders.forEach((s, i) => { s.value = panelSplitPercentages[i]; });
+        labels.forEach((l, i) => { l.textContent = `${panelSplitPercentages[i]}% \u00b7 ${fmtDuration(totalMin * panelSplitPercentages[i] / 100 * 60000)}`; });
+        barSegs.forEach((b, i) => { b.style.width = `${panelSplitPercentages[i]}%`; });
       }
 
       // Waterfall rebalancing: moving a slider only redistributes across
       // the ones AFTER it (keeping earlier ones exactly as you left them).
-      // If you're dragging the last slider, there's nothing after it to
-      // absorb the change, so it redistributes across the ones before
+      // Dragging the last slider redistributes across the ones before
       // instead - either way the total always stays locked at 100.
       function rebalance(idx, newVal) {
         newVal = Math.max(0, Math.min(100, newVal));
-
         const isLast = idx === centres.length - 1;
         const flexIdxs = isLast
           ? centres.map((_, i) => i).filter(i => i < idx)
           : centres.map((_, i) => i).filter(i => i > idx);
-
         const lockedSum = centres.map((_, i) => i)
           .filter(i => i !== idx && !flexIdxs.includes(i))
-          .reduce((s, i) => s + percentages[i], 0);
-
-        // Can't let the dragged value + whatever's locked exceed 100 - if
-        // it would, clamp the drag itself rather than letting flex sliders
-        // go negative.
+          .reduce((s, i) => s + panelSplitPercentages[i], 0);
         newVal = Math.min(newVal, 100 - lockedSum);
-        percentages[idx] = newVal;
+        panelSplitPercentages[idx] = newVal;
         const remaining = 100 - newVal - lockedSum;
-
-        const flexOldTotal = flexIdxs.reduce((s, i) => s + percentages[i], 0);
+        const flexOldTotal = flexIdxs.reduce((s, i) => s + panelSplitPercentages[i], 0);
         let assigned = 0;
         flexIdxs.forEach((i, n) => {
           const isLastFlex = n === flexIdxs.length - 1;
           const share = isLastFlex
             ? remaining - assigned
-            : Math.round(flexOldTotal > 0 ? (percentages[i] / flexOldTotal) * remaining : remaining / flexIdxs.length);
-          percentages[i] = Math.max(0, share);
+            : Math.round(flexOldTotal > 0 ? (panelSplitPercentages[i] / flexOldTotal) * remaining : remaining / flexIdxs.length);
+          panelSplitPercentages[i] = Math.max(0, share);
           assigned += share;
         });
-
         paint();
       }
 
       sliders.forEach(slider => {
-        slider.addEventListener('input', () => {
-          rebalance(parseInt(slider.dataset.index), parseInt(slider.value));
-        });
+        slider.addEventListener('input', () => rebalance(parseInt(slider.dataset.index), parseInt(slider.value)));
       });
+    }
 
-      overlay.querySelector('#split-cancel-btn').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#split-save-btn').addEventListener('click', async () => {
-        const msg = overlay.querySelector('#split-msg');
-        const btn = overlay.querySelector('#split-save-btn');
-        btn.disabled = true;
+    async function saveEntryPanel(overlay, id, isPushed) {
+      const msg = overlay.querySelector('#panel-msg');
+      const btn = overlay.querySelector('#panel-save-btn');
+      const projectId = overlay.querySelector('#panel-project').value || null;
+      const doingSplit = overlay.querySelector('#panel-split-section').style.display === 'block' && panelSplitPercentages.length > 1;
 
-        const totalPct = percentages.reduce((a, b) => a + b, 0);
-        if (totalPct !== 100) {
-          msg.innerHTML = `<div class="error-box">Percentages must add up to 100 (currently ${totalPct}).</div>`;
-          btn.disabled = false;
-          return;
+      const update = { project_id: projectId };
+      if (!doingSplit) {
+        if (panelSelectedCostCentres.length === 1) { update.cost_centre_id = panelSelectedCostCentres[0]; update.selected_cost_centre_ids = null; }
+        else if (panelSelectedCostCentres.length > 1) { update.cost_centre_id = null; update.selected_cost_centre_ids = panelSelectedCostCentres; }
+        else { update.cost_centre_id = null; update.selected_cost_centre_ids = null; }
+      }
+
+      let clockIn = null, clockOut = null;
+      if (!isPushed) {
+        const dateVal = overlay.querySelector('#panel-date').value;
+        const startVal = overlay.querySelector('#panel-start-time').value;
+        const endVal = overlay.querySelector('#panel-end-time').value;
+        if (!dateVal || !startVal) { msg.innerHTML = `<div class="error-box">Date and start time are required.</div>`; return; }
+        clockIn = combineDateTime(dateVal, startVal);
+        clockOut = endVal ? combineDateTime(dateVal, endVal) : null;
+        if (clockOut && clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Finish time must be after start time - shifts can't cross midnight here, log it as two entries instead.</div>`; return; }
+        if (!doingSplit) {
+          update.clock_in = clockIn.toISOString();
+          update.clock_out = clockOut ? clockOut.toISOString() : null;
         }
+      }
 
-        const newEntries = [];
-        let cursor = new Date(clockInIso);
-        centres.forEach((c, i) => {
-          const isLast = i === centres.length - 1;
-          const minutes = isLast
-            ? totalMin - newEntries.reduce((s, e) => s + e.minutes, 0)
-            : Math.round(totalMin * percentages[i] / 100);
-          const segStart = new Date(cursor);
-          const segEnd = new Date(cursor.getTime() + minutes * 60000);
-          newEntries.push({ minutes, clock_in: segStart.toISOString(), clock_out: segEnd.toISOString(), cost_centre_id: c.id });
-          cursor = segEnd;
-        });
+      if (doingSplit) {
+        if (!clockOut) { msg.innerHTML = `<div class="error-box">A finish time is needed to split hours across stages.</div>`; return; }
+        const totalPct = panelSplitPercentages.reduce((a, b) => a + b, 0);
+        if (totalPct !== 100) { msg.innerHTML = `<div class="error-box">Percentages must add up to 100 (currently ${totalPct}).</div>`; return; }
+      }
 
-        try {
+      btn.disabled = true;
+      try {
+        if (doingSplit) {
+          const centres = JSON.parse(overlay.dataset.centres || '[]').filter(c => panelSelectedCostCentres.includes(c.id));
+          const totalMin = Math.round((clockOut - clockIn) / 60000);
+          const newEntries = [];
+          let cursor = new Date(clockIn);
+          centres.forEach((c, i) => {
+            const isLast = i === centres.length - 1;
+            const minutes = isLast
+              ? totalMin - newEntries.reduce((s, e) => s + e.minutes, 0)
+              : Math.round(totalMin * panelSplitPercentages[i] / 100);
+            const segStart = new Date(cursor);
+            const segEnd = new Date(cursor.getTime() + minutes * 60000);
+            newEntries.push({ minutes, clock_in: segStart.toISOString(), clock_out: segEnd.toISOString(), cost_centre_id: c.id });
+            cursor = segEnd;
+          });
+
           const { error: insErr } = await supabaseClient.from('time_entries').insert(
             newEntries.map(e => ({
               staff_id: myUserId, project_id: projectId, cost_centre_id: e.cost_centre_id,
@@ -838,17 +787,18 @@
             }))
           );
           if (insErr) throw insErr;
-          const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', entryId);
+          const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', id);
           if (delErr) throw delErr;
-          overlay.remove();
-          await loadMyEntries();
-        } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-          btn.disabled = false;
+        } else {
+          const { error } = await supabaseClient.from('time_entries').update(update).eq('id', id);
+          if (error) throw error;
         }
-      });
-
-      document.body.appendChild(overlay);
+        overlay.remove();
+        await loadMyWeek();
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        btn.disabled = false;
+      }
     }
 
     // Shared by the "+ Add missed entry" button (today's date) and
@@ -915,7 +865,6 @@
       document.getElementById('manual-cost-centres').style.display = 'none';
       manualSelectedCostCentres = [];
       msg.innerHTML = '';
-      await loadMyEntries();
       await loadMyWeek();
     });
 
@@ -1101,7 +1050,6 @@
       initTeamWeekCard(myRole);
       initDevModeEntriesCard(myRole);
       await refreshWeekViews();
-      await loadMyEntries();
       await loadMyLeave();
       await loadApprovals(myRole);
       initXeroPayrollCard(myRole);

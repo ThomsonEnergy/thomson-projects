@@ -288,6 +288,43 @@ function costCentreNumber(jobNumber, position) {
   return jobNumber ? `J${jobNumber}-${position}` : `-${position}`;
 }
 
+// Splits a clock-in/clock-out pair into one segment per Sydney calendar
+// day, so a shift that runs past midnight never lands as a single
+// time_entries row spanning two days - both the "your timesheet this
+// week" view and the server-side labour-cost banding key everything off
+// the Sydney LOCAL date of a row, so a row that crosses midnight would
+// otherwise have its hours entirely misattributed to whichever day it
+// started on. Returns [{clock_in, clock_out}, ...] as ISO strings - a
+// same-day shift returns a single segment matching the input exactly.
+function sydneyOffsetMinutesAt(date) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Australia/Sydney', timeZoneName: 'shortOffset' }).formatToParts(date);
+  const tzPart = parts.find(p => p.type === 'timeZoneName');
+  const m = tzPart && tzPart.value.match(/GMT([+-]\d+)/);
+  return m ? parseInt(m[1], 10) * 60 : 600;
+}
+function sydneyDateKey(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+}
+function sydneyMidnightUtc(dateKey) {
+  const naive = new Date(`${dateKey}T00:00:00Z`);
+  return new Date(naive.getTime() - sydneyOffsetMinutesAt(naive) * 60000);
+}
+function splitAtSydneyMidnight(clockInIso, clockOutIso) {
+  const segments = [];
+  let cursor = new Date(clockInIso);
+  const end = new Date(clockOutIso);
+  while (cursor < end) {
+    const dateKey = sydneyDateKey(cursor);
+    const nextDateKey = new Date(`${dateKey}T00:00:00Z`);
+    nextDateKey.setUTCDate(nextDateKey.getUTCDate() + 1);
+    const nextMidnight = sydneyMidnightUtc(nextDateKey.toISOString().slice(0, 10));
+    const segEnd = nextMidnight < end ? nextMidnight : end;
+    segments.push({ clock_in: cursor.toISOString(), clock_out: segEnd.toISOString() });
+    cursor = segEnd;
+  }
+  return segments.length ? segments : [{ clock_in: clockInIso, clock_out: clockOutIso }];
+}
+
 // STC (Small-scale Technology Certificate) quantity, per the Clean Energy
 // Regulator's published formula (cer.gov.au/schemes/renewable-energy-target
 // /small-scale-renewable-energy-scheme/small-scale-technology-certificates):

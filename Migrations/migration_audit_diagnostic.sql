@@ -201,4 +201,11 @@ select '071', 'office_tasks',
 union all
 select '072', 'po_backorder',
   case when exists (select 1 from information_schema.columns where table_name = 'purchase_order_line_items' and column_name = 'is_backordered') then 'present' else 'MISSING' end
+union all
+select '073', 'split_overnight_timesheets',
+  case when not exists (
+    select 1 from time_entries
+    where clock_out is not null
+      and (clock_out at time zone 'Australia/Sydney')::date > (clock_in at time zone 'Australia/Sydney')::date
+  ) then 'present' else 'MISSING' end
 order by 1;
