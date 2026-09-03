@@ -141,10 +141,16 @@ async function computeAccruedLabourCost(supabaseAdmin, projectIds) {
     const centreIds = (te.selected_cost_centre_ids && te.selected_cost_centre_ids.length)
       ? te.selected_cost_centre_ids
       : (te.cost_centre_id ? [te.cost_centre_id] : []);
+    // An entry ticked against multiple stages (no explicit split) shares its
+    // hours/cost evenly across them - crediting each stage the FULL duration
+    // was inflating every stage total (and the project's "hours logged" sum,
+    // which adds the per-stage figures back together) by however many
+    // stages were ticked.
+    const share = centreIds.length > 1 ? 1 / centreIds.length : 1;
     centreIds.forEach(cid => {
       if (!proj.byCentre[cid]) proj.byCentre[cid] = { actualHours: 0, actualLabourCost: 0 };
-      proj.byCentre[cid].actualHours += hours;
-      proj.byCentre[cid].actualLabourCost += cost;
+      proj.byCentre[cid].actualHours += hours * share;
+      proj.byCentre[cid].actualLabourCost += cost * share;
     });
   });
 

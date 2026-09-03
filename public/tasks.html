@@ -65,6 +65,8 @@
             ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>` : `<span>${task.description}</span>`}
             <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
               ${jobLabel}
+              ${task.due_date ? ` &middot; Due ${task.due_date}` : ''}
+              ${task.recurrence ? ` &middot; Repeats ${task.recurrence}` : ''}
               ${task.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
             </p>
           </div>
@@ -152,6 +154,17 @@
           </div>
           <label>Due date (optional)</label>
           <input type="date" id="at-due-date" />
+          <label style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+            <input type="checkbox" id="at-recurring" style="width:auto;" /> Repeats
+          </label>
+          <div id="at-recurrence-section" style="display:none; margin-top:8px;">
+            <select id="at-recurrence">
+              <option value="daily">Daily</option>
+              <option value="weekly" selected>Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+            <p class="subtitle" id="at-recurrence-hint" style="margin:4px 0 0;"></p>
+          </div>
           <div style="margin-top:14px;">
             <button id="at-save-btn">Add task</button>
             <button type="button" class="secondary" id="at-cancel-btn">Cancel</button>
@@ -159,6 +172,17 @@
           <div id="at-msg"></div>
         </div>`;
       document.body.appendChild(overlay);
+
+      // A repeat needs a due date to advance from, so requiring one here
+      // rather than silently ignoring "Repeats" when the date's blank.
+      function refreshRecurrenceHint() {
+        const checked = overlay.querySelector('#at-recurring').checked;
+        overlay.querySelector('#at-recurrence-section').style.display = checked ? 'block' : 'none';
+        overlay.querySelector('#at-recurrence-hint').textContent = (checked && !overlay.querySelector('#at-due-date').value)
+          ? 'Set a due date above - the next occurrence is created that many days/weeks/months after it.' : '';
+      }
+      overlay.querySelector('#at-recurring').addEventListener('change', refreshRecurrenceHint);
+      overlay.querySelector('#at-due-date').addEventListener('input', refreshRecurrenceHint);
 
       let selectedJobId = null;
       let jobSearchTimeout;
@@ -197,6 +221,9 @@
         const description = overlay.querySelector('#at-desc').value.trim();
         if (!description) { msg.innerHTML = `<div class="error-box">Enter a description.</div>`; return; }
         const assignType = overlay.querySelector('#at-assign-type').value;
+        const dueDate = overlay.querySelector('#at-due-date').value || null;
+        const isRecurring = overlay.querySelector('#at-recurring').checked;
+        if (isRecurring && !dueDate) { msg.innerHTML = `<div class="error-box">A repeating task needs a due date to count forward from.</div>`; return; }
         const saveBtn = overlay.querySelector('#at-save-btn');
         saveBtn.disabled = true;
         saveBtn.textContent = 'Adding...';
@@ -206,7 +233,8 @@
             description,
             assigned_to_user_id: assignType === 'person' ? overlay.querySelector('#at-person').value : null,
             assigned_to_role: assignType === 'role' ? overlay.querySelector('#at-role').value : null,
-            due_date: overlay.querySelector('#at-due-date').value || null,
+            due_date: dueDate,
+            recurrence: isRecurring ? overlay.querySelector('#at-recurrence').value : null,
             created_by: user.id,
           });
           if (error) throw error;

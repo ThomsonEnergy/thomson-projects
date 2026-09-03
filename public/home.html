@@ -55,7 +55,7 @@
   <div class="wrap">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:4px;">
       <h1 id="greeting" style="margin:0 0 20px;">Home</h1>
-      <a href="/my-day.html" class="btn" style="white-space:nowrap;">Clock in</a>
+      <button type="button" id="clock-btn" class="btn" style="white-space:nowrap;">Clock in</button>
     </div>
 
     <div class="quick-nav">
@@ -92,6 +92,36 @@
   <script src="/js/theme.js"></script>
   <script>
     let myUserId, myRole, myName;
+
+    // Reflects whether you're actually clocked in right now, rather than
+    // always saying "Clock in" - clocking out from here uses the same
+    // midnight-safe logic as My Day, so someone who just wants to knock
+    // off doesn't have to go find the button on another page.
+    async function refreshClockButton() {
+      const btn = document.getElementById('clock-btn');
+      const { data } = await supabaseClient
+        .from('time_entries')
+        .select('id, staff_id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in')
+        .eq('staff_id', myUserId)
+        .is('clock_out', null)
+        .order('clock_in', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data) {
+        btn.textContent = 'Clock out';
+        btn.onclick = async () => {
+          btn.disabled = true;
+          const { error } = await clockOutActiveEntry(data);
+          if (error) { alert(error.message); btn.disabled = false; return; }
+          await refreshClockButton();
+        };
+      } else {
+        btn.textContent = 'Clock in';
+        btn.disabled = false;
+        btn.onclick = () => { window.location.href = '/my-day.html'; };
+      }
+    }
 
     async function loadActionItems() {
       const el = document.getElementById('action-items');
@@ -323,6 +353,7 @@
       document.getElementById('greeting').textContent = firstName ? `Welcome back, ${firstName}` : 'Home';
       loadDailyGreeting(firstName);
 
+      await refreshClockButton();
       await loadActionItems();
       await loadFeed();
     })();

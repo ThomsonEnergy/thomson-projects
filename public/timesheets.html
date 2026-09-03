@@ -676,21 +676,27 @@
         </div>
         ${centres.map((c, i) => `
           <div style="margin-bottom:14px;">
-            <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; margin-bottom:4px; gap:8px;">
               <span><span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:${segmentColor(i)}; margin-right:6px;"></span><strong>${c.number}</strong> ${c.name}</span>
-              <span class="panel-split-label" data-index="${i}">${panelSplitPercentages[i]}% &middot; ${fmtDuration(totalMin * panelSplitPercentages[i] / 100 * 60000)}</span>
+              <span style="display:flex; align-items:center; gap:4px; flex-shrink:0;">
+                <input type="number" min="0" max="100" value="${panelSplitPercentages[i]}" class="panel-split-number" data-index="${i}" style="width:56px; padding:4px 6px; text-align:right;" />%
+                <span class="panel-split-label subtitle" data-index="${i}" style="min-width:70px; text-align:right;">${fmtDuration(totalMin * panelSplitPercentages[i] / 100 * 60000)}</span>
+              </span>
             </div>
-            <input type="range" min="0" max="100" value="${panelSplitPercentages[i]}" class="panel-split-slider" data-index="${i}" style="width:100%;" />
+            <input type="range" min="0" max="100" value="${panelSplitPercentages[i]}" class="panel-split-slider" data-index="${i}" style="width:100%; touch-action:none;" />
           </div>
-        `).join('')}`;
+        `).join('')}
+        <p class="subtitle" style="margin:0;">If dragging is fiddly on your device, type the percentage directly instead.</p>`;
 
       const sliders = [...section.querySelectorAll('.panel-split-slider')];
+      const numbers = [...section.querySelectorAll('.panel-split-number')];
       const labels = [...section.querySelectorAll('.panel-split-label')];
       const barSegs = [...section.querySelectorAll('.panel-split-bar-seg')];
 
       function paint() {
         sliders.forEach((s, i) => { s.value = panelSplitPercentages[i]; });
-        labels.forEach((l, i) => { l.textContent = `${panelSplitPercentages[i]}% \u00b7 ${fmtDuration(totalMin * panelSplitPercentages[i] / 100 * 60000)}`; });
+        numbers.forEach((n, i) => { if (document.activeElement !== n) n.value = panelSplitPercentages[i]; });
+        labels.forEach((l, i) => { l.textContent = fmtDuration(totalMin * panelSplitPercentages[i] / 100 * 60000); });
         barSegs.forEach((b, i) => { b.style.width = `${panelSplitPercentages[i]}%`; });
       }
 
@@ -725,6 +731,12 @@
 
       sliders.forEach(slider => {
         slider.addEventListener('input', () => rebalance(parseInt(slider.dataset.index), parseInt(slider.value)));
+      });
+      numbers.forEach(numberInput => {
+        numberInput.addEventListener('input', () => {
+          const val = parseInt(numberInput.value);
+          if (!isNaN(val)) rebalance(parseInt(numberInput.dataset.index), val);
+        });
       });
     }
 

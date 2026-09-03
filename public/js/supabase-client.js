@@ -325,6 +325,31 @@ function splitAtSydneyMidnight(clockInIso, clockOutIso) {
   return segments.length ? segments : [{ clock_in: clockInIso, clock_out: clockOutIso }];
 }
 
+// Clocks out an active (clock_out is null) time_entries row, splitting it
+// at each Sydney midnight it crosses - shared by my-day.html and the
+// quick clock in/out button on home.html so there's one place that knows
+// how to do this correctly. `entry` needs id/staff_id/project_id/
+// cost_centre_id/selected_cost_centre_ids/time_category/clock_in.
+// Returns { error } - never throws.
+async function clockOutActiveEntry(entry) {
+  const clockOutIso = new Date().toISOString();
+  const segments = splitAtSydneyMidnight(entry.clock_in, clockOutIso);
+
+  const { error } = await supabaseClient.from('time_entries').update({ clock_out: segments[0].clock_out }).eq('id', entry.id);
+  if (error) return { error };
+
+  if (segments.length > 1) {
+    const extraEntries = segments.slice(1).map(seg => ({
+      staff_id: entry.staff_id, project_id: entry.project_id, cost_centre_id: entry.cost_centre_id,
+      selected_cost_centre_ids: entry.selected_cost_centre_ids, time_category: entry.time_category,
+      clock_in: seg.clock_in, clock_out: seg.clock_out,
+    }));
+    const { error: insErr } = await supabaseClient.from('time_entries').insert(extraEntries);
+    if (insErr) return { error: insErr };
+  }
+  return { error: null };
+}
+
 // STC (Small-scale Technology Certificate) quantity, per the Clean Energy
 // Regulator's published formula (cer.gov.au/schemes/renewable-energy-target
 // /small-scale-renewable-energy-scheme/small-scale-technology-certificates):

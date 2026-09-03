@@ -125,23 +125,8 @@
         update();
         elapsedInterval = setInterval(update, 30000);
         document.getElementById('clock-out-btn').onclick = async () => {
-          const clockOutIso = new Date().toISOString();
-          const segments = splitAtSydneyMidnight(data.clock_in, clockOutIso);
-
-          const { error } = await supabaseClient.from('time_entries').update({ clock_out: segments[0].clock_out }).eq('id', data.id);
+          const { error } = await clockOutActiveEntry(data);
           if (error) { alert(error.message); return; }
-
-          if (segments.length > 1) {
-            // The shift ran past midnight - carry the rest of it over as
-            // separate entries on the following day(s), same job/stage.
-            const extraEntries = segments.slice(1).map(seg => ({
-              staff_id: data.staff_id, project_id: data.project_id, cost_centre_id: data.cost_centre_id,
-              selected_cost_centre_ids: data.selected_cost_centre_ids, time_category: data.time_category,
-              clock_in: seg.clock_in, clock_out: seg.clock_out,
-            }));
-            const { error: insErr } = await supabaseClient.from('time_entries').insert(extraEntries);
-            if (insErr) { alert(insErr.message); return; }
-          }
           await checkActiveClock();
         };
         await renderActiveJobCard(data.project_id);

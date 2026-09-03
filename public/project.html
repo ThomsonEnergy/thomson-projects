@@ -2586,6 +2586,7 @@
               <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
                 ${who}
                 ${dueLabel ? ` &middot; <span style="${isOverdue ? 'color:var(--red);' : ''}">${dueLabel}</span>` : ''}
+                ${t.recurrence ? ` &middot; Repeats ${t.recurrence}` : ''}
                 ${t.schedule_assignment_id ? ` &middot; On calendar` : ''}
                 ${t.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
               </p>
@@ -2659,6 +2660,17 @@
           <label id="at-calendar-row" style="margin-top:14px; display:none; align-items:center; gap:8px;">
             <input type="checkbox" id="at-add-to-calendar" style="width:auto;" /> Also put this on their Schedule for that date
           </label>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+            <input type="checkbox" id="at-recurring" style="width:auto;" /> Repeats
+          </label>
+          <div id="at-recurrence-section" style="display:none; margin-top:8px;">
+            <select id="at-recurrence">
+              <option value="daily">Daily</option>
+              <option value="weekly" selected>Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+            <p class="subtitle" id="at-recurrence-hint" style="margin:4px 0 0;"></p>
+          </div>
           <label style="margin-top:14px; display:flex; align-items:center; gap:8px;">
             <input type="checkbox" id="at-required" style="width:auto;" /> Required before this job can be scheduled
           </label>
@@ -2688,6 +2700,15 @@
       });
       overlay.querySelector('#at-due-date').addEventListener('change', refreshCalendarRowVisibility);
 
+      function refreshRecurrenceHint() {
+        const checked = overlay.querySelector('#at-recurring').checked;
+        overlay.querySelector('#at-recurrence-section').style.display = checked ? 'block' : 'none';
+        overlay.querySelector('#at-recurrence-hint').textContent = (checked && !overlay.querySelector('#at-due-date').value)
+          ? 'Set a due date above - the next occurrence is created that many days/weeks/months after it.' : '';
+      }
+      overlay.querySelector('#at-recurring').addEventListener('change', refreshRecurrenceHint);
+      overlay.querySelector('#at-due-date').addEventListener('input', refreshRecurrenceHint);
+
       overlay.querySelector('#at-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#at-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#at-msg');
@@ -2697,6 +2718,8 @@
         const dueDate = overlay.querySelector('#at-due-date').value || null;
         const addToCalendar = overlay.querySelector('#at-add-to-calendar').checked;
         const personId = assignType === 'person' ? overlay.querySelector('#at-person').value : null;
+        const isRecurring = overlay.querySelector('#at-recurring').checked;
+        if (isRecurring && !dueDate) { msg.innerHTML = `<div class="error-box">A repeating task needs a due date to count forward from.</div>`; return; }
 
         const saveBtn = overlay.querySelector('#at-save-btn');
         saveBtn.disabled = true;
@@ -2727,6 +2750,7 @@
             assigned_to_role: assignType === 'role' ? overlay.querySelector('#at-role').value : null,
             required_before_scheduling: overlay.querySelector('#at-required').checked,
             due_date: dueDate,
+            recurrence: isRecurring ? overlay.querySelector('#at-recurrence').value : null,
             schedule_assignment_id: scheduleAssignmentId,
             created_by: user.id,
           });

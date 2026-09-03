@@ -206,6 +206,9 @@ select '073', 'split_overnight_timesheets',
   case when not exists (
     select 1 from time_entries
     where clock_out is not null
-      and (clock_out at time zone 'Australia/Sydney')::date > (clock_in at time zone 'Australia/Sydney')::date
+      and (clock_out at time zone 'Australia/Sydney') > (((clock_in at time zone 'Australia/Sydney')::date + 1)::timestamp)
   ) then 'present' else 'MISSING' end
+union all
+select '074', 'recurring_tasks',
+  case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'recurrence') then 'present' else 'MISSING' end
 order by 1;
