@@ -198,4 +198,7 @@ select '070', 'payment_milestones',
 union all
 select '071', 'office_tasks',
   case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'project_id' and is_nullable = 'YES') then 'present' else 'MISSING' end
+union all
+select '072', 'po_backorder',
+  case when exists (select 1 from information_schema.columns where table_name = 'purchase_order_line_items' and column_name = 'is_backordered') then 'present' else 'MISSING' end
 order by 1;

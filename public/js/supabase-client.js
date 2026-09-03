@@ -687,27 +687,88 @@ function renderPoLineItemsReceivable(po, canEdit) {
         <span class="badge accepted" style="font-size:11px;">Received - ${destLabel}</span>
       </div>`;
     }
-    return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
-      <span>${li.description} — ${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}</span>
-      ${canEdit ? `<button type="button" class="secondary receive-line-item-btn" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">Receive</button>` : '<span class="subtitle" style="font-size:11px;">Not yet received</span>'}
+    const etaLabel = li.backorder_eta ? new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : null;
+    return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
+      <span>${li.description} — ${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}
+        ${li.is_backordered ? `<span class="badge draft" style="font-size:11px; margin-left:6px;">Backordered${etaLabel ? ' - ETA ' + etaLabel : ''}</span>` : ''}
+      </span>
+      ${canEdit ? `
+        <span style="display:flex; gap:6px;">
+          <button type="button" class="secondary receive-line-item-btn" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">Receive</button>
+          <button type="button" class="secondary backorder-line-item-btn" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">${li.is_backordered ? 'Update backorder' : 'Mark backordered'}</button>
+        </span>` : '<span class="subtitle" style="font-size:11px;">Not yet received</span>'}
     </div>`;
   }).join('');
 }
 
-// Wires up every ".receive-line-item-btn" found in the container - call
-// this after rendering a PO list that used renderPoLineItemsReceivable.
+// Wires up every ".receive-line-item-btn"/".backorder-line-item-btn"
+// found in the container - call this after rendering a PO list that
+// used renderPoLineItemsReceivable.
 function wireReceiveLineItemButtons(containerEl, allPos, defaultDestinationFor, onComplete) {
+  function findLineItem(lineId) {
+    for (const po of allPos) {
+      const found = (po.purchase_order_line_items || []).find(li => li.id === lineId);
+      if (found) return { lineItem: found, parentPo: po };
+    }
+    return {};
+  }
   containerEl.querySelectorAll('.receive-line-item-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const lineId = btn.dataset.lineId;
-      let lineItem = null, parentPo = null;
-      for (const po of allPos) {
-        const found = (po.purchase_order_line_items || []).find(li => li.id === lineId);
-        if (found) { lineItem = found; parentPo = po; break; }
-      }
+      const { lineItem, parentPo } = findLineItem(btn.dataset.lineId);
       if (lineItem) openReceiveLineItemPanel(lineItem, parentPo, defaultDestinationFor(parentPo), onComplete);
     });
   });
+  containerEl.querySelectorAll('.backorder-line-item-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const { lineItem } = findLineItem(btn.dataset.lineId);
+      if (lineItem) openBackorderPanel(lineItem, onComplete);
+    });
+  });
+}
+
+// Marks a not-yet-received line item as backordered with an expected
+// date - a separate status from "received", for when a supplier says an
+// item's delayed rather than it having actually arrived.
+function openBackorderPanel(lineItem, onComplete) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+  overlay.innerHTML = `
+    <div class="card" style="max-width:360px; width:100%;">
+      <h2>Backorder</h2>
+      <p class="subtitle" style="margin-bottom:10px;">${lineItem.description} x${lineItem.quantity}</p>
+      <label style="margin-top:0">Expected date</label>
+      <input type="date" id="bo-eta" value="${lineItem.backorder_eta || ''}" />
+      <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="bo-save-btn">Save</button>
+        ${lineItem.is_backordered ? '<button type="button" class="secondary" id="bo-clear-btn">No longer backordered</button>' : ''}
+        <button type="button" class="secondary" id="bo-cancel-btn">Cancel</button>
+      </div>
+      <div id="bo-msg"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('#bo-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#bo-save-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#bo-msg');
+    const { error } = await supabaseClient.from('purchase_order_line_items')
+      .update({ is_backordered: true, backorder_eta: overlay.querySelector('#bo-eta').value || null })
+      .eq('id', lineItem.id);
+    if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+    overlay.remove();
+    await onComplete();
+  });
+  const clearBtn = overlay.querySelector('#bo-clear-btn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', async () => {
+      const msg = overlay.querySelector('#bo-msg');
+      const { error } = await supabaseClient.from('purchase_order_line_items')
+        .update({ is_backordered: false, backorder_eta: null })
+        .eq('id', lineItem.id);
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      overlay.remove();
+      await onComplete();
+    });
+  }
 }
 
 async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComplete) {
