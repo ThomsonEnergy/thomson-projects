@@ -40,8 +40,13 @@ async function getXeroToken() {
 // `api` is 'accounting' or 'payroll.au'.
 async function xeroRequest(api, path, { method = 'GET', body = null } = {}) {
   const token = await getXeroToken();
+  // Payroll AU only got Timesheets support in the 2.0 API in March 2026,
+  // and it's opt-in per organisation - an AU org that hasn't switched
+  // over (this one hasn't) gets "Method not allowed for the current
+  // customer jurisdiction" from 2.0. 1.0 is the long-established, fully
+  // supported AU Payroll API and needs no opt-in.
   const base = api === 'payroll.au'
-    ? 'https://api.xero.com/payroll.xro/2.0'
+    ? 'https://api.xero.com/payroll.xro/1.0'
     : 'https://api.xero.com/api.xro/2.0';
 
   const res = await fetch(`${base}/${path}`, {
