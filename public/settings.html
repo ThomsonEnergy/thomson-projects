@@ -566,6 +566,10 @@
             <label>Airwallex Webhook Secret <span class="key-status" data-key="airwallex_webhook_secret"></span></label>
             <input id="key-airwallex-webhook-secret" type="password" placeholder="From creating the webhook subscription" autocomplete="off" />
 
+            <label>ABN Lookup GUID <span class="key-status" data-key="abr_guid"></span></label>
+            <input id="key-abr-guid" type="password" placeholder="Free from abr.business.gov.au/tools/webservices" autocomplete="off" />
+            <p class="subtitle" style="margin:2px 0 10px;">Powers the super fund search during onboarding, so nobody has to type an ABN and hope it's right. Register for a free GUID at <a href="https://abr.business.gov.au/Tools/WebServices" target="_blank" rel="noopener" class="link-quiet">abr.business.gov.au</a> - it's emailed to you instantly.</p>
+
             <button id="save-keys-btn" style="margin-top:14px;">Save keys</button>
           </div>
 
@@ -2190,6 +2194,7 @@
         { key_name: 'airwallex_client_id', key_value: document.getElementById('key-airwallex-client-id').value.trim() },
         { key_name: 'airwallex_api_key', key_value: document.getElementById('key-airwallex-api-key').value.trim() },
         { key_name: 'airwallex_webhook_secret', key_value: document.getElementById('key-airwallex-webhook-secret').value.trim() },
+        { key_name: 'abr_guid', key_value: document.getElementById('key-abr-guid').value.trim() },
       ].filter(r => r.key_value);
 
       if (!rows.length) {

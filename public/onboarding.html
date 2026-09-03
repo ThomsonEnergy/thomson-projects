@@ -53,6 +53,14 @@
     let currentStep = 1;
     const TOTAL_STEPS = 4;
 
+    async function authedFetch(url, options = {}) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      return fetch(url, {
+        ...options,
+        headers: { ...(options.headers || {}), Authorization: `Bearer ${session.access_token}` },
+      });
+    }
+
     function renderSteps() {
       const labels = ['Your details', 'Your pay rates', 'Documents', 'Finish'];
       document.getElementById('ob-steps').innerHTML = labels.map((label, i) => {
@@ -98,6 +106,10 @@
           </label>
 
           <div id="ob-super-standard" style="display:${profile.super_is_self_managed ? 'none' : 'block'};">
+            <label style="margin-top:8px;">Search for your fund</label>
+            <input id="ob-super-search" placeholder="Start typing your fund's name..." autocomplete="off" />
+            <div id="ob-super-search-results"></div>
+            <p class="subtitle" style="margin:4px 0 0;">Picking a result fills the name and ABN below correctly - or just type them in yourself if your fund doesn't show up.</p>
             <div class="grid cols-2" style="margin-top:8px;">
               <div>
                 <label style="margin-top:0">Super fund name</label>
@@ -116,6 +128,7 @@
               <div>
                 <label style="margin-top:0">SMSF ABN</label>
                 <input id="ob-smsf-abn" value="${profile.smsf_abn || ''}" />
+                <p class="subtitle" id="ob-smsf-abn-status" style="margin:4px 0 0; font-size:12px;"></p>
               </div>
               <div>
                 <label style="margin-top:0">SMSF bank BSB</label>
@@ -179,9 +192,74 @@
         document.getElementById('ob-super-smsf').style.display = e.target.checked ? 'block' : 'none';
       });
 
+      // Search-as-you-type against the ABN Lookup (ABR) register, so
+      // picking a fund fills in a verified ABN instead of someone typing
+      // 11 digits from memory and hoping they got it right.
+      let superSearchTimeout;
+      document.getElementById('ob-super-search').addEventListener('input', (e) => {
+        clearTimeout(superSearchTimeout);
+        const q = e.target.value.trim();
+        const resultsEl = document.getElementById('ob-super-search-results');
+        if (q.length < 3) { resultsEl.innerHTML = ''; return; }
+        superSearchTimeout = setTimeout(async () => {
+          resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">Searching...</p>`;
+          try {
+            const res = await authedFetch(`/.netlify/functions/abn-lookup?name=${encodeURIComponent(q)}`);
+            const data = await res.json();
+            if (!data.ok || !data.results?.length) {
+              resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">${data.message || 'No matches - enter your fund details manually below.'}</p>`;
+              return;
+            }
+            resultsEl.innerHTML = `
+              <div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+                ${data.results.map(r => `<div class="job-pick-row" data-name="${r.name}" data-abn="${r.abn}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${r.name} <span class="subtitle">ABN ${r.abn}${r.status ? ' - ' + r.status : ''}</span></div>`).join('')}
+              </div>`;
+            resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
+              row.addEventListener('click', () => {
+                document.getElementById('ob-super-name').value = row.dataset.name;
+                document.getElementById('ob-super-abn').value = row.dataset.abn;
+                document.getElementById('ob-super-search').value = '';
+                resultsEl.innerHTML = '';
+              });
+            });
+          } catch {
+            resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">Search unavailable right now - enter your fund details manually below.</p>`;
+          }
+        }, 350);
+      });
+
+      // Confirms an SMSF ABN someone already knows is actually registered
+      // and current, rather than only catching a typo after it's in Xero.
+      document.getElementById('ob-smsf-abn').addEventListener('blur', async (e) => {
+        const statusEl = document.getElementById('ob-smsf-abn-status');
+        const abn = e.target.value.replace(/\s+/g, '');
+        if (!abn) { statusEl.textContent = ''; return; }
+        statusEl.innerHTML = '<span class="subtitle">Checking...</span>';
+        try {
+          const res = await authedFetch(`/.netlify/functions/abn-lookup?abn=${encodeURIComponent(abn)}`);
+          const data = await res.json();
+          statusEl.innerHTML = data.ok
+            ? `<span style="color:var(--green);">Verified: ${data.name} (${data.status})</span>`
+            : `<span style="color:var(--red);">${data.message || 'ABN not found - double check it.'}</span>`;
+        } catch {
+          statusEl.textContent = '';
+        }
+      });
+
       document.getElementById('ob-details-next-btn').addEventListener('click', async () => {
         const msg = document.getElementById('ob-details-msg');
         const isSmsf = document.getElementById('ob-smsf-toggle').checked;
+
+        if (isSmsf) {
+          if (!document.getElementById('ob-smsf-abn').value.trim() || !document.getElementById('ob-smsf-bsb').value.trim() || !document.getElementById('ob-smsf-account').value.trim()) {
+            msg.innerHTML = `<div class="error-box">Fill in your SMSF's ABN and bank details before continuing.</div>`;
+            return;
+          }
+        } else if (!document.getElementById('ob-super-name').value.trim() || !document.getElementById('ob-super-abn').value.trim() || !document.getElementById('ob-super-member').value.trim()) {
+          msg.innerHTML = `<div class="error-box">Super fund details are required - search for your fund above or enter its name, ABN, and your member number.</div>`;
+          return;
+        }
+
         const updates = {
           date_of_birth: document.getElementById('ob-dob').value || null,
           tax_file_number: document.getElementById('ob-tfn').value.trim() || null,
