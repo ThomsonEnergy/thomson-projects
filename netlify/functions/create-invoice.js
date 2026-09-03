@@ -1,11 +1,13 @@
 // POST /api/create-invoice
-// Body EITHER: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent }], invoiceNumber }
+// Body EITHER: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent }] }
 //   for a job-linked claim - one invoice, one row per cost centre included
 //   (a single-stage claim is just claims.length === 1), OR
-// { clientId, description, labourAmount, materialAmount, invoiceNumber }
+// { clientId, description, labourAmount, materialAmount }
 //   for a standalone invoice with no job/quote behind it.
-// Pricing roles only. Creates a new row in the invoices table (plus one
-// invoice_claims row per claimed cost centre for a job-linked claim).
+// Invoice numbers are always auto-assigned server-side, never accepted
+// from the caller. Pricing roles only. Creates a new row in the invoices
+// table (plus one invoice_claims row per claimed cost centre for a
+// job-linked claim).
 
 const crypto = require('crypto');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
@@ -32,7 +34,6 @@ exports.handler = async (event) => {
       materialAmount = 0,
       stcAmount = 0,
       claimPercent = 100,
-      invoiceNumber: overrideNumber,
       sentAt,
       dueDate: overrideDueDate,
     } = JSON.parse(event.body || '{}');
@@ -62,13 +63,12 @@ exports.handler = async (event) => {
     const totalStc = isJobClaim ? claimRows.reduce((s, c) => s + c.stc_amount, 0) : Number(stcAmount) || 0;
     const totalAmount = totalLabour + totalMaterial;
 
-    let invoiceNumberStr = overrideNumber;
-    if (!invoiceNumberStr) {
-      const { data: drawnNumber, error: numErr } = await supabaseAdmin.rpc('get_next_number_serverside', { counter_name: 'invoice' });
-      if (numErr) throw numErr;
-      const { data: companySettings } = await supabaseAdmin.from('company_settings').select('invoice_number_prefix').eq('id', 1).single();
-      invoiceNumberStr = `${companySettings?.invoice_number_prefix || 'SI'}${drawnNumber}`;
-    }
+    // Always auto-assigned, never user-typed - a manually-entered number
+    // could collide with or skip the real sequence.
+    const { data: drawnNumber, error: numErr } = await supabaseAdmin.rpc('get_next_number_serverside', { counter_name: 'invoice' });
+    if (numErr) throw numErr;
+    const { data: companySettings } = await supabaseAdmin.from('company_settings').select('invoice_number_prefix').eq('id', 1).single();
+    const invoiceNumberStr = `${companySettings?.invoice_number_prefix || 'SI'}${drawnNumber}`;
 
     let overallClaimPercent = Number(claimPercent) || 100;
     let claimLabel = isJobClaim ? null : (description || null);

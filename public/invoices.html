@@ -72,7 +72,6 @@
 
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const DUE_DAYS = 14; // treat unpaid invoices older than this as overdue - no formal due-date field yet
 
       let total = 0, thisMonth = 0, outstanding = 0, overdue = 0;
 
@@ -83,8 +82,7 @@
         if (sentAt >= startOfMonth) thisMonth += amount;
         if (!inv.paid_at) {
           outstanding += amount;
-          const daysSince = (now - sentAt) / 86400000;
-          if (daysSince > DUE_DAYS) overdue += amount;
+          if (inv.due_date && new Date(inv.due_date + 'T00:00:00') < now) overdue += amount;
         }
       });
 
@@ -169,11 +167,7 @@
           <label>What's this for</label>
           <input id="standalone-description" placeholder="e.g. Callout - switchboard fault" />
 
-          <div class="grid cols-3">
-            <div>
-              <label>Invoice number</label>
-              <input id="standalone-invoice-number" placeholder="Auto-assign" />
-            </div>
+          <div class="grid cols-2">
             <div>
               <label>Invoice date</label>
               <input type="date" id="standalone-date" value="${new Date().toISOString().slice(0, 10)}" />
@@ -184,18 +178,29 @@
             </div>
           </div>
 
-          <div class="grid cols-3">
+          <label style="margin-top:14px;">Line items</label>
+          <div id="standalone-li-rows"></div>
+          <button type="button" class="secondary" id="standalone-li-add" style="font-size:12px; padding:6px 12px;">+ Add line item</button>
+
+          <div class="grid cols-2" style="margin-top:10px;">
             <div>
-              <label>Labour amount</label>
-              <input type="number" step="0.01" id="standalone-labour" value="0" />
+              <label style="margin-top:0">Materials markup %</label>
+              <input type="number" step="1" id="standalone-markup" value="45" />
+            </div>
+          </div>
+
+          <div class="cc-row-costs" style="grid-template-columns: 1fr 1fr 1fr; margin-top:10px;">
+            <div>
+              <label style="margin-top:0">Labour total</label>
+              <div class="readout" id="standalone-labour-total">$0.00</div>
             </div>
             <div>
-              <label>Materials amount</label>
-              <input type="number" step="0.01" id="standalone-materials" value="0" />
+              <label style="margin-top:0">Materials total</label>
+              <div class="readout" id="standalone-material-total">$0.00</div>
             </div>
             <div>
-              <label>Total</label>
-              <input id="standalone-total" readonly style="background:var(--surface); color:var(--muted);" />
+              <label style="margin-top:0">Total</label>
+              <div class="readout" id="standalone-total">$0.00</div>
             </div>
           </div>
 
@@ -208,13 +213,79 @@
 
       let selectedClientId = null;
 
-      function updateTotal() {
-        const l = parseFloat(overlay.querySelector('#standalone-labour').value) || 0;
-        const m = parseFloat(overlay.querySelector('#standalone-materials').value) || 0;
-        overlay.querySelector('#standalone-total').value = money(l + m);
+      // Same line-item shape as a normal cost centre stage - labour picks
+      // a billable rate tier (already a sell price, no markup) times
+      // hours, materials are qty x unit cost with markup applied - rather
+      // than typing a guessed lump-sum labour/materials figure.
+      function standaloneLineItemHtml({ description = '', item_type = 'material', quantity = 1, unit_cost = '' } = {}) {
+        const isLabour = item_type === 'labour';
+        return `
+          <div class="li-row" style="display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;">
+            <input class="li-desc" placeholder="${isLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Switchboard parts'}" value="${description}" style="font-size:13px;" />
+            <select class="li-type" style="font-size:13px;">
+              <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
+              <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
+            </select>
+            <input class="li-qty" type="number" step="0.01" value="${quantity}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="font-size:13px;" />
+            <select class="li-tier" style="font-size:13px; display:${isLabour ? 'block' : 'none'};">
+              <option value="">-- Select tier --</option>
+              ${RATE_TIERS.map(t => `<option value="${t.id}" data-rate="${t.sell_rate}">${t.name} ($${t.sell_rate}/hr)</option>`).join('')}
+            </select>
+            <input class="li-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px; display:${isLabour ? 'none' : 'block'};" />
+            <div class="li-total" style="font-size:13px; font-weight:600;">$0.00</div>
+            <button type="button" class="secondary li-remove" style="padding:6px 10px; font-size:12px;">x</button>
+          </div>`;
       }
-      overlay.querySelector('#standalone-labour').addEventListener('input', updateTotal);
-      overlay.querySelector('#standalone-materials').addEventListener('input', updateTotal);
+
+      function wireStandaloneLineItem(li) {
+        li.querySelector('.li-qty').addEventListener('input', updateStandaloneTotals);
+        li.querySelector('.li-cost').addEventListener('input', updateStandaloneTotals);
+        li.querySelector('.li-tier').addEventListener('change', (e) => {
+          const selected = e.target.selectedOptions[0];
+          li.querySelector('.li-cost').value = selected?.dataset.rate || '';
+          updateStandaloneTotals();
+        });
+        li.querySelector('.li-type').addEventListener('change', (e) => {
+          const nowLabour = e.target.value === 'labour';
+          li.querySelector('.li-qty').placeholder = nowLabour ? 'Hours' : 'Qty';
+          li.querySelector('.li-tier').style.display = nowLabour ? 'block' : 'none';
+          li.querySelector('.li-cost').style.display = nowLabour ? 'none' : 'block';
+          if (nowLabour) {
+            const selected = li.querySelector('.li-tier').selectedOptions[0];
+            li.querySelector('.li-cost').value = selected?.dataset.rate || '';
+          }
+          updateStandaloneTotals();
+        });
+        li.querySelector('.li-remove').addEventListener('click', () => { li.remove(); updateStandaloneTotals(); });
+      }
+
+      function addStandaloneLineItem(opts) {
+        const wrap = overlay.querySelector('#standalone-li-rows');
+        wrap.insertAdjacentHTML('beforeend', standaloneLineItemHtml(opts));
+        wireStandaloneLineItem(wrap.lastElementChild);
+      }
+      overlay.querySelector('#standalone-li-add').addEventListener('click', () => addStandaloneLineItem());
+      overlay.querySelector('#standalone-markup').addEventListener('input', updateStandaloneTotals);
+      addStandaloneLineItem({ item_type: 'labour' });
+
+      function updateStandaloneTotals() {
+        const markup = parseFloat(overlay.querySelector('#standalone-markup').value) || 0;
+        let labour = 0, material = 0;
+        overlay.querySelectorAll('#standalone-li-rows .li-row').forEach(li => {
+          const qty = parseFloat(li.querySelector('.li-qty').value) || 0;
+          const cost = parseFloat(li.querySelector('.li-cost').value) || 0;
+          const lineTotal = qty * cost;
+          li.querySelector('.li-total').textContent = money(lineTotal);
+          if (li.querySelector('.li-type').value === 'labour') labour += lineTotal; else material += lineTotal;
+        });
+        const materialSell = material * (1 + markup / 100);
+        overlay.querySelector('#standalone-labour-total').textContent = money(labour);
+        overlay.querySelector('#standalone-material-total').textContent = money(materialSell);
+        overlay.querySelector('#standalone-total').textContent = money(labour + materialSell);
+        overlay.dataset.labourTotal = labour.toFixed(2);
+        overlay.dataset.materialTotal = materialSell.toFixed(2);
+      }
+      updateStandaloneTotals();
 
       let searchTimeout;
       overlay.querySelector('#standalone-client-search').addEventListener('input', (e) => {
@@ -278,9 +349,8 @@
             body: JSON.stringify({
               clientId,
               description: overlay.querySelector('#standalone-description').value.trim() || 'Invoice',
-              labourAmount: parseFloat(overlay.querySelector('#standalone-labour').value) || 0,
-              materialAmount: parseFloat(overlay.querySelector('#standalone-materials').value) || 0,
-              invoiceNumber: overlay.querySelector('#standalone-invoice-number').value.trim() || null,
+              labourAmount: parseFloat(overlay.dataset.labourTotal) || 0,
+              materialAmount: parseFloat(overlay.dataset.materialTotal) || 0,
               sentAt: overlay.querySelector('#standalone-date').value || null,
               dueDate: overlay.querySelector('#standalone-due-date').value || null,
             }),
@@ -315,6 +385,8 @@
 
     document.getElementById('standalone-invoice-btn').addEventListener('click', openStandaloneInvoicePanel);
 
+    let RATE_TIERS = [];
+
     (async function () {
       const session = await requireLogin();
       if (!session) return;
@@ -325,6 +397,8 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+      const { data: tiers } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
+      RATE_TIERS = tiers || [];
       await loadInvoices();
     })();
   </script>

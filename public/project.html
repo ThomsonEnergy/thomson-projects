@@ -1429,11 +1429,7 @@
             </table>
           </div>
 
-          <div class="grid cols-3" style="margin-top:14px;">
-            <div>
-              <label style="margin-top:0">Invoice number</label>
-              <input id="inv-invoice-number" placeholder="Auto-assign" />
-            </div>
+          <div class="grid cols-2" style="margin-top:14px;">
             <div>
               <label style="margin-top:0">Invoice date</label>
               <input type="date" id="inv-date" value="${new Date().toISOString().slice(0, 10)}" />
@@ -1565,7 +1561,6 @@
             body: JSON.stringify({
               projectId: project.id,
               claims,
-              invoiceNumber: overlay.querySelector('#inv-invoice-number').value.trim() || null,
               sentAt: overlay.querySelector('#inv-date').value || null,
               dueDate: overlay.querySelector('#inv-due-date').value || null,
             }),
