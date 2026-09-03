@@ -2997,14 +2997,35 @@
         return;
       }
 
-      listEl.innerHTML = visible.map(d => `
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); gap:10px;">
-          <div style="min-width:0;">
-            <a href="#" class="link-quiet doc-view-link" data-path="${d.file_path}" style="font-weight:600;">${d.file_name}</a>
-            <p class="subtitle" style="margin:2px 0 0; font-size:12px;">${d.folder} &middot; ${d.profiles?.full_name || 'Someone'} &middot; ${new Date(d.created_at).toLocaleDateString('en-AU')}</p>
-          </div>
-          <button type="button" class="secondary doc-delete-btn" data-id="${d.id}" data-path="${d.file_path}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Delete</button>
-        </div>`).join('');
+      listEl.innerHTML = `<p class="subtitle">Loading previews...</p>`;
+
+      // Grid preview instead of a bare filename list - a private bucket
+      // needs a signed URL per file to actually show a thumbnail, so
+      // these are generated once up front rather than one at a time.
+      const signedUrls = await Promise.all(visible.map(d => getSignedDocUrl(d.file_path).catch(() => null)));
+
+      listEl.innerHTML = `
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">
+          ${visible.map((d, i) => {
+            const url = signedUrls[i];
+            const isImage = (d.mime_type || '').startsWith('image/');
+            const isVideo = (d.mime_type || '').startsWith('video/');
+            const preview = isImage && url
+              ? `<img src="${url}" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0;" />`
+              : isVideo && url
+                ? `<video src="${url}" muted preload="metadata" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0; background:#000;"></video>`
+                : `<div style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px;">&#128196;</div>`;
+            return `
+              <div class="doc-tile" style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
+                <a href="#" class="doc-view-link" data-path="${d.file_path}" style="display:block;">${preview}</a>
+                <div style="padding:8px;">
+                  <a href="#" class="link-quiet doc-view-link" data-path="${d.file_path}" style="font-weight:600; font-size:12px; word-break:break-word;">${d.file_name}</a>
+                  <p class="subtitle" style="margin:4px 0 0; font-size:11px;">${d.profiles?.full_name || 'Someone'} &middot; ${new Date(d.created_at).toLocaleDateString('en-AU')}</p>
+                  <button type="button" class="secondary doc-delete-btn" data-id="${d.id}" data-path="${d.file_path}" style="font-size:11px; padding:4px 8px; margin-top:6px; width:100%;">Delete</button>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>`;
 
       listEl.querySelectorAll('.doc-view-link').forEach(a => {
         a.addEventListener('click', async (e) => {
