@@ -28,8 +28,13 @@
   </div>
 
   <div class="wrap">
-    <h1>Tasks</h1>
-    <p class="subtitle">Assigned to you, your role, or open for anyone free to pick up.</p>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h1 style="margin-bottom:4px;">Tasks</h1>
+        <p class="subtitle">Assigned to you, your role, or open for anyone free to pick up.</p>
+      </div>
+      <button type="button" id="add-task-btn">+ Add task</button>
+    </div>
 
     <div class="card">
       <h2>Assigned to you</h2>
@@ -51,12 +56,15 @@
   <script src="/js/theme.js"></script>
   <script>
     function taskRow(task, showPickUp) {
+      const jobLabel = task.project_id
+        ? (task.projects?.job_number ? 'J' + task.projects.job_number : (task.projects?.name || ''))
+        : 'Office / General';
       return `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px solid var(--border);">
           <div>
-            <a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>
+            ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>` : `<span>${task.description}</span>`}
             <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
-              ${task.projects?.job_number ? 'J' + task.projects.job_number : (task.projects?.name || '')}
+              ${jobLabel}
               ${task.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
             </p>
           </div>
@@ -107,6 +115,111 @@
       });
     }
 
+    // Job is optional here (unlike the "+ Add task" on a project's own
+    // page) - leave it blank for an office/general task like "take the
+    // bins out" that isn't tied to any job.
+    async function openAddTaskPanel() {
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const { data: staff } = await supabaseClient.from('profiles').select('id, full_name').order('full_name');
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Add task</h2>
+          <label style="margin-top:0">Job (optional - leave blank for an office/general task)</label>
+          <input id="at-job-search" placeholder="Search job number, name, client..." autocomplete="off" />
+          <div id="at-job-results"></div>
+          <p class="subtitle" id="at-job-selected" style="margin-top:4px;"></p>
+
+          <label>Description</label>
+          <input id="at-desc" placeholder="e.g. Check POs and order stock, or Mow the lawn" />
+          <label>Assign to</label>
+          <select id="at-assign-type">
+            <option value="none">Leave unassigned - anyone can pick it up</option>
+            <option value="person">A specific person</option>
+            <option value="role">A role</option>
+          </select>
+          <div id="at-person-section" style="display:none; margin-top:8px;">
+            <select id="at-person">${(staff || []).map(s => `<option value="${s.id}">${s.full_name}</option>`).join('')}</select>
+          </div>
+          <div id="at-role-section" style="display:none; margin-top:8px;">
+            <select id="at-role">
+              <option value="admin">Admin</option>
+              <option value="finance">Finance</option>
+              <option value="sales">Sales</option>
+              <option value="staff">Staff</option>
+            </select>
+          </div>
+          <label>Due date (optional)</label>
+          <input type="date" id="at-due-date" />
+          <div style="margin-top:14px;">
+            <button id="at-save-btn">Add task</button>
+            <button type="button" class="secondary" id="at-cancel-btn">Cancel</button>
+          </div>
+          <div id="at-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      let selectedJobId = null;
+      let jobSearchTimeout;
+      overlay.querySelector('#at-job-search').addEventListener('input', (e) => {
+        clearTimeout(jobSearchTimeout);
+        selectedJobId = null;
+        overlay.querySelector('#at-job-selected').textContent = '';
+        const q = e.target.value.trim();
+        const resultsEl = overlay.querySelector('#at-job-results');
+        if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+        jobSearchTimeout = setTimeout(async () => {
+          const results = await searchProjects(q);
+          if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
+          resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+            ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+          </div>`;
+          resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
+            row.addEventListener('click', () => {
+              selectedJobId = row.dataset.id;
+              overlay.querySelector('#at-job-search').value = row.dataset.label;
+              overlay.querySelector('#at-job-selected').textContent = `Selected: ${row.dataset.label}`;
+              resultsEl.innerHTML = '';
+            });
+          });
+        }, 250);
+      });
+
+      overlay.querySelector('#at-assign-type').addEventListener('change', (e) => {
+        overlay.querySelector('#at-person-section').style.display = e.target.value === 'person' ? 'block' : 'none';
+        overlay.querySelector('#at-role-section').style.display = e.target.value === 'role' ? 'block' : 'none';
+      });
+
+      overlay.querySelector('#at-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#at-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#at-msg');
+        const description = overlay.querySelector('#at-desc').value.trim();
+        if (!description) { msg.innerHTML = `<div class="error-box">Enter a description.</div>`; return; }
+        const assignType = overlay.querySelector('#at-assign-type').value;
+        const saveBtn = overlay.querySelector('#at-save-btn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Adding...';
+        try {
+          const { error } = await supabaseClient.from('job_tasks').insert({
+            project_id: selectedJobId,
+            description,
+            assigned_to_user_id: assignType === 'person' ? overlay.querySelector('#at-person').value : null,
+            assigned_to_role: assignType === 'role' ? overlay.querySelector('#at-role').value : null,
+            due_date: overlay.querySelector('#at-due-date').value || null,
+            created_by: user.id,
+          });
+          if (error) throw error;
+          overlay.remove();
+          await loadTasks();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Add task';
+        }
+      });
+    }
+
     (async function () {
       const session = await requireLogin();
       if (!session) return;
@@ -117,6 +230,7 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+      document.getElementById('add-task-btn').addEventListener('click', openAddTaskPanel);
       await loadTasks();
     })();
   </script>

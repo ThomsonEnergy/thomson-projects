@@ -195,4 +195,7 @@ select '069', 'bug_report_approval_and_comments',
 union all
 select '070', 'payment_milestones',
   case when exists (select 1 from information_schema.tables where table_name = 'payment_milestones') then 'present' else 'MISSING' end
+union all
+select '071', 'office_tasks',
+  case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'project_id' and is_nullable = 'YES') then 'present' else 'MISSING' end
 order by 1;

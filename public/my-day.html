@@ -350,12 +350,15 @@
     });
 
     function taskRow(task, showPickUp) {
+      const jobLabel = task.project_id
+        ? (task.projects?.job_number ? 'J' + task.projects.job_number : (task.projects?.name || ''))
+        : 'Office / General';
       return `
         <div class="day-item">
           <div>
-            <a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>
+            ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>` : `<span>${task.description}</span>`}
             <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
-              ${task.projects?.job_number ? 'J' + task.projects.job_number : (task.projects?.name || '')}
+              ${jobLabel}
               ${task.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
             </p>
           </div>
