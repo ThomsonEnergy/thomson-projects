@@ -211,4 +211,7 @@ select '073', 'split_overnight_timesheets',
 union all
 select '074', 'recurring_tasks',
   case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'recurrence') then 'present' else 'MISSING' end
+union all
+select '075', 'clockout_breaks',
+  case when exists (select 1 from information_schema.columns where table_name = 'time_entries' and column_name = 'break_taken') then 'present' else 'MISSING' end
 order by 1;

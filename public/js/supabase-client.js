@@ -325,29 +325,241 @@ function splitAtSydneyMidnight(clockInIso, clockOutIso) {
   return segments.length ? segments : [{ clock_in: clockInIso, clock_out: clockOutIso }];
 }
 
+// Punches (clock in/out button presses, not manual entries or later edits)
+// round to the nearest 15 minutes - real punches drift by a minute or two
+// either way, and that shouldn't show up as odd timesheet totals.
+function roundToQuarterHour(date) {
+  const ms = 15 * 60 * 1000;
+  return new Date(Math.round(date.getTime() / ms) * ms);
+}
+
 // Clocks out an active (clock_out is null) time_entries row, splitting it
 // at each Sydney midnight it crosses - shared by my-day.html and the
 // quick clock in/out button on home.html so there's one place that knows
 // how to do this correctly. `entry` needs id/staff_id/project_id/
 // cost_centre_id/selected_cost_centre_ids/time_category/clock_in.
-// Returns { error } - never throws.
-async function clockOutActiveEntry(entry) {
-  const clockOutIso = new Date().toISOString();
+// `opts.clockOutIso` overrides "now" (e.g. a rounded/edited punch time).
+// `opts.carryFields` (e.g. a corrected cost centre) applies to the closed
+// segment AND any overnight carryover segments, since it describes the
+// whole shift. `opts.onceFields` (e.g. break info) applies only to the
+// segment actually being closed - a break is a single point in time, not
+// something to duplicate onto a carried-over segment. Returns { error } -
+// never throws.
+async function clockOutActiveEntry(entry, opts = {}) {
+  const clockOutIso = opts.clockOutIso || new Date().toISOString();
+  const carryFields = opts.carryFields || {};
+  const onceFields = opts.onceFields || {};
+
   const segments = splitAtSydneyMidnight(entry.clock_in, clockOutIso);
 
-  const { error } = await supabaseClient.from('time_entries').update({ clock_out: segments[0].clock_out }).eq('id', entry.id);
+  const { error } = await supabaseClient.from('time_entries')
+    .update({ clock_out: segments[0].clock_out, ...carryFields, ...onceFields })
+    .eq('id', entry.id);
   if (error) return { error };
 
   if (segments.length > 1) {
     const extraEntries = segments.slice(1).map(seg => ({
       staff_id: entry.staff_id, project_id: entry.project_id, cost_centre_id: entry.cost_centre_id,
       selected_cost_centre_ids: entry.selected_cost_centre_ids, time_category: entry.time_category,
+      ...carryFields,
       clock_in: seg.clock_in, clock_out: seg.clock_out,
     }));
     const { error: insErr } = await supabaseClient.from('time_entries').insert(extraEntries);
     if (insErr) return { error: insErr };
   }
   return { error: null };
+}
+
+// ---------- clock-out confirmation wizard ----------
+// Runs whenever someone clocks out (My Day, and the quick button on
+// Home) - confirms which stage(s) the time counts against, lets them
+// nudge the rounded punch time, captures the mandatory 30-minute break
+// (or why it wasn't taken - asked once per Sydney calendar day, not
+// every single clock-out), and finishes with a reminder to log
+// materials, sort any forms, and upload site photos before leaving site.
+// `entry` needs id/staff_id/project_id/cost_centre_id/
+// selected_cost_centre_ids/time_category/clock_in. Calls `onDone` (if
+// given) once the clock-out has actually saved.
+async function openClockOutModal(entry, onDone) {
+  let project = null, centres = [];
+  if (entry.project_id) {
+    const [{ data: proj }, { data: cc }] = await Promise.all([
+      supabaseClient.from('projects').select('id, name, job_number, quote_number').eq('id', entry.project_id).maybeSingle(),
+      supabaseClient.from('cost_centres').select('id, name').eq('project_id', entry.project_id).order('sort_order'),
+    ]);
+    project = proj;
+    centres = (cc || []).map((c, i) => ({ ...c, number: costCentreNumber(proj ? proj.job_number : null, i + 1) }));
+  }
+  let chosenCentres = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
+    ? entry.selected_cost_centre_ids.slice()
+    : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
+
+  // Has today's mandatory break already been answered against another
+  // entry today? Generous UTC window, exact Sydney-date match in JS -
+  // same pattern used server-side for day banding.
+  const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
+  const { data: recentBreaks } = await supabaseClient
+    .from('time_entries')
+    .select('clock_in, break_taken')
+    .eq('staff_id', entry.staff_id)
+    .gte('clock_in', windowStart.toISOString())
+    .not('break_taken', 'is', null);
+  const todayKey = sydneyDateKey(new Date());
+  const breakAlreadyLogged = (recentBreaks || []).some(r => sydneyDateKey(new Date(r.clock_in)) === todayKey);
+
+  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakSkipReason: '' };
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  document.body.appendChild(overlay);
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function timePartLocal(d) { return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+
+  function renderStep1() {
+    const outDate = new Date(state.outIso);
+    overlay.innerHTML = `
+      <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
+        <h2>Confirm clock-out</h2>
+        <p class="subtitle" style="margin-bottom:12px;">${project ? projectRef(project) : 'General / Office'}</p>
+        ${centres.length ? `
+          <label style="margin-top:0">Stage(s) this time counts against</label>
+          <div id="cko-cc-chips">${centres.map(c => `
+            <button type="button" class="cc-chip ${chosenCentres.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
+              <span class="cc-chip-num">${c.number}</span> ${c.name}
+            </button>`).join('')}</div>
+          <p class="subtitle" id="cko-cc-hint" style="margin:6px 0 0;">${chosenCentres.length > 1 ? 'Time will be shared evenly across these - edit the split later from Timesheets if it needs to be uneven.' : ''}</p>
+        ` : ''}
+        <label>Clock-out time</label>
+        <input type="time" id="cko-time" value="${timePartLocal(outDate)}" />
+        <p class="subtitle" style="margin:4px 0 0;">Rounded to the nearest 15 minutes - adjust if that's not quite right.</p>
+        <div style="margin-top:14px;">
+          <button id="cko-next-btn">Next</button>
+          <button type="button" class="secondary" id="cko-cancel-btn">Cancel</button>
+        </div>
+        <div id="cko-msg"></div>
+      </div>`;
+
+    if (centres.length) {
+      overlay.querySelectorAll('#cko-cc-chips .cc-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          chip.classList.toggle('selected');
+          const id = chip.dataset.id;
+          if (chip.classList.contains('selected')) chosenCentres.push(id);
+          else chosenCentres = chosenCentres.filter(x => x !== id);
+          overlay.querySelector('#cko-cc-hint').textContent = chosenCentres.length > 1
+            ? 'Time will be shared evenly across these - edit the split later from Timesheets if it needs to be uneven.' : '';
+        });
+      });
+    }
+    overlay.querySelector('#cko-cancel-btn').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#cko-next-btn').addEventListener('click', () => {
+      const msg = overlay.querySelector('#cko-msg');
+      const timeVal = overlay.querySelector('#cko-time').value;
+      if (!timeVal) { msg.innerHTML = `<div class="error-box">Pick a clock-out time.</div>`; return; }
+      const [hh, mm] = timeVal.split(':').map(Number);
+      const combined = new Date(outDate);
+      combined.setHours(hh, mm, 0, 0);
+      if (combined <= new Date(entry.clock_in)) { msg.innerHTML = `<div class="error-box">Clock-out must be after your clock-in time.</div>`; return; }
+      state.outIso = combined.toISOString();
+      if (breakAlreadyLogged) finalizeClockOut(); else renderStep2();
+    });
+  }
+
+  function renderStep2() {
+    overlay.innerHTML = `
+      <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
+        <h2>Did you take your 30-minute break today?</h2>
+        <p class="subtitle" style="margin-bottom:12px;">It's mandatory to take at least 30 minutes - let us know when, or why not.</p>
+        <div style="display:flex; gap:10px; margin-bottom:12px;">
+          <button type="button" id="cko-break-yes" class="secondary" style="flex:1;">Yes, I took it</button>
+          <button type="button" id="cko-break-no" class="secondary" style="flex:1;">No, I didn't</button>
+        </div>
+        <div id="cko-break-detail"></div>
+        <div style="margin-top:14px;">
+          <button id="cko-break-continue-btn">Continue</button>
+          <button type="button" class="secondary" id="cko-back-btn">Back</button>
+        </div>
+        <div id="cko-msg"></div>
+      </div>`;
+
+    const detailEl = overlay.querySelector('#cko-break-detail');
+    overlay.querySelector('#cko-break-yes').addEventListener('click', () => {
+      state.breakTaken = true;
+      overlay.querySelector('#cko-break-yes').style.borderColor = 'var(--accent)';
+      overlay.querySelector('#cko-break-no').style.borderColor = '';
+      detailEl.innerHTML = `<label style="margin-top:0">What time did your break start?</label><input type="time" id="cko-break-start" />`;
+    });
+    overlay.querySelector('#cko-break-no').addEventListener('click', () => {
+      state.breakTaken = false;
+      overlay.querySelector('#cko-break-no').style.borderColor = 'var(--accent)';
+      overlay.querySelector('#cko-break-yes').style.borderColor = '';
+      detailEl.innerHTML = `<label style="margin-top:0">Why not?</label><input id="cko-break-reason" placeholder="e.g. too busy on site" />`;
+    });
+    overlay.querySelector('#cko-back-btn').addEventListener('click', renderStep1);
+    overlay.querySelector('#cko-break-continue-btn').addEventListener('click', () => {
+      const msg = overlay.querySelector('#cko-msg');
+      if (state.breakTaken === null) { msg.innerHTML = `<div class="error-box">Let us know if you took a break.</div>`; return; }
+      if (state.breakTaken) {
+        const startVal = overlay.querySelector('#cko-break-start')?.value;
+        if (!startVal) { msg.innerHTML = `<div class="error-box">Enter when your break started.</div>`; return; }
+        state.breakStart = startVal;
+      } else {
+        const reasonVal = overlay.querySelector('#cko-break-reason')?.value.trim();
+        if (!reasonVal) { msg.innerHTML = `<div class="error-box">A quick reason is required.</div>`; return; }
+        state.breakSkipReason = reasonVal;
+      }
+      finalizeClockOut();
+    });
+  }
+
+  async function finalizeClockOut() {
+    const carryFields = {};
+    if (chosenCentres.length === 1) { carryFields.cost_centre_id = chosenCentres[0]; carryFields.selected_cost_centre_ids = null; }
+    else if (chosenCentres.length > 1) { carryFields.cost_centre_id = null; carryFields.selected_cost_centre_ids = chosenCentres; }
+    else { carryFields.cost_centre_id = null; carryFields.selected_cost_centre_ids = null; }
+
+    const onceFields = {};
+    if (state.breakTaken !== null) {
+      onceFields.break_taken = state.breakTaken;
+      if (state.breakTaken) {
+        const [hh, mm] = state.breakStart.split(':').map(Number);
+        const breakStartDate = new Date(state.outIso);
+        breakStartDate.setHours(hh, mm, 0, 0);
+        onceFields.break_start = breakStartDate.toISOString();
+        onceFields.break_minutes = 30;
+      } else {
+        onceFields.break_skip_reason = state.breakSkipReason;
+      }
+    }
+
+    const { error } = await clockOutActiveEntry(entry, { clockOutIso: state.outIso, carryFields, onceFields });
+    if (error) {
+      const msg = overlay.querySelector('#cko-msg');
+      if (msg) msg.innerHTML = `<div class="error-box">${error.message}</div>`;
+      return;
+    }
+    if (project) renderStep3();
+    else { overlay.remove(); if (onDone) await onDone(); }
+  }
+
+  function renderStep3() {
+    overlay.innerHTML = `
+      <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
+        <h2>Before you go...</h2>
+        <p class="subtitle" style="margin-bottom:12px;">You're clocked out of ${projectRef(project)}. Quick reminders:</p>
+        <ul style="margin:0 0 14px; padding-left:20px; font-size:14px; line-height:1.8;">
+          <li>Log any materials you used today</li>
+          <li>Get any forms that need signing sorted</li>
+          <li>Upload any site photos</li>
+        </ul>
+        <a href="/project.html?id=${project.id}" class="btn" style="display:block; text-align:center; text-decoration:none;">Go to job</a>
+        <button type="button" class="secondary" id="cko-finish-btn" style="margin-top:10px; width:100%;">Done</button>
+      </div>`;
+    overlay.querySelector('#cko-finish-btn').addEventListener('click', async () => { overlay.remove(); if (onDone) await onDone(); });
+  }
+
+  renderStep1();
 }
 
 // STC (Small-scale Technology Certificate) quantity, per the Clean Energy

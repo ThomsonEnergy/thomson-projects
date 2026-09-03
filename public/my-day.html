@@ -124,11 +124,7 @@
         const update = () => { document.getElementById('active-elapsed').textContent = fmtDuration(Date.now() - new Date(data.clock_in).getTime()); };
         update();
         elapsedInterval = setInterval(update, 30000);
-        document.getElementById('clock-out-btn').onclick = async () => {
-          const { error } = await clockOutActiveEntry(data);
-          if (error) { alert(error.message); return; }
-          await checkActiveClock();
-        };
+        document.getElementById('clock-out-btn').onclick = () => openClockOutModal(data, checkActiveClock);
         await renderActiveJobCard(data.project_id);
       } else {
         document.getElementById('clock-idle').style.display = 'block';
@@ -331,6 +327,7 @@
         staff_id: myUserId,
         project_id: projectId,
         time_category: projectId ? 'job' : document.getElementById('clock-category').value,
+        clock_in: roundToQuarterHour(new Date()).toISOString(),
       };
       if (selectedClockCostCentres.length === 1) {
         entry.cost_centre_id = selectedClockCostCentres[0];

@@ -110,12 +110,7 @@
 
       if (data) {
         btn.textContent = 'Clock out';
-        btn.onclick = async () => {
-          btn.disabled = true;
-          const { error } = await clockOutActiveEntry(data);
-          if (error) { alert(error.message); btn.disabled = false; return; }
-          await refreshClockButton();
-        };
+        btn.onclick = () => openClockOutModal(data, refreshClockButton);
       } else {
         btn.textContent = 'Clock in';
         btn.disabled = false;

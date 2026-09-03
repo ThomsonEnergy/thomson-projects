@@ -604,7 +604,7 @@
       ['panel-date', 'panel-start-time', 'panel-end-time'].forEach(elId => {
         overlay.querySelector('#' + elId).addEventListener('input', () => refreshSplitSection(overlay, isPushed));
       });
-      overlay.querySelector('#panel-save-btn').addEventListener('click', () => saveEntryPanel(overlay, id, isPushed));
+      overlay.querySelector('#panel-save-btn').addEventListener('click', () => saveEntryPanel(overlay, id, isPushed, data));
 
       await loadPanelCostCentreChips(overlay, data.projectId || null, currentSelectedCC, isPushed);
     }
@@ -740,7 +740,7 @@
       });
     }
 
-    async function saveEntryPanel(overlay, id, isPushed) {
+    async function saveEntryPanel(overlay, id, isPushed, original) {
       const msg = overlay.querySelector('#panel-msg');
       const btn = overlay.querySelector('#panel-save-btn');
       const projectId = overlay.querySelector('#panel-project').value || null;
@@ -801,9 +801,30 @@
           if (insErr) throw insErr;
           const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', id);
           if (delErr) throw delErr;
+          if (projectId) {
+            await logActivity('project', projectId, 'timesheet_split', `Timesheet split across ${centres.length} stages (${fmtTime(clockIn.toISOString())} - ${fmtTime(clockOut.toISOString())})`);
+          }
         } else {
           const { error } = await supabaseClient.from('time_entries').update(update).eq('id', id);
           if (error) throw error;
+          // A time change is worth a paper trail - who changed a clock
+          // in/out and to what, surfaced on the job's own Activity Log
+          // when it's tied to one.
+          if (!isPushed && clockIn) {
+            const changes = [];
+            if (new Date(original.clockIn).getTime() !== clockIn.getTime()) {
+              changes.push(`clock-in ${fmtTime(original.clockIn)} to ${fmtTime(clockIn.toISOString())}`);
+            }
+            const origOutMs = original.clockOut ? new Date(original.clockOut).getTime() : null;
+            const newOutMs = clockOut ? clockOut.getTime() : null;
+            if (origOutMs !== newOutMs) {
+              changes.push(`clock-out ${original.clockOut ? fmtTime(original.clockOut) : 'in progress'} to ${clockOut ? fmtTime(clockOut.toISOString()) : 'in progress'}`);
+            }
+            if (changes.length) {
+              const entityProjectId = projectId || original.projectId || null;
+              await logActivity(entityProjectId ? 'project' : 'time_entry', entityProjectId || id, 'timesheet_edited', `Timesheet edited: ${changes.join(', ')}`);
+            }
+          }
         }
         overlay.remove();
         await loadMyWeek();
