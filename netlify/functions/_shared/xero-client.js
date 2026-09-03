@@ -64,10 +64,22 @@ async function xeroRequest(api, path, { method = 'GET', body = null } = {}) {
   try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
 
   if (!res.ok) {
-    const message = json?.Elements?.[0]?.ValidationErrors?.map(e => e.Message).join('; ')
+    // A validation failure's per-field detail lives in an array of
+    // elements each carrying its own ValidationErrors - the Accounting
+    // API always calls that array "Elements", but Payroll AU echoes it
+    // back under the resource's own name instead (e.g. "Employees",
+    // "Timesheets"), so json.Message alone is just Xero's generic "A
+    // validation exception occurred" with the actual reason still
+    // sitting unread in whichever array key Xero used this time.
+    const candidateArrays = Object.values(json || {}).filter(Array.isArray);
+    const detail = [...new Set(
+      candidateArrays.flatMap(arr => arr.flatMap(el => (el?.ValidationErrors || []).map(v => v.Message))).filter(Boolean)
+    )];
+    const message = (detail.length ? detail.join('; ') : null)
       || json?.Message
       || text
       || `Xero API error ${res.status}`;
+    if (!detail.length) console.error('Xero API error, full response:', text);
     throw new Error(message);
   }
 
