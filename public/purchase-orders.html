@@ -38,7 +38,7 @@
 
     <div class="grid cols-3">
       <div class="stat"><div class="label">Pending (not received)</div><div class="value" id="stat-pending">-</div></div>
-      <div class="stat"><div class="label">Needs approval</div><div class="value" id="stat-needs-approval">-</div></div>
+      <div class="stat"><div class="label">Needs approval</div><div class="value" id="stat-needs-approval" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:4px;" title="Click to see the list">-</div></div>
       <div class="stat"><div class="label">Received this month</div><div class="value" id="stat-received-month">-</div></div>
     </div>
 
@@ -48,6 +48,7 @@
         <select id="po-filter">
           <option value="all">All</option>
           <option value="pending">Pending only</option>
+          <option value="needs_approval">Needs approval</option>
           <option value="received">Received only</option>
         </select>
       </div>
@@ -104,6 +105,7 @@
       let filtered = allPos;
       if (filter === 'pending') filtered = filtered.filter(po => !po.received);
       if (filter === 'received') filtered = filtered.filter(po => po.received);
+      if (filter === 'needs_approval') filtered = filtered.filter(po => !po.received && (po.purchase_order_line_items || []).some(li => !li.received));
       if (q) {
         filtered = filtered.filter(po =>
           (po.po_number || '').toLowerCase().includes(q) ||
@@ -157,6 +159,11 @@
 
     document.getElementById('po-search').addEventListener('input', renderList);
     document.getElementById('po-filter').addEventListener('change', renderList);
+    document.getElementById('stat-needs-approval').addEventListener('click', () => {
+      document.getElementById('po-filter').value = 'needs_approval';
+      renderList();
+      document.getElementById('po-full-list').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
 
     async function openCreatePoPanel() {
       const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
