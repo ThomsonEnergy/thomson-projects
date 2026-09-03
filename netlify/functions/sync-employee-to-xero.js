@@ -73,23 +73,26 @@ exports.handler = async (event) => {
     const [firstName, ...rest] = (profile.full_name || '').trim().split(/\s+/);
     const lastName = rest.join(' ') || firstName || 'Unknown';
 
-    const employeePayload = {
-      Employees: [{
-        FirstName: firstName || 'Unknown',
-        LastName: lastName,
-        Email: email || undefined,
-        DateOfBirth: profile.date_of_birth || undefined,
-        StartDate: profile.employment_start_date || undefined,
-        HomeAddress: profile.residential_address ? { AddressLine1: profile.residential_address } : undefined,
-        BankAccounts: profile.bank_account_number ? [{
-          AccountName: profile.bank_account_name || profile.full_name,
-          BSB: profile.bank_bsb,
-          AccountNumber: profile.bank_account_number,
-          Remainder: true,
-        }] : undefined,
-        TaxDeclaration: profile.tax_file_number ? { TaxFileNumber: profile.tax_file_number } : undefined,
-      }],
-    };
+    // Payroll AU's Employees endpoint wants a bare JSON array as the
+    // request body (unlike the Accounting API's {"Invoices": [...]}
+    // style wrapping) - wrapping it in an {Employees: [...]} object gets
+    // rejected as a deserialization error before Xero even looks at the
+    // employee fields themselves.
+    const employeePayload = [{
+      FirstName: firstName || 'Unknown',
+      LastName: lastName,
+      Email: email || undefined,
+      DateOfBirth: profile.date_of_birth || undefined,
+      StartDate: profile.employment_start_date || undefined,
+      HomeAddress: profile.residential_address ? { AddressLine1: profile.residential_address } : undefined,
+      BankAccounts: profile.bank_account_number ? [{
+        AccountName: profile.bank_account_name || profile.full_name,
+        BSB: profile.bank_bsb,
+        AccountNumber: profile.bank_account_number,
+        Remainder: true,
+      }] : undefined,
+      TaxDeclaration: profile.tax_file_number ? { TaxFileNumber: profile.tax_file_number } : undefined,
+    }];
 
     let xeroResult;
     try {

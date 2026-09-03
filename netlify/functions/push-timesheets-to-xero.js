@@ -98,17 +98,21 @@ exports.handler = async (event) => {
       };
 
       try {
+        // Payroll AU wants a bare JSON array as the request body (same as
+        // Employees) - wrapping the timesheet in a plain object gets
+        // rejected as a deserialization error before Xero looks at it.
         const result = await xeroRequest('payroll.au', 'Timesheets', {
           method: 'POST',
-          body: {
+          body: [{
             EmployeeID: employeeId,
             StartDate: startDate,
             EndDate: endDate,
             Status: 'DRAFT',
             TimesheetLines: [timesheetLine],
-          },
+          }],
         });
-        results.push({ staff: staffName, timesheetId: result.TimesheetID });
+        const timesheetId = result?.Timesheets?.[0]?.TimesheetID;
+        results.push({ staff: staffName, timesheetId });
         staffEntries.forEach(e => pushedEntryIds.push(e.id));
       } catch (err) {
         skipped.push(`${staffName}: ${err.message}`);
