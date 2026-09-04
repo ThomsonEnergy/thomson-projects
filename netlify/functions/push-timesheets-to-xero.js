@@ -6,28 +6,38 @@
 // Pushes each staff member's clocked hours in the range as one DRAFT
 // timesheet per employee. Each day's hours are banded into the same 4
 // award rates payroll costing already uses (ordinary/OT1 1.5x/OT2 2x/
-// public holiday 2.5x - see dayBands in compute-labour-cost.js), banded
+// public holiday 2.5x - see dayBands in compute-labour-cost.js) banded
 // across the employee's WHOLE day (every job), same as a real payslip.
-// One TimesheetLine per (job, band) combination that has hours, each
-// tagged with that job's tracking option (required per line once
-// tracking is turned on for timesheets in Xero's Payroll Settings) and
-// the earnings rate mapped to that band in Settings > Xero Mapping - so
-// OT hours can post to a different Xero account than ordinary hours.
-// Only entries that haven't been pushed before are included
-// (xero_pushed_at is null) - safe to re-run without double-pushing hours
-// already sent.
+// Hours are also split by time_entries.time_category into 3 fixed Xero
+// tracking options - Billable (Jobs) / Non-billable (Office) / Training
+// (TAFE) - NOT one option per job number. A per-job tracking option was
+// tried first but Xero caps a Tracking Category at 100 options, and this
+// company's job numbering would blow through that within a year; the
+// per-job cost/revenue breakdown already lives properly in Thomson
+// Projects' own job costing, so Xero only needs the coarse 3-way split.
+// One TimesheetLine per (tracking option, band) combination that has
+// hours, each tagged with the earnings rate mapped to that band in
+// Settings > Xero Mapping - so OT hours can post to a different Xero
+// account than ordinary hours. Only entries that haven't been pushed
+// before are included (xero_pushed_at is null) - safe to re-run without
+// double-pushing hours already sent.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { xeroRequest } = require('./_shared/xero-client');
 const { getOrCreateTrackingOptionId } = require('./_shared/xero-tracking');
 const { dayBands, localDateKey, entryHours } = require('./_shared/compute-labour-cost');
 
-const OFFICE_TRACKING_OPTION_NAME = 'Office / General';
 const BAND_LABELS = ['ordinary', 'ot1', 'ot2', 'publicHoliday'];
 const BAND_NAMES = { ordinary: 'Ordinary Hours', ot1: 'OT1 (1.5x)', ot2: 'OT2 (2x)', publicHoliday: 'Public holiday (2.5x)' };
 
 function dateOnly(iso) {
   return iso.slice(0, 10);
+}
+
+function trackingLabelFor(entry) {
+  if (entry.time_category === 'training') return 'Training (TAFE)';
+  if (entry.time_category === 'job') return 'Billable (Jobs)';
+  return 'Non-billable (Office)'; // 'office' or 'other'
 }
 
 exports.handler = async (event) => {
@@ -72,9 +82,19 @@ exports.handler = async (event) => {
       return settings.xero_ordinary_earnings_rate_id;
     }
 
+    // Cached across every staff member in this run - the 3 tracking
+    // options are fixed, no need to hit Xero for the same lookup twice.
+    const trackingIdCache = {};
+    async function trackingIdFor(label) {
+      if (!(label in trackingIdCache)) {
+        trackingIdCache[label] = await getOrCreateTrackingOptionId(supabaseAdmin, label);
+      }
+      return trackingIdCache[label];
+    }
+
     const { data: entries, error: entriesErr } = await supabaseAdmin
       .from('time_entries')
-      .select('*, profiles(xero_employee_id, full_name), projects(job_number)')
+      .select('*, profiles(xero_employee_id, full_name)')
       .gte('clock_in', `${startDate}T00:00:00`)
       .lte('clock_in', `${endDate}T23:59:59`)
       .not('clock_out', 'is', null)
@@ -115,15 +135,13 @@ exports.handler = async (event) => {
         cursor.setDate(cursor.getDate() + 1);
       }
 
-      const jobNumberByKey = {};
-      staffEntries.forEach(e => { jobNumberByKey[e.project_id || 'none'] = e.projects?.job_number; });
-
       // Band each CALENDAR DAY's hours (Sydney local date) across the
-      // employee's WHOLE day - every job together, same as payroll costing
-      // (dayBands in compute-labour-cost.js) - then attribute each band's
-      // hours back to whichever job the entry that earned them was
-      // logged against. jobKey -> bandLabel -> dateKey -> hours.
-      const unitsByJobBandDay = {};
+      // employee's WHOLE day - every entry together, same as payroll
+      // costing (dayBands in compute-labour-cost.js) - then attribute
+      // each band's hours to whichever tracking option (billable/office/
+      // training) the entry that earned them belongs to.
+      // trackingLabel -> bandLabel -> dateKey -> hours
+      const unitsByLabelBandDay = {};
       const byDay = {};
       staffEntries.forEach(e => { (byDay[localDateKey(e.clock_in)] ||= []).push(e); });
       Object.keys(byDay).forEach(dateKey => {
@@ -133,13 +151,13 @@ exports.handler = async (event) => {
         dayEntries.forEach(e => {
           const hours = entryHours(e);
           const start = cumulative, entryEnd = cumulative + hours;
-          const jobKey = e.project_id || 'none';
+          const label = trackingLabelFor(e);
           bands.forEach(band => {
             const overlapStart = Math.max(start, band.from);
             const overlapEnd = Math.min(entryEnd, band.to);
             if (overlapEnd > overlapStart) {
-              const jobBands = (unitsByJobBandDay[jobKey] ||= {});
-              const bandDays = (jobBands[band.rate] ||= {});
+              const labelBands = (unitsByLabelBandDay[label] ||= {});
+              const bandDays = (labelBands[band.rate] ||= {});
               bandDays[dateKey] = (bandDays[dateKey] || 0) + (overlapEnd - overlapStart);
             }
           });
@@ -149,13 +167,12 @@ exports.handler = async (event) => {
 
       const timesheetLines = [];
       let allEntriesForThisStaff = [];
-      for (const jobKey of Object.keys(unitsByJobBandDay)) {
-        const jobNumber = jobNumberByKey[jobKey];
-        const trackingItemId = await getOrCreateTrackingOptionId(supabaseAdmin, jobNumber ? `Job ${jobNumber}` : OFFICE_TRACKING_OPTION_NAME);
+      for (const label of Object.keys(unitsByLabelBandDay)) {
+        const trackingItemId = await trackingIdFor(label);
 
-        let jobHasLine = false;
+        let labelHasLine = false;
         BAND_LABELS.forEach(bandLabel => {
-          const bandDays = unitsByJobBandDay[jobKey][bandLabel];
+          const bandDays = unitsByLabelBandDay[label][bandLabel];
           if (!bandDays) return;
           const numberOfUnits = days.map(d => Math.round(((bandDays[d] || 0)) * 100) / 100);
           if (numberOfUnits.every(n => n === 0)) return;
@@ -164,10 +181,10 @@ exports.handler = async (event) => {
             NumberOfUnits: numberOfUnits,
             TrackingItemID: trackingItemId || undefined,
           });
-          jobHasLine = true;
+          labelHasLine = true;
         });
-        if (jobHasLine) {
-          allEntriesForThisStaff = allEntriesForThisStaff.concat(staffEntries.filter(e => (e.project_id || 'none') === jobKey));
+        if (labelHasLine) {
+          allEntriesForThisStaff = allEntriesForThisStaff.concat(staffEntries.filter(e => trackingLabelFor(e) === label));
         }
       }
 

@@ -5,7 +5,6 @@
 // so an edit can never post differently than the original push did.
 
 const { xeroRequest } = require('./xero-client');
-const { getOrCreateTrackingOptionId } = require('./xero-tracking');
 
 async function getOrCreateContact({ name, email }, storeOn) {
   if (storeOn.xero_contact_id) return storeOn.xero_contact_id;
@@ -23,10 +22,10 @@ async function getOrCreateContact({ name, email }, storeOn) {
   return created.Contacts[0].ContactID;
 }
 
-// Fetches invoice `invoiceId`, resolves its Xero contact and tracking
-// option, and builds { invoice, contactId, reference, lineItems,
-// jobNumber } - the caller decides what Status/InvoiceID to send and
-// performs the actual Invoices POST.
+// Fetches invoice `invoiceId`, resolves its Xero contact, and builds
+// { invoice, contactId, reference, lineItems, jobNumber } - the caller
+// decides what Status/InvoiceID to send and performs the actual Invoices
+// POST.
 async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   const { data: invoice, error: invErr } = await supabaseAdmin
     .from('invoices')
@@ -48,8 +47,7 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   }
 
   // Everything below is branched: job-linked claims get a job-tagged
-  // reference and tracking; standalone invoices just get a plain
-  // description and no tracking, since there's no job to tag them to.
+  // reference; standalone invoices just get a plain description.
   let contactName, contactEmail, clientType, jobNumber, contactStoreTable, contactStoreId, existingXeroContactId;
 
   if (isStandalone) {
@@ -84,12 +82,6 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
     await supabaseAdmin.from(contactStoreTable).update({ xero_contact_id: contactId }).eq('id', contactStoreId);
   }
 
-  const trackingOptionId = jobNumber ? await getOrCreateTrackingOptionId(supabaseAdmin, `Job ${jobNumber}`) : null;
-  const { data: settings } = await supabaseAdmin.from('company_settings').select('xero_tracking_category_id').eq('id', 1).single();
-  const trackingBlock = (trackingOptionId && settings?.xero_tracking_category_id)
-    ? [{ TrackingCategoryID: settings.xero_tracking_category_id, TrackingOptionID: trackingOptionId }]
-    : undefined;
-
   let reference, lineItems;
   if (isMultiStage) {
     const claims = (invoice.invoice_claims || []).slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0));
@@ -103,7 +95,6 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
         UnitAmount: Number(c.labour_amount) || 0,
         AccountCode: labourMap.xero_account_code,
         TaxType: labourMap.xero_tax_type,
-        Tracking: trackingBlock,
       });
       if (Number(c.material_amount) > 0) {
         lineItems.push({
@@ -112,7 +103,6 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
           UnitAmount: Number(c.material_amount),
           AccountCode: materialsMap.xero_account_code,
           TaxType: materialsMap.xero_tax_type,
-          Tracking: trackingBlock,
         });
       }
       if (Number(c.stc_amount) > 0) {
@@ -123,7 +113,6 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
           UnitAmount: -Number(c.stc_amount),
           AccountCode: stcMap.xero_account_code,
           TaxType: stcMap.xero_tax_type,
-          Tracking: trackingBlock,
         });
       }
     });
@@ -142,7 +131,6 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
         UnitAmount: Number(invoice.labour_amount) || 0,
         AccountCode: labourMap.xero_account_code,
         TaxType: labourMap.xero_tax_type,
-        Tracking: trackingBlock,
       },
     ];
     if (Number(invoice.material_amount) > 0) {
@@ -152,7 +140,6 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
         UnitAmount: Number(invoice.material_amount),
         AccountCode: materialsMap.xero_account_code,
         TaxType: materialsMap.xero_tax_type,
-        Tracking: trackingBlock,
       });
     }
     if (Number(invoice.stc_amount) > 0) {
@@ -165,7 +152,6 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
         UnitAmount: -Number(invoice.stc_amount),
         AccountCode: stcMap.xero_account_code,
         TaxType: stcMap.xero_tax_type,
-        Tracking: trackingBlock,
       });
     }
   }

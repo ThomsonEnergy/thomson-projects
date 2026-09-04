@@ -1,10 +1,11 @@
 // Finds (or creates) a Tracking Option under the company's configured
 // Xero tracking category (Settings > Xero connection > Xero Tracking
-// Category ID), by exact name. Shared by invoices (one option per job,
-// "Job 7009") and timesheets (the same job options, plus a fixed
-// "Office / General" one for non-job time) - using the identical option
-// for both means a job's revenue and labour cost tag to the same Xero
-// tracking value, so Xero's own reports can actually job-cost it.
+// Category ID), by exact name. Used by push-timesheets-to-xero.js for its
+// 3 fixed options - Billable (Jobs) / Non-billable (Office) / Training
+// (TAFE) - deliberately NOT one option per job number, since Xero caps a
+// Tracking Category at 100 options and this company's job numbering would
+// blow through that; per-job cost/revenue detail already lives properly
+// in Thomson Projects' own job costing.
 
 const { xeroRequest } = require('./xero-client');
 
