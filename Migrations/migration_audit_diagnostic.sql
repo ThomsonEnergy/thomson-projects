@@ -233,4 +233,10 @@ select '079', 'fix_column_masking_table_grant',
 union all
 select '080', 'xero_payroll_calendar',
   case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_payroll_calendar_id') then 'present' else 'MISSING' end
+union all
+select '081', 'fix_invoice_claim_ordering',
+  case when exists (
+    select 1 from pg_proc where proname = 'get_invoice_by_token_v3'
+      and pg_get_functiondef(oid) like '%i2.created_at < v_invoice.created_at%'
+  ) then 'present' else 'MISSING' end
 order by 1;
