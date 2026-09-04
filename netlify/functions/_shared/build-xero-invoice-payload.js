@@ -5,6 +5,7 @@
 // so an edit can never post differently than the original push did.
 
 const { xeroRequest } = require('./xero-client');
+const { getOrCreateTrackingOptionId } = require('./xero-tracking');
 
 async function getOrCreateContact({ name, email }, storeOn) {
   if (storeOn.xero_contact_id) return storeOn.xero_contact_id;
@@ -20,29 +21,6 @@ async function getOrCreateContact({ name, email }, storeOn) {
     body: { Contacts: [{ Name: name, EmailAddress: email || undefined }] },
   });
   return created.Contacts[0].ContactID;
-}
-
-async function getOrCreateTrackingOptionId(supabaseAdmin, jobNumber) {
-  if (!jobNumber) return null;
-  const { data: settings } = await supabaseAdmin.from('company_settings').select('xero_tracking_category_id').eq('id', 1).single();
-  const categoryId = settings?.xero_tracking_category_id;
-  if (!categoryId) return null;
-
-  try {
-    const optionName = `Job ${jobNumber}`;
-    const category = await xeroRequest('accounting', `TrackingCategories/${categoryId}`);
-    const existing = (category.TrackingCategories?.[0]?.Options || []).find(o => o.Name === optionName);
-    if (existing) return existing.TrackingOptionID;
-
-    const createdOption = await xeroRequest('accounting', `TrackingCategories/${categoryId}/Options`, {
-      method: 'POST',
-      body: { Name: optionName },
-    });
-    return createdOption.Options?.[0]?.TrackingOptionID || null;
-  } catch (err) {
-    console.error('Tracking option lookup/create failed, pushing without tracking:', err.message);
-    return null;
-  }
 }
 
 // Fetches invoice `invoiceId`, resolves its Xero contact and tracking
@@ -106,7 +84,7 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
     await supabaseAdmin.from(contactStoreTable).update({ xero_contact_id: contactId }).eq('id', contactStoreId);
   }
 
-  const trackingOptionId = jobNumber ? await getOrCreateTrackingOptionId(supabaseAdmin, jobNumber) : null;
+  const trackingOptionId = jobNumber ? await getOrCreateTrackingOptionId(supabaseAdmin, `Job ${jobNumber}`) : null;
   const { data: settings } = await supabaseAdmin.from('company_settings').select('xero_tracking_category_id').eq('id', 1).single();
   const trackingBlock = (trackingOptionId && settings?.xero_tracking_category_id)
     ? [{ TrackingCategoryID: settings.xero_tracking_category_id, TrackingOptionID: trackingOptionId }]

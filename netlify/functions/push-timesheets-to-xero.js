@@ -4,13 +4,18 @@
 // period boundaries, this doesn't try to guess them)
 //
 // Pushes each staff member's clocked hours in the range as one DRAFT
-// timesheet per employee, one line per day worked, tagged with the job
-// tracking option where a stage was recorded. Only entries that haven't
-// been pushed before are included (xero_pushed_at is null) - safe to
-// re-run without double-pushing hours already sent.
+// timesheet per employee, one line per job worked (plus one for non-job
+// time), each day-by-day and tagged with that job's tracking option -
+// required per line once tracking is turned on for timesheets in Xero's
+// Payroll Settings. Only entries that haven't been pushed before are
+// included (xero_pushed_at is null) - safe to re-run without double-
+// pushing hours already sent.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { xeroRequest } = require('./_shared/xero-client');
+const { getOrCreateTrackingOptionId } = require('./_shared/xero-tracking');
+
+const OFFICE_TRACKING_OPTION_NAME = 'Office / General';
 
 function dateOnly(iso) {
   return iso.slice(0, 10);
@@ -44,7 +49,7 @@ exports.handler = async (event) => {
 
     const { data: entries, error: entriesErr } = await supabaseAdmin
       .from('time_entries')
-      .select('*, profiles(xero_employee_id, full_name)')
+      .select('*, profiles(xero_employee_id, full_name), projects(job_number)')
       .gte('clock_in', `${startDate}T00:00:00`)
       .lte('clock_in', `${endDate}T23:59:59`)
       .not('clock_out', 'is', null)
@@ -71,16 +76,9 @@ exports.handler = async (event) => {
         continue;
       }
 
-      // Total minutes worked per calendar day in range.
-      const minutesByDay = {};
-      staffEntries.forEach(e => {
-        const day = dateOnly(e.clock_in);
-        const mins = (new Date(e.clock_out) - new Date(e.clock_in)) / 60000;
-        minutesByDay[day] = (minutesByDay[day] || 0) + mins;
-      });
-
       // Xero wants a fixed-length NumberOfUnits array, one slot per day of
-      // the timesheet period, in order from startDate to endDate.
+      // the timesheet period, in order from startDate to endDate - shared
+      // across every line below.
       const days = [];
       let cursor = new Date(`${startDate}T00:00:00`);
       const end = new Date(`${endDate}T00:00:00`);
@@ -88,14 +86,40 @@ exports.handler = async (event) => {
         days.push(dateOnly(cursor.toISOString()));
         cursor.setDate(cursor.getDate() + 1);
       }
-      const numberOfUnits = days.map(d => Math.round(((minutesByDay[d] || 0) / 60) * 100) / 100);
 
-      if (numberOfUnits.every(n => n === 0)) { continue; }
+      // One TimesheetLine per job worked (plus one for non-job time), each
+      // tagged with its own TrackingItemID - required per line once
+      // tracking is turned on for timesheets in Xero's Payroll Settings
+      // ("TrackingItemID is required for each timesheet line"). Reuses the
+      // exact same tracking option a job's invoices already use ("Job
+      // 7009"), so revenue and labour cost land on the same Xero tracking
+      // value for real job-costing reports.
+      const byJob = {};
+      staffEntries.forEach(e => { (byJob[e.project_id || 'none'] ||= { jobNumber: e.projects?.job_number, entries: [] }).entries.push(e); });
 
-      const timesheetLine = {
-        EarningsRateID: settings.xero_ordinary_earnings_rate_id,
-        NumberOfUnits: numberOfUnits,
-      };
+      const timesheetLines = [];
+      let allEntriesForThisStaff = [];
+      for (const jobKey of Object.keys(byJob)) {
+        const { jobNumber, entries: jobEntries } = byJob[jobKey];
+        const minutesByDay = {};
+        jobEntries.forEach(e => {
+          const day = dateOnly(e.clock_in);
+          const mins = (new Date(e.clock_out) - new Date(e.clock_in)) / 60000;
+          minutesByDay[day] = (minutesByDay[day] || 0) + mins;
+        });
+        const numberOfUnits = days.map(d => Math.round(((minutesByDay[d] || 0) / 60) * 100) / 100);
+        if (numberOfUnits.every(n => n === 0)) continue;
+
+        const trackingItemId = await getOrCreateTrackingOptionId(supabaseAdmin, jobNumber ? `Job ${jobNumber}` : OFFICE_TRACKING_OPTION_NAME);
+        timesheetLines.push({
+          EarningsRateID: settings.xero_ordinary_earnings_rate_id,
+          NumberOfUnits: numberOfUnits,
+          TrackingItemID: trackingItemId || undefined,
+        });
+        allEntriesForThisStaff = allEntriesForThisStaff.concat(jobEntries);
+      }
+
+      if (!timesheetLines.length) { continue; }
 
       try {
         // Payroll AU wants a bare JSON array as the request body (same as
@@ -108,12 +132,12 @@ exports.handler = async (event) => {
             StartDate: startDate,
             EndDate: endDate,
             Status: 'DRAFT',
-            TimesheetLines: [timesheetLine],
+            TimesheetLines: timesheetLines,
           }],
         });
         const timesheetId = result?.Timesheets?.[0]?.TimesheetID;
         results.push({ staff: staffName, timesheetId });
-        staffEntries.forEach(e => pushedEntryIds.push(e.id));
+        allEntriesForThisStaff.forEach(e => pushedEntryIds.push(e.id));
       } catch (err) {
         skipped.push(`${staffName}: ${err.message}`);
       }
