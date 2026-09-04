@@ -83,14 +83,16 @@ exports.handler = async (event) => {
       Email: email || undefined,
       DateOfBirth: profile.date_of_birth || undefined,
       StartDate: profile.employment_start_date || undefined,
-      // Xero's own validation error was explicit: Suburb/State/Postcode
-      // are required as separate fields - AddressLine1 alone isn't
-      // enough even though it holds the full street address text.
+      // Xero's validation message uses AU-friendly terms ("The Suburb is
+      // required") but the actual wire schema is Xero's general Address
+      // type, shared across the whole platform - City/Region/PostalCode,
+      // not Suburb/State/Postcode. Sending "Suburb" got a second, blunter
+      // error back: "Suburb is not a valid element in HomeAddress".
       HomeAddress: profile.residential_address ? {
         AddressLine1: profile.residential_address,
-        Suburb: profile.residential_suburb || undefined,
-        State: profile.residential_state || undefined,
-        Postcode: profile.residential_postcode || undefined,
+        City: profile.residential_suburb || undefined,
+        Region: profile.residential_state || undefined,
+        PostalCode: profile.residential_postcode || undefined,
       } : undefined,
       BankAccounts: profile.bank_account_number ? [{
         AccountName: profile.bank_account_name || profile.full_name,

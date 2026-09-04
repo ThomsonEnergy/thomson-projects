@@ -95,16 +95,25 @@ async function xeroRequest(api, path, { method = 'GET', body = null } = {}) {
     const detail = [...new Set(
       candidateArrays.flatMap(arr => arr.flatMap(el => (el?.ValidationErrors || []).map(v => v.Message))).filter(Boolean)
     )];
-    // Deliberately never falls back to the raw response text - this
-    // message can end up stored (profiles.xero_payroll_error) and shown
-    // in the Settings UI, not just logged, so it must never be able to
-    // carry an echoed TFN/BSB/account number through to either place.
-    // Full (redacted) detail is still in the function log below for
-    // whoever needs to dig further than the summary.
+    // Some deep validation errors from Xero's underlying engine come
+    // back as a raw XML fault instead of JSON, even with
+    // Accept: application/json sent - e.g. "<Message>Suburb is not a
+    // valid element in HomeAddress</Message>". These are plain
+    // structural complaints (never an echo of submitted field values),
+    // safe to surface directly rather than falling back to the opaque
+    // "Xero API error 400".
+    const xmlMessage = (!detail.length && json?.raw) ? json.raw.match(/<Message>([\s\S]*?)<\/Message>/)?.[1] : null;
+    // Otherwise deliberately never falls back to the raw response text -
+    // this message can end up stored (profiles.xero_payroll_error) and
+    // shown in the Settings UI, not just logged, so it must never be
+    // able to carry an echoed TFN/BSB/account number through to either
+    // place. Full (redacted) detail is still in the function log below
+    // for whoever needs to dig further than the summary.
     const message = (detail.length ? detail.join('; ') : null)
+      || xmlMessage
       || json?.Message
       || `Xero API error ${res.status}`;
-    if (!detail.length) {
+    if (!detail.length && !xmlMessage) {
       let safe;
       try { safe = JSON.stringify(redactSensitive(json)); } catch { safe = '[response could not be serialised]'; }
       console.error('Xero API error, full response (sensitive fields redacted):', safe);
