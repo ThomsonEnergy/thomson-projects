@@ -217,4 +217,7 @@ select '075', 'clockout_breaks',
 union all
 select '076', 'onboarding_reissue',
   case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'onboarding_cycle_started_at') then 'present' else 'MISSING' end
+union all
+select '077', 'structured_address',
+  case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'residential_postcode') then 'present' else 'MISSING' end
 order by 1;

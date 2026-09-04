@@ -115,7 +115,15 @@
           </div>
 
           <label style="margin-top:14px;">Residential address</label>
-          <input id="ob-address" value="${profile.residential_address || ''}" />
+          <input id="ob-address" placeholder="Street address" value="${profile.residential_address || ''}" />
+          <div class="grid cols-3" style="margin-top:8px;">
+            <input id="ob-suburb" placeholder="Suburb" value="${profile.residential_suburb || ''}" />
+            <select id="ob-state">
+              <option value="">State</option>
+              ${['NSW', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'].map(s => `<option value="${s}" ${profile.residential_state === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+            <input id="ob-postcode" placeholder="Postcode" value="${profile.residential_postcode || ''}" />
+          </div>
 
           <label style="margin-top:14px; display:flex; align-items:center; gap:8px;">
             <input type="checkbox" id="ob-smsf-toggle" style="width:auto;" ${profile.super_is_self_managed ? 'checked' : ''} /> My super fund is self-managed (SMSF)
@@ -266,6 +274,11 @@
         const msg = document.getElementById('ob-details-msg');
         const isSmsf = document.getElementById('ob-smsf-toggle').checked;
 
+        if (!document.getElementById('ob-address').value.trim() || !document.getElementById('ob-suburb').value.trim() || !document.getElementById('ob-state').value || !document.getElementById('ob-postcode').value.trim()) {
+          msg.innerHTML = `<div class="error-box">Fill in your full residential address, including suburb, state, and postcode - Xero payroll needs these as separate fields.</div>`;
+          return;
+        }
+
         if (isSmsf) {
           if (!document.getElementById('ob-smsf-abn').value.trim() || !document.getElementById('ob-smsf-bsb').value.trim() || !document.getElementById('ob-smsf-account').value.trim()) {
             msg.innerHTML = `<div class="error-box">Fill in your SMSF's ABN and bank details before continuing.</div>`;
@@ -280,6 +293,9 @@
           date_of_birth: document.getElementById('ob-dob').value || null,
           tax_file_number: document.getElementById('ob-tfn').value.trim() || null,
           residential_address: document.getElementById('ob-address').value.trim() || null,
+          residential_suburb: document.getElementById('ob-suburb').value.trim() || null,
+          residential_state: document.getElementById('ob-state').value || null,
+          residential_postcode: document.getElementById('ob-postcode').value.trim() || null,
           super_is_self_managed: isSmsf,
           super_fund_name: isSmsf ? null : document.getElementById('ob-super-name').value.trim() || null,
           super_fund_abn: isSmsf ? null : document.getElementById('ob-super-abn').value.trim() || null,
