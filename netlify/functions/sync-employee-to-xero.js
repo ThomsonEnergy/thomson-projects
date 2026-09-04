@@ -19,6 +19,8 @@
 const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { xeroRequest, redactSensitive } = require('./_shared/xero-client');
 
+const EMPLOYMENT_BASIS = { full_time: 'FULLTIME', part_time: 'PARTTIME', casual: 'CASUAL' };
+
 function buildSummary(profile, email) {
   return {
     'Full name': profile.full_name || '',
@@ -100,7 +102,13 @@ exports.handler = async (event) => {
         AccountNumber: profile.bank_account_number,
         Remainder: true,
       }] : undefined,
-      TaxDeclaration: profile.tax_file_number ? { TaxFileNumber: profile.tax_file_number } : undefined,
+      // EmploymentBasis is mandatory for an STP2-qualified employee - Xero
+      // rejected the record outright without it ("Invalid EmploymentBasis"),
+      // even though TaxFileNumber alone was present.
+      TaxDeclaration: profile.tax_file_number ? {
+        TaxFileNumber: profile.tax_file_number,
+        EmploymentBasis: EMPLOYMENT_BASIS[profile.employment_type] || undefined,
+      } : undefined,
     }];
 
     let xeroResult;
