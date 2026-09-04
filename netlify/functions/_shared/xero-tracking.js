@@ -15,8 +15,18 @@ async function getOrCreateTrackingOptionId(supabaseAdmin, optionName) {
   if (!categoryId) return null;
 
   try {
-    const category = await xeroRequest('accounting', `TrackingCategories/${categoryId}`);
-    const existing = (category.TrackingCategories?.[0]?.Options || []).find(o => o.Name === optionName);
+    // GET TrackingCategories/{id} (single-resource) 404s "resource cannot
+    // be found" for this Custom Connection even for a category ID
+    // confirmed to exist via the plain list endpoint - fetching the full
+    // list and finding it by ID here sidesteps that entirely, reusing the
+    // exact call lookup-xero-ids.js already relies on successfully.
+    const all = await xeroRequest('accounting', 'TrackingCategories');
+    const category = (all.TrackingCategories || []).find(c => c.TrackingCategoryID === categoryId);
+    if (!category) {
+      console.error(`Tracking category ${categoryId} not found in Xero's TrackingCategories list.`);
+      return null;
+    }
+    const existing = (category.Options || []).find(o => o.Name === optionName);
     if (existing) return existing.TrackingOptionID;
 
     const createdOption = await xeroRequest('accounting', `TrackingCategories/${categoryId}/Options`, {
