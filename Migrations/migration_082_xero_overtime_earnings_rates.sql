@@ -1,4 +1,4 @@
--- Migration 081 — Xero earnings rates for overtime/public holiday bands
+-- Migration 082 — Xero earnings rates for overtime/public holiday bands
 -- Run this in Supabase: SQL Editor > New query > paste > Run.
 --
 -- Timesheets pushed to Xero only ever used one earnings rate (Ordinary

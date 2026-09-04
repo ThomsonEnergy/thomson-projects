@@ -234,7 +234,13 @@ union all
 select '080', 'xero_payroll_calendar',
   case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_payroll_calendar_id') then 'present' else 'MISSING' end
 union all
-select '081', 'xero_overtime_earnings_rates',
+select '081', 'fix_invoice_claim_ordering',
+  case when exists (
+    select 1 from pg_proc where proname = 'get_invoice_by_token_v3'
+      and pg_get_functiondef(oid) like '%i2.created_at < v_invoice.created_at%'
+  ) then 'present' else 'MISSING' end
+union all
+select '082', 'xero_overtime_earnings_rates',
   case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_ot1_earnings_rate_id')
     and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_ot2_earnings_rate_id')
     and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_public_holiday_earnings_rate_id')

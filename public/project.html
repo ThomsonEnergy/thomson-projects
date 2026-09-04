@@ -60,7 +60,7 @@
       const centreCols = await costCentreColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, paid_at, xero_invoice_id)), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order), cost_centre_photo_groups(*)),
+        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order), cost_centre_photo_groups(*)),
           project_manager:client_contacts!project_manager_contact_id(name, phone, email),
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
@@ -1348,18 +1348,27 @@
     // uses invoice_claims. Shared by the per-stage claims card and the
     // "Invoice project" modal so remaining-to-claim can never drift between
     // the two.
+    //
+    // Sorted by created_at, not sent_at - sent_at is a user-editable display
+    // date (often backdated, or just left at "today" when the invoice is
+    // actually raised), so two invoices made minutes apart on the same day
+    // can have sent_at values that land in the wrong order relative to each
+    // other (e.g. a deposit auto-raised at 3:35am vs a progress claim made
+    // that afternoon but dated to midnight). created_at is set once at
+    // insert and never edited, so it's the one field that reliably reflects
+    // which invoice actually came first.
     function stageClaimSummary(c) {
       const legacyInvoices = (c.invoices || []).map(inv => ({
-        invoice_number: inv.invoice_number, invoice_token: inv.invoice_token, sent_at: inv.sent_at,
+        invoice_number: inv.invoice_number, invoice_token: inv.invoice_token, sent_at: inv.sent_at, created_at: inv.created_at,
         paid_at: inv.paid_at, xero_invoice_id: inv.xero_invoice_id, id: inv.id,
         labour_amount: inv.labour_amount, material_amount: inv.material_amount, stc_amount: inv.stc_amount,
       }));
       const claimInvoices = (c.invoice_claims || []).map(ic => ({
-        invoice_number: ic.invoices?.invoice_number, invoice_token: ic.invoices?.invoice_token, sent_at: ic.invoices?.sent_at,
+        invoice_number: ic.invoices?.invoice_number, invoice_token: ic.invoices?.invoice_token, sent_at: ic.invoices?.sent_at, created_at: ic.invoices?.created_at,
         paid_at: ic.invoices?.paid_at, xero_invoice_id: ic.invoices?.xero_invoice_id, id: ic.invoices?.id,
         labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount,
       }));
-      const stageInvoices = [...legacyInvoices, ...claimInvoices].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+      const stageInvoices = [...legacyInvoices, ...claimInvoices].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
       const quotedAmt = Number(c.quoted_amount) || 0;
       const remaining = Math.max(0, quotedAmt - claimedTotal);
