@@ -71,6 +71,8 @@ exports.handler = async (event) => {
     const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(profileId);
     const email = authUser?.user?.email || '';
 
+    const { data: settings } = await supabaseAdmin.from('company_settings').select('xero_payroll_calendar_id').eq('id', 1).single();
+
     const [firstName, ...rest] = (profile.full_name || '').trim().split(/\s+/);
     const lastName = rest.join(' ') || firstName || 'Unknown';
 
@@ -79,12 +81,22 @@ exports.handler = async (event) => {
     // style wrapping) - wrapping it in an {Employees: [...]} object gets
     // rejected as a deserialization error before Xero even looks at the
     // employee fields themselves.
+    //
+    // Including EmployeeID (when this profile already has one) makes
+    // this an UPDATE of the existing Xero record instead of creating a
+    // second, duplicate employee - needed the first time this was tried
+    // twice in a row to attach a payroll calendar after the fact.
     const employeePayload = [{
+      EmployeeID: profile.xero_employee_id || undefined,
       FirstName: firstName || 'Unknown',
       LastName: lastName,
       Email: email || undefined,
       DateOfBirth: profile.date_of_birth || undefined,
       StartDate: profile.employment_start_date || undefined,
+      // An employee can't have timesheets or a pay run without one of
+      // these assigned - found when the first real timesheet push came
+      // back "employee doesn't have payrun calendar".
+      PayrollCalendarID: settings?.xero_payroll_calendar_id || undefined,
       // Xero's validation message uses AU-friendly terms ("The Suburb is
       // required") but the actual wire schema is Xero's general Address
       // type, shared across the whole platform - City/Region/PostalCode,

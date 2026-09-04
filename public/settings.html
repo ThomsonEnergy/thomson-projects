@@ -182,6 +182,9 @@
             <input id="xero-tracking-category-id" placeholder="Use Look up IDs below to find this" />
             <label>Ordinary Hours earnings rate ID</label>
             <input id="xero-earnings-rate-id" placeholder="Use Look up IDs below to find this" />
+            <label>Payroll calendar ID</label>
+            <input id="xero-payroll-calendar-id" placeholder="Use Look up IDs below to find this" />
+            <p class="subtitle" style="margin:2px 0 0;">Every employee needs one of these assigned in Xero before they can have timesheets or a pay run - pushing an employee to Xero now assigns this one automatically.</p>
             <button id="save-xero-connection-btn" style="margin-top:10px;">Save</button>
             <div id="xero-connection-msg"></div>
 
@@ -2622,10 +2625,11 @@
     });
 
     async function loadXeroConnection() {
-      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id').eq('id', 1).single();
+      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id, xero_payroll_calendar_id').eq('id', 1).single();
       if (data) {
         document.getElementById('xero-tracking-category-id').value = data.xero_tracking_category_id || '';
         document.getElementById('xero-earnings-rate-id').value = data.xero_ordinary_earnings_rate_id || '';
+        document.getElementById('xero-payroll-calendar-id').value = data.xero_payroll_calendar_id || '';
       }
     }
 
@@ -2636,6 +2640,7 @@
         .update({
           xero_tracking_category_id: document.getElementById('xero-tracking-category-id').value.trim(),
           xero_ordinary_earnings_rate_id: document.getElementById('xero-earnings-rate-id').value.trim(),
+          xero_payroll_calendar_id: document.getElementById('xero-payroll-calendar-id').value.trim(),
         })
         .eq('id', 1);
       msg.innerHTML = error
@@ -2679,6 +2684,18 @@
               <span class="subtitle" style="font-size:11px;">${er.id}</span>
             </div>`;
           });
+        }
+
+        if (data.payrollCalendars.length) {
+          html += `<p class="subtitle" style="margin:14px 0 6px;"><strong style="color:var(--text);">Payroll Calendars</strong> - click the one your staff are paid on:</p>`;
+          data.payrollCalendars.forEach(pc => {
+            html += `<div class="project-list-item" style="cursor:pointer;" onclick="document.getElementById('xero-payroll-calendar-id').value='${pc.id}'">
+              <div><div class="name">${pc.name}</div><div class="meta">${pc.type || ''}</div></div>
+              <span class="subtitle" style="font-size:11px;">${pc.id}</span>
+            </div>`;
+          });
+        } else {
+          html += `<p class="subtitle" style="margin-top:14px;">No payroll calendars found - create one in Xero first (Payroll &gt; Pay Runs &gt; New Pay Run, or Payroll Settings &gt; Pay Calendars).</p>`;
         }
 
         if (data.errors.length) {

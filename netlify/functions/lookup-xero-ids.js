@@ -22,6 +22,7 @@ exports.handler = async (event) => {
   const errors = [];
   let trackingCategories = [];
   let earningsRates = [];
+  let payrollCalendars = [];
 
   try {
     const tcResult = await xeroRequest('accounting', 'TrackingCategories');
@@ -45,5 +46,19 @@ exports.handler = async (event) => {
     errors.push(`Earnings rates: ${err.message}`);
   }
 
-  return { statusCode: 200, body: JSON.stringify({ ok: true, trackingCategories, earningsRates, errors }) };
+  // An employee can't have timesheets or a pay run without one of these
+  // assigned - found the hard way when the first real timesheet push
+  // came back "employee doesn't have payrun calendar".
+  try {
+    const pcResult = await xeroRequest('payroll.au', 'PayrollCalendars');
+    payrollCalendars = (pcResult.PayrollCalendars || []).map(pc => ({
+      id: pc.PayrollCalendarID,
+      name: pc.Name,
+      type: pc.CalendarType,
+    }));
+  } catch (err) {
+    errors.push(`Payroll calendars: ${err.message}`);
+  }
+
+  return { statusCode: 200, body: JSON.stringify({ ok: true, trackingCategories, earningsRates, payrollCalendars, errors }) };
 };

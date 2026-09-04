@@ -230,4 +230,7 @@ select '079', 'fix_column_masking_table_grant',
     where table_name = 'profiles' and grantee in ('authenticated','anon') and privilege_type = 'SELECT'
       and column_name in ('tax_file_number','bank_account_number','ordinary_rate','annual_salary','date_of_birth')
   ) then 'present' else 'MISSING' end
+union all
+select '080', 'xero_payroll_calendar',
+  case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_payroll_calendar_id') then 'present' else 'MISSING' end
 order by 1;
