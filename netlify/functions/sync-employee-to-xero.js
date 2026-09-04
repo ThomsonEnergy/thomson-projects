@@ -101,6 +101,7 @@ exports.handler = async (event) => {
         BSB: profile.bank_bsb,
         AccountNumber: profile.bank_account_number,
         Remainder: true,
+        StatementText: 'Wages', // shows on the employee's bank statement for the deposit - required, Xero has no default
       }] : undefined,
       // EmploymentBasis is mandatory for an STP2-qualified employee - Xero
       // rejected the record outright without it ("Invalid EmploymentBasis"),
