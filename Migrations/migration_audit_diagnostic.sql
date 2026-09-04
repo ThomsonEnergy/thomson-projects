@@ -233,4 +233,10 @@ select '079', 'fix_column_masking_table_grant',
 union all
 select '080', 'xero_payroll_calendar',
   case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_payroll_calendar_id') then 'present' else 'MISSING' end
+union all
+select '081', 'xero_overtime_earnings_rates',
+  case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_ot1_earnings_rate_id')
+    and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_ot2_earnings_rate_id')
+    and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_public_holiday_earnings_rate_id')
+  then 'present' else 'MISSING' end
 order by 1;

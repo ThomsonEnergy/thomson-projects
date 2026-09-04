@@ -162,4 +162,4 @@ async function computeAccruedLabourCost(supabaseAdmin, projectIds) {
   return byProject;
 }
 
-module.exports = { computeAccruedLabourCost, computeEntryLabourCosts };
+module.exports = { computeAccruedLabourCost, computeEntryLabourCosts, dayBands, localDateKey, entryHours };

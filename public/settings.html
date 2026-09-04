@@ -182,6 +182,13 @@
             <input id="xero-tracking-category-id" placeholder="Use Look up IDs below to find this" />
             <label>Ordinary Hours earnings rate ID</label>
             <input id="xero-earnings-rate-id" placeholder="Use Look up IDs below to find this" />
+            <label>Overtime 1.5x (OT1) earnings rate ID</label>
+            <input id="xero-ot1-earnings-rate-id" placeholder="Optional - falls back to Ordinary Hours if blank" />
+            <label>Overtime 2x (OT2) earnings rate ID</label>
+            <input id="xero-ot2-earnings-rate-id" placeholder="Optional - falls back to Ordinary Hours if blank" />
+            <label>Public holiday (2.5x) earnings rate ID</label>
+            <input id="xero-public-holiday-earnings-rate-id" placeholder="Optional - falls back to Ordinary Hours if blank" />
+            <p class="subtitle" style="margin:2px 0 0;">Timesheets already band each day's hours into these 4 rates the same way payroll costing does. Set up a separate earnings rate for each in Xero (linked to whichever account it should post to, e.g. 477 for ordinary, 477.5 for OT1) to have them post separately - any left blank here fall back to Ordinary Hours.</p>
             <label>Payroll calendar ID</label>
             <input id="xero-payroll-calendar-id" placeholder="Use Look up IDs below to find this" />
             <p class="subtitle" style="margin:2px 0 0;">Every employee needs one of these assigned in Xero before they can have timesheets or a pay run - pushing an employee to Xero now assigns this one automatically.</p>
@@ -2625,10 +2632,13 @@
     });
 
     async function loadXeroConnection() {
-      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id, xero_payroll_calendar_id').eq('id', 1).single();
+      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_payroll_calendar_id').eq('id', 1).single();
       if (data) {
         document.getElementById('xero-tracking-category-id').value = data.xero_tracking_category_id || '';
         document.getElementById('xero-earnings-rate-id').value = data.xero_ordinary_earnings_rate_id || '';
+        document.getElementById('xero-ot1-earnings-rate-id').value = data.xero_ot1_earnings_rate_id || '';
+        document.getElementById('xero-ot2-earnings-rate-id').value = data.xero_ot2_earnings_rate_id || '';
+        document.getElementById('xero-public-holiday-earnings-rate-id').value = data.xero_public_holiday_earnings_rate_id || '';
         document.getElementById('xero-payroll-calendar-id').value = data.xero_payroll_calendar_id || '';
       }
     }
@@ -2640,6 +2650,9 @@
         .update({
           xero_tracking_category_id: document.getElementById('xero-tracking-category-id').value.trim(),
           xero_ordinary_earnings_rate_id: document.getElementById('xero-earnings-rate-id').value.trim(),
+          xero_ot1_earnings_rate_id: document.getElementById('xero-ot1-earnings-rate-id').value.trim(),
+          xero_ot2_earnings_rate_id: document.getElementById('xero-ot2-earnings-rate-id').value.trim(),
+          xero_public_holiday_earnings_rate_id: document.getElementById('xero-public-holiday-earnings-rate-id').value.trim(),
           xero_payroll_calendar_id: document.getElementById('xero-payroll-calendar-id').value.trim(),
         })
         .eq('id', 1);
@@ -2677,11 +2690,16 @@
         }
 
         if (data.earningsRates.length) {
-          html += `<p class="subtitle" style="margin:14px 0 6px;"><strong style="color:var(--text);">Earnings Rates</strong> - click the one that represents ordinary hours:</p>`;
+          html += `<p class="subtitle" style="margin:14px 0 6px;"><strong style="color:var(--text);">Earnings Rates</strong> - click which band each one represents:</p>`;
           data.earningsRates.forEach(er => {
-            html += `<div class="project-list-item" style="cursor:pointer;" onclick="document.getElementById('xero-earnings-rate-id').value='${er.id}'">
-              <div><div class="name">${er.name}</div><div class="meta">${er.type || ''}</div></div>
-              <span class="subtitle" style="font-size:11px;">${er.id}</span>
+            html += `<div class="project-list-item" style="align-items:center;">
+              <div><div class="name">${er.name}</div><div class="meta">${er.type || ''} - ${er.id}</div></div>
+              <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;">
+                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-earnings-rate-id').value='${er.id}'">Ordinary</button>
+                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot1-earnings-rate-id').value='${er.id}'">OT1 1.5x</button>
+                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot2-earnings-rate-id').value='${er.id}'">OT2 2x</button>
+                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-earnings-rate-id').value='${er.id}'">Public hol.</button>
+              </div>
             </div>`;
           });
         }

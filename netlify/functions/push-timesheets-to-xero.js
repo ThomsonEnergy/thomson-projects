@@ -4,18 +4,27 @@
 // period boundaries, this doesn't try to guess them)
 //
 // Pushes each staff member's clocked hours in the range as one DRAFT
-// timesheet per employee, one line per job worked (plus one for non-job
-// time), each day-by-day and tagged with that job's tracking option -
-// required per line once tracking is turned on for timesheets in Xero's
-// Payroll Settings. Only entries that haven't been pushed before are
-// included (xero_pushed_at is null) - safe to re-run without double-
-// pushing hours already sent.
+// timesheet per employee. Each day's hours are banded into the same 4
+// award rates payroll costing already uses (ordinary/OT1 1.5x/OT2 2x/
+// public holiday 2.5x - see dayBands in compute-labour-cost.js), banded
+// across the employee's WHOLE day (every job), same as a real payslip.
+// One TimesheetLine per (job, band) combination that has hours, each
+// tagged with that job's tracking option (required per line once
+// tracking is turned on for timesheets in Xero's Payroll Settings) and
+// the earnings rate mapped to that band in Settings > Xero Mapping - so
+// OT hours can post to a different Xero account than ordinary hours.
+// Only entries that haven't been pushed before are included
+// (xero_pushed_at is null) - safe to re-run without double-pushing hours
+// already sent.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { xeroRequest } = require('./_shared/xero-client');
 const { getOrCreateTrackingOptionId } = require('./_shared/xero-tracking');
+const { dayBands, localDateKey, entryHours } = require('./_shared/compute-labour-cost');
 
 const OFFICE_TRACKING_OPTION_NAME = 'Office / General';
+const BAND_LABELS = ['ordinary', 'ot1', 'ot2', 'publicHoliday'];
+const BAND_NAMES = { ordinary: 'Ordinary Hours', ot1: 'OT1 (1.5x)', ot2: 'OT2 (2x)', publicHoliday: 'Public holiday (2.5x)' };
 
 function dateOnly(iso) {
   return iso.slice(0, 10);
@@ -40,11 +49,27 @@ exports.handler = async (event) => {
 
     const { data: settings } = await supabaseAdmin
       .from('company_settings')
-      .select('xero_ordinary_earnings_rate_id, xero_tracking_category_id')
+      .select('xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_tracking_category_id')
       .eq('id', 1)
       .single();
     if (!settings?.xero_ordinary_earnings_rate_id) {
       throw new Error('Set the Ordinary Hours earnings rate ID in Settings > Xero Mapping before pushing timesheets.');
+    }
+
+    // Bands with no earnings rate ID of their own fall back to Ordinary
+    // Hours rather than blocking the push - tracked so the response can
+    // warn that those hours posted at the wrong rate/account.
+    const fallbackBands = new Set();
+    function earningsRateFor(bandLabel) {
+      const direct = {
+        ordinary: settings.xero_ordinary_earnings_rate_id,
+        ot1: settings.xero_ot1_earnings_rate_id,
+        ot2: settings.xero_ot2_earnings_rate_id,
+        publicHoliday: settings.xero_public_holiday_earnings_rate_id,
+      }[bandLabel];
+      if (direct) return direct;
+      fallbackBands.add(bandLabel);
+      return settings.xero_ordinary_earnings_rate_id;
     }
 
     const { data: entries, error: entriesErr } = await supabaseAdmin
@@ -58,6 +83,9 @@ exports.handler = async (event) => {
     if (!entries.length) {
       return { statusCode: 200, body: JSON.stringify({ ok: true, pushed: 0, message: 'No unpushed entries in that range.' }) };
     }
+
+    const { data: holidays } = await supabaseAdmin.from('public_holidays').select('holiday_date');
+    const holidaySet = new Set((holidays || []).map(h => h.holiday_date));
 
     const byStaff = {};
     entries.forEach(e => { (byStaff[e.staff_id] ||= []).push(e); });
@@ -87,36 +115,60 @@ exports.handler = async (event) => {
         cursor.setDate(cursor.getDate() + 1);
       }
 
-      // One TimesheetLine per job worked (plus one for non-job time), each
-      // tagged with its own TrackingItemID - required per line once
-      // tracking is turned on for timesheets in Xero's Payroll Settings
-      // ("TrackingItemID is required for each timesheet line"). Reuses the
-      // exact same tracking option a job's invoices already use ("Job
-      // 7009"), so revenue and labour cost land on the same Xero tracking
-      // value for real job-costing reports.
-      const byJob = {};
-      staffEntries.forEach(e => { (byJob[e.project_id || 'none'] ||= { jobNumber: e.projects?.job_number, entries: [] }).entries.push(e); });
+      const jobNumberByKey = {};
+      staffEntries.forEach(e => { jobNumberByKey[e.project_id || 'none'] = e.projects?.job_number; });
+
+      // Band each CALENDAR DAY's hours (Sydney local date) across the
+      // employee's WHOLE day - every job together, same as payroll costing
+      // (dayBands in compute-labour-cost.js) - then attribute each band's
+      // hours back to whichever job the entry that earned them was
+      // logged against. jobKey -> bandLabel -> dateKey -> hours.
+      const unitsByJobBandDay = {};
+      const byDay = {};
+      staffEntries.forEach(e => { (byDay[localDateKey(e.clock_in)] ||= []).push(e); });
+      Object.keys(byDay).forEach(dateKey => {
+        const dayEntries = byDay[dateKey].slice().sort((a, b) => new Date(a.clock_in) - new Date(b.clock_in));
+        const bands = dayBands(dateKey, holidaySet.has(dateKey), { ordinary: 'ordinary', ot1: 'ot1', ot2: 'ot2', publicHoliday: 'publicHoliday' });
+        let cumulative = 0;
+        dayEntries.forEach(e => {
+          const hours = entryHours(e);
+          const start = cumulative, entryEnd = cumulative + hours;
+          const jobKey = e.project_id || 'none';
+          bands.forEach(band => {
+            const overlapStart = Math.max(start, band.from);
+            const overlapEnd = Math.min(entryEnd, band.to);
+            if (overlapEnd > overlapStart) {
+              const jobBands = (unitsByJobBandDay[jobKey] ||= {});
+              const bandDays = (jobBands[band.rate] ||= {});
+              bandDays[dateKey] = (bandDays[dateKey] || 0) + (overlapEnd - overlapStart);
+            }
+          });
+          cumulative = entryEnd;
+        });
+      });
 
       const timesheetLines = [];
       let allEntriesForThisStaff = [];
-      for (const jobKey of Object.keys(byJob)) {
-        const { jobNumber, entries: jobEntries } = byJob[jobKey];
-        const minutesByDay = {};
-        jobEntries.forEach(e => {
-          const day = dateOnly(e.clock_in);
-          const mins = (new Date(e.clock_out) - new Date(e.clock_in)) / 60000;
-          minutesByDay[day] = (minutesByDay[day] || 0) + mins;
-        });
-        const numberOfUnits = days.map(d => Math.round(((minutesByDay[d] || 0) / 60) * 100) / 100);
-        if (numberOfUnits.every(n => n === 0)) continue;
-
+      for (const jobKey of Object.keys(unitsByJobBandDay)) {
+        const jobNumber = jobNumberByKey[jobKey];
         const trackingItemId = await getOrCreateTrackingOptionId(supabaseAdmin, jobNumber ? `Job ${jobNumber}` : OFFICE_TRACKING_OPTION_NAME);
-        timesheetLines.push({
-          EarningsRateID: settings.xero_ordinary_earnings_rate_id,
-          NumberOfUnits: numberOfUnits,
-          TrackingItemID: trackingItemId || undefined,
+
+        let jobHasLine = false;
+        BAND_LABELS.forEach(bandLabel => {
+          const bandDays = unitsByJobBandDay[jobKey][bandLabel];
+          if (!bandDays) return;
+          const numberOfUnits = days.map(d => Math.round(((bandDays[d] || 0)) * 100) / 100);
+          if (numberOfUnits.every(n => n === 0)) return;
+          timesheetLines.push({
+            EarningsRateID: earningsRateFor(bandLabel),
+            NumberOfUnits: numberOfUnits,
+            TrackingItemID: trackingItemId || undefined,
+          });
+          jobHasLine = true;
         });
-        allEntriesForThisStaff = allEntriesForThisStaff.concat(jobEntries);
+        if (jobHasLine) {
+          allEntriesForThisStaff = allEntriesForThisStaff.concat(staffEntries.filter(e => (e.project_id || 'none') === jobKey));
+        }
       }
 
       if (!timesheetLines.length) { continue; }
@@ -150,9 +202,11 @@ exports.handler = async (event) => {
         .in('id', pushedEntryIds);
     }
 
+    const warnings = [...fallbackBands].map(b => `${BAND_NAMES[b]} has no earnings rate ID set - those hours were pushed at the Ordinary Hours rate instead (Settings > Xero Mapping).`);
+
     return {
       statusCode: 200,
-      body: JSON.stringify({ ok: true, pushed: results.length, results, skipped }),
+      body: JSON.stringify({ ok: true, pushed: results.length, results, skipped, warnings }),
     };
   } catch (err) {
     console.error(err);

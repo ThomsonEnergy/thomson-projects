@@ -908,6 +908,9 @@
         if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
 
         let html = `<div class="success-box">Pushed ${data.pushed} timesheet${data.pushed === 1 ? '' : 's'}.</div>`;
+        if (data.warnings && data.warnings.length) {
+          html += `<div class="error-box" style="margin-top:8px;">${data.warnings.join('<br>')}</div>`;
+        }
         if (data.skipped && data.skipped.length) {
           html += `<div class="error-box" style="margin-top:8px;">Skipped: ${data.skipped.join('; ')}</div>`;
         }
