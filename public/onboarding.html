@@ -503,8 +503,8 @@
       // select('*') here would error out for everyone, self included.
       const [{ data: p }, { data: sensitive }, { data: rates }, { data: docs }, { data: sigs }, { data: c }] = await Promise.all([
         supabaseClient.from('profiles').select(`
-          id, full_name, date_of_birth, employment_type, employment_start_date, pay_type, annual_salary, salary_includes_super,
-          has_company_vehicle, super_fund_name, super_is_self_managed, bank_account_name, bank_bsb, bank_account_number,
+          id, full_name, employment_type, employment_start_date, pay_type, salary_includes_super,
+          has_company_vehicle, super_fund_name, super_is_self_managed,
           emergency_contact_name, emergency_contact_relationship, onboarding_completed_at,
           onboarding_reissue_reason, onboarding_reissue_note, onboarding_cycle_started_at
         `).eq('id', myUserId).single(),

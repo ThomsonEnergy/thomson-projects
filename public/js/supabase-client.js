@@ -919,7 +919,7 @@ function generateContractDraft(profile, templateBody, answers = {}) {
     body = body.replaceAll('[insert day] to [insert day]', `${answers.hours_day_from || '[insert day]'} to ${answers.hours_day_to || '[insert day]'}`);
   }
 
-  const employeeAddress = profile.residential_address || '[insert employee address]';
+  const employeeAddress = [profile.residential_address, profile.residential_suburb, profile.residential_state, profile.residential_postcode].filter(Boolean).join(', ') || '[insert employee address]';
   const position = answers.position || '[insert position]';
   const commencementDate = fmtDate(profile.employment_start_date);
   const letterDate = fmtDate(answers.letter_date);

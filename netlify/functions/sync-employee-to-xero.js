@@ -17,14 +17,14 @@
 // regardless of import method) - so a summary is more useful than a CSV.
 
 const { requireFinanceRole } = require('./_shared/require-finance-role');
-const { xeroRequest } = require('./_shared/xero-client');
+const { xeroRequest, redactSensitive } = require('./_shared/xero-client');
 
 function buildSummary(profile, email) {
   return {
     'Full name': profile.full_name || '',
     'Email': email || '',
     'Date of birth': profile.date_of_birth || '',
-    'Residential address': profile.residential_address || '',
+    'Residential address': [profile.residential_address, profile.residential_suburb, profile.residential_state, profile.residential_postcode].filter(Boolean).join(', '),
     'Tax file number': profile.tax_file_number || '',
     'Employment type': profile.employment_type || '',
     'Start date': profile.employment_start_date || '',
@@ -83,7 +83,15 @@ exports.handler = async (event) => {
       Email: email || undefined,
       DateOfBirth: profile.date_of_birth || undefined,
       StartDate: profile.employment_start_date || undefined,
-      HomeAddress: profile.residential_address ? { AddressLine1: profile.residential_address } : undefined,
+      // Xero's own validation error was explicit: Suburb/State/Postcode
+      // are required as separate fields - AddressLine1 alone isn't
+      // enough even though it holds the full street address text.
+      HomeAddress: profile.residential_address ? {
+        AddressLine1: profile.residential_address,
+        Suburb: profile.residential_suburb || undefined,
+        State: profile.residential_state || undefined,
+        Postcode: profile.residential_postcode || undefined,
+      } : undefined,
       BankAccounts: profile.bank_account_number ? [{
         AccountName: profile.bank_account_name || profile.full_name,
         BSB: profile.bank_bsb,
@@ -104,7 +112,7 @@ exports.handler = async (event) => {
     const newEmployeeId = xeroResult?.Employees?.[0]?.EmployeeID;
     if (!newEmployeeId) {
       const msg = 'Xero accepted the request but did not return an EmployeeID - check the raw response in the function logs.';
-      console.error('Unexpected Xero Employees response:', JSON.stringify(xeroResult));
+      console.error('Unexpected Xero Employees response:', JSON.stringify(redactSensitive(xeroResult)));
       await supabaseAdmin.from('profiles').update({ xero_payroll_status: 'failed', xero_payroll_error: msg }).eq('id', profileId);
       return { statusCode: 200, body: JSON.stringify({ ok: true, status: 'failed', error: msg, summary: buildSummary(profile, email) }) };
     }

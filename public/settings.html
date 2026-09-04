@@ -1349,9 +1349,10 @@
 
     async function loadMyProfile(userId) {
       myProfileUserId = userId;
-      const [{ data: profile }, { data: rates }, { data: licences }] = await Promise.all([
-        supabaseClient.from('profiles').select('mobile_number, photo_url, bank_account_name, bank_bsb, bank_account_number').eq('id', userId).single(),
+      const [{ data: profile }, { data: rates }, { data: sensitive }, { data: licences }] = await Promise.all([
+        supabaseClient.from('profiles').select('mobile_number, photo_url').eq('id', userId).single(),
         supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle(),
+        supabaseClient.from('profiles_sensitive_secure').select('bank_account_name, bank_bsb, bank_account_number').eq('id', userId).maybeSingle(),
         supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date'),
       ]);
 
@@ -1364,9 +1365,9 @@
       document.getElementById('my-rate-2x').textContent = rates?.rate_2x != null ? money(rates.rate_2x) : 'Not set';
       document.getElementById('my-rate-2-5x').textContent = rates?.rate_2_5x != null ? money(rates.rate_2_5x) : 'Not set';
 
-      document.getElementById('my-bank-account-name').value = profile?.bank_account_name || '';
-      document.getElementById('my-bank-bsb').value = profile?.bank_bsb || '';
-      document.getElementById('my-bank-account-number').value = profile?.bank_account_number || '';
+      document.getElementById('my-bank-account-name').value = sensitive?.bank_account_name || '';
+      document.getElementById('my-bank-bsb').value = sensitive?.bank_bsb || '';
+      document.getElementById('my-bank-account-number').value = sensitive?.bank_account_number || '';
 
       document.getElementById('my-licence-rows').innerHTML = (licences || []).map(myLicenceRowHtml).join('');
       wireMyLicenceRows();
@@ -1535,8 +1536,8 @@
       // finance (or the row's own owner) at the database level, so a
       // direct select on profiles can no longer see them at all.
       const { data: profile, error } = await supabaseClient.from('profiles')
-        .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id, bank_account_name, bank_bsb, bank_account_number,
-          date_of_birth, employment_type, employment_start_date, pay_type, annual_salary, salary_includes_super, has_company_vehicle, has_probationary_period,
+        .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id,
+          employment_type, employment_start_date, pay_type, salary_includes_super, has_company_vehicle, has_probationary_period,
           super_fund_name, super_is_self_managed, emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason`)
         .eq('id', userId).single();
       const { data: rates } = await supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle();

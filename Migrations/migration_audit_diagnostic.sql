@@ -220,4 +220,14 @@ select '076', 'onboarding_reissue',
 union all
 select '077', 'structured_address',
   case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'residential_postcode') then 'present' else 'MISSING' end
+union all
+select '078', 'reharden_sensitive_columns (view update only - see 079 for the real fix)',
+  case when exists (select 1 from information_schema.columns where table_name = 'profiles_sensitive_secure' and column_name = 'bank_account_number') then 'present' else 'MISSING' end
+union all
+select '079', 'fix_column_masking_table_grant',
+  case when not exists (
+    select 1 from information_schema.column_privileges
+    where table_name = 'profiles' and grantee in ('authenticated','anon') and privilege_type = 'SELECT'
+      and column_name in ('tax_file_number','bank_account_number','ordinary_rate','annual_salary','date_of_birth')
+  ) then 'present' else 'MISSING' end
 order by 1;

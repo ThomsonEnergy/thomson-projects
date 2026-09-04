@@ -35,6 +35,26 @@ async function getXeroToken() {
   return data.access_token;
 }
 
+// Xero's own error responses often echo the submitted record back
+// verbatim (e.g. a failed Employees call includes the TaxDeclaration/
+// BankAccounts/DateOfBirth it rejected) - logging that raw would put a
+// TFN or bank account number in plaintext in Netlify's function logs,
+// which is exactly the kind of exposure TFN handling rules and basic
+// data-minimisation both rule out. Masks known-sensitive field names
+// wherever they appear in the response tree before anything gets logged.
+const SENSITIVE_LOG_KEYS = new Set(['taxfilenumber', 'bsb', 'accountnumber', 'dateofbirth']);
+function redactSensitive(value) {
+  if (Array.isArray(value)) return value.map(redactSensitive);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = SENSITIVE_LOG_KEYS.has(k.toLowerCase()) ? '[redacted]' : redactSensitive(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 // Makes an authenticated call to the Xero Accounting or Payroll API.
 // `path` should start with the resource, e.g. 'Invoices' or 'Contacts'.
 // `api` is 'accounting' or 'payroll.au'.
@@ -75,15 +95,24 @@ async function xeroRequest(api, path, { method = 'GET', body = null } = {}) {
     const detail = [...new Set(
       candidateArrays.flatMap(arr => arr.flatMap(el => (el?.ValidationErrors || []).map(v => v.Message))).filter(Boolean)
     )];
+    // Deliberately never falls back to the raw response text - this
+    // message can end up stored (profiles.xero_payroll_error) and shown
+    // in the Settings UI, not just logged, so it must never be able to
+    // carry an echoed TFN/BSB/account number through to either place.
+    // Full (redacted) detail is still in the function log below for
+    // whoever needs to dig further than the summary.
     const message = (detail.length ? detail.join('; ') : null)
       || json?.Message
-      || text
       || `Xero API error ${res.status}`;
-    if (!detail.length) console.error('Xero API error, full response:', text);
+    if (!detail.length) {
+      let safe;
+      try { safe = JSON.stringify(redactSensitive(json)); } catch { safe = '[response could not be serialised]'; }
+      console.error('Xero API error, full response (sensitive fields redacted):', safe);
+    }
     throw new Error(message);
   }
 
   return json;
 }
 
-module.exports = { getXeroToken, xeroRequest };
+module.exports = { getXeroToken, xeroRequest, redactSensitive };
