@@ -174,9 +174,11 @@
           <div class="card">
             <h2>Xero connection</h2>
             <p class="subtitle" style="margin-bottom:10px;">
-              Tracking category used to tag invoice lines and payroll timesheets back to a job. Create a Tracking
-              Category called "Job" in Xero first (Settings &gt; Advanced &gt; Tracking Categories), then use the
-              lookup below to get its real ID - Xero's own screens never show it, only the API does.
+              Tracking category used to tag payroll timesheets as Billable (Jobs), Non-billable (Office) or
+              Training (TAFE) - not per job, to stay well under Xero's 100-option-per-category limit. Create an
+              empty Tracking Category in Xero first (Settings &gt; Advanced &gt; Tracking Categories) - the app
+              creates the 3 options automatically the first time it pushes each one - then use the lookup below
+              to get the category's real ID (Xero's own screens never show it, only the API does).
             </p>
             <label style="margin-top:0">Xero Tracking Category ID</label>
             <input id="xero-tracking-category-id" placeholder="Use Look up IDs below to find this" />
