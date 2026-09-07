@@ -1326,6 +1326,120 @@ async function runBackgroundExtraction(jobType, functionName, file, mediaType) {
   throw new Error('This is taking longer than expected - try again shortly.');
 }
 
+// Markup for a search-existing-or-type-new supplier picker - shared by
+// every "create a purchase order" panel (purchase-orders.html,
+// project.html, stock.html, vehicle-stock.html) so picking/creating a
+// supplier works identically everywhere a PO gets made. `ids` supplies
+// this panel's own id prefix-free element ids (search/results/selected/
+// newSection/newEmail/newPhone) so multiple pickers can coexist on one
+// page without colliding.
+function supplierPickerHtml(ids) {
+  return `
+    <input id="${ids.search}" placeholder="Search suppliers, or type a new one..." autocomplete="off" />
+    <div id="${ids.results}"></div>
+    <div id="${ids.selected}" class="subtitle" style="margin-top:4px;"></div>
+    <div id="${ids.newSection}" style="display:none; margin-top:8px; padding:10px; background:var(--surface-2); border-radius:8px;">
+      <p class="subtitle" style="margin:0 0 8px;">No match - this'll be created as a new supplier.</p>
+      <div class="grid cols-2">
+        <div><label style="margin-top:0">Contact email</label><input id="${ids.newEmail}" type="email" /></div>
+        <div><label style="margin-top:0">Contact phone</label><input id="${ids.newPhone}" /></div>
+      </div>
+    </div>`;
+}
+
+// Wires the search/select/new-supplier behaviour for the markup above.
+// Returns an async `resolveSupplier()` - call it once at save time; it
+// creates the typed name as a real supplier row on first call if nothing
+// was matched/selected, and returns { supplierId, supplierName } (both
+// null if the field was left blank, e.g. a Warehouse-stock pull with no
+// supplier at all).
+function wireSupplierPicker(overlay, suppliers, ids) {
+  let selectedSupplierId = null;
+  const searchInput = overlay.querySelector(`#${ids.search}`);
+  const resultsEl = overlay.querySelector(`#${ids.results}`);
+  const selectedEl = overlay.querySelector(`#${ids.selected}`);
+  const newSection = overlay.querySelector(`#${ids.newSection}`);
+  let searchTimeout;
+
+  searchInput.addEventListener('input', (e) => {
+    clearTimeout(searchTimeout);
+    selectedSupplierId = null;
+    selectedEl.textContent = '';
+    const q = e.target.value.trim();
+    if (!q) { resultsEl.innerHTML = ''; newSection.style.display = 'none'; return; }
+    searchTimeout = setTimeout(() => {
+      const matches = (suppliers || []).filter(s => s.name.toLowerCase().includes(q.toLowerCase()));
+      if (matches.length) {
+        resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+          ${matches.map(s => `<div class="supplier-pick-row" data-id="${s.id}" data-name="${s.name.replace(/"/g, '&quot;')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${s.name}</div>`).join('')}
+        </div>`;
+        resultsEl.querySelectorAll('.supplier-pick-row').forEach(row => {
+          row.addEventListener('click', () => {
+            selectedSupplierId = row.dataset.id;
+            searchInput.value = row.dataset.name;
+            selectedEl.textContent = `Selected: ${row.dataset.name}`;
+            newSection.style.display = 'none';
+            resultsEl.innerHTML = '';
+          });
+        });
+        newSection.style.display = 'none';
+      } else {
+        resultsEl.innerHTML = '';
+        newSection.style.display = 'block';
+      }
+    }, 250);
+  });
+
+  return async function resolveSupplier() {
+    if (selectedSupplierId) {
+      return { supplierId: selectedSupplierId, supplierName: (suppliers.find(s => s.id === selectedSupplierId) || {}).name || searchInput.value.trim() };
+    }
+    const typedName = searchInput.value.trim();
+    if (!typedName) return { supplierId: null, supplierName: null };
+    const { data: newSupplier, error } = await supabaseClient.from('suppliers').insert({
+      name: typedName,
+      contact_email: (overlay.querySelector(`#${ids.newEmail}`)?.value || '').trim() || null,
+      contact_phone: (overlay.querySelector(`#${ids.newPhone}`)?.value || '').trim() || null,
+    }).select('id').single();
+    if (error) throw error;
+    return { supplierId: newSupplier.id, supplierName: typedName };
+  };
+}
+
+// Wires an "upload the supplier's invoice instead" button - reads the
+// file, extracts supplier + line item detail, then hands off to
+// resolveSupplierAndHandoff to match/create the supplier and continue on
+// their page (which can create a new PO with real line items straight
+// from the bill). Shared by every "create a PO" panel; `msgEl` shows
+// read/error status inline in that panel while it works.
+function wireUploadInvoiceButton(btnEl, msgEl) {
+  btnEl.addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.jpg,.jpeg,.png';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      msgEl.innerHTML = `<p class="subtitle">Reading the invoice...</p>`;
+      try {
+        const fileBase64 = await fileToBase64(file);
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/extract-supplier-invoice', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ fileBase64, mediaType: file.type }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+        msgEl.innerHTML = '';
+        await resolveSupplierAndHandoff(data.extracted, 'bill', data.extracted, file);
+      } catch (err) {
+        msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+    };
+    input.click();
+  });
+}
+
 // Shared between the Suppliers page and the Stock page's "Upload
 // pricelist" button - given a document's extracted supplier info, either
 // confirms a match, lets the person pick manually, or creates a brand

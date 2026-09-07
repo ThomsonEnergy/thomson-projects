@@ -3436,12 +3436,10 @@
             <div style="border:1px solid var(--red); border-radius:8px; padding:12px; margin-bottom:10px;">
               <p style="margin:0 0 8px; color:var(--red); font-weight:600;">Needs a supplier assigned</p>
               ${unassigned.map((item, i) => `
-                <div class="sp-unassigned-row" data-index="${i}" style="display:grid; grid-template-columns:2fr 1fr; gap:8px; margin-bottom:6px; align-items:center;">
+                <div class="sp-unassigned-row" data-index="${i}" style="margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border);">
                   <span style="font-size:13px;">${item.description} (${item.stageName}) x${item.quantity}</span>
-                  <select class="sp-unassigned-supplier" style="font-size:12px;">
-                    <option value="">-- Skip --</option>
-                    ${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
-                  </select>
+                  <p class="subtitle" style="margin:2px 0 4px;">Leave blank to skip ordering this item for now.</p>
+                  ${supplierPickerHtml({ search: `sp-unassigned-search-${i}`, results: `sp-unassigned-results-${i}`, selected: `sp-unassigned-selected-${i}`, newSection: `sp-unassigned-new-section-${i}`, newEmail: `sp-unassigned-new-email-${i}`, newPhone: `sp-unassigned-new-phone-${i}` })}
                 </div>`).join('')}
             </div>` : ''}
 
@@ -3451,6 +3449,11 @@
           </div>
           <div id="sp-msg"></div>
         </div>`;
+
+      const unassignedResolvers = unassigned.map((item, i) => wireSupplierPicker(overlay, suppliers, {
+        search: `sp-unassigned-search-${i}`, results: `sp-unassigned-results-${i}`, selected: `sp-unassigned-selected-${i}`,
+        newSection: `sp-unassigned-new-section-${i}`, newEmail: `sp-unassigned-new-email-${i}`, newPhone: `sp-unassigned-new-phone-${i}`,
+      }));
 
       overlay.querySelector('#sp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#sp-confirm-btn').addEventListener('click', async () => {
@@ -3494,16 +3497,18 @@
           }
 
           // Group manually-assigned unassigned items by the supplier picked
-          const manualGroups = {};
-          overlay.querySelectorAll('.sp-unassigned-row').forEach(row => {
-            const supplierId = row.querySelector('.sp-unassigned-supplier').value;
-            if (!supplierId) return;
+          // (typing a new name creates that supplier here, same as any
+          // other "create a PO" panel) - blank means skip.
+          const manualGroups = {}; // supplierId -> { supplierName, items }
+          for (const row of overlay.querySelectorAll('.sp-unassigned-row')) {
+            const { supplierId, supplierName } = await unassignedResolvers[parseInt(row.dataset.index)]();
+            if (!supplierId) continue;
             const item = unassigned[parseInt(row.dataset.index)];
-            if (!manualGroups[supplierId]) manualGroups[supplierId] = [];
-            manualGroups[supplierId].push(item);
-          });
-          for (const [supplierId, items] of Object.entries(manualGroups)) {
-            const supplierName = suppliers.find(s => s.id === supplierId)?.name || 'Unknown';
+            if (!manualGroups[supplierId]) manualGroups[supplierId] = { supplierName, items: [] };
+            manualGroups[supplierId].items.push(item);
+          }
+          for (const [supplierId, group] of Object.entries(manualGroups)) {
+            const { supplierName, items } = group;
             const poNumber = await drawNextPoNumber();
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: supplierName,
@@ -3540,8 +3545,9 @@
         <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Create purchase order</h2>
           <label style="margin-top:0">Supplier</label>
-          <select id="cp-supplier"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
-          <label>Stage (optional)</label>
+          ${supplierPickerHtml({ search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' })}
+          <button type="button" class="secondary" id="cp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
+          <label style="margin-top:14px;">Stage (optional)</label>
           <select id="cp-stage"><option value="">Whole project</option>${centres.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select>
           <label>Description</label>
           <input id="cp-description" />
@@ -3575,6 +3581,9 @@
         </div>`;
       document.body.appendChild(overlay);
 
+      const resolveSupplier = wireSupplierPicker(overlay, suppliers, { search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' });
+      wireUploadInvoiceButton(overlay.querySelector('#cp-upload-invoice-btn'), overlay.querySelector('#cp-msg'));
+
       buildMaterialSearchRow(materials || [], 'cp-fixed-items-container');
       overlay.querySelector('#cp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'cp-fixed-items-container'));
 
@@ -3588,11 +3597,12 @@
       overlay.querySelector('#cp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#cp-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#cp-msg');
-        const supplierId = overlay.querySelector('#cp-supplier').value;
-        if (!supplierId) { msg.innerHTML = `<div class="error-box">Pick a supplier.</div>`; return; }
         const poType = overlay.querySelector('input[name="cp-type"]:checked').value;
 
         try {
+          const { supplierId, supplierName } = await resolveSupplier();
+          if (!supplierId) { msg.innerHTML = `<div class="error-box">Search for an existing supplier or type a new one.</div>`; return; }
+
           const { data: { user } } = await supabaseClient.auth.getUser();
           const fileInput = overlay.querySelector('#cp-file');
           let file_path = null, file_name = null;
@@ -3601,7 +3611,6 @@
             file_name = fileInput.files[0].name;
           }
 
-          const supplierName = overlay.querySelector('#cp-supplier').selectedOptions[0].textContent;
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: projectId,
             cost_centre_id: overlay.querySelector('#cp-stage').value || null,

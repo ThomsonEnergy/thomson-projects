@@ -233,7 +233,8 @@
         <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Create purchase order for Stock</h2>
           <label style="margin-top:0">Supplier</label>
-          <select id="csp-supplier"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+          ${supplierPickerHtml({ search: 'csp-supplier-search', results: 'csp-supplier-results', selected: 'csp-supplier-selected', newSection: 'csp-supplier-new-section', newEmail: 'csp-supplier-new-email', newPhone: 'csp-supplier-new-phone' })}
+          <button type="button" class="secondary" id="csp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
           <label style="margin-top:14px;">Items</label>
           <div id="csp-items-container"></div>
           <button type="button" class="secondary" id="csp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
@@ -245,18 +246,21 @@
         </div>`;
       document.body.appendChild(overlay);
 
+      const resolveSupplier = wireSupplierPicker(overlay, suppliers, { search: 'csp-supplier-search', results: 'csp-supplier-results', selected: 'csp-supplier-selected', newSection: 'csp-supplier-new-section', newEmail: 'csp-supplier-new-email', newPhone: 'csp-supplier-new-phone' });
+      wireUploadInvoiceButton(overlay.querySelector('#csp-upload-invoice-btn'), overlay.querySelector('#csp-msg'));
+
       buildMaterialSearchRow(allMaterials, 'csp-items-container');
       overlay.querySelector('#csp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(allMaterials, 'csp-items-container'));
 
       overlay.querySelector('#csp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#csp-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#csp-msg');
-        const supplierId = overlay.querySelector('#csp-supplier').value;
-        if (!supplierId) { msg.innerHTML = `<div class="error-box">Pick a supplier.</div>`; return; }
 
         try {
+          const { supplierId, supplierName } = await resolveSupplier();
+          if (!supplierId) { msg.innerHTML = `<div class="error-box">Search for an existing supplier or type a new one.</div>`; return; }
+
           const { data: { user } } = await supabaseClient.auth.getUser();
-          const supplierName = overlay.querySelector('#csp-supplier').selectedOptions[0].textContent;
 
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: null, supplier_id: supplierId, supplier_name: supplierName,

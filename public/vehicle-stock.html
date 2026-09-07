@@ -140,7 +140,8 @@
 
           <div id="cp-supplier-section" style="display:none;">
             <label>Supplier</label>
-            <select id="cp-supplier"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+            ${supplierPickerHtml({ search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' })}
+            <button type="button" class="secondary" id="cp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
           </div>
 
           <label style="margin-top:14px;">Items</label>
@@ -155,6 +156,9 @@
         </div>`;
       document.body.appendChild(overlay);
 
+      const resolveSupplier = wireSupplierPicker(overlay, suppliers, { search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' });
+      wireUploadInvoiceButton(overlay.querySelector('#cp-upload-invoice-btn'), overlay.querySelector('#cp-msg'));
+
       buildMaterialSearchRow(materials || [], 'cp-items-container');
       overlay.querySelector('#cp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'cp-items-container'));
 
@@ -168,12 +172,15 @@
       overlay.querySelector('#cp-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#cp-msg');
         const source = overlay.querySelector('input[name="cp-source"]:checked').value;
-        const supplierId = source === 'supplier' ? overlay.querySelector('#cp-supplier').value : null;
-        if (source === 'supplier' && !supplierId) { msg.innerHTML = `<div class="error-box">Pick a supplier.</div>`; return; }
 
         try {
+          let supplierId = null, supplierName = null;
+          if (source === 'supplier') {
+            ({ supplierId, supplierName } = await resolveSupplier());
+            if (!supplierId) { msg.innerHTML = `<div class="error-box">Search for an existing supplier or type a new one.</div>`; return; }
+          }
+
           const { data: { user } } = await supabaseClient.auth.getUser();
-          const supplierName = supplierId ? overlay.querySelector('#cp-supplier').selectedOptions[0].textContent : null;
 
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: null, vehicle_id: vehicleId, supplier_id: supplierId, supplier_name: supplierName,
