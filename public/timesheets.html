@@ -536,7 +536,7 @@
     let dayRemovedBlocks = [];
 
     function blankDayBlock() {
-      return { key: dayBlockKeySeq++, id: null, projectId: null, ccIds: [], clockInTime: '', clockOutTime: '', xeroPushed: false, centres: [], splitPercentages: [], origClockIn: null, origClockOut: null, origProjectId: null };
+      return { key: dayBlockKeySeq++, id: null, projectId: null, ccIds: [], clockInTime: '', clockOutTime: '', xeroPushed: false, centres: [], splitPercentages: [], origClockIn: null, origClockOut: null, origProjectId: null, timeCategory: 'office' };
     }
     function dayBlockFromEntry(e) {
       const ccIds = (e.selected_cost_centre_ids && e.selected_cost_centre_ids.length) ? e.selected_cost_centre_ids.slice() : (e.cost_centre_id ? [e.cost_centre_id] : []);
@@ -545,6 +545,7 @@
         clockInTime: isoToTimePart(e.clock_in), clockOutTime: isoToTimePart(e.clock_out),
         xeroPushed: !!e.xero_pushed_at, centres: [], splitPercentages: [],
         origClockIn: e.clock_in, origClockOut: e.clock_out, origProjectId: e.project_id,
+        timeCategory: (e.time_category && e.time_category !== 'job') ? e.time_category : 'office',
       };
     }
     function dayBlockTotalMinutes(block, dateStr) {
@@ -660,17 +661,25 @@
 
       async function renderBlock(block, el) {
         await ensureCentresLoaded(block);
-        const projectOptions = `<option value="">General / Office</option>` +
-          cachedProjects.map(p => `<option value="${p.id}" ${p.id === block.projectId ? 'selected' : ''}>${projectRef(p)}</option>`).join('');
+        const selectedProject = block.projectId ? cachedProjects.find(p => p.id === block.projectId) : null;
 
         el.innerHTML = `
           ${block.xeroPushed ? `<p class="subtitle" style="margin:0 0 8px;">This block's time is already in Xero and can't be changed - the job/stage can still be corrected.</p>` : ''}
           <div style="display:flex; gap:10px; align-items:flex-end;">
             <div style="flex:1;">
-              <label style="margin-top:0">Job</label>
-              <select class="day-block-project">${projectOptions}</select>
+              <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
+              <input class="day-block-job-search" placeholder="Job number, name, client..." autocomplete="off" value="${selectedProject ? projectRef(selectedProject) : ''}" />
+              <div class="day-block-job-results"></div>
             </div>
             <button type="button" class="secondary day-block-remove" style="flex-shrink:0;">Remove</button>
+          </div>
+          <div class="day-block-category-row" style="${block.projectId ? 'display:none;' : ''} margin-top:8px;">
+            <label style="margin-top:0">What's this time for</label>
+            <select class="day-block-category">
+              <option value="office" ${block.timeCategory === 'office' ? 'selected' : ''}>Office / admin</option>
+              <option value="training" ${block.timeCategory === 'training' ? 'selected' : ''}>Training</option>
+              <option value="other" ${block.timeCategory === 'other' ? 'selected' : ''}>Other</option>
+            </select>
           </div>
           <div class="day-block-cc" style="${block.centres.length ? '' : 'display:none;'} margin-top:8px;">
             <label style="margin-top:0">Stage(s)</label>
@@ -691,12 +700,51 @@
           </div>
           <div class="day-block-split" style="display:none; margin-top:10px;"></div>`;
 
-        el.querySelector('.day-block-project').addEventListener('change', async (e) => {
-          block.projectId = e.target.value || null;
+        const jobSearchInput = el.querySelector('.day-block-job-search');
+        const jobResultsEl = el.querySelector('.day-block-job-results');
+
+        function renderJobResults(results, label) {
+          if (!results.length) { jobResultsEl.innerHTML = label ? '' : `<p class="subtitle" style="margin-top:4px; font-size:12px;">No matches.</p>`; return; }
+          jobResultsEl.innerHTML = `
+            ${label ? `<p class="subtitle" style="margin:6px 0 2px; font-size:12px;">${label}</p>` : ''}
+            <div style="border:1px solid var(--border); border-radius:8px; ${label ? '' : 'margin-top:6px;'}">
+              ${results.map(p => `<div class="day-block-job-pick" data-id="${p.id}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:13px;">${projectRef(p)}</div>`).join('')}
+            </div>`;
+          jobResultsEl.querySelectorAll('.day-block-job-pick').forEach(row => {
+            row.addEventListener('click', async () => {
+              block.projectId = row.dataset.id;
+              block.ccIds = [];
+              block.splitPercentages = [];
+              await renderBlock(block, el);
+            });
+          });
+        }
+
+        jobSearchInput.addEventListener('focus', () => {
+          if (jobSearchInput.value.trim().length < 2) renderJobResults(cachedProjects.slice(0, 8), 'Recent jobs');
+        });
+        let jobSearchTimeout;
+        jobSearchInput.addEventListener('input', (e) => {
+          clearTimeout(jobSearchTimeout);
+          block.projectId = null;
           block.ccIds = [];
           block.splitPercentages = [];
-          await renderBlock(block, el);
+          el.querySelector('.day-block-category-row').style.display = 'block';
+          el.querySelector('.day-block-cc').style.display = 'none';
+          const q = e.target.value.trim();
+          if (q.length === 0) { renderJobResults(cachedProjects.slice(0, 8), 'Recent jobs'); return; }
+          if (q.length < 2) { jobResultsEl.innerHTML = ''; return; }
+          jobSearchTimeout = setTimeout(() => {
+            const ql = q.toLowerCase();
+            const matches = cachedProjects.filter(p =>
+              projectRef(p).toLowerCase().includes(ql) ||
+              (p.job_number && String(p.job_number).includes(q)) ||
+              (p.quote_number && String(p.quote_number).includes(q))
+            );
+            renderJobResults(matches);
+          }, 200);
         });
+        el.querySelector('.day-block-category')?.addEventListener('change', (e) => { block.timeCategory = e.target.value; });
         el.querySelectorAll('.day-block-cc-chips .cc-chip').forEach(chip => {
           chip.addEventListener('click', () => {
             chip.classList.toggle('selected');
@@ -877,6 +925,7 @@
             const { error: insErr } = await supabaseClient.from('time_entries').insert(
               rows.map((r, i) => ({
                 staff_id: staffId, project_id: projectId, cost_centre_id: r.cost_centre_id, clock_in: r.clock_in, clock_out: r.clock_out,
+                time_category: 'job', // splitting across stages only ever applies to job time
                 ...(i === 0 && isBreakTarget ? breakFields : {}),
               }))
             );
@@ -891,7 +940,7 @@
             continue;
           }
 
-          const fields = { project_id: projectId };
+          const fields = { project_id: projectId, time_category: projectId ? 'job' : block.timeCategory };
           if (block.ccIds.length === 1) { fields.cost_centre_id = block.ccIds[0]; fields.selected_cost_centre_ids = null; }
           else if (block.ccIds.length > 1) { fields.cost_centre_id = null; fields.selected_cost_centre_ids = block.ccIds; }
           else { fields.cost_centre_id = null; fields.selected_cost_centre_ids = null; }
