@@ -194,10 +194,11 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 | **Insurance & Licensing** | Admin only | Company + employee licence/insurance tracking, AI-extracted expiry dates |
 | **Appearance** | — | Theme toggle (Navy Pro / Dark Trade) |
 
-### B3. User Management (mostly built)
+### B3. User Management (built)
 - Admin-editable user names/roles — built (B1)
 - Full user profile: licences + expiry, insurance docs — **built**, including AI extraction of type/reference/expiry from an uploaded certificate
-- **Still open:** admin-generated password option as an alternative to invite-only; KPIs, wage/rate history, industry allowances (travel, tool, leading hand, etc.) beyond what's already on the profile
+- Admin-generated password option — **built** (`create-user-with-password.js`), toggled via "How should they get access?" on the Add Staff form, for when invite emails aren't reliably arriving
+- **Still open (low priority, not scoped):** KPIs, wage/rate history over time, industry allowances (travel, tool, leading hand, etc.) beyond what's already on the profile
 
 ### B4. Auth Persistence & Biometric Login (not built)
 - **Stay logged in:** no persisted-session handling beyond default supabase-js behaviour — still prompts for login on the normal token-expiry/logout schedule, nothing extra engineered
