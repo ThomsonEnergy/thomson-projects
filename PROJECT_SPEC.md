@@ -161,8 +161,8 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 
 ### A17. Job Page — Tabbed Layout (built)
 - `project.html` already has the tabbed structure originally planned in Part J: **Summary / Cost Centres / Purchase Orders / Invoices / Details / Documents**, with a persistent Activity/Timeline sidebar visible alongside every tab
-- Summary tab shows stat cards and progress/budget bars for labour cost vs budget
-- **Not yet built:** the pie/bar chart visuals originally envisioned (Materials/Labour/Profit split, Actual-vs-Invoiced, Actual-vs-Estimated) — current Summary tab is numeric cards and bars, not charts. See Part J.
+- Summary tab shows stat cards, progress/budget bars, **and two real CSS conic-gradient donut charts** — "Quoted split" (Materials/Labour/Profit from the estimate) and "Job split" (same breakdown from real accrued spend) — both already built, missed on the first audit pass which only checked for `<canvas>`/chart-library usage
+- Per-cost-centre cards now show combined labour + materials quoted-vs-actual cost and gross profit %, not labour-only (see D5)
 
 ---
 
@@ -255,9 +255,9 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 - Reading a plan/spec document to generate a takeoff list of specific part numbers + quantities, sending it to a wholesaler, then reading the quote back to update prebuild/material costs — none of this exists yet
 - Depends on D2 (done) and D3 (not done) — the AI needs prebuild-generation capability to plug into first
 
-### D5. Cost/Profit Reporting (decided approach, partially built)
+### D5. Cost/Profit Reporting (decided approach — built)
 - **No per-job overhead allocation** — decided against, stays a business-level-only concern (see H4)
-- **Per-job gross profit — not yet combining labour + materials.** The job page currently shows labour cost vs budget per cost centre; a stale in-code comment still says "full gross profit needs materials cost too, once the materials database exists" — the materials database now exists (A9a), so this is now just a wiring gap, not a data gap. Revenue − direct labour − direct materials, quoted vs actual, with labour margin vs materials margin split, is the target.
+- **Per-job gross profit — built, combining labour + materials.** Project-level summary was already computing this correctly (quoted vs accrued, both cost sources combined, with the two donut charts — see A17); the actual remaining gap was narrower than first audited — the per-cost-centre cards were still labour-only. Now wired to `job_material_usage` (grouped by cost centre, mirroring how `get_stage_actual_labour_cost` works for labour) so each stage shows combined quoted cost, actual cost, overall GP%, and labour margin vs materials margin split.
 - **Separate net P&L, run monthly at business level:** still depends on H4 (Xero P&L pull), not built
 - Job expenses (materials/POs) already tracked per job via Purchase Orders (A10)
 
@@ -369,10 +369,10 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 
 ## PART J — Quote/Job Page Redesign (mostly built — see A17)
 
-The tabbed layout, activity sidebar, and role-aware display envisioned here are built — see **A17** for current state.
+The tabbed layout, activity sidebar, role-aware display, and the Materials/Labour/Profit donut charts (quoted split + real "job split") envisioned here are all built — see **A17** for current state.
 
 **Still missing:**
-- No pie/bar chart rendering — Summary tab uses stat cards and progress bars, not the originally-envisioned Materials/Labour/Profit pie chart or Actual-vs-Invoiced/Actual-vs-Estimated bar charts
+- Actual-vs-Invoiced / Actual-vs-Estimated bar charts specifically (the donuts cover the Materials/Labour/Profit split; these would be a second, different chart type)
 - Materials cost split by source (existing stock vs newly purchased), PO status at-a-glance ("3 of 4 POs fully received"), and job-level "needs attention" flags on the Summary tab are not yet built
 - No dedicated Notes tab (see E2)
 

@@ -116,6 +116,31 @@
         project.accrued_material_cost = 0;
       }
 
+      // Same real material spend, but per stage - job_material_usage is the
+      // authoritative "what actually got used against this cost centre"
+      // record (stock draws + PO receipts landed straight on a job), same
+      // role for materials that get_stage_actual_labour_cost's time_entries
+      // query plays for labour. Unlike time_entries there's no split-pending
+      // ambiguity here (each row already has exactly one cost_centre_id),
+      // so summing client-side is safe without the caveats that pushed
+      // actual_labour_cost out to a serverless function instead.
+      if (project.job_number) {
+        const { data: usageRows } = await supabaseClient
+          .from('job_material_usage')
+          .select('cost_centre_id, quantity, unit_cost')
+          .eq('project_id', projectId);
+        const materialByCentre = {};
+        for (const row of usageRows || []) {
+          if (!row.cost_centre_id) continue;
+          materialByCentre[row.cost_centre_id] = (materialByCentre[row.cost_centre_id] || 0) + Number(row.quantity) * Number(row.unit_cost);
+        }
+        for (const centre of project.cost_centres || []) {
+          centre.actual_material_cost = materialByCentre[centre.id] || 0;
+        }
+      } else {
+        for (const centre of project.cost_centres || []) centre.actual_material_cost = 0;
+      }
+
       // A quote never becomes the job in place any more - approval spins
       // up a separate project row (see create-job-from-quote.js). Once
       // approved, this looks up that job so "Go to job" can link straight
@@ -2243,23 +2268,44 @@
                 const isOver = budgetPercent > 100;
 
                 if (pricingVisible) {
+                  // estimated_labour_cost is a SELL total (see the project-level
+                  // split above), backed out to cost the same way; estimated_material_cost
+                  // is already stored as a cost, no back-out needed.
+                  const markupFactor = 1 + (Number(c.markup_percent) || 45) / 100;
+                  const quotedLabourCost = quotedLabour / markupFactor;
+                  const quotedMaterialCost = Number(c.estimated_material_cost) || 0;
+                  const actualMaterial = Number(c.actual_material_cost) || 0;
+                  const quotedTotalCost = quotedLabourCost + quotedMaterialCost;
+                  const actualTotalCost = actualLabour + actualMaterial;
                   const marginPercent = quotedLabour > 0 ? Math.round(((quotedLabour - actualLabour) / quotedLabour) * 100) : null;
+                  const centreQuotedAmt = Number(c.quoted_amount) || 0;
+                  const gpPercent = centreQuotedAmt > 0 ? Math.round(((centreQuotedAmt - actualTotalCost) / centreQuotedAmt) * 100) : null;
                   return `
                   <div class="card">
-                    <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - labour</h2>
-                    <p class="subtitle" style="margin-bottom:14px;">Labour only - full gross profit needs materials cost too, once the materials database exists.</p>
+                    <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - cost &amp; margin</h2>
+                    <p class="subtitle" style="margin-bottom:14px;">Labour + materials, quoted cost vs real spend so far.</p>
                     <div class="grid cols-3">
                       <div>
-                        <p class="subtitle" style="margin:0 0 4px;">Quoted</p>
-                        <p style="font-size:20px; font-weight:600; margin:0;">${money(quotedLabour)}</p>
+                        <p class="subtitle" style="margin:0 0 4px;">Quoted cost</p>
+                        <p style="font-size:20px; font-weight:600; margin:0;">${money(quotedTotalCost)}</p>
                       </div>
                       <div>
                         <p class="subtitle" style="margin:0 0 4px;">Actual cost</p>
-                        <p style="font-size:20px; font-weight:600; margin:0;">${money(actualLabour)}</p>
+                        <p style="font-size:20px; font-weight:600; margin:0;">${money(actualTotalCost)}</p>
                       </div>
                       <div>
+                        <p class="subtitle" style="margin:0 0 4px;">Gross profit</p>
+                        <p style="font-size:20px; font-weight:600; margin:0; color:${gpPercent === null ? 'inherit' : gpPercent >= 0 ? 'var(--green)' : 'var(--red)'};">${gpPercent === null ? '-' : gpPercent + '%'}</p>
+                      </div>
+                    </div>
+                    <div class="grid cols-2" style="margin-top:14px; padding-top:14px; border-top:0.5px solid var(--border);">
+                      <div>
                         <p class="subtitle" style="margin:0 0 4px;">Labour margin</p>
-                        <p style="font-size:20px; font-weight:600; margin:0; color:${marginPercent === null ? 'inherit' : marginPercent >= 0 ? 'var(--green)' : 'var(--red)'};">${marginPercent === null ? '-' : marginPercent + '%'}</p>
+                        <p style="font-size:15px; font-weight:600; margin:0; color:${marginPercent === null ? 'inherit' : marginPercent >= 0 ? 'var(--green)' : 'var(--red)'};">${marginPercent === null ? '-' : marginPercent + '%'} <span class="subtitle" style="font-weight:400;">(${money(actualLabour)} of ${money(quotedLabourCost)})</span></p>
+                      </div>
+                      <div>
+                        <p class="subtitle" style="margin:0 0 4px;">Materials margin</p>
+                        <p style="font-size:15px; font-weight:600; margin:0;">${money(actualMaterial)} <span class="subtitle" style="font-weight:400;">of ${money(quotedMaterialCost)} quoted</span></p>
                       </div>
                     </div>
                   </div>`;
