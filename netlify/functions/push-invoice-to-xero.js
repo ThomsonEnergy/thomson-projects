@@ -1,8 +1,9 @@
 // POST /api/push-invoice-to-xero
 // Body: { invoiceId }
 // Pricing roles only. Copies an already-created, already-sent invoice
-// across to Xero as a DRAFT, for the bookkeeper's records - the client
-// never sees Xero, they already have the invoice link from the app.
+// across to Xero as AUTHORISED (Xero's "Approved"), for the bookkeeper's
+// records - the client never sees Xero, they already have the invoice
+// link from the app.
 // Handles standalone invoices, legacy single-stage job claims (cost_centre_id
 // set directly on the invoice), and multi-stage job claims (project_id set,
 // one row per claimed cost centre in invoice_claims) - one Xero line item
@@ -46,7 +47,7 @@ exports.handler = async (event) => {
           InvoiceNumber: invoice.invoice_number,
           Date: date,
           DueDate: dueDate,
-          Status: 'DRAFT',
+          Status: 'AUTHORISED',
         }],
       },
     });
