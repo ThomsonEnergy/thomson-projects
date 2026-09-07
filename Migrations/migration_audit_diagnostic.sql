@@ -270,4 +270,9 @@ select '087', 'clear_sensitive_employee_data',
 union all
 select '088', 'supplier_bill_source_file',
   case when exists (select 1 from information_schema.columns where table_name = 'supplier_bills' and column_name = 'file_path') then 'present' else 'MISSING' end
+union all
+select '089', 'client_delete_unlinks_instead_of_blocking',
+  case when (select confdeltype from pg_constraint where conname = 'projects_client_id_fkey') = 'n'
+    and (select confdeltype from pg_constraint where conname = 'invoices_client_id_fkey') = 'n'
+  then 'present' else 'MISSING' end
 order by 1;

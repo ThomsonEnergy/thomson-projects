@@ -135,6 +135,11 @@
 
           <label>Description</label>
           <input id="at-desc" placeholder="e.g. Check POs and order stock, or Mow the lawn" />
+          <label>Type</label>
+          <select id="at-task-type">
+            <option value="prejob">Prejob - office / handover docs</option>
+            <option value="onsite">Onsite</option>
+          </select>
           <label>Assign to</label>
           <select id="at-assign-type">
             <option value="none">Leave unassigned - anyone can pick it up</option>
@@ -165,6 +170,9 @@
             </select>
             <p class="subtitle" id="at-recurrence-hint" style="margin:4px 0 0;"></p>
           </div>
+          <label id="at-required-row" style="margin-top:14px; display:none; align-items:center; gap:8px;">
+            <input type="checkbox" id="at-required" style="width:auto;" /> Required before this job can be scheduled
+          </label>
           <div style="margin-top:14px;">
             <button id="at-save-btn">Add task</button>
             <button type="button" class="secondary" id="at-cancel-btn">Cancel</button>
@@ -190,6 +198,7 @@
         clearTimeout(jobSearchTimeout);
         selectedJobId = null;
         overlay.querySelector('#at-job-selected').textContent = '';
+        overlay.querySelector('#at-required-row').style.display = 'none';
         const q = e.target.value.trim();
         const resultsEl = overlay.querySelector('#at-job-results');
         if (q.length < 2) { resultsEl.innerHTML = ''; return; }
@@ -204,6 +213,7 @@
               selectedJobId = row.dataset.id;
               overlay.querySelector('#at-job-search').value = row.dataset.label;
               overlay.querySelector('#at-job-selected').textContent = `Selected: ${row.dataset.label}`;
+              overlay.querySelector('#at-required-row').style.display = 'flex';
               resultsEl.innerHTML = '';
             });
           });
@@ -231,10 +241,12 @@
           const { error } = await supabaseClient.from('job_tasks').insert({
             project_id: selectedJobId,
             description,
+            task_type: overlay.querySelector('#at-task-type').value,
             assigned_to_user_id: assignType === 'person' ? overlay.querySelector('#at-person').value : null,
             assigned_to_role: assignType === 'role' ? overlay.querySelector('#at-role').value : null,
             due_date: dueDate,
             recurrence: isRecurring ? overlay.querySelector('#at-recurrence').value : null,
+            required_before_scheduling: selectedJobId ? overlay.querySelector('#at-required').checked : false,
             created_by: user.id,
           });
           if (error) throw error;

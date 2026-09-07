@@ -2878,6 +2878,13 @@
 
           let scheduleAssignmentId = null;
           if (addToCalendar && personId && dueDate) {
+            const blocking = await requiredTasksBlockingSchedule(projectId);
+            if (blocking.length) {
+              msg.innerHTML = `<div class="error-box">This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done: ${blocking.join('; ')}</div>`;
+              saveBtn.disabled = false;
+              saveBtn.textContent = 'Add task';
+              return;
+            }
             const { data: assignment, error: schedErr } = await supabaseClient
               .from('schedule_assignments')
               .insert({

@@ -181,6 +181,13 @@
     let currentView = 'month';
     let myRole = 'staff';
     let staffList = [];
+    // schedule_assignments RLS only allows admin/finance/sales to write at
+    // all - drag/resize/add/remove controls check this before attempting
+    // anything, so a Staff viewer gets a plain read-only day view instead
+    // of a raw Postgres permission-denied alert after the fact.
+    function canEditSchedule() {
+      return myRole === 'admin' || myRole === 'finance' || myRole === 'sales';
+    }
     let publicHolidaySet = new Set(); // 'YYYY-MM-DD' strings, for the currently loaded range
 
     function toDateStr(y, m, d) {
@@ -417,7 +424,7 @@
           <div class="mobile-staff-block">
             <div class="msb-name">${staff.full_name || 'Unnamed'}</div>
             ${entriesHtml || '<p class="subtitle" style="margin:0 0 6px;">Nothing scheduled.</p>'}
-            <button type="button" class="secondary mobile-add-btn" data-staff-id="${staff.id}" data-staff-name="${staff.full_name || 'Unnamed'}">+ Add</button>
+            ${canEditSchedule() ? `<button type="button" class="secondary mobile-add-btn" data-staff-id="${staff.id}" data-staff-name="${staff.full_name || 'Unnamed'}">+ Add</button>` : ''}
           </div>`;
       }).join('');
 
@@ -430,19 +437,23 @@
           if (!assignment) return;
           const isReconciled = !!reconciledById[assignment.id];
           if (isReconciled) {
-            if (myRole !== 'admin' && myRole !== 'finance' && myRole !== 'sales') return;
+            if (!canEditSchedule()) return;
             if (confirm('This reflects real clocked hours the employee was paid for. Remove it anyway?')) {
               supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
             }
             return;
           }
           if (assignment.project_id) {
-            if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this block instead)`)) {
+            if (canEditSchedule()) {
+              if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this block instead)`)) {
+                window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
+              } else if (confirm('Remove this schedule block?')) {
+                supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+              }
+            } else if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now?`)) {
               window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
-            } else if (confirm('Remove this schedule block?')) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
             }
-          } else {
+          } else if (canEditSchedule()) {
             const categoryLabel = CATEGORY_LABELS[assignment.block_type] || 'this block';
             if (confirm(`Remove this ${categoryLabel} block?`)) {
               supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
@@ -523,6 +534,14 @@
         const endTime = overlay.querySelector('#mobile-add-end').value;
         if (!startTime || !endTime) { msg.innerHTML = `<div class="error-box">Pick both times.</div>`; return; }
 
+        if (selectedProject) {
+          const blocking = await requiredTasksBlockingSchedule(selectedProject.id);
+          if (blocking.length) {
+            msg.innerHTML = `<div class="error-box">This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done: ${blocking.join('; ')}</div>`;
+            return;
+          }
+        }
+
         const insert = {
           staff_id: staffId, assignment_date: dateStr, start_time: startTime, end_time: endTime,
         };
@@ -554,6 +573,7 @@
     }
 
     function wireStaffTimelines() {
+      if (!canEditSchedule()) return; // read-only for Staff - nothing here would be allowed to write anyway
       document.querySelectorAll('.staff-timeline').forEach(timeline => {
         timeline.addEventListener('dragover', (e) => { e.preventDefault(); timeline.classList.add('drag-over'); });
         timeline.addEventListener('dragleave', () => timeline.classList.remove('drag-over'));
@@ -563,6 +583,11 @@
           const projectData = e.dataTransfer.getData('application/json');
           if (!projectData) return;
           const project = JSON.parse(projectData);
+          const blocking = await requiredTasksBlockingSchedule(project.id);
+          if (blocking.length) {
+            alert(`This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done:\n${blocking.map(d => '- ' + d).join('\n')}`);
+            return;
+          }
           const rect = timeline.getBoundingClientRect();
           const startMin = minutesFromX(e.clientX - rect.left, timeline);
           const startTime = minutesToTimeStr(startMin);
@@ -674,8 +699,9 @@
         // Reconciled blocks represent real, already-paid hours - locked
         // from drag/resize entirely, not just visually different. Only
         // deleting one (an admin correcting a genuine mistake) is still
-        // possible, via the click handler below.
-        if (!isReconciled) {
+        // possible, via the click handler below. Drag/resize is also
+        // locked out entirely for Staff, same reason as wireStaffTimelines.
+        if (!isReconciled && canEditSchedule()) {
           block.querySelectorAll('.block-resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
               e.stopPropagation();
@@ -707,7 +733,7 @@
           if (!assignment) return;
 
           if (isReconciled) {
-            if (myRole !== 'admin' && myRole !== 'finance' && myRole !== 'sales') {
+            if (!canEditSchedule()) {
               return; // locked - these are confirmed, paid hours, not editable by Staff
             }
             if (confirm('This reflects real clocked hours the employee was paid for. Remove it anyway?')) {
@@ -717,12 +743,20 @@
           }
 
           if (assignment.project_id) {
-            if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this schedule block instead)`)) {
+            // Clocking in is always fine for anyone (it's their own
+            // time_entries write, unrelated to schedule_assignments) -
+            // only the "remove this block" alternative needs the role
+            // check, since that's a schedule_assignments write.
+            if (canEditSchedule()) {
+              if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this schedule block instead)`)) {
+                window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
+              } else if (confirm('Remove this schedule block?')) {
+                supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+              }
+            } else if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now?`)) {
               window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
-            } else if (confirm('Remove this schedule block?')) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
             }
-          } else {
+          } else if (canEditSchedule()) {
             const categoryLabel = CATEGORY_LABELS[assignment.block_type] || 'this block';
             if (confirm(`Remove this ${categoryLabel} block?`)) {
               supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());

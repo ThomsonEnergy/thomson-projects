@@ -259,6 +259,24 @@ function renderMainNav(activeKey) {
 // Shared job search - by job number, name, client name, or site address.
 // Used by the Schedule day view's draggable job panel, the Timesheets job
 // picker, and anywhere else that needs "find a job by anything about it."
+// Blocks scheduling a job that still has an outstanding task marked
+// "required before this job can be scheduled" - project.html shows that
+// flag as a red warning, but nothing actually enforced it anywhere a
+// schedule_assignments row gets created (Schedule's drag-drop/mobile-add,
+// or the "Also put this on their Schedule" task-creation checkbox).
+// Returns the blocking task descriptions - empty array means safe to
+// schedule.
+async function requiredTasksBlockingSchedule(projectId) {
+  if (!projectId) return [];
+  const { data } = await supabaseClient
+    .from('job_tasks')
+    .select('description')
+    .eq('project_id', projectId)
+    .eq('required_before_scheduling', true)
+    .eq('completed', false);
+  return (data || []).map(t => t.description);
+}
+
 async function searchProjects(query, limit = 15) {
   if (!query || query.trim().length < 2) return [];
   const q = query.trim();
