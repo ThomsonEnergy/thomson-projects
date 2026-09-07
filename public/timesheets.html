@@ -361,7 +361,7 @@
               const total = dayHours.reduce((a, b) => a + b, 0);
               return `<tr>
                 <td data-label="Staff">${s.full_name || 'Unnamed'}</td>
-                ${dayHours.map((h, i) => `<td class="num team-week-cell" data-label="${days[i].toLocaleDateString('en-AU', { weekday: 'short' })}" data-staff-id="${s.id}" data-date="${localDateStr(days[i])}" data-staff-name="${(s.full_name || 'staff member').replace(/"/g, '&quot;')}" style="${h ? 'cursor:pointer; text-decoration:underline dotted;' : ''}">${h ? h.toFixed(1) : '-'}</td>`).join('')}
+                ${dayHours.map((h, i) => `<td class="num team-week-cell" data-label="${days[i].toLocaleDateString('en-AU', { weekday: 'short' })}" data-staff-id="${s.id}" data-date="${localDateStr(days[i])}" data-staff-name="${(s.full_name || 'staff member').replace(/"/g, '&quot;')}" style="cursor:pointer; text-decoration:underline dotted;">${h ? h.toFixed(1) : '-'}</td>`).join('')}
                 <td class="num" data-label="Total" style="font-weight:600;">${total.toFixed(1)}</td>
               </tr>`;
             }).join('')}
@@ -372,7 +372,6 @@
       el.querySelectorAll('.team-week-cell').forEach(cell => {
         if (!cell.dataset.date) return;
         const staffId = cell.dataset.staffId;
-        if (hoursFor(staffId, cell.dataset.date) <= 0) return;
         cell.addEventListener('click', () => openDayEditPanel(cell.dataset.date, staffId, cell.dataset.staffName));
       });
 
