@@ -453,58 +453,7 @@
       updateTotal();
     }
 
-    // ---------- prebuilds ----------
-
-    let _prebuildsCache = null;
-    async function getPrebuilds() {
-      if (_prebuildsCache) return _prebuildsCache;
-      const { data, error } = await supabaseClient
-        .from('prebuilds')
-        .select('*, prebuild_components(*)')
-        .order('category')
-        .order('name');
-      _prebuildsCache = error ? [] : data;
-      return _prebuildsCache;
-    }
-
-    async function openPrebuildPicker(stageRow) {
-      const prebuilds = await getPrebuilds();
-      if (!prebuilds.length) {
-        alert('No prebuilds set up yet. Add some under Settings > Prebuild Categories.');
-        return;
-      }
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:480px; width:90%; max-height:80vh; overflow-y:auto;">
-          <h2>Add a prebuild</h2>
-          <select id="prebuild-select" style="margin-bottom:12px;">
-            ${prebuilds.map(p => `<option value="${p.id}">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''} - ${p.name}</option>`).join('')}
-          </select>
-          <label style="margin-top:0">Quantity</label>
-          <input id="prebuild-qty" type="number" value="1" min="1" step="1" />
-          <div style="margin-top:16px; text-align:right;">
-            <button type="button" class="secondary" id="prebuild-cancel">Cancel</button>
-            <button type="button" id="prebuild-confirm">Add to stage</button>
-          </div>
-        </div>`;
-      document.body.appendChild(overlay);
-      overlay.querySelector('#prebuild-cancel').addEventListener('click', () => overlay.remove());
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-      overlay.querySelector('#prebuild-confirm').addEventListener('click', () => {
-        const prebuild = prebuilds.find(p => p.id === overlay.querySelector('#prebuild-select').value);
-        const qty = parseFloat(overlay.querySelector('#prebuild-qty').value) || 1;
-        (prebuild.prebuild_components || []).forEach(comp => {
-          addLineItem(stageRow, {
-            description: `${prebuild.name} - ${comp.description}`,
-            item_type: comp.item_type,
-            quantity: (parseFloat(comp.quantity) || 0) * qty,
-            unit_cost: comp.unit_cost,
-          });
-        });
-        overlay.remove();
-      });
-    }
+    // getPrebuilds()/openPrebuildPicker() are shared - see js/supabase-client.js
 
     // ---------- payment milestones ----------
 

@@ -1459,6 +1459,75 @@ function wireSupplierPicker(overlay, suppliers, ids) {
   };
 }
 
+// Shared searchable "add a prebuild to this stage" picker - was a plain
+// <select> duplicated in project.html and new-project.html, unworkable
+// once the ServiceM8 import brought the library up to 55+ entries. Caches
+// the full prebuild list client-side (there's no volume here that needs
+// server-side search like searchProjects()) and filters by name/category/
+// subcategory as the user types. Calls the including page's own global
+// `addLineItem(stageRow, {...})` - both pages already define one with the
+// same signature.
+let _prebuildsCache = null;
+async function getPrebuilds() {
+  if (_prebuildsCache) return _prebuildsCache;
+  const { data, error } = await supabaseClient.from('prebuilds').select('*, prebuild_components(*)').order('category').order('name');
+  _prebuildsCache = error ? [] : data;
+  return _prebuildsCache;
+}
+
+async function openPrebuildPicker(stageRow) {
+  const prebuilds = await getPrebuilds();
+  if (!prebuilds.length) { alert('No prebuilds set up yet. Add some under Settings > Prebuild Categories.'); return; }
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+  overlay.innerHTML = `
+    <div class="card" style="max-width:480px; width:100%; max-height:80vh; overflow-y:auto;">
+      <h2>Add a prebuild</h2>
+      <label style="margin-top:0">Quantity</label>
+      <input id="prebuild-qty" type="number" value="1" min="1" step="1" style="margin-bottom:12px;" />
+      <label>Search</label>
+      <input id="prebuild-search" placeholder="Name, category..." autocomplete="off" />
+      <div id="prebuild-results" style="margin-top:8px;"></div>
+      <div style="margin-top:16px; text-align:right;">
+        <button type="button" class="secondary" id="prebuild-cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#prebuild-cancel').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  const resultsEl = overlay.querySelector('#prebuild-results');
+  function renderResults() {
+    const q = overlay.querySelector('#prebuild-search').value.trim().toLowerCase();
+    const matches = q
+      ? prebuilds.filter(p => (p.name || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q) || (p.subcategory || '').toLowerCase().includes(q))
+      : prebuilds;
+    if (!matches.length) { resultsEl.innerHTML = `<p class="subtitle">No matches.</p>`; return; }
+    resultsEl.innerHTML = matches.slice(0, 50).map(p => `
+      <div class="prebuild-result-row" data-id="${p.id}" style="padding:10px; border-radius:8px; cursor:pointer; border-bottom:0.5px solid var(--border);">
+        <div style="font-weight:600;">${p.name}</div>
+        <div class="subtitle" style="font-size:12px;">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''}</div>
+      </div>`).join('');
+    resultsEl.querySelectorAll('.prebuild-result-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const prebuild = prebuilds.find(p => p.id === row.dataset.id);
+        const qty = parseFloat(overlay.querySelector('#prebuild-qty').value) || 1;
+        (prebuild.prebuild_components || []).forEach(comp => {
+          addLineItem(stageRow, {
+            description: `${prebuild.name} - ${comp.description}`,
+            item_type: comp.item_type,
+            quantity: (parseFloat(comp.quantity) || 0) * qty,
+            unit_cost: comp.unit_cost,
+          });
+        });
+        overlay.remove();
+      });
+    });
+  }
+  overlay.querySelector('#prebuild-search').addEventListener('input', renderResults);
+  renderResults();
+}
+
 // Wires an "upload the supplier's invoice instead" button - reads the
 // file, extracts supplier + line item detail, then hands off to
 // resolveSupplierAndHandoff to match/create the supplier and continue on

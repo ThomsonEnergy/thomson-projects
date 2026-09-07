@@ -102,35 +102,70 @@
 
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No materials yet - add one to get started.</p>`; return; }
 
+      // Split so the page actually answers "what's on hand" at a glance -
+      // a catalog/pricing-only entry (e.g. bulk-imported for quoting, never
+      // physically stocked) sitting in the same table as real stock buried
+      // the real stock once the library got past a couple hundred rows.
+      const inStock = filtered.filter(m => Number(m.quantity_on_hand) > 0);
+      const notStocked = filtered.filter(m => Number(m.quantity_on_hand) <= 0);
+
+      function stockRowsHtml(rows, showQtyCols) {
+        return rows.map(m => {
+          const isBelowMin = Number(m.minimum_quantity) > 0 && Number(m.quantity_on_hand) < Number(m.minimum_quantity);
+          return `
+          <tr>
+            <td data-label="Name">${m.name}</td>
+            <td data-label="Category">${m.category || '-'}</td>
+            <td data-label="Supplier">${m.suppliers?.name || '-'}</td>
+            <td class="num" data-label="Cost">${money(m.cost_price)}</td>
+            <td class="num" data-label="Sell">${money(m.sell_price)}</td>
+            ${showQtyCols ? `
+              <td class="num" data-label="Qty" style="${isBelowMin ? 'color:var(--red); font-weight:600;' : ''}">
+                ${m.quantity_on_hand}${isBelowMin ? ' &#9888;' : ''}
+                ${stockVehicles.length ? `<div class="subtitle" style="font-size:11px; font-weight:400; white-space:nowrap;">${locationBreakdown(m.id)}</div>` : ''}
+              </td>
+              <td class="num" data-label="Minimum">${m.minimum_quantity || '-'}</td>
+            ` : ''}
+            <td data-label="">
+              <button class="secondary edit-material-btn" data-id="${m.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
+            </td>
+          </tr>`;
+        }).join('');
+      }
+
       listEl.innerHTML = `
         <table class="responsive-stack">
           <thead><tr><th>Name</th><th>Category</th><th>Supplier</th><th class="num">Cost</th><th class="num">Sell</th><th class="num">Qty on hand</th><th class="num">Minimum</th><th></th></tr></thead>
           <tbody>
-            ${filtered.map(m => {
-              const isBelowMin = Number(m.minimum_quantity) > 0 && Number(m.quantity_on_hand) < Number(m.minimum_quantity);
-              return `
-              <tr>
-                <td data-label="Name">${m.name}</td>
-                <td data-label="Category">${m.category || '-'}</td>
-                <td data-label="Supplier">${m.suppliers?.name || '-'}</td>
-                <td class="num" data-label="Cost">${money(m.cost_price)}</td>
-                <td class="num" data-label="Sell">${money(m.sell_price)}</td>
-                <td class="num" data-label="Qty" style="${isBelowMin ? 'color:var(--red); font-weight:600;' : ''}">
-                  ${m.quantity_on_hand}${isBelowMin ? ' &#9888;' : ''}
-                  ${stockVehicles.length ? `<div class="subtitle" style="font-size:11px; font-weight:400; white-space:nowrap;">${locationBreakdown(m.id)}</div>` : ''}
-                </td>
-                <td class="num" data-label="Minimum">${m.minimum_quantity || '-'}</td>
-                <td data-label="">
-                  <button class="secondary edit-material-btn" data-id="${m.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
-                </td>
-              </tr>`;
-            }).join('')}
+            ${inStock.length ? stockRowsHtml(inStock, true) : `<tr><td colspan="8"><p class="subtitle" style="margin:8px 0;">Nothing currently in stock${q ? ' matching that search' : ''}.</p></td></tr>`}
           </tbody>
-        </table>`;
+        </table>
+        ${notStocked.length ? `
+          <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+            <button type="button" class="secondary" id="not-stocked-toggle" style="font-size:13px;">Show ${notStocked.length} material${notStocked.length === 1 ? '' : 's'} not currently stocked &#9656;</button>
+            <div id="not-stocked-section" style="display:none; margin-top:12px;">
+              <p class="subtitle" style="margin-bottom:10px;">Priced for quoting/prebuilds, but nothing's physically on hand right now.</p>
+              <table class="responsive-stack">
+                <thead><tr><th>Name</th><th>Category</th><th>Supplier</th><th class="num">Cost</th><th class="num">Sell</th><th></th></tr></thead>
+                <tbody>${stockRowsHtml(notStocked, false)}</tbody>
+              </table>
+            </div>
+          </div>` : ''}`;
 
       listEl.querySelectorAll('.edit-material-btn').forEach(btn => {
         btn.addEventListener('click', () => openMaterialPanel(allMaterials.find(m => m.id === btn.dataset.id)));
       });
+      const toggleBtn = listEl.querySelector('#not-stocked-toggle');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+          const section = listEl.querySelector('#not-stocked-section');
+          const showing = section.style.display !== 'none';
+          section.style.display = showing ? 'none' : 'block';
+          toggleBtn.innerHTML = showing
+            ? `Show ${notStocked.length} material${notStocked.length === 1 ? '' : 's'} not currently stocked &#9656;`
+            : `Hide ${notStocked.length} material${notStocked.length === 1 ? '' : 's'} not currently stocked &#9662;`;
+        });
+      }
     }
 
     document.getElementById('stock-search').addEventListener('input', renderMaterials);
