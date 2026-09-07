@@ -23,6 +23,13 @@ guessing, and skip it until it's answered.
 - **What's happening:** Jobs cant be dragged onto the schedule
 - **Record id:** 70b1f34a-ffcd-4684-98f7-19ada1d6aa69
 
+### Update idea: Credit notes
+- **Reported:** 4 Sept 2026, 04:40 am by Nathan Hicks
+- **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
+- **Page/feature:** jobs
+- **What they want:** Have an option to create a credit note for an invcoice, and push to xero
+- **Record id:** 5e2b56ca-2cbc-477f-8eeb-3daeaec28535
+
 ## In Progress
 
 None.
