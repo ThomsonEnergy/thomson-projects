@@ -192,7 +192,18 @@
           </div>
 
           <label style="margin-top:14px;">Supplier ${' '}<span class="subtitle" id="np-supplier-hint"></span></label>
-          <select id="np-supplier"><option value="">-- None (pull from Warehouse stock) --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+          <p class="subtitle" style="margin:0 0 6px;">Leave blank to pull from Warehouse stock instead.</p>
+          <input id="np-supplier-search" placeholder="Search suppliers, or type a new one..." autocomplete="off" />
+          <div id="np-supplier-results"></div>
+          <div id="np-supplier-selected" class="subtitle" style="margin-top:4px;"></div>
+          <div id="np-supplier-new-section" style="display:none; margin-top:8px; padding:10px; background:var(--surface-2); border-radius:8px;">
+            <p class="subtitle" style="margin:0 0 8px;">No match - this'll be created as a new supplier.</p>
+            <div class="grid cols-2">
+              <div><label style="margin-top:0">Contact email</label><input id="np-supplier-new-email" type="email" /></div>
+              <div><label style="margin-top:0">Contact phone</label><input id="np-supplier-new-phone" /></div>
+            </div>
+          </div>
+          <button type="button" class="secondary" id="np-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
 
           <label style="margin-top:14px;">Items</label>
           <div id="np-items-container"></div>
@@ -240,6 +251,75 @@
         }, 250);
       });
 
+      // Search-existing-or-type-new, same pattern as the job/client
+      // pickers elsewhere - a name that doesn't match anything gets
+      // created as a new supplier on save, rather than forcing a trip to
+      // the Suppliers page first.
+      let selectedSupplierId = null;
+      const supplierSearchInput = overlay.querySelector('#np-supplier-search');
+      let supplierSearchTimeout;
+      supplierSearchInput.addEventListener('input', (e) => {
+        clearTimeout(supplierSearchTimeout);
+        selectedSupplierId = null;
+        overlay.querySelector('#np-supplier-selected').textContent = '';
+        const q = e.target.value.trim();
+        const resultsEl = overlay.querySelector('#np-supplier-results');
+        const newSection = overlay.querySelector('#np-supplier-new-section');
+        if (!q) { resultsEl.innerHTML = ''; newSection.style.display = 'none'; return; }
+        supplierSearchTimeout = setTimeout(() => {
+          const matches = (suppliers || []).filter(s => s.name.toLowerCase().includes(q.toLowerCase()));
+          if (matches.length) {
+            resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+              ${matches.map(s => `<div class="np-supplier-pick" data-id="${s.id}" data-name="${s.name.replace(/"/g, '&quot;')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${s.name}</div>`).join('')}
+            </div>`;
+            resultsEl.querySelectorAll('.np-supplier-pick').forEach(row => {
+              row.addEventListener('click', () => {
+                selectedSupplierId = row.dataset.id;
+                supplierSearchInput.value = row.dataset.name;
+                overlay.querySelector('#np-supplier-selected').textContent = `Selected: ${row.dataset.name}`;
+                newSection.style.display = 'none';
+                resultsEl.innerHTML = '';
+              });
+            });
+            newSection.style.display = 'none';
+          } else {
+            resultsEl.innerHTML = '';
+            newSection.style.display = 'block';
+          }
+        }, 250);
+      });
+
+      overlay.querySelector('#np-upload-invoice-btn').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf,.jpg,.jpeg,.png';
+        input.onchange = async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const msg = overlay.querySelector('#np-msg');
+          msg.innerHTML = `<p class="subtitle">Reading the invoice...</p>`;
+          try {
+            const fileBase64 = await fileToBase64(file);
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch('/.netlify/functions/extract-supplier-invoice', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({ fileBase64, mediaType: file.type }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+            msg.innerHTML = '';
+            // Detects/creates the supplier from the invoice itself, then
+            // hands off to their page to finish - including an option
+            // there to create this PO's line items straight from the
+            // bill, so the destination picked above isn't needed either.
+            await resolveSupplierAndHandoff(data.extracted, 'bill', data.extracted, file);
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          }
+        };
+        input.click();
+      });
+
       buildMaterialSearchRow(materials || [], 'np-items-container');
       overlay.querySelector('#np-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'np-items-container'));
 
@@ -249,11 +329,23 @@
         const destType = overlay.querySelector('#np-dest-type').value;
         if (destType === 'job' && !selectedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
         const vehicleId = destType === 'vehicle' ? overlay.querySelector('#np-vehicle-select').value : null;
-        const supplierId = overlay.querySelector('#np-supplier').value || null;
+        const typedSupplierName = supplierSearchInput.value.trim();
 
         try {
           const { data: { user } } = await supabaseClient.auth.getUser();
-          const supplierName = supplierId ? overlay.querySelector('#np-supplier').selectedOptions[0].textContent : null;
+          let supplierId = selectedSupplierId;
+          let supplierName = supplierId ? (suppliers.find(s => s.id === supplierId)?.name || typedSupplierName) : null;
+
+          if (!supplierId && typedSupplierName) {
+            const { data: newSupplier, error: supErr } = await supabaseClient.from('suppliers').insert({
+              name: typedSupplierName,
+              contact_email: overlay.querySelector('#np-supplier-new-email').value.trim() || null,
+              contact_phone: overlay.querySelector('#np-supplier-new-phone').value.trim() || null,
+            }).select('id').single();
+            if (supErr) throw supErr;
+            supplierId = newSupplier.id;
+            supplierName = typedSupplierName;
+          }
 
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: destType === 'job' ? selectedJob.id : null,
