@@ -479,6 +479,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     overlay.querySelector('#cko-cancel-btn').addEventListener('click', () => overlay.remove());
     overlay.querySelector('#cko-next-btn').addEventListener('click', () => {
       const msg = overlay.querySelector('#cko-msg');
+      if (centres.length && !chosenCentres.length) { msg.innerHTML = `<div class="error-box">Pick at least one stage this time counts against.</div>`; return; }
       const timeVal = overlay.querySelector('#cko-time').value;
       if (!timeVal) { msg.innerHTML = `<div class="error-box">Pick a clock-out time.</div>`; return; }
       const [hh, mm] = timeVal.split(':').map(Number);

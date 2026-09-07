@@ -823,6 +823,22 @@
           }
         }
 
+        // No two job blocks can cover the same time on the same day - an
+        // open-ended block (no finish time yet) is treated as running to
+        // the end of the day for this check.
+        const activeBlocks = dayBlocks.filter(b => b.clockInTime);
+        for (let i = 0; i < activeBlocks.length; i++) {
+          const aStart = combineDateTime(dateStr, activeBlocks[i].clockInTime);
+          const aEnd = activeBlocks[i].clockOutTime ? combineDateTime(dateStr, activeBlocks[i].clockOutTime) : new Date(`${dateStr}T23:59:59`);
+          for (let j = i + 1; j < activeBlocks.length; j++) {
+            const bStart = combineDateTime(dateStr, activeBlocks[j].clockInTime);
+            const bEnd = activeBlocks[j].clockOutTime ? combineDateTime(dateStr, activeBlocks[j].clockOutTime) : new Date(`${dateStr}T23:59:59`);
+            if (aStart < bEnd && bStart < aEnd) {
+              throw new Error('Two job blocks overlap in time - rewrite one of the times or remove one of them before saving.');
+            }
+          }
+        }
+
         for (const removed of dayRemovedBlocks) {
           const { error } = await supabaseClient.from('time_entries').delete().eq('id', removed.id);
           if (error) throw error;
@@ -839,6 +855,7 @@
           const clockIn = combineDateTime(dateStr, block.clockInTime);
           const clockOut = block.clockOutTime ? combineDateTime(dateStr, block.clockOutTime) : null;
           if (clockOut && clockOut <= clockIn) throw new Error('Finish time must be after start time for one of the jobs listed.');
+          if (block.projectId && block.centres.length && !block.ccIds.length) throw new Error('Pick at least one stage for every job block.');
 
           const isBreakTarget = block === breakTargetBlock && breakFields;
           const doingSplit = !block.xeroPushed && block.ccIds.length > 1 && block.splitPercentages.length === block.ccIds.length && clockOut;
