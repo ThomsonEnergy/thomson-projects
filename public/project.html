@@ -2081,7 +2081,7 @@
                 <div class="card" style="margin-top:20px;">
                   <h2>Invoice actual costs</h2>
                   <p class="subtitle" style="margin-bottom:10px;">No quote behind this job - invoice for whatever's actually been logged so far (labour at each person's charge-out rate, materials at cost plus markup), not a % of an estimate.</p>
-                  ${(accruedTotal - invoiced) > 0.01 ? `<button class="secondary" id="invoice-actual-btn">Invoice actual costs...</button>` : `<p class="subtitle">Nothing new to invoice yet.</p>`}
+                  <button class="secondary" id="invoice-actual-btn">Invoice actual costs...</button>
                 </div>
               ` : `
                 <div class="grid cols-${project.job_number ? '4' : '3'}">
@@ -2545,6 +2545,7 @@
               pylon_link: fullProject.pylon_link,
               reference_photos: fullProject.reference_photos,
               cover_photos: fullProject.cover_photos,
+              proposal_template: fullProject.proposal_template,
             })
             .select()
             .single();
@@ -2562,6 +2563,11 @@
               estimated_labour_cost: s.estimated_labour_cost,
               estimated_material_cost: s.estimated_material_cost,
               quoted_amount: s.quoted_amount,
+              stc_total: s.stc_total,
+              stc_system_kw: s.stc_system_kw,
+              stc_zone_rating: s.stc_zone_rating,
+              stc_install_year: s.stc_install_year,
+              stc_price_per_certificate: s.stc_price_per_certificate,
             })))
             .select();
           if (stagesErr) throw stagesErr;

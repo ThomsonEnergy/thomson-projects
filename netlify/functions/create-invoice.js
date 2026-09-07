@@ -64,16 +64,17 @@ exports.handler = async (event) => {
     // at all (a direct/no-quote job) - there's nothing for a % to mean.
     const overallClaimPercent = projectTotal > 0 ? Math.round((totalAmount / projectTotal) * 10000) / 100 : null;
 
-    // "Final claim" if this invoice brings every stage to fully invoiced
-    // (for a no-quote job, quoted_amount is 0, so any invoice at all
-    // trivially qualifies - correct, since there's no ongoing progress
-    // billing concept without a quote to be "in progress" against),
-    // otherwise "Progress claim N" - N is how many non-deposit invoices
-    // this job already has, +1. Counted in JS rather than a .neq() filter
-    // so a null description (every progress claim raised before this
-    // label existed) still correctly counts as "not the deposit", not
-    // gets silently excluded by SQL's null != 'Deposit' => null semantics.
-    const isFinalClaim = (allCentres || []).every(c => {
+    // "Final claim" if this invoice brings every stage to fully invoiced -
+    // meaningless for a no-quote job (quoted_amount is always 0 there, so
+    // this would trivially call EVERY invoice "Final claim" even when
+    // there's plenty more to invoice later), so that's never a final
+    // claim, always "Progress claim N" instead. Otherwise N is how many
+    // non-deposit invoices this job already has, +1. Counted in JS rather
+    // than a .neq() filter so a null description (every progress claim
+    // raised before this label existed) still correctly counts as "not
+    // the deposit", not gets silently excluded by SQL's
+    // null != 'Deposit' => null semantics.
+    const isFinalClaim = projectTotal > 0 && (allCentres || []).every(c => {
       const claimedForThisCentre = claimRows.find(cr => cr.cost_centre_id === c.id);
       const newInvoiced = (Number(c.invoiced_amount) || 0) + (claimedForThisCentre ? claimedForThisCentre.labour_amount + claimedForThisCentre.material_amount : 0);
       return newInvoiced >= (Number(c.quoted_amount) || 0) - 0.01;

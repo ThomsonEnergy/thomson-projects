@@ -61,7 +61,7 @@
       const listEl = document.getElementById('projects-list');
       const [{ data: projects, error }, { data: poRows }] = await Promise.all([
         supabaseClient.from('projects')
-          .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoices(labour_amount, material_amount, stc_amount))')
+          .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
           .neq('pipeline_stage', 'archived')
           .order('created_at', { ascending: false }),
         supabaseClient.from('purchase_orders').select('project_id, amount, status, purchase_order_line_items(quantity, unit_cost)').neq('status', 'ordered'),
@@ -106,8 +106,7 @@
         const isSigned = !!p.job_number;
         const signed = isSigned ? totalQuoted : 0;
         const pending = isSigned ? 0 : totalQuoted;
-        const invoiced = (p.cost_centres || []).reduce((s, c) =>
-          s + (c.invoices || []).reduce((s2, inv) => s2 + (Number(inv.labour_amount) || 0) + (Number(inv.material_amount) || 0) - (Number(inv.stc_amount) || 0), 0), 0);
+        const invoiced = (p.cost_centres || []).reduce((s, c) => s + (Number(c.invoiced_amount) || 0), 0);
         const costOutlayed = (materialCostByProject[p.id] || 0) + (labourCostByProject[p.id] || 0);
         return { ...p, totalQuoted, signed, pending, invoiced, costOutlayed, isSigned };
       });
