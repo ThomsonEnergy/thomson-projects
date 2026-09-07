@@ -2036,7 +2036,7 @@ async function deleteProject(projectId) {
   const { data: pos } = await supabaseClient.from('purchase_orders').select('id').eq('project_id', projectId);
   const poIds = (pos || []).map(po => po.id);
   if (poIds.length) {
-    await supabaseClient.from('purchase_order_line_items').delete().in('purchase_order_id', poIds);
+    await supabaseClient.from('purchase_order_line_items').delete().in('po_id', poIds);
     await supabaseClient.from('purchase_orders').delete().in('id', poIds);
   }
 

@@ -505,14 +505,14 @@
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
         overlay.remove();
-        await openReviewPanel(data.extracted);
+        await openReviewPanel(data.extracted, null, file);
       } catch (err) {
         overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="extract-err-close">Close</button>`;
         overlay.querySelector('#extract-err-close').addEventListener('click', () => overlay.remove());
       }
     }
 
-    async function openReviewPanel(extracted, preselectedPoId = null) {
+    async function openReviewPanel(extracted, preselectedPoId = null, sourceFile = null) {
       const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand');
       const materials = allMaterials || [];
 
@@ -734,6 +734,16 @@
             return computed;
           })() : null;
 
+          // Keeps the original scan/PDF, same as the sibling statement
+          // upload already does - without this the source document was
+          // silently discarded the moment extraction succeeded, with no
+          // way to pull it back up later.
+          let filePath = null, fileName = null;
+          if (sourceFile) {
+            filePath = await uploadPrivateFile(sourceFile, `bills/${supplierId}`);
+            fileName = sourceFile.name;
+          }
+
           const { data: newBill, error: billErr } = await supabaseClient.from('supplier_bills').insert({
             supplier_id: supplierId,
             supplier_name: currentSupplier.name,
@@ -742,6 +752,8 @@
             due_date: dueDate,
             amount: parseFloat(overlay.querySelector('#rev-total').value) || 0,
             po_id: poId,
+            file_path: filePath,
+            file_name: fileName,
             created_by: user.id,
           }).select('id').single();
           if (billErr) throw billErr;
@@ -842,7 +854,7 @@
           for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
           const file = new File([bytes], fileName, { type: fileType });
 
-          if (type === 'bill') await openReviewPanel(extracted, preselectedPoId || null);
+          if (type === 'bill') await openReviewPanel(extracted, preselectedPoId || null, file);
           else if (type === 'pricelist') await openPricelistReviewPanel(extracted.items);
           else if (type === 'statement') await openStatementReviewPanel(extracted, file);
         }
