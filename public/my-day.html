@@ -67,7 +67,10 @@
       </div>
       <div id="clock-active" style="display:none;">
         <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-project-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
-        <button class="danger" id="clock-out-btn">Clock out</button>
+        <div style="display:flex; gap:8px;">
+          <button class="danger" id="clock-out-btn" style="flex:1;">Clock out</button>
+          <button type="button" class="secondary" id="switch-job-btn" style="flex:1;">Switch job</button>
+        </div>
         <div id="active-job-card" style="display:none;"></div>
       </div>
       <div id="clock-msg"></div>
@@ -125,6 +128,7 @@
         update();
         elapsedInterval = setInterval(update, 30000);
         document.getElementById('clock-out-btn').onclick = () => openClockOutModal(data, checkActiveClock);
+        document.getElementById('switch-job-btn').onclick = () => openJobSwitchModal(data, checkActiveClock);
         await renderActiveJobCard(data.project_id);
       } else {
         document.getElementById('clock-idle').style.display = 'block';

@@ -48,15 +48,17 @@ async function getSignedDocUrl(path) {
   return data.signedUrl;
 }
 
-// Uploads one or more files to the public proposal-photos bucket and returns
-// their public URLs. `folder` keeps things tidy, e.g. 'portfolio' or a project id.
-async function uploadPhotos(fileList, folder) {
+// Uploads one or more files to a public bucket and returns their public
+// URLs. `folder` keeps things tidy, e.g. 'portfolio' or a project id.
+// `bucket` defaults to proposal-photos (quotes/portfolio); site photos
+// taken from the clock-out flow use 'site-photos' instead.
+async function uploadPhotos(fileList, folder, bucket = 'proposal-photos') {
   const urls = [];
   for (const file of fileList) {
     const path = `${folder}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const { error } = await supabaseClient.storage.from('proposal-photos').upload(path, file);
+    const { error } = await supabaseClient.storage.from(bucket).upload(path, file);
     if (error) throw error;
-    const { data } = supabaseClient.storage.from('proposal-photos').getPublicUrl(path);
+    const { data } = supabaseClient.storage.from(bucket).getPublicUrl(path);
     urls.push(data.publicUrl);
   }
   return urls;
@@ -373,14 +375,18 @@ async function clockOutActiveEntry(entry, opts = {}) {
 // ---------- clock-out confirmation wizard ----------
 // Runs whenever someone clocks out (My Day, and the quick button on
 // Home) - confirms which stage(s) the time counts against, lets them
-// nudge the rounded punch time, captures the mandatory 30-minute break
-// (or why it wasn't taken - asked once per Sydney calendar day, not
-// every single clock-out), and finishes with a reminder to log
-// materials, sort any forms, and upload site photos before leaving site.
+// nudge the rounded punch time, captures the mandatory break if they've
+// worked more than 6 hours today (or why it wasn't taken - asked once
+// per Sydney calendar day, not every single clock-out), and finishes
+// with real "before you go" actions: log a site photo, jot a note (with
+// an optional signature), or head to the job.
 // `entry` needs id/staff_id/project_id/cost_centre_id/
 // selected_cost_centre_ids/time_category/clock_in. Calls `onDone` (if
-// given) once the clock-out has actually saved.
-async function openClockOutModal(entry, onDone) {
+// given) once the clock-out has actually saved. `opts.switchTo`
+// ({projectId, label}), when given, clocks straight into that job once
+// this clock-out (and its before-you-go step) is done - see
+// openJobSwitchModal.
+async function openClockOutModal(entry, onDone, opts = {}) {
   let project = null, centres = [];
   if (entry.project_id) {
     const [{ data: proj }, { data: cc }] = await Promise.all([
@@ -397,16 +403,22 @@ async function openClockOutModal(entry, onDone) {
 
   // Has today's mandatory break already been answered against another
   // entry today? Generous UTC window, exact Sydney-date match in JS -
-  // same pattern used server-side for day banding.
+  // same pattern used server-side for day banding. The same fetch also
+  // gives us everything ELSE clocked today, to check the 6-hour
+  // threshold below.
   const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
-  const { data: recentBreaks } = await supabaseClient
+  const { data: recentEntries } = await supabaseClient
     .from('time_entries')
-    .select('clock_in, break_taken')
+    .select('id, clock_in, clock_out, break_taken')
     .eq('staff_id', entry.staff_id)
-    .gte('clock_in', windowStart.toISOString())
-    .not('break_taken', 'is', null);
+    .gte('clock_in', windowStart.toISOString());
   const todayKey = sydneyDateKey(new Date());
-  const breakAlreadyLogged = (recentBreaks || []).some(r => sydneyDateKey(new Date(r.clock_in)) === todayKey);
+  const todaysEntries = (recentEntries || []).filter(r => sydneyDateKey(new Date(r.clock_in)) === todayKey);
+  const breakAlreadyLogged = todaysEntries.some(r => r.break_taken !== null && r.break_taken !== undefined);
+  // Everything already clocked today (other entries) plus however long
+  // THIS entry ends up running once a clock-out time is picked below.
+  const otherTodayMs = todaysEntries.filter(r => r.id !== entry.id && r.clock_out)
+    .reduce((s, r) => s + (new Date(r.clock_out) - new Date(r.clock_in)), 0);
 
   const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '' };
 
@@ -474,7 +486,10 @@ async function openClockOutModal(entry, onDone) {
       combined.setHours(hh, mm, 0, 0);
       if (combined <= new Date(entry.clock_in)) { msg.innerHTML = `<div class="error-box">Clock-out must be after your clock-in time.</div>`; return; }
       state.outIso = combined.toISOString();
-      if (breakAlreadyLogged) finalizeClockOut(); else renderStep2();
+      // Only worth asking about a break once today's actual worked hours
+      // (this entry included) pass 6 - a short day doesn't need one.
+      const todayHours = (otherTodayMs + (combined - new Date(entry.clock_in))) / 3600000;
+      if (breakAlreadyLogged || todayHours <= 6) finalizeClockOut(); else renderStep2();
     });
 
     refreshClockOutSplit();
@@ -674,26 +689,190 @@ async function openClockOutModal(entry, onDone) {
       return;
     }
     if (project) renderStep3();
-    else { overlay.remove(); if (onDone) await onDone(); }
+    else await finishAndMaybeSwitch();
+  }
+
+  // Clocking out is done at this point - if this clock-out was part of a
+  // job switch (see openJobSwitchModal), this is where the new job's
+  // clock-in actually happens, so the gap between jobs is exactly however
+  // long the before-you-go step took, not zero and not backdated.
+  async function finishAndMaybeSwitch() {
+    if (opts.switchTo) {
+      await supabaseClient.from('time_entries').insert({
+        staff_id: entry.staff_id, project_id: opts.switchTo.projectId,
+        time_category: 'job', clock_in: roundToQuarterHour(new Date()).toISOString(),
+      });
+    }
+    overlay.remove();
+    if (onDone) await onDone();
   }
 
   function renderStep3() {
     overlay.innerHTML = `
-      <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
+      <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Before you go...</h2>
-        <p class="subtitle" style="margin-bottom:12px;">You're clocked out of ${projectRef(project)}. Quick reminders:</p>
-        <ul style="margin:0 0 14px; padding-left:20px; font-size:14px; line-height:1.8;">
-          <li>Log any materials you used today</li>
-          <li>Get any forms that need signing sorted</li>
-          <li>Upload any site photos</li>
-        </ul>
-        <a href="/project.html?id=${project.id}" class="btn" style="display:block; text-align:center; text-decoration:none;">Go to job</a>
-        <button type="button" class="secondary" id="cko-finish-btn" style="margin-top:10px; width:100%;">Done</button>
+        <p class="subtitle" style="margin-bottom:12px;">You're clocked out of ${projectRef(project)}.${opts.switchTo ? ` Next up: ${opts.switchTo.label}.` : ''}</p>
+
+        <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
+          <label style="margin-top:0">Site photos</label>
+          <input type="file" id="cko-photo-file" accept="image/*" multiple capture="environment" />
+          <button type="button" class="secondary" id="cko-photo-upload-btn" style="margin-top:8px;">Upload</button>
+          <div id="cko-photo-msg"></div>
+        </div>
+
+        <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
+          <label style="margin-top:0">Note (materials used, forms sorted, anything worth flagging)</label>
+          <textarea id="cko-note-text" rows="2" placeholder="e.g. used 2x 6mm cable, isolator installed"></textarea>
+          <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-weight:400;">
+            <input type="checkbox" id="cko-note-sign-toggle" style="width:auto;" /> Sign this note
+          </label>
+          <div id="cko-note-sign-section" style="display:none; margin-top:8px;"></div>
+          <button type="button" class="secondary" id="cko-note-save-btn" style="margin-top:8px;">Save note</button>
+          <div id="cko-note-msg"></div>
+        </div>
+
+        <a href="/project.html?id=${project.id}" class="link-quiet" style="display:block; text-align:center; margin-bottom:10px; font-size:13px;">Go to job page</a>
+        <button type="button" id="cko-finish-btn" style="width:100%;">${opts.switchTo ? `Clock into ${opts.switchTo.label}` : 'Done'}</button>
       </div>`;
-    overlay.querySelector('#cko-finish-btn').addEventListener('click', async () => { overlay.remove(); if (onDone) await onDone(); });
+
+    let sigCanvas = null, sigCtx = null, hasSignature = false;
+    overlay.querySelector('#cko-note-sign-toggle').addEventListener('change', (e) => {
+      const section = overlay.querySelector('#cko-note-sign-section');
+      if (!e.target.checked) { section.style.display = 'none'; section.innerHTML = ''; sigCanvas = null; return; }
+      section.style.display = 'block';
+      section.innerHTML = `
+        <label style="margin-top:0">Signed by (name)</label>
+        <input id="cko-note-signed-name" placeholder="Full name" />
+        <label>Signature</label>
+        <canvas id="cko-note-sig-canvas" width="380" height="120" style="width:100%; max-width:380px; height:120px; border:1px solid var(--border); border-radius:6px; touch-action:none; background:#fff; display:block;"></canvas>
+        <button type="button" class="secondary" id="cko-note-sig-clear-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Clear signature</button>`;
+      sigCanvas = section.querySelector('#cko-note-sig-canvas');
+      sigCtx = sigCanvas.getContext('2d');
+      sigCtx.strokeStyle = '#000'; sigCtx.lineWidth = 2; sigCtx.lineJoin = 'round'; sigCtx.lineCap = 'round';
+      hasSignature = false;
+      let drawing = false;
+      function pointerPos(ev) {
+        const rect = sigCanvas.getBoundingClientRect();
+        return { x: (ev.clientX - rect.left) * (sigCanvas.width / rect.width), y: (ev.clientY - rect.top) * (sigCanvas.height / rect.height) };
+      }
+      sigCanvas.addEventListener('pointerdown', (ev) => { drawing = true; hasSignature = true; const p = pointerPos(ev); sigCtx.beginPath(); sigCtx.moveTo(p.x, p.y); });
+      sigCanvas.addEventListener('pointermove', (ev) => { if (!drawing) return; const p = pointerPos(ev); sigCtx.lineTo(p.x, p.y); sigCtx.stroke(); });
+      window.addEventListener('pointerup', () => { drawing = false; });
+      section.querySelector('#cko-note-sig-clear-btn').addEventListener('click', () => { sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); hasSignature = false; });
+    });
+
+    overlay.querySelector('#cko-photo-upload-btn').addEventListener('click', async () => {
+      const fileInput = overlay.querySelector('#cko-photo-file');
+      const msg = overlay.querySelector('#cko-photo-msg');
+      if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose a photo first.</div>`; return; }
+      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
+      try {
+        const urls = await uploadPhotos(fileInput.files, project.id, 'site-photos');
+        const { error } = await supabaseClient.from('project_photos').insert(urls.map(url => ({ project_id: project.id, staff_id: entry.staff_id, url })));
+        if (error) throw error;
+        fileInput.value = '';
+        msg.innerHTML = `<div class="success-box">${urls.length} photo${urls.length === 1 ? '' : 's'} added.</div>`;
+      } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+    });
+
+    overlay.querySelector('#cko-note-save-btn').addEventListener('click', async () => {
+      const msg = overlay.querySelector('#cko-note-msg');
+      const noteText = overlay.querySelector('#cko-note-text').value.trim();
+      if (!noteText) { msg.innerHTML = `<div class="error-box">Write a note first.</div>`; return; }
+      const row = { project_id: project.id, staff_id: entry.staff_id, note: noteText };
+      if (overlay.querySelector('#cko-note-sign-toggle').checked) {
+        const signedName = overlay.querySelector('#cko-note-signed-name')?.value.trim();
+        if (!signedName) { msg.innerHTML = `<div class="error-box">Enter the signer's name.</div>`; return; }
+        if (!hasSignature) { msg.innerHTML = `<div class="error-box">Draw a signature.</div>`; return; }
+        row.signed_by_name = signedName;
+        row.signature_data_url = sigCanvas.toDataURL('image/png');
+      }
+      const { error } = await supabaseClient.from('project_field_notes').insert(row);
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      overlay.querySelector('#cko-note-text').value = '';
+      msg.innerHTML = `<div class="success-box">Note saved.</div>`;
+    });
+
+    overlay.querySelector('#cko-finish-btn').addEventListener('click', finishAndMaybeSwitch);
   }
 
   renderStep1();
+}
+
+// Lets someone currently clocked in search for a different job and move
+// straight onto it - picking a job here just runs the exact same
+// clock-out flow as normal (confirm stage(s), the 6-hour break question,
+// before-you-go photos/notes/sign) with one difference: finishing that
+// flow clocks straight into the new job instead of just stopping, so the
+// gap between jobs is whatever the wrap-up actually took, not backdated
+// to zero. `entry` is the currently active time_entries row (needs
+// id/staff_id/project_id/cost_centre_id/selected_cost_centre_ids/
+// time_category/clock_in, same as openClockOutModal). Calls `onDone`
+// once the whole switch (old job's clock-out through to the new job's
+// clock-in) is done.
+async function openJobSwitchModal(entry, onDone) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  document.body.appendChild(overlay);
+
+  overlay.innerHTML = `
+    <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
+      <h2>Switch job</h2>
+      <p class="subtitle" style="margin-bottom:12px;">Search for the job you're moving onto - you'll be asked to wrap up your current one first.</p>
+      <input id="switch-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
+      <div id="switch-job-results" style="margin-top:8px;"></div>
+      <button type="button" class="secondary" id="switch-job-cancel-btn" style="margin-top:14px; width:100%;">Cancel</button>
+    </div>`;
+
+  function renderResults(results, label) {
+    const resultsEl = overlay.querySelector('#switch-job-results');
+    if (!results.length) { resultsEl.innerHTML = label ? '' : `<p class="subtitle">No matches.</p>`; return; }
+    resultsEl.innerHTML = `
+      ${label ? `<p class="subtitle" style="margin:0 0 4px; font-size:12px;">${label}</p>` : ''}
+      <div style="border:1px solid var(--border); border-radius:8px;">
+        ${results.filter(p => p.id !== entry.project_id).map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p).replace(/"/g, '&quot;')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+      </div>`;
+    resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
+      row.addEventListener('click', () => {
+        overlay.remove();
+        openClockOutModal(entry, onDone, { switchTo: { projectId: row.dataset.id, label: row.dataset.label } });
+      });
+    });
+  }
+
+  async function showRecent() {
+    const { data } = await supabaseClient
+      .from('time_entries')
+      .select('project_id, clock_in, projects(id, name, job_number, quote_number, client_name)')
+      .eq('staff_id', entry.staff_id)
+      .not('project_id', 'is', null)
+      .order('clock_in', { ascending: false })
+      .limit(50);
+    const seen = new Set();
+    const recent = [];
+    for (const row of data || []) {
+      if (!row.projects || seen.has(row.project_id)) continue;
+      seen.add(row.project_id);
+      recent.push(row.projects);
+      if (recent.length >= 8) break;
+    }
+    renderResults(recent, 'Recent jobs');
+  }
+
+  overlay.querySelector('#switch-job-search').addEventListener('focus', (e) => {
+    if (e.target.value.trim().length < 2) showRecent();
+  });
+  let searchTimeout;
+  overlay.querySelector('#switch-job-search').addEventListener('input', (e) => {
+    clearTimeout(searchTimeout);
+    const q = e.target.value.trim();
+    if (q.length === 0) { showRecent(); return; }
+    if (q.length < 2) { overlay.querySelector('#switch-job-results').innerHTML = ''; return; }
+    searchTimeout = setTimeout(async () => renderResults(await searchProjects(q)), 250);
+  });
+  overlay.querySelector('#switch-job-cancel-btn').addEventListener('click', () => overlay.remove());
+
+  showRecent();
 }
 
 // STC (Small-scale Technology Certificate) quantity, per the Clean Energy

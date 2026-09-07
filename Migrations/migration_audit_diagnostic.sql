@@ -248,4 +248,10 @@ select '082', 'xero_overtime_earnings_rates',
 union all
 select '083', 'finance_role_timesheet_management',
   case when exists (select 1 from information_schema.routines where routine_name = 'is_finance_role') then 'present' else 'MISSING' end
+union all
+select '084', 'field_photos_notes',
+  case when exists (select 1 from information_schema.tables where table_name = 'project_photos')
+    and exists (select 1 from information_schema.tables where table_name = 'project_field_notes')
+    and exists (select 1 from storage.buckets where id = 'site-photos')
+  then 'present' else 'MISSING' end
 order by 1;
