@@ -30,6 +30,20 @@ guessing, and skip it until it's answered.
 - **What they want:** Have an option to create a credit note for an invcoice, and push to xero
 - **Record id:** 5e2b56ca-2cbc-477f-8eeb-3daeaec28535
 
+### Update idea: xero updates
+- **Reported:** 4 Sept 2026, 04:39 am by Nathan Hicks
+- **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
+- **Page/feature:** Invoicing
+- **What they want:** When we create an invoice have it push to xero approved not as a draft.
+- **Record id:** 31cc02b4-7b05-494e-af87-f62875861796
+
+### Update idea: job search
+- **Reported:** 3 Sept 2026, 08:54 pm by Nathan Hicks
+- **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
+- **Page/feature:** my day
+- **What they want:** when im clocked into a job have a search bar for any other jobs so we cna clock into anothe rjob without clocking out.
+- **Record id:** 0207bcdc-1208-46e5-ade6-7468d1a5aeb9
+
 ## In Progress
 
 None.
