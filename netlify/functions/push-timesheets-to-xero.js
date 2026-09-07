@@ -22,7 +22,7 @@
 // before are included (xero_pushed_at is null) - safe to re-run without
 // double-pushing hours already sent.
 
-const { requirePricingRole } = require('./_shared/require-pricing-role');
+const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { xeroRequest } = require('./_shared/xero-client');
 const { getOrCreateTrackingOptionId } = require('./_shared/xero-tracking');
 const { dayBands, localDateKey, entryHours } = require('./_shared/compute-labour-cost');
@@ -45,7 +45,7 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
-  const auth = await requirePricingRole(event);
+  const auth = await requireFinanceRole(event);
   if (!auth) {
     return { statusCode: 403, body: JSON.stringify({ error: 'Not authorized' }) };
   }

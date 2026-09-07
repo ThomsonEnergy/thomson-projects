@@ -245,4 +245,7 @@ select '082', 'xero_overtime_earnings_rates',
     and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_ot2_earnings_rate_id')
     and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_public_holiday_earnings_rate_id')
   then 'present' else 'MISSING' end
+union all
+select '083', 'finance_role_timesheet_management',
+  case when exists (select 1 from information_schema.routines where routine_name = 'is_finance_role') then 'present' else 'MISSING' end
 order by 1;
