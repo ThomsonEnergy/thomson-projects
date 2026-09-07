@@ -172,24 +172,27 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 1. ~~User invite email not sending~~ — `invite-user.js` calls Supabase Auth's real invite-email function; working.
 2. ~~Admin can't edit user names~~ — Settings → Users profile panel has a working update path.
 
-### B2. Settings Restructure (still planned)
-- New "Admin Only" sub-category/visibility flag for settings that rarely change and shouldn't be seen by non-admin roles — at minimum Company Details and Xero Mapping; consider extending to Numbering and Payment Terms/T&Cs
-- Not yet built — Settings currently has no such visibility flag
+### B2. Settings Restructure (built)
+- "Admin Only" visibility flag exists (`data-admin-only="1"` on the tab + panel) and is applied more broadly than originally asked: Company Details, Xero Mapping, Numbering, Payment Terms & T&Cs, Users & Roles, Onboarding Documents, API Keys, and Insurance & Licensing are all hidden from non-admin roles
+- Separately, a `data-pricing-only="1"` flag hides Quoting Defaults, Billable Rates, and Prebuild Categories from Staff (visible to admin/finance/sales)
 
-**Settings categories (current + planned):**
-| Category | Contains |
-|---|---|
-| **Company Details** *(planned: Admin Only)* | Name, ABN, address, phone, website, licences, logo, tagline |
-| **Xero Mapping** *(planned: Admin Only)* | Account codes + tax type per line item type — built and live, just not yet visibility-restricted |
-| **Numbering** | Next PC invoice, project, quote, invoice, PO numbers |
-| **Quoting Defaults** | Default markup %, default deposit % |
-| **Payment Terms & T&Cs** | Editable text blocks, including Quick Estimate disclaimer |
-| **Payment Details** | Bank name, account name, BSB, account number — shown on invoices; payment reference auto-populated with invoice number |
-| **Photo Categories** | Electrical / Solar / General — extendable |
-| **Prebuild Categories** | Electrical (Lighting/Power/Trenching/Cable Runs), Solar (Panels/Batteries/Inverters) — extendable |
-| **Billable Rates** | Hourly rate tiers, cost rate + sell rate each — built (see D1) |
-| **Users & Roles** | Staff accounts, role assignment, licence/insurance tracking with AI-extracted expiry dates |
-| **Appearance** | Theme toggle (Navy Pro / Dark Trade) |
+**Settings categories (current):**
+| Category | Visibility | Contains |
+|---|---|---|
+| **Company Details** | Admin only | Name, ABN, address, phone, website, licences, logo, tagline |
+| **Xero Mapping** | Admin only | Account codes + tax type per line item type (C4) |
+| **Numbering** | Admin only | Next PC invoice, project, quote, invoice, PO numbers |
+| **Quoting Defaults** | Pricing roles | Default markup %, default deposit % |
+| **Payment Terms & T&Cs** | Admin only | Editable text blocks, including Quick Estimate disclaimer |
+| **Payment Details** | — | Bank name, account name, BSB, account number — shown on invoices; payment reference auto-populated with invoice number |
+| **Photo Categories** | — | Electrical / Solar / General — extendable |
+| **Prebuild Categories** | Pricing roles | Electrical (Lighting/Power/Trenching/Cable Runs), Solar (Panels/Batteries/Inverters) — extendable |
+| **Billable Rates** | Pricing roles | Hourly rate tiers, cost rate + sell rate each (D1) |
+| **Users & Roles** | Admin only | Staff accounts, role assignment |
+| **Onboarding Documents** | Admin only | Docs new staff review & sign |
+| **API Keys** | Admin only | Integration credentials |
+| **Insurance & Licensing** | Admin only | Company + employee licence/insurance tracking, AI-extracted expiry dates |
+| **Appearance** | — | Theme toggle (Navy Pro / Dark Trade) |
 
 ### B3. User Management (mostly built)
 - Admin-editable user names/roles — built (B1)
@@ -415,4 +418,3 @@ The tabbed layout, activity sidebar, and role-aware display envisioned here are 
 - [ ] Confirm Employment Hero → Xero Payroll cutover timing (H2) — don't drop EH until proven stable over a full pay cycle
 - [ ] Wholesaler quote matching fallback (D4): manual pairing option, or flag-only, when a line doesn't match a part number exactly? (Not urgent — D4 itself isn't started.)
 - [ ] Site inspection checklist (Part K): what questions/photos does this business actually need, given both electrical and solar work
-- [ ] Settings "Admin Only" visibility flag (B2): worth building now, or defer until more admin-only settings accumulate?
