@@ -17,6 +17,12 @@ guessing, and skip it until it's answered.
 - **What they want:** I want the quick job to be built differently from a quote and project. Click it and add customer details but it will be just do and charge so no quoting section no variation nothing. Just log time and pos and based off time and materials it creates bill amount. But make the time and materials editable too so we can add more or take some off. Remove the ability to make an invoice standalone and this will take its place so we can actually add costs to it and make it an invoice.
 - **Record id:** 99527a44-210e-41a4-9dd5-f9ddeac18120
 
+### Bug: Calender isnt putting jobs on
+- **Reported:** 4 Sept 2026, 05:12 am by Nathan Hicks
+- **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
+- **What's happening:** Jobs cant be dragged onto the schedule
+- **Record id:** 70b1f34a-ffcd-4684-98f7-19ada1d6aa69
+
 ## In Progress
 
 None.
