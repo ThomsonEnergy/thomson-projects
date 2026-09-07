@@ -254,4 +254,10 @@ select '084', 'field_photos_notes',
     and exists (select 1 from information_schema.tables where table_name = 'project_field_notes')
     and exists (select 1 from storage.buckets where id = 'site-photos')
   then 'present' else 'MISSING' end
+union all
+select '085', 'laha_allowance',
+  case when exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'laha_approved')
+    and exists (select 1 from information_schema.columns where table_name = 'time_entries' and column_name = 'stayed_overnight')
+    and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_laha_earnings_rate_id')
+  then 'present' else 'MISSING' end
 order by 1;

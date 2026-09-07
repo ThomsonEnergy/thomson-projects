@@ -390,7 +390,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   let project = null, centres = [];
   if (entry.project_id) {
     const [{ data: proj }, { data: cc }] = await Promise.all([
-      supabaseClient.from('projects').select('id, name, job_number, quote_number').eq('id', entry.project_id).maybeSingle(),
+      supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved').eq('id', entry.project_id).maybeSingle(),
       supabaseClient.from('cost_centres').select('id, name').eq('project_id', entry.project_id).order('sort_order'),
     ]);
     project = proj;
@@ -409,7 +409,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
   const { data: recentEntries } = await supabaseClient
     .from('time_entries')
-    .select('id, clock_in, clock_out, break_taken')
+    .select('id, project_id, clock_in, clock_out, break_taken, stayed_overnight')
     .eq('staff_id', entry.staff_id)
     .gte('clock_in', windowStart.toISOString());
   const todayKey = sydneyDateKey(new Date());
@@ -419,8 +419,12 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   // THIS entry ends up running once a clock-out time is picked below.
   const otherTodayMs = todaysEntries.filter(r => r.id !== entry.id && r.clock_out)
     .reduce((s, r) => s + (new Date(r.clock_out) - new Date(r.clock_in)), 0);
+  // Overnight-stay is asked once per (day, job) - a mobilisation job
+  // usually runs several consecutive days, so this only needs answering
+  // once per day even if it's clocked in and out of more than once.
+  const lahaAlreadyLogged = todaysEntries.some(r => r.project_id === entry.project_id && r.stayed_overnight !== null && r.stayed_overnight !== undefined);
 
-  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '' };
+  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '', stayedOvernight: null };
 
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
@@ -490,7 +494,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       // Only worth asking about a break once today's actual worked hours
       // (this entry included) pass 6 - a short day doesn't need one.
       const todayHours = (otherTodayMs + (combined - new Date(entry.clock_in))) / 3600000;
-      if (breakAlreadyLogged || todayHours <= 6) finalizeClockOut(); else renderStep2();
+      if (breakAlreadyLogged || todayHours <= 6) proceedAfterBreak(); else renderStep2();
     });
 
     refreshClockOutSplit();
@@ -613,8 +617,30 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         if (!reasonVal) { msg.innerHTML = `<div class="error-box">A quick reason is required.</div>`; return; }
         state.breakSkipReason = reasonVal;
       }
-      finalizeClockOut();
+      proceedAfterBreak();
     });
+  }
+
+  // Break's been asked (or didn't need to be) - LAHA is the last
+  // question before actually clocking out, only for a job approved for
+  // it and not already answered today.
+  function proceedAfterBreak() {
+    if (project && project.laha_approved && !lahaAlreadyLogged) renderStepLaha(); else finalizeClockOut();
+  }
+
+  function renderStepLaha() {
+    overlay.innerHTML = `
+      <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
+        <h2>Staying overnight?</h2>
+        <p class="subtitle" style="margin-bottom:12px;">${projectRef(project)} is approved for LAHA (living-away-from-home allowance). Did you stay overnight away from home for it?</p>
+        <div style="display:flex; gap:10px;">
+          <button type="button" id="cko-laha-yes" style="flex:1;">Yes</button>
+          <button type="button" class="secondary" id="cko-laha-no" style="flex:1;">No</button>
+        </div>
+        <div id="cko-msg"></div>
+      </div>`;
+    overlay.querySelector('#cko-laha-yes').addEventListener('click', () => { state.stayedOvernight = true; finalizeClockOut(); });
+    overlay.querySelector('#cko-laha-no').addEventListener('click', () => { state.stayedOvernight = false; finalizeClockOut(); });
   }
 
   async function finalizeClockOut() {
@@ -630,6 +656,9 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       } else {
         onceFields.break_skip_reason = state.breakSkipReason;
       }
+    }
+    if (state.stayedOvernight !== null) {
+      onceFields.stayed_overnight = state.stayedOvernight;
     }
 
     const doingSplit = chosenCentres.length > 1 && splitPercentages.length === chosenCentres.length;
@@ -920,6 +949,11 @@ function openQuickJobPanel(onCreated) {
       <label>Site address</label>
       <input id="qj-address" placeholder="Job site address" />
 
+      <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:400;">
+        <input type="checkbox" id="qj-laha-approved" style="width:auto;" /> LAHA approved (more than 100km from base)
+      </label>
+      <p class="subtitle" style="margin-top:4px;">Staff clocking out of this job will be asked whether they stayed overnight, and the allowance gets added to their pay automatically.</p>
+
       <div style="margin-top:14px;">
         <button id="qj-confirm-btn">Create job</button>
         <button type="button" class="secondary" id="qj-cancel-btn">Cancel</button>
@@ -1001,6 +1035,7 @@ function openQuickJobPanel(onCreated) {
         proposal_template: 'direct_job',
         pipeline_stage: 'job_booked',
         status: 'in_progress',
+        laha_approved: overlay.querySelector('#qj-laha-approved').checked,
       }).select('id, name, job_number').single();
       if (error) throw error;
 

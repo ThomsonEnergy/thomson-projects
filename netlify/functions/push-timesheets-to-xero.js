@@ -21,6 +21,12 @@
 // account than ordinary hours. Only entries that haven't been pushed
 // before are included (xero_pushed_at is null) - safe to re-run without
 // double-pushing hours already sent.
+//
+// Also pushes a LAHA (living-away-from-home allowance) line for every
+// night flagged at clock-out (time_entries.stayed_overnight, only asked
+// for a project with projects.laha_approved set) - NumberOfUnits here is
+// nights, not hours, same "units on a TimesheetLine, Xero's own rate
+// config decides the $" mechanism as the hourly bands.
 
 const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { xeroRequest } = require('./_shared/xero-client');
@@ -59,7 +65,7 @@ exports.handler = async (event) => {
 
     const { data: settings } = await supabaseAdmin
       .from('company_settings')
-      .select('xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_tracking_category_id')
+      .select('xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_laha_earnings_rate_id, xero_tracking_category_id')
       .eq('id', 1)
       .single();
     if (!settings?.xero_ordinary_earnings_rate_id) {
@@ -165,6 +171,27 @@ exports.handler = async (event) => {
         });
       });
 
+      // LAHA nights - separate from the hour bands above since units here
+      // are "1 per night stayed", not hours. Already at most one flagged
+      // entry per (project, day) by construction (clock-out only asks
+      // once per day per project), so no dedupe needed.
+      const lahaNightsByLabelDay = {};
+      staffEntries.filter(e => e.stayed_overnight === true).forEach(e => {
+        const label = trackingLabelFor(e);
+        const labelDays = (lahaNightsByLabelDay[label] ||= {});
+        labelDays[localDateKey(e.clock_in)] = 1;
+      });
+      const hasLahaNights = Object.values(lahaNightsByLabelDay).some(days => Object.values(days).some(n => n > 0));
+      // Unlike the OT/PH rate fallback (still pays the right total, just
+      // at the wrong $/hr), there's no safe fallback for a missing LAHA
+      // rate - once these hours are pushed and marked xero_pushed_at,
+      // the flagged night can never be reconsidered. Skip this person's
+      // WHOLE push rather than silently lose the allowance.
+      if (hasLahaNights && !settings.xero_laha_earnings_rate_id) {
+        skipped.push(`${staffName}: has LAHA nights logged but no LAHA earnings rate ID is set (Settings > Xero Mapping) - set that first so the allowance isn't lost.`);
+        continue;
+      }
+
       const timesheetLines = [];
       let allEntriesForThisStaff = [];
       for (const label of Object.keys(unitsByLabelBandDay)) {
@@ -183,6 +210,20 @@ exports.handler = async (event) => {
           });
           labelHasLine = true;
         });
+
+        const lahaDays = lahaNightsByLabelDay[label];
+        if (lahaDays) {
+          const numberOfUnits = days.map(d => lahaDays[d] || 0);
+          if (numberOfUnits.some(n => n > 0)) {
+            timesheetLines.push({
+              EarningsRateID: settings.xero_laha_earnings_rate_id,
+              NumberOfUnits: numberOfUnits,
+              TrackingItemID: trackingItemId || undefined,
+            });
+            labelHasLine = true;
+          }
+        }
+
         if (labelHasLine) {
           allEntriesForThisStaff = allEntriesForThisStaff.concat(staffEntries.filter(e => trackingLabelFor(e) === label));
         }

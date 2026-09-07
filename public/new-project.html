@@ -191,6 +191,14 @@
       </div>
     </div>
 
+    <div class="card">
+      <h2>Living away from home</h2>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:400;">
+        <input type="checkbox" id="p-laha-approved" style="width:auto;" /> LAHA approved for this job
+      </label>
+      <p class="subtitle" style="margin-top:6px;">For jobs more than 100km from base with a Mobilisation stage already covering travel/LAHA in the quote. Once approved, staff clocking out of this job are asked whether they stayed overnight, and the allowance gets added to their pay automatically.</p>
+    </div>
+
     <div class="card" id="pylon-card">
       <h2>Pylon system design</h2>
       <p class="subtitle" style="margin-bottom:10px;">Link to the Pylon proposal so the client can view the interactive design. Shown as a button on the proposal.</p>
@@ -1003,6 +1011,7 @@
         name, client_id: clientId, client_name, client_email, client_phone, client_address,
         sow_text, proposal_subtitle, terms_text,
         deposit_percent, pylon_link, pylon_project_id,
+        laha_approved: document.getElementById('p-laha-approved').checked,
         reference_photos: referencePhotos.map(url => ({ url })),
         cover_photos: coverPhotos,
         proposal_template: currentTemplate,
@@ -1156,6 +1165,7 @@
       document.getElementById('p-sow').value = project.sow_text || '';
       document.getElementById('p-terms').value = project.terms_text || '';
       document.getElementById('p-deposit').value = project.deposit_percent;
+      document.getElementById('p-laha-approved').checked = !!project.laha_approved;
       (project.payment_milestones || []).slice().sort((a, b) => a.sort_order - b.sort_order).forEach(m => {
         document.getElementById('milestone-rows').insertAdjacentHTML('beforeend', milestoneRowHtml(m));
       });

@@ -191,6 +191,9 @@
             <label>Public holiday (2.5x) earnings rate ID</label>
             <input id="xero-public-holiday-earnings-rate-id" placeholder="Optional - falls back to Ordinary Hours if blank" />
             <p class="subtitle" style="margin:2px 0 0;">Timesheets already band each day's hours into these 4 rates the same way payroll costing does. Set up a separate earnings rate for each in Xero (linked to whichever account it should post to, e.g. 477 for ordinary, 477.5 for OT1) to have them post separately - any left blank here fall back to Ordinary Hours.</p>
+            <label>LAHA (living away from home) earnings rate ID</label>
+            <input id="xero-laha-earnings-rate-id" placeholder="Required before pushing anyone with a flagged overnight stay" />
+            <p class="subtitle" style="margin:2px 0 0;">Paid per night flagged at clock-out on a LAHA-approved job (Settings on the job/quote itself). No fallback for this one - if it's not set, that person's whole timesheet is skipped (not pushed at the wrong rate) until it is.</p>
             <label>Payroll calendar ID</label>
             <input id="xero-payroll-calendar-id" placeholder="Use Look up IDs below to find this" />
             <p class="subtitle" style="margin:2px 0 0;">Every employee needs one of these assigned in Xero before they can have timesheets or a pay run - pushing an employee to Xero now assigns this one automatically.</p>
@@ -2634,13 +2637,14 @@
     });
 
     async function loadXeroConnection() {
-      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_payroll_calendar_id').eq('id', 1).single();
+      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_laha_earnings_rate_id, xero_payroll_calendar_id').eq('id', 1).single();
       if (data) {
         document.getElementById('xero-tracking-category-id').value = data.xero_tracking_category_id || '';
         document.getElementById('xero-earnings-rate-id').value = data.xero_ordinary_earnings_rate_id || '';
         document.getElementById('xero-ot1-earnings-rate-id').value = data.xero_ot1_earnings_rate_id || '';
         document.getElementById('xero-ot2-earnings-rate-id').value = data.xero_ot2_earnings_rate_id || '';
         document.getElementById('xero-public-holiday-earnings-rate-id').value = data.xero_public_holiday_earnings_rate_id || '';
+        document.getElementById('xero-laha-earnings-rate-id').value = data.xero_laha_earnings_rate_id || '';
         document.getElementById('xero-payroll-calendar-id').value = data.xero_payroll_calendar_id || '';
       }
     }
@@ -2655,6 +2659,7 @@
           xero_ot1_earnings_rate_id: document.getElementById('xero-ot1-earnings-rate-id').value.trim(),
           xero_ot2_earnings_rate_id: document.getElementById('xero-ot2-earnings-rate-id').value.trim(),
           xero_public_holiday_earnings_rate_id: document.getElementById('xero-public-holiday-earnings-rate-id').value.trim(),
+          xero_laha_earnings_rate_id: document.getElementById('xero-laha-earnings-rate-id').value.trim(),
           xero_payroll_calendar_id: document.getElementById('xero-payroll-calendar-id').value.trim(),
         })
         .eq('id', 1);
@@ -2701,6 +2706,7 @@
                 <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot1-earnings-rate-id').value='${er.id}'">OT1 1.5x</button>
                 <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot2-earnings-rate-id').value='${er.id}'">OT2 2x</button>
                 <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-earnings-rate-id').value='${er.id}'">Public hol.</button>
+                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-laha-earnings-rate-id').value='${er.id}'">LAHA</button>
               </div>
             </div>`;
           });

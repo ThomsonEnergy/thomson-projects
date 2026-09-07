@@ -2388,6 +2388,17 @@
               </div>
               ` : ''}
 
+              ${project.job_number && pricingVisible ? `
+              <div class="card">
+                <h2>Living away from home</h2>
+                <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:400;">
+                  <input type="checkbox" id="laha-approved-toggle" ${project.laha_approved ? 'checked' : ''} style="width:auto;" /> LAHA approved for this job
+                </label>
+                <p class="subtitle" style="margin-top:6px;">For jobs more than 100km from base with a Mobilisation stage covering travel/LAHA. Staff clocking out of this job are asked whether they stayed overnight, and the allowance gets added to their pay automatically.</p>
+                <div id="laha-approved-msg"></div>
+              </div>
+              ` : ''}
+
               ${['client_handover', 'awaiting_payment', 'archived'].includes(project.pipeline_stage) ? `
               <div class="card">
                 <h2>Compliance - CCEW</h2>
@@ -2474,6 +2485,14 @@
       if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
       const invoiceActualBtn = document.getElementById('invoice-actual-btn');
       if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => openInvoiceActualCostsPanel(project));
+
+      const lahaToggle = document.getElementById('laha-approved-toggle');
+      if (lahaToggle) lahaToggle.addEventListener('change', async (e) => {
+        const { error } = await supabaseClient.from('projects').update({ laha_approved: e.target.checked }).eq('id', project.id);
+        const msgEl = document.getElementById('laha-approved-msg');
+        msgEl.innerHTML = error ? `<div class="error-box">${error.message}</div>` : '';
+        if (!error) project.laha_approved = e.target.checked;
+      });
       document.querySelectorAll('.push-xero-btn').forEach(btn => {
         btn.addEventListener('click', () => pushExistingInvoiceToXero(btn));
       });
