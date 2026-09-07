@@ -89,13 +89,15 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 - Part number is internal-only, not locked to a supplier SKU
 - Xero coding: labour → Labour Income account, materials → Materials/Trading Income account, via the live `xero_account_mapping` table (see C4)
 - Categories: Electrical (Lighting/Power/Trenching/Cable Runs), Solar (Panels/Batteries/Inverters), searchable/filterable
+- **Real data, first population:** 55 prebuilds bulk-imported from a cleaned ServiceM8 bundle-catalog export (2026-09-07) — labour consolidated to the "Licensed Electrical Specialist" rate tier (D1), Contingency/Sundries markup lines kept as flat per-bundle amounts. This was a one-time manual/scripted SQL import from a specific spreadsheet, **not** the AI-generation feature itself — D3 (below) is still not built.
 - **Not yet built:** AI-assisted prebuild generation from a text description or uploaded document — see D3
 
 ### A9a. Materials Database (built)
 - Standalone `materials` table — name, category, supplier, cost price, sell price, quantity on hand — distinct from Prebuilds
 - Populated/updated via AI extraction from an uploaded supplier price list (`extract-pricelist.js`), same pattern as the PO invoice extraction in A11
 - Materials selectable as quote/invoice line items
-- **Remaining:** Prebuilds (A9) should be refactored to reference this table for their material components rather than storing standalone lines; per-job gross profit (D5) still needs to roll this cost in
+- **Real data:** 174 materials bulk-imported alongside the A9 prebuild import above, same source spreadsheet — 107 landed in a real category (Cable, Downlight, Switch, Power Point/GPO, Wall/Ceiling Fan, Switchboard, etc.), 67 are tagged `Other / Needs Review` (didn't match a clean keyword rule during cleanup) and still need a manual categorisation pass - usable as-is in the meantime, just not filterable by category yet
+- **Remaining:** Prebuilds (A9) should be refactored to reference this table for their material components rather than storing standalone lines (this import kept the existing denormalized pattern rather than pre-building the category-based "generic material swap at PO time" concept raised alongside it - that's a real, separate follow-up, not done here)
 
 ### A10. Purchase Orders — fully rebuilt (built)
 - Sequential numbering from PO2000, prefix/next-number editable in Settings, same atomic-counter pattern as quotes/jobs/invoices
@@ -419,3 +421,6 @@ The tabbed layout, activity sidebar, role-aware display, and the Materials/Labou
 - [ ] Confirm Employment Hero → Xero Payroll cutover timing (H2) — don't drop EH until proven stable over a full pay cycle
 - [ ] Wholesaler quote matching fallback (D4): manual pairing option, or flag-only, when a line doesn't match a part number exactly? (Not urgent — D4 itself isn't started.)
 - [ ] Site inspection checklist (Part K): what questions/photos does this business actually need, given both electrical and solar work
+- [ ] Categorise the 67 "Other / Needs Review" materials from the ServiceM8 import (A9a) - manual pass or AI-assisted with review
+- [ ] Confirm the one auto-picked switch bundle from the ServiceM8 import ("ELRESINLSPLATE" / light switch plate) - imported with the cheapest of 14 uncategorised options as a placeholder default, worth a quick look
+- [ ] Generic-material-swap at PO time (raised alongside the ServiceM8 import, A9a): should prebuild components reference a material category instead of one locked material, so `buildMaterialSearchRow` can offer any matching item at PO-generation time? Real follow-up work, not done as part of the import itself.
