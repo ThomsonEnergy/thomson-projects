@@ -184,7 +184,7 @@
     async function loadProjectOptions() {
       const { data } = await supabaseClient
         .from('projects')
-        .select('id, name, job_number, quote_number')
+        .select('id, name, job_number, quote_number, laha_approved')
         .neq('pipeline_stage', 'archived')
         .order('created_at', { ascending: false })
         .limit(200);
@@ -377,7 +377,10 @@
       });
 
       // Only flags what needs attention - a skipped break (with the reason
-      // given) or hours logged with no break answer at all, not every day.
+      // given), or hours logged with no break answer at all on a day long
+      // enough to have actually needed one (same >6h threshold clock-out
+      // itself uses to decide whether to ask at all - a short day was
+      // never asked, so it's not missing anything).
       const exceptions = [];
       (staff || []).forEach(s => {
         days.forEach(d => {
@@ -386,7 +389,9 @@
           if (!dayEntries.length) return;
           const breakEntry = breakInfoFor(dayEntries);
           if (!breakEntry) {
-            exceptions.push({ staffName: s.full_name || 'Unnamed', staffId: s.id, dStr, day: d, note: 'Break not recorded', isSkip: false });
+            if (hoursFor(s.id, dStr) > 6) {
+              exceptions.push({ staffName: s.full_name || 'Unnamed', staffId: s.id, dStr, day: d, note: 'Break not recorded', isSkip: false });
+            }
           } else if (breakEntry.break_taken === false) {
             exceptions.push({ staffName: s.full_name || 'Unnamed', staffId: s.id, dStr, day: d, note: `No break taken${breakEntry.break_skip_reason ? ' - ' + breakEntry.break_skip_reason : ''}`, isSkip: true });
           }
@@ -536,16 +541,23 @@
     let dayRemovedBlocks = [];
 
     function blankDayBlock() {
-      return { key: dayBlockKeySeq++, id: null, projectId: null, ccIds: [], clockInTime: '', clockOutTime: '', xeroPushed: false, centres: [], splitPercentages: [], origClockIn: null, origClockOut: null, origProjectId: null, timeCategory: 'office' };
+      return {
+        key: dayBlockKeySeq++, id: null, projectId: null, projectLabel: '', projectLahaApproved: false, ccIds: [],
+        clockInTime: '', clockOutTime: '', xeroPushed: false, centres: [], splitPercentages: [],
+        origClockIn: null, origClockOut: null, origProjectId: null, timeCategory: 'office', stayedOvernight: null,
+      };
     }
     function dayBlockFromEntry(e) {
       const ccIds = (e.selected_cost_centre_ids && e.selected_cost_centre_ids.length) ? e.selected_cost_centre_ids.slice() : (e.cost_centre_id ? [e.cost_centre_id] : []);
       return {
-        key: dayBlockKeySeq++, id: e.id, projectId: e.project_id, ccIds,
+        key: dayBlockKeySeq++, id: e.id, projectId: e.project_id,
+        projectLabel: e.projects ? projectRef(e.projects) : '', projectLahaApproved: !!(e.projects && e.projects.laha_approved),
+        ccIds,
         clockInTime: isoToTimePart(e.clock_in), clockOutTime: isoToTimePart(e.clock_out),
         xeroPushed: !!e.xero_pushed_at, centres: [], splitPercentages: [],
         origClockIn: e.clock_in, origClockOut: e.clock_out, origProjectId: e.project_id,
         timeCategory: (e.time_category && e.time_category !== 'job') ? e.time_category : 'office',
+        stayedOvernight: e.stayed_overnight !== null && e.stayed_overnight !== undefined ? e.stayed_overnight : null,
       };
     }
     function dayBlockTotalMinutes(block, dateStr) {
@@ -562,7 +574,7 @@
       const windowEnd = new Date(windowStart); windowEnd.setDate(windowEnd.getDate() + 1);
       const { data: existing, error } = await supabaseClient
         .from('time_entries')
-        .select('id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, clock_out, xero_pushed_at, break_taken, break_start, break_minutes, break_skip_reason')
+        .select('id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, clock_out, xero_pushed_at, break_taken, break_start, break_minutes, break_skip_reason, stayed_overnight, projects(name, job_number, quote_number, laha_approved)')
         .eq('staff_id', staffId)
         .gte('clock_in', windowStart.toISOString())
         .lt('clock_in', windowEnd.toISOString())
@@ -661,14 +673,13 @@
 
       async function renderBlock(block, el) {
         await ensureCentresLoaded(block);
-        const selectedProject = block.projectId ? cachedProjects.find(p => p.id === block.projectId) : null;
 
         el.innerHTML = `
           ${block.xeroPushed ? `<p class="subtitle" style="margin:0 0 8px;">This block's time is already in Xero and can't be changed - the job/stage can still be corrected.</p>` : ''}
           <div style="display:flex; gap:10px; align-items:flex-end;">
             <div style="flex:1;">
               <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
-              <input class="day-block-job-search" placeholder="Job number, name, client..." autocomplete="off" value="${selectedProject ? projectRef(selectedProject) : ''}" />
+              <input class="day-block-job-search" placeholder="Job number, name, client..." autocomplete="off" value="${block.projectLabel}" />
               <div class="day-block-job-results"></div>
             </div>
             <button type="button" class="secondary day-block-remove" style="flex-shrink:0;">Remove</button>
@@ -680,6 +691,13 @@
               <option value="training" ${block.timeCategory === 'training' ? 'selected' : ''}>Training</option>
               <option value="other" ${block.timeCategory === 'other' ? 'selected' : ''}>Other</option>
             </select>
+          </div>
+          <div class="day-block-laha-row" style="${block.projectLahaApproved ? '' : 'display:none;'} margin-top:8px; padding:10px; background:var(--surface-2); border-radius:8px;">
+            <label style="margin-top:0">This job is LAHA-approved - stayed overnight?</label>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="secondary day-block-laha-yes" style="flex:1; ${block.stayedOvernight === true ? 'border-color:var(--accent);' : ''}">Yes</button>
+              <button type="button" class="secondary day-block-laha-no" style="flex:1; ${block.stayedOvernight === false ? 'border-color:var(--accent);' : ''}">No</button>
+            </div>
           </div>
           <div class="day-block-cc" style="${block.centres.length ? '' : 'display:none;'} margin-top:8px;">
             <label style="margin-top:0">Stage(s)</label>
@@ -712,7 +730,10 @@
             </div>`;
           jobResultsEl.querySelectorAll('.day-block-job-pick').forEach(row => {
             row.addEventListener('click', async () => {
-              block.projectId = row.dataset.id;
+              const picked = results.find(p => p.id === row.dataset.id);
+              block.projectId = picked.id;
+              block.projectLabel = projectRef(picked);
+              block.projectLahaApproved = !!picked.laha_approved;
               block.ccIds = [];
               block.splitPercentages = [];
               await renderBlock(block, el);
@@ -727,24 +748,28 @@
         jobSearchInput.addEventListener('input', (e) => {
           clearTimeout(jobSearchTimeout);
           block.projectId = null;
+          block.projectLabel = '';
+          block.projectLahaApproved = false;
           block.ccIds = [];
           block.splitPercentages = [];
           el.querySelector('.day-block-category-row').style.display = 'block';
+          el.querySelector('.day-block-laha-row').style.display = 'none';
           el.querySelector('.day-block-cc').style.display = 'none';
           const q = e.target.value.trim();
           if (q.length === 0) { renderJobResults(cachedProjects.slice(0, 8), 'Recent jobs'); return; }
           if (q.length < 2) { jobResultsEl.innerHTML = ''; return; }
-          jobSearchTimeout = setTimeout(() => {
-            const ql = q.toLowerCase();
-            const matches = cachedProjects.filter(p =>
-              projectRef(p).toLowerCase().includes(ql) ||
-              (p.job_number && String(p.job_number).includes(q)) ||
-              (p.quote_number && String(p.quote_number).includes(q))
-            );
+          // Server-side search (same as My Day's clock-in job search) - not
+          // capped to the 200 most-recently-created active jobs the way
+          // filtering cachedProjects client-side would be, and matches on
+          // client name/address too.
+          jobSearchTimeout = setTimeout(async () => {
+            const matches = await searchProjects(q);
             renderJobResults(matches);
-          }, 200);
+          }, 250);
         });
         el.querySelector('.day-block-category')?.addEventListener('change', (e) => { block.timeCategory = e.target.value; });
+        el.querySelector('.day-block-laha-yes')?.addEventListener('click', () => { block.stayedOvernight = true; renderBlock(block, el); });
+        el.querySelector('.day-block-laha-no')?.addEventListener('click', () => { block.stayedOvernight = false; renderBlock(block, el); });
         el.querySelectorAll('.day-block-cc-chips .cc-chip').forEach(chip => {
           chip.addEventListener('click', () => {
             chip.classList.toggle('selected');
@@ -853,11 +878,15 @@
 
       try {
         // Break is a once-per-day question, same as clock-out - attached to
-        // whichever block is first for the day. Only the employee's own
-        // save is required to actually answer it (mirrors clock-out being
-        // mandatory); an admin/finance edit of someone else's day can leave
-        // it as already recorded (or unanswered) without being blocked.
+        // whichever block is first for the day, and only actually required
+        // once the day's total worked hours pass 6 (same threshold
+        // openClockOutModal uses - a short day never asks). Only the
+        // employee's own save is required to answer it at all (mirrors
+        // clock-out being mandatory); an admin/finance edit of someone
+        // else's day can leave it as already recorded (or unanswered)
+        // without being blocked.
         const breakTargetBlock = dayBlocks.find(b => b.clockInTime);
+        const dayTotalHours = dayBlocks.reduce((s, b) => s + dayBlockTotalMinutes(b, dateStr), 0) / 60;
         let breakFields = null;
         if (breakTargetBlock) {
           if (dayBreak.taken === true) {
@@ -866,7 +895,7 @@
           } else if (dayBreak.taken === false) {
             if (!dayBreak.skipReason.trim()) throw new Error('A quick reason is required for skipping the lunch break.');
             breakFields = { break_taken: false, break_start: null, break_minutes: null, break_skip_reason: dayBreak.skipReason.trim() };
-          } else if (isSelf) {
+          } else if (isSelf && dayTotalHours > 6) {
             throw new Error('Let us know if a lunch break was taken today.');
           }
         }
@@ -904,6 +933,7 @@
           const clockOut = block.clockOutTime ? combineDateTime(dateStr, block.clockOutTime) : null;
           if (clockOut && clockOut <= clockIn) throw new Error('Finish time must be after start time for one of the jobs listed.');
           if (block.projectId && block.centres.length && !block.ccIds.length) throw new Error('Pick at least one stage for every job block.');
+          if (block.projectLahaApproved && block.stayedOvernight === null && isSelf) throw new Error('Let us know if you stayed overnight for the LAHA-approved job.');
 
           const isBreakTarget = block === breakTargetBlock && breakFields;
           const doingSplit = !block.xeroPushed && block.ccIds.length > 1 && block.splitPercentages.length === block.ccIds.length && clockOut;
@@ -926,6 +956,7 @@
               rows.map((r, i) => ({
                 staff_id: staffId, project_id: projectId, cost_centre_id: r.cost_centre_id, clock_in: r.clock_in, clock_out: r.clock_out,
                 time_category: 'job', // splitting across stages only ever applies to job time
+                stayed_overnight: block.stayedOvernight, // carried onto every segment - push-timesheets-to-xero.js dedupes to 1 night either way
                 ...(i === 0 && isBreakTarget ? breakFields : {}),
               }))
             );
@@ -940,7 +971,7 @@
             continue;
           }
 
-          const fields = { project_id: projectId, time_category: projectId ? 'job' : block.timeCategory };
+          const fields = { project_id: projectId, time_category: projectId ? 'job' : block.timeCategory, stayed_overnight: block.stayedOvernight };
           if (block.ccIds.length === 1) { fields.cost_centre_id = block.ccIds[0]; fields.selected_cost_centre_ids = null; }
           else if (block.ccIds.length > 1) { fields.cost_centre_id = null; fields.selected_cost_centre_ids = block.ccIds; }
           else { fields.cost_centre_id = null; fields.selected_cost_centre_ids = null; }

@@ -267,7 +267,7 @@ async function searchProjects(query, limit = 15) {
   if (isNumeric) orClauses.push(`job_number.eq.${q}`, `quote_number.eq.${q}`);
   const { data, error } = await supabaseClient
     .from('projects')
-    .select('id, name, job_number, quote_number, client_name, client_address, pipeline_stage')
+    .select('id, name, job_number, quote_number, client_name, client_address, pipeline_stage, laha_approved')
     .or(orClauses.join(','))
     .order('created_at', { ascending: false })
     .limit(limit);
