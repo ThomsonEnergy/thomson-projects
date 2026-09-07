@@ -1391,6 +1391,102 @@
       return { labourAmount, materialAmount };
     }
 
+    // For a no-quote job (dashboard.html's "+ New job (no quote)") -
+    // there's no quoted amount to claim a % of, so this invoices whatever
+    // has actually accrued instead: labour at each person's own charge-out
+    // rate for every hour logged (server-side, same reason pay rates never
+    // reach the browser directly - see get-invoiceable-actuals.js), and
+    // materials at received-PO cost marked up by the cost centre's own
+    // markup%. Pre-fills editable amounts covering whatever's accrued but
+    // not yet invoiced; the user can still adjust before sending.
+    async function openInvoiceActualCostsPanel(project) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:440px; width:100%;"><p class="subtitle">Working out what's accrued...</p></div>`;
+      document.body.appendChild(overlay);
+
+      let actuals;
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/get-invoiceable-actuals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ projectId: project.id }),
+        });
+        actuals = await res.json();
+        if (!res.ok || !actuals.ok) throw new Error(actuals.error || 'Could not work out accrued costs');
+      } catch (err) {
+        overlay.innerHTML = `<div class="card" style="max-width:440px; width:100%;"><div class="error-box">${err.message}</div><button type="button" class="secondary" id="ia-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+        overlay.querySelector('#ia-close-btn').addEventListener('click', () => overlay.remove());
+        return;
+      }
+
+      const totalAccrued = actuals.actualLabourSell + actuals.materialSell;
+      const remaining = Math.max(0, totalAccrued - actuals.invoicedAmount);
+      const labourShare = totalAccrued > 0 ? actuals.actualLabourSell / totalAccrued : 0;
+      const defaultLabour = Math.round(remaining * labourShare * 100) / 100;
+      const defaultMaterial = Math.round((remaining - defaultLabour) * 100) / 100;
+
+      overlay.innerHTML = `
+        <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Invoice actual costs</h2>
+          <p class="subtitle" style="margin-bottom:12px;">${actuals.actualHours} hours logged so far &middot; ${money(actuals.materialCost)} in received materials (marked up to ${money(actuals.materialSell)}). ${money(actuals.invoicedAmount)} already invoiced.</p>
+          <label style="margin-top:0">Labour</label>
+          <input type="number" step="0.01" id="ia-labour" value="${defaultLabour}" />
+          <label>Materials</label>
+          <input type="number" step="0.01" id="ia-material" value="${defaultMaterial}" />
+          <label>Invoice date</label>
+          <input type="date" id="ia-date" value="${new Date().toISOString().slice(0, 10)}" />
+          <label>Due date (optional - defaults to the client's payment terms)</label>
+          <input type="date" id="ia-due-date" />
+          <div style="margin-top:14px;">
+            <button id="ia-confirm-btn">Create &amp; send</button>
+            <button type="button" class="secondary" id="ia-cancel-btn">Cancel</button>
+          </div>
+          <div id="ia-msg"></div>
+        </div>`;
+
+      overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#ia-confirm-btn').addEventListener('click', async () => {
+        const confirmBtn = overlay.querySelector('#ia-confirm-btn');
+        const msg = overlay.querySelector('#ia-msg');
+        const labourAmount = parseFloat(overlay.querySelector('#ia-labour').value) || 0;
+        const materialAmount = parseFloat(overlay.querySelector('#ia-material').value) || 0;
+        if (labourAmount + materialAmount <= 0) { msg.innerHTML = `<div class="error-box">Enter a labour or material amount.</div>`; return; }
+
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Creating...';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/create-invoice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({
+              projectId: project.id,
+              claims: [{ costCentreId: actuals.costCentreId, labourAmount, materialAmount, claimPercent: null }],
+              sentAt: overlay.querySelector('#ia-date').value || null,
+              dueDate: overlay.querySelector('#ia-due-date').value || null,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
+
+          const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
+          msg.innerHTML = `
+            <div class="success-box">Created as ${data.invoiceNumber}.</div>
+            <label>Invoice link</label>
+            <input readonly value="${invoiceUrl}" onclick="this.select()" />`;
+          confirmBtn.style.display = 'none';
+          overlay.querySelector('#ia-cancel-btn').textContent = 'Close';
+          overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => window.location.reload());
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Create & send';
+        }
+      });
+    }
+
     // One invoice, multiple stage-claim lines: either a single % of the
     // whole project's contract value (distributed across every stage in
     // proportion to its quoted amount, capped at each stage's own
@@ -1903,6 +1999,12 @@
       // A quote that's been approved is a frozen historical record - the
       // job it became is a separate project, edited from there instead.
       const isFrozenQuote = !project.job_number && project.status === 'approved';
+      // Skipped the quote/estimate step entirely (dashboard.html's
+      // "+ New job (no quote)") - quoted_amount is 0 on its one cost
+      // centre, so every quote/estimate/% figure above is meaningless for
+      // this job. Invoiced off whatever's actually accrued instead (see
+      // openInvoiceActualCostsPanel), not a % of a quote that never existed.
+      const isQuoteFree = project.proposal_template === 'direct_job';
 
       const content = document.getElementById('content');
       const numberLine = [
@@ -1970,7 +2072,18 @@
           <div class="job-tab-main">
 
             <div class="settings-panel active" id="panel-summary">
-              ${pricingVisible ? `
+              ${pricingVisible ? (isQuoteFree ? `
+                <div class="grid cols-2">
+                  <div class="stat"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
+                </div>
+
+                <div class="card" style="margin-top:20px;">
+                  <h2>Invoice actual costs</h2>
+                  <p class="subtitle" style="margin-bottom:10px;">No quote behind this job - invoice for whatever's actually been logged so far (labour at each person's charge-out rate, materials at cost plus markup), not a % of an estimate.</p>
+                  ${(accruedTotal - invoiced) > 0.01 ? `<button class="secondary" id="invoice-actual-btn">Invoice actual costs...</button>` : `<p class="subtitle">Nothing new to invoice yet.</p>`}
+                </div>
+              ` : `
                 <div class="grid cols-${project.job_number ? '4' : '3'}">
                   <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
                   <div class="stat"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
@@ -2012,7 +2125,7 @@
                   <p class="subtitle" style="margin-top:8px;">Accrued = actual labour cost from timesheets + received purchase order line items. Click the accrued figure to see the timesheets behind it.</p>
                 </div>
                 ` : ''}
-              ` : ''}
+              `) : ''}
 
               <div class="card">
                 <h2>Needs attention</h2>
@@ -2359,6 +2472,8 @@
       });
       const invoiceProjectBtn = document.getElementById('invoice-project-btn');
       if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
+      const invoiceActualBtn = document.getElementById('invoice-actual-btn');
+      if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => openInvoiceActualCostsPanel(project));
       document.querySelectorAll('.push-xero-btn').forEach(btn => {
         btn.addEventListener('click', () => pushExistingInvoiceToXero(btn));
       });

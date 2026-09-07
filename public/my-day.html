@@ -48,6 +48,7 @@
             <input id="clock-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
             <div id="clock-job-results"></div>
             <div id="clock-job-selected" class="subtitle" style="margin-top:4px;"></div>
+            <button type="button" class="secondary" id="new-quick-job-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">+ New job (no quote)</button>
           </div>
         </div>
         <div id="clock-category-row" style="margin-top:10px;">
@@ -316,6 +317,13 @@
         });
       });
     }
+
+    document.getElementById('new-quick-job-btn').addEventListener('click', () => {
+      openQuickJobPanel((project) => {
+        recentJobsCache = null; // this job wasn't clocked into yet, so it wouldn't show up in the cached "recent" list
+        selectClockJob(project.id, projectRef(project));
+      });
+    });
 
     document.getElementById('clock-in-btn').addEventListener('click', async () => {
       const projectId = selectedClockJobId;

@@ -876,6 +876,153 @@ async function openJobSwitchModal(entry, onDone) {
   showRecent();
 }
 
+// Creates a job with no quote/estimate behind it - straight to Job
+// Booked (a job number is assigned immediately, no approval to wait for)
+// with one cost centre already in place so time (timesheets) and
+// materials (POs, or logged manually) have somewhere to attach to right
+// away. There's nothing quoted here to raise a % claim against - see
+// openInvoiceActualCostsPanel (project.html) for how it gets invoiced
+// instead, off whatever actually accrued. Shared by the Job pipeline
+// board and My Day. `onCreated({id, name, job_number})` is called once
+// saved - the caller decides what to do next (redirect, auto-select it
+// for clocking in, etc), nothing is baked in here.
+function openQuickJobPanel(onCreated) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px;';
+  overlay.innerHTML = `
+    <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
+      <h2>New job - no quote</h2>
+      <p class="subtitle" style="margin-bottom:12px;">Skips the quote/proposal step entirely and goes straight to Job Booked. Time and materials get logged against it as normal (timesheets, POs, or manually); invoice it for whatever's actually been spent once it's done.</p>
+
+      <label style="margin-top:0">Job name</label>
+      <input id="qj-name" placeholder="e.g. 14 Miller St - Switchboard Repair" />
+
+      <label>What's this job about</label>
+      <textarea id="qj-brief" rows="2" placeholder="Brief description of the work"></textarea>
+
+      <label>Client - search existing, or just type a new one below</label>
+      <input id="qj-client-search" placeholder="Search existing clients..." autocomplete="off" />
+      <div id="qj-client-results"></div>
+
+      <div class="grid cols-2" style="margin-top:8px;">
+        <div>
+          <label style="margin-top:0">Client name</label>
+          <input id="qj-client-name" required />
+        </div>
+        <div>
+          <label style="margin-top:0">Client email</label>
+          <input id="qj-client-email" type="email" />
+        </div>
+      </div>
+      <label>Client phone</label>
+      <input id="qj-client-phone" />
+
+      <label>Site address</label>
+      <input id="qj-address" placeholder="Job site address" />
+
+      <div style="margin-top:14px;">
+        <button id="qj-confirm-btn">Create job</button>
+        <button type="button" class="secondary" id="qj-cancel-btn">Cancel</button>
+      </div>
+      <div id="qj-msg"></div>
+    </div>`;
+
+  let selectedClientId = null;
+
+  let searchTimeout;
+  overlay.querySelector('#qj-client-search').addEventListener('input', (e) => {
+    clearTimeout(searchTimeout);
+    const q = e.target.value.trim();
+    selectedClientId = null;
+    if (q.length < 2) { overlay.querySelector('#qj-client-results').innerHTML = ''; return; }
+    searchTimeout = setTimeout(async () => {
+      const { data } = await supabaseClient
+        .from('clients')
+        .select('id, name, email, phone, address')
+        .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
+        .limit(8);
+      const resultsEl = overlay.querySelector('#qj-client-results');
+      if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - fill in the fields below to add them as a new client.</p>`; return; }
+      resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+        ${data.map(c => `<div class="client-pick-row" data-id="${c.id}" data-name="${c.name}" data-email="${c.email || ''}" data-phone="${c.phone || ''}" data-address="${c.address || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${c.name} <span class="subtitle">${c.email || ''}</span></div>`).join('')}
+      </div>`;
+      resultsEl.querySelectorAll('.client-pick-row').forEach(row => {
+        row.addEventListener('click', () => {
+          selectedClientId = row.dataset.id;
+          overlay.querySelector('#qj-client-search').value = row.dataset.name;
+          overlay.querySelector('#qj-client-name').value = row.dataset.name;
+          overlay.querySelector('#qj-client-email').value = row.dataset.email;
+          overlay.querySelector('#qj-client-phone').value = row.dataset.phone;
+          if (row.dataset.address && !overlay.querySelector('#qj-address').value) {
+            overlay.querySelector('#qj-address').value = row.dataset.address;
+          }
+          resultsEl.innerHTML = '';
+        });
+      });
+    }, 250);
+  });
+
+  overlay.querySelector('#qj-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#qj-confirm-btn').addEventListener('click', async () => {
+    const confirmBtn = overlay.querySelector('#qj-confirm-btn');
+    const panelMsg = overlay.querySelector('#qj-msg');
+    const name = overlay.querySelector('#qj-name').value.trim();
+    const brief = overlay.querySelector('#qj-brief').value.trim();
+    const clientName = overlay.querySelector('#qj-client-name').value.trim();
+    const clientEmail = overlay.querySelector('#qj-client-email').value.trim();
+    const clientPhone = overlay.querySelector('#qj-client-phone').value.trim();
+    const clientAddress = overlay.querySelector('#qj-address').value.trim();
+
+    if (!name) { panelMsg.innerHTML = `<div class="error-box">Job name is required.</div>`; return; }
+    if (!clientName) { panelMsg.innerHTML = `<div class="error-box">Client name is required - search for an existing client or type a new one.</div>`; return; }
+
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Creating...';
+    try {
+      let clientId = selectedClientId;
+      if (!clientId) {
+        const { data: newClient, error: clientErr } = await supabaseClient
+          .from('clients')
+          .insert({ name: clientName, email: clientEmail, phone: clientPhone, address: clientAddress })
+          .select('id')
+          .single();
+        if (clientErr) throw clientErr;
+        clientId = newClient.id;
+      }
+
+      const { data: project, error } = await supabaseClient.from('projects').insert({
+        name,
+        sow_text: brief || null,
+        client_id: clientId,
+        client_name: clientName,
+        client_email: clientEmail,
+        client_phone: clientPhone,
+        client_address: clientAddress,
+        proposal_template: 'direct_job',
+        pipeline_stage: 'job_booked',
+        status: 'in_progress',
+      }).select('id, name, job_number').single();
+      if (error) throw error;
+
+      // One cost centre so time and materials have somewhere to attach to
+      // immediately - no quote behind it, so there's nothing to estimate.
+      const { error: ccErr } = await supabaseClient.from('cost_centres').insert({
+        project_id: project.id, name: 'Labour & Materials', sort_order: 0, markup_percent: 45,
+      });
+      if (ccErr) throw ccErr;
+
+      overlay.remove();
+      if (onCreated) onCreated(project);
+    } catch (err) {
+      panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Create job';
+    }
+  });
+
+  document.body.appendChild(overlay);
+}
+
 // STC (Small-scale Technology Certificate) quantity, per the Clean Energy
 // Regulator's published formula (cer.gov.au/schemes/renewable-energy-target
 // /small-scale-renewable-energy-scheme/small-scale-technology-certificates):

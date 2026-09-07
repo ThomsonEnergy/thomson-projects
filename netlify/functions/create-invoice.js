@@ -1,13 +1,15 @@
 // POST /api/create-invoice
-// Body EITHER: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent }] }
-//   for a job-linked claim - one invoice, one row per cost centre included
-//   (a single-stage claim is just claims.length === 1), OR
-// { clientId, description, labourAmount, materialAmount }
-//   for a standalone invoice with no job/quote behind it.
+// Body: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent }] }
+// One invoice, one row per cost centre included (a single-stage claim is
+// just claims.length === 1) - either a % of that stage's quote (the
+// normal claim panel) or, for a no-quote job (proposal_template
+// 'direct_job'), whatever's actually accrued (see
+// get-invoiceable-actuals.js / openInvoiceActualCostsPanel). Standalone
+// invoices with no job behind them at all have been removed - every
+// invoice now comes from an actual job, even a quote-free one, since
+// dashboard.html's "+ New job (no quote)" makes starting one trivial.
 // Invoice numbers are always auto-assigned server-side, never accepted
-// from the caller. Pricing roles only. Creates a new row in the invoices
-// table (plus one invoice_claims row per claimed cost centre for a
-// job-linked claim).
+// from the caller. Pricing roles only.
 
 const crypto = require('crypto');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
@@ -25,42 +27,28 @@ exports.handler = async (event) => {
   const { supabaseAdmin, user } = auth;
 
   try {
-    const {
-      projectId,
-      claims,
-      clientId,
-      description,
-      labourAmount = 0,
-      materialAmount = 0,
-      stcAmount = 0,
-      claimPercent = 100,
-      sentAt,
-      dueDate: overrideDueDate,
-    } = JSON.parse(event.body || '{}');
+    const { projectId, claims, sentAt, dueDate: overrideDueDate } = JSON.parse(event.body || '{}');
 
-    const isJobClaim = !!projectId && Array.isArray(claims) && claims.length > 0;
-    if (!isJobClaim && !clientId) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Either projectId+claims (job claim) or clientId (standalone invoice) is required' }) };
+    if (!projectId || !Array.isArray(claims) || !claims.length) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'projectId and at least one claim are required' }) };
     }
 
-    const claimRows = isJobClaim
-      ? claims
-          .map(c => ({
-            cost_centre_id: c.costCentreId,
-            labour_amount: Number(c.labourAmount) || 0,
-            material_amount: Number(c.materialAmount) || 0,
-            stc_amount: Number(c.stcAmount) || 0,
-            claim_percent: c.claimPercent != null ? Number(c.claimPercent) : null,
-          }))
-          .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount) > 0)
-      : [];
-    if (isJobClaim && !claimRows.length) {
+    const claimRows = claims
+      .map(c => ({
+        cost_centre_id: c.costCentreId,
+        labour_amount: Number(c.labourAmount) || 0,
+        material_amount: Number(c.materialAmount) || 0,
+        stc_amount: Number(c.stcAmount) || 0,
+        claim_percent: c.claimPercent != null ? Number(c.claimPercent) : null,
+      }))
+      .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount) > 0);
+    if (!claimRows.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'At least one cost centre needs a non-zero claim amount' }) };
     }
 
-    const totalLabour = isJobClaim ? claimRows.reduce((s, c) => s + c.labour_amount, 0) : Number(labourAmount) || 0;
-    const totalMaterial = isJobClaim ? claimRows.reduce((s, c) => s + c.material_amount, 0) : Number(materialAmount) || 0;
-    const totalStc = isJobClaim ? claimRows.reduce((s, c) => s + c.stc_amount, 0) : Number(stcAmount) || 0;
+    const totalLabour = claimRows.reduce((s, c) => s + c.labour_amount, 0);
+    const totalMaterial = claimRows.reduce((s, c) => s + c.material_amount, 0);
+    const totalStc = claimRows.reduce((s, c) => s + c.stc_amount, 0);
     const totalAmount = totalLabour + totalMaterial;
 
     // Always auto-assigned, never user-typed - a manually-entered number
@@ -70,33 +58,34 @@ exports.handler = async (event) => {
     const { data: companySettings } = await supabaseAdmin.from('company_settings').select('invoice_number_prefix').eq('id', 1).single();
     const invoiceNumberStr = `${companySettings?.invoice_number_prefix || 'SI'}${drawnNumber}`;
 
-    let overallClaimPercent = Number(claimPercent) || 100;
-    let claimLabel = isJobClaim ? null : (description || null);
-    if (isJobClaim) {
-      const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('id, quoted_amount, invoiced_amount').eq('project_id', projectId);
-      const projectTotal = (allCentres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
-      overallClaimPercent = projectTotal > 0 ? Math.round((totalAmount / projectTotal) * 10000) / 100 : null;
+    const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('id, quoted_amount, invoiced_amount').eq('project_id', projectId);
+    const projectTotal = (allCentres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
+    // Null (not a misleading 0%/100%) when there's no quote behind this job
+    // at all (a direct/no-quote job) - there's nothing for a % to mean.
+    const overallClaimPercent = projectTotal > 0 ? Math.round((totalAmount / projectTotal) * 10000) / 100 : null;
 
-      // "Final claim" if this invoice brings every stage to fully
-      // invoiced, otherwise "Progress claim N" - N is how many non-
-      // deposit invoices this job already has, +1. Counted in JS rather
-      // than a .neq() filter so a null description (every progress claim
-      // raised before this label existed) still correctly counts as "not
-      // the deposit", not gets silently excluded by SQL's
-      // null != 'Deposit' => null semantics.
-      const isFinalClaim = (allCentres || []).every(c => {
-        const claimedForThisCentre = claimRows.find(cr => cr.cost_centre_id === c.id);
-        const newInvoiced = (Number(c.invoiced_amount) || 0) + (claimedForThisCentre ? claimedForThisCentre.labour_amount + claimedForThisCentre.material_amount : 0);
-        return newInvoiced >= (Number(c.quoted_amount) || 0) - 0.01;
-      });
+    // "Final claim" if this invoice brings every stage to fully invoiced
+    // (for a no-quote job, quoted_amount is 0, so any invoice at all
+    // trivially qualifies - correct, since there's no ongoing progress
+    // billing concept without a quote to be "in progress" against),
+    // otherwise "Progress claim N" - N is how many non-deposit invoices
+    // this job already has, +1. Counted in JS rather than a .neq() filter
+    // so a null description (every progress claim raised before this
+    // label existed) still correctly counts as "not the deposit", not
+    // gets silently excluded by SQL's null != 'Deposit' => null semantics.
+    const isFinalClaim = (allCentres || []).every(c => {
+      const claimedForThisCentre = claimRows.find(cr => cr.cost_centre_id === c.id);
+      const newInvoiced = (Number(c.invoiced_amount) || 0) + (claimedForThisCentre ? claimedForThisCentre.labour_amount + claimedForThisCentre.material_amount : 0);
+      return newInvoiced >= (Number(c.quoted_amount) || 0) - 0.01;
+    });
 
-      if (isFinalClaim) {
-        claimLabel = 'Final claim';
-      } else {
-        const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
-        const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit' && inv.description !== 'Final claim').length;
-        claimLabel = `Progress claim ${priorProgressCount + 1}`;
-      }
+    let claimLabel;
+    if (isFinalClaim) {
+      claimLabel = 'Final claim';
+    } else {
+      const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
+      const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit' && inv.description !== 'Final claim').length;
+      claimLabel = `Progress claim ${priorProgressCount + 1}`;
     }
 
     const invoiceToken = crypto.randomUUID();
@@ -107,9 +96,7 @@ exports.handler = async (event) => {
     // can override it below.
     let dueDate = overrideDueDate || null;
     if (!dueDate) {
-      const resolvedClientId = isJobClaim
-        ? (await supabaseAdmin.from('projects').select('client_id').eq('id', projectId).single()).data?.client_id
-        : clientId;
+      const resolvedClientId = (await supabaseAdmin.from('projects').select('client_id').eq('id', projectId).single()).data?.client_id;
       const { data: client } = resolvedClientId
         ? await supabaseAdmin.from('clients').select('payment_terms').eq('id', resolvedClientId).maybeSingle()
         : { data: null };
@@ -119,9 +106,9 @@ exports.handler = async (event) => {
     const { data: insertedInvoice, error: insErr } = await supabaseAdmin
       .from('invoices')
       .insert({
-        project_id: isJobClaim ? projectId : null,
-        cost_centre_id: null, // stage detail for job-linked claims always lives in invoice_claims now
-        client_id: isJobClaim ? null : clientId,
+        project_id: projectId,
+        cost_centre_id: null, // stage detail always lives in invoice_claims now
+        client_id: null,
         description: claimLabel,
         invoice_number: invoiceNumberStr,
         invoice_token: invoiceToken,
@@ -137,21 +124,19 @@ exports.handler = async (event) => {
       .single();
     if (insErr) throw insErr;
 
-    if (isJobClaim) {
-      const { error: claimsErr } = await supabaseAdmin
-        .from('invoice_claims')
-        .insert(claimRows.map(c => ({ ...c, invoice_id: insertedInvoice.id })));
-      if (claimsErr) throw claimsErr;
+    const { error: claimsErr } = await supabaseAdmin
+      .from('invoice_claims')
+      .insert(claimRows.map(c => ({ ...c, invoice_id: insertedInvoice.id })));
+    if (claimsErr) throw claimsErr;
 
-      const { data: centresBefore } = await supabaseAdmin
-        .from('cost_centres')
-        .select('id, invoiced_amount')
-        .in('id', claimRows.map(c => c.cost_centre_id));
-      await Promise.all(claimRows.map(c => {
-        const before = Number((centresBefore || []).find(cc => cc.id === c.cost_centre_id)?.invoiced_amount) || 0;
-        return supabaseAdmin.from('cost_centres').update({ invoiced_amount: before + c.labour_amount + c.material_amount }).eq('id', c.cost_centre_id);
-      }));
-    }
+    const { data: centresBefore } = await supabaseAdmin
+      .from('cost_centres')
+      .select('id, invoiced_amount')
+      .in('id', claimRows.map(c => c.cost_centre_id));
+    await Promise.all(claimRows.map(c => {
+      const before = Number((centresBefore || []).find(cc => cc.id === c.cost_centre_id)?.invoiced_amount) || 0;
+      return supabaseAdmin.from('cost_centres').update({ invoiced_amount: before + c.labour_amount + c.material_amount }).eq('id', c.cost_centre_id);
+    }));
 
     // No Airwallex payment link is created here. It's generated on demand
     // the moment the client actually clicks "Pay online" on the invoice

@@ -10,6 +10,14 @@ guessing, and skip it until it's answered.
 
 ## Open
 
+None.
+
+## In Progress
+
+None.
+
+## Resolved
+
 ### Update idea: Invoice changes
 - **Reported:** 30 Aug 2026, 07:06 am by Jasper Thomson
 - **Approved:** 1 Sep 2026, 08:20 am by Jasper Thomson
@@ -17,12 +25,8 @@ guessing, and skip it until it's answered.
 - **What they want:** Should be able to select the labour charge out rate and material cost same as a normal cost center for the stand alone invoice. 
 Also I don’t want people to be able to type in an invoice number. Should always be automated.
 - **Record id:** 785fdec5-a4ee-4e94-846d-1b99e1a3f32c
-
-## In Progress
-
-None.
-
-## Resolved
+- **Comments:**
+  - *Claude, 7 Sep 2026, 04:12 am:* Invoice numbers were already fully automated. For the rate-selection part: standalone invoices have been removed entirely per Jasper's direction - instead, "+ New job (no quote)" (Job pipeline board and My Day) creates a real job with one cost centre, skipping the quote/estimate step. Time and materials get logged against it normally (timesheets, POs, or manually), and it's invoiced off whatever actually accrued (labour at each person's charge-out rate, materials at cost plus markup) via the new "Invoice actual costs" button on the job page, rather than a standalone line-item form.
 
 ### Update idea: adding photos to jobs
 - **Reported:** 31 Aug 2026, 01:03 am by Jasper Thomson
