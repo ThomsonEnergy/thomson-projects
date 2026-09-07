@@ -249,26 +249,6 @@
             <div id="my-signed-docs-list"><p class="subtitle">Loading...</p></div>
           </div>
 
-          <div class="card">
-            <h2>My bank account</h2>
-            <p class="subtitle" style="margin-bottom:10px;">For payroll - only visible to you and admin/finance.</p>
-            <div class="grid cols-3">
-              <div>
-                <label style="margin-top:0">Account name</label>
-                <input id="my-bank-account-name" />
-              </div>
-              <div>
-                <label style="margin-top:0">BSB</label>
-                <input id="my-bank-bsb" placeholder="000-000" />
-              </div>
-              <div>
-                <label style="margin-top:0">Account number</label>
-                <input id="my-bank-account-number" />
-              </div>
-            </div>
-            <button id="my-bank-save-btn" style="margin-top:10px;">Save bank details</button>
-            <div id="my-bank-msg"></div>
-          </div>
         </div>
 
         <!-- Numbering -->
@@ -1364,10 +1344,9 @@
 
     async function loadMyProfile(userId) {
       myProfileUserId = userId;
-      const [{ data: profile }, { data: rates }, { data: sensitive }, { data: licences }] = await Promise.all([
+      const [{ data: profile }, { data: rates }, { data: licences }] = await Promise.all([
         supabaseClient.from('profiles').select('mobile_number, photo_url').eq('id', userId).single(),
         supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle(),
-        supabaseClient.from('profiles_sensitive_secure').select('bank_account_name, bank_bsb, bank_account_number').eq('id', userId).maybeSingle(),
         supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date'),
       ]);
 
@@ -1379,10 +1358,6 @@
       document.getElementById('my-rate-1-5x').textContent = rates?.rate_1_5x != null ? money(rates.rate_1_5x) : 'Not set';
       document.getElementById('my-rate-2x').textContent = rates?.rate_2x != null ? money(rates.rate_2x) : 'Not set';
       document.getElementById('my-rate-2-5x').textContent = rates?.rate_2_5x != null ? money(rates.rate_2_5x) : 'Not set';
-
-      document.getElementById('my-bank-account-name').value = sensitive?.bank_account_name || '';
-      document.getElementById('my-bank-bsb').value = sensitive?.bank_bsb || '';
-      document.getElementById('my-bank-account-number').value = sensitive?.bank_account_number || '';
 
       document.getElementById('my-licence-rows').innerHTML = (licences || []).map(myLicenceRowHtml).join('');
       wireMyLicenceRows();
@@ -1490,16 +1465,6 @@
       }
     });
 
-    document.getElementById('my-bank-save-btn').addEventListener('click', async () => {
-      const msg = document.getElementById('my-bank-msg');
-      const { error } = await supabaseClient.from('profiles').update({
-        bank_account_name: document.getElementById('my-bank-account-name').value.trim() || null,
-        bank_bsb: document.getElementById('my-bank-bsb').value.trim() || null,
-        bank_account_number: document.getElementById('my-bank-account-number').value.trim() || null,
-      }).eq('id', myProfileUserId);
-      msg.innerHTML = error ? `<div class="error-box">${error.message}</div>` : `<div class="success-box">Saved.</div>`;
-    });
-
     // Every remaining [bracket] in the contract template becomes an
     // actual field here rather than left as raw text to hand-edit - which
     // fields show depends on employment type / pay type, same as the
@@ -1553,7 +1518,7 @@
       const { data: profile, error } = await supabaseClient.from('profiles')
         .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id,
           employment_type, employment_start_date, pay_type, salary_includes_super, has_company_vehicle, has_probationary_period,
-          super_fund_name, super_is_self_managed, emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason`)
+          emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason`)
         .eq('id', userId).single();
       const { data: rates } = await supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle();
       const { data: sensitive } = await supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', userId).maybeSingle();
@@ -1710,15 +1675,11 @@
             </div>
           </div>
 
-          <p class="subtitle" style="margin:14px 0 8px;">Sensitive - visible here and to the person themself only. Mostly filled in by the employee via their own onboarding.</p>
+          <p class="subtitle" style="margin:14px 0 8px;">Sensitive - visible here and to the person themself only. Mostly filled in by the employee via their own onboarding. Tax file number, super, and bank details aren't collected here at all - send the employee a direct self-service invite from Xero for those once they're set up there.</p>
           <div class="grid cols-2">
             <div>
               <label style="margin-top:0">Date of birth</label>
               <input type="date" id="profile-dob" value="${profile.date_of_birth || ''}" />
-            </div>
-            <div>
-              <label style="margin-top:0">Tax file number</label>
-              <input id="profile-tfn" value="${profile.tax_file_number || ''}" />
             </div>
           </div>
           <label style="margin-top:10px;">Residential address</label>
@@ -1733,7 +1694,6 @@
               <input id="profile-emergency-relationship" value="${profile.emergency_contact_relationship || ''}" />
             </div>
           </div>
-          <p class="subtitle" style="margin:10px 0 0;">Super fund: ${profile.super_is_self_managed ? 'Self-managed (SMSF)' : (profile.super_fund_name || 'Not yet provided')}</p>
         </div>
 
         <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
@@ -1821,7 +1781,6 @@
             has_company_vehicle: overlay.querySelector('#profile-has-vehicle').checked,
             has_probationary_period: overlay.querySelector('#profile-has-probation').checked,
             date_of_birth: overlay.querySelector('#profile-dob').value || null,
-            tax_file_number: overlay.querySelector('#profile-tfn').value.trim() || null,
             residential_address: overlay.querySelector('#profile-address').value.trim() || null,
             emergency_contact_name: overlay.querySelector('#profile-emergency-name').value.trim() || null,
             emergency_contact_relationship: overlay.querySelector('#profile-emergency-relationship').value.trim() || null,
@@ -2068,6 +2027,8 @@
               if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
               if (data.status === 'failed') {
                 openXeroFallbackSummary(data.summary, data.error);
+              } else if (data.reminder) {
+                alert(data.reminder);
               }
               await loadUsers();
             } catch (err) {

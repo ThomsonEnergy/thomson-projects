@@ -260,4 +260,11 @@ select '085', 'laha_allowance',
     and exists (select 1 from information_schema.columns where table_name = 'time_entries' and column_name = 'stayed_overnight')
     and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_laha_earnings_rate_id')
   then 'present' else 'MISSING' end
+union all
+select '086', 'guard_profiles_privileged_writes',
+  case when exists (select 1 from pg_trigger where tgname = 'trg_guard_profiles_writes') then 'present' else 'MISSING' end
+union all
+select '087', 'clear_sensitive_employee_data',
+  case when not exists (select 1 from profiles where tax_file_number is not null or bank_account_number is not null or super_fund_name is not null or smsf_abn is not null)
+  then 'present' else 'MISSING' end
 order by 1;

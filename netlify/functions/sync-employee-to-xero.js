@@ -11,10 +11,12 @@
 // xero_employee_id column - the same column push-timesheets-to-xero.js
 // already reads to match timesheets, so nothing else needs to change.
 // On failure: records the error and returns a plain summary of every
-// onboarding field collected, for an admin to key into Xero by hand.
-// Xero's own bulk-CSV employee import "is deliberately limited to basic
-// identity and contact details" (TFN/bank/rates always need manual entry
-// regardless of import method) - so a summary is more useful than a CSV.
+// basic field collected, for an admin to key into Xero by hand.
+//
+// TFN, bank details, and super are deliberately NEVER collected by this
+// app at all - they're handled entirely through Xero's own native
+// employee self-onboarding invite (sent by an admin once this basic
+// record exists in Xero), so nothing here even attempts to send them.
 
 const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { xeroRequest, redactSensitive } = require('./_shared/xero-client');
@@ -27,19 +29,13 @@ function buildSummary(profile, email) {
     'Email': email || '',
     'Date of birth': profile.date_of_birth || '',
     'Residential address': [profile.residential_address, profile.residential_suburb, profile.residential_state, profile.residential_postcode].filter(Boolean).join(', '),
-    'Tax file number': profile.tax_file_number || '',
     'Employment type': profile.employment_type || '',
     'Start date': profile.employment_start_date || '',
     'Pay type': profile.pay_type || '',
     'Annual salary': profile.annual_salary || '',
     'Ordinary rate ($/hr)': profile.ordinary_rate || '',
-    'Bank account name': profile.bank_account_name || '',
-    'Bank BSB': profile.bank_bsb || '',
-    'Bank account number': profile.bank_account_number || '',
-    'Super fund': profile.super_is_self_managed
-      ? `Self-managed - ABN ${profile.smsf_abn || ''}, BSB ${profile.smsf_bank_bsb || ''}, Acct ${profile.smsf_bank_account || ''}, ESA ${profile.smsf_esa || ''}`
-      : `${profile.super_fund_name || ''} (ABN ${profile.super_fund_abn || ''}, Member ${profile.super_member_number || ''})`,
     'Emergency contact': [profile.emergency_contact_name, profile.emergency_contact_relationship, profile.emergency_contact_phone].filter(Boolean).join(' - '),
+    'Next step': 'Send this employee their self-onboarding invite directly from Xero to collect TFN, super, and bank details.',
   };
 }
 
@@ -108,20 +104,15 @@ exports.handler = async (event) => {
         Region: profile.residential_state || undefined,
         PostalCode: profile.residential_postcode || undefined,
       } : undefined,
-      BankAccounts: profile.bank_account_number ? [{
-        AccountName: profile.bank_account_name || profile.full_name,
-        BSB: profile.bank_bsb,
-        AccountNumber: profile.bank_account_number,
-        Remainder: true,
-        StatementText: 'Wages', // shows on the employee's bank statement for the deposit - required, Xero has no default
-      }] : undefined,
       // EmploymentBasis is mandatory for an STP2-qualified employee - Xero
-      // rejected the record outright without it ("Invalid EmploymentBasis"),
-      // even though TaxFileNumber alone was present.
-      TaxDeclaration: profile.tax_file_number ? {
-        TaxFileNumber: profile.tax_file_number,
+      // rejected the record outright without it ("Invalid EmploymentBasis").
+      // No TaxDeclaration/BankAccounts here at all - TFN and bank details
+      // are never collected by this app, only through Xero's own native
+      // self-onboarding invite (send that separately, in Xero, once this
+      // basic record exists).
+      TaxDeclaration: {
         EmploymentBasis: EMPLOYMENT_BASIS[profile.employment_type] || undefined,
-      } : undefined,
+      },
     }];
 
     let xeroResult;
@@ -144,7 +135,13 @@ exports.handler = async (event) => {
       xero_employee_id: newEmployeeId, xero_payroll_status: 'synced', xero_payroll_error: null,
     }).eq('id', profileId);
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, status: 'synced', xeroEmployeeId: newEmployeeId }) };
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        ok: true, status: 'synced', xeroEmployeeId: newEmployeeId,
+        reminder: 'Send this employee their self-onboarding invite directly from Xero to collect TFN, super, and bank details - nothing here sent them.',
+      }),
+    };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };

@@ -53,14 +53,6 @@
     let currentStep = 1;
     const TOTAL_STEPS = 4;
 
-    async function authedFetch(url, options = {}) {
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      return fetch(url, {
-        ...options,
-        headers: { ...(options.headers || {}), Authorization: `Bearer ${session.access_token}` },
-      });
-    }
-
     // A re-issue (admin trigger, e.g. a pay rise) shows different framing
     // than the original first-day welcome - onboarding_reissue_reason is
     // how the page tells the two apart.
@@ -96,23 +88,20 @@
     }
 
     // ---------- Step 1: details ----------
+    // Tax file number, super fund, and bank details used to be collected
+    // here too - removed in favour of Xero's own native employee self-
+    // onboarding invite, sent directly by an admin once the employee's
+    // basic record exists in Xero. Nothing this sensitive gets typed into
+    // or stored by this app at all now.
     function renderDetailsStep() {
       const content = document.getElementById('ob-content');
       content.innerHTML = `
         <div class="card">
           <h2>Your details</h2>
-          <p class="subtitle" style="margin-bottom:14px;">This is what's needed to set you up correctly for pay - tax, super, and who to contact if there's an emergency on site.</p>
+          <p class="subtitle" style="margin-bottom:14px;">Your basic details, and who to contact if there's an emergency on site. Tax file number, super, and bank details are handled separately - your admin will send you a direct invite from Xero for those.</p>
 
-          <div class="grid cols-2">
-            <div>
-              <label style="margin-top:0">Date of birth</label>
-              <input type="date" id="ob-dob" value="${profile.date_of_birth || ''}" />
-            </div>
-            <div>
-              <label style="margin-top:0">Tax file number</label>
-              <input id="ob-tfn" value="${profile.tax_file_number || ''}" />
-            </div>
-          </div>
+          <label style="margin-top:0">Date of birth</label>
+          <input type="date" id="ob-dob" value="${profile.date_of_birth || ''}" style="max-width:220px;" />
 
           <label style="margin-top:14px;">Residential address</label>
           <input id="ob-address" placeholder="Street address" value="${profile.residential_address || ''}" />
@@ -123,70 +112,6 @@
               ${['NSW', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'].map(s => `<option value="${s}" ${profile.residential_state === s ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
             <input id="ob-postcode" placeholder="Postcode" value="${profile.residential_postcode || ''}" />
-          </div>
-
-          <label style="margin-top:14px; display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" id="ob-smsf-toggle" style="width:auto;" ${profile.super_is_self_managed ? 'checked' : ''} /> My super fund is self-managed (SMSF)
-          </label>
-
-          <div id="ob-super-standard" style="display:${profile.super_is_self_managed ? 'none' : 'block'};">
-            <label style="margin-top:8px;">Search for your fund</label>
-            <input id="ob-super-search" placeholder="Start typing your fund's name..." autocomplete="off" />
-            <div id="ob-super-search-results"></div>
-            <p class="subtitle" style="margin:4px 0 0;">Picking a result fills the name and ABN below correctly - or just type them in yourself if your fund doesn't show up.</p>
-            <div class="grid cols-2" style="margin-top:8px;">
-              <div>
-                <label style="margin-top:0">Super fund name</label>
-                <input id="ob-super-name" value="${profile.super_fund_name || ''}" />
-              </div>
-              <div>
-                <label style="margin-top:0">Fund ABN</label>
-                <input id="ob-super-abn" value="${profile.super_fund_abn || ''}" />
-              </div>
-            </div>
-            <label style="margin-top:8px;">Member number</label>
-            <input id="ob-super-member" value="${profile.super_member_number || ''}" />
-          </div>
-          <div id="ob-super-smsf" style="display:${profile.super_is_self_managed ? 'block' : 'none'};">
-            <div class="grid cols-2" style="margin-top:8px;">
-              <div>
-                <label style="margin-top:0">SMSF ABN</label>
-                <input id="ob-smsf-abn" value="${profile.smsf_abn || ''}" />
-                <p class="subtitle" id="ob-smsf-abn-status" style="margin:4px 0 0; font-size:12px;"></p>
-              </div>
-              <div>
-                <label style="margin-top:0">SMSF bank BSB</label>
-                <input id="ob-smsf-bsb" value="${profile.smsf_bank_bsb || ''}" />
-              </div>
-            </div>
-            <div class="grid cols-2" style="margin-top:8px;">
-              <div>
-                <label style="margin-top:0">SMSF bank account number</label>
-                <input id="ob-smsf-account" value="${profile.smsf_bank_account || ''}" />
-              </div>
-              <div>
-                <label style="margin-top:0">Electronic service address (ESA)</label>
-                <input id="ob-smsf-esa" value="${profile.smsf_esa || ''}" />
-              </div>
-            </div>
-          </div>
-
-          <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
-            <p style="margin:0 0 8px; font-weight:600;">Bank account for pay</p>
-            <div class="grid cols-3">
-              <div>
-                <label style="margin-top:0">Account name</label>
-                <input id="ob-bank-name" value="${profile.bank_account_name || ''}" />
-              </div>
-              <div>
-                <label style="margin-top:0">BSB</label>
-                <input id="ob-bank-bsb" value="${profile.bank_bsb || ''}" />
-              </div>
-              <div>
-                <label style="margin-top:0">Account number</label>
-                <input id="ob-bank-account" value="${profile.bank_account_number || ''}" />
-              </div>
-            </div>
           </div>
 
           <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
@@ -211,102 +136,20 @@
           <div id="ob-details-msg"></div>
         </div>`;
 
-      document.getElementById('ob-smsf-toggle').addEventListener('change', (e) => {
-        document.getElementById('ob-super-standard').style.display = e.target.checked ? 'none' : 'block';
-        document.getElementById('ob-super-smsf').style.display = e.target.checked ? 'block' : 'none';
-      });
-
-      // Search-as-you-type against the ABN Lookup (ABR) register, so
-      // picking a fund fills in a verified ABN instead of someone typing
-      // 11 digits from memory and hoping they got it right.
-      let superSearchTimeout;
-      document.getElementById('ob-super-search').addEventListener('input', (e) => {
-        clearTimeout(superSearchTimeout);
-        const q = e.target.value.trim();
-        const resultsEl = document.getElementById('ob-super-search-results');
-        if (q.length < 3) { resultsEl.innerHTML = ''; return; }
-        superSearchTimeout = setTimeout(async () => {
-          resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">Searching...</p>`;
-          try {
-            const res = await authedFetch(`/.netlify/functions/abn-lookup?name=${encodeURIComponent(q)}`);
-            const data = await res.json();
-            if (!data.ok || !data.results?.length) {
-              resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">${data.message || 'No matches - enter your fund details manually below.'}</p>`;
-              return;
-            }
-            resultsEl.innerHTML = `
-              <div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-                ${data.results.map(r => `<div class="job-pick-row" data-name="${r.name}" data-abn="${r.abn}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${r.name} <span class="subtitle">ABN ${r.abn}${r.status ? ' - ' + r.status : ''}</span></div>`).join('')}
-              </div>`;
-            resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
-              row.addEventListener('click', () => {
-                document.getElementById('ob-super-name').value = row.dataset.name;
-                document.getElementById('ob-super-abn').value = row.dataset.abn;
-                document.getElementById('ob-super-search').value = '';
-                resultsEl.innerHTML = '';
-              });
-            });
-          } catch {
-            resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">Search unavailable right now - enter your fund details manually below.</p>`;
-          }
-        }, 350);
-      });
-
-      // Confirms an SMSF ABN someone already knows is actually registered
-      // and current, rather than only catching a typo after it's in Xero.
-      document.getElementById('ob-smsf-abn').addEventListener('blur', async (e) => {
-        const statusEl = document.getElementById('ob-smsf-abn-status');
-        const abn = e.target.value.replace(/\s+/g, '');
-        if (!abn) { statusEl.textContent = ''; return; }
-        statusEl.innerHTML = '<span class="subtitle">Checking...</span>';
-        try {
-          const res = await authedFetch(`/.netlify/functions/abn-lookup?abn=${encodeURIComponent(abn)}`);
-          const data = await res.json();
-          statusEl.innerHTML = data.ok
-            ? `<span style="color:var(--green);">Verified: ${data.name} (${data.status})</span>`
-            : `<span style="color:var(--red);">${data.message || 'ABN not found - double check it.'}</span>`;
-        } catch {
-          statusEl.textContent = '';
-        }
-      });
-
       document.getElementById('ob-details-next-btn').addEventListener('click', async () => {
         const msg = document.getElementById('ob-details-msg');
-        const isSmsf = document.getElementById('ob-smsf-toggle').checked;
 
         if (!document.getElementById('ob-address').value.trim() || !document.getElementById('ob-suburb').value.trim() || !document.getElementById('ob-state').value || !document.getElementById('ob-postcode').value.trim()) {
-          msg.innerHTML = `<div class="error-box">Fill in your full residential address, including suburb, state, and postcode - Xero payroll needs these as separate fields.</div>`;
-          return;
-        }
-
-        if (isSmsf) {
-          if (!document.getElementById('ob-smsf-abn').value.trim() || !document.getElementById('ob-smsf-bsb').value.trim() || !document.getElementById('ob-smsf-account').value.trim()) {
-            msg.innerHTML = `<div class="error-box">Fill in your SMSF's ABN and bank details before continuing.</div>`;
-            return;
-          }
-        } else if (!document.getElementById('ob-super-name').value.trim() || !document.getElementById('ob-super-abn').value.trim() || !document.getElementById('ob-super-member').value.trim()) {
-          msg.innerHTML = `<div class="error-box">Super fund details are required - search for your fund above or enter its name, ABN, and your member number.</div>`;
+          msg.innerHTML = `<div class="error-box">Fill in your full residential address, including suburb, state, and postcode.</div>`;
           return;
         }
 
         const updates = {
           date_of_birth: document.getElementById('ob-dob').value || null,
-          tax_file_number: document.getElementById('ob-tfn').value.trim() || null,
           residential_address: document.getElementById('ob-address').value.trim() || null,
           residential_suburb: document.getElementById('ob-suburb').value.trim() || null,
           residential_state: document.getElementById('ob-state').value || null,
           residential_postcode: document.getElementById('ob-postcode').value.trim() || null,
-          super_is_self_managed: isSmsf,
-          super_fund_name: isSmsf ? null : document.getElementById('ob-super-name').value.trim() || null,
-          super_fund_abn: isSmsf ? null : document.getElementById('ob-super-abn').value.trim() || null,
-          super_member_number: isSmsf ? null : document.getElementById('ob-super-member').value.trim() || null,
-          smsf_abn: isSmsf ? document.getElementById('ob-smsf-abn').value.trim() || null : null,
-          smsf_bank_bsb: isSmsf ? document.getElementById('ob-smsf-bsb').value.trim() || null : null,
-          smsf_bank_account: isSmsf ? document.getElementById('ob-smsf-account').value.trim() || null : null,
-          smsf_esa: isSmsf ? document.getElementById('ob-smsf-esa').value.trim() || null : null,
-          bank_account_name: document.getElementById('ob-bank-name').value.trim() || null,
-          bank_bsb: document.getElementById('ob-bank-bsb').value.trim() || null,
-          bank_account_number: document.getElementById('ob-bank-account').value.trim() || null,
           emergency_contact_name: document.getElementById('ob-em-name').value.trim() || null,
           emergency_contact_phone: document.getElementById('ob-em-phone').value.trim() || null,
           emergency_contact_relationship: document.getElementById('ob-em-relationship').value.trim() || null,
@@ -504,7 +347,7 @@
       const [{ data: p }, { data: sensitive }, { data: rates }, { data: docs }, { data: sigs }, { data: c }] = await Promise.all([
         supabaseClient.from('profiles').select(`
           id, full_name, employment_type, employment_start_date, pay_type, salary_includes_super,
-          has_company_vehicle, super_fund_name, super_is_self_managed,
+          has_company_vehicle,
           emergency_contact_name, emergency_contact_relationship, onboarding_completed_at,
           onboarding_reissue_reason, onboarding_reissue_note, onboarding_cycle_started_at
         `).eq('id', myUserId).single(),
