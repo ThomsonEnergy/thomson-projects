@@ -60,7 +60,7 @@
       const centreCols = await costCentreColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order), cost_centre_photo_groups(*)),
+        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order, prebuild_group_id, prebuild_client_description, prebuild_base_quantity), cost_centre_photo_groups(*)),
           project_manager:client_contacts!project_manager_contact_id(name, phone, email),
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
@@ -202,7 +202,7 @@
       return (parseFloat(li.querySelector('.li-qty').value) || 0) * (parseFloat(li.querySelector('.li-cost').value) || 0);
     }
 
-    function addLineItem(stageRow, { id = '', description = '', item_type = 'material', quantity = 1, unit_cost = '', rate_tier_id = '', prebuild_group_id = null, prebuild_client_description = null } = {}) {
+    function addLineItem(stageRow, { id = '', description = '', item_type = 'material', quantity = 1, unit_cost = '', rate_tier_id = '', prebuild_group_id = null, prebuild_client_description = null, prebuild_base_quantity = null } = {}, container = null) {
       const li = document.createElement('div');
       li.className = 'li-row';
       li.dataset.id = id;
@@ -210,8 +210,13 @@
       // client-facing quote collapse every component added in one click
       // back into a single line showing the prebuild's own client-facing
       // description, without changing how staff see/edit each line here.
+      // prebuildBaseQuantity is the un-multiplied per-unit quantity from
+      // the master prebuild - lets the group's own quantity control (see
+      // renderPrebuildGroup) rescale every component from the same base
+      // instead of compounding a rescale-of-a-rescale.
       li.dataset.prebuildGroupId = prebuild_group_id || '';
       li.dataset.prebuildClientDescription = prebuild_client_description || '';
+      li.dataset.prebuildBaseQuantity = prebuild_base_quantity ?? '';
       li.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
       const isLabour = item_type === 'labour';
       const descPlaceholder = isLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
@@ -230,7 +235,7 @@
         <div class="li-total" style="font-size:13px; font-weight:600;">$0.00</div>
         <button type="button" class="secondary li-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
-      stageRow.querySelector('.li-rows').appendChild(li);
+      (container || stageRow.querySelector('.li-rows')).appendChild(li);
       const recalc = () => updateStageTotals(stageRow);
 
       li.querySelector('.li-qty').addEventListener('input', recalc);
@@ -413,8 +418,7 @@
       div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateEditTotal(); renumberEditStages(); });
       if (TEMPLATE_INFO[currentTemplate].singleStage) div.querySelector('.remove-row').style.display = 'none';
 
-      if (lineItems.length) lineItems.forEach(li => addLineItem(div, li));
-      else addLineItem(div);
+      renderStageLineItems(div, lineItems);
 
       photoGroups.forEach(pg => addPhotoGroup(div, pg));
     }
@@ -1118,6 +1122,7 @@
             sort_order: j,
             prebuild_group_id: li.dataset.prebuildGroupId || null,
             prebuild_client_description: li.dataset.prebuildClientDescription || null,
+            prebuild_base_quantity: li.dataset.prebuildBaseQuantity ? parseFloat(li.dataset.prebuildBaseQuantity) : null,
           };
         }).filter(li => li.description),
         photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({

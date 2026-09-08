@@ -99,6 +99,15 @@
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
 
+    // Labour shows as hours worked; everything else (materials, and a
+    // collapsed prebuild's own instance count - see get_quote_by_token)
+    // shows as a plain multiplier. item_type is only present for an
+    // ungrouped line - a prebuild group has no single item_type of its own.
+    function fmtQty(qty, item_type) {
+      const n = Math.round((Number(qty) || 0) * 100) / 100;
+      return item_type === 'labour' ? `${n} hrs` : `&times;${n}`;
+    }
+
     async function load() {
       const [{ data, error }, { data: settings }] = await Promise.all([
         supabaseClient.rpc('get_quote_by_token', { p_token: token }),
@@ -243,7 +252,7 @@
                         ${c.line_items.map(li => `
                           <tr>
                             <td style="color:var(--muted); font-size:13px; border:none;">${li.description}</td>
-                            <td style="border:none;"></td>
+                            <td class="num" style="color:var(--muted); font-size:13px; border:none;">${fmtQty(li.quantity, li.item_type)}</td>
                             <td class="num" style="font-size:13px; border:none;">${money(li.amount)}</td>
                           </tr>`).join('')}
                         <tr>

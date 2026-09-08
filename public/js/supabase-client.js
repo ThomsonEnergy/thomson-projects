@@ -1520,22 +1520,121 @@ async function openPrebuildPicker(stageRow) {
         // own rather than merging with the first.
         const groupId = crypto.randomUUID();
         const clientDescription = prebuild.client_description || prebuild.name;
-        (prebuild.prebuild_components || []).forEach(comp => {
-          addLineItem(stageRow, {
-            description: `${prebuild.name} - ${comp.description}`,
-            item_type: comp.item_type,
-            quantity: (parseFloat(comp.quantity) || 0) * qty,
-            unit_cost: comp.unit_cost,
-            prebuild_group_id: groupId,
-            prebuild_client_description: clientDescription,
-          });
-        });
+        const components = (prebuild.prebuild_components || []).map(comp => ({
+          description: `${prebuild.name} - ${comp.description}`,
+          item_type: comp.item_type,
+          quantity: (parseFloat(comp.quantity) || 0) * qty,
+          unit_cost: comp.unit_cost,
+          // Un-multiplied - the group's own quantity control rescales from
+          // this base rather than the qty typed into this picker, which
+          // only sets the starting point.
+          prebuild_base_quantity: parseFloat(comp.quantity) || 0,
+        }));
+        renderPrebuildGroup(stageRow, groupId, clientDescription, components);
         overlay.remove();
       });
     });
   }
   overlay.querySelector('#prebuild-search').addEventListener('input', renderResults);
   renderResults();
+}
+
+// Renders one "prebuild instance" as a single collapsed control in a
+// stage's line-item list: the prebuild's client-facing name, a running
+// total, and ONE quantity field that rescales every underlying component
+// together - added because rescaling used to mean editing every labour/
+// material/markup component's own quantity by hand to keep them in
+// proportion. "Components" expands to the individual rows underneath,
+// still fully editable one at a time (each is a real addLineItem() row,
+// just appended into this group's own container instead of straight into
+// .li-rows). Used both for a freshly-added prebuild and for reconstructing
+// a previously-saved group (see renderStageLineItems below) - the two
+// cases differ only in whether `components` came from a prebuild's master
+// template or from saved cost_centre_line_items rows.
+function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
+  const group = document.createElement('div');
+  group.className = 'li-prebuild-group';
+  group.dataset.groupId = groupId;
+  group.style.cssText = 'margin-bottom:10px; border:0.5px solid var(--border); border-radius:8px; overflow:hidden;';
+
+  // The group's own quantity isn't stored directly - it's derived from
+  // any one component's own quantity / its recorded base quantity (see
+  // prebuild_base_quantity). Falls back to 1 if a component predates that
+  // column (old data) - the qty control still works from that point on,
+  // it just can't know the true starting ratio for pre-existing rows.
+  const first = components.find(c => parseFloat(c.prebuild_base_quantity) > 0);
+  const initialGroupQty = first ? (parseFloat(first.quantity) / parseFloat(first.prebuild_base_quantity)) : 1;
+  const qtyDisplay = Math.round(initialGroupQty * 100) / 100;
+
+  group.innerHTML = `
+    <div class="li-prebuild-header" style="display:grid; grid-template-columns:2fr 0.6fr 1fr auto; gap:8px; align-items:center; padding:10px; background:var(--surface-2);">
+      <div style="font-size:13px;"><strong>${clientDescription}</strong> <span class="subtitle">(prebuild)</span></div>
+      <input class="li-prebuild-qty" type="number" step="0.01" min="0.01" value="${qtyDisplay}" title="Quantity of this whole prebuild - rescales every component together" style="font-size:13px;" />
+      <div class="li-prebuild-total" style="font-size:13px; font-weight:600;">$0.00</div>
+      <div style="white-space:nowrap;">
+        <button type="button" class="secondary li-prebuild-toggle" style="font-size:12px; padding:6px 10px;">Components &#9656;</button>
+        <button type="button" class="secondary li-prebuild-remove" style="font-size:12px; padding:6px 10px;">Remove</button>
+      </div>
+    </div>
+    <div class="li-prebuild-components" style="display:none; padding:10px 10px 4px 20px;"></div>`;
+  stageRow.querySelector('.li-rows').appendChild(group);
+
+  const componentsEl = group.querySelector('.li-prebuild-components');
+  components.forEach(comp => {
+    addLineItem(stageRow, { ...comp, prebuild_group_id: groupId, prebuild_client_description: clientDescription }, componentsEl);
+  });
+
+  function recalcGroupTotal() {
+    const total = [...componentsEl.querySelectorAll('.li-row')].reduce((s, li) =>
+      s + (parseFloat(li.querySelector('.li-qty').value) || 0) * (parseFloat(li.querySelector('.li-cost').value) || 0), 0);
+    group.querySelector('.li-prebuild-total').textContent = money(total);
+  }
+
+  group.querySelector('.li-prebuild-toggle').addEventListener('click', (e) => {
+    const showing = componentsEl.style.display !== 'none';
+    componentsEl.style.display = showing ? 'none' : 'block';
+    e.target.innerHTML = showing ? 'Components &#9656;' : 'Components &#9662;';
+  });
+
+  group.querySelector('.li-prebuild-remove').addEventListener('click', () => {
+    group.remove();
+    updateStageTotals(stageRow);
+  });
+
+  group.querySelector('.li-prebuild-qty').addEventListener('input', (e) => {
+    const newQty = parseFloat(e.target.value) || 0;
+    [...componentsEl.querySelectorAll('.li-row')].forEach(li => {
+      const base = parseFloat(li.dataset.prebuildBaseQuantity);
+      if (!base) return; // no base recorded (predates this column) - edit that component's own qty directly instead
+      li.querySelector('.li-qty').value = (base * newQty).toFixed(2);
+    });
+    updateStageTotals(stageRow);
+    recalcGroupTotal();
+  });
+
+  recalcGroupTotal();
+}
+
+// Renders a stage's saved line items into its editor, collapsing any that
+// share a prebuild_group_id back into one renderPrebuildGroup() control
+// instead of showing every component as a flat row - so reopening a saved
+// quote looks the same as when the prebuild was first added, not exploded
+// back out. Replaces the old `lineItems.forEach(li => addLineItem(div, li))`
+// in both project.html and new-project.html's addRow().
+function renderStageLineItems(stageRow, lineItems) {
+  if (!lineItems.length) { addLineItem(stageRow); return; }
+  const rendered = new Set();
+  lineItems.forEach(li => {
+    if (rendered.has(li.id)) return;
+    if (li.prebuild_group_id) {
+      const groupMembers = lineItems.filter(m => m.prebuild_group_id === li.prebuild_group_id);
+      groupMembers.forEach(m => rendered.add(m.id));
+      renderPrebuildGroup(stageRow, li.prebuild_group_id, li.prebuild_client_description, groupMembers);
+    } else {
+      rendered.add(li.id);
+      addLineItem(stageRow, li);
+    }
+  });
 }
 
 // Wires an "upload the supplier's invoice instead" button - reads the
