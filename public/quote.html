@@ -227,12 +227,35 @@
           <table>
             <thead><tr><th>Stage</th><th>Description</th><th class="num">Price (ex GST)</th></tr></thead>
             <tbody>
-              ${centres.map(c => `
-                <tr>
-                  <td>${c.name}</td>
+              ${centres.map((c, i) => {
+                const hasItems = (c.line_items || []).length > 0;
+                return `
+                <tr class="${hasItems ? 'stage-summary-row' : ''}" data-idx="${i}" style="${hasItems ? 'cursor:pointer;' : ''}">
+                  <td>${c.name}${hasItems ? ` <span class="stage-toggle-arrow" style="font-size:11px; color:var(--muted);">&#9656;</span>` : ''}</td>
                   <td style="color:var(--muted)">${c.description || ''}</td>
                   <td class="num">${money(c.quoted_amount)}</td>
-                </tr>`).join('')}
+                </tr>
+                ${hasItems ? `
+                <tr class="stage-detail-row" data-idx="${i}" style="display:none;">
+                  <td colspan="3" style="padding:0 0 0 20px; background:var(--surface-2);">
+                    <table style="width:100%; margin:0;">
+                      <tbody>
+                        ${c.line_items.map(li => `
+                          <tr>
+                            <td style="color:var(--muted); font-size:13px; border:none;">${li.description}</td>
+                            <td style="border:none;"></td>
+                            <td class="num" style="font-size:13px; border:none;">${money(li.amount)}</td>
+                          </tr>`).join('')}
+                        <tr>
+                          <td style="font-weight:600; font-size:13px; border-top:0.5px solid var(--border);">Stage subtotal</td>
+                          <td style="border-top:0.5px solid var(--border);"></td>
+                          <td class="num" style="font-weight:600; font-size:13px; border-top:0.5px solid var(--border);">${money(c.quoted_amount)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>` : ''}`;
+              }).join('')}
             </tbody>
           </table>
           <div style="text-align:right; margin-top:16px;">
@@ -254,6 +277,17 @@
           <p class="success-box" style="display:inline-block">${template === 'quick_estimate' ? 'Estimate accepted, thank you.' : 'Quote accepted, thank you.'} Work will begin as scheduled.</p>
         </div>` : ''}
       `;
+
+      content.querySelectorAll('.stage-summary-row').forEach(row => {
+        row.addEventListener('click', () => {
+          const detailRow = content.querySelector(`.stage-detail-row[data-idx="${row.dataset.idx}"]`);
+          if (!detailRow) return;
+          const showing = detailRow.style.display !== 'none';
+          detailRow.style.display = showing ? 'none' : 'table-row';
+          const arrow = row.querySelector('.stage-toggle-arrow');
+          if (arrow) arrow.innerHTML = showing ? '&#9656;' : '&#9662;';
+        });
+      });
 
       document.getElementById('topbar-total').innerHTML = `
         <p class="subtitle" style="margin:0 0 2px; font-size:10px; text-transform:uppercase; letter-spacing:0.04em;">Total</p>

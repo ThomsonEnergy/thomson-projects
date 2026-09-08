@@ -1512,12 +1512,22 @@ async function openPrebuildPicker(stageRow) {
       row.addEventListener('click', () => {
         const prebuild = prebuilds.find(p => p.id === row.dataset.id);
         const qty = parseFloat(overlay.querySelector('#prebuild-qty').value) || 1;
+        // One group id shared by every component this click adds - lets the
+        // client-facing quote collapse them back into a single line (the
+        // prebuild's own client_description) while staff still see and can
+        // edit each component individually here. A second "Add prebuild"
+        // for the same prebuild gets its own group, so it collapses on its
+        // own rather than merging with the first.
+        const groupId = crypto.randomUUID();
+        const clientDescription = prebuild.client_description || prebuild.name;
         (prebuild.prebuild_components || []).forEach(comp => {
           addLineItem(stageRow, {
             description: `${prebuild.name} - ${comp.description}`,
             item_type: comp.item_type,
             quantity: (parseFloat(comp.quantity) || 0) * qty,
             unit_cost: comp.unit_cost,
+            prebuild_group_id: groupId,
+            prebuild_client_description: clientDescription,
           });
         });
         overlay.remove();

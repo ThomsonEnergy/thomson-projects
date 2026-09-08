@@ -202,10 +202,16 @@
       return (parseFloat(li.querySelector('.li-qty').value) || 0) * (parseFloat(li.querySelector('.li-cost').value) || 0);
     }
 
-    function addLineItem(stageRow, { id = '', description = '', item_type = 'material', quantity = 1, unit_cost = '', rate_tier_id = '' } = {}) {
+    function addLineItem(stageRow, { id = '', description = '', item_type = 'material', quantity = 1, unit_cost = '', rate_tier_id = '', prebuild_group_id = null, prebuild_client_description = null } = {}) {
       const li = document.createElement('div');
       li.className = 'li-row';
       li.dataset.id = id;
+      // Set only when this line came from "Add a prebuild" - lets the
+      // client-facing quote collapse every component added in one click
+      // back into a single line showing the prebuild's own client-facing
+      // description, without changing how staff see/edit each line here.
+      li.dataset.prebuildGroupId = prebuild_group_id || '';
+      li.dataset.prebuildClientDescription = prebuild_client_description || '';
       li.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
       const isLabour = item_type === 'labour';
       const descPlaceholder = isLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
@@ -1110,6 +1116,8 @@
             unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
             rate_tier_id,
             sort_order: j,
+            prebuild_group_id: li.dataset.prebuildGroupId || null,
+            prebuild_client_description: li.dataset.prebuildClientDescription || null,
           };
         }).filter(li => li.description),
         photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
