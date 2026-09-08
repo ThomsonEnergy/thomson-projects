@@ -1568,7 +1568,10 @@ function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
 
   group.innerHTML = `
     <div class="li-prebuild-header" style="display:grid; grid-template-columns:2fr 0.6fr 1fr auto; gap:8px; align-items:center; padding:10px; background:var(--surface-2);">
-      <div style="font-size:13px;"><strong>${clientDescription}</strong> <span class="subtitle">(prebuild)</span></div>
+      <div>
+        <input class="li-prebuild-desc" value="${clientDescription.replace(/"/g, '&quot;')}" style="font-size:13px; font-weight:600;" />
+        <div class="subtitle" style="font-size:11px; margin-top:2px;">Prebuild - the client sees this one line, not the components below</div>
+      </div>
       <input class="li-prebuild-qty" type="number" step="0.01" min="0.01" value="${qtyDisplay}" title="Quantity of this whole prebuild - rescales every component together" style="font-size:13px;" />
       <div class="li-prebuild-total" style="font-size:13px; font-weight:600;">$0.00</div>
       <div style="white-space:nowrap;">
@@ -1576,16 +1579,20 @@ function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
         <button type="button" class="secondary li-prebuild-remove" style="font-size:12px; padding:6px 10px;">Remove</button>
       </div>
     </div>
-    <div class="li-prebuild-components" style="display:none; padding:10px 10px 4px 20px;"></div>`;
+    <div class="li-prebuild-components" style="display:none; padding:10px 10px 4px 20px;">
+      <div class="li-prebuild-rows"></div>
+      <button type="button" class="secondary li-prebuild-add-component" style="font-size:12px; padding:6px 12px; margin-top:4px;">+ Add component</button>
+    </div>`;
   stageRow.querySelector('.li-rows').appendChild(group);
 
   const componentsEl = group.querySelector('.li-prebuild-components');
+  const rowsEl = group.querySelector('.li-prebuild-rows');
   components.forEach(comp => {
-    addLineItem(stageRow, { ...comp, prebuild_group_id: groupId, prebuild_client_description: clientDescription }, componentsEl);
+    addLineItem(stageRow, { ...comp, prebuild_group_id: groupId, prebuild_client_description: clientDescription }, rowsEl);
   });
 
   function recalcGroupTotal() {
-    const total = [...componentsEl.querySelectorAll('.li-row')].reduce((s, li) =>
+    const total = [...rowsEl.querySelectorAll('.li-row')].reduce((s, li) =>
       s + (parseFloat(li.querySelector('.li-qty').value) || 0) * (parseFloat(li.querySelector('.li-cost').value) || 0), 0);
     group.querySelector('.li-prebuild-total').textContent = money(total);
   }
@@ -1603,7 +1610,7 @@ function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
 
   group.querySelector('.li-prebuild-qty').addEventListener('input', (e) => {
     const newQty = parseFloat(e.target.value) || 0;
-    [...componentsEl.querySelectorAll('.li-row')].forEach(li => {
+    [...rowsEl.querySelectorAll('.li-row')].forEach(li => {
       const base = parseFloat(li.dataset.prebuildBaseQuantity);
       if (!base) return; // no base recorded (predates this column) - edit that component's own qty directly instead
       li.querySelector('.li-qty').value = (base * newQty).toFixed(2);
@@ -1611,6 +1618,31 @@ function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
     updateStageTotals(stageRow);
     recalcGroupTotal();
   });
+
+  // Editing the client-facing description here re-tags every current (and
+  // future - see the add-component handler below) component with the new
+  // text, since each component row carries its own copy of it rather than
+  // there being one separate "group" record to update.
+  group.querySelector('.li-prebuild-desc').addEventListener('input', (e) => {
+    const newDesc = e.target.value;
+    [...rowsEl.querySelectorAll('.li-row')].forEach(li => { li.dataset.prebuildClientDescription = newDesc; });
+  });
+
+  group.querySelector('.li-prebuild-add-component').addEventListener('click', () => {
+    // A manually-added extra has no master quantity to rescale from, so it
+    // sits outside the group's bulk quantity control - edited directly,
+    // same as any component whose base predates this column.
+    addLineItem(stageRow, { prebuild_group_id: groupId, prebuild_client_description: group.querySelector('.li-prebuild-desc').value }, rowsEl);
+    recalcGroupTotal();
+  });
+
+  // Any edit/removal inside the component list (qty, cost, type, or the
+  // per-row "x" remove button) should update the header's running total -
+  // delegated here rather than threading a callback through addLineItem,
+  // since e.target is still readable even after a remove-button's own
+  // click handler has already detached its row.
+  rowsEl.addEventListener('input', recalcGroupTotal);
+  rowsEl.addEventListener('click', (e) => { if (e.target.classList.contains('li-remove')) recalcGroupTotal(); });
 
   recalcGroupTotal();
 }
