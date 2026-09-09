@@ -211,7 +211,7 @@ Keep answers short and practical - this is someone checking something quickly du
     const anthropicMessages = messages.map((m) => ({ role: m.role, content: m.content }));
 
     let finalText = '';
-    for (let i = 0; i < 8 && !finalText; i++) {
+    for (let i = 0; i < 12 && !finalText; i++) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },

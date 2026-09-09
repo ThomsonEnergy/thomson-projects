@@ -292,7 +292,7 @@ function renderAIChatWidget() {
   const wrap = document.createElement('div');
   wrap.id = 'ai-chat-widget';
   wrap.innerHTML = `
-    <button type="button" id="ai-chat-toggle" title="Ask AI">&#129302;&#9889;</button>
+    <button type="button" id="ai-chat-toggle" title="Ask AI"><svg width="30" height="30" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 1.5 2.5 14.5h7.2l-1.2 8 11.5-14h-7.4l1.4-7z" fill="#FFCC33" stroke="#1a1a1a" stroke-width="1.1" stroke-linejoin="round"/><circle cx="9" cy="10.6" r="0.95" fill="#1a1a1a"/><circle cx="13.4" cy="9.6" r="0.95" fill="#1a1a1a"/><path d="M9.3 13.2q1.8 1.5 3.6 0.1" stroke="#1a1a1a" stroke-width="1.1" fill="none" stroke-linecap="round"/></svg></button>
     <div id="ai-chat-panel">
       <div id="ai-chat-panel-header">
         <strong style="font-size:14px;">Ask AI</strong>
