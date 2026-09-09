@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=3"></script>
+  <script src="/js/supabase-client.js?v=4"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -284,7 +284,7 @@
       updateEditTotal();
     }
 
-    // getPrebuilds()/openPrebuildPicker() are shared - see js/supabase-client.js
+    // getPrebuilds()/getMaterials()/openStockPicker() are shared - see js/supabase-client.js
 
     // ---------- payment milestones ----------
 
@@ -356,8 +356,8 @@
         <div style="margin-top:12px;">
           <label style="margin-top:0">Line items</label>
           <div class="li-rows"></div>
-          <button type="button" class="secondary li-add" style="font-size:12px; padding:6px 12px;">+ Add line item</button>
-          <button type="button" class="secondary prebuild-add" style="font-size:12px; padding:6px 12px;">+ Add prebuild</button>
+          <button type="button" class="secondary prebuild-add" style="font-size:12px; padding:6px 12px;">+ Search material / prebuild</button>
+          <button type="button" class="secondary li-add" style="font-size:12px; padding:6px 12px;">+ Add custom line</button>
         </div>
         <div style="margin-top:16px;">
           <label style="margin-top:0">Photos for this stage</label>
@@ -413,7 +413,7 @@
       div.querySelector('.cc-markup').addEventListener('input', () => updateStageTotals(div));
       div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); });
       div.querySelector('.li-add').addEventListener('click', () => addLineItem(div));
-      div.querySelector('.prebuild-add').addEventListener('click', () => openPrebuildPicker(div));
+      div.querySelector('.prebuild-add').addEventListener('click', () => openStockPicker(div));
       div.querySelector('.pg-add').addEventListener('click', () => addPhotoGroup(div));
       div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateEditTotal(); renumberEditStages(); });
       if (TEMPLATE_INFO[currentTemplate].singleStage) div.querySelector('.remove-row').style.display = 'none';

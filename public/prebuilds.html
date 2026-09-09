@@ -80,7 +80,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=3"></script>
+  <script src="/js/supabase-client.js?v=4"></script>
   <script src="/js/theme.js"></script>
   <script>
     const PREBUILD_SUBCATEGORIES = {
@@ -102,7 +102,10 @@
       row.className = 'pb-component-row';
       row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.7fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
       row.innerHTML = `
-        <input class="pbc-desc" placeholder="e.g. Downlight fitting" value="${description}" style="font-size:13px;" />
+        <div style="position:relative;">
+          <input class="pbc-desc" placeholder="e.g. Downlight fitting" value="${description}" style="font-size:13px;" autocomplete="off" />
+          <div class="pbc-results" style="position:absolute; top:100%; left:0; right:0; z-index:10; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:none;"></div>
+        </div>
         <select class="pbc-type" style="font-size:13px;">
           <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
           <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
@@ -112,6 +115,34 @@
         <button type="button" class="secondary pbc-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
       row.querySelector('.pbc-remove').addEventListener('click', () => row.remove());
+
+      // Type-ahead against Stock materials, same search-or-type-new pattern
+      // as the PO line picker (buildMaterialSearchRow in supabase-client.js)
+      // - picking a result fills description + unit cost from Stock;
+      // typing without picking just keeps it as free text. Materials only,
+      // not prebuilds - a prebuild containing another prebuild isn't a case
+      // the data model (or the UI here) supports.
+      const descInput = row.querySelector('.pbc-desc');
+      const costInput = row.querySelector('.pbc-cost');
+      const resultsEl = row.querySelector('.pbc-results');
+      descInput.addEventListener('input', async () => {
+        const q = descInput.value.trim().toLowerCase();
+        if (row.querySelector('.pbc-type').value !== 'material' || q.length < 2) { resultsEl.style.display = 'none'; return; }
+        const materials = await getMaterials();
+        const matches = materials.filter(m => m.name.toLowerCase().includes(q)).slice(0, 8);
+        if (!matches.length) { resultsEl.style.display = 'none'; return; }
+        resultsEl.innerHTML = matches.map(m => `<div class="pbc-pick" data-name="${m.name}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${m.name} <span class="subtitle">(${money(m.cost_price)})</span></div>`).join('');
+        resultsEl.style.display = 'block';
+        resultsEl.querySelectorAll('.pbc-pick').forEach(pick => {
+          pick.addEventListener('click', () => {
+            descInput.value = pick.dataset.name;
+            costInput.value = pick.dataset.cost;
+            resultsEl.style.display = 'none';
+          });
+        });
+      });
+      descInput.addEventListener('blur', () => setTimeout(() => { resultsEl.style.display = 'none'; }, 200));
+
       document.getElementById('pb-components').appendChild(row);
     }
     document.getElementById('pb-add-component').addEventListener('click', () => addComponentRow());

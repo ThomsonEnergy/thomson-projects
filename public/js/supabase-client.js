@@ -1484,43 +1484,76 @@ async function getPrebuilds() {
   return _prebuildsCache;
 }
 
-async function openPrebuildPicker(stageRow) {
-  const prebuilds = await getPrebuilds();
-  if (!prebuilds.length) { alert('No prebuilds set up yet. Add some under the Prebuilds tab.'); return; }
+let _materialsCache = null;
+async function getMaterials() {
+  if (_materialsCache) return _materialsCache;
+  const { data, error } = await supabaseClient.from('materials').select('id, name, category, cost_price, sell_price').order('name');
+  _materialsCache = error ? [] : data;
+  return _materialsCache;
+}
+
+// Shared "add material or prebuild to this stage" picker - searches Stock
+// materials and the Prebuild library together so staff don't need to
+// remember which one a given item lives in (e.g. "90mm downlight" matches
+// both the material and the prebuild package). Picking a material adds one
+// line item with its cost pulled straight from Stock; picking a prebuild
+// keeps the existing explode-into-components behaviour. Calls the
+// including page's own global `addLineItem(stageRow, {...})` - both
+// project.html and new-project.html already define one with the same
+// signature.
+async function openStockPicker(stageRow) {
+  const [materials, prebuilds] = await Promise.all([getMaterials(), getPrebuilds()]);
+  if (!materials.length && !prebuilds.length) { alert('No materials or prebuilds set up yet. Add stock under the Stock tab or a prebuild under the Prebuilds tab.'); return; }
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
   overlay.innerHTML = `
     <div class="card" style="max-width:480px; width:100%; max-height:80vh; overflow-y:auto;">
-      <h2>Add a prebuild</h2>
+      <h2>Add material or prebuild</h2>
       <label style="margin-top:0">Quantity</label>
-      <input id="prebuild-qty" type="number" value="1" min="1" step="1" style="margin-bottom:12px;" />
+      <input id="stock-pick-qty" type="number" value="1" min="0.01" step="0.01" style="margin-bottom:12px;" />
       <label>Search</label>
-      <input id="prebuild-search" placeholder="Name, category..." autocomplete="off" />
-      <div id="prebuild-results" style="margin-top:8px;"></div>
+      <input id="stock-pick-search" placeholder="Name, category..." autocomplete="off" />
+      <div id="stock-pick-results" style="margin-top:8px;"></div>
       <div style="margin-top:16px; text-align:right;">
-        <button type="button" class="secondary" id="prebuild-cancel">Cancel</button>
+        <button type="button" class="secondary" id="stock-pick-cancel">Cancel</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
-  overlay.querySelector('#prebuild-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#stock-pick-cancel').addEventListener('click', () => overlay.remove());
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
-  const resultsEl = overlay.querySelector('#prebuild-results');
+  const resultsEl = overlay.querySelector('#stock-pick-results');
   function renderResults() {
-    const q = overlay.querySelector('#prebuild-search').value.trim().toLowerCase();
-    const matches = q
+    const q = overlay.querySelector('#stock-pick-search').value.trim().toLowerCase();
+    const prebuildMatches = (q
       ? prebuilds.filter(p => (p.name || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q) || (p.subcategory || '').toLowerCase().includes(q))
-      : prebuilds;
-    if (!matches.length) { resultsEl.innerHTML = `<p class="subtitle">No matches.</p>`; return; }
-    resultsEl.innerHTML = matches.slice(0, 50).map(p => `
-      <div class="prebuild-result-row" data-id="${p.id}" style="padding:10px; border-radius:8px; cursor:pointer; border-bottom:0.5px solid var(--border);">
-        <div style="font-weight:600;">${p.name}</div>
-        <div class="subtitle" style="font-size:12px;">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''}</div>
-      </div>`).join('');
-    resultsEl.querySelectorAll('.prebuild-result-row').forEach(row => {
+      : prebuilds).slice(0, 25);
+    const materialMatches = (q
+      ? materials.filter(m => (m.name || '').toLowerCase().includes(q) || (m.category || '').toLowerCase().includes(q))
+      : materials).slice(0, 25);
+    if (!prebuildMatches.length && !materialMatches.length) { resultsEl.innerHTML = `<p class="subtitle">No matches.</p>`; return; }
+    resultsEl.innerHTML = [
+      ...prebuildMatches.map(p => `
+        <div class="stock-pick-row" data-kind="prebuild" data-id="${p.id}" style="padding:10px; border-radius:8px; cursor:pointer; border-bottom:0.5px solid var(--border);">
+          <div style="font-weight:600;">${p.name} <span class="subtitle" style="font-weight:400;">Prebuild</span></div>
+          <div class="subtitle" style="font-size:12px;">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''}</div>
+        </div>`),
+      ...materialMatches.map(m => `
+        <div class="stock-pick-row" data-kind="material" data-id="${m.id}" style="padding:10px; border-radius:8px; cursor:pointer; border-bottom:0.5px solid var(--border);">
+          <div style="font-weight:600;">${m.name} <span class="subtitle" style="font-weight:400;">Material - ${money(m.cost_price)}</span></div>
+          <div class="subtitle" style="font-size:12px;">${m.category || ''}</div>
+        </div>`),
+    ].join('');
+    resultsEl.querySelectorAll('.stock-pick-row').forEach(row => {
       row.addEventListener('click', () => {
+        const qty = parseFloat(overlay.querySelector('#stock-pick-qty').value) || 1;
+        if (row.dataset.kind === 'material') {
+          const material = materials.find(m => m.id === row.dataset.id);
+          addLineItem(stageRow, { description: material.name, item_type: 'material', quantity: qty, unit_cost: material.cost_price });
+          overlay.remove();
+          return;
+        }
         const prebuild = prebuilds.find(p => p.id === row.dataset.id);
-        const qty = parseFloat(overlay.querySelector('#prebuild-qty').value) || 1;
         // One group id shared by every component this click adds - lets the
         // client-facing quote collapse them back into a single line (the
         // prebuild's own client_description) while staff still see and can
@@ -1544,7 +1577,7 @@ async function openPrebuildPicker(stageRow) {
       });
     });
   }
-  overlay.querySelector('#prebuild-search').addEventListener('input', renderResults);
+  overlay.querySelector('#stock-pick-search').addEventListener('input', renderResults);
   renderResults();
 }
 
@@ -2099,7 +2132,12 @@ function uploadInvoiceForPo(po) {
 // dropdown (unworkable with a large materials list) with type-ahead
 // search, while still allowing a free-text item that isn't in Stock at
 // all yet (e.g. a one-off "10A power point") rather than forcing a full
-// Stock record to be created just to order something.
+// Stock record to be created just to order something. Also matches
+// against the Prebuild library (e.g. searching "90mm downlight" surfaces
+// both the material and the prebuild package) - picking a prebuild result
+// doesn't fill this one row (a prebuild is several materials, not one), it
+// removes this row and adds one new row per material component instead,
+// so a whole prebuild's worth of stock can be ordered in one click.
 function buildMaterialSearchRow(materials, containerId) {
   const row = document.createElement('div');
   row.className = 'po-material-line';
@@ -2119,16 +2157,32 @@ function buildMaterialSearchRow(materials, containerId) {
   const resultsEl = row.querySelector('.po-line-results');
   const materialIdInput = row.querySelector('.po-line-material-id');
 
-  searchInput.addEventListener('input', (e) => {
+  searchInput.addEventListener('input', async (e) => {
     materialIdInput.value = ''; // typing again means whatever was selected no longer applies
     const q = e.target.value.trim().toLowerCase();
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
-    const matches = materials.filter(m => m.name.toLowerCase().includes(q)).slice(0, 8);
-    if (!matches.length) { resultsEl.style.display = 'none'; return; }
-    resultsEl.innerHTML = matches.map(m => `<div class="po-line-pick" data-id="${m.id}" data-name="${m.name}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${m.name} <span class="subtitle">(${money(m.cost_price)})</span></div>`).join('');
+    const prebuilds = await getPrebuilds();
+    const prebuildMatches = prebuilds.filter(p => (p.name || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q)).slice(0, 5);
+    const materialMatches = materials.filter(m => m.name.toLowerCase().includes(q)).slice(0, 8);
+    if (!prebuildMatches.length && !materialMatches.length) { resultsEl.style.display = 'none'; return; }
+    resultsEl.innerHTML = [
+      ...prebuildMatches.map(p => `<div class="po-line-pick" data-kind="prebuild" data-id="${p.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${p.name} <span class="subtitle">(Prebuild - adds each material)</span></div>`),
+      ...materialMatches.map(m => `<div class="po-line-pick" data-kind="material" data-id="${m.id}" data-name="${m.name}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${m.name} <span class="subtitle">(${money(m.cost_price)})</span></div>`),
+    ].join('');
     resultsEl.style.display = 'block';
     resultsEl.querySelectorAll('.po-line-pick').forEach(pick => {
       pick.addEventListener('click', () => {
+        if (pick.dataset.kind === 'prebuild') {
+          const prebuild = prebuilds.find(p => p.id === pick.dataset.id);
+          row.remove();
+          (prebuild.prebuild_components || []).filter(c => c.item_type === 'material').forEach(comp => {
+            const newRow = buildMaterialSearchRow(materials, containerId);
+            newRow.querySelector('.po-line-search').value = `${prebuild.name} - ${comp.description}`;
+            newRow.querySelector('.po-line-qty').value = parseFloat(comp.quantity) || 1;
+            newRow.querySelector('.po-line-cost').value = comp.unit_cost;
+          });
+          return;
+        }
         searchInput.value = pick.dataset.name;
         materialIdInput.value = pick.dataset.id;
         row.querySelector('.po-line-cost').value = pick.dataset.cost;
