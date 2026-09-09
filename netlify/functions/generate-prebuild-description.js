@@ -34,7 +34,11 @@ ${componentLines}
 
 Format (follow exactly):
 Line 1: a short title in ALL CAPS, starting with "SUPPLY AND INSTALL NEW" followed by the item.
-Then a blank line, then one paragraph (2-4 sentences) in plain trade language describing what the work involves - measuring/preparing the location, running and terminating cabling, installing/mounting the item as required - closing with a compliance reference to the relevant Australian Standard(s). Use AS/NZS 3000 for general electrical work and AS/NZS 3008 for cable sizing where relevant; only reference AS/NZS 5033 and AS/NZS 5139 if the components indicate solar panel or battery/DC work specifically - don't add them to an unrelated general electrical item.
+Then a blank line, then one paragraph (2-4 sentences) in plain trade language closing with a compliance reference to the relevant Australian Standard(s). Use AS/NZS 3000 for general electrical work and AS/NZS 3008 for cable sizing where relevant; only reference AS/NZS 5033 and AS/NZS 5139 if the components indicate solar panel or battery/DC work specifically - don't add them to an unrelated general electrical item.
+
+Two important rules:
+1. Describe ONLY the scope the components above actually cover - don't assume or add steps that aren't represented there. Many jobs are broken into separate prebuilds (e.g. running cable to a location is its own prebuild, separate from terminating it and fitting a device), so don't describe running/laying cable unless a cable-running component is actually listed - if the components are just the fitting, its termination, and mounting, describe only that.
+2. Never attribute the work to a specific qualification level (e.g. "licensed electrician", "licensed electrical specialist") - apprentices and other staff do this work too, under supervision as required. Describe the work itself, not who's doing it.
 
 Example of the exact tone and format wanted:
 
