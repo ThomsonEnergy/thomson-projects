@@ -71,7 +71,7 @@ async function runQuery(userClient, input) {
 
 const KB_TOOL = {
   name: 'search_knowledge_base',
-  description: 'Search the internal Knowledge Base - install guides, best practices, AUS standards, and other reference material staff have added (pasted text, linked websites, or uploaded PDFs/images/spreadsheets). Use this for "how do I...", "what does the standard say about...", procedure/reference questions - as opposed to query_database, which is for live business records like jobs and invoices. Returns matching entries with title, category, and their extracted text content (truncated if long).',
+  description: 'Search the internal Knowledge Base - install guides, best practices, AUS standards, and other reference material staff have added (pasted text, linked websites, or uploaded PDFs/images/spreadsheets). Use this for "how do I...", "what does the standard say about...", procedure/reference questions - as opposed to query_database, which is for live business records like jobs and invoices. Returns matching entries (with an id) and, for a long document, short excerpts around your search words rather than the whole thing - use read_knowledge_entry with that id to dig further into one specific document, e.g. re-searching it for a more specific clause/term once you know which document has what you need.',
   input_schema: {
     type: 'object',
     properties: { query: { type: 'string', description: 'Keywords to search for in the entry title and content.' } },
@@ -79,7 +79,59 @@ const KB_TOOL = {
   },
 };
 
+const READ_ENTRY_TOOL = {
+  name: 'read_knowledge_entry',
+  description: 'Read more of one specific Knowledge Base entry by id (the id comes from a search_knowledge_base result). Use this to dig into a large document - e.g. a full AUS standard - that search_knowledge_base only returned a short excerpt of. Pass search_term to get excerpts from within that entry around a more specific clause/topic than your original search; omit it to read from the start of the document instead.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The knowledge_entries id from a search_knowledge_base result.' },
+      search_term: { type: 'string', description: 'Optional - narrows to excerpts around this term within the entry, instead of reading from the start.' },
+    },
+    required: ['id'],
+  },
+};
+
 const KB_CONTENT_CHAR_LIMIT = 4000;
+const READ_ENTRY_CHAR_LIMIT = 8000;
+
+// A large document (a full AUS standard can run to 1MB+ of text) can't be
+// handed to the model whole, and truncating from character 0 only ever
+// surfaces the cover page - useless for "what does clause X say". Instead,
+// find where the search words actually appear and return windows of text
+// around each match, so a deep clause several hundred pages in is still
+// reachable.
+function extractExcerpts(content, words, { windowSize = 1200, maxExcerpts = 4, maxMatchesPerWord = 3 } = {}) {
+  if (!content) return '';
+  const lower = content.toLowerCase();
+  const windows = [];
+  for (const w of words) {
+    const wl = w.toLowerCase();
+    if (!wl) continue;
+    let searchFrom = 0;
+    for (let found = 0; found < maxMatchesPerWord; found++) {
+      const pos = lower.indexOf(wl, searchFrom);
+      if (pos === -1) break;
+      windows.push([Math.max(0, pos - windowSize / 2), Math.min(content.length, pos + wl.length + windowSize / 2)]);
+      searchFrom = pos + wl.length;
+    }
+  }
+  if (!windows.length) return content.slice(0, 2000);
+
+  windows.sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const w of windows) {
+    const last = merged[merged.length - 1];
+    if (last && w[0] <= last[1] + 200) last[1] = Math.max(last[1], w[1]);
+    else merged.push(w);
+  }
+
+  return merged.slice(0, maxExcerpts).map(([start, end]) => {
+    const prefix = start > 0 ? '...' : '';
+    const suffix = end < content.length ? '...' : '';
+    return prefix + content.slice(start, end).trim() + suffix;
+  }).join('\n\n[...]\n\n');
+}
 
 async function searchKnowledgeBase(userClient, input) {
   const query = ((input && input.query) || '').trim();
@@ -101,10 +153,34 @@ async function searchKnowledgeBase(userClient, input) {
   const trimmed = (data || []).map((row) => ({
     ...row,
     content: row.content && row.content.length > KB_CONTENT_CHAR_LIMIT
-      ? row.content.slice(0, KB_CONTENT_CHAR_LIMIT) + '... (truncated)'
+      ? extractExcerpts(row.content, words)
       : row.content,
   }));
   return { data: trimmed, error: null };
+}
+
+async function readKnowledgeEntry(userClient, input) {
+  const id = ((input && input.id) || '').trim();
+  if (!id) return { error: { message: 'id is required' } };
+  const { data, error } = await userClient
+    .from('knowledge_entries')
+    .select('id, title, category, content, source_url, file_name')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return { error };
+  if (!data) return { data: null, error: null };
+
+  const searchTerm = ((input && input.search_term) || '').trim();
+  let content = data.content || '';
+  if (content.length > READ_ENTRY_CHAR_LIMIT) {
+    if (searchTerm) {
+      const words = searchTerm.split(/\s+/).map((w) => w.replace(/[%,()]/g, '')).filter(Boolean).slice(0, 4);
+      content = extractExcerpts(content, words, { windowSize: 2500, maxExcerpts: 4 });
+    } else {
+      content = content.slice(0, READ_ENTRY_CHAR_LIMIT) + '... (truncated - pass search_term to find a specific section instead)';
+    }
+  }
+  return { data: { ...data, content }, error: null };
 }
 
 exports.handler = async (event) => {
@@ -143,7 +219,7 @@ exports.handler = async (event) => {
 
     const systemPrompt = `You are the AI assistant built into Thomson Projects, Thomson Energy's internal job management app for their electrical/solar contracting business. You're talking to ${profile && profile.full_name ? profile.full_name : 'a staff member'} (role: ${profile && profile.role ? profile.role : 'unknown'}). Today's date is ${today}.
 
-Use the query_database tool to look up real data - jobs/quotes, cost centres, invoices, purchase orders, stock/materials, prebuilds, clients, suppliers, timesheets, tasks, and more - rather than guessing or estimating numbers. Use the search_knowledge_base tool for install guides, best practices, AUS standards, and other reference material staff have added. If a query or search comes back empty or errors, say so plainly instead of making something up.
+Use the query_database tool to look up real data - jobs/quotes, cost centres, invoices, purchase orders, stock/materials, prebuilds, clients, suppliers, timesheets, tasks, and more - rather than guessing or estimating numbers. Use search_knowledge_base for install guides, best practices, AUS standards, and other reference material staff have added - a big document (a full AUS standard can run hundreds of pages) only comes back as short excerpts around your search words, not the whole thing, so if the first search finds the right document but not the exact clause/detail you need, call read_knowledge_entry with that entry's id and a more specific search_term to dig further into it, rather than answering from the short excerpt alone or falling back to general knowledge. If a query or search comes back empty or errors, say so plainly instead of making something up - and for anything safety- or compliance-critical (clearances, ratings, labelling requirements), don't state a figure from general knowledge as if it were the standard's actual wording unless you've actually found and read it in the knowledge base.
 
 You are read-only - you cannot create, edit, or delete anything in the app. If asked to change something, say you can only look things up right now and point to the right page to do it.
 
@@ -152,7 +228,7 @@ Keep answers short and practical - this is someone checking something quickly du
     const anthropicMessages = messages.map((m) => ({ role: m.role, content: m.content }));
 
     let finalText = '';
-    for (let i = 0; i < 6 && !finalText; i++) {
+    for (let i = 0; i < 8 && !finalText; i++) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -160,7 +236,7 @@ Keep answers short and practical - this is someone checking something quickly du
           model: 'claude-sonnet-5',
           max_tokens: 1024,
           system: systemPrompt,
-          tools: [QUERY_TOOL, KB_TOOL],
+          tools: [QUERY_TOOL, KB_TOOL, READ_ENTRY_TOOL],
           messages: anthropicMessages,
         }),
       });
@@ -181,8 +257,8 @@ Keep answers short and practical - this is someone checking something quickly du
       for (const tu of toolUses) {
         let resultContent;
         try {
-          const { data: rows, error } = tu.name === 'search_knowledge_base'
-            ? await searchKnowledgeBase(userClient, tu.input)
+          const { data: rows, error } = tu.name === 'search_knowledge_base' ? await searchKnowledgeBase(userClient, tu.input)
+            : tu.name === 'read_knowledge_entry' ? await readKnowledgeEntry(userClient, tu.input)
             : await runQuery(userClient, tu.input);
           resultContent = error ? `Error: ${error.message}` : JSON.stringify(rows);
         } catch (err) {
