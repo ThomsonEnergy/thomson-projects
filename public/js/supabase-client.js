@@ -263,6 +263,112 @@ async function renderMainNav(activeKey) {
   ).join('');
   if (tabsEl) tabsEl.innerHTML = linksHtml(true);
   if (dropdownEl) dropdownEl.innerHTML = linksHtml(false);
+  renderAIChatWidget();
+}
+
+// Floating "Ask AI" widget - piggybacks on renderMainNav() so it shows up
+// on every page that renders the topbar (i.e. every authenticated page)
+// without needing to be wired in individually. Backed by the ai-chat
+// Netlify function, which can query the live database (read-only, scoped
+// to whatever this logged-in staff member is allowed to see) to answer
+// with real numbers instead of guessing.
+let _aiChatHistory = [];
+function _aiChatEscape(s) {
+  const div = document.createElement('div');
+  div.textContent = s == null ? '' : String(s);
+  return div.innerHTML;
+}
+function _aiChatLoadHistory() {
+  try { return JSON.parse(sessionStorage.getItem('te-ai-chat-history') || '[]'); } catch (e) { return []; }
+}
+function _aiChatSaveHistory() {
+  try { sessionStorage.setItem('te-ai-chat-history', JSON.stringify(_aiChatHistory.slice(-30))); } catch (e) { /* private browsing etc - chat still works, just won't persist */ }
+}
+function renderAIChatWidget() {
+  if (document.getElementById('ai-chat-widget')) return;
+  _aiChatHistory = _aiChatLoadHistory();
+
+  const wrap = document.createElement('div');
+  wrap.id = 'ai-chat-widget';
+  wrap.innerHTML = `
+    <button type="button" id="ai-chat-toggle" title="Ask AI" style="position:fixed; bottom:20px; right:20px; width:52px; height:52px; border-radius:50%; background:var(--primary, #2563eb); color:#fff; border:none; font-size:22px; cursor:pointer; z-index:200; box-shadow:0 2px 10px rgba(0,0,0,0.3);">&#128172;</button>
+    <div id="ai-chat-panel" style="display:none; flex-direction:column; position:fixed; bottom:84px; right:20px; width:360px; max-width:calc(100vw - 32px); height:480px; max-height:calc(100vh - 120px); background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.35); z-index:200; overflow:hidden;">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border); background:var(--surface-2); flex-shrink:0;">
+        <strong style="font-size:14px;">Ask AI</strong>
+        <div>
+          <button type="button" id="ai-chat-clear" title="Clear conversation" style="background:none; border:none; cursor:pointer; font-size:12px; color:var(--muted); margin-right:10px;">Clear</button>
+          <button type="button" id="ai-chat-close" title="Close" style="background:none; border:none; cursor:pointer; font-size:18px; line-height:1;">&times;</button>
+        </div>
+      </div>
+      <div id="ai-chat-messages" style="flex:1; overflow-y:auto; padding:12px; font-size:13px;"></div>
+      <div style="display:flex; gap:6px; padding:10px; border-top:1px solid var(--border); flex-shrink:0;">
+        <input id="ai-chat-input" placeholder="Ask about a job, quote, stock..." autocomplete="off" style="flex:1; font-size:13px; margin:0;" />
+        <button type="button" id="ai-chat-send" style="padding:8px 14px; font-size:13px; margin:0;">Send</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  const panel = wrap.querySelector('#ai-chat-panel');
+  const messagesEl = wrap.querySelector('#ai-chat-messages');
+  const input = wrap.querySelector('#ai-chat-input');
+  const sendBtn = wrap.querySelector('#ai-chat-send');
+
+  function renderMessages() {
+    if (!_aiChatHistory.length) {
+      messagesEl.innerHTML = `<p class="subtitle" style="margin:0;">Ask about a job, a quote, stock levels, what's overdue - anything in the app. Read-only, can't make changes for you.</p>`;
+      return;
+    }
+    messagesEl.innerHTML = _aiChatHistory.map(m => `
+      <div style="display:flex; ${m.role === 'user' ? 'justify-content:flex-end;' : 'justify-content:flex-start;'} margin-bottom:8px;">
+        <div style="max-width:85%; padding:8px 11px; border-radius:10px; white-space:pre-wrap; ${m.role === 'user' ? 'background:var(--primary, #2563eb); color:#fff;' : 'background:var(--surface-2); border:1px solid var(--border);'}">${_aiChatEscape(m.content)}</div>
+      </div>`).join('');
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+  renderMessages();
+
+  function togglePanel(show) {
+    panel.style.display = show ? 'flex' : 'none';
+    if (show) { renderMessages(); input.focus(); }
+  }
+  wrap.querySelector('#ai-chat-toggle').addEventListener('click', () => togglePanel(panel.style.display === 'none'));
+  wrap.querySelector('#ai-chat-close').addEventListener('click', () => togglePanel(false));
+  wrap.querySelector('#ai-chat-clear').addEventListener('click', () => {
+    _aiChatHistory = [];
+    _aiChatSaveHistory();
+    renderMessages();
+  });
+
+  async function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    _aiChatHistory.push({ role: 'user', content: text });
+    renderMessages();
+    _aiChatSaveHistory();
+
+    sendBtn.disabled = true;
+    messagesEl.insertAdjacentHTML('beforeend', `<div id="ai-chat-thinking" class="subtitle" style="margin-top:2px;">Thinking...</div>`);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ messages: _aiChatHistory.slice(-20) }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Something went wrong.');
+      _aiChatHistory.push({ role: 'assistant', content: data.text });
+    } catch (err) {
+      _aiChatHistory.push({ role: 'assistant', content: `Sorry, couldn't get an answer - ${err.message}` });
+    }
+    sendBtn.disabled = false;
+    renderMessages();
+    _aiChatSaveHistory();
+    input.focus();
+  }
+  sendBtn.addEventListener('click', send);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 }
 
 // Shared job search - by job number, name, client name, or site address.
