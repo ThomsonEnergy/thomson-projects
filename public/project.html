@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=10"></script>
+  <script src="/js/supabase-client.js?v=11"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -2132,6 +2132,19 @@
                 ` : ''}
               `) : ''}
 
+              ${project.job_number && !editMode ? `
+              <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                  <h2 style="margin:0;">Installer summary</h2>
+                  <button type="button" class="secondary" id="installer-summary-btn" style="font-size:12px; padding:6px 10px;">${project.installer_summary ? 'Regenerate' : 'Generate summary'}</button>
+                </div>
+                <p class="subtitle" style="margin:0 0 8px;">Plain-language inclusions/exclusions for whoever's doing the job on site - condensed from the scope of works, not a replacement for it.</p>
+                <div id="installer-summary-text" style="white-space:pre-wrap; font-size:14px;">${project.installer_summary ? escapeHtml(project.installer_summary) : '<span class="subtitle">Not generated yet.</span>'}</div>
+                ${project.installer_summary && project.installer_summary_generated_at ? `<p class="subtitle" style="margin-top:8px; font-size:11px;">Generated ${new Date(project.installer_summary_generated_at).toLocaleString('en-AU')}</p>` : ''}
+                <div id="installer-summary-msg"></div>
+              </div>
+              ` : ''}
+
               <div class="card">
                 <h2>Needs attention</h2>
                 <div id="summary-po-line">${project.job_number ? `<p class="subtitle">Loading purchase orders...</p>` : `<p class="subtitle">Purchase orders start once this quote is approved and becomes a job.</p>`}</div>
@@ -2511,6 +2524,40 @@
       if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
       const invoiceActualBtn = document.getElementById('invoice-actual-btn');
       if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => openInvoiceActualCostsPanel(project));
+
+      const installerSummaryBtn = document.getElementById('installer-summary-btn');
+      if (installerSummaryBtn) installerSummaryBtn.addEventListener('click', async () => {
+        const textEl = document.getElementById('installer-summary-text');
+        const msgEl = document.getElementById('installer-summary-msg');
+        if (!project.sow_text || !project.sow_text.trim()) {
+          msgEl.innerHTML = `<div class="error-box">This job has no scope of works to summarise yet - add one under Edit quote first.</div>`;
+          return;
+        }
+        installerSummaryBtn.disabled = true;
+        installerSummaryBtn.textContent = 'Generating...';
+        msgEl.innerHTML = '';
+        try {
+          const stages = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order)
+            .map(c => ({ name: c.name, description: c.description }));
+          const res = await fetch('/.netlify/functions/generate-installer-summary', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectName: project.name, sowText: project.sow_text, stages }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate a summary');
+          const generatedAt = new Date().toISOString();
+          const { error: updErr } = await supabaseClient.from('projects').update({ installer_summary: data.summary, installer_summary_generated_at: generatedAt }).eq('id', project.id);
+          if (updErr) throw updErr;
+          project.installer_summary = data.summary;
+          project.installer_summary_generated_at = generatedAt;
+          textEl.innerHTML = escapeHtml(data.summary);
+          await logActivity('project', project.id, 'installer_summary_generated', 'Generated the installer job summary');
+        } catch (err) {
+          msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+        installerSummaryBtn.disabled = false;
+        installerSummaryBtn.textContent = 'Regenerate';
+      });
 
       const lahaToggle = document.getElementById('laha-approved-toggle');
       if (lahaToggle) lahaToggle.addEventListener('change', async (e) => {

@@ -273,12 +273,15 @@ async function renderMainNav(activeKey) {
 // Netlify function, which can query the live database (read-only, scoped
 // to whatever this logged-in staff member is allowed to see) to answer
 // with real numbers instead of guessing.
-let _aiChatHistory = [];
-function _aiChatEscape(s) {
+// Shared HTML-escape for dropping any plain text (AI output, anything not
+// already known-safe) into an innerHTML template literal.
+function escapeHtml(s) {
   const div = document.createElement('div');
   div.textContent = s == null ? '' : String(s);
   return div.innerHTML;
 }
+
+let _aiChatHistory = [];
 function _aiChatLoadHistory() {
   try { return JSON.parse(sessionStorage.getItem('te-ai-chat-history') || '[]'); } catch (e) { return []; }
 }
@@ -321,7 +324,7 @@ function renderAIChatWidget() {
     }
     messagesEl.innerHTML = _aiChatHistory.map(m => `
       <div style="display:flex; ${m.role === 'user' ? 'justify-content:flex-end;' : 'justify-content:flex-start;'} margin-bottom:8px;">
-        <div style="max-width:85%; padding:8px 11px; border-radius:10px; white-space:pre-wrap; ${m.role === 'user' ? 'background:var(--accent); color:#fff;' : 'background:var(--surface-2); border:1px solid var(--border);'}">${_aiChatEscape(m.content)}</div>
+        <div style="max-width:85%; padding:8px 11px; border-radius:10px; white-space:pre-wrap; ${m.role === 'user' ? 'background:var(--accent); color:#fff;' : 'background:var(--surface-2); border:1px solid var(--border);'}">${escapeHtml(m.content)}</div>
       </div>`).join('');
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
