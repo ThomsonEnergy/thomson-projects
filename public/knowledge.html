@@ -111,6 +111,7 @@
       try {
         const { data: { user } } = await supabaseClient.auth.getUser();
         const row = { title, category, created_by: user.id };
+        let backgroundPayload = null;
 
         if (type === 'text') {
           const content = document.getElementById('kb-text-content').value.trim();
@@ -120,16 +121,10 @@
         } else if (type === 'website') {
           const url = document.getElementById('kb-website-url').value.trim();
           if (!url) throw new Error('Add a website URL first.');
-          btn.textContent = 'Fetching page...';
-          const res = await fetch('/.netlify/functions/extract-knowledge-content', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source_url: url }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not read that page');
           row.entry_type = 'website';
           row.source_url = url;
-          row.content = data.content;
+          row.content = null;
+          backgroundPayload = { source_url: url };
         } else {
           const fileInput = document.getElementById('kb-file-input');
           const file = fileInput.files[0];
@@ -138,28 +133,36 @@
           const path = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
           const { error: upErr } = await supabaseClient.storage.from('knowledge-files').upload(path, file);
           if (upErr) throw upErr;
-          btn.textContent = 'Reading document...';
-          const res = await fetch('/.netlify/functions/extract-knowledge-content', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file_path: path, file_name: file.name }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not read that file');
           row.entry_type = 'file';
           row.file_path = path;
           row.file_name = file.name;
-          row.content = data.content;
+          row.content = null;
+          backgroundPayload = { file_path: path, file_name: file.name };
         }
 
         const { data: newEntry, error: insErr } = await supabaseClient.from('knowledge_entries').insert(row).select('id').single();
         if (insErr) throw insErr;
         await logActivity('knowledge_entry', newEntry.id, 'created', `Added "${title}" to the Knowledge Base`);
 
+        if (backgroundPayload) {
+          // Fire-and-forget: reading a website/file can take longer than a
+          // normal function's ~10s budget (a slow host, a big PDF needing
+          // AI transcription), so this runs as a Netlify background
+          // function that writes the result onto the row itself once done,
+          // instead of the browser waiting on the response.
+          fetch('/.netlify/functions/extract-knowledge-content-background', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entry_id: newEntry.id, ...backgroundPayload }),
+          }).catch(() => {});
+        }
+
         document.getElementById('kb-title').value = '';
         document.getElementById('kb-text-content').value = '';
         document.getElementById('kb-website-url').value = '';
         document.getElementById('kb-file-input').value = '';
-        msg.innerHTML = `<div class="success-box">Saved.</div>`;
+        msg.innerHTML = backgroundPayload
+          ? `<div class="success-box">Saved - reading it now, refresh the list in a minute to see the extracted text.</div>`
+          : `<div class="success-box">Saved.</div>`;
         await loadEntries();
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
@@ -171,6 +174,13 @@
     function entryPreview(content) {
       if (!content) return '';
       return content.length > 220 ? content.slice(0, 220) + '...' : content;
+    }
+
+    function entryStatusPreview(e) {
+      if (e.content) return entryPreview(e.content);
+      if (e.extraction_error) return `Couldn't read this: ${e.extraction_error}`;
+      if (e.entry_type !== 'text') return 'Reading in the background - refresh the page in a minute.';
+      return '';
     }
 
     function renderList() {
@@ -196,14 +206,15 @@
               <button type="button" class="secondary kb-delete" style="font-size:12px; padding:4px 8px;">Delete</button>
             </div>
           </div>
-          <p class="kb-preview" style="margin:6px 0 0; font-size:13px; cursor:pointer; white-space:pre-wrap;" data-expanded="false">${entryPreview(e.content)}</p>
+          <p class="kb-preview" style="margin:6px 0 0; font-size:13px; ${e.content ? 'cursor:pointer;' : 'font-style:italic; color:var(--muted);'} white-space:pre-wrap;" data-expanded="false">${entryStatusPreview(e)}</p>
         </div>`).join('');
 
       listEl.querySelectorAll('.kb-entry').forEach(row => {
         const entry = allEntries.find(e => e.id === row.dataset.id);
         row.querySelector('.kb-preview').addEventListener('click', (ev) => {
+          if (!entry.content) return;
           const expanded = ev.target.dataset.expanded === 'true';
-          ev.target.textContent = expanded ? entryPreview(entry.content) : (entry.content || '');
+          ev.target.textContent = expanded ? entryPreview(entry.content) : entry.content;
           ev.target.dataset.expanded = expanded ? 'false' : 'true';
         });
         const openBtn = row.querySelector('.kb-open-file');
