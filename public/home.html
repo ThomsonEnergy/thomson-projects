@@ -196,7 +196,7 @@
         (activeStaff || []).forEach(s => {
           const c = (allContracts || []).find(x => x.profile_id === s.id);
           if (!c || c.status !== 'signed') {
-            items.push({ label: `Employment contract not completed: ${s.full_name || 'a staff member'}${c ? ` (${c.status.replace('_', ' ')})` : ' (not started)'}`, link: '/settings.html' });
+            items.push({ label: `Employment contract not completed: ${s.full_name || 'a staff member'}${c ? ` (${c.status.replace(/_/g, ' ')})` : ' (not started)'}`, link: '/settings.html' });
           }
         });
       }
