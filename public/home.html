@@ -55,7 +55,10 @@
   <div class="wrap">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:4px;">
       <h1 id="greeting" style="margin:0 0 20px;">Home</h1>
-      <button type="button" id="clock-btn" class="btn" style="white-space:nowrap;">Clock in</button>
+      <div style="text-align:right;">
+        <button type="button" id="clock-btn" class="btn" style="white-space:nowrap;">Clock in</button>
+        <div id="clocked-into-line" class="subtitle" style="display:none; margin-top:6px; font-size:12px;"></div>
+      </div>
     </div>
 
     <div class="quick-nav">
@@ -99,9 +102,10 @@
     // off doesn't have to go find the button on another page.
     async function refreshClockButton() {
       const btn = document.getElementById('clock-btn');
+      const lineEl = document.getElementById('clocked-into-line');
       const { data } = await supabaseClient
         .from('time_entries')
-        .select('id, staff_id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in')
+        .select('id, staff_id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, projects(name, job_number, quote_number)')
         .eq('staff_id', myUserId)
         .is('clock_out', null)
         .order('clock_in', { ascending: false })
@@ -110,11 +114,17 @@
 
       if (data) {
         btn.textContent = 'Clock out';
+        btn.classList.add('danger');
         btn.onclick = () => openClockOutModal(data, refreshClockButton);
+        const jobLabel = data.projects ? projectRef(data.projects) : 'General / Office';
+        lineEl.innerHTML = `Clocked into: ${jobLabel} &middot; <a href="/my-day.html" class="link-quiet">Switch job</a>`;
+        lineEl.style.display = 'block';
       } else {
         btn.textContent = 'Clock in';
+        btn.classList.remove('danger');
         btn.disabled = false;
         btn.onclick = () => { window.location.href = '/my-day.html'; };
+        lineEl.style.display = 'none';
       }
     }
 
