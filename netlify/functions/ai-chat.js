@@ -69,6 +69,36 @@ async function runQuery(userClient, input) {
   return q;
 }
 
+const KB_TOOL = {
+  name: 'search_knowledge_base',
+  description: 'Search the internal Knowledge Base - install guides, best practices, AUS standards, and other reference material staff have added (pasted text, linked websites, or uploaded PDFs/images/spreadsheets). Use this for "how do I...", "what does the standard say about...", procedure/reference questions - as opposed to query_database, which is for live business records like jobs and invoices. Returns matching entries with title, category, and their extracted text content (truncated if long).',
+  input_schema: {
+    type: 'object',
+    properties: { query: { type: 'string', description: 'Keywords to search for in the entry title and content.' } },
+    required: ['query'],
+  },
+};
+
+const KB_CONTENT_CHAR_LIMIT = 4000;
+
+async function searchKnowledgeBase(userClient, input) {
+  const query = ((input && input.query) || '').trim();
+  if (!query) return { error: { message: 'query is required' } };
+  const { data, error } = await userClient
+    .from('knowledge_entries')
+    .select('id, title, category, content, source_url, file_name')
+    .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
+    .limit(5);
+  if (error) return { error };
+  const trimmed = (data || []).map((row) => ({
+    ...row,
+    content: row.content && row.content.length > KB_CONTENT_CHAR_LIMIT
+      ? row.content.slice(0, KB_CONTENT_CHAR_LIMIT) + '... (truncated)'
+      : row.content,
+  }));
+  return { data: trimmed, error: null };
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
@@ -105,7 +135,7 @@ exports.handler = async (event) => {
 
     const systemPrompt = `You are the AI assistant built into Thomson Projects, Thomson Energy's internal job management app for their electrical/solar contracting business. You're talking to ${profile && profile.full_name ? profile.full_name : 'a staff member'} (role: ${profile && profile.role ? profile.role : 'unknown'}). Today's date is ${today}.
 
-Use the query_database tool to look up real data - jobs/quotes, cost centres, invoices, purchase orders, stock/materials, prebuilds, clients, suppliers, timesheets, tasks, and more - rather than guessing or estimating numbers. If a query comes back empty or errors, say so plainly instead of making something up.
+Use the query_database tool to look up real data - jobs/quotes, cost centres, invoices, purchase orders, stock/materials, prebuilds, clients, suppliers, timesheets, tasks, and more - rather than guessing or estimating numbers. Use the search_knowledge_base tool for install guides, best practices, AUS standards, and other reference material staff have added. If a query or search comes back empty or errors, say so plainly instead of making something up.
 
 You are read-only - you cannot create, edit, or delete anything in the app. If asked to change something, say you can only look things up right now and point to the right page to do it.
 
@@ -122,7 +152,7 @@ Keep answers short and practical - this is someone checking something quickly du
           model: 'claude-sonnet-5',
           max_tokens: 1024,
           system: systemPrompt,
-          tools: [QUERY_TOOL],
+          tools: [QUERY_TOOL, KB_TOOL],
           messages: anthropicMessages,
         }),
       });
@@ -143,7 +173,9 @@ Keep answers short and practical - this is someone checking something quickly du
       for (const tu of toolUses) {
         let resultContent;
         try {
-          const { data: rows, error } = await runQuery(userClient, tu.input);
+          const { data: rows, error } = tu.name === 'search_knowledge_base'
+            ? await searchKnowledgeBase(userClient, tu.input)
+            : await runQuery(userClient, tu.input);
           resultContent = error ? `Error: ${error.message}` : JSON.stringify(rows);
         } catch (err) {
           resultContent = `Error: ${err.message}`;

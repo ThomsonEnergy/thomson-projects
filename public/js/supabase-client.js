@@ -242,6 +242,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'clients', label: 'Clients', href: '/clients.html' },
   { key: 'stock', label: 'Stock', href: '/stock.html' },
   { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', pricingOnly: true },
+  { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html' },
   { key: 'team', label: 'Team', href: '/team.html' },
   { key: 'dnsp', label: 'DNSP', href: '/dnsp.html' },
   { key: 'fleet', label: 'Fleet', href: '/fleet.html' },
