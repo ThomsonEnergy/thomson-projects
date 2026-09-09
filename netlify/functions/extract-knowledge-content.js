@@ -40,9 +40,23 @@ function mimeFor(fileName) {
   return null;
 }
 
+// A "website" link isn't always an HTML page - several real-world sources
+// (a manufacturer datasheet, a knowledge-base article's attached file) are
+// a direct link straight to a PDF. Route those through the same
+// document-transcription path a PDF upload gets, instead of HTML-stripping
+// binary PDF bytes into garbage.
 async function extractWebsite(sourceUrl) {
   const res = await fetch(sourceUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ThomsonProjectsBot/1.0)' } });
   if (!res.ok) throw new Error(`Couldn't fetch that page (${res.status})`);
+
+  const contentType = res.headers.get('content-type') || '';
+  const looksLikePdf = contentType.includes('application/pdf') || /\.pdf(\?|$)/i.test(sourceUrl);
+  if (looksLikePdf) {
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const apiKey = await getIntegrationKey('anthropic');
+    return extractDocumentOrImage(buffer, 'application/pdf', apiKey);
+  }
+
   const html = await res.text();
   const text = stripHtml(html).slice(0, MAX_WEBSITE_CHARS);
   if (!text) throw new Error("Couldn't find any readable text on that page.");
