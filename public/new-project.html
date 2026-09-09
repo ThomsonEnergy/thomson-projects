@@ -133,6 +133,9 @@
       <h2>Scope of works document</h2>
       <p class="subtitle" style="margin-bottom:10px;">Paste in your full scope of works, or generate it above. Shown as its own section in the proposal, above the pricing table.</p>
       <textarea id="p-sow" style="min-height:260px;" placeholder="Paste your scope of works here..."></textarea>
+      <button type="button" class="secondary" id="cleanup-sow-btn" style="margin-top:10px;">&#129529; Cleanup with AI</button>
+      <p class="subtitle" style="margin:4px 0 0;">Rewrites the wording/formatting of what's in the box above right now - use it after generating a draft and then editing it by hand, instead of generating a fresh one from scratch.</p>
+      <div id="cleanup-sow-msg"></div>
     </div>
 
     <div class="card">
@@ -784,6 +787,40 @@
         btn.disabled = false;
         btn.textContent = 'Generate scope of works with AI';
       }
+    });
+
+    document.getElementById('cleanup-sow-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('cleanup-sow-btn');
+      const msg = document.getElementById('cleanup-sow-msg');
+      const current = document.getElementById('p-sow').value.trim();
+      if (!current) { msg.innerHTML = `<div class="error-box">Nothing to clean up yet - write or generate a scope of works first.</div>`; return; }
+
+      const sowStyle = document.querySelector('input[name="sow-style"]:checked').value;
+      const styleNote = sowStyle === 'structured'
+        ? 'This follows the "structured & numbered" house style for commercial builders/developers - formal, numbered sub-sections by discipline/phase, ending in an Exclusions section. Keep that structure.'
+        : 'This follows the "story-flowing" house style for residential homeowners - plain-English, one section per major component with a short bolded heading, closing with a bulleted inclusions list, no numbered sections or Exclusions clause. Keep that structure.';
+
+      btn.disabled = true;
+      btn.textContent = 'Cleaning up...';
+      msg.innerHTML = '';
+      try {
+        const res = await fetch('/.netlify/functions/cleanup-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: current,
+            instructions: `This is a scope-of-works document on an electrical/solar contractor's client-facing quote. ${styleNote} Plain text, no markdown headers/asterisks. Do not include pricing.`,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not clean this up');
+        document.getElementById('p-sow').value = data.text;
+        msg.innerHTML = `<div class="success-box">Cleaned up.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+      btn.disabled = false;
+      btn.textContent = '🧹 Cleanup with AI';
     });
 
     // ---------- reference photos ----------

@@ -61,6 +61,8 @@
       <p class="subtitle" style="margin:0 0 8px;">What the client sees on the proposal - not the name above. Add components below first so the AI has something real to describe, or write your own.</p>
       <textarea id="pb-client-desc" style="min-height:110px;" placeholder="e.g. SUPPLY AND INSTALL NEW 70MM BATTERY CABLE&#10;&#10;Supply and installation of..."></textarea>
       <button type="button" class="secondary" id="pb-generate-btn" style="margin-top:8px;">&#10024; Generate with AI</button>
+      <button type="button" class="secondary" id="pb-cleanup-btn" style="margin-top:8px;">&#129529; Cleanup with AI</button>
+      <p class="subtitle" style="margin:4px 0 0;">Cleanup rewrites the wording/formatting of what's in the box above right now - use it after you've generated a draft and then edited it by hand, instead of generating a fresh one from scratch.</p>
       <div id="pb-generate-msg"></div>
 
       <label>Components</label>
@@ -191,6 +193,36 @@
       }
       btn.disabled = false;
       btn.textContent = '✨ Generate with AI';
+    });
+
+    document.getElementById('pb-cleanup-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('pb-cleanup-btn');
+      const msg = document.getElementById('pb-generate-msg');
+      const current = document.getElementById('pb-client-desc').value.trim();
+      if (!current) { msg.innerHTML = `<div class="error-box">Nothing to clean up yet - write or generate a description first.</div>`; return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Cleaning up...';
+      msg.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/cleanup-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({
+            text: current,
+            instructions: `This is a client-facing prebuild description for an Australian electrical/solar contractor's quoting system, in this exact house format: an ALL CAPS "SUPPLY AND INSTALL NEW ..." (or similar - matching whatever action the text describes) title line, then a blank line, then one short trade-language paragraph closing with the relevant AS/NZS standard(s). Keep that exact format. Never attribute the work to a specific qualification level (e.g. "licensed electrician", "licensed electrical specialist") - apprentices do this work too.`,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not clean this up');
+        document.getElementById('pb-client-desc').value = data.text;
+        msg.innerHTML = `<div class="success-box">Cleaned up.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+      btn.disabled = false;
+      btn.textContent = '🧹 Cleanup with AI';
     });
 
     async function loadPrebuilds() {
