@@ -292,7 +292,7 @@ function renderAIChatWidget() {
   const wrap = document.createElement('div');
   wrap.id = 'ai-chat-widget';
   wrap.innerHTML = `
-    <button type="button" id="ai-chat-toggle" title="Ask AI">&#128172;</button>
+    <button type="button" id="ai-chat-toggle" title="Ask AI">&#129302;&#9889;</button>
     <div id="ai-chat-panel">
       <div id="ai-chat-panel-header">
         <strong style="font-size:14px;">Ask AI</strong>

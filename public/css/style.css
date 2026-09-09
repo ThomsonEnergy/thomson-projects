@@ -598,11 +598,13 @@ html[data-theme="navy"] .success-box {
   right: 20px;
   width: 52px;
   height: 52px;
+  padding: 0;
+  justify-content: center;
   border-radius: 50%;
   background: var(--accent);
   color: #fff;
   border: none;
-  font-size: 22px;
+  font-size: 19px;
   cursor: pointer;
   z-index: 200;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
