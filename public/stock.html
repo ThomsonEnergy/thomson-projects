@@ -236,10 +236,12 @@
           const { error } = await supabaseClient.from('materials').update(fields).eq('id', material.id);
           if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
           await setWarehouseStock(material.id, quantityValue);
+          await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
         } else {
           const { data: newMat, error } = await supabaseClient.from('materials').insert(fields).select('id').single();
           if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
           await setWarehouseStock(newMat.id, quantityValue);
+          await logActivity('material', newMat.id, 'created', `Material "${name}" added`);
         }
         overlay.remove();
         await loadMaterials();
@@ -250,6 +252,7 @@
           if (!confirm(`Delete ${material.name}?`)) return;
           const { error } = await supabaseClient.from('materials').delete().eq('id', material.id);
           if (error) { alert(error.message); return; }
+          await logActivity('material', material.id, 'deleted', `Material "${material.name}" deleted`);
           overlay.remove();
           await loadMaterials();
         });

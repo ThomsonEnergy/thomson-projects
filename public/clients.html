@@ -311,10 +311,12 @@
         const { error } = await supabaseClient.from('clients').update(clientFields).eq('id', editingClientId);
         if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
         await supabaseClient.from('client_contacts').delete().eq('client_id', editingClientId);
+        await logActivity('client', editingClientId, 'updated', `Client "${name}" updated`);
       } else {
         const { data: inserted, error } = await supabaseClient.from('clients').insert(clientFields).select().single();
         if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
         clientId = inserted.id;
+        await logActivity('client', clientId, 'created', `Client "${name}" added`);
       }
 
       const contacts = [...document.querySelectorAll('.contact-row')].map((row, i) => ({
@@ -338,8 +340,10 @@
     document.getElementById('delete-client-btn').addEventListener('click', async () => {
       if (!editingClientId) return;
       if (!confirm('Delete this client? Existing quotes stay as they are, just unlinked.')) return;
+      const clientName = allClients.find(c => c.id === editingClientId)?.name || 'client';
       const { error } = await supabaseClient.from('clients').delete().eq('id', editingClientId);
       if (error) { alert(error.message); return; }
+      await logActivity('client', editingClientId, 'deleted', `Client "${clientName}" deleted`);
       await loadClients();
       document.querySelector('.settings-tab[data-panel="list"]').click();
     });

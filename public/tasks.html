@@ -103,15 +103,19 @@
 
       document.querySelectorAll('.complete-task-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
+          const task = allTasks.find(t => t.id === btn.dataset.id);
           await supabaseClient.from('job_tasks').update({
             completed: true, completed_by: user.id, completed_at: new Date().toISOString(),
           }).eq('id', btn.dataset.id);
+          if (task?.project_id) await logActivity('project', task.project_id, 'task_completed', `Task completed: ${task.description || ''}`);
           await loadTasks();
         });
       });
       document.querySelectorAll('.pick-up-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
+          const task = allTasks.find(t => t.id === btn.dataset.id);
           await supabaseClient.from('job_tasks').update({ assigned_to_user_id: user.id }).eq('id', btn.dataset.id);
+          if (task?.project_id) await logActivity('project', task.project_id, 'task_picked_up', `Task picked up: ${task.description || ''}`);
           await loadTasks();
         });
       });

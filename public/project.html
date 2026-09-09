@@ -1230,6 +1230,8 @@
             if (pgErr) throw pgErr;
           }
 
+          await logStageChanges(project.id, project.cost_centres || [], stagesPayload);
+
           editMode = false;
           const refreshed = await loadProject();
           const myRole = await getMyRole();
@@ -1318,6 +1320,8 @@
           const { error: delCentreErr } = await supabaseClient.from('cost_centres').delete().in('id', removedCentres.map(c => c.id));
           if (delCentreErr) throw delCentreErr;
         }
+
+        await logStageChanges(project.id, existingCentres, stagesPayload);
 
         if (pendingVariation) {
           const { data: { user } } = await supabaseClient.auth.getUser();
@@ -1466,6 +1470,7 @@
           });
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
+          await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (actual costs)`);
 
           const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
           msg.innerHTML = `
@@ -1668,6 +1673,7 @@
           });
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
+          await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (${claims.length} stage${claims.length === 1 ? '' : 's'} claimed)`);
 
           const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
           panelMsg.innerHTML = `

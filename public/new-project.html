@@ -1040,6 +1040,8 @@
         if (pgErr) { msg.innerHTML = `<div class="error-box">${pgErr.message}</div>`; return; }
       }
 
+      await logActivity('project', projectId, editId ? 'stage_updated' : 'created', editId ? 'Quote details and stages updated' : 'Quote created');
+
       window.location.href = `/project.html?id=${projectId}`;
     });
 

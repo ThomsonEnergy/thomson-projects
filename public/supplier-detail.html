@@ -479,6 +479,7 @@
           notes: overlay.querySelector('#ed-notes').value.trim() || null,
         }).eq('id', supplier.id);
         if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        await logActivity('supplier', supplier.id, 'updated', `Supplier "${overlay.querySelector('#ed-name').value.trim()}" updated`);
         overlay.remove();
         await loadSupplier();
       });

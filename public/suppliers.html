@@ -155,15 +155,16 @@
         const msg = overlay.querySelector('#sup-msg');
         const name = overlay.querySelector('#sup-name').value.trim();
         if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
-        const { error } = await supabaseClient.from('suppliers').insert({
+        const { data: newSupplier, error } = await supabaseClient.from('suppliers').insert({
           name,
           contact_email: overlay.querySelector('#sup-email').value.trim() || null,
           contact_phone: overlay.querySelector('#sup-phone').value.trim() || null,
           credit_terms_type: overlay.querySelector('#sup-terms-type').value,
           credit_terms_days: parseInt(overlay.querySelector('#sup-terms-days').value) || 0,
           notes: overlay.querySelector('#sup-notes').value.trim() || null,
-        });
+        }).select('id').single();
         if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        await logActivity('supplier', newSupplier.id, 'created', `Supplier "${name}" added`);
         overlay.remove();
         await loadSuppliers();
       });

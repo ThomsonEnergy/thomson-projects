@@ -46,11 +46,14 @@
       const msg = document.getElementById('msg');
       msg.innerHTML = '';
 
-      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
       if (error) {
         msg.innerHTML = `<div class="error-box">${error.message}</div>`;
         return;
       }
+      // entity_id is the signed-in user's own id - the new admin Logs page
+      // queries entity_type='login' to show who signed in and when.
+      await logActivity('login', data.user.id, 'signed_in', 'Signed in');
       window.location.href = landingPage;
     });
 

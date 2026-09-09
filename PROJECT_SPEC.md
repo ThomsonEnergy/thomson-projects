@@ -132,9 +132,14 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 
 ### A13a. Universal Activity Log (built)
 - One shared table for every entity type rather than a separate log per feature - `logActivity()` and `renderActivityLog()` are the two shared functions
-- Fully instrumented: Purchase Orders (creation, per-item receiving, fully-received milestone). Partially instrumented: Jobs (PO creation and material receipt against the job), Suppliers (bill approval)
-- Not yet instrumented: quotes, invoices, stock/material edits, settings changes - the shared functions make this straightforward to add when needed
+- Instrumented: Purchase Orders (creation, per-item receiving, fully-received milestone), Jobs/Quotes (stage added/renamed/re-priced/removed on every save - was previously the one big gap, a quote/job edit left no trace at all), Invoices (creation on both the staged-claim and actual-costs flows, plus editing an already-sent one), Suppliers (creation, edits, bill approval), Materials (create/edit/delete), Clients (create/edit/delete), Tasks (added, completed, picked up), Documents (upload/delete), Variations, Timesheets (edit/split/removal)
+- Still not instrumented: settings changes, task edit/delete (edit/delete don't exist as features yet for tasks - only complete/pick-up/add), schedule assignment changes
 - Shown as a persistent sidebar alongside every tab on the job page (see A17)
+
+### A13c. Logs page - logins + global activity feed (built)
+- New admin-only page (`logs.html`), gated by role check + redirect (same frontend-only gating pattern as Settings' admin-only tabs - `activity_log`'s own RLS was already unconditionally readable by any authenticated user before this, and stays that way)
+- Login history: `logActivity('login', userId, 'signed_in', ...)` fires from `login.html` right after a successful sign-in
+- Global activity feed: every `activity_log` entry app-wide (not scoped to one entity like the per-page sidebar), filterable by staff member, entity type, and free-text search on the description, paginated 50 at a time
 
 ### A13b. Number-first display convention (built)
 - Every job/quote reference across the app follows one consistent format via shared `projectRef()`/`projectNumberOnly()` functions: `J{jobNumber} - {name}` once a job number exists, falling back to `Q{quoteNumber} - {name}` before approval

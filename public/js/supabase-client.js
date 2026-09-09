@@ -244,12 +244,19 @@ const MAIN_NAV_ITEMS = [
   { key: 'team', label: 'Team', href: '/team.html' },
   { key: 'dnsp', label: 'DNSP', href: '/dnsp.html' },
   { key: 'fleet', label: 'Fleet', href: '/fleet.html' },
+  { key: 'logs', label: 'Logs', href: '/logs.html', adminOnly: true },
 ];
 
-function renderMainNav(activeKey) {
+// Async (unlike before) so the admin-only Logs link can be filtered out for
+// everyone else before it's ever painted, not hidden after the fact -
+// existing callers don't need to change, they just fire-and-forget this
+// same as always, nothing downstream awaits it.
+async function renderMainNav(activeKey) {
   const tabsEl = document.getElementById('topbar-tabs');
   const dropdownEl = document.getElementById('mobile-menu-dropdown');
-  const linksHtml = (asTab) => MAIN_NAV_ITEMS.map(item =>
+  const role = await getMyRole();
+  const items = MAIN_NAV_ITEMS.filter(item => !item.adminOnly || role === 'admin');
+  const linksHtml = (asTab) => items.map(item =>
     `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''}">${item.label}</a>`
   ).join('');
   if (tabsEl) tabsEl.innerHTML = linksHtml(true);
@@ -2156,6 +2163,42 @@ async function logActivity(entityType, entityId, action, description) {
     });
   } catch (err) {
     console.error('Activity log write failed:', err); // never block the real action over a logging failure
+  }
+}
+
+// Logs meaningful per-stage differences after a quote/job save - stages
+// added, removed, renamed, or re-priced. Was previously never called at
+// all, so saving a quote/job's stage editor left no trace in its own
+// Activity tab even though PO/invoice/task activity on the same project
+// showed up fine. Shared by both save paths in project.html (quote:
+// delete-and-reinsert; job: update-in-place) - takes the same
+// `stagesPayload` shape either way, and `existingCentres` is just
+// whatever project.cost_centres held before the save. Doesn't log every
+// line-item edit individually (would be noisy) since a line-item change
+// almost always shows up here anyway as a price change on its stage.
+async function logStageChanges(projectId, existingCentres, stagesPayload) {
+  const keptIds = stagesPayload.map(s => s.id).filter(Boolean);
+  const entries = [];
+  stagesPayload.forEach(s => {
+    if (!s.id) {
+      entries.push(`Stage "${s.name}" added (${money(s.quoted_amount)})`);
+      return;
+    }
+    const original = existingCentres.find(c => c.id === s.id);
+    if (!original) return;
+    if ((original.name || '') !== s.name) {
+      entries.push(`Stage renamed from "${original.name}" to "${s.name}"`);
+    }
+    const oldAmount = Number(original.quoted_amount) || 0;
+    if (Math.abs(s.quoted_amount - oldAmount) >= 0.01) {
+      entries.push(`Stage "${s.name}" price changed from ${money(oldAmount)} to ${money(s.quoted_amount)}`);
+    }
+  });
+  existingCentres.filter(c => !keptIds.includes(c.id)).forEach(c => {
+    entries.push(`Stage "${c.name}" removed (was ${money(Number(c.quoted_amount) || 0)})`);
+  });
+  for (const description of entries) {
+    await logActivity('project', projectId, 'stage_updated', description);
   }
 }
 
