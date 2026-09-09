@@ -183,6 +183,32 @@
         (pendingLeave || []).forEach(lr => {
           items.push({ label: `Leave request pending: ${lr.profiles ? lr.profiles.full_name : 'a staff member'}`, link: '/timesheets.html' });
         });
+
+        // Onboarding no longer blocks on a pending employment contract (an
+        // admin might still be drafting it), so this is Finance/Admin's own
+        // visibility that one's still outstanding for an active staff
+        // member - easy to lose track of otherwise since nothing else
+        // surfaces it once someone's already using the app day to day.
+        const [{ data: allContracts }, { data: activeStaff }] = await Promise.all([
+          supabaseClient.from('employee_contracts').select('profile_id, status'),
+          supabaseClient.from('profiles').select('id, full_name').eq('active', true),
+        ]);
+        (activeStaff || []).forEach(s => {
+          const c = (allContracts || []).find(x => x.profile_id === s.id);
+          if (!c || c.status !== 'signed') {
+            items.push({ label: `Employment contract not completed: ${s.full_name || 'a staff member'}${c ? ` (${c.status.replace('_', ' ')})` : ' (not started)'}`, link: '/settings.html' });
+          }
+        });
+      }
+
+      // Your own employment contract, if not yet fully signed - the same
+      // reason as above, just addressed to you instead of Finance/Admin.
+      const { data: myContract } = await supabaseClient.from('employee_contracts').select('status').eq('profile_id', myUserId).maybeSingle();
+      if (!myContract || myContract.status !== 'signed') {
+        items.push({
+          label: `Your employment contract isn't completed yet${myContract?.status === 'ready_to_sign' ? " - it's ready for you to sign" : ' - still being prepared'}`,
+          link: '/onboarding.html',
+        });
       }
 
       if (myRole === 'admin') {

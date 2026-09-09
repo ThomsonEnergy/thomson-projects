@@ -206,7 +206,13 @@
       const content = document.getElementById('ob-content');
       const visible = visibleDocsForStep3();
       const contractPending = documents.some(d => d.is_contract) && (!contract || contract.status === 'draft');
-      const allSigned = visible.every(d => isSigned(d.id)) && !contractPending;
+      // A pending contract is no longer a hard block - visible already
+      // excludes it (see visibleDocsForStep3), so someone can finish
+      // onboarding and start working while it's still being prepared.
+      // They get a standing reminder on their home page (see home.html)
+      // until it's actually signed, and Finance/Admin see the same gap
+      // in their own "Needs attention" panel.
+      const allSigned = visible.every(d => isSigned(d.id));
 
       content.innerHTML = `
         <div class="card">
@@ -378,7 +384,13 @@
 
       await loadOnboardingData();
       renderWelcomeHeader();
-      goToStep(1);
+      // Already finished once (onboarding_completed_at set) but linked back
+      // here - e.g. from the home page's "your contract isn't signed yet"
+      // reminder, since a contract can go from pending to ready well after
+      // someone's already been using the app day to day. Redoing details/
+      // pay rates from step 1 would make no sense at that point, so land
+      // straight on the documents step instead.
+      goToStep(profile.onboarding_completed_at ? 3 : 1);
     })();
   </script>
 </body>
