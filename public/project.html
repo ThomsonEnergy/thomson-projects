@@ -955,7 +955,10 @@
           stc_system_kw: stage.stc_system_kw, stc_zone_rating: stage.stc_zone_rating,
           stc_install_year: stage.stc_install_year, stc_price_per_certificate: stage.stc_price_per_certificate,
           lineItems: (stage.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order)
-            .map(li => ({ id: li.id, description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id })),
+            .map(li => ({
+              id: li.id, description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id,
+              prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description, prebuild_base_quantity: li.prebuild_base_quantity,
+            })),
           photoGroups: (stage.cost_centre_photo_groups || []).slice().sort((a, b) => a.sort_order - b.sort_order)
             .map(pg => ({ description: pg.description, photos: (pg.photos || []).map(p => p.url || p) })),
         });
@@ -2598,7 +2601,18 @@
           const allLineItems = [];
           const allPhotoGroups = [];
           stages.forEach((s, i) => {
+            // A duplicated prebuild group keeps its grouping (still shows as
+            // one line to the client on the new quote) but gets its own
+            // fresh group id per distinct source group, rather than literally
+            // reusing the original's - that id would otherwise collide
+            // across two now-separate quotes.
+            const groupIdMap = {};
             (s.cost_centre_line_items || []).forEach(li => {
+              let newGroupId = null;
+              if (li.prebuild_group_id) {
+                if (!groupIdMap[li.prebuild_group_id]) groupIdMap[li.prebuild_group_id] = crypto.randomUUID();
+                newGroupId = groupIdMap[li.prebuild_group_id];
+              }
               allLineItems.push({
                 cost_centre_id: newStages[i].id,
                 description: li.description,
@@ -2606,6 +2620,9 @@
                 quantity: li.quantity,
                 unit_cost: li.unit_cost,
                 sort_order: li.sort_order,
+                prebuild_group_id: newGroupId,
+                prebuild_client_description: li.prebuild_client_description,
+                prebuild_base_quantity: li.prebuild_base_quantity,
               });
             });
             (s.cost_centre_photo_groups || []).forEach(pg => {

@@ -1151,7 +1151,10 @@
           stc_price_per_certificate: stage.stc_price_per_certificate,
           lineItems: (stage.cost_centre_line_items || [])
             .sort((a, b) => a.sort_order - b.sort_order)
-            .map(li => ({ description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id })),
+            .map(li => ({
+              description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id,
+              prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description, prebuild_base_quantity: li.prebuild_base_quantity,
+            })),
           photoGroups: (stage.cost_centre_photo_groups || [])
             .sort((a, b) => a.sort_order - b.sort_order)
             .map(pg => ({ description: pg.description, photos: (pg.photos || []).map(p => p.url || p) })),
