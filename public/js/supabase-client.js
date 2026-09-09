@@ -241,21 +241,23 @@ const MAIN_NAV_ITEMS = [
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html' },
   { key: 'clients', label: 'Clients', href: '/clients.html' },
   { key: 'stock', label: 'Stock', href: '/stock.html' },
+  { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', pricingOnly: true },
   { key: 'team', label: 'Team', href: '/team.html' },
   { key: 'dnsp', label: 'DNSP', href: '/dnsp.html' },
   { key: 'fleet', label: 'Fleet', href: '/fleet.html' },
   { key: 'logs', label: 'Logs', href: '/logs.html', adminOnly: true },
 ];
 
-// Async (unlike before) so the admin-only Logs link can be filtered out for
-// everyone else before it's ever painted, not hidden after the fact -
-// existing callers don't need to change, they just fire-and-forget this
-// same as always, nothing downstream awaits it.
+// Async (unlike before) so an admin-only/pricing-only link can be filtered
+// out for everyone else before it's ever painted, not hidden after the
+// fact - existing callers don't need to change, they just fire-and-forget
+// this same as always, nothing downstream awaits it.
 async function renderMainNav(activeKey) {
   const tabsEl = document.getElementById('topbar-tabs');
   const dropdownEl = document.getElementById('mobile-menu-dropdown');
   const role = await getMyRole();
-  const items = MAIN_NAV_ITEMS.filter(item => !item.adminOnly || role === 'admin');
+  const items = MAIN_NAV_ITEMS.filter(item =>
+    (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)));
   const linksHtml = (asTab) => items.map(item =>
     `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''}">${item.label}</a>`
   ).join('');
@@ -1484,7 +1486,7 @@ async function getPrebuilds() {
 
 async function openPrebuildPicker(stageRow) {
   const prebuilds = await getPrebuilds();
-  if (!prebuilds.length) { alert('No prebuilds set up yet. Add some under Settings > Prebuild Categories.'); return; }
+  if (!prebuilds.length) { alert('No prebuilds set up yet. Add some under the Prebuilds tab.'); return; }
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
   overlay.innerHTML = `

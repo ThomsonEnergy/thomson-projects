@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Prebuilds - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=9" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Prebuilds</h1>
+    <p class="subtitle">Reusable supply-and-install packages. Staff pick these on a quote and set a quantity - every component scales automatically.</p>
+
+    <div class="card">
+      <h2 id="pb-form-heading">Add a prebuild</h2>
+      <div class="grid cols-3">
+        <div>
+          <label style="margin-top:0">Name</label>
+          <input id="pb-name" placeholder="e.g. 70mm Battery Cable - short, quick to recognise" />
+        </div>
+        <div>
+          <label style="margin-top:0">Internal part number (optional)</label>
+          <input id="pb-part-number" placeholder="Internal only, not a supplier SKU" />
+        </div>
+        <div>
+          <label style="margin-top:0">Category</label>
+          <select id="pb-category">
+            <option value="Electrical">Electrical</option>
+            <option value="Solar">Solar</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid cols-3">
+        <div>
+          <label style="margin-top:0">Subcategory</label>
+          <select id="pb-subcategory"></select>
+        </div>
+      </div>
+
+      <label>Client-facing description</label>
+      <p class="subtitle" style="margin:0 0 8px;">What the client sees on the proposal - not the name above. Add components below first so the AI has something real to describe, or write your own.</p>
+      <textarea id="pb-client-desc" style="min-height:110px;" placeholder="e.g. SUPPLY AND INSTALL NEW 70MM BATTERY CABLE&#10;&#10;Supply and installation of..."></textarea>
+      <button type="button" class="secondary" id="pb-generate-btn" style="margin-top:8px;">&#10024; Generate with AI</button>
+      <div id="pb-generate-msg"></div>
+
+      <label>Components</label>
+      <div id="pb-components"></div>
+      <button type="button" class="secondary" id="pb-add-component" style="margin-top:6px;">+ Add component</button>
+      <div style="margin-top:14px;">
+        <button id="pb-save-btn">Save prebuild</button>
+        <button class="secondary" id="pb-clear-btn" type="button">Clear form</button>
+      </div>
+      <div id="pb-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Library</h2>
+      <input id="pb-search" placeholder="Search by name or category..." style="margin-bottom:12px; max-width:320px;" autocomplete="off" />
+      <div id="pb-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=3"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    const PREBUILD_SUBCATEGORIES = {
+      Electrical: ['Lighting', 'Power', 'Trenching', 'Cable Runs'],
+      Solar: ['Panels', 'Batteries', 'Inverters'],
+    };
+    let editingPrebuildId = null;
+    let allPrebuilds = [];
+
+    function refreshSubcategoryOptions() {
+      const cat = document.getElementById('pb-category').value;
+      document.getElementById('pb-subcategory').innerHTML = PREBUILD_SUBCATEGORIES[cat]
+        .map(s => `<option value="${s}">${s}</option>`).join('');
+    }
+    document.getElementById('pb-category').addEventListener('change', refreshSubcategoryOptions);
+
+    function addComponentRow({ item_type = 'material', description = '', quantity = 1, unit_cost = '' } = {}) {
+      const row = document.createElement('div');
+      row.className = 'pb-component-row';
+      row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.7fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
+      row.innerHTML = `
+        <input class="pbc-desc" placeholder="e.g. Downlight fitting" value="${description}" style="font-size:13px;" />
+        <select class="pbc-type" style="font-size:13px;">
+          <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
+          <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
+        </select>
+        <input class="pbc-qty" type="number" step="0.01" value="${quantity}" placeholder="Qty/hrs" style="font-size:13px;" />
+        <input class="pbc-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px;" />
+        <button type="button" class="secondary pbc-remove" style="padding:6px 10px; font-size:12px;">x</button>
+      `;
+      row.querySelector('.pbc-remove').addEventListener('click', () => row.remove());
+      document.getElementById('pb-components').appendChild(row);
+    }
+    document.getElementById('pb-add-component').addEventListener('click', () => addComponentRow());
+
+    function clearPrebuildForm() {
+      editingPrebuildId = null;
+      document.getElementById('pb-form-heading').textContent = 'Add a prebuild';
+      document.getElementById('pb-name').value = '';
+      document.getElementById('pb-part-number').value = '';
+      document.getElementById('pb-client-desc').value = '';
+      document.getElementById('pb-category').value = 'Electrical';
+      refreshSubcategoryOptions();
+      document.getElementById('pb-components').innerHTML = '';
+      addComponentRow();
+      document.getElementById('pb-msg').innerHTML = '';
+      document.getElementById('pb-generate-msg').innerHTML = '';
+    }
+    document.getElementById('pb-clear-btn').addEventListener('click', clearPrebuildForm);
+
+    document.getElementById('pb-generate-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('pb-generate-btn');
+      const msg = document.getElementById('pb-generate-msg');
+      const name = document.getElementById('pb-name').value.trim();
+      if (!name) { msg.innerHTML = `<div class="error-box">Give it a name first.</div>`; return; }
+
+      const components = [...document.querySelectorAll('.pb-component-row')].map(row => ({
+        item_type: row.querySelector('.pbc-type').value,
+        description: row.querySelector('.pbc-desc').value.trim(),
+      })).filter(c => c.description);
+
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+      msg.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/generate-prebuild-description', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ name, components }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate a description');
+        document.getElementById('pb-client-desc').value = data.description;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+      btn.disabled = false;
+      btn.textContent = '✨ Generate with AI';
+    });
+
+    async function loadPrebuilds() {
+      const listEl = document.getElementById('pb-list');
+      const { data, error } = await supabaseClient
+        .from('prebuilds')
+        .select('*, prebuild_components(*)')
+        .order('category').order('name');
+      if (error) {
+        listEl.innerHTML = `<div class="error-box">${error.message}</div>`;
+        return;
+      }
+      allPrebuilds = data || [];
+      renderPrebuildList();
+    }
+
+    function renderPrebuildList() {
+      const listEl = document.getElementById('pb-list');
+      const q = document.getElementById('pb-search').value.trim().toLowerCase();
+      const data = q
+        ? allPrebuilds.filter(pb => (pb.name || '').toLowerCase().includes(q) || (pb.category || '').toLowerCase().includes(q) || (pb.subcategory || '').toLowerCase().includes(q))
+        : allPrebuilds;
+
+      if (!allPrebuilds.length) {
+        listEl.innerHTML = `<p class="subtitle">No prebuilds yet - add your first one above.</p>`;
+        return;
+      }
+      if (!data.length) {
+        listEl.innerHTML = `<p class="subtitle">No matches.</p>`;
+        return;
+      }
+      listEl.innerHTML = data.map(pb => {
+        const total = (pb.prebuild_components || []).reduce((s, c) => s + Number(c.quantity) * Number(c.unit_cost), 0);
+        return `
+        <div class="project-list-item" data-id="${pb.id}">
+          <div>
+            <div class="name">${pb.name}</div>
+            <div class="meta">${pb.category}${pb.subcategory ? ' / ' + pb.subcategory : ''} &middot; ${(pb.prebuild_components || []).length} component${(pb.prebuild_components || []).length === 1 ? '' : 's'} &middot; ${money(total)} base cost</div>
+          </div>
+          <div>
+            <button class="secondary pb-edit-btn" data-id="${pb.id}">Edit</button>
+            <button class="secondary danger pb-delete-btn" data-id="${pb.id}">Delete</button>
+          </div>
+        </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.pb-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const pb = allPrebuilds.find(p => p.id === btn.dataset.id);
+          editingPrebuildId = pb.id;
+          document.getElementById('pb-form-heading').textContent = `Edit prebuild - ${pb.name}`;
+          document.getElementById('pb-name').value = pb.name;
+          document.getElementById('pb-part-number').value = pb.internal_part_number || '';
+          document.getElementById('pb-client-desc').value = pb.client_description || '';
+          document.getElementById('pb-category').value = pb.category;
+          refreshSubcategoryOptions();
+          document.getElementById('pb-subcategory').value = pb.subcategory || '';
+          document.getElementById('pb-components').innerHTML = '';
+          (pb.prebuild_components || []).sort((a, b) => a.sort_order - b.sort_order).forEach(addComponentRow);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      });
+      listEl.querySelectorAll('.pb-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this prebuild? This cannot be undone.')) return;
+          const { error: delErr } = await supabaseClient.from('prebuilds').delete().eq('id', btn.dataset.id);
+          if (delErr) { alert(delErr.message); return; }
+          await loadPrebuilds();
+        });
+      });
+    }
+    document.getElementById('pb-search').addEventListener('input', renderPrebuildList);
+
+    document.getElementById('pb-save-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('pb-msg');
+      const name = document.getElementById('pb-name').value.trim();
+      if (!name) {
+        msg.innerHTML = `<div class="error-box">Name is required.</div>`;
+        return;
+      }
+      const components = [...document.querySelectorAll('.pb-component-row')].map((row, i) => ({
+        item_type: row.querySelector('.pbc-type').value,
+        description: row.querySelector('.pbc-desc').value.trim(),
+        quantity: parseFloat(row.querySelector('.pbc-qty').value) || 0,
+        unit_cost: parseFloat(row.querySelector('.pbc-cost').value) || 0,
+        sort_order: i,
+      })).filter(c => c.description);
+
+      const prebuildFields = {
+        name,
+        internal_part_number: document.getElementById('pb-part-number').value.trim(),
+        client_description: document.getElementById('pb-client-desc').value.trim(),
+        category: document.getElementById('pb-category').value,
+        subcategory: document.getElementById('pb-subcategory').value,
+      };
+
+      let prebuildId = editingPrebuildId;
+      if (editingPrebuildId) {
+        const { error } = await supabaseClient.from('prebuilds').update(prebuildFields).eq('id', editingPrebuildId);
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        await supabaseClient.from('prebuild_components').delete().eq('prebuild_id', editingPrebuildId);
+      } else {
+        const { data: inserted, error } = await supabaseClient.from('prebuilds').insert(prebuildFields).select().single();
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        prebuildId = inserted.id;
+      }
+
+      if (components.length) {
+        const { error: compErr } = await supabaseClient
+          .from('prebuild_components')
+          .insert(components.map(c => ({ ...c, prebuild_id: prebuildId })));
+        if (compErr) { msg.innerHTML = `<div class="error-box">${compErr.message}</div>`; return; }
+      }
+
+      msg.innerHTML = `<div class="success-box">Saved.</div>`;
+      clearPrebuildForm();
+      await loadPrebuilds();
+    });
+
+    (async () => {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('prebuilds');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      const role = await getMyRole();
+      if (!isPricingRole(role)) { window.location.href = '/home.html'; return; }
+
+      clearPrebuildForm();
+      await loadPrebuilds();
+    })();
+  </script>
+</body>
+</html>
