@@ -1,6 +1,7 @@
 const fetch = require('node-fetch');
 const XLSX = require('xlsx');
 const { PDFDocument } = require('pdf-lib');
+const pdfParse = require('pdf-parse');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { getAdminClient } = require('./_shared/require-admin');
 
@@ -83,11 +84,17 @@ async function extractDocumentOrImage(buffer, mediaType, apiKey, maxTokens) {
   return data.content.map((b) => b.text || '').join('').trim();
 }
 
-// Transcribes a PDF of any size, splitting into page-range chunks once it
-// exceeds one chunk's worth of pages. onProgress (optional) is called with
-// the growing combined text after every chunk, so a caller can persist
-// partial progress as it goes rather than only at the very end.
-async function transcribePdf(buffer, apiKey, onProgress) {
+// Transcribes a PDF via Claude vision, splitting into page-range chunks
+// once it exceeds one chunk's worth of pages. This is the fallback path
+// for a scanned/image-only PDF with no real text layer - see handlePdf()
+// below, which tries actual text extraction first and only reaches this
+// for a document that genuinely needs OCR. Re-serializing pages this way
+// via pdf-lib does NOT properly decrypt a PDF that uses standard
+// encryption (pdf-lib's `ignoreEncryption` loads the structure but not the
+// content), so an encrypted scanned document will still come out blank -
+// a rarer combination than plain encryption, which handlePdf's text-first
+// path already handles correctly.
+async function transcribeScannedPdf(buffer, apiKey, onProgress) {
   const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
   const pageCount = pdfDoc.getPageCount();
 
@@ -122,6 +129,33 @@ async function transcribePdf(buffer, apiKey, onProgress) {
   return parts.join('\n\n');
 }
 
+// A digitally-produced PDF (the overwhelming majority - including one
+// that's encryption-protected against copying/printing, e.g. a purchased
+// AS/NZS standard) has its real text embedded in the file. Extracting that
+// directly is faster, cheaper, and far more accurate than re-rendering
+// pages as images for Claude to OCR - and, importantly, pdf-parse (built
+// on pdfjs-dist, the same engine browsers use to open/search a PDF)
+// handles standard PDF encryption with a blank owner password
+// transparently, where pdf-lib does not. Only fall back to Claude vision
+// transcription for a genuinely scanned/image-only PDF with no usable
+// text layer.
+async function handlePdf(buffer, apiKey, onProgress) {
+  let parsed = null;
+  try {
+    parsed = await pdfParse(buffer);
+  } catch (err) {
+    // pdf-parse itself failed to open it (e.g. malformed file) - fall
+    // through to the vision path, which has its own error handling.
+  }
+
+  const text = (parsed?.text || '').trim();
+  const pageCount = parsed?.numpages || 1;
+  const looksLikeRealText = text.length > Math.max(200, pageCount * 10);
+  if (looksLikeRealText) return text;
+
+  return transcribeScannedPdf(buffer, apiKey, onProgress);
+}
+
 async function extractWebsite(sourceUrl, apiKeyGetter, onProgress) {
   const res = await fetch(sourceUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ThomsonProjectsBot/1.0)' } });
   if (!res.ok) throw new Error(`Couldn't fetch that page (${res.status})`);
@@ -131,7 +165,7 @@ async function extractWebsite(sourceUrl, apiKeyGetter, onProgress) {
   if (looksLikePdf) {
     const buffer = Buffer.from(await res.arrayBuffer());
     const apiKey = await apiKeyGetter();
-    return transcribePdf(buffer, apiKey, onProgress);
+    return handlePdf(buffer, apiKey, onProgress);
   }
 
   const html = await res.text();
@@ -176,7 +210,7 @@ exports.handler = async (event) => {
         content = buffer.toString('utf-8');
       } else if (ext === 'pdf') {
         const apiKey = await getIntegrationKey('anthropic');
-        content = await transcribePdf(buffer, apiKey, saveProgress);
+        content = await handlePdf(buffer, apiKey, saveProgress);
       } else {
         const mediaType = mimeFor(file_name);
         if (!mediaType) throw new Error(`Don't know how to read a .${ext} file.`);
