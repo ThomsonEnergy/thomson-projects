@@ -84,11 +84,19 @@ const KB_CONTENT_CHAR_LIMIT = 4000;
 async function searchKnowledgeBase(userClient, input) {
   const query = ((input && input.query) || '').trim();
   if (!query) return { error: { message: 'query is required' } };
-  const { data, error } = await userClient
-    .from('knowledge_entries')
-    .select('id, title, category, content, source_url, file_name')
-    .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
-    .limit(5);
+
+  // AND together "this word appears in title OR content", one OR-group per
+  // word, rather than requiring the whole phrase as one contiguous
+  // substring - a plain ilike on the full query fails on a search like
+  // "downlight torque" against text that reads "...torque the terminal
+  // screws..." (the words aren't contiguous, "torque" isn't next to
+  // "downlight" in the source text at all).
+  const words = query.split(/\s+/).map((w) => w.replace(/[%,()]/g, '')).filter(Boolean).slice(0, 6);
+  let q = userClient.from('knowledge_entries').select('id, title, category, content, source_url, file_name');
+  for (const w of words) {
+    q = q.or(`title.ilike.%${w}%,content.ilike.%${w}%`);
+  }
+  const { data, error } = await q.limit(5);
   if (error) return { error };
   const trimmed = (data || []).map((row) => ({
     ...row,
