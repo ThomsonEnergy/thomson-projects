@@ -32,45 +32,6 @@
     <p class="subtitle">Install guides, best practices, AUS standards, and other reference material. The Ask AI chatbox (bottom-right, on every page) can search this to answer questions.</p>
 
     <div class="card">
-      <h2 id="kb-form-heading">Add to the Knowledge Base</h2>
-      <p class="subtitle" id="kb-editing-note" style="display:none; margin:0 0 10px;">Editing an existing entry - Save updates it in place.</p>
-      <label style="margin-top:0">Title</label>
-      <input id="kb-title" placeholder="e.g. AS/NZS 3000 - Switchboard clearances" />
-
-      <label>Category</label>
-      <select id="kb-category">
-        <option value="Install Guides">Install Guides</option>
-        <option value="Best Practices">Best Practices</option>
-        <option value="AUS Standards">AUS Standards</option>
-        <option value="Credentials">Credentials</option>
-        <option value="Other">Other</option>
-      </select>
-
-      <label>Type</label>
-      <div style="display:flex; gap:16px; margin-bottom:8px;">
-        <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="kb-type" value="text" checked style="width:auto;" /> Paste text</label>
-        <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="kb-type" value="website" style="width:auto;" /> Link a website</label>
-        <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="kb-type" value="file" style="width:auto;" /> Upload a file</label>
-      </div>
-
-      <div id="kb-type-text">
-        <textarea id="kb-text-content" style="min-height:140px;" placeholder="Paste the guide, procedure, or reference text here..."></textarea>
-      </div>
-      <div id="kb-type-website" style="display:none;">
-        <input id="kb-website-url" placeholder="https://..." />
-        <p class="subtitle" style="margin:4px 0 0;">The page's text is fetched and saved so it's searchable, even if the site later changes.</p>
-      </div>
-      <div id="kb-type-file" style="display:none;">
-        <input type="file" id="kb-file-input" accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.csv,.txt" />
-        <p class="subtitle" style="margin:4px 0 0;">PDF, image, spreadsheet, or plain text. Read and transcribed automatically so it's searchable.</p>
-      </div>
-
-      <button type="button" id="kb-save-btn" style="margin-top:14px;">Save</button>
-      <button type="button" id="kb-cancel-edit-btn" class="secondary" style="margin-top:14px; display:none;">Cancel edit</button>
-      <div id="kb-save-msg"></div>
-    </div>
-
-    <div class="card">
       <h2>Library</h2>
       <div class="grid cols-2" style="margin-bottom:12px;">
         <input id="kb-search" placeholder="Search title or content..." autocomplete="off" />
@@ -85,6 +46,50 @@
       </div>
       <div id="kb-list"><p class="subtitle">Loading...</p></div>
     </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2 id="kb-form-heading" style="margin:0;">Add to the Knowledge Base</h2>
+        <button type="button" class="secondary" id="kb-form-toggle">+ Add new</button>
+      </div>
+      <div id="kb-form-fields" style="display:none; margin-top:14px;">
+        <p class="subtitle" id="kb-editing-note" style="display:none; margin:0 0 10px;">Editing an existing entry - Save updates it in place.</p>
+        <label style="margin-top:0">Title</label>
+        <input id="kb-title" placeholder="e.g. AS/NZS 3000 - Switchboard clearances" />
+
+        <label>Category</label>
+        <select id="kb-category">
+          <option value="Install Guides">Install Guides</option>
+          <option value="Best Practices">Best Practices</option>
+          <option value="AUS Standards">AUS Standards</option>
+          <option value="Credentials">Credentials</option>
+          <option value="Other">Other</option>
+        </select>
+
+        <label>Type</label>
+        <div style="display:flex; gap:16px; margin-bottom:8px;">
+          <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="kb-type" value="text" checked style="width:auto;" /> Paste text</label>
+          <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="kb-type" value="website" style="width:auto;" /> Link a website</label>
+          <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="kb-type" value="file" style="width:auto;" /> Upload a file</label>
+        </div>
+
+        <div id="kb-type-text">
+          <textarea id="kb-text-content" style="min-height:140px;" placeholder="Paste the guide, procedure, or reference text here..."></textarea>
+        </div>
+        <div id="kb-type-website" style="display:none;">
+          <input id="kb-website-url" placeholder="https://..." />
+          <p class="subtitle" style="margin:4px 0 0;">The page's text is fetched and saved so it's searchable, even if the site later changes.</p>
+        </div>
+        <div id="kb-type-file" style="display:none;">
+          <input type="file" id="kb-file-input" accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.csv,.txt" />
+          <p class="subtitle" style="margin:4px 0 0;">PDF, image, spreadsheet, or plain text. Read and transcribed automatically so it's searchable.</p>
+        </div>
+
+        <button type="button" id="kb-save-btn" style="margin-top:14px;">Save</button>
+        <button type="button" id="kb-cancel-edit-btn" class="secondary" style="margin-top:14px; display:none;">Cancel edit</button>
+        <div id="kb-save-msg"></div>
+      </div>
+    </div>
   </div>
 
   <script src="/js/supabase-client.js?v=11"></script>
@@ -93,7 +98,19 @@
     let allEntries = [];
     let editingEntryId = null;
 
+    // Collapsed by default - the form used to be the first thing on the
+    // page, pushing the actual search/library list (what someone visiting
+    // to look something up actually wants) below a full scroll of fields.
+    function setFormOpen(open) {
+      document.getElementById('kb-form-fields').style.display = open ? 'block' : 'none';
+      document.getElementById('kb-form-toggle').textContent = open ? 'Hide' : '+ Add new';
+    }
+    document.getElementById('kb-form-toggle').addEventListener('click', () => {
+      setFormOpen(document.getElementById('kb-form-fields').style.display === 'none');
+    });
+
     function startEdit(entry) {
+      setFormOpen(true);
       editingEntryId = entry.id;
       document.getElementById('kb-title').value = entry.title;
       document.getElementById('kb-category').value = entry.category || 'Other';
@@ -117,6 +134,7 @@
     }
 
     function cancelEdit() {
+      setFormOpen(false);
       editingEntryId = null;
       document.querySelectorAll('input[name="kb-type"]').forEach(r => { r.disabled = false; });
       document.getElementById('kb-title').value = '';
