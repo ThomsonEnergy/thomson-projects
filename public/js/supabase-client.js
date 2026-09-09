@@ -292,19 +292,19 @@ function renderAIChatWidget() {
   const wrap = document.createElement('div');
   wrap.id = 'ai-chat-widget';
   wrap.innerHTML = `
-    <button type="button" id="ai-chat-toggle" title="Ask AI" style="position:fixed; bottom:20px; right:20px; width:52px; height:52px; border-radius:50%; background:var(--primary, #2563eb); color:#fff; border:none; font-size:22px; cursor:pointer; z-index:200; box-shadow:0 2px 10px rgba(0,0,0,0.3);">&#128172;</button>
-    <div id="ai-chat-panel" style="display:none; flex-direction:column; position:fixed; bottom:84px; right:20px; width:360px; max-width:calc(100vw - 32px); height:480px; max-height:calc(100vh - 120px); background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.35); z-index:200; overflow:hidden;">
-      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border); background:var(--surface-2); flex-shrink:0;">
+    <button type="button" id="ai-chat-toggle" title="Ask AI">&#128172;</button>
+    <div id="ai-chat-panel">
+      <div id="ai-chat-panel-header">
         <strong style="font-size:14px;">Ask AI</strong>
         <div>
           <button type="button" id="ai-chat-clear" title="Clear conversation" style="background:none; border:none; cursor:pointer; font-size:12px; color:var(--muted); margin-right:10px;">Clear</button>
           <button type="button" id="ai-chat-close" title="Close" style="background:none; border:none; cursor:pointer; font-size:18px; line-height:1;">&times;</button>
         </div>
       </div>
-      <div id="ai-chat-messages" style="flex:1; overflow-y:auto; padding:12px; font-size:13px;"></div>
-      <div style="display:flex; gap:6px; padding:10px; border-top:1px solid var(--border); flex-shrink:0;">
-        <input id="ai-chat-input" placeholder="Ask about a job, quote, stock..." autocomplete="off" style="flex:1; font-size:13px; margin:0;" />
-        <button type="button" id="ai-chat-send" style="padding:8px 14px; font-size:13px; margin:0;">Send</button>
+      <div id="ai-chat-messages"></div>
+      <div id="ai-chat-input-row">
+        <input id="ai-chat-input" placeholder="Ask about a job, quote, stock..." autocomplete="off" />
+        <button type="button" id="ai-chat-send">Send</button>
       </div>
     </div>`;
   document.body.appendChild(wrap);
@@ -321,17 +321,17 @@ function renderAIChatWidget() {
     }
     messagesEl.innerHTML = _aiChatHistory.map(m => `
       <div style="display:flex; ${m.role === 'user' ? 'justify-content:flex-end;' : 'justify-content:flex-start;'} margin-bottom:8px;">
-        <div style="max-width:85%; padding:8px 11px; border-radius:10px; white-space:pre-wrap; ${m.role === 'user' ? 'background:var(--primary, #2563eb); color:#fff;' : 'background:var(--surface-2); border:1px solid var(--border);'}">${_aiChatEscape(m.content)}</div>
+        <div style="max-width:85%; padding:8px 11px; border-radius:10px; white-space:pre-wrap; ${m.role === 'user' ? 'background:var(--accent); color:#fff;' : 'background:var(--surface-2); border:1px solid var(--border);'}">${_aiChatEscape(m.content)}</div>
       </div>`).join('');
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
   renderMessages();
 
   function togglePanel(show) {
-    panel.style.display = show ? 'flex' : 'none';
+    panel.classList.toggle('open', show);
     if (show) { renderMessages(); input.focus(); }
   }
-  wrap.querySelector('#ai-chat-toggle').addEventListener('click', () => togglePanel(panel.style.display === 'none'));
+  wrap.querySelector('#ai-chat-toggle').addEventListener('click', () => togglePanel(!panel.classList.contains('open')));
   wrap.querySelector('#ai-chat-close').addEventListener('click', () => togglePanel(false));
   wrap.querySelector('#ai-chat-clear').addEventListener('click', () => {
     _aiChatHistory = [];
@@ -352,14 +352,33 @@ function renderAIChatWidget() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
     try {
       const { data: { session } } = await supabaseClient.auth.getSession();
-      const res = await fetch('/.netlify/functions/ai-chat', {
+      const startRes = await fetch('/.netlify/functions/ai-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({ messages: _aiChatHistory.slice(-20) }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Something went wrong.');
-      _aiChatHistory.push({ role: 'assistant', content: data.text });
+      const startData = await startRes.json();
+      if (!startRes.ok || !startData.ok) throw new Error(startData.error || 'Something went wrong.');
+
+      // The real answer runs in the background - a deep lookup (search the
+      // knowledge base, dig into a specific document, maybe check live
+      // data too) is several chained calls and was timing out held open as
+      // one request. Poll for the result instead.
+      let answer = null;
+      for (let i = 0; i < 60 && answer === null; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const pollRes = await fetch('/.netlify/functions/ai-chat-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ job_id: startData.job_id }),
+        });
+        const pollData = await pollRes.json();
+        if (!pollRes.ok || !pollData.ok) throw new Error(pollData.error || 'Lost track of that answer.');
+        if (pollData.status === 'done') answer = pollData.answer;
+        else if (pollData.status === 'error') throw new Error(pollData.error || 'Something went wrong.');
+      }
+      if (answer === null) throw new Error("This one's taking a while - try asking again in a moment.");
+      _aiChatHistory.push({ role: 'assistant', content: answer });
     } catch (err) {
       _aiChatHistory.push({ role: 'assistant', content: `Sorry, couldn't get an answer - ${err.message}` });
     }
