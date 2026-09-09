@@ -129,7 +129,7 @@
         const q = descInput.value.trim().toLowerCase();
         if (row.querySelector('.pbc-type').value !== 'material' || q.length < 2) { resultsEl.style.display = 'none'; return; }
         const materials = await getMaterials();
-        const matches = materials.filter(m => m.name.toLowerCase().includes(q)).slice(0, 8);
+        const matches = materials.filter(m => matchesAllWords(m.name, q)).slice(0, 8);
         if (!matches.length) { resultsEl.style.display = 'none'; return; }
         resultsEl.innerHTML = matches.map(m => `<div class="pbc-pick" data-name="${m.name}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${m.name} <span class="subtitle">(${money(m.cost_price)})</span></div>`).join('');
         resultsEl.style.display = 'block';

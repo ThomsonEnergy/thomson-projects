@@ -1476,6 +1476,17 @@ function wireSupplierPicker(overlay, suppliers, ids) {
 // subcategory as the user types. Calls the including page's own global
 // `addLineItem(stageRow, {...})` - both pages already define one with the
 // same signature.
+// Multi-word "contains every word, any order" matcher for the stock/
+// prebuild pickers below - a plain substring match fails on a search like
+// "90mm downlight" against "90mm LED Downlight" (the words aren't
+// contiguous - "LED" sits between them), which is exactly how staff
+// actually type a search.
+function matchesAllWords(haystack, query) {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const h = (haystack || '').toLowerCase();
+  return words.every(w => h.includes(w));
+}
+
 let _prebuildsCache = null;
 async function getPrebuilds() {
   if (_prebuildsCache) return _prebuildsCache;
@@ -1526,10 +1537,10 @@ async function openStockPicker(stageRow) {
   function renderResults() {
     const q = overlay.querySelector('#stock-pick-search').value.trim().toLowerCase();
     const prebuildMatches = (q
-      ? prebuilds.filter(p => (p.name || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q) || (p.subcategory || '').toLowerCase().includes(q))
+      ? prebuilds.filter(p => matchesAllWords(`${p.name} ${p.category} ${p.subcategory || ''}`, q))
       : prebuilds).slice(0, 25);
     const materialMatches = (q
-      ? materials.filter(m => (m.name || '').toLowerCase().includes(q) || (m.category || '').toLowerCase().includes(q))
+      ? materials.filter(m => matchesAllWords(`${m.name} ${m.category || ''}`, q))
       : materials).slice(0, 25);
     if (!prebuildMatches.length && !materialMatches.length) { resultsEl.innerHTML = `<p class="subtitle">No matches.</p>`; return; }
     resultsEl.innerHTML = [
@@ -2162,8 +2173,8 @@ function buildMaterialSearchRow(materials, containerId) {
     const q = e.target.value.trim().toLowerCase();
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
     const prebuilds = await getPrebuilds();
-    const prebuildMatches = prebuilds.filter(p => (p.name || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q)).slice(0, 5);
-    const materialMatches = materials.filter(m => m.name.toLowerCase().includes(q)).slice(0, 8);
+    const prebuildMatches = prebuilds.filter(p => matchesAllWords(`${p.name} ${p.category}`, q)).slice(0, 5);
+    const materialMatches = materials.filter(m => matchesAllWords(m.name, q)).slice(0, 8);
     if (!prebuildMatches.length && !materialMatches.length) { resultsEl.style.display = 'none'; return; }
     resultsEl.innerHTML = [
       ...prebuildMatches.map(p => `<div class="po-line-pick" data-kind="prebuild" data-id="${p.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${p.name} <span class="subtitle">(Prebuild - adds each material)</span></div>`),
