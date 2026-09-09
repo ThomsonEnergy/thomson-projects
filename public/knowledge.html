@@ -251,6 +251,10 @@
         if (!q) return true;
         return (e.title || '').toLowerCase().includes(q) || (e.content || '').toLowerCase().includes(q);
       });
+      // Alphabetical, with embedded numbers compared as numbers (numeric:
+      // true) so "AS/NZS 3000" sorts before "AS/NZS 3001" and "3000" before
+      // "10kW..." reads naturally rather than digit-by-digit as text.
+      filtered.sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { numeric: true, sensitivity: 'base' }));
       const listEl = document.getElementById('kb-list');
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">Nothing here yet.</p>`; return; }
       listEl.innerHTML = filtered.map(e => `
