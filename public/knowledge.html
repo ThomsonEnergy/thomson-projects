@@ -32,7 +32,8 @@
     <p class="subtitle">Install guides, best practices, AUS standards, and other reference material. The Ask AI chatbox (bottom-right, on every page) can search this to answer questions.</p>
 
     <div class="card">
-      <h2>Add to the Knowledge Base</h2>
+      <h2 id="kb-form-heading">Add to the Knowledge Base</h2>
+      <p class="subtitle" id="kb-editing-note" style="display:none; margin:0 0 10px;">Editing an existing entry - Save updates it in place.</p>
       <label style="margin-top:0">Title</label>
       <input id="kb-title" placeholder="e.g. AS/NZS 3000 - Switchboard clearances" />
 
@@ -65,6 +66,7 @@
       </div>
 
       <button type="button" id="kb-save-btn" style="margin-top:14px;">Save</button>
+      <button type="button" id="kb-cancel-edit-btn" class="secondary" style="margin-top:14px; display:none;">Cancel edit</button>
       <div id="kb-save-msg"></div>
     </div>
 
@@ -89,6 +91,45 @@
   <script src="/js/theme.js"></script>
   <script>
     let allEntries = [];
+    let editingEntryId = null;
+
+    function startEdit(entry) {
+      editingEntryId = entry.id;
+      document.getElementById('kb-title').value = entry.title;
+      document.getElementById('kb-category').value = entry.category || 'Other';
+      // Editing always works against the plain text, regardless of how the
+      // entry originally came in (pasted, a website fetch, an uploaded
+      // file) - the source link/file itself isn't re-fetched, this just
+      // overwrites what's saved and searchable. Simpler than re-running
+      // extraction, and covers the actual ask: fix or add to what's there.
+      document.querySelector('input[name="kb-type"][value="text"]').checked = true;
+      document.querySelectorAll('input[name="kb-type"]').forEach(r => {
+        r.dispatchEvent(new Event('change'));
+        if (r.value !== 'text') r.disabled = true;
+      });
+      document.getElementById('kb-text-content').value = entry.content || '';
+      document.getElementById('kb-form-heading').textContent = `Editing "${entry.title}"`;
+      document.getElementById('kb-editing-note').style.display = 'block';
+      document.getElementById('kb-save-btn').textContent = 'Update';
+      document.getElementById('kb-cancel-edit-btn').style.display = 'inline-block';
+      document.getElementById('kb-save-msg').innerHTML = '';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function cancelEdit() {
+      editingEntryId = null;
+      document.querySelectorAll('input[name="kb-type"]').forEach(r => { r.disabled = false; });
+      document.getElementById('kb-title').value = '';
+      document.getElementById('kb-text-content').value = '';
+      document.getElementById('kb-website-url').value = '';
+      document.getElementById('kb-file-input').value = '';
+      document.getElementById('kb-form-heading').textContent = 'Add to the Knowledge Base';
+      document.getElementById('kb-editing-note').style.display = 'none';
+      document.getElementById('kb-save-btn').textContent = 'Save';
+      document.getElementById('kb-cancel-edit-btn').style.display = 'none';
+      document.getElementById('kb-save-msg').innerHTML = '';
+    }
+    document.getElementById('kb-cancel-edit-btn').addEventListener('click', cancelEdit);
 
     document.querySelectorAll('input[name="kb-type"]').forEach(radio => {
       radio.addEventListener('change', (e) => {
@@ -103,9 +144,28 @@
       const msg = document.getElementById('kb-save-msg');
       const title = document.getElementById('kb-title').value.trim();
       const category = document.getElementById('kb-category').value;
-      const type = document.querySelector('input[name="kb-type"]:checked').value;
       if (!title) { msg.innerHTML = `<div class="error-box">Give it a title first.</div>`; return; }
 
+      if (editingEntryId) {
+        const content = document.getElementById('kb-text-content').value.trim();
+        if (!content) { msg.innerHTML = `<div class="error-box">Content can't be empty.</div>`; return; }
+        btn.disabled = true;
+        msg.innerHTML = '';
+        try {
+          const { error: updErr } = await supabaseClient.from('knowledge_entries').update({ title, category, content }).eq('id', editingEntryId);
+          if (updErr) throw updErr;
+          await logActivity('knowledge_entry', editingEntryId, 'updated', `Updated "${title}" in the Knowledge Base`);
+          cancelEdit();
+          document.getElementById('kb-save-msg').innerHTML = `<div class="success-box">Updated.</div>`;
+          await loadEntries();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+        btn.disabled = false;
+        return;
+      }
+
+      const type = document.querySelector('input[name="kb-type"]:checked').value;
       btn.disabled = true;
       msg.innerHTML = '';
       try {
@@ -203,6 +263,7 @@
             <div style="white-space:nowrap;">
               ${e.source_url ? `<a class="link-quiet" href="${e.source_url}" target="_blank" style="font-size:12px; margin-right:10px;">Open link</a>` : ''}
               ${e.file_path ? `<button type="button" class="secondary kb-open-file" style="font-size:12px; padding:4px 8px;">Open file</button>` : ''}
+              <button type="button" class="secondary kb-edit" style="font-size:12px; padding:4px 8px;">Edit</button>
               <button type="button" class="secondary kb-delete" style="font-size:12px; padding:4px 8px;">Delete</button>
             </div>
           </div>
@@ -224,8 +285,10 @@
             if (!error) window.open(data.signedUrl, '_blank');
           });
         }
+        row.querySelector('.kb-edit').addEventListener('click', () => startEdit(entry));
         row.querySelector('.kb-delete').addEventListener('click', async () => {
           if (!confirm(`Delete "${entry.title}"?`)) return;
+          if (editingEntryId === entry.id) cancelEdit();
           await supabaseClient.from('knowledge_entries').delete().eq('id', entry.id);
           if (entry.file_path) await supabaseClient.storage.from('knowledge-files').remove([entry.file_path]);
           await logActivity('knowledge_entry', entry.id, 'deleted', `Deleted "${entry.title}" from the Knowledge Base`);
