@@ -1,5 +1,6 @@
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const { getAdminClient } = require('./_shared/require-admin');
+const { drawCoverPage } = require('./_shared/pdf-cover-page');
 
 // Turns one onboarding_document_signatures row into a real, saved PDF -
 // the plain-text snapshot of what was agreed to, the signer's name and
@@ -54,7 +55,7 @@ function sanitizeForPdf(text) {
     .replace(/[^\x00-\xFF]/g, '?');
 }
 
-async function buildDocumentPdf({ title, bodyText, signedByName, signedAt, signatureDataUrl }) {
+async function buildDocumentPdf({ title, bodyText, signedByName, signedAt, signatureDataUrl, supabaseAdmin }) {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -62,6 +63,12 @@ async function buildDocumentPdf({ title, bodyText, signedByName, signedAt, signa
   bodyText = sanitizeForPdf(bodyText);
   title = sanitizeForPdf(title);
   signedByName = sanitizeForPdf(signedByName);
+
+  await drawCoverPage(pdfDoc, supabaseAdmin, {
+    docTitle: title,
+    preparedFor: signedByName,
+    dateLabel: `Signed ${new Date(signedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+  });
 
   let page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   let y = PAGE_HEIGHT - MARGIN;
@@ -75,9 +82,6 @@ async function buildDocumentPdf({ title, bodyText, signedByName, signedAt, signa
     page.drawText(text, { x: MARGIN, y, size, font: useFont, color: rgb(0, 0, 0) });
     y -= LINE_GAP;
   }
-
-  draw(title, { size: 14, useFont: boldFont });
-  y -= 6;
 
   for (const para of bodyText.split('\n')) {
     if (!para.trim()) { if (y - LINE_GAP < MARGIN) newPage(); else y -= LINE_GAP; continue; }
@@ -141,6 +145,7 @@ exports.handler = async (event) => {
       signedByName: sig.signed_by_name,
       signedAt: sig.signed_at,
       signatureDataUrl: sig.signature_data_url,
+      supabaseAdmin,
     });
 
     if (/employment contract/i.test(sig.document_title_snapshot)) {
