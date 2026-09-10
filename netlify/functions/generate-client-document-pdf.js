@@ -1,11 +1,12 @@
 const chromium = require('@sparticuz/chromium');
-// puppeteer-core depends on ws for its WebSocket transport, but only
-// requires it conditionally at runtime (falling back from a native
-// WebSocket that doesn't exist before Node 22) - esbuild's static bundler
-// doesn't follow that conditional require, so ws never made it into the
-// deployed function bundle without an explicit, unconditional require
-// here forcing it in.
-require('ws');
+// puppeteer-core checks for a native WebSocket global (Node 22+ only) the
+// moment it's required, and throws immediately at that module-load point
+// if it's missing - before any launch() option (protocol/pipe/etc.) is
+// even consulted, which is why changing those had no effect. Polyfilling
+// the global with the ws package (already a puppeteer-core dependency,
+// just not exposed as a native WebSocket) before requiring puppeteer-core
+// satisfies that check on Node 18.
+globalThis.WebSocket = require('ws');
 const puppeteer = require('puppeteer-core');
 const { PDFDocument } = require('pdf-lib');
 const { getAdminClient } = require('./_shared/require-admin');
