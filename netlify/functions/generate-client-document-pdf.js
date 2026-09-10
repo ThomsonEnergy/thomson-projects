@@ -30,12 +30,13 @@ async function renderPageToPdf(url) {
     args: chromium.args,
     executablePath: await chromium.executablePath(),
     headless: chromium.headless,
-    // Puppeteer's newer default (WebDriver BiDi) requires a native
-    // WebSocket global, only available from Node 22+ - forcing the
-    // classic Chrome DevTools Protocol keeps this working on Node 18
-    // (which this whole stack is pinned to for Chromium compatibility -
-    // see .nvmrc) via the ws package instead.
+    // Puppeteer's default connects to the browser over a WebSocket to
+    // its remote-debugging port, which needs a native WebSocket global
+    // (Node 22+ only) or a working ws-package fallback that didn't
+    // trigger here - communicating over stdio pipes instead sidesteps
+    // needing any WebSocket implementation at all.
     protocol: 'cdp',
+    pipe: true,
   });
   try {
     const page = await browser.newPage();
