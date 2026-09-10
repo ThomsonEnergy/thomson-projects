@@ -1410,6 +1410,15 @@ function generateContractDraft(profile, templateBody, answers = {}) {
   }
   let body = out.join('\n');
 
+  // Editorial instructions left in the template's own section headings
+  // (e.g. "2. Period of Employment [Delete the options which are not
+  // applicable]") - distinct from the data-driven [insert ...] placeholders
+  // handled elsewhere in this function, these are just leftover authoring
+  // notes meant to be deleted once the applicable option was chosen, and
+  // were never actually stripped, so they survived into every generated
+  // contract.
+  body = body.replace(/\s*\[Delete[^\]]*\]/gi, '');
+
   // Whole-clause toggles: removed as contiguous ranges rather than
   // same-vs-alternative pairs, since the template marks them as a single
   // clause to delete-if-not-applicable, not a choice between two texts.

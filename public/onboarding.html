@@ -42,7 +42,7 @@
     <div id="ob-content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=11"></script>
+  <script src="/js/supabase-client.js?v=12"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId;
@@ -302,10 +302,12 @@
 
       overlay.querySelector('#sign-confirm-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#sign-msg');
+        const confirmBtn = overlay.querySelector('#sign-confirm-btn');
         const signedByName = overlay.querySelector('#sign-name-input').value.trim();
         if (!signedByName) { msg.innerHTML = `<div class="error-box">Enter your name.</div>`; return; }
         if (!hasSignature) { msg.innerHTML = `<div class="error-box">Draw a signature.</div>`; return; }
-        const { error } = await supabaseClient.from('onboarding_document_signatures').insert({
+        confirmBtn.disabled = true;
+        const { data: newSig, error } = await supabaseClient.from('onboarding_document_signatures').insert({
           profile_id: myUserId,
           document_id: doc.id,
           document_title_snapshot: doc.title,
@@ -313,8 +315,17 @@
           signature_data_url: canvas.toDataURL('image/png'),
           signed_by_name: signedByName,
           signed_at: new Date().toISOString(),
-        });
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        }).select('id').single();
+        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; confirmBtn.disabled = false; return; }
+        // Bakes the snapshot + signature + signer name/date into one real
+        // PDF and saves it to Storage - a fast, synchronous render (plain
+        // text + one image), not the kind of thing that needs a background
+        // job, but this page moves on regardless of whether it succeeds so
+        // a slow/failed render never blocks onboarding itself.
+        fetch('/.netlify/functions/generate-signed-document', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signature_id: newSig.id }),
+        }).catch(() => {});
         overlay.remove();
         await loadOnboardingData();
         goToStep(3);

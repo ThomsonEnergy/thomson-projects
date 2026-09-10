@@ -583,7 +583,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=11"></script>
+  <script src="/js/supabase-client.js?v=12"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -1316,11 +1316,11 @@
       await loadMySignedDocs(userId);
     }
 
-    async function loadMySignedDocs(userId) {
-      const listEl = document.getElementById('my-signed-docs-list');
+    async function loadMySignedDocs(userId, containerId = 'my-signed-docs-list') {
+      const listEl = document.getElementById(containerId);
       const { data: sigs, error } = await supabaseClient
         .from('onboarding_document_signatures')
-        .select('id, document_title_snapshot, document_body_snapshot, signature_data_url, signed_by_name, signed_at')
+        .select('id, document_title_snapshot, document_body_snapshot, signature_data_url, signed_by_name, signed_at, file_path, file_name')
         .eq('profile_id', userId)
         .order('signed_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
@@ -1332,13 +1332,23 @@
             <div class="name">${s.document_title_snapshot}</div>
             <div class="meta">Signed ${new Date(s.signed_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })} as ${s.signed_by_name}</div>
           </div>
-          <button type="button" class="secondary view-signed-doc-btn" data-id="${s.id}" style="font-size:12px; padding:6px 10px;">View</button>
+          <div style="white-space:nowrap;">
+            ${s.file_path ? `<button type="button" class="secondary download-signed-doc-btn" data-id="${s.id}" style="font-size:12px; padding:6px 10px; margin-right:6px;">Download PDF</button>` : ''}
+            <button type="button" class="secondary view-signed-doc-btn" data-id="${s.id}" style="font-size:12px; padding:6px 10px;">View</button>
+          </div>
         </div>`).join('');
 
       listEl.querySelectorAll('.view-signed-doc-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const sig = sigs.find(s => s.id === btn.dataset.id);
           openSignedDocViewer(sig);
+        });
+      });
+      listEl.querySelectorAll('.download-signed-doc-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const sig = sigs.find(s => s.id === btn.dataset.id);
+          const url = await getSignedDocUrl(sig.file_path);
+          window.open(url, '_blank');
         });
       });
     }
@@ -1352,10 +1362,16 @@
           <p class="subtitle" style="margin-bottom:10px;">Signed ${new Date(sig.signed_at).toLocaleString('en-AU')} as ${sig.signed_by_name} - shown exactly as it was at the time, even if the template has since changed.</p>
           <div style="white-space:pre-wrap; line-height:1.6; max-height:320px; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px;">${sig.document_body_snapshot}</div>
           ${sig.signature_data_url ? `<img src="${sig.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
+          ${sig.file_path ? `<button type="button" class="secondary" id="download-signed-doc-modal-btn" style="margin-top:10px; display:block; font-size:12px; padding:6px 10px;">Download signed PDF (with Fair Work Statement if applicable)</button>` : ''}
           <button type="button" class="secondary" id="close-signed-doc-btn" style="margin-top:14px;">Close</button>
         </div>`;
       document.body.appendChild(overlay);
       overlay.querySelector('#close-signed-doc-btn').addEventListener('click', () => overlay.remove());
+      const dlBtn = overlay.querySelector('#download-signed-doc-modal-btn');
+      if (dlBtn) dlBtn.addEventListener('click', async () => {
+        const url = await getSignedDocUrl(sig.file_path);
+        window.open(url, '_blank');
+      });
     }
 
     document.getElementById('my-profile-photo-input').addEventListener('change', async (e) => {
@@ -1660,6 +1676,11 @@
           <div id="contract-msg"></div>
         </div>
 
+        <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+          <p style="margin:0 0 8px; font-weight:600;">Signed documents</p>
+          <div id="admin-profile-signed-docs-list"><p class="subtitle">Loading...</p></div>
+        </div>
+
         <div style="margin-top:16px;">
           <button id="save-profile-btn">Save</button>
           <button type="button" class="secondary" id="close-profile-btn">Close</button>
@@ -1702,6 +1723,8 @@
         });
       }
       wireAllowanceRemoveButtons();
+
+      loadMySignedDocs(profile.id, 'admin-profile-signed-docs-list');
 
       ['#profile-employment-type', '#profile-pay-type', '#profile-salary-inc-super'].forEach(sel => {
         overlay.querySelector(sel).addEventListener('change', () => refreshContractAnswerFields(overlay, profile));
