@@ -1,4 +1,11 @@
 const chromium = require('@sparticuz/chromium');
+// puppeteer-core depends on ws for its WebSocket transport, but only
+// requires it conditionally at runtime (falling back from a native
+// WebSocket that doesn't exist before Node 22) - esbuild's static bundler
+// doesn't follow that conditional require, so ws never made it into the
+// deployed function bundle without an explicit, unconditional require
+// here forcing it in.
+require('ws');
 const puppeteer = require('puppeteer-core');
 const { PDFDocument } = require('pdf-lib');
 const { getAdminClient } = require('./_shared/require-admin');
