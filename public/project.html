@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=12"></script>
+  <script src="/js/supabase-client.js?v=13"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -1757,11 +1757,14 @@
             </div>
             <div>
               <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:10px;">View client-facing invoice</a>
+              ${inv.pdf_path ? `<button type="button" class="secondary view-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">View PDF</button>` : ''}
+              <button type="button" class="secondary generate-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">${inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF'}</button>
               ${!inv.paid_at ? `<button type="button" class="secondary edit-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Edit</button>` : ''}
               ${inv.xero_invoice_id ? '<span class="subtitle" style="font-size:12px;">In Xero</span>' : `<button type="button" class="secondary push-xero-tab-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>`}
             </div>
           </div>
           <div style="margin-top:12px;">${xeroBreakdownHtml(inv, mappings, clientType)}</div>
+          <div id="invoice-pdf-msg-${inv.id}">${inv.pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${inv.pdf_error}</div>` : ''}</div>
         </div>`).join('') + `<div id="job-invoices-msg"></div>`;
 
       listEl.querySelectorAll('.push-xero-tab-btn').forEach(btn => {
@@ -1769,6 +1772,41 @@
       });
       listEl.querySelectorAll('.edit-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => openEditInvoicePanel(invoices.find(i => i.id === btn.dataset.invoiceId), project));
+      });
+      listEl.querySelectorAll('.view-invoice-pdf-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const inv = invoices.find(i => i.id === btn.dataset.invoiceId);
+          openPdfViewer(inv.pdf_path, `Invoice ${inv.invoice_number}`);
+        });
+      });
+      listEl.querySelectorAll('.generate-invoice-pdf-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const inv = invoices.find(i => i.id === btn.dataset.invoiceId);
+          const msgEl = document.getElementById(`invoice-pdf-msg-${inv.id}`);
+          const startedAt = inv.pdf_generated_at;
+          btn.disabled = true;
+          btn.textContent = 'Generating...';
+          msgEl.innerHTML = '';
+          try {
+            await fetch('/.netlify/functions/generate-client-document-pdf-background', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ doc_type: 'invoice', record_id: inv.id }),
+            });
+            let done = false;
+            for (let i = 0; i < 40 && !done; i++) {
+              await new Promise((r) => setTimeout(r, 1500));
+              const { data } = await supabaseClient.from('invoices').select('pdf_path, pdf_generated_at, pdf_error').eq('id', inv.id).single();
+              if (data?.pdf_error) { msgEl.innerHTML = `<div class="error-box">${data.pdf_error}</div>`; done = true; break; }
+              if (data?.pdf_generated_at && data.pdf_generated_at !== startedAt) { done = true; }
+            }
+            if (!done) throw new Error("This is taking longer than expected - try again in a minute.");
+            loadJobInvoices(project);
+          } catch (err) {
+            msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+            btn.disabled = false;
+            btn.textContent = inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF';
+          }
+        });
       });
     }
 
@@ -2414,10 +2452,13 @@
                 <h2>Client quote link</h2>
                 <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
                 <input readonly value="${quoteUrl}" style="margin-bottom:10px;" onclick="this.select()" />
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                   <a class="btn secondary" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Quote: ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your quote here:\n' + quoteUrl + '\n\nThanks,\nThomson Energy' })}">Email quote to client</a>
-                  <a class="btn secondary" target="_blank" href="${quoteUrl}${quoteUrl.includes('?') ? '&' : '?'}print=1">Download PDF</a>
+                  ${project.quote_pdf_path ? `<button type="button" class="secondary" id="view-quote-pdf-btn">View PDF</button>` : ''}
+                  <button type="button" class="secondary" id="generate-quote-pdf-btn" style="${project.quote_pdf_path ? 'font-size:12px; padding:6px 10px;' : ''}">${project.quote_pdf_path ? 'Regenerate' : 'Generate PDF'}</button>
+                  ${project.quote_pdf_generated_at ? `<span class="subtitle" style="font-size:11px;">Generated ${new Date(project.quote_pdf_generated_at).toLocaleString('en-AU')}</span>` : ''}
                 </div>
+                <div id="quote-pdf-msg">${project.quote_pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${project.quote_pdf_error}</div>` : ''}</div>
                 ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * (project.deposit_percent / 100))}) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
                 ${project.proposal_template === 'solar' && project.pylon_link ? `
                   <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
@@ -2557,6 +2598,43 @@
         }
         installerSummaryBtn.disabled = false;
         installerSummaryBtn.textContent = 'Regenerate';
+      });
+
+      const viewQuotePdfBtn = document.getElementById('view-quote-pdf-btn');
+      if (viewQuotePdfBtn) viewQuotePdfBtn.addEventListener('click', () => openPdfViewer(project.quote_pdf_path, `${project.name} - Quote`));
+
+      const generateQuotePdfBtn = document.getElementById('generate-quote-pdf-btn');
+      if (generateQuotePdfBtn) generateQuotePdfBtn.addEventListener('click', async () => {
+        const msgEl = document.getElementById('quote-pdf-msg');
+        const startedAt = project.quote_pdf_generated_at;
+        generateQuotePdfBtn.disabled = true;
+        generateQuotePdfBtn.textContent = 'Generating...';
+        msgEl.innerHTML = '';
+        try {
+          await fetch('/.netlify/functions/generate-client-document-pdf-background', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ doc_type: 'quote', record_id: project.id }),
+          });
+          // The render itself (a background function) can take a few
+          // seconds - poll the project row rather than guessing a delay.
+          let done = false;
+          for (let i = 0; i < 40 && !done; i++) {
+            await new Promise((r) => setTimeout(r, 1500));
+            const { data } = await supabaseClient.from('projects').select('quote_pdf_path, quote_pdf_generated_at, quote_pdf_error').eq('id', project.id).single();
+            if (data?.quote_pdf_error) { msgEl.innerHTML = `<div class="error-box">${data.quote_pdf_error}</div>`; done = true; break; }
+            if (data?.quote_pdf_generated_at && data.quote_pdf_generated_at !== startedAt) {
+              project.quote_pdf_path = data.quote_pdf_path;
+              project.quote_pdf_generated_at = data.quote_pdf_generated_at;
+              done = true;
+            }
+          }
+          if (!done) throw new Error("This is taking longer than expected - try again in a minute.");
+          loadProject();
+        } catch (err) {
+          msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+          generateQuotePdfBtn.disabled = false;
+          generateQuotePdfBtn.textContent = project.quote_pdf_path ? 'Regenerate' : 'Generate PDF';
+        }
       });
 
       const lahaToggle = document.getElementById('laha-approved-toggle');

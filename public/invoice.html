@@ -39,7 +39,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=12"></script>
+  <script src="/js/supabase-client.js?v=13"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
 
@@ -243,9 +243,19 @@
       }
     }
 
-    load().then(() => {
+    load().then(async () => {
+      // Wait for every image actually in the DOM (the logo, any photos) to
+      // finish loading before signalling done - a fixed setTimeout guessed
+      // at "probably rendered by now," which raced real image loads on a
+      // slow connection. generate-client-document-pdf.js (headless
+      // Chromium) polls for data-print-ready instead of guessing a delay
+      // of its own; ?print=1 keeps triggering the browser's own print
+      // dialog for a person following the existing "Download PDF" link.
+      const images = [...document.querySelectorAll('img')];
+      await Promise.all(images.map((img) => img.complete ? Promise.resolve() : new Promise((res) => { img.onload = img.onerror = res; })));
+      document.body.dataset.printReady = 'true';
       if (new URLSearchParams(window.location.search).get('print') === '1') {
-        setTimeout(() => window.print(), 400); // brief pause so the content's actually rendered first
+        window.print();
       }
     });
   </script>

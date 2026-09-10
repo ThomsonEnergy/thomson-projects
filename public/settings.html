@@ -583,7 +583,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=12"></script>
+  <script src="/js/supabase-client.js?v=13"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -1333,7 +1333,7 @@
             <div class="meta">Signed ${new Date(s.signed_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })} as ${s.signed_by_name}</div>
           </div>
           <div style="white-space:nowrap;">
-            ${s.file_path ? `<button type="button" class="secondary download-signed-doc-btn" data-id="${s.id}" style="font-size:12px; padding:6px 10px; margin-right:6px;">Download PDF</button>` : ''}
+            ${s.file_path ? `<button type="button" class="secondary download-signed-doc-btn" data-id="${s.id}" style="font-size:12px; padding:6px 10px; margin-right:6px;">View PDF</button>` : ''}
             <button type="button" class="secondary view-signed-doc-btn" data-id="${s.id}" style="font-size:12px; padding:6px 10px;">View</button>
           </div>
         </div>`).join('');
@@ -1345,10 +1345,9 @@
         });
       });
       listEl.querySelectorAll('.download-signed-doc-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', () => {
           const sig = sigs.find(s => s.id === btn.dataset.id);
-          const url = await getSignedDocUrl(sig.file_path);
-          window.open(url, '_blank');
+          openPdfViewer(sig.file_path, sig.document_title_snapshot);
         });
       });
     }
@@ -1362,16 +1361,13 @@
           <p class="subtitle" style="margin-bottom:10px;">Signed ${new Date(sig.signed_at).toLocaleString('en-AU')} as ${sig.signed_by_name} - shown exactly as it was at the time, even if the template has since changed.</p>
           <div style="white-space:pre-wrap; line-height:1.6; max-height:320px; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px;">${sig.document_body_snapshot}</div>
           ${sig.signature_data_url ? `<img src="${sig.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
-          ${sig.file_path ? `<button type="button" class="secondary" id="download-signed-doc-modal-btn" style="margin-top:10px; display:block; font-size:12px; padding:6px 10px;">Download signed PDF (with Fair Work Statement if applicable)</button>` : ''}
+          ${sig.file_path ? `<button type="button" class="secondary" id="download-signed-doc-modal-btn" style="margin-top:10px; display:block; font-size:12px; padding:6px 10px;">View signed PDF (with Fair Work Statement if applicable)</button>` : ''}
           <button type="button" class="secondary" id="close-signed-doc-btn" style="margin-top:14px;">Close</button>
         </div>`;
       document.body.appendChild(overlay);
       overlay.querySelector('#close-signed-doc-btn').addEventListener('click', () => overlay.remove());
       const dlBtn = overlay.querySelector('#download-signed-doc-modal-btn');
-      if (dlBtn) dlBtn.addEventListener('click', async () => {
-        const url = await getSignedDocUrl(sig.file_path);
-        window.open(url, '_blank');
-      });
+      if (dlBtn) dlBtn.addEventListener('click', () => openPdfViewer(sig.file_path, sig.document_title_snapshot));
     }
 
     document.getElementById('my-profile-photo-input').addEventListener('change', async (e) => {

@@ -48,6 +48,38 @@ async function getSignedDocUrl(path) {
   return data.signedUrl;
 }
 
+// Shared in-app PDF viewer - one place quotes, invoices, and signed
+// onboarding documents all show up, instead of every page picking its own
+// "open in a new tab" behaviour. Embeds the browser's native PDF renderer
+// in an iframe rather than anything custom - this is a viewer, not an
+// editor, so there's no reason to reinvent PDF rendering.
+async function openPdfViewer(path, title) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:300; padding:16px;';
+  overlay.innerHTML = `
+    <div class="card" style="max-width:900px; width:100%; height:90vh; display:flex; flex-direction:column; padding:0; overflow:hidden;">
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--border); flex-shrink:0;">
+        <strong>${title || 'Document'}</strong>
+        <div>
+          <a id="pdf-viewer-download" class="link-quiet" style="margin-right:16px; font-size:13px;" target="_blank">Download</a>
+          <button type="button" class="secondary" id="pdf-viewer-close" style="font-size:12px; padding:6px 10px;">Close</button>
+        </div>
+      </div>
+      <div style="flex:1; min-height:0;"><p class="subtitle" style="padding:16px;">Loading...</p></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#pdf-viewer-close').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  try {
+    const url = await getSignedDocUrl(path);
+    overlay.querySelector('#pdf-viewer-download').href = url;
+    overlay.querySelector('div[style*="flex:1"]').innerHTML = `<iframe src="${url}" style="width:100%; height:100%; border:none;"></iframe>`;
+  } catch (err) {
+    overlay.querySelector('div[style*="flex:1"]').innerHTML = `<div class="error-box" style="margin:16px;">${err.message}</div>`;
+  }
+}
+
 // Uploads one or more files to a public bucket and returns their public
 // URLs. `folder` keeps things tidy, e.g. 'portfolio' or a project id.
 // `bucket` defaults to proposal-photos (quotes/portfolio); site photos
