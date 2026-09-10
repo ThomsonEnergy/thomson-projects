@@ -27,6 +27,11 @@ const { drawCoverPage } = require('./_shared/pdf-cover-page');
 // place - the browser just awaits this directly.
 
 async function renderPageToPdf(url) {
+  // Chromium's graphics stack/WebGL (via a bundled software renderer) is
+  // on by default and costs real memory we don't need just to print HTML/
+  // CSS to a PDF - this alone was plausibly enough to tip a tightly
+  // memory-constrained Lambda container into an OOM kill.
+  chromium.setGraphicsMode = false;
   const browser = await puppeteer.launch({
     args: chromium.args,
     executablePath: await chromium.executablePath(),
