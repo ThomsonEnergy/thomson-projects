@@ -37,11 +37,31 @@ function wrapLine(text, font, fontSize, maxWidth) {
   return lines;
 }
 
+// pdf-lib's default (WinAnsi) text encoding can't draw a bare \r (found
+// the hard way - a document pasted in from a Windows-authored source
+// keeps \r\n line endings, and splitting on \n alone leaves a trailing \r
+// on every line) or anything outside the Windows-1252 codepage. Normalize
+// the common smart-punctuation cases and drop anything else unencodable
+// rather than letting a single stray character fail the whole PDF.
+function sanitizeForPdf(text) {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/–/g, '-')
+    .replace(/—/g, '--')
+    .replace(/…/g, '...')
+    .replace(/[^\x00-\xFF]/g, '?');
+}
+
 async function buildDocumentPdf({ title, bodyText, signedByName, signedAt, signatureDataUrl }) {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const maxWidth = PAGE_WIDTH - MARGIN * 2;
+  bodyText = sanitizeForPdf(bodyText);
+  title = sanitizeForPdf(title);
+  signedByName = sanitizeForPdf(signedByName);
 
   let page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   let y = PAGE_HEIGHT - MARGIN;
