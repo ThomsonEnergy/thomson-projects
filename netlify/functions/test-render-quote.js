@@ -11,7 +11,7 @@ exports.handler = async (event) => {
   let browser;
   try {
     browser = await puppeteer.launch({
-      args: [...chromium.args, '--disable-gpu', '--disable-software-rasterizer', '--single-process'],
+      args: chromium.args,
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
     });
