@@ -9,10 +9,14 @@ const { drawCoverPage } = require('./_shared/pdf-cover-page');
 // through their link, stage tables/claim-remaining/payment link and all)
 // into a real PDF, with a shared title/cover page (pdf-cover-page.js)
 // prepended so it matches the same letterhead treatment as a signed
-// onboarding document. Runs as a background function (Chromium's cold
-// start plus a full page render can occasionally run past a normal
-// function's ~10s budget) - triggered on demand from project.html rather
-// than automatically on every edit, since it's a real render, not free.
+// onboarding document. A regular (synchronous) function, not a
+// background one - Netlify's background functions get a noticeably
+// smaller memory ceiling, which OOM-killed Chromium on a real,
+// photo-heavy quote with no error ever surfaced (an OOM-killed container
+// never gets to run a catch block). The render itself comfortably
+// finishes well inside a normal function's time budget once memory isn't
+// the problem, so there was never a need to background it in the first
+// place - the browser just awaits this directly.
 
 async function renderPageToPdf(url) {
   const browser = await puppeteer.launch({
@@ -25,8 +29,7 @@ async function renderPageToPdf(url) {
     await page.setViewport({ width: 800, height: 1200 });
     // domcontentloaded rather than networkidle0 - waiting for every image
     // to settle via Puppeteer's own network-idle heuristic held them all
-    // in memory at once and OOM-killed the whole function on a real,
-    // photo-heavy quote; the page's own data-print-ready flag (set only
+    // in memory at once; the page's own data-print-ready flag (set only
     // once it has explicitly confirmed each image finished loading) is
     // the real signal to wait for anyway.
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
@@ -50,19 +53,21 @@ async function buildFinalPdf(contentPdfBytes, supabaseAdmin, coverInfo) {
 }
 
 exports.handler = async (event) => {
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: 'Method not allowed' };
+  }
+
   let doc_type, record_id, supabaseAdmin;
   try {
     ({ doc_type, record_id } = JSON.parse(event.body || '{}'));
-    if (!doc_type || !record_id) return { statusCode: 202, body: '' };
+    if (!doc_type || !record_id) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'doc_type and record_id are required' }) };
 
     supabaseAdmin = getAdminClient();
     const siteUrl = process.env.URL || 'https://thomsonprojects.netlify.app';
-    // Clear any stale error from a previous attempt before this one - the
-    // browser polls for either a fresh pdf_generated_at or a pdf_error, so
-    // an old error left in place would look like this attempt failed too.
     if (doc_type === 'quote') await supabaseAdmin.from('projects').update({ quote_pdf_error: null }).eq('id', record_id);
     else if (doc_type === 'invoice') await supabaseAdmin.from('invoices').update({ pdf_error: null }).eq('id', record_id);
 
+    let path;
     if (doc_type === 'quote') {
       const { data: project, error } = await supabaseAdmin
         .from('projects')
@@ -80,7 +85,7 @@ exports.handler = async (event) => {
         dateLabel: new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }),
       });
 
-      const path = `client-documents/quotes/${project.id}.pdf`;
+      path = `client-documents/quotes/${project.id}.pdf`;
       const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
       if (upErr) throw upErr;
       await supabaseAdmin.from('projects').update({ quote_pdf_path: path, quote_pdf_generated_at: new Date().toISOString() }).eq('id', project.id);
@@ -100,17 +105,21 @@ exports.handler = async (event) => {
         dateLabel: new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }),
       });
 
-      const path = `client-documents/invoices/${invoice.id}.pdf`;
+      path = `client-documents/invoices/${invoice.id}.pdf`;
       const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
       if (upErr) throw upErr;
       await supabaseAdmin.from('invoices').update({ pdf_path: path, pdf_generated_at: new Date().toISOString() }).eq('id', invoice.id);
+    } else {
+      return { statusCode: 400, body: JSON.stringify({ ok: false, error: `Unknown doc_type "${doc_type}"` }) };
     }
+
+    return { statusCode: 200, body: JSON.stringify({ ok: true, path }) };
   } catch (err) {
-    console.error('generate-client-document-pdf-background failed:', err);
+    console.error('generate-client-document-pdf failed:', err);
     if (supabaseAdmin && record_id) {
       if (doc_type === 'quote') await supabaseAdmin.from('projects').update({ quote_pdf_error: err.message }).eq('id', record_id).then(() => {}, () => {});
       else if (doc_type === 'invoice') await supabaseAdmin.from('invoices').update({ pdf_error: err.message }).eq('id', record_id).then(() => {}, () => {});
     }
+    return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
   }
-  return { statusCode: 202, body: '' };
 };

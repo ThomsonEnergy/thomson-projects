@@ -1783,23 +1783,16 @@
         btn.addEventListener('click', async () => {
           const inv = invoices.find(i => i.id === btn.dataset.invoiceId);
           const msgEl = document.getElementById(`invoice-pdf-msg-${inv.id}`);
-          const startedAt = inv.pdf_generated_at;
           btn.disabled = true;
           btn.textContent = 'Generating...';
           msgEl.innerHTML = '';
           try {
-            await fetch('/.netlify/functions/generate-client-document-pdf-background', {
+            const res = await fetch('/.netlify/functions/generate-client-document-pdf', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ doc_type: 'invoice', record_id: inv.id }),
             });
-            let done = false;
-            for (let i = 0; i < 40 && !done; i++) {
-              await new Promise((r) => setTimeout(r, 1500));
-              const { data } = await supabaseClient.from('invoices').select('pdf_path, pdf_generated_at, pdf_error').eq('id', inv.id).single();
-              if (data?.pdf_error) { msgEl.innerHTML = `<div class="error-box">${data.pdf_error}</div>`; done = true; break; }
-              if (data?.pdf_generated_at && data.pdf_generated_at !== startedAt) { done = true; }
-            }
-            if (!done) throw new Error("This is taking longer than expected - try again in a minute.");
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate the PDF');
             loadJobInvoices(project);
           } catch (err) {
             msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
@@ -2606,29 +2599,16 @@
       const generateQuotePdfBtn = document.getElementById('generate-quote-pdf-btn');
       if (generateQuotePdfBtn) generateQuotePdfBtn.addEventListener('click', async () => {
         const msgEl = document.getElementById('quote-pdf-msg');
-        const startedAt = project.quote_pdf_generated_at;
         generateQuotePdfBtn.disabled = true;
         generateQuotePdfBtn.textContent = 'Generating...';
         msgEl.innerHTML = '';
         try {
-          await fetch('/.netlify/functions/generate-client-document-pdf-background', {
+          const res = await fetch('/.netlify/functions/generate-client-document-pdf', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ doc_type: 'quote', record_id: project.id }),
           });
-          // The render itself (a background function) can take a few
-          // seconds - poll the project row rather than guessing a delay.
-          let done = false;
-          for (let i = 0; i < 40 && !done; i++) {
-            await new Promise((r) => setTimeout(r, 1500));
-            const { data } = await supabaseClient.from('projects').select('quote_pdf_path, quote_pdf_generated_at, quote_pdf_error').eq('id', project.id).single();
-            if (data?.quote_pdf_error) { msgEl.innerHTML = `<div class="error-box">${data.quote_pdf_error}</div>`; done = true; break; }
-            if (data?.quote_pdf_generated_at && data.quote_pdf_generated_at !== startedAt) {
-              project.quote_pdf_path = data.quote_pdf_path;
-              project.quote_pdf_generated_at = data.quote_pdf_generated_at;
-              done = true;
-            }
-          }
-          if (!done) throw new Error("This is taking longer than expected - try again in a minute.");
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate the PDF');
           loadProject();
         } catch (err) {
           msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
