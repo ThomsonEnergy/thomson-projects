@@ -2,6 +2,12 @@
   publish = "public"
   functions = "netlify/functions"
 
+# Headless Chromium (quote/invoice PDF rendering) needs more headroom than
+# the default Lambda allocation - it was OOM-killing consistently even
+# rendering a plain, photo-free invoice page.
+[functions."generate-client-document-pdf"]
+  memory = "2048mb"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
