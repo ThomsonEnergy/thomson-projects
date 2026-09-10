@@ -1,4 +1,3 @@
-const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 
 // Throwaway smoke test - confirms headless Chromium actually launches in
@@ -8,6 +7,9 @@ const puppeteer = require('puppeteer-core');
 exports.handler = async () => {
   let browser;
   try {
+    // @sparticuz/chromium ships ESM-only - a CommonJS function can still
+    // load it via a dynamic import().
+    const chromium = (await import('@sparticuz/chromium')).default;
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath(),
