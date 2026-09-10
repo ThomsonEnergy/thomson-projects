@@ -22,7 +22,14 @@ async function renderPageToPdf(url) {
   });
   try {
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 25000 });
+    await page.setViewport({ width: 800, height: 1200 });
+    // domcontentloaded rather than networkidle0 - waiting for every image
+    // to settle via Puppeteer's own network-idle heuristic held them all
+    // in memory at once and OOM-killed the whole function on a real,
+    // photo-heavy quote; the page's own data-print-ready flag (set only
+    // once it has explicitly confirmed each image finished loading) is
+    // the real signal to wait for anyway.
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
     await page.waitForSelector('body[data-print-ready="true"]', { timeout: 20000 });
     const pdfBytes = await page.pdf({ format: 'a4', printBackground: true, margin: { top: '20px', bottom: '20px' } });
     return Buffer.from(pdfBytes);
