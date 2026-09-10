@@ -2,6 +2,9 @@
   "name": "thomson-projects",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "18"
+  },
   "dependencies": {
     "@sparticuz/chromium": "^152.0.0",
     "@supabase/supabase-js": "^2.45.0",
