@@ -11,13 +11,19 @@ exports.handler = async (event) => {
   let browser;
   try {
     browser = await puppeteer.launch({
-      args: chromium.args,
+      args: [...chromium.args, '--disable-gpu', '--disable-software-rasterizer', '--single-process'],
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
     });
     const page = await browser.newPage();
+    await page.setViewport({ width: 800, height: 1200 });
     const url = `https://thomsonprojects.netlify.app/quote.html?token=${token}&print=1`;
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 25000 });
+    // domcontentloaded rather than networkidle0 - waiting for every image
+    // to settle via Puppeteer's own network-idle heuristic held them all
+    // in memory at once alongside a whole second Chromium tab; the page's
+    // own data-print-ready flag (set only once it has explicitly confirmed
+    // each image finished loading) is the real signal to wait for anyway.
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
     await page.waitForSelector('body[data-print-ready="true"]', { timeout: 20000 });
     const pdfBytes = await page.pdf({ format: 'a4', printBackground: true });
     return { statusCode: 200, body: JSON.stringify({ ok: true, pdfBytes: pdfBytes.length }) };
