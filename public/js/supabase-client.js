@@ -80,6 +80,42 @@ async function openPdfViewer(path, title) {
   }
 }
 
+// Resizes/re-encodes an image client-side before upload, so a multi-MB
+// phone-camera photo doesn't end up stored (and later re-fetched into a
+// Chromium PDF render) at its full original size. 1920px on the long edge
+// and JPEG quality 0.82 are well past what's visible on a screen or in a
+// printed PDF, so this is a size win with no perceptible quality loss.
+// Falls back to the original file untouched if the browser can't decode it
+// (e.g. some HEIC variants) rather than blocking the upload.
+async function compressImage(file, maxDimension = 1920, quality = 0.82) {
+  if (!file.type.startsWith('image/')) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+
+    // PNGs (logos, anything relying on transparency) stay PNG; phone
+    // photos are already lossy JPEG/HEIC so JPEG loses nothing further.
+    const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, outputType, quality));
+    if (!blob || blob.size >= file.size) return file;
+
+    const ext = outputType === 'image/png' ? 'png' : 'jpg';
+    const name = file.name.replace(/\.[^.]+$/, '') + '.' + ext;
+    return new File([blob], name, { type: outputType });
+  } catch (err) {
+    console.warn('compressImage: falling back to original file —', err.message);
+    return file;
+  }
+}
+
 // Uploads one or more files to a public bucket and returns their public
 // URLs. `folder` keeps things tidy, e.g. 'portfolio' or a project id.
 // `bucket` defaults to proposal-photos (quotes/portfolio); site photos
@@ -87,8 +123,9 @@ async function openPdfViewer(path, title) {
 async function uploadPhotos(fileList, folder, bucket = 'proposal-photos') {
   const urls = [];
   for (const file of fileList) {
-    const path = `${folder}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const { error } = await supabaseClient.storage.from(bucket).upload(path, file);
+    const compressed = await compressImage(file);
+    const path = `${folder}/${Date.now()}-${compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const { error } = await supabaseClient.storage.from(bucket).upload(path, compressed);
     if (error) throw error;
     const { data } = supabaseClient.storage.from(bucket).getPublicUrl(path);
     urls.push(data.publicUrl);
