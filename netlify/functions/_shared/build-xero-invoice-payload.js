@@ -29,7 +29,7 @@ async function getOrCreateContact({ name, email }, storeOn) {
 async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   const { data: invoice, error: invErr } = await supabaseAdmin
     .from('invoices')
-    .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients(name, email, client_type, xero_contact_id), invoice_claims(*, cost_centres(name, sort_order))')
+    .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients(name, email, client_type, xero_contact_id), invoice_claims(*, cost_centres(name, sort_order)), bill_to:bill_to_client_id(id, name, email, client_type, xero_contact_id)')
     .eq('id', invoiceId)
     .single();
   if (invErr || !invoice) throw new Error('Invoice not found');
@@ -67,6 +67,21 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
     contactStoreTable = 'projects';
     contactStoreId = project.id;
     existingXeroContactId = project.xero_contact_id;
+  }
+
+  // Overrides who actually gets billed, without changing which job the
+  // charge is tagged against (jobNumber/Reference stay as resolved
+  // above) - used for warranty jobs billed to the equipment manufacturer
+  // rather than the property owner. The manufacturer's own xero_contact_id
+  // is cached on their clients row, same caching pattern as everywhere
+  // else here, just keyed off `clients` directly instead of `projects`.
+  if (invoice.bill_to) {
+    contactName = invoice.bill_to.name;
+    contactEmail = invoice.bill_to.email;
+    clientType = invoice.bill_to.client_type || 'individual';
+    contactStoreTable = 'clients';
+    contactStoreId = invoice.bill_to.id;
+    existingXeroContactId = invoice.bill_to.xero_contact_id;
   }
 
   const { data: mappings } = await supabaseAdmin.from('xero_account_mapping').select('*');

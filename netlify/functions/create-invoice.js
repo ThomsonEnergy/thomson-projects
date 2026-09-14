@@ -27,7 +27,7 @@ exports.handler = async (event) => {
   const { supabaseAdmin, user } = auth;
 
   try {
-    const { projectId, claims, sentAt, dueDate: overrideDueDate } = JSON.parse(event.body || '{}');
+    const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId } = JSON.parse(event.body || '{}');
 
     if (!projectId || !Array.isArray(claims) || !claims.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectId and at least one claim are required' }) };
@@ -120,6 +120,7 @@ exports.handler = async (event) => {
         sent_at: invoiceDate,
         due_date: dueDate,
         created_by: user.id,
+        bill_to_client_id: billToClientId || null,
       })
       .select('id')
       .single();

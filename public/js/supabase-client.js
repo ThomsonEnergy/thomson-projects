@@ -1283,6 +1283,100 @@ function openQuickJobPanel(onCreated) {
   document.body.appendChild(overlay);
 }
 
+// A warranty job for `originalProject` - functionally a quick job (own
+// job number, one cost centre, no quote) so it reuses every existing
+// clock-in/timesheet/PO mechanism unchanged, but tagged via
+// warranty_of_project_id so its accrued cost rolls back into the
+// original job's actual profit (net of whatever's recovered - see
+// project.html's loadProject()) and its page can show a reference back
+// to the original job's scope of works/documents. Client/site details
+// default from the original (same property, same client contact) but
+// stay editable in case the site contact for the warranty visit differs.
+function openWarrantyJobPanel(originalProject, onCreated) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px;';
+  overlay.innerHTML = `
+    <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
+      <h2>Create warranty job</h2>
+      <p class="subtitle" style="margin-bottom:12px;">For ${projectRef(originalProject)}. Its own job number - clock in, log POs, and invoice it same as any job - but its cost pulls back against the original job's actual profit, and once you close it out you'll choose whether it's absorbed, billed to the manufacturer, or partly billed to the client.</p>
+
+      <label style="margin-top:0">Job name</label>
+      <input id="wj-name" value="${(originalProject.name || '').replace(/"/g, '&quot;')} - Warranty" />
+
+      <label>What's the warranty issue</label>
+      <textarea id="wj-brief" rows="2" placeholder="Brief description of what's gone wrong"></textarea>
+
+      <div class="grid cols-2" style="margin-top:8px;">
+        <div>
+          <label style="margin-top:0">Client name</label>
+          <input id="wj-client-name" required value="${(originalProject.client_name || '').replace(/"/g, '&quot;')}" />
+        </div>
+        <div>
+          <label style="margin-top:0">Client email</label>
+          <input id="wj-client-email" type="email" value="${originalProject.client_email || ''}" />
+        </div>
+      </div>
+      <label>Client phone</label>
+      <input id="wj-client-phone" value="${originalProject.client_phone || ''}" />
+
+      <label>Site address</label>
+      <input id="wj-address" value="${(originalProject.client_address || '').replace(/"/g, '&quot;')}" />
+
+      <div style="margin-top:14px;">
+        <button id="wj-confirm-btn">Create warranty job</button>
+        <button type="button" class="secondary" id="wj-cancel-btn">Cancel</button>
+      </div>
+      <div id="wj-msg"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('#wj-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#wj-confirm-btn').addEventListener('click', async () => {
+    const confirmBtn = overlay.querySelector('#wj-confirm-btn');
+    const panelMsg = overlay.querySelector('#wj-msg');
+    const name = overlay.querySelector('#wj-name').value.trim();
+    const brief = overlay.querySelector('#wj-brief').value.trim();
+    const clientName = overlay.querySelector('#wj-client-name').value.trim();
+    const clientEmail = overlay.querySelector('#wj-client-email').value.trim();
+    const clientPhone = overlay.querySelector('#wj-client-phone').value.trim();
+    const clientAddress = overlay.querySelector('#wj-address').value.trim();
+
+    if (!name) { panelMsg.innerHTML = `<div class="error-box">Job name is required.</div>`; return; }
+    if (!clientName) { panelMsg.innerHTML = `<div class="error-box">Client name is required.</div>`; return; }
+
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Creating...';
+    try {
+      const { data: project, error } = await supabaseClient.from('projects').insert({
+        name,
+        sow_text: brief || null,
+        client_id: originalProject.client_id || null,
+        client_name: clientName,
+        client_email: clientEmail,
+        client_phone: clientPhone,
+        client_address: clientAddress,
+        proposal_template: 'direct_job',
+        pipeline_stage: 'job_booked',
+        status: 'in_progress',
+        warranty_of_project_id: originalProject.id,
+      }).select('id, name, job_number').single();
+      if (error) throw error;
+
+      const { error: ccErr } = await supabaseClient.from('cost_centres').insert({
+        project_id: project.id, name: 'Labour & Materials', sort_order: 0, markup_percent: 45,
+      });
+      if (ccErr) throw ccErr;
+
+      overlay.remove();
+      if (onCreated) onCreated(project);
+    } catch (err) {
+      panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Create warranty job';
+    }
+  });
+}
+
 // STC (Small-scale Technology Certificate) quantity, per the Clean Energy
 // Regulator's published formula (cer.gov.au/schemes/renewable-energy-target
 // /small-scale-renewable-energy-scheme/small-scale-technology-certificates):

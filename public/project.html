@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=14"></script>
+  <script src="/js/supabase-client.js?v=15"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -152,6 +152,65 @@
           .eq('source_quote_id', project.id)
           .maybeSingle();
         project.resulting_job = resultingJob || null;
+      }
+
+      // This job IS a warranty job - pull just enough of the original
+      // job's context (ref + scope of works) for the reference card on
+      // the Summary tab. Photos aren't duplicated here, just linked to -
+      // see the "View original job's documents" link, which points at
+      // the original's own Documents tab instead.
+      if (project.warranty_of_project_id) {
+        const { data: original } = await supabaseClient
+          .from('projects')
+          .select('id, name, job_number, sow_text')
+          .eq('id', project.warranty_of_project_id)
+          .maybeSingle();
+        project.warranty_original = original || null;
+      }
+
+      // This job HAS warranty jobs against it - net cost of all of them
+      // (accrued labour+material, minus whatever each has itself
+      // invoiced back out via a manufacturer/client-partial close-out)
+      // rolls into "Actual profit" below, since warranty work was never
+      // part of the original estimate. Invoiced (not paid) counts as
+      // "recovered", same convention the rest of the job's own progress/
+      // profit figures already use.
+      project.warranty_jobs = [];
+      project.net_warranty_cost = 0;
+      if (project.job_number && !project.warranty_of_project_id) {
+        const { data: warrantyJobs } = await supabaseClient
+          .from('projects')
+          .select('id, name, job_number, warranty_outcome, warranty_closed_at, cost_centres(id, invoiced_amount)')
+          .eq('warranty_of_project_id', project.id)
+          .order('created_at');
+        if (warrantyJobs && warrantyJobs.length) {
+          const warrantyIds = warrantyJobs.map(w => w.id);
+          let accruedLabourByProject = {};
+          try {
+            accruedLabourByProject = await fetchAccruedLabourCost(warrantyIds);
+          } catch (err) {
+            console.error('Warranty accrued labour fetch failed:', err.message);
+          }
+          const { data: poRows } = await supabaseClient
+            .from('purchase_orders')
+            .select('project_id, purchase_order_line_items(quantity, unit_cost, received)')
+            .in('project_id', warrantyIds);
+          const materialByProject = {};
+          (poRows || []).forEach(po => {
+            const cost = (po.purchase_order_line_items || []).filter(li => li.received).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
+            materialByProject[po.project_id] = (materialByProject[po.project_id] || 0) + cost;
+          });
+
+          project.warranty_jobs = warrantyJobs.map(w => {
+            const labourCost = Object.values(accruedLabourByProject[w.id]?.byCentre || {}).reduce((s, c) => s + Number(c.actualLabourCost || 0), 0);
+            const materialCost = materialByProject[w.id] || 0;
+            const accrued = labourCost + materialCost;
+            const invoicedBack = (w.cost_centres || []).reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
+            const net = Math.max(0, accrued - invoicedBack);
+            return { id: w.id, name: w.name, job_number: w.job_number, warranty_outcome: w.warranty_outcome, warranty_closed_at: w.warranty_closed_at, accrued, invoicedBack, net };
+          });
+          project.net_warranty_cost = project.warranty_jobs.reduce((s, w) => s + w.net, 0);
+        }
       }
 
       return project;
@@ -1501,6 +1560,174 @@
       });
     }
 
+    // Closing out a warranty job: pick one of the three outcomes Jasper
+    // described - absorbed entirely (no invoice, the full accrued cost
+    // stays as a net cost against the original job), billed to the
+    // equipment manufacturer (a real invoice, to a manufacturer contact
+    // rather than the property owner - see bill_to_client_id), or partly
+    // billed to the client because not everything logged against it
+    // turned out to be genuine warranty work (a real invoice to the
+    // job's own client, same as any job). Whatever isn't invoiced stays
+    // as net warranty cost against the original (see loadProject()).
+    async function openCloseWarrantyJobPanel(warrantyJobId, originalProject) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:480px; width:100%;"><p class="subtitle">Working out what's accrued...</p></div>`;
+      document.body.appendChild(overlay);
+
+      let actuals;
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/get-invoiceable-actuals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ projectId: warrantyJobId }),
+        });
+        actuals = await res.json();
+        if (!res.ok || !actuals.ok) throw new Error(actuals.error || 'Could not work out accrued costs');
+      } catch (err) {
+        overlay.innerHTML = `<div class="card" style="max-width:480px; width:100%;"><div class="error-box">${err.message}</div><button type="button" class="secondary" id="cw-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+        overlay.querySelector('#cw-close-btn').addEventListener('click', () => overlay.remove());
+        return;
+      }
+
+      const remaining = Math.max(0, actuals.actualLabourSell + actuals.materialSell - actuals.invoicedAmount);
+      const labourShare = remaining > 0 ? actuals.actualLabourSell / (actuals.actualLabourSell + actuals.materialSell || 1) : 0;
+      const defaultLabour = Math.round(remaining * labourShare * 100) / 100;
+      const defaultMaterial = Math.round((remaining - defaultLabour) * 100) / 100;
+
+      overlay.innerHTML = `
+        <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Close out warranty job</h2>
+          <p class="subtitle" style="margin-bottom:12px;">${actuals.actualHours} hours logged &middot; ${money(actuals.materialCost)} in received materials (marked up to ${money(actuals.materialSell)}). ${money(remaining)} not yet invoiced.</p>
+
+          <label style="margin-top:0">Outcome</label>
+          <select id="cw-outcome">
+            <option value="no_bill">Absorbed - no bill (full cost stays against the original job)</option>
+            <option value="manufacturer">Bill the manufacturer</option>
+            <option value="client">Bill the client (not all of it was covered under warranty)</option>
+          </select>
+
+          <div id="cw-manufacturer-row" style="display:none;">
+            <label>Manufacturer - search existing, or type a new one below</label>
+            <input id="cw-mfr-search" placeholder="Search existing clients..." autocomplete="off" />
+            <div id="cw-mfr-results"></div>
+            <div class="grid cols-2" style="margin-top:8px;">
+              <div><label style="margin-top:0">Name</label><input id="cw-mfr-name" /></div>
+              <div><label style="margin-top:0">Email</label><input id="cw-mfr-email" type="email" /></div>
+            </div>
+          </div>
+
+          <div id="cw-amount-row" style="display:none;">
+            <label>Labour</label>
+            <input type="number" step="0.01" id="cw-labour" value="${defaultLabour}" />
+            <label>Materials</label>
+            <input type="number" step="0.01" id="cw-material" value="${defaultMaterial}" />
+            <label>Invoice date</label>
+            <input type="date" id="cw-date" value="${new Date().toISOString().slice(0, 10)}" />
+          </div>
+
+          <div style="margin-top:14px;">
+            <button id="cw-confirm-btn">Close out</button>
+            <button type="button" class="secondary" id="cw-cancel-btn">Cancel</button>
+          </div>
+          <div id="cw-msg"></div>
+        </div>`;
+
+      let selectedMfrId = null;
+      const outcomeSelect = overlay.querySelector('#cw-outcome');
+      function refreshOutcomeUI() {
+        const val = outcomeSelect.value;
+        overlay.querySelector('#cw-manufacturer-row').style.display = val === 'manufacturer' ? 'block' : 'none';
+        overlay.querySelector('#cw-amount-row').style.display = val === 'no_bill' ? 'none' : 'block';
+      }
+      outcomeSelect.addEventListener('change', refreshOutcomeUI);
+      refreshOutcomeUI();
+
+      let mfrSearchTimeout;
+      overlay.querySelector('#cw-mfr-search').addEventListener('input', (e) => {
+        clearTimeout(mfrSearchTimeout);
+        const q = e.target.value.trim();
+        selectedMfrId = null;
+        if (q.length < 2) { overlay.querySelector('#cw-mfr-results').innerHTML = ''; return; }
+        mfrSearchTimeout = setTimeout(async () => {
+          const { data } = await supabaseClient.from('clients').select('id, name, email').or(`name.ilike.%${q}%,email.ilike.%${q}%`).limit(8);
+          const resultsEl = overlay.querySelector('#cw-mfr-results');
+          if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - fill in the fields below to add them as a new client.</p>`; return; }
+          resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+            ${data.map(c => `<div class="mfr-pick-row" data-id="${c.id}" data-name="${c.name}" data-email="${c.email || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${c.name} <span class="subtitle">${c.email || ''}</span></div>`).join('')}
+          </div>`;
+          resultsEl.querySelectorAll('.mfr-pick-row').forEach(row => {
+            row.addEventListener('click', () => {
+              selectedMfrId = row.dataset.id;
+              overlay.querySelector('#cw-mfr-search').value = row.dataset.name;
+              overlay.querySelector('#cw-mfr-name').value = row.dataset.name;
+              overlay.querySelector('#cw-mfr-email').value = row.dataset.email;
+              resultsEl.innerHTML = '';
+            });
+          });
+        }, 250);
+      });
+
+      overlay.querySelector('#cw-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#cw-confirm-btn').addEventListener('click', async () => {
+        const confirmBtn = overlay.querySelector('#cw-confirm-btn');
+        const msg = overlay.querySelector('#cw-msg');
+        const outcome = outcomeSelect.value;
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Closing out...';
+        try {
+          let billToClientId = null;
+          if (outcome === 'manufacturer') {
+            billToClientId = selectedMfrId;
+            if (!billToClientId) {
+              const mfrName = overlay.querySelector('#cw-mfr-name').value.trim();
+              if (!mfrName) throw new Error('Search for the manufacturer, or type their name to add them as a new client.');
+              const { data: newClient, error: clientErr } = await supabaseClient
+                .from('clients')
+                .insert({ name: mfrName, email: overlay.querySelector('#cw-mfr-email').value.trim() || null })
+                .select('id').single();
+              if (clientErr) throw clientErr;
+              billToClientId = newClient.id;
+            }
+          }
+
+          if (outcome !== 'no_bill') {
+            const labourAmount = parseFloat(overlay.querySelector('#cw-labour').value) || 0;
+            const materialAmount = parseFloat(overlay.querySelector('#cw-material').value) || 0;
+            if (labourAmount + materialAmount <= 0) throw new Error('Enter a labour or material amount to bill.');
+
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch('/.netlify/functions/create-invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({
+                projectId: warrantyJobId,
+                claims: [{ costCentreId: actuals.costCentreId, labourAmount, materialAmount, claimPercent: null }],
+                sentAt: overlay.querySelector('#cw-date').value || null,
+                billToClientId,
+              }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
+          }
+
+          const { error: updErr } = await supabaseClient.from('projects').update({
+            warranty_outcome: outcome, warranty_closed_at: new Date().toISOString(),
+          }).eq('id', warrantyJobId);
+          if (updErr) throw updErr;
+
+          await logActivity('project', originalProject.id, 'warranty_job_closed', `Warranty job closed out (${outcome})`);
+          overlay.remove();
+          location.reload();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Close out';
+        }
+      });
+    }
+
     // One invoice, multiple stage-claim lines: either a single % of the
     // whole project's contract value (distributed across every stage in
     // proportion to its quoted amount, capped at each stage's own
@@ -2202,9 +2429,14 @@
       // "Cost allocated" and "Profit" on jobs must always reflect real
       // spend, never the estimate - accrued labour comes from logged
       // timesheets (actual_labour_cost, per stage), accrued materials
-      // from PO line items that have actually been received.
+      // from PO line items that have actually been received. Net warranty
+      // cost (any warranty jobs raised against this one, minus whatever
+      // each has itself recovered - see loadProject()) folds in here too,
+      // never into the quoted/estimated side, since warranty work by
+      // definition wasn't part of the original estimate.
       const accruedMaterialTotal = Number(project.accrued_material_cost) || 0;
-      const accruedTotal = actualLabourTotal + accruedMaterialTotal;
+      const netWarrantyCost = Number(project.net_warranty_cost) || 0;
+      const accruedTotal = actualLabourTotal + accruedMaterialTotal + netWarrantyCost;
       const accruedProfit = quoted - accruedTotal;
       const costBarMax = Math.max(cost, accruedTotal, 1);
       const estimatedBarPct = Math.round((cost / costBarMax) * 100);
@@ -2341,6 +2573,45 @@
                 </div>
                 ` : ''}
               `) : ''}
+
+              ${project.warranty_of_project_id && !editMode ? `
+              <div class="card" style="border-color:#eab308;">
+                <h2 style="margin:0 0 8px;">Warranty job</h2>
+                <p class="subtitle" style="margin:0 0 8px;">This is a warranty job for ${project.warranty_original ? `<a class="link-quiet" href="/project.html?id=${project.warranty_original.id}">${projectRef(project.warranty_original)}</a>` : 'a closed-out job'}.</p>
+                ${project.warranty_original?.sow_text ? `
+                  <p class="subtitle" style="margin:0 0 4px; font-weight:600;">Original scope of works</p>
+                  <div style="white-space:pre-wrap; font-size:13px; max-height:160px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px;">${escapeHtml(project.warranty_original.sow_text)}</div>
+                ` : ''}
+                ${project.warranty_original ? `<a class="link-quiet" href="/project.html?id=${project.warranty_original.id}" style="font-size:12px; display:inline-block; margin-top:8px;">View original job's documents &amp; details &rarr;</a>` : ''}
+                ${project.warranty_outcome ? `<p class="subtitle" style="margin-top:10px;">Closed out ${new Date(project.warranty_closed_at).toLocaleDateString('en-AU')} - ${{ no_bill: 'absorbed, no bill', manufacturer: 'billed to manufacturer', client: 'partly billed to client' }[project.warranty_outcome]}.</p>` : ''}
+              </div>
+              ` : ''}
+
+              ${pricingVisible && project.job_number && !project.warranty_of_project_id && !editMode ? `
+              <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                  <h2 style="margin:0;">Warranty jobs</h2>
+                  <button type="button" class="secondary" id="create-warranty-job-btn" style="font-size:12px; padding:6px 10px;">Create warranty job</button>
+                </div>
+                ${project.warranty_jobs.length ? `
+                  <p class="subtitle" style="margin:0 0 8px;">Net warranty cost against this job: <strong style="color:var(--text);">${money(netWarrantyCost)}</strong> (included in Actual profit above).</p>
+                  <table>
+                    <thead><tr><th>Job</th><th class="num">Accrued</th><th class="num">Recovered</th><th class="num">Net cost</th><th></th></tr></thead>
+                    <tbody>
+                      ${project.warranty_jobs.map(w => `
+                        <tr>
+                          <td><a class="link-quiet" href="/project.html?id=${w.id}">${projectRef(w)}</a></td>
+                          <td class="num">${money(w.accrued)}</td>
+                          <td class="num">${money(w.invoicedBack)}</td>
+                          <td class="num">${money(w.net)}</td>
+                          <td>${w.warranty_outcome ? `<span class="badge accepted">${{ no_bill: 'Absorbed', manufacturer: 'Manufacturer billed', client: 'Client billed' }[w.warranty_outcome]}</span>` : `<button type="button" class="secondary close-warranty-btn" data-warranty-id="${w.id}" style="font-size:12px; padding:5px 8px;">Close out</button>`}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                  </table>
+                ` : `<p class="subtitle">None raised against this job.</p>`}
+                <div id="warranty-jobs-msg"></div>
+              </div>
+              ` : ''}
 
               ${project.job_number && !editMode ? `
               <div class="card">
@@ -2743,6 +3014,14 @@
       if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
       const invoiceActualBtn = document.getElementById('invoice-actual-btn');
       if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => openInvoiceActualCostsPanel(project));
+
+      const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
+      if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {
+        openWarrantyJobPanel(project, (newJob) => { window.location.href = `/project.html?id=${newJob.id}`; });
+      });
+      document.querySelectorAll('.close-warranty-btn').forEach(btn => {
+        btn.addEventListener('click', () => openCloseWarrantyJobPanel(btn.dataset.warrantyId, project));
+      });
 
       const installerSummaryBtn = document.getElementById('installer-summary-btn');
       if (installerSummaryBtn) installerSummaryBtn.addEventListener('click', async () => {
