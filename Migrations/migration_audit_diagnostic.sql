@@ -286,4 +286,9 @@ select '101', 'warranty_jobs',
     and exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'warranty_outcome')
     and exists (select 1 from information_schema.columns where table_name = 'invoices' and column_name = 'bill_to_client_id')
   then 'present' else 'MISSING' end
+union all
+select '102', 'lead_triage',
+  case when exists (select 1 from information_schema.columns where table_name = 'leads' and column_name = 'ai_summary')
+    and not exists (select 1 from pg_trigger where tgname = 'on_lead_created')
+  then 'present' else 'MISSING' end
 order by 1;

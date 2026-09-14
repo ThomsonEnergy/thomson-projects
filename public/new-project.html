@@ -233,6 +233,7 @@
   <script src="/js/theme.js"></script>
   <script>
     const editId = new URLSearchParams(window.location.search).get('id');
+    let prefillLeadId = null;
     let referencePhotos = [];
     let rowCount = 0;
     let currentTemplate = 'new_build';
@@ -1018,6 +1019,7 @@
         sales_contact_id: assignedContactIds.sales_contact_id || null,
         accounts_contact_id: assignedContactIds.accounts_contact_id || null,
       };
+      if (!editId && prefillLeadId) projectFields.lead_id = prefillLeadId;
 
       // Quote number is drawn once, atomically, only when a new quote is
       // created - editing an existing one never reassigns it. Job number
@@ -1045,6 +1047,7 @@
         const { data: project, error: projErr } = await supabaseClient.from('projects').insert(projectFields).select().single();
         if (projErr) { msg.innerHTML = `<div class="error-box">${projErr.message}</div>`; return; }
         projectId = project.id;
+        if (prefillLeadId) await supabaseClient.from('leads').update({ status: 'converted' }).eq('id', prefillLeadId);
       }
 
       // Replace-all, same approach as stages just below - simplest way to
@@ -1265,10 +1268,29 @@
       if (editId) {
         await loadForEdit();
       } else {
-        applyTemplate('new_build');
+        const params = new URLSearchParams(window.location.search);
+        const requestedTemplate = params.get('template') || 'new_build';
+        applyTemplate(requestedTemplate);
         document.getElementById('p-terms').value = companySettings.default_terms || '';
         ['Site Power', 'Rough In', 'Fit Off', 'Finishing Touches'].forEach(n => addRow({ name: n }));
         updateTotal();
+
+        // Converting a lead (see leads.html) - prefill the client/site
+        // details it already captured rather than making staff retype
+        // them, and seed the scope-of-works brief with its AI summary so
+        // "Generate scope of works with AI" has something to work from.
+        prefillLeadId = params.get('lead_id');
+        if (prefillLeadId) {
+          const { data: lead } = await supabaseClient.from('leads').select('*').eq('id', prefillLeadId).maybeSingle();
+          if (lead) {
+            document.getElementById('p-name').value = `${lead.name || 'New enquiry'} - ${{ package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form' }[lead.source] || lead.source}`;
+            document.getElementById('p-client').value = lead.name || '';
+            document.getElementById('p-email').value = lead.email || '';
+            document.getElementById('p-phone').value = lead.phone || '';
+            document.getElementById('p-address').value = lead.address_formatted || lead.address_line || '';
+            document.getElementById('p-brief').value = lead.ai_summary || '';
+          }
+        }
       }
     })();
   </script>
