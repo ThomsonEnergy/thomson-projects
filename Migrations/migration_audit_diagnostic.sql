@@ -275,4 +275,9 @@ select '089', 'client_delete_unlinks_instead_of_blocking',
   case when (select confdeltype from pg_constraint where conname = 'projects_client_id_fkey') = 'n'
     and (select confdeltype from pg_constraint where conname = 'invoices_client_id_fkey') = 'n'
   then 'present' else 'MISSING' end
+union all
+select '100', 'credit_notes',
+  case when exists (select 1 from information_schema.tables where table_name = 'credit_notes')
+    and exists (select 1 from information_schema.tables where table_name = 'credit_note_claims')
+  then 'present' else 'MISSING' end
 order by 1;

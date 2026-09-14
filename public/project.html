@@ -60,7 +60,7 @@
       const centreCols = await costCentreColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order, prebuild_group_id, prebuild_client_description, prebuild_base_quantity), cost_centre_photo_groups(*)),
+        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), credit_note_claims(*), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order, prebuild_group_id, prebuild_client_description, prebuild_base_quantity), cost_centre_photo_groups(*)),
           project_manager:client_contacts!project_manager_contact_id(name, phone, email),
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
@@ -1371,7 +1371,17 @@
         paid_at: ic.invoices?.paid_at, xero_invoice_id: ic.invoices?.xero_invoice_id, id: ic.invoices?.id,
         labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount,
       }));
-      const stageInvoices = [...legacyInvoices, ...claimInvoices].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      // Credit notes count as negative claims in the same timeline, so a
+      // stage's remaining-to-claim balance correctly goes back up once one
+      // is issued - see migration_100_credit_notes.sql for the matching
+      // server-side version of this same subtraction (get_invoice_by_token_v3,
+      // for the client-facing invoice page).
+      const creditLines = (c.credit_note_claims || []).map(cn => ({
+        invoice_number: null, invoice_token: null, sent_at: cn.created_at, created_at: cn.created_at,
+        paid_at: null, xero_invoice_id: null, id: cn.id, isCredit: true,
+        labour_amount: -(Number(cn.labour_amount) || 0), material_amount: -(Number(cn.material_amount) || 0), stc_amount: -(Number(cn.stc_amount) || 0),
+      }));
+      const stageInvoices = [...legacyInvoices, ...claimInvoices, ...creditLines].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
       const quotedAmt = Number(c.quoted_amount) || 0;
       const remaining = Math.max(0, quotedAmt - claimedTotal);
@@ -1737,8 +1747,10 @@
     // own; never bundled together by project.
     async function loadJobInvoices(project) {
       const listEl = document.getElementById('job-invoices-list');
+      const myRole = await getMyRole();
+      const canIssueCreditNote = myRole === 'admin' || myRole === 'finance';
       const [{ data: invoices, error }, { data: mappings }, { data: client }] = await Promise.all([
-        supabaseClient.from('invoices').select('*, cost_centres(name), invoice_claims(*, cost_centres(name, sort_order))').eq('project_id', project.id).order('sent_at', { ascending: false }),
+        supabaseClient.from('invoices').select('*, cost_centres(name), invoice_claims(*, cost_centres(name, sort_order)), credit_notes(*)').eq('project_id', project.id).order('sent_at', { ascending: false }),
         supabaseClient.from('xero_account_mapping').select('*'),
         project.client_id ? supabaseClient.from('clients').select('client_type').eq('id', project.client_id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
@@ -1759,9 +1771,21 @@
               <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:10px;">View client-facing invoice</a>
               ${inv.pdf_path ? `<button type="button" class="secondary view-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">View PDF</button>` : ''}
               <button type="button" class="secondary generate-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">${inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF'}</button>
-              ${!inv.paid_at ? `<button type="button" class="secondary edit-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Edit</button>` : ''}
+              ${!inv.xero_invoice_id && !inv.paid_at
+                ? `<button type="button" class="secondary edit-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Edit</button>`
+                : (canIssueCreditNote ? `<button type="button" class="secondary issue-credit-note-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Issue credit note</button>` : '')}
               ${inv.xero_invoice_id ? '<span class="subtitle" style="font-size:12px;">In Xero</span>' : `<button type="button" class="secondary push-xero-tab-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>`}
             </div>
+            ${(inv.credit_notes || []).length ? `
+              <div style="width:100%; margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);">
+                ${inv.credit_notes.map(cn => `
+                  <p class="subtitle" style="font-size:12px; margin:4px 0;">
+                    Credit note${cn.reason ? ` - ${cn.reason}` : ''} (${new Date(cn.created_at).toLocaleDateString('en-AU')})
+                    ${cn.refund ? `<span class="badge sent" style="margin-left:4px;">Refunded${cn.refund_reference ? ` - ${cn.refund_reference}` : ''}</span>` : `<span class="badge accepted" style="margin-left:4px;">Account credit</span>`}
+                    ${cn.xero_credit_note_id ? '<span style="margin-left:6px;">In Xero</span>' : (canIssueCreditNote ? `<button type="button" class="secondary push-credit-note-btn" data-credit-note-id="${cn.id}" style="font-size:11px; padding:4px 8px; margin-left:6px;">Push to Xero</button>` : '')}
+                    ${cn.xero_credit_note_error ? `<span class="error-box" style="display:block; margin-top:4px;">${cn.xero_credit_note_error}</span>` : ''}
+                  </p>`).join('')}
+              </div>` : ''}
           </div>
           <div style="margin-top:12px;">${xeroBreakdownHtml(inv, mappings, clientType)}</div>
           <div id="invoice-pdf-msg-${inv.id}">${inv.pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${inv.pdf_error}</div>` : ''}</div>
@@ -1772,6 +1796,12 @@
       });
       listEl.querySelectorAll('.edit-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => openEditInvoicePanel(invoices.find(i => i.id === btn.dataset.invoiceId), project));
+      });
+      listEl.querySelectorAll('.issue-credit-note-btn').forEach(btn => {
+        btn.addEventListener('click', () => openIssueCreditNotePanel(invoices.find(i => i.id === btn.dataset.invoiceId), project));
+      });
+      listEl.querySelectorAll('.push-credit-note-btn').forEach(btn => {
+        btn.addEventListener('click', () => pushCreditNoteToXero(btn));
       });
       listEl.querySelectorAll('.view-invoice-pdf-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -1803,14 +1833,17 @@
       });
     }
 
-    // Lets an unpaid invoice's claim amounts be corrected after the fact -
-    // per stage, split into Labour/Materials/STC (the actual invoice_claims
-    // granularity; a legacy single-stage invoice just gets one row here).
-    // Adjusts each touched cost centre's invoiced_amount by the delta
-    // between old and new (never overwrites it outright, since that figure
-    // aggregates every invoice on that stage, not just this one), and - if
-    // this invoice has already been pushed to Xero - re-sends it via
-    // update-invoice-in-xero so the two never drift apart.
+    // Lets an invoice's claim amounts be corrected before it's ever been
+    // pushed to Xero - per stage, split into Labour/Materials/STC (the
+    // actual invoice_claims granularity; a legacy single-stage invoice
+    // just gets one row here). Adjusts each touched cost centre's
+    // invoiced_amount by the delta between old and new (never overwrites
+    // it outright, since that figure aggregates every invoice on that
+    // stage, not just this one). Only ever called for an unpushed,
+    // unpaid invoice (see loadJobInvoices' button gating) - once pushed,
+    // Xero itself rejects line-item edits on an AUTHORISED invoice via
+    // the API, so correcting it from that point on goes through a credit
+    // note instead (openIssueCreditNotePanel), not this panel.
     function openEditInvoicePanel(invoice, project) {
       const isMultiStage = invoice.invoice_claims && invoice.invoice_claims.length > 0;
       const rows = isMultiStage
@@ -1828,7 +1861,7 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:560px; width:100%; max-height:85vh; overflow-y:auto;">
           <h2>Edit ${invoice.invoice_number}</h2>
-          <p class="subtitle" style="margin-bottom:12px;">${invoice.xero_invoice_id ? 'Already pushed to Xero - saving will push these changes there too.' : 'Not yet pushed to Xero - saving just updates the amounts here.'}</p>
+          <p class="subtitle" style="margin-bottom:12px;">Not yet pushed to Xero - saving just updates the amounts here.</p>
           <div class="grid cols-2" style="margin-bottom:12px;">
             <div>
               <label style="margin-top:0">Invoice date</label>
@@ -1911,17 +1944,6 @@
 
           await logActivity('project', project.id, 'invoice_edited', `Edited invoice ${invoice.invoice_number}`);
 
-          if (invoice.xero_invoice_id) {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            const res = await fetch('/.netlify/functions/update-invoice-in-xero', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-              body: JSON.stringify({ invoiceId: invoice.id }),
-            });
-            const data = await res.json();
-            if (!res.ok || !data.ok) throw new Error(data.error || 'Saved here, but pushing the update to Xero failed');
-          }
-
           overlay.remove();
           location.reload();
         } catch (err) {
@@ -1932,6 +1954,163 @@
       });
 
       updateTotal();
+    }
+
+    // The correction path for an invoice that's already been pushed to
+    // Xero (see openEditInvoicePanel's comment for why a raw edit no
+    // longer works past that point). Pre-fills each stage's still-
+    // creditable amount (this invoice's original claim, minus whatever's
+    // already been credited against it before), staff can reduce any of
+    // them for a partial credit. Finance/Admin only (button gated in
+    // loadJobInvoices) - server-side enforced too, see require-finance-role.js.
+    async function openIssueCreditNotePanel(invoice, project) {
+      const isMultiStage = invoice.invoice_claims && invoice.invoice_claims.length > 0;
+      const originalRows = isMultiStage
+        ? invoice.invoice_claims.slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
+            .map(ic => ({ cost_centre_id: ic.cost_centre_id, stageName: ic.cost_centres?.name || 'Stage', labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0 }))
+        : [{
+            cost_centre_id: invoice.cost_centre_id || null,
+            stageName: invoice.cost_centre_id ? (invoice.cost_centres?.name || 'Stage') : (invoice.description || 'Invoice'),
+            labour: Number(invoice.labour_amount) || 0, material: Number(invoice.material_amount) || 0, stc: Number(invoice.stc_amount) || 0,
+          }];
+
+      const { data: priorCredits } = await supabaseClient
+        .from('credit_note_claims')
+        .select('cost_centre_id, labour_amount, material_amount, stc_amount, credit_notes!inner(invoice_id)')
+        .eq('credit_notes.invoice_id', invoice.id);
+      const alreadyCreditedByCentre = {};
+      (priorCredits || []).forEach(pc => {
+        const cur = alreadyCreditedByCentre[pc.cost_centre_id] || { labour: 0, material: 0, stc: 0 };
+        cur.labour += Number(pc.labour_amount) || 0;
+        cur.material += Number(pc.material_amount) || 0;
+        cur.stc += Number(pc.stc_amount) || 0;
+        alreadyCreditedByCentre[pc.cost_centre_id] = cur;
+      });
+
+      const rows = originalRows.map(r => {
+        const already = alreadyCreditedByCentre[r.cost_centre_id] || { labour: 0, material: 0, stc: 0 };
+        return {
+          cost_centre_id: r.cost_centre_id, stageName: r.stageName,
+          maxLabour: Math.max(0, r.labour - already.labour), maxMaterial: Math.max(0, r.material - already.material), maxStc: Math.max(0, r.stc - already.stc),
+        };
+      }).filter(r => r.maxLabour + r.maxMaterial + r.maxStc > 0.004);
+
+      if (!rows.length) {
+        alert('This invoice has already been fully credited - there\'s nothing left to credit.');
+        return;
+      }
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:600px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>Issue credit note - ${invoice.invoice_number}</h2>
+          <p class="subtitle" style="margin-bottom:12px;">Defaults to a full credit of what's left claimable on this invoice - reduce any amount for a partial credit. This creates the credit note here; push it to Xero separately once you're happy with it.</p>
+          <table>
+            <thead><tr><th>Stage</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">STC</th></tr></thead>
+            <tbody>
+              ${rows.map((r, i) => `
+                <tr>
+                  <td>${r.stageName}</td>
+                  <td class="num"><input type="number" step="0.01" min="0" max="${r.maxLabour}" class="cn-labour" data-i="${i}" value="${r.maxLabour.toFixed(2)}" style="width:100px;" /></td>
+                  <td class="num"><input type="number" step="0.01" min="0" max="${r.maxMaterial}" class="cn-material" data-i="${i}" value="${r.maxMaterial.toFixed(2)}" style="width:100px;" /></td>
+                  <td class="num"><input type="number" step="0.01" min="0" max="${r.maxStc}" class="cn-stc" data-i="${i}" value="${r.maxStc.toFixed(2)}" style="width:90px;" /></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+          <p class="subtitle" style="margin-top:8px;">Total credit: <strong id="cn-total" style="color:var(--text);"></strong></p>
+          <label style="margin-top:10px;">Reason</label>
+          <input id="cn-reason" placeholder="e.g. Client disputed the materials line, agreed to reduce it" />
+          <label style="display:flex; align-items:center; gap:6px; margin-top:12px;">
+            <input type="checkbox" id="cn-refund" style="width:auto;" ${invoice.paid_at ? 'checked' : ''} />
+            This has already been paid - refund the money back to the client (rather than leave it as account credit)
+          </label>
+          <div id="cn-refund-ref-row" style="display:${invoice.paid_at ? 'block' : 'none'};">
+            <label>How was it refunded</label>
+            <input id="cn-refund-ref" placeholder="e.g. Bank transfer 12 Sep, or Airwallex refund ID" />
+          </div>
+          <div style="margin-top:14px;">
+            <button id="cn-save-btn">Create credit note</button>
+            <button type="button" class="secondary" id="cn-cancel-btn">Cancel</button>
+          </div>
+          <div id="cn-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      function readValues() {
+        return rows.map((r, i) => ({
+          cost_centre_id: r.cost_centre_id,
+          labour: Math.min(r.maxLabour, Math.max(0, parseFloat(overlay.querySelector(`.cn-labour[data-i="${i}"]`).value) || 0)),
+          material: Math.min(r.maxMaterial, Math.max(0, parseFloat(overlay.querySelector(`.cn-material[data-i="${i}"]`).value) || 0)),
+          stc: Math.min(r.maxStc, Math.max(0, parseFloat(overlay.querySelector(`.cn-stc[data-i="${i}"]`).value) || 0)),
+        }));
+      }
+      function updateTotal() {
+        const total = readValues().reduce((s, r) => s + r.labour + r.material, 0);
+        overlay.querySelector('#cn-total').textContent = money(total);
+      }
+      overlay.querySelectorAll('input[type="number"]').forEach(inp => inp.addEventListener('input', updateTotal));
+      overlay.querySelector('#cn-refund').addEventListener('change', (e) => {
+        overlay.querySelector('#cn-refund-ref-row').style.display = e.target.checked ? 'block' : 'none';
+      });
+
+      overlay.querySelector('#cn-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#cn-save-btn').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#cn-msg');
+        const saveBtn = overlay.querySelector('#cn-save-btn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Creating...';
+        try {
+          const claims = readValues().filter(r => r.labour + r.material + r.stc > 0.004);
+          if (!claims.length) throw new Error('Enter at least one non-zero credit amount');
+
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/create-credit-note', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({
+              invoiceId: invoice.id,
+              reason: overlay.querySelector('#cn-reason').value.trim() || null,
+              refund: overlay.querySelector('#cn-refund').checked,
+              refundReference: overlay.querySelector('#cn-refund-ref').value.trim() || null,
+              claims: claims.map(c => ({ costCentreId: c.cost_centre_id, labourAmount: c.labour, materialAmount: c.material, stcAmount: c.stc })),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the credit note');
+
+          await logActivity('project', project.id, 'credit_note_created', `Credit note created against invoice ${invoice.invoice_number}`);
+          overlay.remove();
+          location.reload();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Create credit note';
+        }
+      });
+
+      updateTotal();
+    }
+
+    async function pushCreditNoteToXero(btn) {
+      const msg = document.getElementById('job-invoices-msg');
+      btn.disabled = true;
+      btn.textContent = 'Pushing...';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/push-credit-note-to-xero', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ creditNoteId: btn.dataset.creditNoteId }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
+        location.reload();
+      } catch (err) {
+        if (msg) msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        btn.disabled = false;
+        btn.textContent = 'Push to Xero';
+      }
     }
 
     async function initCcewSection(project) {
@@ -2368,7 +2547,13 @@
                     <table class="responsive-stack">
                       <thead><tr><th>Invoice</th><th class="num">Amount</th><th>Sent</th><th></th></tr></thead>
                       <tbody>
-                        ${stageInvoices.map(inv => `
+                        ${stageInvoices.map(inv => inv.isCredit ? `
+                          <tr>
+                            <td data-label="Invoice">Credit note</td>
+                            <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
+                            <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
+                            <td data-label=""><span class="subtitle" style="font-size:11px;">See Invoices tab</span></td>
+                          </tr>` : `
                           <tr>
                             <td data-label="Invoice">${inv.invoice_number}</td>
                             <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>

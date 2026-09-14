@@ -61,7 +61,13 @@ exports.handler = async (event) => {
       const xeroInvoice = invoiceDetail.Invoices?.[0];
       if (!xeroInvoice) continue;
 
-      const isPaid = xeroInvoice.Status === 'PAID' || Number(xeroInvoice.AmountDue) === 0;
+      // Status === 'PAID' is Xero's own explicit "this was actually paid"
+      // signal - relied on alone, not also on AmountDue reaching 0, since
+      // a credit note fully allocated against an invoice also zeroes
+      // AmountDue without the invoice ever being paid (Xero leaves its
+      // Status at AUTHORISED in that case), which would otherwise get
+      // wrongly recorded here as paid_at.
+      const isPaid = xeroInvoice.Status === 'PAID';
 
       await supabaseAdmin
         .from('invoices')

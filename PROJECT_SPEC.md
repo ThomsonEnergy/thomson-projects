@@ -347,7 +347,7 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 - Staged projects and Time & Materials jobs invoiced from the app directly to Xero's Invoices API
 - Progress claim invoices carry job context in the Reference field
 - **New invoices push as Approved (AUTHORISED status)**, not Draft — bookkeeper wanted them ready-to-go, not needing a manual approve step in Xero every time
-- Editing an already-pushed invoice re-sends via `update-invoice-in-xero.js`, preserving whatever status Xero already has it at
+- An invoice can only be edited before it's pushed to Xero - once pushed, Xero rejects line-item edits on an AUTHORISED invoice via the API, so correcting/disputing it goes through a credit note instead (`create-credit-note.js` / `push-credit-note-to-xero.js`)
 
 ### H4. Cost/Profit Dashboard (Xero-dependent extension of D5) — not built
 - Pull labour actuals from Xero Payroll, job expenses from Xero Accounting API filtered by Tracking Category

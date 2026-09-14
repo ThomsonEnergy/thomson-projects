@@ -163,4 +163,4 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   return { invoice, contactId, reference, lineItems, jobNumber, date, dueDate };
 }
 
-module.exports = { buildXeroInvoicePayload };
+module.exports = { buildXeroInvoicePayload, getOrCreateContact };

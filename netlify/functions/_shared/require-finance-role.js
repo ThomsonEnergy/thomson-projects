@@ -2,7 +2,10 @@
 // For anything that reveals a real payroll figure (an individual
 // employee's pay rate, or a cost derived closely enough from one person's
 // single shift that it amounts to the same thing) rather than just an
-// aggregate $ total, which pricing roles broadly can already see.
+// aggregate $ total, which pricing roles broadly can already see - and
+// for credit notes, which reverse money already recorded (and can
+// trigger a real refund), so use the same narrower gate rather than the
+// general pricing-role check invoicing/quoting uses.
 
 const { getAdminClient, getAuthCheckClient } = require('./require-admin');
 
