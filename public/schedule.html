@@ -115,7 +115,7 @@
   .mobile-entry .me-time { color: var(--muted); font-size: 12px; white-space: nowrap; }
   .mobile-add-btn { width: 100%; margin-top: 4px; font-size: 12px; padding: 8px; }
 
-  @media (max-width: 700px) {
+  @media (max-width: 700px), (pointer: coarse) {
     .day-board-main { display: none; }
     .day-board-sidebar { display: none; }
     .mobile-day-list { display: block; }
@@ -580,7 +580,7 @@
         timeline.addEventListener('drop', async (e) => {
           e.preventDefault();
           timeline.classList.remove('drag-over');
-          const projectData = e.dataTransfer.getData('application/json');
+          const projectData = e.dataTransfer.getData('text/plain');
           if (!projectData) return;
           const project = JSON.parse(projectData);
           const blocking = await requiredTasksBlockingSchedule(project.id);
@@ -777,7 +777,7 @@
         </div>`).join('');
       resultsEl.querySelectorAll('.job-card').forEach(card => {
         card.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('application/json', card.dataset.project.replace(/&apos;/g, "'"));
+          e.dataTransfer.setData('text/plain', card.dataset.project.replace(/&apos;/g, "'"));
         });
       });
     }
