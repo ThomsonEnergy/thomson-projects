@@ -1,13 +1,3 @@
-const chromium = require('@sparticuz/chromium');
-// puppeteer-core checks for a native WebSocket global (Node 22+ only) the
-// moment it's required, and throws immediately at that module-load point
-// if it's missing - before any launch() option (protocol/pipe/etc.) is
-// even consulted, which is why changing those had no effect. Polyfilling
-// the global with the ws package (already a puppeteer-core dependency,
-// just not exposed as a native WebSocket) before requiring puppeteer-core
-// satisfies that check on Node 18.
-globalThis.WebSocket = require('ws');
-const puppeteer = require('puppeteer-core');
 const { PDFDocument } = require('pdf-lib');
 const { getAdminClient } = require('./_shared/require-admin');
 const { drawCoverPage } = require('./_shared/pdf-cover-page');
@@ -27,6 +17,23 @@ const { drawCoverPage } = require('./_shared/pdf-cover-page');
 // place - the browser just awaits this directly.
 
 async function renderPageToPdf(url) {
+  // Required lazily, inside the function, rather than at module top level -
+  // requiring puppeteer-core at module load time meant simply IMPORTING
+  // this file (which Netlify's function bundler/router does for every
+  // function, not just when this one is actually invoked) tripped
+  // puppeteer-core's native-WebSocket check and broke every OTHER
+  // function on the site with the exact same error, not just this one.
+  const chromium = require('@sparticuz/chromium');
+  // puppeteer-core checks for a native WebSocket global (Node 22+ only) the
+  // moment it's required, and throws immediately at that point if it's
+  // missing - before any launch() option (protocol/pipe/etc.) is even
+  // consulted, which is why changing those had no effect. Polyfilling the
+  // global with the ws package (already a puppeteer-core dependency, just
+  // not exposed as a native WebSocket) before requiring puppeteer-core
+  // satisfies that check on Node 18.
+  globalThis.WebSocket = require('ws');
+  const puppeteer = require('puppeteer-core');
+
   // Chromium's graphics stack/WebGL (via a bundled software renderer) is
   // on by default and costs real memory we don't need just to print HTML/
   // CSS to a PDF - this alone was plausibly enough to tip a tightly
