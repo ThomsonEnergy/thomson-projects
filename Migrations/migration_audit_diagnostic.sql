@@ -301,4 +301,8 @@ select '104', 'site_inspections',
     and exists (select 1 from information_schema.tables where table_name = 'inspection_checklist_templates')
     and exists (select 1 from information_schema.columns where table_name = 'schedule_assignments' and column_name = 'site_inspection_id')
   then 'present' else 'MISSING' end
+union all
+select '105', 'site_inspection_block_type',
+  case when exists (select 1 from information_schema.check_constraints where constraint_name = 'schedule_assignments_block_type_check' and check_clause like '%site_inspection%')
+  then 'present' else 'MISSING' end
 order by 1;
