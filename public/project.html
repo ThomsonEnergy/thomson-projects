@@ -693,6 +693,12 @@
           <p class="subtitle" style="margin-top:6px;"><a class="link-quiet" href="/clients.html" target="_blank">Manage clients &amp; contacts &rarr;</a></p>
         </div>
 
+        <div class="card">
+          <h2>Notes</h2>
+          <p class="subtitle" style="margin-bottom:8px;">Background/context that should stick around regardless of how the scope of works changes - e.g. what a lead originally asked for. Not shown to the client.</p>
+          <textarea id="p-notes" placeholder="Internal notes..."></textarea>
+        </div>
+
         <div class="card" id="job-contacts-card" style="display:none;">
           <h2>Who's running this job</h2>
           <p class="subtitle" style="margin-bottom:10px;">Picked from this client's contact list.</p>
@@ -971,6 +977,7 @@
         document.getElementById('p-email').value = project.client_email || '';
         document.getElementById('p-phone').value = project.client_phone || '';
         document.getElementById('p-address').value = project.client_address || '';
+        document.getElementById('p-notes').value = project.notes || '';
         document.getElementById('p-sow').value = project.sow_text || '';
         document.getElementById('p-terms').value = project.terms_text || '';
         document.getElementById('p-deposit').value = project.deposit_percent;
@@ -1213,6 +1220,7 @@
         const client_email = document.getElementById('p-email').value.trim();
         const client_phone = document.getElementById('p-phone').value.trim();
         const client_address = document.getElementById('p-address').value.trim();
+        const notes = document.getElementById('p-notes').value.trim() || null;
         const payment_terms = document.getElementById('p-payment-terms').value;
         const sow_text = document.getElementById('p-sow').value;
         const proposal_subtitle = document.getElementById('p-subtitle').value.trim();
@@ -1245,7 +1253,7 @@
           const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
 
           const projectFields = {
-            name, client_id: clientId, client_name, client_email, client_phone, client_address,
+            name, client_id: clientId, client_name, client_email, client_phone, client_address, notes,
             sow_text, proposal_subtitle, terms_text, deposit_percent, pylon_link, pylon_project_id,
             reference_photos: referencePhotos.map(url => ({ url })),
             cover_photos: coverPhotos,
@@ -2875,6 +2883,14 @@
 
             <div class="settings-panel" id="panel-details">
               ${editMode && !project.job_number ? editorPanelHtml() : `
+              <div class="card">
+                <h2>Notes</h2>
+                <p class="subtitle" style="margin-bottom:8px;">Background/context that sticks around regardless of how the job progresses - e.g. what a lead originally asked for. Not shown to the client.</p>
+                <textarea id="job-notes-text" placeholder="Internal notes...">${project.notes || ''}</textarea>
+                <button type="button" class="secondary" id="job-notes-save-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Save notes</button>
+                <div id="job-notes-msg"></div>
+              </div>
+
               ${(() => {
                 const contactRows = [
                   { label: 'Project manager', c: project.project_manager },
@@ -3014,6 +3030,24 @@
       if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
       const invoiceActualBtn = document.getElementById('invoice-actual-btn');
       if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => openInvoiceActualCostsPanel(project));
+
+      const jobNotesSaveBtn = document.getElementById('job-notes-save-btn');
+      if (jobNotesSaveBtn) jobNotesSaveBtn.addEventListener('click', async () => {
+        const msgEl = document.getElementById('job-notes-msg');
+        jobNotesSaveBtn.disabled = true;
+        jobNotesSaveBtn.textContent = 'Saving...';
+        try {
+          const notesVal = document.getElementById('job-notes-text').value.trim() || null;
+          const { error } = await supabaseClient.from('projects').update({ notes: notesVal }).eq('id', project.id);
+          if (error) throw error;
+          project.notes = notesVal;
+          msgEl.innerHTML = `<div class="success-box" style="margin-top:6px; font-size:12px;">Saved.</div>`;
+        } catch (err) {
+          msgEl.innerHTML = `<div class="error-box" style="margin-top:6px; font-size:12px;">${err.message}</div>`;
+        }
+        jobNotesSaveBtn.disabled = false;
+        jobNotesSaveBtn.textContent = 'Save notes';
+      });
 
       const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
       if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {

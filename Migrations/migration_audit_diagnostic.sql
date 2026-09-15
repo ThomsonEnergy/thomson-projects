@@ -291,4 +291,8 @@ select '102', 'lead_triage',
   case when exists (select 1 from information_schema.columns where table_name = 'leads' and column_name = 'ai_summary')
     and not exists (select 1 from pg_trigger where tgname = 'on_lead_created')
   then 'present' else 'MISSING' end
+union all
+select '103', 'project_notes',
+  case when exists (select 1 from information_schema.columns where table_name = 'leads' and column_name = 'ai_title')
+  then 'present' else 'MISSING' end
 order by 1;

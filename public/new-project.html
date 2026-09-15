@@ -99,6 +99,12 @@
       <p class="subtitle" style="margin-top:6px;"><a class="link-quiet" href="/clients.html" target="_blank">Manage clients &amp; contacts &rarr;</a></p>
     </div>
 
+    <div class="card">
+      <h2>Notes</h2>
+      <p class="subtitle" style="margin-bottom:8px;">Background/context that should stick around regardless of how the scope of works changes - e.g. what a lead originally asked for. Not shown to the client.</p>
+      <textarea id="p-notes" placeholder="Internal notes..."></textarea>
+    </div>
+
     <div class="card" id="job-contacts-card" style="display:none;">
       <h2>Who's running this job</h2>
       <p class="subtitle" style="margin-bottom:10px;">Picked from this client's contact list. Used so correspondence like variations goes to the right person, not just whoever's first on file.</p>
@@ -1007,6 +1013,7 @@
       const projectFields = {
         name, client_id: clientId, client_name, client_email, client_phone, client_address,
         sow_text, proposal_subtitle, terms_text,
+        notes: document.getElementById('p-notes').value.trim() || null,
         deposit_percent, pylon_link, pylon_project_id,
         laha_approved: document.getElementById('p-laha-approved').checked,
         reference_photos: referencePhotos.map(url => ({ url })),
@@ -1147,6 +1154,7 @@
       document.getElementById('p-email').value = project.client_email || '';
       document.getElementById('p-phone').value = project.client_phone || '';
       document.getElementById('p-address').value = project.client_address || '';
+      document.getElementById('p-notes').value = project.notes || '';
       if (project.client_id) {
         selectedClientId = project.client_id;
         const { data: client } = await supabaseClient.from('clients').select('*').eq('id', project.client_id).maybeSingle();
@@ -1277,18 +1285,31 @@
 
         // Converting a lead (see leads.html) - prefill the client/site
         // details it already captured rather than making staff retype
-        // them, and seed the scope-of-works brief with its AI summary so
-        // "Generate scope of works with AI" has something to work from.
+        // them, seed the scope-of-works brief with its AI summary so
+        // "Generate scope of works with AI" has something to work from,
+        // and put the full captured context (summary + every question/
+        // answer it submitted) into Notes, which - unlike the brief above
+        // (a one-time AI input) or sow_text (gets rewritten as the scope
+        // evolves) - persists for as long as the job exists.
         prefillLeadId = params.get('lead_id');
         if (prefillLeadId) {
           const { data: lead } = await supabaseClient.from('leads').select('*').eq('id', prefillLeadId).maybeSingle();
           if (lead) {
-            document.getElementById('p-name').value = `${lead.name || 'New enquiry'} - ${{ package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form' }[lead.source] || lead.source}`;
+            const sourceLabels = { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form' };
+            document.getElementById('p-name').value = `${lead.name || 'New enquiry'} - ${lead.ai_title || sourceLabels[lead.source] || lead.source}`;
             document.getElementById('p-client').value = lead.name || '';
             document.getElementById('p-email').value = lead.email || '';
             document.getElementById('p-phone').value = lead.phone || '';
             document.getElementById('p-address').value = lead.address_formatted || lead.address_line || '';
             document.getElementById('p-brief').value = lead.ai_summary || '';
+
+            const qandaRows = Object.entries(lead.details || {}).filter(([k]) => k !== 'attachments');
+            const qanda = qandaRows.length
+              ? qandaRows.map(([k, v]) => `${k}: ${typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v}`).join('\n')
+              : '(no further details captured)';
+            document.getElementById('p-notes').value = `Website enquiry (${sourceLabels[lead.source] || lead.source}), ${new Date(lead.created_at).toLocaleDateString('en-AU')}.\n\n${lead.ai_summary ? lead.ai_summary + '\n\n' : ''}${qanda}`;
+
+            offerLeadAttachmentImport(prefillLeadId);
           }
         }
       }

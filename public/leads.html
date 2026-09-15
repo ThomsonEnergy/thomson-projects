@@ -86,6 +86,18 @@
       `).join('')}</tbody></table>`;
     }
 
+    // Plain-text rendering of a lead's summary + full Q&A, for the
+    // persistent Notes field on whatever gets created from it (job or
+    // quote) - the AI summary alone is a paraphrase, this is the actual
+    // record of what was submitted.
+    function leadContextText(lead) {
+      const rows = Object.entries(lead.details || {}).filter(([k]) => k !== 'attachments');
+      const qanda = rows.length
+        ? rows.map(([k, v]) => `${DETAIL_FIELD_LABELS[k] || k}: ${typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v}`).join('\n')
+        : '(no further details captured)';
+      return `Website enquiry (${sourceLabel(lead.source)}), ${new Date(lead.created_at).toLocaleDateString('en-AU')}.\n\n${lead.ai_summary ? lead.ai_summary + '\n\n' : ''}${qanda}`;
+    }
+
     async function generateSummaryFor(lead) {
       try {
         const res = await fetch('/.netlify/functions/generate-lead-summary', {
@@ -95,8 +107,9 @@
         const data = await res.json();
         if (!res.ok || !data.ok) return null;
         const generatedAt = new Date().toISOString();
-        await supabaseClient.from('leads').update({ ai_summary: data.summary, ai_summary_generated_at: generatedAt }).eq('id', lead.id);
+        await supabaseClient.from('leads').update({ ai_summary: data.summary, ai_title: data.title, ai_summary_generated_at: generatedAt }).eq('id', lead.id);
         lead.ai_summary = data.summary;
+        lead.ai_title = data.title;
         lead.ai_summary_generated_at = generatedAt;
         return data.summary;
       } catch (err) {
@@ -207,8 +220,9 @@
         }
 
         const { data: project, error } = await supabaseClient.from('projects').insert({
-          name: `${lead.name || 'New enquiry'} - ${sourceLabel(lead.source)}`,
+          name: `${lead.name || 'New enquiry'} - ${lead.ai_title || sourceLabel(lead.source)}`,
           sow_text: lead.ai_summary || null,
+          notes: leadContextText(lead),
           client_id: clientId,
           client_name: lead.name,
           client_email: lead.email,

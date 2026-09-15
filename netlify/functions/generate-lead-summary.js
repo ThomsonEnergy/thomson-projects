@@ -25,7 +25,7 @@ exports.handler = async (event) => {
       : '(no further details captured)';
     const hasAttachments = !!(details && details.attachments && details.attachments.length);
 
-    const prompt = `You're writing a one-to-two sentence summary for an electrical/solar contractor's office staff, so they can tell at a glance what a website enquiry actually wants before deciding whether to turn it into a job or a quote.
+    const prompt = `You're writing two things for an electrical/solar contractor's office staff, so they can tell at a glance what a website enquiry actually wants before deciding whether to turn it into a job or a quote.
 
 Enquiry type: ${SOURCE_LABELS[source] || source}
 Name: ${name || '(not given)'}
@@ -33,7 +33,11 @@ Captured form data:
 ${detailsText}
 ${hasAttachments ? 'They also attached a file (e.g. a switchboard photo or power bill).' : ''}
 
-Write ONLY the summary itself - no preamble, no "Summary:" label, no quotes around it. Plain, direct, staff-facing language (not a marketing tone). If it's urgent/reactive-sounding work (a fault, a repair, something broken), say so plainly - office staff use this to decide whether it needs a quote or can just become a job straight away. If there isn't much to go on, just say that plainly rather than padding it out.`;
+Reply with EXACTLY two lines, nothing else:
+TITLE: a 3-6 word label for what this is, e.g. "Switchboard upgrade" or "Solar + battery enquiry" - this is used to NAME the job/quote created from it, so keep it short and concrete, not a sentence.
+SUMMARY: a one-to-two sentence plain-English description of what they want. Plain, direct, staff-facing language (not a marketing tone). If it's urgent/reactive-sounding work (a fault, a repair, something broken), say so plainly - office staff use this to decide whether it needs a quote or can just become a job straight away. If there isn't much to go on, just say that plainly rather than padding it out.
+
+No other text, no markdown, exactly those two lines.`;
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -49,9 +53,13 @@ Write ONLY the summary itself - no preamble, no "Summary:" label, no quotes arou
       throw new Error(`Anthropic API error: ${res.status} ${errText}`);
     }
     const data = await res.json();
-    const summary = data.content.map((b) => b.text || '').join('').trim();
+    const raw = data.content.map((b) => b.text || '').join('').trim();
+    const titleMatch = raw.match(/^TITLE:\s*(.+)$/m);
+    const summaryMatch = raw.match(/^SUMMARY:\s*([\s\S]+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : null;
+    const summary = summaryMatch ? summaryMatch[1].trim() : raw;
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, summary }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, title, summary }) };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
