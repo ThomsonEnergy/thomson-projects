@@ -55,6 +55,7 @@
         <button class="settings-tab" data-panel="numbering" data-admin-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
         <button class="settings-tab" data-panel="billable-rates" data-pricing-only="1">Billable Rates</button>
+        <button class="settings-tab" data-panel="inspections" data-pricing-only="1">Inspection Checklists</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
         <button class="settings-tab" data-panel="terms" data-admin-only="1">Payment Terms &amp; T&amp;Cs</button>
         <button class="settings-tab" data-panel="photos">Photo Categories</button>
@@ -330,6 +331,23 @@
           </div>
         </div>
 
+        <!-- Inspection Checklists -->
+        <div class="settings-panel" id="panel-inspections">
+          <div class="card">
+            <h2>Inspection checklist templates</h2>
+            <p class="subtitle" style="margin-bottom:10px;">One template per job type (e.g. Solar & Battery, General Electrical) - picked when scheduling a site inspection from a lead, quote, or job. A Yes/No question can be set to reveal an extra required photo when answered a certain way, same pattern as "Does the property have a sub-board?" &rarr; Sub Board photo.</p>
+            <div id="insp-templates-list"><p class="subtitle">Loading...</p></div>
+            <div style="margin-top:14px; display:flex; gap:8px; align-items:flex-end;">
+              <div style="flex:1;">
+                <label style="margin-top:0">New template name</label>
+                <input id="new-template-name" placeholder="e.g. Heat Pump Install" />
+              </div>
+              <button id="add-template-btn">Add template</button>
+            </div>
+            <div id="insp-templates-msg"></div>
+          </div>
+        </div>
+
         <!-- Job Defaults (stub) -->
         <div class="settings-panel" id="panel-sm8">
           <div class="card">
@@ -583,7 +601,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=15"></script>
+  <script src="/js/supabase-client.js?v=16"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -834,6 +852,183 @@
       document.getElementById('new-tier-rate').value = '';
       msg.innerHTML = '';
       await loadRateTiers();
+    });
+
+    // ---------- Inspection checklist templates ----------
+    let inspTemplatesCache = [];
+    let inspItemsCache = {}; // template_id -> items[]
+    let expandedTemplateId = null;
+
+    async function loadInspectionTemplates() {
+      const listEl = document.getElementById('insp-templates-list');
+      const { data: templates, error } = await supabaseClient.from('inspection_checklist_templates').select('*').order('sort_order');
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      inspTemplatesCache = templates || [];
+      if (!inspTemplatesCache.length) { listEl.innerHTML = `<p class="subtitle">No templates yet - add one below.</p>`; return; }
+
+      const { data: allItems } = await supabaseClient.from('inspection_checklist_items').select('*').order('sort_order');
+      inspItemsCache = {};
+      (allItems || []).forEach(it => { (inspItemsCache[it.template_id] = inspItemsCache[it.template_id] || []).push(it); });
+
+      renderInspTemplatesList();
+    }
+
+    function renderInspTemplatesList() {
+      const listEl = document.getElementById('insp-templates-list');
+      listEl.innerHTML = inspTemplatesCache.map(t => {
+        const items = inspItemsCache[t.id] || [];
+        const expanded = expandedTemplateId === t.id;
+        return `
+        <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div>
+              <strong>${t.name}</strong> ${!t.active ? '<span class="badge draft">Inactive</span>' : ''}
+              <span class="subtitle" style="margin-left:6px;">${items.length} item${items.length === 1 ? '' : 's'}</span>
+            </div>
+            <div>
+              <button type="button" class="secondary toggle-template-btn" data-id="${t.id}" style="font-size:12px; padding:6px 10px;">${expanded ? 'Hide items' : 'Manage items'}</button>
+              <button type="button" class="secondary toggle-active-btn" data-id="${t.id}" data-active="${t.active}" style="font-size:12px; padding:6px 10px;">${t.active ? 'Deactivate' : 'Activate'}</button>
+              <button type="button" class="secondary delete-template-btn" data-id="${t.id}" style="font-size:12px; padding:6px 10px;">Delete</button>
+            </div>
+          </div>
+          ${expanded ? `
+            <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+              ${items.length ? items.map((it, i) => {
+                const parent = it.parent_item_id ? items.find(p => p.id === it.parent_item_id) : null;
+                return `
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:8px 0; ${i > 0 ? 'border-top:1px solid var(--border);' : ''}">
+                  <div>
+                    <span class="badge ${it.item_type === 'photo' ? 'sent' : 'draft'}">${it.item_type === 'photo' ? 'Photo' : 'Yes/No'}</span>
+                    <strong style="margin-left:6px;">${it.label}</strong> ${!it.required ? '<span class="subtitle">(optional)</span>' : ''}
+                    ${it.description ? `<p class="subtitle" style="margin:4px 0 0;">${it.description}</p>` : ''}
+                    ${parent ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Shown when "${parent.label}" = ${it.show_when_parent_answer ? 'Yes' : 'No'}</p>` : ''}
+                  </div>
+                  <div style="display:flex; gap:4px; flex-shrink:0;">
+                    <button type="button" class="secondary move-item-btn" data-id="${it.id}" data-dir="up" style="font-size:11px; padding:4px 8px;" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
+                    <button type="button" class="secondary move-item-btn" data-id="${it.id}" data-dir="down" style="font-size:11px; padding:4px 8px;" ${i === items.length - 1 ? 'disabled' : ''}>&darr;</button>
+                    <button type="button" class="secondary delete-item-btn" data-id="${it.id}" style="font-size:11px; padding:4px 8px;">Delete</button>
+                  </div>
+                </div>`;
+              }).join('') : `<p class="subtitle">No items yet.</p>`}
+
+              <div style="margin-top:14px; padding:12px; background:var(--surface-2); border-radius:8px;">
+                <p class="subtitle" style="margin:0 0 8px; font-weight:600;">Add item</p>
+                <div class="grid cols-2">
+                  <div>
+                    <label style="margin-top:0">Type</label>
+                    <select class="new-item-type" data-template="${t.id}">
+                      <option value="photo">Photo</option>
+                      <option value="yes_no">Yes/No question</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="margin-top:0">Only show when...</label>
+                    <select class="new-item-parent" data-template="${t.id}">
+                      <option value="">Always shown</option>
+                      ${items.filter(it => it.item_type === 'yes_no').map(it => `
+                        <option value="${it.id}|true">"${it.label}" = Yes</option>
+                        <option value="${it.id}|false">"${it.label}" = No</option>
+                      `).join('')}
+                    </select>
+                  </div>
+                </div>
+                <label>Label</label>
+                <input class="new-item-label" data-template="${t.id}" placeholder="e.g. Switchboard" />
+                <label>Description / instructions (optional)</label>
+                <input class="new-item-desc" data-template="${t.id}" placeholder="e.g. Clear photo of the main switchboard with all breakers visible." />
+                <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-weight:400;">
+                  <input type="checkbox" class="new-item-required" data-template="${t.id}" checked style="width:auto;" /> Required
+                </label>
+                <button type="button" class="secondary add-item-btn" data-template="${t.id}" style="margin-top:10px;">Add item</button>
+                <div class="add-item-msg" data-template="${t.id}"></div>
+              </div>
+            </div>
+          ` : ''}
+        </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.toggle-template-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          expandedTemplateId = expandedTemplateId === btn.dataset.id ? null : btn.dataset.id;
+          renderInspTemplatesList();
+        });
+      });
+      listEl.querySelectorAll('.toggle-active-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const nowActive = btn.dataset.active !== 'true';
+          const { error } = await supabaseClient.from('inspection_checklist_templates').update({ active: nowActive }).eq('id', btn.dataset.id);
+          if (error) { alert(error.message); return; }
+          await loadInspectionTemplates();
+        });
+      });
+      listEl.querySelectorAll('.delete-template-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this template? Only possible if no inspection has ever used it.')) return;
+          const { error } = await supabaseClient.from('inspection_checklist_templates').delete().eq('id', btn.dataset.id);
+          if (error) { alert('Could not delete - ' + (error.message.includes('violates foreign key') ? 'this template has already been used by a scheduled inspection.' : error.message)); return; }
+          await loadInspectionTemplates();
+        });
+      });
+      listEl.querySelectorAll('.move-item-btn').forEach(btn => {
+        btn.addEventListener('click', () => moveInspItem(btn.dataset.id, btn.dataset.dir));
+      });
+      listEl.querySelectorAll('.delete-item-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this item? Any answers already recorded for it on past inspections stay, but it disappears from the checklist.')) return;
+          const { error } = await supabaseClient.from('inspection_checklist_items').delete().eq('id', btn.dataset.id);
+          if (error) { alert(error.message); return; }
+          await loadInspectionTemplates();
+        });
+      });
+      listEl.querySelectorAll('.add-item-btn').forEach(btn => {
+        btn.addEventListener('click', () => addInspItem(btn.dataset.template));
+      });
+    }
+
+    async function moveInspItem(itemId, dir) {
+      const templateId = Object.keys(inspItemsCache).find(tid => inspItemsCache[tid].some(it => it.id === itemId));
+      const items = inspItemsCache[templateId];
+      const i = items.findIndex(it => it.id === itemId);
+      const swapWith = dir === 'up' ? i - 1 : i + 1;
+      if (swapWith < 0 || swapWith >= items.length) return;
+      const a = items[i], b = items[swapWith];
+      const { error } = await supabaseClient.from('inspection_checklist_items').update({ sort_order: b.sort_order }).eq('id', a.id);
+      if (!error) await supabaseClient.from('inspection_checklist_items').update({ sort_order: a.sort_order }).eq('id', b.id);
+      await loadInspectionTemplates();
+    }
+
+    async function addInspItem(templateId) {
+      const msgEl = document.querySelector(`.add-item-msg[data-template="${templateId}"]`);
+      const itemType = document.querySelector(`.new-item-type[data-template="${templateId}"]`).value;
+      const label = document.querySelector(`.new-item-label[data-template="${templateId}"]`).value.trim();
+      const description = document.querySelector(`.new-item-desc[data-template="${templateId}"]`).value.trim();
+      const required = document.querySelector(`.new-item-required[data-template="${templateId}"]`).checked;
+      const parentVal = document.querySelector(`.new-item-parent[data-template="${templateId}"]`).value;
+      if (!label) { msgEl.innerHTML = `<div class="error-box">Enter a label.</div>`; return; }
+
+      const [parentItemId, showWhen] = parentVal ? parentVal.split('|') : [null, null];
+      const existing = inspItemsCache[templateId] || [];
+      const nextSort = existing.length ? Math.max(...existing.map(it => it.sort_order)) + 1 : 1;
+
+      const { error } = await supabaseClient.from('inspection_checklist_items').insert({
+        template_id: templateId, item_type: itemType, label, description: description || null, required,
+        parent_item_id: parentItemId || null, show_when_parent_answer: parentItemId ? showWhen === 'true' : null,
+        sort_order: nextSort,
+      });
+      if (error) { msgEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      await loadInspectionTemplates();
+    }
+
+    document.getElementById('add-template-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('insp-templates-msg');
+      const name = document.getElementById('new-template-name').value.trim();
+      if (!name) { msg.innerHTML = `<div class="error-box">Enter a template name.</div>`; return; }
+      const nextSort = inspTemplatesCache.length ? Math.max(...inspTemplatesCache.map(t => t.sort_order)) + 1 : 1;
+      const { error } = await supabaseClient.from('inspection_checklist_templates').insert({ name, sort_order: nextSort });
+      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      document.getElementById('new-template-name').value = '';
+      msg.innerHTML = '';
+      await loadInspectionTemplates();
     });
 
     document.getElementById('save-numbering-btn').addEventListener('click', async () => {
@@ -2546,6 +2741,7 @@
         await loadXeroMapping();
         await loadXeroConnection();
         await loadRateTiers();
+        await loadInspectionTemplates();
       }
     })();
   </script>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Site Inspection - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=11" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .insp-item { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  .insp-item.answered { border-color: var(--green); }
+  .insp-item .insp-label { font-weight: 600; margin-bottom: 2px; }
+  .insp-item .insp-desc { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  .insp-yn-btn { width: auto; padding: 8px 20px; margin-right: 8px; }
+  .insp-yn-btn.selected { background: var(--accent); color: #fff; }
+  .insp-photo-thumb { width: 90px; height: 90px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); margin-right: 8px; }
+  .insp-child { margin-left: 20px; border-left: 2px solid var(--accent-dim); padding-left: 14px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap" id="content">
+    <p class="subtitle">Loading...</p>
+  </div>
+
+  <script src="/js/supabase-client.js?v=16"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    const inspectionId = new URLSearchParams(window.location.search).get('id');
+    let inspection, items, answers = {}; // answers keyed by item_id
+
+    function itemsVisible() {
+      // An item with no parent is always visible; one with a parent is
+      // only visible once the parent's own answer matches
+      // show_when_parent_answer - same reveal logic the checklist
+      // template editor uses to preview a template.
+      return items.filter(it => {
+        if (!it.parent_item_id) return true;
+        const parentAnswer = answers[it.parent_item_id];
+        if (!parentAnswer || parentAnswer.answer_yes_no === null || parentAnswer.answer_yes_no === undefined) return false;
+        return parentAnswer.answer_yes_no === it.show_when_parent_answer;
+      });
+    }
+
+    async function saveAnswer(itemId, fields) {
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const row = { inspection_id: inspectionId, item_id: itemId, answered_by: user?.id || null, answered_at: new Date().toISOString(), ...fields };
+      const { data, error } = await supabaseClient.from('site_inspection_answers').upsert(row, { onConflict: 'inspection_id,item_id' }).select().single();
+      if (error) throw error;
+      answers[itemId] = data;
+      if (inspection.status === 'scheduled') {
+        await supabaseClient.from('site_inspections').update({ status: 'in_progress' }).eq('id', inspectionId);
+        inspection.status = 'in_progress';
+      }
+    }
+
+    function renderItems() {
+      const visible = itemsVisible();
+      const visibleIds = new Set(visible.map(i => i.id));
+      const required = visible.filter(i => i.required);
+      const answeredCount = required.filter(i => {
+        const a = answers[i.id];
+        return a && (i.item_type === 'photo' ? !!a.photo_path : a.answer_yes_no !== null && a.answer_yes_no !== undefined);
+      }).length;
+
+      document.getElementById('insp-progress').textContent = `${answeredCount} of ${required.length} required items done`;
+      document.getElementById('mark-complete-btn').disabled = answeredCount < required.length;
+
+      const listEl = document.getElementById('insp-items');
+      listEl.innerHTML = visible.map(it => {
+        const a = answers[it.id];
+        const isChild = !!it.parent_item_id;
+        const answered = it.item_type === 'photo' ? !!a?.photo_path : (a?.answer_yes_no !== null && a?.answer_yes_no !== undefined);
+        return `
+        <div class="${isChild ? 'insp-child' : ''}">
+          <div class="insp-item ${answered ? 'answered' : ''}" data-item-id="${it.id}">
+            <div class="insp-label">${it.label}${it.required ? '' : ' <span class="subtitle">(optional)</span>'}</div>
+            ${it.description ? `<div class="insp-desc">${it.description}</div>` : ''}
+            ${it.item_type === 'yes_no' ? `
+              <button type="button" class="insp-yn-btn yn-yes ${a?.answer_yes_no === true ? 'selected' : ''}">Yes</button>
+              <button type="button" class="insp-yn-btn secondary yn-no ${a?.answer_yes_no === false ? 'selected' : ''}">No</button>
+            ` : `
+              ${a?.photo_path ? `<img class="insp-photo-thumb" src="${a.photo_path}" />` : ''}
+              <input type="file" class="insp-photo-file" accept="image/*" capture="environment" style="display:block; margin-bottom:8px;" />
+              <button type="button" class="secondary insp-photo-upload-btn">${a?.photo_path ? 'Replace photo' : 'Upload photo'}</button>
+            `}
+            <div class="insp-item-msg"></div>
+          </div>
+        </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.insp-item').forEach(el => {
+        const itemId = el.dataset.itemId;
+        const item = items.find(i => i.id === itemId);
+        const msgEl = el.querySelector('.insp-item-msg');
+
+        el.querySelectorAll('.yn-yes, .yn-no').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            try {
+              await saveAnswer(itemId, { answer_yes_no: btn.classList.contains('yn-yes') });
+              renderItems();
+            } catch (err) { msgEl.innerHTML = `<div class="error-box">${err.message}</div>`; }
+          });
+        });
+
+        const uploadBtn = el.querySelector('.insp-photo-upload-btn');
+        if (uploadBtn) {
+          uploadBtn.addEventListener('click', async () => {
+            const fileInput = el.querySelector('.insp-photo-file');
+            if (!fileInput.files.length) { msgEl.innerHTML = `<div class="error-box">Choose a photo first.</div>`; return; }
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Uploading...';
+            try {
+              const [url] = await uploadPhotos(fileInput.files, `inspections/${inspectionId}`, 'site-photos');
+              await saveAnswer(itemId, { photo_path: url });
+              renderItems();
+            } catch (err) {
+              msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+              uploadBtn.disabled = false;
+              uploadBtn.textContent = item.item_type === 'photo' ? 'Upload photo' : 'Upload photo';
+            }
+          });
+        }
+      });
+    }
+
+    async function loadInspection() {
+      const content = document.getElementById('content');
+      const { data: insp, error } = await supabaseClient
+        .from('site_inspections')
+        .select('*, inspection_checklist_templates(name), leads(name, address_formatted, phone, email), projects(name, job_number, quote_number, client_name, client_address)')
+        .eq('id', inspectionId)
+        .single();
+      if (error || !insp) {
+        content.innerHTML = `<div class="error-box">Could not load this inspection.</div>`;
+        return;
+      }
+      inspection = insp;
+
+      const [{ data: itemsData }, { data: answersData }] = await Promise.all([
+        supabaseClient.from('inspection_checklist_items').select('*').eq('template_id', insp.template_id).order('sort_order'),
+        supabaseClient.from('site_inspection_answers').select('*').eq('inspection_id', inspectionId),
+      ]);
+      items = itemsData || [];
+      answers = {};
+      (answersData || []).forEach(a => { answers[a.item_id] = a; });
+
+      const subject = insp.leads
+        ? `${insp.leads.name || 'Lead'}${insp.leads.address_formatted ? ' - ' + insp.leads.address_formatted : ''}`
+        : `${projectRef(insp.projects)}${insp.projects?.client_address ? ' - ' + insp.projects.client_address : ''}`;
+      const backLink = insp.lead_id ? '/leads.html' : `/project.html?id=${insp.project_id}`;
+
+      content.innerHTML = `
+        <a class="link-quiet" href="${backLink}" style="font-size:13px;">&larr; Back</a>
+        <h1 style="margin-top:6px;">Site Inspection</h1>
+        <p class="subtitle">${subject}</p>
+        <div class="card" style="margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div>
+              <strong>${insp.inspection_checklist_templates?.name || 'Checklist'}</strong>
+              <span class="badge ${insp.status === 'completed' ? 'accepted' : 'sent'}" style="margin-left:8px;">${insp.status.replace('_', ' ')}</span>
+              <p class="subtitle" id="insp-progress" style="margin:6px 0 0;"></p>
+            </div>
+            <button type="button" id="mark-complete-btn" ${insp.status === 'completed' ? 'disabled' : ''}>${insp.status === 'completed' ? 'Completed' : 'Mark complete'}</button>
+          </div>
+          <div id="insp-complete-msg"></div>
+        </div>
+        <div id="insp-items"></div>`;
+
+      document.getElementById('mark-complete-btn').addEventListener('click', async () => {
+        if (inspection.status === 'completed') return;
+        const btn = document.getElementById('mark-complete-btn');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+          const { error: updErr } = await supabaseClient.from('site_inspections').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', inspectionId);
+          if (updErr) throw updErr;
+          inspection.status = 'completed';
+          location.reload();
+        } catch (err) {
+          document.getElementById('insp-complete-msg').innerHTML = `<div class="error-box">${err.message}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Mark complete';
+        }
+      });
+
+      renderItems();
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav(null);
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      if (!inspectionId) {
+        document.getElementById('content').innerHTML = `<div class="error-box">No inspection specified.</div>`;
+        return;
+      }
+      await loadInspection();
+    })();
+  </script>
+</body>
+</html>

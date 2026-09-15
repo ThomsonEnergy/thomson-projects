@@ -1283,6 +1283,79 @@ function openQuickJobPanel(onCreated) {
   document.body.appendChild(overlay);
 }
 
+// Schedules a site inspection against a lead or job/quote - picks a
+// checklist template (see Settings > Inspection Checklists) and who/when,
+// creates the site_inspections row plus a matching schedule_assignments
+// block (block_type 'site_inspection') so it shows up on the Schedule
+// page like any other booking. `record` is the lead or project row
+// (just needs .id); `kind` is 'lead' or 'project'.
+async function openScheduleInspectionPanel(record, kind, onScheduled) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><p class="subtitle">Loading...</p></div>`;
+  document.body.appendChild(overlay);
+
+  const [{ data: templates }, { data: staff }] = await Promise.all([
+    supabaseClient.from('inspection_checklist_templates').select('id, name').eq('active', true).order('sort_order'),
+    supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
+  ]);
+
+  if (!templates || !templates.length) {
+    overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><div class="error-box">No checklist templates set up yet - add one under Settings &gt; Inspection Checklists first.</div><button type="button" class="secondary" id="si-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+    overlay.querySelector('#si-close-btn').addEventListener('click', () => overlay.remove());
+    return;
+  }
+
+  overlay.innerHTML = `
+    <div class="card" style="max-width:420px; width:100%;">
+      <h2>Schedule inspection</h2>
+      <label style="margin-top:0">Checklist</label>
+      <select id="si-template">${templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}</select>
+      <label>Assign to</label>
+      <select id="si-staff">${(staff || []).map(s => `<option value="${s.id}">${s.full_name || 'Unnamed'}</option>`).join('')}</select>
+      <label>Date</label>
+      <input type="date" id="si-date" value="${new Date().toISOString().slice(0, 10)}" />
+      <div style="margin-top:14px;">
+        <button id="si-confirm-btn">Schedule</button>
+        <button type="button" class="secondary" id="si-cancel-btn">Cancel</button>
+      </div>
+      <div id="si-msg"></div>
+    </div>`;
+
+  overlay.querySelector('#si-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#si-confirm-btn').addEventListener('click', async () => {
+    const confirmBtn = overlay.querySelector('#si-confirm-btn');
+    const msg = overlay.querySelector('#si-msg');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Scheduling...';
+    try {
+      const { data: inspection, error } = await supabaseClient.from('site_inspections').insert({
+        lead_id: kind === 'lead' ? record.id : null,
+        project_id: kind === 'project' ? record.id : null,
+        template_id: overlay.querySelector('#si-template').value,
+      }).select('id').single();
+      if (error) throw error;
+
+      const { error: schedErr } = await supabaseClient.from('schedule_assignments').insert({
+        staff_id: overlay.querySelector('#si-staff').value,
+        project_id: kind === 'project' ? record.id : null,
+        assignment_date: overlay.querySelector('#si-date').value,
+        start_time: '09:00', end_time: '10:00',
+        block_type: 'site_inspection',
+        site_inspection_id: inspection.id,
+      });
+      if (schedErr) throw schedErr;
+
+      overlay.remove();
+      if (onScheduled) onScheduled(inspection);
+    } catch (err) {
+      msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Schedule';
+    }
+  });
+}
+
 // A warranty job for `originalProject` - functionally a quick job (own
 // job number, one cost centre, no quote) so it reuses every existing
 // clock-in/timesheet/PO mechanism unchanged, but tagged via

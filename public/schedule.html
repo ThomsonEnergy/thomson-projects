@@ -174,7 +174,7 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=15"></script>
+  <script src="/js/supabase-client.js?v=16"></script>
   <script src="/js/theme.js"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
@@ -359,14 +359,16 @@
           const endMin = timeToMinutes(displayEnd) - DAY_START_HOUR * 60;
           const left = Math.max(0, startMin) / 60 * pxPerHour;
           const width = Math.max(20, (endMin - startMin) / 60 * pxPerHour);
-          const label = a.project_id
-            ? `${displayStart} - ${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
-            : `${CATEGORY_LABELS[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
-          const isNote = !a.project_id;
+          const label = a.block_type === 'site_inspection'
+            ? `${displayStart} - Inspection${a.projects?.name ? ': ' + a.projects.name : ''}`
+            : a.project_id
+              ? `${displayStart} - ${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
+              : `${CATEGORY_LABELS[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
+          const isNote = !a.project_id && a.block_type !== 'site_inspection';
           const noteStyle = isNote && !reconciled ? 'background:var(--surface-1); color:var(--muted); border-color:var(--border);' : '';
-          const siteVisitClass = a.block_type === 'site_visit' && !reconciled ? 'site-visit' : '';
+          const siteVisitClass = (a.block_type === 'site_visit' || a.block_type === 'site_inspection') && !reconciled ? 'site-visit' : '';
           blocksHtml += `
-            <div class="day-block ${reconciled ? 'reconciled' : ''} ${siteVisitClass}" data-id="${a.id}" data-project-id="${a.project_id || ''}" data-reconciled="${reconciled ? '1' : ''}" style="left:${left}px; width:${width}px; ${noteStyle}">
+            <div class="day-block ${reconciled ? 'reconciled' : ''} ${siteVisitClass}" data-id="${a.id}" data-project-id="${a.project_id || ''}" data-inspection-id="${a.site_inspection_id || ''}" data-reconciled="${reconciled ? '1' : ''}" style="left:${left}px; width:${width}px; ${noteStyle}">
               ${!reconciled ? `<div class="block-resize-handle" data-edge="left" style="position:absolute; left:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
               <span class="block-label">${label}${reconciled ? ' &#10003;' : ''}</span>
               ${!reconciled ? `<div class="block-resize-handle" data-edge="right" style="position:absolute; right:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
@@ -409,10 +411,12 @@
           const reconciled = reconciledById[a.id];
           const displayStart = reconciled ? reconciled.start : a.start_time.slice(0, 5);
           const displayEnd = reconciled ? reconciled.end : a.end_time.slice(0, 5);
-          const label = a.project_id
-            ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
-            : `${CATEGORY_LABELS[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
-          const cls = reconciled ? 'reconciled' : (a.block_type === 'site_visit' ? 'site-visit' : '');
+          const label = a.block_type === 'site_inspection'
+            ? `Inspection${a.projects?.name ? ': ' + a.projects.name : ''}`
+            : a.project_id
+              ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
+              : `${CATEGORY_LABELS[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
+          const cls = reconciled ? 'reconciled' : ((a.block_type === 'site_visit' || a.block_type === 'site_inspection') ? 'site-visit' : '');
           entriesHtml += `
             <div class="mobile-entry ${cls}" data-id="${a.id}">
               <span>${label}${reconciled ? ' &#10003;' : ''}</span>
@@ -742,7 +746,17 @@
             return;
           }
 
-          if (assignment.project_id) {
+          if (assignment.site_inspection_id) {
+            if (canEditSchedule()) {
+              if (confirm('Open this site inspection? (Cancel to remove this schedule block instead)')) {
+                window.location.href = `/site-inspection.html?id=${assignment.site_inspection_id}`;
+              } else if (confirm('Remove this schedule block? The inspection itself stays, just unscheduled.')) {
+                supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+              }
+            } else {
+              window.location.href = `/site-inspection.html?id=${assignment.site_inspection_id}`;
+            }
+          } else if (assignment.project_id) {
             // Clocking in is always fine for anyone (it's their own
             // time_entries write, unrelated to schedule_assignments) -
             // only the "remove this block" alternative needs the role

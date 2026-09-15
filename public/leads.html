@@ -51,7 +51,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=15"></script>
+  <script src="/js/supabase-client.js?v=16"></script>
   <script src="/js/theme.js"></script>
   <script>
     function timeAgo(dateStr) {
@@ -147,6 +147,13 @@
             <p id="ld-summary-text">${lead.ai_summary ? escapeHtml(lead.ai_summary) : '<span class="subtitle">Generating...</span>'}</p>
           </div>
 
+          <div class="card" style="margin-top:14px;">
+            <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:400;">
+              <input type="checkbox" id="ld-needs-visit" style="width:auto;" ${lead.needs_site_visit ? 'checked' : ''} /> Needs a site visit
+            </label>
+            <div id="ld-inspection-area" style="margin-top:10px;">${lead.needs_site_visit ? '<p class="subtitle">Checking for a scheduled inspection...</p>' : ''}</div>
+          </div>
+
           <div class="grid cols-2" style="margin-top:14px;">
             <div><label style="margin-top:0">Phone</label><p>${lead.phone || '-'}</p></div>
             <div><label style="margin-top:0">Email</label><p>${lead.email || '-'}</p></div>
@@ -183,6 +190,26 @@
           }).join('') || '(could not load files)';
         });
       }
+
+      const inspectionArea = overlay.querySelector('#ld-inspection-area');
+      async function refreshLeadInspectionArea() {
+        if (!lead.needs_site_visit) { inspectionArea.innerHTML = ''; return; }
+        const { data: insp } = await supabaseClient.from('site_inspections').select('id, status').eq('lead_id', lead.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (insp) {
+          inspectionArea.innerHTML = `<a class="link-quiet" href="/site-inspection.html?id=${insp.id}">Site inspection - <span class="badge ${insp.status === 'completed' ? 'accepted' : 'sent'}">${insp.status.replace('_', ' ')}</span> &rarr;</a>`;
+        } else {
+          inspectionArea.innerHTML = `<button type="button" class="secondary" id="ld-schedule-inspection-btn" style="font-size:12px; padding:6px 10px;">Schedule inspection</button>`;
+          inspectionArea.querySelector('#ld-schedule-inspection-btn').addEventListener('click', () => {
+            openScheduleInspectionPanel(lead, 'lead', () => refreshLeadInspectionArea());
+          });
+        }
+      }
+      overlay.querySelector('#ld-needs-visit').addEventListener('change', async (e) => {
+        lead.needs_site_visit = e.target.checked;
+        await supabaseClient.from('leads').update({ needs_site_visit: lead.needs_site_visit }).eq('id', lead.id);
+        await refreshLeadInspectionArea();
+      });
+      if (lead.needs_site_visit) refreshLeadInspectionArea();
 
       if (!linkedProjectId) {
         overlay.querySelector('#ld-create-job-btn').addEventListener('click', () => createJobFromLead(lead, overlay.querySelector('#ld-convert-msg'), overlay.querySelector('#ld-create-job-btn')));

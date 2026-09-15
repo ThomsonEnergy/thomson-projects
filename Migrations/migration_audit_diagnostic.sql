@@ -295,4 +295,10 @@ union all
 select '103', 'project_notes',
   case when exists (select 1 from information_schema.columns where table_name = 'leads' and column_name = 'ai_title')
   then 'present' else 'MISSING' end
+union all
+select '104', 'site_inspections',
+  case when exists (select 1 from information_schema.tables where table_name = 'site_inspections')
+    and exists (select 1 from information_schema.tables where table_name = 'inspection_checklist_templates')
+    and exists (select 1 from information_schema.columns where table_name = 'schedule_assignments' and column_name = 'site_inspection_id')
+  then 'present' else 'MISSING' end
 order by 1;
