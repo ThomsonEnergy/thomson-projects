@@ -1,3 +1,4 @@
+require('./_shared/polyfill-websocket');
 const fetch = require('node-fetch');
 const { createClient } = require('@supabase/supabase-js');
 const { getIntegrationKey } = require('./_shared/get-integration-key');

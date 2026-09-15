@@ -1,3 +1,4 @@
+require('./_shared/polyfill-websocket');
 const { createClient } = require('@supabase/supabase-js');
 const { findOrCreateCompany, createJob } = require('./_servicem8');
 

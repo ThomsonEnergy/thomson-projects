@@ -1,3 +1,4 @@
+require('./_shared/polyfill-websocket');
 const { createClient } = require('@supabase/supabase-js');
 
 // Polled by the "Ask AI" chat widget after ai-chat.js hands back a job id,

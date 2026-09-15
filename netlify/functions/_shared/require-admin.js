@@ -5,6 +5,7 @@
 // here. Every function that touches user accounts MUST call
 // requireAdmin() first and stop if it returns null.
 
+require('./polyfill-websocket');
 const { createClient } = require('@supabase/supabase-js');
 
 // Safe to hardcode — this is the same public anon key already embedded in
