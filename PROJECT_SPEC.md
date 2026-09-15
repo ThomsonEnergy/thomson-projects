@@ -385,13 +385,14 @@ The tabbed layout, activity sidebar, role-aware display, and the Materials/Labou
 
 ---
 
-## PART K — Site Inspection & Solar Pricing/Design (Pylon data pull built, rest still open)
+## PART K — Site Inspection & Solar Pricing/Design (Pylon data pull + site inspections built, pricing tool still open)
 
 **Pylon integration (built — see A16):** `pylon-sync.js` is a real, working integration pulling panel/inverter/battery counts and hardware summary from Pylon's `solar_designs` API. This answers the open research question from the original spec — **yes, Pylon does expose this data programmatically** — so "price here, design in Pylon" is achievable via integration, not blocked on unknown API capability.
 
+**Site inspection checklist (built — migration_104):** "Needs a site visit" can be ticked on a lead, quote, or job; scheduling one picks a checklist template and creates a real Schedule page block. Field staff fill it out live on site at `site-inspection.html` - Yes/No questions with conditional photo requirements (e.g. sub-board question revealing a Sub Board photo), same pattern reviewed from the Runbase reference but not a port - approximated and covers both electrical and solar via separate templates. Templates are fully editable under Settings > Inspection Checklists, seeded with "Solar & Battery Install" and "General Electrical" starters.
+
 **Still not built:**
 - **In-app solar pricing/design tool:** panels/inverters/batteries with quantities, roof type, gateway, install kits, STC deeming year/month, recommended vs quoted sale price with uplift % — not started. Pylon data is currently pulled for display only, not fed into a pricing calculation.
-- **Site inspection checklist on quotes:** a toggle revealing configurable inspection questions/photo requirements — not built, zero related code. Needs its own scoping session (electrical + solar both need coverage, not a straight port of the Runbase reference reviewed earlier).
 
 ---
 
@@ -425,7 +426,6 @@ The tabbed layout, activity sidebar, role-aware display, and the Materials/Labou
 - [ ] Inspection forms (G1): auto-generate client-facing compliance PDF, or internal-only?
 - [ ] Confirm Employment Hero → Xero Payroll cutover timing (H2) — don't drop EH until proven stable over a full pay cycle
 - [ ] Wholesaler quote matching fallback (D4): manual pairing option, or flag-only, when a line doesn't match a part number exactly? (Not urgent — D4 itself isn't started.)
-- [ ] Site inspection checklist (Part K): what questions/photos does this business actually need, given both electrical and solar work
 - [ ] Categorise the 67 "Other / Needs Review" materials from the ServiceM8 import (A9a) - manual pass or AI-assisted with review
 - [ ] Confirm the one auto-picked switch bundle from the ServiceM8 import ("ELRESINLSPLATE" / light switch plate) - imported with the cheapest of 14 uncategorised options as a placeholder default, worth a quick look
 - [ ] Generic-material-swap at PO time (raised alongside the ServiceM8 import, A9a): should prebuild components reference a material category instead of one locked material, so `buildMaterialSearchRow` can offer any matching item at PO-generation time? Real follow-up work, not done as part of the import itself.
