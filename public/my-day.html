@@ -78,6 +78,17 @@
     </div>
 
     <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+        <h2 style="margin:0;">Your schedule</h2>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="secondary" id="my-sched-day-btn" style="font-size:12px; padding:6px 10px;">Day</button>
+          <button type="button" class="secondary" id="my-sched-week-btn" style="font-size:12px; padding:6px 10px;">Week</button>
+        </div>
+      </div>
+      <div id="my-schedule-view"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
       <h2>Your scheduled tasks</h2>
       <div id="my-tasks"><p class="subtitle">Loading...</p></div>
     </div>
@@ -104,9 +115,11 @@
     function fmtDateTime(iso) {
       return new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     }
-    function todayStr() {
-      const d = new Date();
+    function dateToStr(d) {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    function todayStr() {
+      return dateToStr(new Date());
     }
 
     async function checkActiveClock() {
@@ -198,6 +211,60 @@
         });
       });
     }
+
+    // "Your schedule" card - Day/Week toggle, separate from the quick-
+    // clock-in shortcuts above (loadTodaysSchedule), which only exist to
+    // clock in fast. This is for seeing what's actually coming up -
+    // requested so staff (and whoever's booking them into a site
+    // inspection or job) aren't guessing whether a day's already full.
+    let myScheduleView = 'day';
+    function labelForAssignment(a) {
+      if (a.block_type === 'site_inspection') return 'Inspection' + (a.projects?.name ? ': ' + a.projects.name : '');
+      if (a.projects) return `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects.name}${a.projects.job_number ? ' #' + a.projects.job_number : ''}`;
+      return `${{ training: 'Training', office: 'Office / admin', other: 'Other' }[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
+    }
+    function linkForAssignment(a) {
+      if (a.site_inspection_id) return `/site-inspection.html?id=${a.site_inspection_id}`;
+      if (a.project_id) return `/project.html?id=${a.project_id}`;
+      return null;
+    }
+
+    async function loadMySchedule() {
+      const container = document.getElementById('my-schedule-view');
+      document.getElementById('my-sched-day-btn').style.borderColor = myScheduleView === 'day' ? 'var(--accent)' : '';
+      document.getElementById('my-sched-week-btn').style.borderColor = myScheduleView === 'week' ? 'var(--accent)' : '';
+
+      const today = new Date();
+      const rangeEnd = new Date(today);
+      if (myScheduleView === 'week') rangeEnd.setDate(rangeEnd.getDate() + 6);
+      const rangeEndStr = dateToStr(rangeEnd);
+      const todayStrVal = todayStr();
+
+      const [{ data: assignments }, { data: leave }] = await Promise.all([
+        supabaseClient.from('schedule_assignments').select('*, projects(name, job_number, quote_number)').eq('staff_id', myUserId).gte('assignment_date', todayStrVal).lte('assignment_date', rangeEndStr).order('assignment_date').order('start_time'),
+        supabaseClient.from('leave_requests').select('start_date, end_date, leave_type').eq('staff_id', myUserId).eq('status', 'approved').lte('start_date', rangeEndStr).gte('end_date', todayStrVal),
+      ]);
+
+      const days = [];
+      for (let d = new Date(today); dateToStr(d) <= rangeEndStr; d.setDate(d.getDate() + 1)) days.push(dateToStr(d));
+
+      container.innerHTML = days.map(dateStr => {
+        const dayAssignments = (assignments || []).filter(a => a.assignment_date === dateStr);
+        const onLeave = (leave || []).find(l => l.start_date <= dateStr && l.end_date >= dateStr);
+        const dayLabel = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });
+        return `
+          <div style="padding:8px 0; border-bottom:1px solid var(--border);">
+            <p style="margin:0 0 4px; font-weight:600; font-size:13px;">${dateStr === todayStrVal ? 'Today - ' : ''}${dayLabel}</p>
+            ${onLeave ? `<p class="subtitle" style="margin:0; color:var(--red);">On leave (${onLeave.leave_type || 'approved'})</p>` : dayAssignments.length ? dayAssignments.map(a => {
+              const link = linkForAssignment(a);
+              const inner = `${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${labelForAssignment(a)}`;
+              return link ? `<a class="link-quiet" href="${link}" style="display:block; font-size:13px; margin:2px 0;">${inner}</a>` : `<p class="subtitle" style="margin:2px 0; font-size:13px;">${inner}</p>`;
+            }).join('') : `<p class="subtitle" style="margin:0; font-size:13px;">Nothing scheduled.</p>`}
+          </div>`;
+      }).join('');
+    }
+    document.getElementById('my-sched-day-btn').addEventListener('click', () => { myScheduleView = 'day'; loadMySchedule(); });
+    document.getElementById('my-sched-week-btn').addEventListener('click', () => { myScheduleView = 'week'; loadMySchedule(); });
 
     let selectedClockCostCentres = [];
     let selectedClockJobId = null;
@@ -442,6 +509,7 @@
       myRole = await getMyRole();
 
       await loadTodaysSchedule();
+      await loadMySchedule();
 
       const deepLinkProjectId = new URLSearchParams(window.location.search).get('clockin_project');
       if (deepLinkProjectId) {
