@@ -1307,14 +1307,32 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
   }
 
   overlay.innerHTML = `
-    <div class="card" style="max-width:420px; width:100%;">
+    <div class="card" style="max-width:460px; width:100%; max-height:88vh; overflow-y:auto;">
       <h2>Schedule inspection</h2>
       <label style="margin-top:0">Checklist</label>
       <select id="si-template">${templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}</select>
       <label>Assign to</label>
       <select id="si-staff">${(staff || []).map(s => `<option value="${s.id}">${s.full_name || 'Unnamed'}</option>`).join('')}</select>
-      <label>Date</label>
-      <input type="date" id="si-date" value="${new Date().toISOString().slice(0, 10)}" />
+      <div class="grid cols-3">
+        <div>
+          <label>Date</label>
+          <input type="date" id="si-date" value="${new Date().toISOString().slice(0, 10)}" />
+        </div>
+        <div>
+          <label>Start time</label>
+          <input type="time" id="si-start" value="09:00" />
+        </div>
+        <div>
+          <label>End time</label>
+          <input type="time" id="si-end" value="10:00" />
+        </div>
+      </div>
+
+      <div style="margin-top:10px; padding:10px; background:var(--surface-2); border-radius:8px;">
+        <p class="subtitle" style="margin:0 0 6px; font-weight:600;">Their day, so far</p>
+        <div id="si-day-preview"><p class="subtitle">Loading...</p></div>
+      </div>
+
       <div style="margin-top:14px;">
         <button id="si-confirm-btn">Schedule</button>
         <button type="button" class="secondary" id="si-cancel-btn">Cancel</button>
@@ -1322,10 +1340,46 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
       <div id="si-msg"></div>
     </div>`;
 
+  // Shows what the selected staff member already has on for the selected
+  // date - existing schedule_assignments plus approved leave - so
+  // whoever's booking an inspection can actually see a gap instead of
+  // guessing someone's free.
+  async function refreshDayPreview() {
+    const previewEl = overlay.querySelector('#si-day-preview');
+    const staffId = overlay.querySelector('#si-staff').value;
+    const dateStr = overlay.querySelector('#si-date').value;
+    if (!staffId || !dateStr) { previewEl.innerHTML = ''; return; }
+    previewEl.innerHTML = `<p class="subtitle">Loading...</p>`;
+
+    const [{ data: existing }, { data: leave }] = await Promise.all([
+      supabaseClient.from('schedule_assignments').select('start_time, end_time, block_type, note, projects(name, job_number)').eq('staff_id', staffId).eq('assignment_date', dateStr).order('start_time'),
+      supabaseClient.from('leave_requests').select('leave_type').eq('staff_id', staffId).eq('status', 'approved').lte('start_date', dateStr).gte('end_date', dateStr).maybeSingle(),
+    ]);
+
+    if (leave) {
+      previewEl.innerHTML = `<p style="margin:0; color:var(--red);">On approved leave (${leave.leave_type || 'leave'}) this day.</p>`;
+      return;
+    }
+    if (!existing || !existing.length) {
+      previewEl.innerHTML = `<p style="margin:0; color:var(--green);">Nothing booked this day yet.</p>`;
+      return;
+    }
+    const labelFor = (a) => a.block_type === 'site_inspection' ? 'Inspection' + (a.projects?.name ? ': ' + a.projects.name : '')
+      : a.projects ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects.name}${a.projects.job_number ? ' #' + a.projects.job_number : ''}`
+      : `${{ training: 'Training', office: 'Office / admin', other: 'Other' }[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
+    previewEl.innerHTML = existing.map(a => `<p style="margin:2px 0;">${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${labelFor(a)}</p>`).join('');
+  }
+  overlay.querySelector('#si-staff').addEventListener('change', refreshDayPreview);
+  overlay.querySelector('#si-date').addEventListener('change', refreshDayPreview);
+  refreshDayPreview();
+
   overlay.querySelector('#si-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#si-confirm-btn').addEventListener('click', async () => {
     const confirmBtn = overlay.querySelector('#si-confirm-btn');
     const msg = overlay.querySelector('#si-msg');
+    const startTime = overlay.querySelector('#si-start').value;
+    const endTime = overlay.querySelector('#si-end').value;
+    if (!startTime || !endTime || endTime <= startTime) { msg.innerHTML = `<div class="error-box">Pick a valid start/end time.</div>`; return; }
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Scheduling...';
     try {
@@ -1340,7 +1394,7 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
         staff_id: overlay.querySelector('#si-staff').value,
         project_id: kind === 'project' ? record.id : null,
         assignment_date: overlay.querySelector('#si-date').value,
-        start_time: '09:00', end_time: '10:00',
+        start_time: startTime, end_time: endTime,
         block_type: 'site_inspection',
         site_inspection_id: inspection.id,
       });
