@@ -111,6 +111,24 @@
       <div class="grid cols-3" id="job-contacts-selects"></div>
     </div>
 
+    <div class="card" id="pylon-card">
+      <h2>Pylon system design</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Start here for a solar job: create the design/quote in Pylon first, then paste the resulting proposal link below before filling in the scope of works and pricing.</p>
+      <a href="https://app.getpylon.com" target="_blank" rel="noopener"><button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:14px;">Create job in Pylon &rarr;</button></a>
+      <label style="margin-top:0">Pylon proposal link</label>
+      <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." />
+      <div class="grid cols-3" style="margin-top:10px;">
+        <div style="grid-column: span 2;">
+          <label>Pylon project ID (optional, for pulling system data)</label>
+          <input id="p-pylon-id" placeholder="Requires a Pylon API key set up under Settings > API Keys" />
+        </div>
+        <div style="display:flex; align-items:end;">
+          <button type="button" class="secondary" id="pylon-pull-btn" style="width:100%;">Pull from Pylon</button>
+        </div>
+      </div>
+      <div id="pylon-msg"></div>
+    </div>
+
     <div class="card">
       <h2>Write the scope of works with AI</h2>
       <p class="subtitle" style="margin-bottom:10px;">A few rough notes, plus anything useful to attach - plans, drawings, or an electricity bill. Drafts each stage's description first, then a full scope of works using those.</p>
@@ -206,23 +224,6 @@
         <input type="checkbox" id="p-laha-approved" style="width:auto;" /> LAHA approved for this job
       </label>
       <p class="subtitle" style="margin-top:6px;">For jobs more than 100km from base with a Mobilisation stage already covering travel/LAHA in the quote. Once approved, staff clocking out of this job are asked whether they stayed overnight, and the allowance gets added to their pay automatically.</p>
-    </div>
-
-    <div class="card" id="pylon-card">
-      <h2>Pylon system design</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Link to the Pylon proposal so the client can view the interactive design. Shown as a button on the proposal.</p>
-      <label style="margin-top:0">Pylon proposal link</label>
-      <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." />
-      <div class="grid cols-3" style="margin-top:10px;">
-        <div style="grid-column: span 2;">
-          <label>Pylon project ID (optional, for pulling system data)</label>
-          <input id="p-pylon-id" placeholder="Requires a Pylon API key set up under Settings > API Keys" />
-        </div>
-        <div style="display:flex; align-items:end;">
-          <button type="button" class="secondary" id="pylon-pull-btn" style="width:100%;">Pull from Pylon</button>
-        </div>
-      </div>
-      <div id="pylon-msg"></div>
     </div>
 
     <div class="card" id="solar-compliance-card" style="display:none;">
