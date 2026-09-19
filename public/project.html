@@ -977,6 +977,12 @@
         const name = document.getElementById('p-client').value.trim();
         const address = document.getElementById('p-address').value.trim();
         if (!name || !address) { msg.innerHTML = `<div class="error-box">Enter the client name and site address first.</div>`; return; }
+        // Pylon's create API has no dedup by address/customer and this
+        // app has no way to search their existing projects either
+        // (confirmed against their docs - no address/email/phone filter
+        // on GET /v1/solar_projects), so the only guard available is our
+        // own record of having already pushed this one.
+        if (document.getElementById('p-pylon-id').value.trim() && !confirm('This quote already has a Pylon project ID - creating another will make a duplicate project in Pylon for this address. Continue anyway?')) return;
         btn.disabled = true;
         btn.textContent = 'Creating in Pylon...';
         msg.innerHTML = '';
