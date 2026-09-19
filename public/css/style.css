@@ -104,6 +104,15 @@ body {
 }
 .topbar-tab.active .tab-total { color: var(--accent); }
 
+.nav-star {
+  font-size: 13px;
+  color: var(--border);
+  cursor: pointer;
+  line-height: 1;
+}
+.nav-star:hover { color: var(--muted); }
+.nav-star.starred { color: #eab308; }
+
 .topbar-right {
   display: flex;
   align-items: center;

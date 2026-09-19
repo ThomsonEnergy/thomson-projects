@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=11" />
+<link rel="stylesheet" href="/css/style.css?v=12" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   .quick-nav { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px; margin-bottom:24px; }
@@ -61,21 +61,11 @@
       </div>
     </div>
 
-    <div class="quick-nav">
-      <a href="/dashboard.html"><span class="icon">&#128203;</span>Job pipeline</a>
-      <a href="/projects.html"><span class="icon">&#128202;</span>Projects</a>
-      <a href="/timesheets.html"><span class="icon">&#9203;</span>Timesheets</a>
-      <a href="/quotes.html"><span class="icon">&#128221;</span>Quotes</a>
-      <a href="/invoices.html"><span class="icon">&#128179;</span>Invoices</a>
-      <a href="/suppliers.html"><span class="icon">&#128194;</span>Suppliers</a>
-      <a href="/leads.html"><span class="icon">&#127919;</span>Leads</a>
-      <a href="/schedule.html"><span class="icon">&#128197;</span>Schedule</a>
-      <a href="/clients.html"><span class="icon">&#128100;</span>Clients</a>
-      <a href="/stock.html"><span class="icon">&#128736;</span>Stock</a>
-      <a href="/team.html"><span class="icon">&#128101;</span>Team</a>
-      <a href="/fleet.html"><span class="icon">&#128666;</span>Fleet</a>
-      <a href="/bugs.html"><span class="icon">&#128030;</span>Bugs &amp; Updates</a>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <p class="subtitle" style="margin:0;">Your shortcuts - star any tab up top to add one, or edit here.</p>
+      <button type="button" class="secondary" id="edit-quick-nav-btn" style="font-size:12px; padding:6px 10px;">Edit</button>
     </div>
+    <div class="quick-nav" id="quick-nav"><p class="subtitle">Loading...</p></div>
 
     <div class="card">
       <h2>Needs attention</h2>
@@ -91,7 +81,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=17"></script>
+  <script src="/js/supabase-client.js?v=18"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId, myRole, myName;
@@ -127,6 +117,100 @@
         lineEl.style.display = 'none';
       }
     }
+
+    // Driven by profiles.home_shortcuts (see MAIN_NAV_ITEMS/
+    // getMyHomeShortcuts in supabase-client.js) - the same starred set the
+    // topbar tabs' star toggle writes to, so starring a tab up top and
+    // editing the order here are two views onto the one list.
+    async function renderQuickNav() {
+      const el = document.getElementById('quick-nav');
+      const role = await getMyRole();
+      const available = MAIN_NAV_ITEMS.filter(item => (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)));
+      const byKey = {}; available.forEach(i => { byKey[i.key] = i; });
+      const shortcuts = await getMyHomeShortcuts();
+      const ordered = shortcuts.map(k => byKey[k]).filter(Boolean);
+      el.innerHTML = ordered.length
+        ? ordered.map(item => `<a href="${item.href}"><span class="icon">${item.icon}</span>${item.label}</a>`).join('')
+        : `<p class="subtitle">No shortcuts yet - star a tab up top, or click Edit to add some.</p>`;
+    }
+
+    function openEditQuickNavPanel() {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;"><p class="subtitle">Loading...</p></div>`;
+      document.body.appendChild(overlay);
+
+      (async () => {
+        const role = await getMyRole();
+        const available = MAIN_NAV_ITEMS.filter(item => (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)));
+        const byKey = {}; available.forEach(i => { byKey[i.key] = i; });
+        let shortcuts = (await getMyHomeShortcuts()).filter(k => byKey[k]);
+        const notShown = () => available.filter(i => !shortcuts.includes(i.key));
+
+        function render() {
+          overlay.innerHTML = `
+            <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
+              <h2>Edit shortcuts</h2>
+              <p class="subtitle" style="margin-bottom:10px;">Reorder or remove what's already shown, or add anything else.</p>
+              <div id="eqn-current">
+                ${shortcuts.length ? shortcuts.map((key, i) => `
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border);">
+                    <span>${byKey[key].icon ? byKey[key].icon + ' ' : ''}${byKey[key].label}</span>
+                    <div style="display:flex; gap:4px;">
+                      <button type="button" class="secondary eqn-move-btn" data-key="${key}" data-dir="up" style="font-size:11px; padding:4px 8px;" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
+                      <button type="button" class="secondary eqn-move-btn" data-key="${key}" data-dir="down" style="font-size:11px; padding:4px 8px;" ${i === shortcuts.length - 1 ? 'disabled' : ''}>&darr;</button>
+                      <button type="button" class="secondary eqn-remove-btn" data-key="${key}" style="font-size:11px; padding:4px 8px;">Remove</button>
+                    </div>
+                  </div>`).join('') : '<p class="subtitle">Nothing shown yet.</p>'}
+              </div>
+
+              ${notShown().length ? `
+                <p class="subtitle" style="margin:14px 0 6px; font-weight:600;">Add</p>
+                <div id="eqn-add-list">
+                  ${notShown().map(item => `
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border);">
+                      <span>${item.icon ? item.icon + ' ' : ''}${item.label}</span>
+                      <button type="button" class="secondary eqn-add-btn" data-key="${item.key}" style="font-size:11px; padding:4px 8px;">+ Add</button>
+                    </div>`).join('')}
+                </div>
+              ` : ''}
+
+              <button type="button" id="eqn-close-btn" style="margin-top:14px; width:100%;">Done</button>
+            </div>`;
+
+          overlay.querySelectorAll('.eqn-move-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              const i = shortcuts.indexOf(btn.dataset.key);
+              const swapWith = btn.dataset.dir === 'up' ? i - 1 : i + 1;
+              if (swapWith < 0 || swapWith >= shortcuts.length) return;
+              [shortcuts[i], shortcuts[swapWith]] = [shortcuts[swapWith], shortcuts[i]];
+              await setMyHomeShortcuts(shortcuts);
+              render();
+              renderQuickNav();
+            });
+          });
+          overlay.querySelectorAll('.eqn-remove-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              shortcuts = shortcuts.filter(k => k !== btn.dataset.key);
+              await setMyHomeShortcuts(shortcuts);
+              render();
+              renderQuickNav();
+            });
+          });
+          overlay.querySelectorAll('.eqn-add-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              shortcuts = [...shortcuts, btn.dataset.key];
+              await setMyHomeShortcuts(shortcuts);
+              render();
+              renderQuickNav();
+            });
+          });
+          overlay.querySelector('#eqn-close-btn').addEventListener('click', () => overlay.remove());
+        }
+        render();
+      })();
+    }
+    document.getElementById('edit-quick-nav-btn').addEventListener('click', openEditQuickNavPanel);
 
     async function loadActionItems() {
       const el = document.getElementById('action-items');
@@ -385,6 +469,7 @@
       loadDailyGreeting(firstName);
 
       await refreshClockButton();
+      await renderQuickNav();
       await loadActionItems();
       await loadFeed();
     })();

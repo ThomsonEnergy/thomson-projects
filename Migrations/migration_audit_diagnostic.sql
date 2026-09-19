@@ -305,4 +305,8 @@ union all
 select '105', 'site_inspection_block_type',
   case when exists (select 1 from information_schema.check_constraints where constraint_name = 'schedule_assignments_block_type_check' and check_clause like '%site_inspection%')
   then 'present' else 'MISSING' end
+union all
+select '106', 'home_shortcuts',
+  case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'home_shortcuts')
+  then 'present' else 'MISSING' end
 order by 1;

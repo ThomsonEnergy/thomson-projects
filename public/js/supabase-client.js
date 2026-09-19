@@ -298,25 +298,60 @@ async function findMatchingSupplier(fields) {
 // hand-maintaining its own copy of the same 13 links (which is exactly
 // how small nav inconsistencies kept creeping in before this existed).
 const MAIN_NAV_ITEMS = [
-  { key: 'my-day', label: 'My Day', href: '/my-day.html' },
-  { key: 'leads', label: 'Leads', href: '/leads.html' },
-  { key: 'quotes', label: 'Quotes', href: '/quotes.html' },
-  { key: 'projects', label: 'Projects', href: '/projects.html' },
-  { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html' },
-  { key: 'invoices', label: 'Invoices', href: '/invoices.html' },
-  { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html' },
-  { key: 'tasks', label: 'Tasks', href: '/tasks.html' },
-  { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html' },
-  { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html' },
-  { key: 'clients', label: 'Clients', href: '/clients.html' },
-  { key: 'stock', label: 'Stock', href: '/stock.html' },
-  { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', pricingOnly: true },
-  { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html' },
-  { key: 'team', label: 'Team', href: '/team.html' },
-  { key: 'dnsp', label: 'DNSP', href: '/dnsp.html' },
-  { key: 'fleet', label: 'Fleet', href: '/fleet.html' },
-  { key: 'logs', label: 'Logs', href: '/logs.html', adminOnly: true },
+  { key: 'my-day', label: 'My Day', href: '/my-day.html', icon: '&#127749;' },
+  { key: 'leads', label: 'Leads', href: '/leads.html', icon: '&#127919;' },
+  { key: 'quotes', label: 'Quotes', href: '/quotes.html', icon: '&#128221;' },
+  { key: 'projects', label: 'Projects', href: '/projects.html', icon: '&#128202;' },
+  { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html', icon: '&#128203;' },
+  { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;' },
+  { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html', icon: '&#128230;' },
+  { key: 'tasks', label: 'Tasks', href: '/tasks.html', icon: '&#9989;' },
+  { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;' },
+  { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;' },
+  { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;' },
+  { key: 'stock', label: 'Stock', href: '/stock.html', icon: '&#128736;' },
+  { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', icon: '&#129513;', pricingOnly: true },
+  { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html', icon: '&#128218;' },
+  { key: 'team', label: 'Team', href: '/team.html', icon: '&#128101;' },
+  { key: 'dnsp', label: 'DNSP', href: '/dnsp.html', icon: '&#9889;' },
+  { key: 'fleet', label: 'Fleet', href: '/fleet.html', icon: '&#128666;' },
+  { key: 'bugs', label: 'Bugs & Updates', href: '/bugs.html', icon: '&#128030;' },
+  { key: 'logs', label: 'Logs', href: '/logs.html', icon: '&#128209;', adminOnly: true },
 ];
+
+// Fallback for anyone who hasn't customized their Home page tiles yet
+// (profiles.home_shortcuts is null) - the set that used to be hardcoded
+// on home.html, so existing users see no change until they actually open
+// "Edit" there.
+// Doesn't include Schedule - that's already one click away via its own
+// topbar icon on every page, unlike everything else here.
+const DEFAULT_HOME_SHORTCUTS = [
+  'job-pipeline', 'projects', 'timesheets', 'quotes', 'invoices', 'suppliers',
+  'leads', 'clients', 'stock', 'team', 'fleet', 'bugs',
+];
+
+let _cachedHomeShortcuts = null;
+async function getMyHomeShortcuts() {
+  if (_cachedHomeShortcuts) return _cachedHomeShortcuts;
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) return DEFAULT_HOME_SHORTCUTS;
+  const { data } = await supabaseClient.from('profiles').select('home_shortcuts').eq('id', session.user.id).maybeSingle();
+  _cachedHomeShortcuts = data?.home_shortcuts || DEFAULT_HOME_SHORTCUTS;
+  return _cachedHomeShortcuts;
+}
+async function setMyHomeShortcuts(keys) {
+  _cachedHomeShortcuts = keys;
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) return;
+  await supabaseClient.from('profiles').update({ home_shortcuts: keys }).eq('id', session.user.id);
+}
+async function toggleHomeShortcut(key) {
+  const current = (await getMyHomeShortcuts()).slice();
+  const idx = current.indexOf(key);
+  if (idx === -1) current.push(key); else current.splice(idx, 1);
+  await setMyHomeShortcuts(current);
+  return current.includes(key);
+}
 
 // Async (unlike before) so an admin-only/pricing-only link can be filtered
 // out for everyone else before it's ever painted, not hidden after the
@@ -328,11 +363,31 @@ async function renderMainNav(activeKey) {
   const role = await getMyRole();
   const items = MAIN_NAV_ITEMS.filter(item =>
     (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)));
+  const shortcuts = await getMyHomeShortcuts();
+  const starHtml = (key) => {
+    const starred = shortcuts.includes(key);
+    return `<span class="nav-star ${starred ? 'starred' : ''}" data-key="${key}" title="${starred ? 'Remove from Home page' : 'Add to Home page'}" onclick="event.preventDefault(); event.stopPropagation(); window.__onNavStarClick(this);">${starred ? '&#9733;' : '&#9734;'}</span>`;
+  };
   const linksHtml = (asTab) => items.map(item =>
-    `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''}">${item.label}</a>`
+    `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''}"><span style="display:flex; align-items:center; gap:5px;">${starHtml(item.key)}${item.label}</span></a>`
   ).join('');
   if (tabsEl) tabsEl.innerHTML = linksHtml(true);
   if (dropdownEl) dropdownEl.innerHTML = linksHtml(false);
+
+  // Delegated via a single global so the inline onclick above (needed
+  // since tabs/dropdown get fully replaced on every renderMainNav call,
+  // which would otherwise leak listeners) has one stable place to call
+  // into - toggles the star everywhere it appears (desktop + mobile both
+  // render the same key), not just the one clicked.
+  window.__onNavStarClick = async (el) => {
+    const key = el.dataset.key;
+    const nowStarred = await toggleHomeShortcut(key);
+    document.querySelectorAll(`.nav-star[data-key="${key}"]`).forEach(s => {
+      s.classList.toggle('starred', nowStarred);
+      s.innerHTML = nowStarred ? '&#9733;' : '&#9734;';
+      s.title = nowStarred ? 'Remove from Home page' : 'Add to Home page';
+    });
+  };
   renderAIChatWidget();
 }
 
