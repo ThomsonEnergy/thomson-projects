@@ -335,15 +335,17 @@ async function getMyHomeShortcuts() {
   if (_cachedHomeShortcuts) return _cachedHomeShortcuts;
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) return DEFAULT_HOME_SHORTCUTS;
-  const { data } = await supabaseClient.from('profiles').select('home_shortcuts').eq('id', session.user.id).maybeSingle();
+  const { data, error } = await supabaseClient.from('profiles').select('home_shortcuts').eq('id', session.user.id).maybeSingle();
+  if (error) console.error('getMyHomeShortcuts failed:', error.message); // surfaced, not swallowed - a column-grant or RLS gap here silently fell back to defaults before
   _cachedHomeShortcuts = data?.home_shortcuts || DEFAULT_HOME_SHORTCUTS;
   return _cachedHomeShortcuts;
 }
 async function setMyHomeShortcuts(keys) {
-  _cachedHomeShortcuts = keys;
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) return;
-  await supabaseClient.from('profiles').update({ home_shortcuts: keys }).eq('id', session.user.id);
+  const { error } = await supabaseClient.from('profiles').update({ home_shortcuts: keys }).eq('id', session.user.id);
+  if (error) { console.error('setMyHomeShortcuts failed:', error.message); throw error; }
+  _cachedHomeShortcuts = keys; // only cache once the write's actually confirmed to have gone through
 }
 async function toggleHomeShortcut(key) {
   const current = (await getMyHomeShortcuts()).slice();
@@ -381,12 +383,16 @@ async function renderMainNav(activeKey) {
   // render the same key), not just the one clicked.
   window.__onNavStarClick = async (el) => {
     const key = el.dataset.key;
-    const nowStarred = await toggleHomeShortcut(key);
-    document.querySelectorAll(`.nav-star[data-key="${key}"]`).forEach(s => {
-      s.classList.toggle('starred', nowStarred);
-      s.innerHTML = nowStarred ? '&#9733;' : '&#9734;';
-      s.title = nowStarred ? 'Remove from Home page' : 'Add to Home page';
-    });
+    try {
+      const nowStarred = await toggleHomeShortcut(key);
+      document.querySelectorAll(`.nav-star[data-key="${key}"]`).forEach(s => {
+        s.classList.toggle('starred', nowStarred);
+        s.innerHTML = nowStarred ? '&#9733;' : '&#9734;';
+        s.title = nowStarred ? 'Remove from Home page' : 'Add to Home page';
+      });
+    } catch (err) {
+      alert('Could not save that - ' + err.message);
+    }
   };
   renderAIChatWidget();
 }

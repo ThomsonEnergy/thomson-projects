@@ -309,4 +309,8 @@ union all
 select '106', 'home_shortcuts',
   case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'home_shortcuts')
   then 'present' else 'MISSING' end
+union all
+select '107', 'home_shortcuts_grant',
+  case when exists (select 1 from information_schema.column_privileges where table_name = 'profiles' and grantee = 'authenticated' and column_name = 'home_shortcuts' and privilege_type = 'SELECT')
+  then 'present' else 'MISSING' end
 order by 1;

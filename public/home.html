@@ -81,7 +81,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=18"></script>
+  <script src="/js/supabase-client.js?v=19"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId, myRole, myName;
@@ -134,6 +134,26 @@
         : `<p class="subtitle">No shortcuts yet - star a tab up top, or click Edit to add some.</p>`;
     }
 
+    // Persists a new shortcuts order/set - reverts the in-memory list and
+    // shows what actually went wrong if the save fails, rather than
+    // leaving the UI showing a change that never actually made it to the
+    // database (exactly what happened before migration_107 - the write
+    // itself was fine, but a missing column-level SELECT grant made every
+    // *read-back* silently fall back to the defaults, which looked
+    // identical to "didn't save").
+    async function persistShortcuts(newShortcuts, previousShortcuts, msgEl) {
+      try {
+        await setMyHomeShortcuts(newShortcuts);
+        if (msgEl) msgEl.innerHTML = '';
+        return true;
+      } catch (err) {
+        if (msgEl) msgEl.innerHTML = `<div class="error-box">Could not save: ${err.message}</div>`;
+        newShortcuts.length = 0;
+        newShortcuts.push(...previousShortcuts);
+        return false;
+      }
+    }
+
     function openEditQuickNavPanel() {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
@@ -146,23 +166,33 @@
         const byKey = {}; available.forEach(i => { byKey[i.key] = i; });
         let shortcuts = (await getMyHomeShortcuts()).filter(k => byKey[k]);
         const notShown = () => available.filter(i => !shortcuts.includes(i.key));
+        // Hoisted above render() so it survives the re-renders a drag
+        // itself triggers (each swap rebuilds the whole list, which would
+        // otherwise reset a locally-scoped drag state back to "not
+        // dragging" after the very first swap). dragStartOrder is
+        // captured once, at pointerdown - "previous" for a revert-on-
+        // failure has to mean "before this drag started", not "one swap
+        // ago", or a failed save would just re-show the already-reordered
+        // list instead of actually reverting anything.
+        let draggingKey = null;
+        let dragStartOrder = null;
 
         function render() {
           overlay.innerHTML = `
             <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
               <h2>Edit shortcuts</h2>
-              <p class="subtitle" style="margin-bottom:10px;">Reorder or remove what's already shown, or add anything else.</p>
+              <p class="subtitle" style="margin-bottom:10px;">Drag the handle to reorder, or remove/add below.</p>
               <div id="eqn-current">
-                ${shortcuts.length ? shortcuts.map((key, i) => `
-                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border);">
-                    <span>${byKey[key].icon ? byKey[key].icon + ' ' : ''}${byKey[key].label}</span>
-                    <div style="display:flex; gap:4px;">
-                      <button type="button" class="secondary eqn-move-btn" data-key="${key}" data-dir="up" style="font-size:11px; padding:4px 8px;" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
-                      <button type="button" class="secondary eqn-move-btn" data-key="${key}" data-dir="down" style="font-size:11px; padding:4px 8px;" ${i === shortcuts.length - 1 ? 'disabled' : ''}>&darr;</button>
-                      <button type="button" class="secondary eqn-remove-btn" data-key="${key}" style="font-size:11px; padding:4px 8px;">Remove</button>
-                    </div>
+                ${shortcuts.length ? shortcuts.map((key) => `
+                  <div class="eqn-row" data-key="${key}" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); background:var(--surface);">
+                    <span style="display:flex; align-items:center; gap:8px;">
+                      <span class="eqn-drag-handle" style="cursor:grab; touch-action:none; color:var(--muted); font-size:16px; padding:4px;">&#9776;</span>
+                      ${byKey[key].icon ? byKey[key].icon + ' ' : ''}${byKey[key].label}
+                    </span>
+                    <button type="button" class="secondary eqn-remove-btn" data-key="${key}" style="font-size:11px; padding:4px 8px;">Remove</button>
                   </div>`).join('') : '<p class="subtitle">Nothing shown yet.</p>'}
               </div>
+              <div id="eqn-msg"></div>
 
               ${notShown().length ? `
                 <p class="subtitle" style="margin:14px 0 6px; font-weight:600;">Add</p>
@@ -178,29 +208,58 @@
               <button type="button" id="eqn-close-btn" style="margin-top:14px; width:100%;">Done</button>
             </div>`;
 
-          overlay.querySelectorAll('.eqn-move-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-              const i = shortcuts.indexOf(btn.dataset.key);
-              const swapWith = btn.dataset.dir === 'up' ? i - 1 : i + 1;
-              if (swapWith < 0 || swapWith >= shortcuts.length) return;
-              [shortcuts[i], shortcuts[swapWith]] = [shortcuts[swapWith], shortcuts[i]];
-              await setMyHomeShortcuts(shortcuts);
-              render();
-              renderQuickNav();
+          const msgEl = overlay.querySelector('#eqn-msg');
+          const listEl = overlay.querySelector('#eqn-current');
+
+          // Drag-to-reorder via Pointer Events (covers mouse and touch in
+          // one code path, unlike HTML5 drag-and-drop which never fires on
+          // touch at all - see the same fix applied to schedule.html).
+          // Swaps live as the pointer crosses another row's position,
+          // rather than trying to animate a floating dragged element -
+          // simpler to get right, and the list is short enough that a
+          // full re-render per swap is imperceptible.
+          listEl.querySelectorAll('.eqn-drag-handle').forEach(handle => {
+            handle.addEventListener('pointerdown', (e) => {
+              e.preventDefault();
+              draggingKey = handle.closest('.eqn-row').dataset.key;
+              dragStartOrder = shortcuts.slice();
+              handle.setPointerCapture(e.pointerId);
+              handle.closest('.eqn-row').style.opacity = '0.5';
             });
           });
+          listEl.addEventListener('pointermove', (e) => {
+            if (!draggingKey) return;
+            const overRow = document.elementFromPoint(e.clientX, e.clientY)?.closest('.eqn-row');
+            if (!overRow || overRow.dataset.key === draggingKey) return;
+            const fromIdx = shortcuts.indexOf(draggingKey);
+            const toIdx = shortcuts.indexOf(overRow.dataset.key);
+            if (fromIdx === -1 || toIdx === -1) return;
+            shortcuts.splice(toIdx, 0, shortcuts.splice(fromIdx, 1)[0]);
+            render();
+          });
+          listEl.addEventListener('pointerup', async () => {
+            if (!draggingKey) return;
+            draggingKey = null;
+            await persistShortcuts(shortcuts, dragStartOrder, msgEl);
+            render();
+            renderQuickNav();
+          });
+          listEl.addEventListener('pointercancel', () => { draggingKey = null; });
+
           overlay.querySelectorAll('.eqn-remove-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
+              const previous = shortcuts.slice();
               shortcuts = shortcuts.filter(k => k !== btn.dataset.key);
-              await setMyHomeShortcuts(shortcuts);
+              await persistShortcuts(shortcuts, previous, msgEl);
               render();
               renderQuickNav();
             });
           });
           overlay.querySelectorAll('.eqn-add-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
+              const previous = shortcuts.slice();
               shortcuts = [...shortcuts, btn.dataset.key];
-              await setMyHomeShortcuts(shortcuts);
+              await persistShortcuts(shortcuts, previous, msgEl);
               render();
               renderQuickNav();
             });
