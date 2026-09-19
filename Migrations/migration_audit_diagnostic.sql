@@ -318,4 +318,8 @@ select '108', 'solar_compliance_tasks',
   case when exists (select 1 from information_schema.check_constraints where constraint_name = 'job_tasks_task_type_check' and check_clause like '%handover%')
     and exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'formbay_lodgement_status')
   then 'present' else 'MISSING' end
+union all
+select '109', 'callback_requests_ui',
+  case when exists (select 1 from information_schema.columns where table_name = 'callback_requests' and column_name = 'claimed_by')
+  then 'present' else 'MISSING' end
 order by 1;

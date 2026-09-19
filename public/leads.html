@@ -39,6 +39,12 @@
     </div>
 
     <div class="card">
+      <h2>Call requests</h2>
+      <p class="subtitle" style="margin-bottom:14px;">"Book a call" requests from the website, with the time they asked for. Unclaimed ones also show as up-for-grabs on the Home page.</p>
+      <div id="callback-requests-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
       <h2>Enquiries</h2>
       <p class="subtitle" style="margin-bottom:14px;">People who left contact details.</p>
       <div id="contact-leads-list"><p class="subtitle">Loading...</p></div>
@@ -373,6 +379,46 @@
       }
     }
 
+    function fmtRequestedTime(dateStr, timeStr) {
+      const d = new Date(`${dateStr}T${timeStr}`);
+      return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+    }
+
+    async function loadCallbackRequests() {
+      const listEl = document.getElementById('callback-requests-list');
+      const { data: requests, error } = await supabaseClient
+        .from('callback_requests')
+        .select('*')
+        .order('requested_date')
+        .order('requested_time');
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!requests || !requests.length) { listEl.innerHTML = `<p class="subtitle">No call requests yet.</p>`; return; }
+
+      listEl.innerHTML = requests.map(r => `
+        <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+            <div>
+              <strong>${r.name || '(no name given)'}</strong>
+              <span class="badge ${r.status === 'done' ? 'accepted' : r.status === 'claimed' ? 'in_progress' : 'draft'}" style="margin-left:6px;">${r.status}</span>
+              <p class="subtitle" style="margin:4px 0 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}</p>
+              <p class="subtitle" style="margin:2px 0 0;">${r.phone ? r.phone + ' &middot; ' : ''}${r.email || ''}</p>
+              ${r.message ? `<p style="margin:6px 0 0;">${escapeHtml(r.message)}</p>` : ''}
+            </div>
+            <div>
+              ${r.status !== 'done' ? `<button type="button" class="secondary mark-callback-done-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Mark as called</button>` : ''}
+            </div>
+          </div>
+        </div>`).join('');
+
+      listEl.querySelectorAll('.mark-callback-done-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const { error: updErr } = await supabaseClient.from('callback_requests').update({ status: 'done' }).eq('id', btn.dataset.id);
+          if (updErr) { alert(updErr.message); return; }
+          await loadCallbackRequests();
+        });
+      });
+    }
+
     (async function () {
       const session = await requireLogin();
       if (!session) return;
@@ -398,6 +444,7 @@
         return;
       }
 
+      await loadCallbackRequests();
       await loadLeads();
     })();
   </script>

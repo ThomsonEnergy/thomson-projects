@@ -67,6 +67,12 @@
     </div>
     <div class="quick-nav" id="quick-nav"><p class="subtitle">Loading...</p></div>
 
+    <div class="card" id="callback-requests-card" style="display:none;">
+      <h2>Call requests - up for grabs</h2>
+      <p class="subtitle" style="margin-bottom:10px;">"Book a call" requests from the website that nobody's claimed yet - grab one if you can make the time.</p>
+      <div id="callback-requests-home-list"></div>
+    </div>
+
     <div class="card">
       <h2>Needs attention</h2>
       <div id="action-items"><p class="subtitle">Loading...</p></div>
@@ -116,6 +122,44 @@
         btn.onclick = () => { window.location.href = '/my-day.html'; };
         lineEl.style.display = 'none';
       }
+    }
+
+    // "Book a call" requests from the website (callback_requests) that
+    // nobody's picked up yet - visible to everyone, not just pricing
+    // roles, same "anyone can grab it" idea as job_tasks' free tasks.
+    // Claiming one here removes it from this list; it still shows either
+    // way on the Leads page's own Call requests card.
+    async function loadCallbackRequestsHome() {
+      const card = document.getElementById('callback-requests-card');
+      const listEl = document.getElementById('callback-requests-home-list');
+      const { data: requests, error } = await supabaseClient
+        .from('callback_requests')
+        .select('*')
+        .is('claimed_by', null)
+        .neq('status', 'done')
+        .order('requested_date')
+        .order('requested_time');
+      if (error || !requests || !requests.length) { card.style.display = 'none'; return; }
+      card.style.display = 'block';
+
+      listEl.innerHTML = requests.map(r => {
+        const when = new Date(`${r.requested_date}T${r.requested_time}`);
+        const whenStr = when.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + when.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+        return `
+          <div class="action-item">
+            <span><strong>${r.name || '(no name given)'}</strong> wants a call ${whenStr}${r.phone ? ' - ' + r.phone : ''}</span>
+            <button type="button" class="secondary claim-callback-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Claim</button>
+          </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.claim-callback-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          const { error: updErr } = await supabaseClient.from('callback_requests').update({ claimed_by: myUserId, status: 'claimed' }).eq('id', btn.dataset.id);
+          if (updErr) { alert(updErr.message); btn.disabled = false; return; }
+          await loadCallbackRequestsHome();
+        });
+      });
     }
 
     // Driven by profiles.home_shortcuts (see MAIN_NAV_ITEMS/
@@ -937,6 +981,7 @@
 
       await refreshClockButton();
       await renderQuickNav();
+      await loadCallbackRequestsHome();
       await loadActionItems();
       await loadFeed();
     })();
