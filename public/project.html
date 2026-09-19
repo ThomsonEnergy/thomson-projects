@@ -708,8 +708,9 @@
         <div class="card" id="pylon-card">
           <h2>Pylon system design</h2>
           <p class="subtitle" style="margin-bottom:10px;">Start here for a solar job: create the design/quote in Pylon first, then paste the resulting proposal link below before filling in the scope of works and pricing.</p>
-          <a href="https://app.getpylon.com/app" target="_blank" rel="noopener"><button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:14px;">Create job in Pylon &rarr;</button></a>
-          <label style="margin-top:0">Pylon proposal link</label>
+          <button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:6px;">Create job in Pylon &rarr;</button>
+          <div id="pylon-create-msg"></div>
+          <label style="margin-top:10px;">Pylon proposal link</label>
           <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." />
           <div class="grid cols-3" style="margin-top:10px;">
             <div style="grid-column: span 2;"><label>Pylon project ID (optional, for pulling system data)</label><input id="p-pylon-id" placeholder="Requires a Pylon API key set up under Settings > API Keys" /></div>
@@ -968,6 +969,38 @@
         document.getElementById('milestone-rows').insertAdjacentHTML('beforeend', milestoneRowHtml());
         wireMilestoneRows();
         refreshMilestoneTotal();
+      });
+
+      document.getElementById('pylon-create-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('pylon-create-btn');
+        const msg = document.getElementById('pylon-create-msg');
+        const name = document.getElementById('p-client').value.trim();
+        const address = document.getElementById('p-address').value.trim();
+        if (!name || !address) { msg.innerHTML = `<div class="error-box">Enter the client name and site address first.</div>`; return; }
+        btn.disabled = true;
+        btn.textContent = 'Creating in Pylon...';
+        msg.innerHTML = '';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/push-to-pylon', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({
+              name, address,
+              email: document.getElementById('p-email').value.trim() || null,
+              phone: document.getElementById('p-phone').value.trim() || null,
+              referenceNumber: project.quote_number ? `Q${project.quote_number}` : (project.name || null),
+            }),
+          });
+          const json = await res.json();
+          if (!json.ok) throw new Error(json.error);
+          if (json.pylonProjectId) document.getElementById('p-pylon-id').value = json.pylonProjectId;
+          msg.innerHTML = `<div class="success-box">Created in Pylon${json.referenceNumber ? ` as ${json.referenceNumber}` : ''} with the client/site details filled in. <a class="link-quiet" href="https://app.getpylon.com/app" target="_blank" rel="noopener">Open Pylon</a> to finish the design, then paste the resulting proposal link above.</div>`;
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+        btn.disabled = false;
+        btn.textContent = 'Create job in Pylon →';
       });
 
       document.getElementById('pylon-pull-btn').addEventListener('click', async () => {
