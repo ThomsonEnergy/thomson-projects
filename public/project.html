@@ -637,7 +637,7 @@
       });
     }
 
-    function editorPanelHtml() {
+    function editorPanelHtml(project) {
       return `
         <div class="card">
           <h2>Proposal template</h2>
@@ -2988,7 +2988,7 @@
             ` : ''}
 
             <div class="settings-panel" id="panel-details">
-              ${editMode && !project.job_number ? editorPanelHtml() : `
+              ${editMode && !project.job_number ? editorPanelHtml(project) : `
               <div class="card">
                 <h2>Notes</h2>
                 <p class="subtitle" style="margin-bottom:8px;">Background/context that sticks around regardless of how the job progresses - e.g. what a lead originally asked for. Not shown to the client.</p>
