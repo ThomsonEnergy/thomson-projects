@@ -136,7 +136,8 @@
         .from('callback_requests')
         .select('*')
         .is('claimed_by', null)
-        .neq('status', 'done')
+        .neq('status', 'completed')
+        .neq('status', 'cancelled')
         .order('requested_date')
         .order('requested_time');
       if (error || !requests || !requests.length) { card.style.display = 'none'; return; }
@@ -155,7 +156,7 @@
       listEl.querySelectorAll('.claim-callback-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           btn.disabled = true;
-          const { error: updErr } = await supabaseClient.from('callback_requests').update({ claimed_by: myUserId, status: 'claimed' }).eq('id', btn.dataset.id);
+          const { error: updErr } = await supabaseClient.from('callback_requests').update({ claimed_by: myUserId, status: 'scheduled' }).eq('id', btn.dataset.id);
           if (updErr) { alert(updErr.message); btn.disabled = false; return; }
           await loadCallbackRequestsHome();
         });

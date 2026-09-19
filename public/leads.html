@@ -160,6 +160,11 @@
             <div id="ld-inspection-area" style="margin-top:10px;">${lead.needs_site_visit ? '<p class="subtitle">Checking for a scheduled inspection...</p>' : ''}</div>
           </div>
 
+          <div class="card" id="ld-callbacks-card" style="margin-top:14px; display:none;">
+            <h2 style="font-size:15px;">Call requests from this person</h2>
+            <div id="ld-callbacks-area"></div>
+          </div>
+
           <div class="grid cols-2" style="margin-top:14px;">
             <div><label style="margin-top:0">Phone</label><p>${lead.phone || '-'}</p></div>
             <div><label style="margin-top:0">Email</label><p>${lead.email || '-'}</p></div>
@@ -216,6 +221,22 @@
         await refreshLeadInspectionArea();
       });
       if (lead.needs_site_visit) refreshLeadInspectionArea();
+
+      (async () => {
+        const clauses = [];
+        if (lead.email) clauses.push(`email.eq.${lead.email}`);
+        if (lead.phone) clauses.push(`phone.eq.${lead.phone}`);
+        if (!clauses.length) return;
+        const { data: cbs } = await supabaseClient.from('callback_requests').select('*').or(clauses.join(',')).order('requested_date', { ascending: false });
+        if (!cbs || !cbs.length) return;
+        const card = overlay.querySelector('#ld-callbacks-card');
+        if (!card) return;
+        card.style.display = 'block';
+        overlay.querySelector('#ld-callbacks-area').innerHTML = cbs.map(r => `
+          <p style="margin:4px 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}
+            <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}">${r.status}</span>
+          </p>`).join('');
+      })();
 
       if (!linkedProjectId) {
         overlay.querySelector('#ld-create-job-btn').addEventListener('click', () => createJobFromLead(lead, overlay.querySelector('#ld-convert-msg'), overlay.querySelector('#ld-create-job-btn')));
@@ -384,6 +405,75 @@
       return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
     }
 
+    // Best-effort match of a callback request to an existing lead and/or
+    // existing customer jobs/quotes, by email or phone (whichever the
+    // request actually has - the website's known name/phone mangling
+    // means phone matches won't always hit, email is more reliable).
+    async function matchCallbackToRecords(r) {
+      const leadClauses = [];
+      if (r.email) leadClauses.push(`email.eq.${r.email}`);
+      if (r.phone) leadClauses.push(`phone.eq.${r.phone}`);
+      let leadsMatch = [];
+      if (leadClauses.length) {
+        const { data } = await supabaseClient.from('leads').select('id, name, email, phone, created_at').or(leadClauses.join(','));
+        leadsMatch = data || [];
+      }
+
+      const projectClauses = [];
+      if (r.email) projectClauses.push(`client_email.eq.${r.email}`);
+      if (r.phone) projectClauses.push(`client_phone.eq.${r.phone}`);
+      let projectsMatch = [];
+      if (projectClauses.length) {
+        const { data } = await supabaseClient.from('projects').select('id, name, job_number, quote_number, pipeline_stage, client_name, created_at').or(projectClauses.join(','));
+        projectsMatch = data || [];
+      }
+
+      return { leadsMatch, projectsMatch };
+    }
+
+    async function openCallbackDetail(r, match) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+      const { leadsMatch, projectsMatch } = match;
+
+      overlay.innerHTML = `
+        <div class="card" style="max-width:560px; width:100%; max-height:88vh; overflow-y:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+            <div>
+              <h2 style="margin:0;">${r.name || '(no name given)'}</h2>
+              <p class="subtitle" style="margin:4px 0 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}</p>
+            </div>
+            <button type="button" class="secondary" id="cb-close-btn" style="font-size:12px; padding:6px 10px;">Close</button>
+          </div>
+          <div class="grid cols-2" style="margin-top:14px;">
+            <div><label style="margin-top:0">Phone</label><p>${r.phone || '-'}</p></div>
+            <div><label style="margin-top:0">Email</label><p>${r.email || '-'}</p></div>
+          </div>
+          ${r.message ? `<label>Message</label><p>${escapeHtml(r.message)}</p>` : ''}
+
+          ${!leadsMatch.length && !projectsMatch.length ? `<p class="subtitle" style="margin-top:14px;">No matching lead or customer record found - this looks like a new contact.</p>` : `
+            ${leadsMatch.length ? `<label>Matching lead${leadsMatch.length > 1 ? 's' : ''}</label>
+              ${leadsMatch.map(l => `<p style="margin:4px 0;"><a class="link-quiet cb-open-lead" data-id="${l.id}" href="#">${l.name || '(no name)'} &middot; ${timeAgo(l.created_at)}</a></p>`).join('')}` : ''}
+            ${projectsMatch.length ? `<label>Jobs &amp; quotes</label>
+              ${projectsMatch.map(p => `<p style="margin:4px 0;"><a class="link-quiet" href="/project.html?id=${p.id}" target="_blank" rel="noopener">${p.job_number ? 'Job #' + p.job_number : p.quote_number ? 'Quote #' + p.quote_number : p.name}</a> ${p.pipeline_stage === 'archived' ? '<span class="badge draft">Archived</span>' : ''}</p>`).join('')}` : ''}
+          `}
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#cb-close-btn').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+      overlay.querySelectorAll('.cb-open-lead').forEach(a => {
+        a.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const { data: fullLead } = await supabaseClient.from('leads').select('*').eq('id', a.dataset.id).single();
+          if (!fullLead) return;
+          const { data: linked } = await supabaseClient.from('projects').select('id').eq('lead_id', fullLead.id).limit(1).maybeSingle();
+          overlay.remove();
+          openLeadDetail(fullLead, linked ? linked.id : null);
+        });
+      });
+    }
+
     async function loadCallbackRequests() {
       const listEl = document.getElementById('callback-requests-list');
       const { data: requests, error } = await supabaseClient
@@ -394,25 +484,41 @@
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (!requests || !requests.length) { listEl.innerHTML = `<p class="subtitle">No call requests yet.</p>`; return; }
 
-      listEl.innerHTML = requests.map(r => `
-        <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+      const matches = await Promise.all(requests.map(r => matchCallbackToRecords(r)));
+
+      listEl.innerHTML = requests.map((r, i) => {
+        const { leadsMatch, projectsMatch } = matches[i];
+        const matchTag = projectsMatch.length ? `<span class="badge in_progress" style="margin-left:6px;">Existing customer</span>`
+          : leadsMatch.length ? `<span class="badge in_progress" style="margin-left:6px;">Matches a lead</span>` : '';
+        return `
+        <div class="callback-row" data-id="${r.id}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; cursor:pointer;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
             <div>
               <strong>${r.name || '(no name given)'}</strong>
-              <span class="badge ${r.status === 'done' ? 'accepted' : r.status === 'claimed' ? 'in_progress' : 'draft'}" style="margin-left:6px;">${r.status}</span>
+              <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}" style="margin-left:6px;">${r.status}</span>
+              ${matchTag}
               <p class="subtitle" style="margin:4px 0 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}</p>
               <p class="subtitle" style="margin:2px 0 0;">${r.phone ? r.phone + ' &middot; ' : ''}${r.email || ''}</p>
               ${r.message ? `<p style="margin:6px 0 0;">${escapeHtml(r.message)}</p>` : ''}
             </div>
             <div>
-              ${r.status !== 'done' ? `<button type="button" class="secondary mark-callback-done-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Mark as called</button>` : ''}
+              ${r.status !== 'completed' ? `<button type="button" class="secondary mark-callback-done-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Mark as called</button>` : ''}
             </div>
           </div>
-        </div>`).join('');
+        </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.callback-row').forEach((row, i) => {
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('.mark-callback-done-btn')) return;
+          openCallbackDetail(requests[i], matches[i]);
+        });
+      });
 
       listEl.querySelectorAll('.mark-callback-done-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const { error: updErr } = await supabaseClient.from('callback_requests').update({ status: 'done' }).eq('id', btn.dataset.id);
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const { error: updErr } = await supabaseClient.from('callback_requests').update({ status: 'completed' }).eq('id', btn.dataset.id);
           if (updErr) { alert(updErr.message); return; }
           await loadCallbackRequests();
         });
