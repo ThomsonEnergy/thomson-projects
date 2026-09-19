@@ -1344,6 +1344,45 @@ function openQuickJobPanel(onCreated) {
   document.body.appendChild(overlay);
 }
 
+// Best-effort carry-over of a site inspection across lead -> quote -> job.
+// A job created from an approved quote is a NEW projects row
+// (source_quote_id points back at the quote, lead_id is never copied onto
+// it), and a quote created from a lead only ever gets lead_id set on the
+// quote itself. Rather than physically moving or duplicating the
+// site_inspections row (which would orphan whichever earlier stage still
+// wants to see it - the lead's own page still needs it, for instance),
+// this just looks in every place an inspection could have been recorded
+// for this same project's chain: directly on it, on the lead it came
+// from, or - for a job - on the quote it came from and that quote's own
+// lead. Same underlying inspection (and its answers/photos) shows up at
+// every stage.
+async function findLinkedSiteInspection(project) {
+  const { data: direct } = await supabaseClient.from('site_inspections')
+    .select('id, status').eq('project_id', project.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (direct) return direct;
+
+  if (project.lead_id) {
+    const { data: viaLead } = await supabaseClient.from('site_inspections')
+      .select('id, status').eq('lead_id', project.lead_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (viaLead) return viaLead;
+  }
+
+  if (project.source_quote_id) {
+    const { data: viaQuote } = await supabaseClient.from('site_inspections')
+      .select('id, status').eq('project_id', project.source_quote_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (viaQuote) return viaQuote;
+
+    const { data: quote } = await supabaseClient.from('projects').select('lead_id').eq('id', project.source_quote_id).maybeSingle();
+    if (quote?.lead_id) {
+      const { data: viaQuoteLead } = await supabaseClient.from('site_inspections')
+        .select('id, status').eq('lead_id', quote.lead_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (viaQuoteLead) return viaQuoteLead;
+    }
+  }
+
+  return null;
+}
+
 // Schedules a site inspection against a lead or job/quote - picks a
 // checklist template (see Settings > Inspection Checklists) and who/when,
 // creates the site_inspections row plus a matching schedule_assignments
@@ -1357,7 +1396,7 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
   document.body.appendChild(overlay);
 
   const [{ data: templates }, { data: staff }] = await Promise.all([
-    supabaseClient.from('inspection_checklist_templates').select('id, name').eq('active', true).order('sort_order'),
+    supabaseClient.from('inspection_checklist_templates').select('id, name').eq('active', true).eq('checklist_type', 'site_inspection').order('sort_order'),
     supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
   ]);
 

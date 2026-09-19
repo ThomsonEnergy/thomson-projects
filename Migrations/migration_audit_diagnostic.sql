@@ -322,4 +322,9 @@ union all
 select '109', 'callback_requests_ui',
   case when exists (select 1 from information_schema.columns where table_name = 'callback_requests' and column_name = 'claimed_by')
   then 'present' else 'MISSING' end
+union all
+select '110', 'quote_compliance_checklist',
+  case when exists (select 1 from information_schema.tables where table_name = 'quote_compliance_answers')
+    and exists (select 1 from information_schema.columns where table_name = 'inspection_checklist_templates' and column_name = 'checklist_type')
+  then 'present' else 'MISSING' end
 order by 1;

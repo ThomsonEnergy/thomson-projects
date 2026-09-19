@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=12" />
+<link rel="stylesheet" href="/css/style.css?v=13" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -334,13 +334,20 @@
         <!-- Inspection Checklists -->
         <div class="settings-panel" id="panel-inspections">
           <div class="card">
-            <h2>Inspection checklist templates</h2>
-            <p class="subtitle" style="margin-bottom:10px;">One template per job type (e.g. Solar & Battery, General Electrical) - picked when scheduling a site inspection from a lead, quote, or job. A Yes/No question can be set to reveal an extra required photo when answered a certain way, same pattern as "Does the property have a sub-board?" &rarr; Sub Board photo.</p>
+            <h2>Inspection &amp; document checklist templates</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Two kinds of checklist, same shape: <strong>Site inspection</strong> templates are picked when scheduling a field visit from a lead, quote, or job. <strong>Quote compliance</strong> templates are the "documents to gather from the customer" checklist sales work through directly on a solar quote - no site visit needed. Either way, a Yes/No question can be set to reveal an extra required photo when answered a certain way, same pattern as "Does the property have a sub-board?" &rarr; Sub Board photo.</p>
             <div id="insp-templates-list"><p class="subtitle">Loading...</p></div>
-            <div style="margin-top:14px; display:flex; gap:8px; align-items:flex-end;">
-              <div style="flex:1;">
+            <div style="margin-top:14px; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+              <div style="flex:1; min-width:160px;">
                 <label style="margin-top:0">New template name</label>
                 <input id="new-template-name" placeholder="e.g. Heat Pump Install" />
+              </div>
+              <div>
+                <label style="margin-top:0">Type</label>
+                <select id="new-template-type">
+                  <option value="site_inspection">Site inspection</option>
+                  <option value="quote_compliance">Quote compliance (documents to gather)</option>
+                </select>
               </div>
               <button id="add-template-btn">Add template</button>
             </div>
@@ -601,7 +608,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=19"></script>
+  <script src="/js/supabase-client.js?v=20"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -875,7 +882,23 @@
 
     function renderInspTemplatesList() {
       const listEl = document.getElementById('insp-templates-list');
-      listEl.innerHTML = inspTemplatesCache.map(t => {
+      const groups = [
+        { type: 'site_inspection', heading: 'Site inspection checklists' },
+        { type: 'quote_compliance', heading: 'Quote compliance checklists' },
+      ];
+      listEl.innerHTML = groups.map(g => {
+        const templates = inspTemplatesCache.filter(t => (t.checklist_type || 'site_inspection') === g.type);
+        return `
+        <div style="margin-bottom:18px;">
+          <h3 style="font-size:13px; margin:0 0 8px;">${g.heading}</h3>
+          ${templates.length ? inspTemplateRowsHtml(templates) : '<p class="subtitle">None yet.</p>'}
+        </div>`;
+      }).join('');
+      wireInspTemplateRows();
+    }
+
+    function inspTemplateRowsHtml(templates) {
+      return templates.map(t => {
         const items = inspItemsCache[t.id] || [];
         const expanded = expandedTemplateId === t.id;
         return `
@@ -946,7 +969,10 @@
           ` : ''}
         </div>`;
       }).join('');
+    }
 
+    function wireInspTemplateRows() {
+      const listEl = document.getElementById('insp-templates-list');
       listEl.querySelectorAll('.toggle-template-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           expandedTemplateId = expandedTemplateId === btn.dataset.id ? null : btn.dataset.id;
@@ -1022,9 +1048,11 @@
     document.getElementById('add-template-btn').addEventListener('click', async () => {
       const msg = document.getElementById('insp-templates-msg');
       const name = document.getElementById('new-template-name').value.trim();
+      const checklistType = document.getElementById('new-template-type').value;
       if (!name) { msg.innerHTML = `<div class="error-box">Enter a template name.</div>`; return; }
-      const nextSort = inspTemplatesCache.length ? Math.max(...inspTemplatesCache.map(t => t.sort_order)) + 1 : 1;
-      const { error } = await supabaseClient.from('inspection_checklist_templates').insert({ name, sort_order: nextSort });
+      const sameType = inspTemplatesCache.filter(t => (t.checklist_type || 'site_inspection') === checklistType);
+      const nextSort = sameType.length ? Math.max(...sameType.map(t => t.sort_order)) + 1 : 1;
+      const { error } = await supabaseClient.from('inspection_checklist_templates').insert({ name, sort_order: nextSort, checklist_type: checklistType });
       if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       document.getElementById('new-template-name').value = '';
       msg.innerHTML = '';

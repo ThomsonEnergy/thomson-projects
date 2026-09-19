@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=12" />
+<link rel="stylesheet" href="/css/style.css?v=13" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=19"></script>
+  <script src="/js/supabase-client.js?v=20"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -708,7 +708,7 @@
         <div class="card" id="pylon-card">
           <h2>Pylon system design</h2>
           <p class="subtitle" style="margin-bottom:10px;">Start here for a solar job: create the design/quote in Pylon first, then paste the resulting proposal link below before filling in the scope of works and pricing.</p>
-          <a href="https://app.getpylon.com" target="_blank" rel="noopener"><button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:14px;">Create job in Pylon &rarr;</button></a>
+          <a href="https://app.getpylon.com/app" target="_blank" rel="noopener"><button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:14px;">Create job in Pylon &rarr;</button></a>
           <label style="margin-top:0">Pylon proposal link</label>
           <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." />
           <div class="grid cols-3" style="margin-top:10px;">
@@ -769,6 +769,12 @@
           <p class="subtitle" style="margin-bottom:10px;">What NETCC and the Clean Energy Regulator require before this quote is sent - checked against this job's own data, not a guess.</p>
           <button type="button" class="secondary" id="compliance-check-btn">Check compliance</button>
           <div id="compliance-check-result" style="margin-top:12px;"></div>
+
+          <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+            <h2 style="font-size:15px;">Documents to gather from the customer</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Work through these with the customer - answers and photos save as you go.</p>
+            <div id="quote-doc-checklist"><p class="subtitle">Loading...</p></div>
+          </div>
         </div>
 
         <div class="card">
@@ -802,16 +808,26 @@
 
     async function enterEditMode(project) {
       editMode = true;
-      if (!RATE_TIERS.length) {
-        const { data: tiersData } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
-        RATE_TIERS = tiersData || [];
+      try {
+        if (!RATE_TIERS.length) {
+          const { data: tiersData } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
+          RATE_TIERS = tiersData || [];
+        }
+        if (!Object.keys(companySettings).length) {
+          const { data: settingsRow } = await supabaseClient.from('company_settings')
+            .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
+          companySettings = settingsRow || {};
+        }
+        render(project, true);
+      } catch (err) {
+        // Was previously a silent no-op on failure - the click looked like
+        // it did nothing at all, with the real error only visible in the
+        // console. Surface it instead, and drop back to view mode rather
+        // than leaving editMode true with no edit form actually shown.
+        editMode = false;
+        console.error('enterEditMode failed:', err);
+        alert('Could not open the editor: ' + err.message);
       }
-      if (!Object.keys(companySettings).length) {
-        const { data: settingsRow } = await supabaseClient.from('company_settings')
-          .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
-        companySettings = settingsRow || {};
-      }
-      render(project, true);
     }
 
     async function wireEditForm(project) {
@@ -820,6 +836,7 @@
       // read-only, so all of that wiring below is quote-edit only.
       const isQuoteEdit = !project.job_number;
 
+      try {
       if (isQuoteEdit) {
       document.querySelectorAll('.template-option').forEach(btn => btn.addEventListener('click', () => applyEditTemplate(btn.dataset.template)));
 
@@ -978,6 +995,7 @@
           project.id, 'quote', 'quote', complianceBtn, document.getElementById('compliance-check-result')
         ));
       }
+      if (document.getElementById('quote-doc-checklist')) loadQuoteComplianceChecklist(project);
       } // end isQuoteEdit-only wiring
 
       document.getElementById('add-row').addEventListener('click', () => addRow());
@@ -1048,6 +1066,16 @@
       if (!stages.length) addRow({ name: 'Stage 1' });
       updateEditTotal();
       if (isQuoteEdit) loadEditAddressAutocomplete(companySettings.google_maps_api_key);
+      } catch (err) {
+        // wireEditForm runs un-awaited from render() (it's called without
+        // `await` since render() itself isn't async), so a throw in here
+        // used to just become a silent unhandled rejection - the edit form
+        // would appear (from render()'s own innerHTML swap) but stay
+        // completely unpopulated/unwired, which looks exactly like
+        // "nothing happens" if the swap itself was subtle. Surface it.
+        console.error('wireEditForm failed:', err);
+        alert('The editor loaded but hit an error setting up: ' + err.message);
+      }
     }
 
     // Presents the choice - quick note vs full signed Variation - for a set
@@ -3134,8 +3162,12 @@
       const inspectionArea = document.getElementById('proj-inspection-area');
       async function refreshProjectInspectionArea() {
         if (!inspectionArea) return;
-        if (!project.needs_site_visit) { inspectionArea.innerHTML = ''; return; }
-        const { data: insp } = await supabaseClient.from('site_inspections').select('id, status').eq('project_id', project.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+        // Checks this project directly, then walks lead -> quote -> job so
+        // an inspection recorded at an earlier stage (e.g. on the lead,
+        // before this job existed) still shows up here - see
+        // findLinkedSiteInspection in supabase-client.js.
+        const insp = await findLinkedSiteInspection(project);
+        if (!insp && !project.needs_site_visit) { inspectionArea.innerHTML = ''; return; }
         if (insp) {
           inspectionArea.innerHTML = `<a class="link-quiet" href="/site-inspection.html?id=${insp.id}">Site inspection - <span class="badge ${insp.status === 'completed' ? 'accepted' : 'sent'}">${insp.status.replace('_', ' ')}</span> &rarr;</a>`;
         } else {
@@ -3511,6 +3543,108 @@
         btnEl.disabled = false;
         btnEl.textContent = originalLabel;
       }
+    }
+
+    // Sales-facing "documents to gather from the customer" checklist -
+    // separate from the automatic Pylon/system checks above. Same
+    // yes/no + conditional-photo item shape as the site inspection
+    // checklists (see site-inspection.html), just scoped to
+    // checklist_type 'quote_compliance' and answered here inline rather
+    // than via a scheduled site visit - it's a conversation with the
+    // customer, not a trip.
+    async function loadQuoteComplianceChecklist(project) {
+      const containerEl = document.getElementById('quote-doc-checklist');
+      if (!containerEl) return;
+
+      const { data: template } = await supabaseClient.from('inspection_checklist_templates')
+        .select('id, name').eq('checklist_type', 'quote_compliance').eq('active', true).order('sort_order').limit(1).maybeSingle();
+      if (!template) {
+        containerEl.innerHTML = `<p class="subtitle">No document checklist set up yet - add one under Settings &gt; Inspection Checklists.</p>`;
+        return;
+      }
+
+      const [{ data: itemsData }, { data: answersData }] = await Promise.all([
+        supabaseClient.from('inspection_checklist_items').select('*').eq('template_id', template.id).order('sort_order'),
+        supabaseClient.from('quote_compliance_answers').select('*').eq('project_id', project.id),
+      ]);
+      const items = itemsData || [];
+      const answers = {};
+      (answersData || []).forEach(a => { answers[a.item_id] = a; });
+
+      function itemsVisible() {
+        return items.filter(it => {
+          if (!it.parent_item_id) return true;
+          const parentAnswer = answers[it.parent_item_id];
+          if (!parentAnswer || parentAnswer.answer_yes_no === null || parentAnswer.answer_yes_no === undefined) return false;
+          return parentAnswer.answer_yes_no === it.show_when_parent_answer;
+        });
+      }
+
+      async function saveAnswer(itemId, fields) {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const row = { project_id: project.id, item_id: itemId, answered_by: user?.id || null, answered_at: new Date().toISOString(), ...fields };
+        const { data, error } = await supabaseClient.from('quote_compliance_answers').upsert(row, { onConflict: 'project_id,item_id' }).select().single();
+        if (error) throw error;
+        answers[itemId] = data;
+      }
+
+      function renderChecklist() {
+        const visible = itemsVisible();
+        containerEl.innerHTML = visible.map(it => {
+          const a = answers[it.id];
+          const isChild = !!it.parent_item_id;
+          const answered = it.item_type === 'photo' ? !!a?.photo_path : (a?.answer_yes_no !== null && a?.answer_yes_no !== undefined);
+          return `
+          <div class="${isChild ? 'insp-child' : ''}">
+            <div class="insp-item ${answered ? 'answered' : ''}" data-item-id="${it.id}">
+              <div class="insp-label">${it.label}${it.required ? '' : ' <span class="subtitle">(optional)</span>'}</div>
+              ${it.description ? `<div class="insp-desc">${it.description}</div>` : ''}
+              ${it.item_type === 'yes_no' ? `
+                <button type="button" class="insp-yn-btn yn-yes ${a?.answer_yes_no === true ? 'selected' : ''}">Yes</button>
+                <button type="button" class="insp-yn-btn secondary yn-no ${a?.answer_yes_no === false ? 'selected' : ''}">No</button>
+              ` : `
+                ${a?.photo_path ? `<img class="insp-photo-thumb" src="${a.photo_path}" />` : ''}
+                <input type="file" class="insp-photo-file" accept="image/*,.pdf" style="display:block; margin-bottom:8px;" />
+                <button type="button" class="secondary insp-photo-upload-btn">${a?.photo_path ? 'Replace' : 'Upload'}</button>
+              `}
+              <div class="insp-item-msg"></div>
+            </div>
+          </div>`;
+        }).join('');
+
+        containerEl.querySelectorAll('.insp-item').forEach(el => {
+          const itemId = el.dataset.itemId;
+          const msgEl = el.querySelector('.insp-item-msg');
+
+          el.querySelectorAll('.yn-yes, .yn-no').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              try { await saveAnswer(itemId, { answer_yes_no: btn.classList.contains('yn-yes') }); renderChecklist(); }
+              catch (err) { msgEl.innerHTML = `<div class="error-box">${err.message}</div>`; }
+            });
+          });
+
+          const uploadBtn = el.querySelector('.insp-photo-upload-btn');
+          if (uploadBtn) {
+            uploadBtn.addEventListener('click', async () => {
+              const fileInput = el.querySelector('.insp-photo-file');
+              if (!fileInput.files.length) { msgEl.innerHTML = `<div class="error-box">Choose a file first.</div>`; return; }
+              uploadBtn.disabled = true;
+              uploadBtn.textContent = 'Uploading...';
+              try {
+                const [url] = await uploadPhotos(fileInput.files, `quote-compliance/${project.id}`, 'site-photos');
+                await saveAnswer(itemId, { photo_path: url });
+                renderChecklist();
+              } catch (err) {
+                msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload';
+              }
+            });
+          }
+        });
+      }
+
+      renderChecklist();
     }
 
     async function loadJobTasks(projectId) {

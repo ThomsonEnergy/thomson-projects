@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=12" />
+<link rel="stylesheet" href="/css/style.css?v=13" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -114,7 +114,7 @@
     <div class="card" id="pylon-card">
       <h2>Pylon system design</h2>
       <p class="subtitle" style="margin-bottom:10px;">Start here for a solar job: create the design/quote in Pylon first, then paste the resulting proposal link below before filling in the scope of works and pricing.</p>
-      <a href="https://app.getpylon.com" target="_blank" rel="noopener"><button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:14px;">Create job in Pylon &rarr;</button></a>
+      <a href="https://app.getpylon.com/app" target="_blank" rel="noopener"><button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:14px;">Create job in Pylon &rarr;</button></a>
       <label style="margin-top:0">Pylon proposal link</label>
       <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." />
       <div class="grid cols-3" style="margin-top:10px;">
@@ -243,7 +243,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=19"></script>
+  <script src="/js/supabase-client.js?v=20"></script>
   <script src="/js/theme.js"></script>
   <script>
     const editId = new URLSearchParams(window.location.search).get('id');
