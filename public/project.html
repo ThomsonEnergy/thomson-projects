@@ -997,7 +997,11 @@
           if (json.pylonProjectId) document.getElementById('p-pylon-id').value = json.pylonProjectId;
           msg.innerHTML = `<div class="success-box">Created in Pylon${json.referenceNumber ? ` as ${json.referenceNumber}` : ''} with the client/site details filled in. <a class="link-quiet" href="https://app.getpylon.com/app" target="_blank" rel="noopener">Open Pylon</a> to finish the design, then paste the resulting proposal link above.</div>`;
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          // Falls back to just opening Pylon manually either way - e.g. a
+          // Pylon account without solar-project-creation API access
+          // (403 feature_not_available) shouldn't leave staff with no way
+          // to create the job at all, just without the auto-filled details.
+          msg.innerHTML = `<div class="error-box">${err.message} - <a class="link-quiet" href="https://app.getpylon.com/app" target="_blank" rel="noopener">open Pylon</a> and create it manually instead.</div>`;
         }
         btn.disabled = false;
         btn.textContent = 'Create job in Pylon →';
