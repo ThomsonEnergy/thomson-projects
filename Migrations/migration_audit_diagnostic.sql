@@ -313,4 +313,9 @@ union all
 select '107', 'home_shortcuts_grant',
   case when exists (select 1 from information_schema.column_privileges where table_name = 'profiles' and grantee = 'authenticated' and column_name = 'home_shortcuts' and privilege_type = 'SELECT')
   then 'present' else 'MISSING' end
+union all
+select '108', 'solar_compliance_tasks',
+  case when exists (select 1 from information_schema.check_constraints where constraint_name = 'job_tasks_task_type_check' and check_clause like '%handover%')
+    and exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'formbay_lodgement_status')
+  then 'present' else 'MISSING' end
 order by 1;

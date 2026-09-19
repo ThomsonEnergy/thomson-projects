@@ -762,6 +762,13 @@
           <div id="pylon-msg"></div>
         </div>
 
+        <div class="card" id="solar-compliance-card" style="${project.proposal_template === 'solar' ? '' : 'display:none;'}">
+          <h2>Compliance checklist</h2>
+          <p class="subtitle" style="margin-bottom:10px;">What NETCC and the Clean Energy Regulator require before this quote is sent - checked against this job's own data, not a guess.</p>
+          <button type="button" class="secondary" id="compliance-check-btn">Check compliance</button>
+          <div id="compliance-check-result" style="margin-top:12px;"></div>
+        </div>
+
         <div class="card">
           <h2>Terms and conditions</h2>
           <textarea id="p-terms" style="min-height:180px;"></textarea>
@@ -962,6 +969,13 @@
           msg.innerHTML = `<div class="error-box">${err.message} (check Settings &gt; API Keys &gt; Pylon, and that this Pylon project ID is correct)</div>`;
         }
       });
+
+      const complianceBtn = document.getElementById('compliance-check-btn');
+      if (complianceBtn) {
+        complianceBtn.addEventListener('click', () => runComplianceCheck(
+          project.id, 'quote', 'quote', complianceBtn, document.getElementById('compliance-check-result')
+        ));
+      }
       } // end isQuoteEdit-only wiring
 
       document.getElementById('add-row').addEventListener('click', () => addRow());
@@ -2639,6 +2653,35 @@
                 <div id="summary-po-line">${project.job_number ? `<p class="subtitle">Loading purchase orders...</p>` : `<p class="subtitle">Purchase orders start once this quote is approved and becomes a job.</p>`}</div>
               </div>
 
+              ${project.job_number && project.proposal_template === 'solar' && !editMode ? `
+              <div class="card">
+                <h2>Handover / STC details</h2>
+                <p class="subtitle" style="margin-bottom:10px;">Recorded once install is done - feeds the handover checklist and, eventually, the Formbay STC lodgement.</p>
+                <label style="margin-top:0">NMI</label>
+                <input id="hd-nmi" value="${project.nmi || ''}" placeholder="National Metering Identifier" />
+                <label>Panel serial numbers (one per line)</label>
+                <textarea id="hd-panel-serials" style="min-height:70px;">${project.panel_serial_numbers || ''}</textarea>
+                <label>Inverter serial numbers (one per line)</label>
+                <textarea id="hd-inverter-serials" style="min-height:70px;">${project.inverter_serial_numbers || ''}</textarea>
+                <label>Formbay STC lodgement status</label>
+                <select id="hd-formbay-status">
+                  <option value="" ${!project.formbay_lodgement_status ? 'selected' : ''}>-- Not lodged yet --</option>
+                  <option value="pending_installer_action" ${project.formbay_lodgement_status === 'pending_installer_action' ? 'selected' : ''}>Pending installer action</option>
+                  <option value="pending_retailer_action" ${project.formbay_lodgement_status === 'pending_retailer_action' ? 'selected' : ''}>Pending retailer action</option>
+                  <option value="pending_cer_audit" ${project.formbay_lodgement_status === 'pending_cer_audit' ? 'selected' : ''}>Pending CER audit</option>
+                  <option value="approved_for_sale" ${project.formbay_lodgement_status === 'approved_for_sale' ? 'selected' : ''}>Approved for sale</option>
+                  <option value="sold" ${project.formbay_lodgement_status === 'sold' ? 'selected' : ''}>Sold</option>
+                </select>
+                <p class="subtitle" style="margin-top:4px;">Set by hand for now - Formbay isn't wired up to push/pull this automatically yet.</p>
+                <button type="button" id="hd-save-btn" style="margin-top:10px;">Save</button>
+                <div id="hd-save-msg"></div>
+                <div style="margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border);">
+                  <button type="button" class="secondary" id="handover-check-btn">Check handover checklist</button>
+                  <div id="handover-check-result" style="margin-top:12px;"></div>
+                </div>
+              </div>
+              ` : ''}
+
               ${!editMode ? `
               <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
@@ -3023,6 +3066,35 @@
       if (document.getElementById('job-invoices-list')) loadJobInvoices(project);
       if (document.getElementById('variations-list')) loadVariations(project.id);
       loadJobTasks(project.id);
+
+      const hdSaveBtn = document.getElementById('hd-save-btn');
+      if (hdSaveBtn) hdSaveBtn.addEventListener('click', async () => {
+        const msgEl = document.getElementById('hd-save-msg');
+        hdSaveBtn.disabled = true;
+        hdSaveBtn.textContent = 'Saving...';
+        try {
+          const updates = {
+            nmi: document.getElementById('hd-nmi').value.trim() || null,
+            panel_serial_numbers: document.getElementById('hd-panel-serials').value.trim() || null,
+            inverter_serial_numbers: document.getElementById('hd-inverter-serials').value.trim() || null,
+            formbay_lodgement_status: document.getElementById('hd-formbay-status').value || null,
+          };
+          const { error } = await supabaseClient.from('projects').update(updates).eq('id', project.id);
+          if (error) throw error;
+          Object.assign(project, updates);
+          msgEl.innerHTML = `<div class="success-box">Saved.</div>`;
+        } catch (err) {
+          msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+        hdSaveBtn.disabled = false;
+        hdSaveBtn.textContent = 'Save';
+      });
+
+      const handoverCheckBtn = document.getElementById('handover-check-btn');
+      if (handoverCheckBtn) handoverCheckBtn.addEventListener('click', () => runComplianceCheck(
+        project.id, 'handover', 'handover', handoverCheckBtn, document.getElementById('handover-check-result')
+      ));
+
       loadDocuments(project.id);
       wireDocumentUpload(project);
       if (document.getElementById('ccew-section')) initCcewSection(project);
@@ -3368,6 +3440,77 @@
       }).join('');
     }
 
+    // Shared by the quote-stage and job-handover compliance panels - runs
+    // check-solar-compliance.js for the given phase, shows what's missing,
+    // and offers to turn the gaps into job_tasks via generate-solar-tasks.js
+    // (see those functions for what's actually deterministic vs AI-worded).
+    async function runComplianceCheck(projectId, phase, taskType, btnEl, resultEl) {
+      btnEl.disabled = true;
+      const originalLabel = btnEl.textContent;
+      btnEl.textContent = 'Checking...';
+      resultEl.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const checkRes = await fetch('/.netlify/functions/check-solar-compliance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ projectId, phase }),
+        });
+        const checkJson = await checkRes.json();
+        if (!checkJson.ok) throw new Error(checkJson.error);
+
+        if (!checkJson.missing.length) {
+          resultEl.innerHTML = `<div class="success-box">Everything on the checklist is in place.</div>`;
+          return;
+        }
+
+        resultEl.innerHTML = `
+          <div class="error-box">
+            <p style="margin:0 0 8px; font-weight:600;">${checkJson.missing.length} thing${checkJson.missing.length === 1 ? '' : 's'} missing:</p>
+            <ul style="margin:0 0 10px; padding-left:18px;">${checkJson.missing.map(m => `<li>${m.label}</li>`).join('')}</ul>
+            <button type="button" class="secondary create-compliance-tasks-btn">Create tasks for these</button>
+          </div>`;
+
+        resultEl.querySelector('.create-compliance-tasks-btn').addEventListener('click', async (e) => {
+          const createBtn = e.target;
+          createBtn.disabled = true;
+          createBtn.textContent = 'Creating...';
+          try {
+            const { data: proj } = await supabaseClient.from('projects').select('pylon_data').eq('id', projectId).single();
+            const pylonData = proj?.pylon_data || {};
+            const equipment = {
+              panels: pylonData.module_types || [],
+              inverters: pylonData.inverter_types || [],
+              batteries: pylonData.storage_types || [],
+            };
+            const wordRes = await fetch('/.netlify/functions/generate-solar-tasks', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ missing: checkJson.missing, equipment }),
+            });
+            const wordJson = await wordRes.json();
+            if (!wordJson.ok) throw new Error(wordJson.error);
+
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            const { error: insErr } = await supabaseClient.from('job_tasks').insert(
+              wordJson.tasks.map(t => ({ project_id: projectId, description: t.description, task_type: taskType, created_by: user.id }))
+            );
+            if (insErr) throw insErr;
+            resultEl.innerHTML = `<div class="success-box">${wordJson.tasks.length} task${wordJson.tasks.length === 1 ? '' : 's'} added.</div>`;
+            if (typeof loadJobTasks === 'function' && document.getElementById('job-tasks-list')) await loadJobTasks(projectId);
+          } catch (err) {
+            createBtn.disabled = false;
+            createBtn.textContent = 'Create tasks for these';
+            resultEl.insertAdjacentHTML('beforeend', `<div class="error-box">${err.message}</div>`);
+          }
+        });
+      } catch (err) {
+        resultEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+      } finally {
+        btnEl.disabled = false;
+        btnEl.textContent = originalLabel;
+      }
+    }
+
     async function loadJobTasks(projectId) {
       const listEl = document.getElementById('job-tasks-list');
       const summaryEl = document.getElementById('summary-tasks-line');
@@ -3418,17 +3561,22 @@
           </div>`;
       }
 
-      const prejobTasks = tasks.filter(t => t.task_type !== 'onsite');
+      const prejobTasks = tasks.filter(t => t.task_type === 'prejob' || t.task_type === 'quote' || !t.task_type);
       const onsiteTasks = tasks.filter(t => t.task_type === 'onsite');
+      const handoverTasks = tasks.filter(t => t.task_type === 'handover');
 
       listEl.innerHTML = `
         <div style="margin-bottom:16px;">
-          <h3 style="font-size:14px; margin:0 0 4px;">Prejob / office / handover</h3>
+          <h3 style="font-size:14px; margin:0 0 4px;">Prejob / office</h3>
           ${prejobTasks.length ? prejobTasks.map(taskRowHtml).join('') : '<p class="subtitle">None.</p>'}
         </div>
-        <div>
+        <div style="margin-bottom:16px;">
           <h3 style="font-size:14px; margin:0 0 4px;">Onsite</h3>
           ${onsiteTasks.length ? onsiteTasks.map(taskRowHtml).join('') : '<p class="subtitle">None.</p>'}
+        </div>
+        <div>
+          <h3 style="font-size:14px; margin:0 0 4px;">Handover (STC/compliance paperwork)</h3>
+          ${handoverTasks.length ? handoverTasks.map(taskRowHtml).join('') : '<p class="subtitle">None.</p>'}
         </div>`;
 
       listEl.querySelectorAll('.complete-job-task-btn').forEach(btn => {
@@ -3458,8 +3606,10 @@
           <input id="at-desc" placeholder="e.g. Check POs and order stock" />
           <label>Type</label>
           <select id="at-task-type">
-            <option value="prejob">Prejob - office / handover docs</option>
+            <option value="quote">Quote - required before this quote is sent</option>
+            <option value="prejob">Prejob - office / before install</option>
             <option value="onsite">Onsite</option>
+            <option value="handover">Handover - STC/compliance paperwork after install</option>
           </select>
           <label>Assign to</label>
           <select id="at-assign-type">

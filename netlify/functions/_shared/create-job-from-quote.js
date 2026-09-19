@@ -17,6 +17,7 @@
 
 const crypto = require('crypto');
 const { computeDueDate } = require('./compute-due-date');
+const { createDefaultJobTasks } = require('./create-default-job-tasks');
 
 function splitLabourMaterial(centre, amount) {
   const labourCost = Number(centre.estimated_labour_cost) || 0;
@@ -220,6 +221,10 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
     const { error: pgErr } = await supabaseAdmin.from('cost_centre_photo_groups').insert(allPhotoGroups);
     if (pgErr) throw pgErr;
   }
+
+  // Best-effort, doesn't block job creation if it fails - see
+  // create-default-job-tasks.js.
+  await createDefaultJobTasks(supabaseAdmin, job, newStages);
 
   const invoiceToken = await raiseDepositInvoice(supabaseAdmin, job, newStages);
 

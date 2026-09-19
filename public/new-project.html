@@ -225,6 +225,13 @@
       <div id="pylon-msg"></div>
     </div>
 
+    <div class="card" id="solar-compliance-card" style="display:none;">
+      <h2>Compliance checklist</h2>
+      <p class="subtitle" style="margin-bottom:10px;">What NETCC and the Clean Energy Regulator require before this quote is sent - checked against this job's own data, not a guess.</p>
+      <button type="button" class="secondary" id="compliance-check-btn">Check compliance</button>
+      <div id="compliance-check-result" style="margin-top:12px;"></div>
+    </div>
+
     <div class="card">
       <h2>Terms and conditions</h2>
       <p class="subtitle" style="margin-bottom:10px;">Prefilled from your default terms in Settings. Edit here if this job needs something different.</p>
@@ -377,6 +384,7 @@
         document.getElementById('p-pylon-link').value = '';
         document.getElementById('p-pylon-id').value = '';
       }
+      document.getElementById('solar-compliance-card').style.display = info.showPylon ? 'block' : 'none';
     }
 
     document.querySelectorAll('.template-option').forEach(btn => {
@@ -873,6 +881,79 @@
         msg.innerHTML = `<div class="success-box">Pulled from Pylon.${summary ? ' ' + summary : ' No hardware summary came back - check the function logs against the field names in the Pylon API docs.'}</div>`;
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message} (check Settings &gt; API Keys &gt; Pylon, and that this Pylon project ID is correct)</div>`;
+      }
+    });
+
+    document.getElementById('compliance-check-btn').addEventListener('click', async () => {
+      const resultEl = document.getElementById('compliance-check-result');
+      if (!editId) {
+        resultEl.innerHTML = `<div class="error-box">Save this quote first, then come back to run the compliance check.</div>`;
+        return;
+      }
+      const btn = document.getElementById('compliance-check-btn');
+      btn.disabled = true;
+      btn.textContent = 'Checking...';
+      resultEl.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const checkRes = await fetch('/.netlify/functions/check-solar-compliance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ projectId: editId, phase: 'quote' }),
+        });
+        const checkJson = await checkRes.json();
+        if (!checkJson.ok) throw new Error(checkJson.error);
+
+        if (!checkJson.missing.length) {
+          resultEl.innerHTML = `<div class="success-box">Everything on the checklist is in place.</div>`;
+          return;
+        }
+
+        resultEl.innerHTML = `
+          <div class="error-box">
+            <p style="margin:0 0 8px; font-weight:600;">${checkJson.missing.length} thing${checkJson.missing.length === 1 ? '' : 's'} missing:</p>
+            <ul style="margin:0 0 10px; padding-left:18px;">${checkJson.missing.map(m => `<li>${m.label}</li>`).join('')}</ul>
+            <button type="button" class="secondary" id="create-compliance-tasks-btn">Create tasks for these</button>
+          </div>`;
+
+        document.getElementById('create-compliance-tasks-btn').addEventListener('click', async (e) => {
+          const createBtn = e.target;
+          createBtn.disabled = true;
+          createBtn.textContent = 'Creating...';
+          try {
+            const { data: proj } = await supabaseClient.from('projects').select('pylon_data').eq('id', editId).single();
+            const pylonData = proj?.pylon_data || {};
+            const equipment = {
+              panels: pylonData.module_types || [],
+              inverters: pylonData.inverter_types || [],
+              batteries: pylonData.storage_types || [],
+            };
+            const wordRes = await fetch('/.netlify/functions/generate-solar-tasks', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ missing: checkJson.missing, equipment }),
+            });
+            const wordJson = await wordRes.json();
+            if (!wordJson.ok) throw new Error(wordJson.error);
+
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            const { error: insErr } = await supabaseClient.from('job_tasks').insert(
+              wordJson.tasks.map(t => ({
+                project_id: editId, description: t.description, task_type: 'quote', created_by: user.id,
+              }))
+            );
+            if (insErr) throw insErr;
+            resultEl.innerHTML = `<div class="success-box">${wordJson.tasks.length} task${wordJson.tasks.length === 1 ? '' : 's'} added - see the Tasks card on the quote page.</div>`;
+          } catch (err) {
+            createBtn.disabled = false;
+            createBtn.textContent = 'Create tasks for these';
+            resultEl.insertAdjacentHTML('beforeend', `<div class="error-box">${err.message}</div>`);
+          }
+        });
+      } catch (err) {
+        resultEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Check compliance';
       }
     });
 
