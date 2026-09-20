@@ -10,18 +10,13 @@ guessing, and skip it until it's answered.
 
 ## Open
 
-### Update idea: Quick job
-- **Reported:** 5 Sept 2026, 12:02 am by Jasper Thomson
-- **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
-- **Page/feature:** Job pipeline board
-- **What they want:** I want the quick job to be built differently from a quote and project. Click it and add customer details but it will be just do and charge so no quoting section no variation nothing. Just log time and pos and based off time and materials it creates bill amount. But make the time and materials editable too so we can add more or take some off. Remove the ability to make an invoice standalone and this will take its place so we can actually add costs to it and make it an invoice.
-- **Record id:** 99527a44-210e-41a4-9dd5-f9ddeac18120
-
 ### Bug: Calender isnt putting jobs on
 - **Reported:** 4 Sept 2026, 05:12 am by Nathan Hicks
 - **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
 - **What's happening:** Jobs cant be dragged onto the schedule
 - **Record id:** 70b1f34a-ffcd-4684-98f7-19ada1d6aa69
+- **Comments:**
+  - *Claude, 14 Sept 2026, 05:33 am:* Pushed a likely fix: native HTML5 drag-and-drop never works on touch input at all (no error, it just silently does nothing), and the schedule page was only switching to its tap-based mobile view below 700px screen width - so a touch device with a wider screen (a tablet in landscape, or a touchscreen laptop) would land on the drag-only desktop layout with no way to actually drag. It now switches to the tap-based view for any touch/coarse-pointer device regardless of width. Also tightened up the drag data format for better cross-browser support on genuine desktop/mouse use. Can you confirm what device/browser this was on, and try again? If it still doesn't work, let us know the device and we'll keep digging.
 
 ### Update idea: Credit notes
 - **Reported:** 4 Sept 2026, 04:40 am by Nathan Hicks
@@ -29,13 +24,8 @@ guessing, and skip it until it's answered.
 - **Page/feature:** jobs
 - **What they want:** Have an option to create a credit note for an invcoice, and push to xero
 - **Record id:** 5e2b56ca-2cbc-477f-8eeb-3daeaec28535
-
-### Update idea: xero updates
-- **Reported:** 4 Sept 2026, 04:39 am by Nathan Hicks
-- **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
-- **Page/feature:** Invoicing
-- **What they want:** When we create an invoice have it push to xero approved not as a draft.
-- **Record id:** 31cc02b4-7b05-494e-af87-f62875861796
+- **Comments:**
+  - *Claude, 14 Sept 2026, 09:14 pm:* Built and deployed (commit 1d2c730). Finance/Admin only. On an invoice already pushed to Xero (where the old Edit button no longer appears, since Xero blocks editing an Approved invoice), theres now an "Issue credit note" button - pick which stage(s)/amounts to credit (defaults to a full credit, editable down for partial), add a reason, and mark it as an account credit or a refund if the client already paid. Creates the record locally first, then a separate "Push to Xero" button creates the actual Xero credit note and allocates it against the invoice. This hasnt been tested against a real invoice/Xero push yet - recommend trying it on a real (or low-stakes test) invoice before relying on it for something that matters, given its live accounting data. Leaving this open until confirmed working end-to-end.
 
 ### Update idea: job search
 - **Reported:** 3 Sept 2026, 08:54 pm by Nathan Hicks
@@ -43,12 +33,32 @@ guessing, and skip it until it's answered.
 - **Page/feature:** my day
 - **What they want:** when im clocked into a job have a search bar for any other jobs so we cna clock into anothe rjob without clocking out.
 - **Record id:** 0207bcdc-1208-46e5-ade6-7468d1a5aeb9
+- **Comments:**
+  - *Claude, 14 Sept 2026, 05:32 am:* Checking before marking this resolved: My Day already has a "Switch job" button + search bar while clocked in (never returns you to the idle "Clock in" screen in between - you go straight from job A to job B). It does still show a "Confirm clock-out" step first (clock-out time, and which stage(s) the time counts against) before starting the new job, since that's needed for accurate payroll/Xero reporting on the job you're leaving. Is that what you had in mind, or were you after something with no confirmation step at all in between? Leaving this open until you confirm.
 
 ## In Progress
 
 None.
 
 ## Resolved
+
+### Update idea: Quick job
+- **Reported:** 5 Sept 2026, 12:02 am by Jasper Thomson
+- **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
+- **Page/feature:** Job pipeline board
+- **What they want:** I want the quick job to be built differently from a quote and project. Click it and add customer details but it will be just do and charge so no quoting section no variation nothing. Just log time and pos and based off time and materials it creates bill amount. But make the time and materials editable too so we can add more or take some off. Remove the ability to make an invoice standalone and this will take its place so we can actually add costs to it and make it an invoice.
+- **Record id:** 99527a44-210e-41a4-9dd5-f9ddeac18120
+- **Comments:**
+  - *Claude, 14 Sept 2026, 05:32 am:* Done - this already exists. "+ New job (no quote)" (Job pipeline board / My Day) creates a real job with one cost centre and no quote/variation. Time (timesheets) and materials (purchase orders) log against it normally. "Invoice actual costs..." on the job page pulls in the accrued labour (hours x charge-out rate) and materials (received POs at cost + markup) into two editable amount fields you can adjust up or down before creating the invoice - so costs can be added or removed exactly as described. Standalone invoice creation has been removed entirely, per the earlier "Invoice changes" resolution.
+
+### Update idea: xero updates
+- **Reported:** 4 Sept 2026, 04:39 am by Nathan Hicks
+- **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
+- **Page/feature:** Invoicing
+- **What they want:** When we create an invoice have it push to xero approved not as a draft.
+- **Record id:** 31cc02b4-7b05-494e-af87-f62875861796
+- **Comments:**
+  - *Claude, 14 Sept 2026, 05:34 am:* Done - already fixed 7 Sept (commit 75d1c3f). New invoices now push to Xero as Approved (AUTHORISED) instead of Draft. Marking resolved, but flagging a real side effect this creates: netlify/functions/update-invoice-in-xero.js (the "Save & push to Xero" edit flow, for adjusting an invoice's amounts after it's already in Xero) was written assuming invoices start as Draft and only lock once approved in Xero. Since every invoice is now Approved from the moment it's created, Xero will likely reject any further line-item edit through that path - editing an already-pushed invoice's amount may now silently fail in Xero even though it saves fine on our side. This is exactly the gap the still-open "Credit notes" idea would properly solve (correct a pushed invoice via a credit note rather than editing it directly). Recommend treating that as the real fix rather than patching update-invoice-in-xero.js separately - let us know if you'd like us to prioritise it.
 
 ### Update idea: adding photos to jobs
 - **Reported:** 31 Aug 2026, 01:03 am by Jasper Thomson
