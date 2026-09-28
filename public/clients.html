@@ -46,7 +46,10 @@
           <div class="card">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
               <input id="client-search" placeholder="Search by name, email, or phone" style="max-width:320px;" />
-              <button id="new-client-btn">+ New client</button>
+              <div>
+                <button type="button" class="secondary" id="find-abns-btn" style="margin-right:8px;">Find ABNs for existing clients</button>
+                <button id="new-client-btn">+ New client</button>
+              </div>
             </div>
             <div id="clients-list"><p class="subtitle">Loading...</p></div>
           </div>
@@ -164,7 +167,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=21"></script>
+  <script src="/js/supabase-client.js?v=22"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allClients = [];
@@ -233,6 +236,113 @@
       document.getElementById('c-name').value = name;
       document.getElementById('c-abn').value = abn;
     });
+
+    // Strips the bits that make an exact string match unlikely even when
+    // it's clearly the same business ("Smith Electrical" vs "Smith
+    // Electrical Pty Ltd") - used only to decide whether a search result
+    // is confident enough to pre-select, never written anywhere.
+    function normalizeBizName(s) {
+      return (s || '').toLowerCase().replace(/\b(pty|ltd|limited|the|trust|p\/l)\b/g, '').replace(/[^a-z0-9]/g, '').trim();
+    }
+
+    // Runs the same ABN-register search the form's live lookup uses, but
+    // against every existing client missing an abn, one at a time (kind
+    // to whatever rate limit the free ABR service has). Nothing saves
+    // until Apply is clicked - an exact-enough name match is pre-ticked,
+    // anything else is left for a person to actually look at and pick
+    // (or leave unticked), since silently writing a guessed ABN onto a
+    // real client record is exactly the kind of thing worth a human
+    // glance first.
+    async function openAbnBackfillPanel() {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:720px; width:100%; max-height:88vh; overflow-y:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+            <div>
+              <h2 style="margin:0;">Find ABNs for existing clients</h2>
+              <p class="subtitle" style="margin:4px 0 0;">Searches the ABN register by each client's name. Nothing saves until you click Apply below.</p>
+            </div>
+            <button type="button" class="secondary" id="abn-backfill-close-btn" style="font-size:12px; padding:6px 10px;">Close</button>
+          </div>
+          <div id="abn-backfill-progress" style="margin-top:14px;"><p class="subtitle">Starting...</p></div>
+          <div id="abn-backfill-list" style="margin-top:10px;"></div>
+          <div id="abn-backfill-apply-area" style="margin-top:16px; display:none;">
+            <button type="button" id="abn-backfill-apply-btn">Apply selected</button>
+            <div id="abn-backfill-apply-msg"></div>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#abn-backfill-close-btn').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+      const progressEl = overlay.querySelector('#abn-backfill-progress');
+      const listEl = overlay.querySelector('#abn-backfill-list');
+      const targets = allClients.filter(c => !c.abn && c.name);
+      if (!targets.length) { progressEl.innerHTML = `<p class="subtitle">Every client already has an ABN on file.</p>`; return; }
+
+      const rows = [];
+      for (let i = 0; i < targets.length; i++) {
+        if (!overlay.isConnected) return;
+        const c = targets[i];
+        progressEl.innerHTML = `<p class="subtitle">Searching ${i + 1} of ${targets.length}: ${escapeHtml(c.name)}...</p>`;
+        const results = await searchAbnByName(c.name);
+        const confidentMatch = results.find(r => normalizeBizName(r.name) === normalizeBizName(c.name));
+        rows.push({ client: c, results, confident: !!confidentMatch, chosenIndex: results.indexOf(confidentMatch || results[0]) });
+      }
+      if (!overlay.isConnected) return;
+      const foundCount = rows.filter(r => r.results.length).length;
+      progressEl.innerHTML = `<p class="subtitle">Done - found at least one match for ${foundCount} of ${targets.length} client${targets.length === 1 ? '' : 's'} missing an ABN.</p>`;
+
+      listEl.innerHTML = rows.map((row, i) => {
+        if (!row.results.length) {
+          return `<div style="padding:10px 0; border-bottom:1px solid var(--border);">
+            <strong>${escapeHtml(row.client.name)}</strong> <span class="subtitle">- no match found</span>
+          </div>`;
+        }
+        return `
+        <div style="padding:10px 0; border-bottom:1px solid var(--border); display:flex; align-items:flex-start; gap:10px;">
+          <input type="checkbox" class="abn-row-check" data-i="${i}" ${row.confident ? 'checked' : ''} style="width:auto; margin-top:26px;" />
+          <div style="flex:1;">
+            <strong>${escapeHtml(row.client.name)}</strong> ${row.confident ? '<span class="badge accepted" style="font-size:10px;">Confident match</span>' : '<span class="badge draft" style="font-size:10px;">Check this one</span>'}
+            <select class="abn-row-select" data-i="${i}" style="margin-top:6px;">
+              ${row.results.map((r, ri) => `<option value="${ri}" ${ri === row.chosenIndex ? 'selected' : ''}>${escapeHtml(r.name)} - ABN ${r.abn || 'none'}${r.status ? ' (' + escapeHtml(r.status) + ')' : ''}</option>`).join('')}
+            </select>
+          </div>
+        </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.abn-row-select').forEach(sel => {
+        sel.addEventListener('change', () => { rows[Number(sel.dataset.i)].chosenIndex = Number(sel.value); });
+      });
+
+      overlay.querySelector('#abn-backfill-apply-area').style.display = 'block';
+      overlay.querySelector('#abn-backfill-apply-btn').addEventListener('click', async () => {
+        const applyBtn = overlay.querySelector('#abn-backfill-apply-btn');
+        const applyMsg = overlay.querySelector('#abn-backfill-apply-msg');
+        const checkedIndexes = [...listEl.querySelectorAll('.abn-row-check:checked')].map(cb => Number(cb.dataset.i));
+        if (!checkedIndexes.length) { applyMsg.innerHTML = `<div class="error-box">Nothing selected.</div>`; return; }
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Applying...';
+        applyMsg.innerHTML = '';
+        try {
+          for (const i of checkedIndexes) {
+            const row = rows[i];
+            const chosen = row.results[row.chosenIndex];
+            if (!chosen || !chosen.abn) continue;
+            const { error } = await supabaseClient.from('clients').update({ abn: chosen.abn }).eq('id', row.client.id);
+            if (error) throw error;
+          }
+          applyMsg.innerHTML = `<div class="success-box">Updated ${checkedIndexes.length} client${checkedIndexes.length === 1 ? '' : 's'}.</div>`;
+          await loadClients();
+        } catch (err) {
+          applyMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Apply selected';
+      });
+    }
+    document.getElementById('find-abns-btn').addEventListener('click', () => openAbnBackfillPanel());
 
     document.getElementById('new-client-btn').addEventListener('click', () => {
       resetEditForm();
