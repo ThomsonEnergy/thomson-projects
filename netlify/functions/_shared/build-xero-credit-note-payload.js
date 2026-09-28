@@ -18,7 +18,7 @@ const { getOrCreateContact } = require('./build-xero-invoice-payload');
 async function buildXeroCreditNotePayload(supabaseAdmin, creditNoteId) {
   const { data: creditNote, error: cnErr } = await supabaseAdmin
     .from('credit_notes')
-    .select('*, credit_note_claims(*, cost_centres(name, sort_order)), invoices(*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients:client_id(name, email, client_type, xero_contact_id), project_id)')
+    .select('*, credit_note_claims(*, cost_centres(name, sort_order)), invoices(*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients:client_id(name, email, client_type, xero_contact_id), bill_to:bill_to_client_id(id, name, email, client_type, xero_contact_id), project_id)')
     .eq('id', creditNoteId)
     .single();
   if (cnErr || !creditNote) throw new Error('Credit note not found');
@@ -57,6 +57,21 @@ async function buildXeroCreditNotePayload(supabaseAdmin, creditNoteId) {
     contactStoreTable = 'projects';
     contactStoreId = project.id;
     existingXeroContactId = project.xero_contact_id;
+  }
+
+  // Same override as build-xero-invoice-payload.js, and for the same
+  // reason: a credit note against a warranty job must go to whoever the
+  // original invoice actually billed (e.g. the equipment manufacturer),
+  // not the property owner the job itself is tagged against - otherwise
+  // it'd land on the wrong Xero contact and never actually offset the
+  // invoice it's meant to credit.
+  if (invoice.bill_to) {
+    contactName = invoice.bill_to.name;
+    contactEmail = invoice.bill_to.email;
+    clientType = invoice.bill_to.client_type || 'individual';
+    contactStoreTable = 'clients';
+    contactStoreId = invoice.bill_to.id;
+    existingXeroContactId = invoice.bill_to.xero_contact_id;
   }
 
   const { data: mappings } = await supabaseAdmin.from('xero_account_mapping').select('*');
