@@ -29,7 +29,7 @@ async function getOrCreateContact({ name, email }, storeOn) {
 async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   const { data: invoice, error: invErr } = await supabaseAdmin
     .from('invoices')
-    .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients(name, email, client_type, xero_contact_id), invoice_claims(*, cost_centres(name, sort_order)), bill_to:bill_to_client_id(id, name, email, client_type, xero_contact_id)')
+    .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients:client_id(name, email, client_type, xero_contact_id), invoice_claims(*, cost_centres(name, sort_order)), bill_to:bill_to_client_id(id, name, email, client_type, xero_contact_id)')
     .eq('id', invoiceId)
     .single();
   if (invErr || !invoice) throw new Error('Invoice not found');

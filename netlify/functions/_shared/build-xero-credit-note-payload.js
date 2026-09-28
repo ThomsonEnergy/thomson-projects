@@ -18,7 +18,7 @@ const { getOrCreateContact } = require('./build-xero-invoice-payload');
 async function buildXeroCreditNotePayload(supabaseAdmin, creditNoteId) {
   const { data: creditNote, error: cnErr } = await supabaseAdmin
     .from('credit_notes')
-    .select('*, credit_note_claims(*, cost_centres(name, sort_order)), invoices(*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients(name, email, client_type, xero_contact_id), project_id)')
+    .select('*, credit_note_claims(*, cost_centres(name, sort_order)), invoices(*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients:client_id(name, email, client_type, xero_contact_id), project_id)')
     .eq('id', creditNoteId)
     .single();
   if (cnErr || !creditNote) throw new Error('Credit note not found');
