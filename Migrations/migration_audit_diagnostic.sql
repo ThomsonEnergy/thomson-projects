@@ -327,4 +327,8 @@ select '110', 'quote_compliance_checklist',
   case when exists (select 1 from information_schema.tables where table_name = 'quote_compliance_answers')
     and exists (select 1 from information_schema.columns where table_name = 'inspection_checklist_templates' and column_name = 'checklist_type')
   then 'present' else 'MISSING' end
+union all
+select '111', 'client_abn',
+  case when exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'abn')
+  then 'present' else 'MISSING' end
 order by 1;
