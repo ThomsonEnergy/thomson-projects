@@ -340,4 +340,10 @@ union all
 select '113', 'pipeline_automation_phase2',
   case when exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'completed_at')
   then 'present' else 'MISSING' end
+union all
+select '114', 'shared_gmail_inbox',
+  case when exists (select 1 from information_schema.tables where table_name = 'email_threads')
+    and exists (select 1 from information_schema.tables where table_name = 'emails')
+    and exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'email_signature')
+  then 'present' else 'MISSING' end
 order by 1;

@@ -342,6 +342,7 @@ async function findMatchingSupplier(fields) {
 // how small nav inconsistencies kept creeping in before this existed).
 const MAIN_NAV_ITEMS = [
   { key: 'my-day', label: 'My Day', href: '/my-day.html', icon: '&#127749;' },
+  { key: 'inbox', label: 'Inbox', href: '/inbox.html', icon: '&#128231;' },
   { key: 'leads', label: 'Leads', href: '/leads.html', icon: '&#127919;' },
   { key: 'quotes', label: 'Quotes', href: '/quotes.html', icon: '&#128221;' },
   { key: 'projects', label: 'Projects', href: '/projects.html', icon: '&#128202;' },

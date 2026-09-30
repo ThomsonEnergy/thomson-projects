@@ -145,6 +145,35 @@ granted.
   purchase order tracker here is for having everything in one place per project, not a
   replacement for that.
 
+## Shared inbox (sales@thomsonenergy.com.au)
+
+Every active staff member can read and send email as sales@thomsonenergy.com.au from the Inbox
+tab, with their own signature (set under Settings > My Profile) appended automatically so the
+client can see who they're actually talking to, even though every email comes from the shared
+address. One-time setup, since this is a real Google Workspace mailbox:
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com), create a new project (any
+   name).
+2. Under **APIs & Services > Library**, search for and enable the **Gmail API**.
+3. Under **APIs & Services > OAuth consent screen**, choose **Internal** as the user type (only
+   shows up because this project belongs to your Workspace) - this means no Google review process
+   and no expiry on the access once granted, since it can only ever be used by accounts on your
+   own thomsonenergy.com.au domain.
+4. Under **APIs & Services > Credentials**, create an **OAuth client ID**, application type **Web
+   application**, and add this as an authorized redirect URI (swap in your actual deployed
+   domain): `https://<your-site>/.netlify/functions/google-oauth-callback`
+5. Copy the **Client ID** and **Client Secret** into Settings > API Keys (Google Client ID / Google
+   Client Secret) and click **Save keys**.
+6. Click **Connect sales@thomsonenergy.com.au** (same page, just below). Log into that mailbox in
+   the popup and approve access - that's it, no ongoing maintenance. The connection status badge
+   updates to "Connected" once it's done.
+
+New mail is checked every 5 minutes automatically (see `netlify.toml`'s `sync-gmail` schedule); a
+"Sync now" button in both Settings and the Inbox page triggers an immediate check instead of
+waiting. Read state (`is_read` on a conversation) is shared across every staff member, matching
+how a real team inbox works - it's app-side only and never touches the real Gmail mailbox's own
+read/label state.
+
 ## Notes on accuracy
 
 - Labour cost is calculated from ServiceM8's recorded time (check-ins) multiplied by the cost

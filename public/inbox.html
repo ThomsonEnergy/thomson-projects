@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Inbox - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=12" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .inbox-layout { display:flex; gap:16px; align-items:flex-start; }
+  .inbox-thread-list { width:340px; flex-shrink:0; max-height:calc(100vh - 220px); overflow-y:auto; }
+  .inbox-thread-item { display:block; padding:12px; border-bottom:1px solid var(--border); cursor:pointer; }
+  .inbox-thread-item:hover { background:var(--surface-2); }
+  .inbox-thread-item.active { background:var(--surface-2); border-left:3px solid var(--accent); }
+  .inbox-thread-item.unread .inbox-subject { font-weight:700; }
+  .inbox-detail { flex:1; min-width:0; }
+  .inbox-message { border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px; white-space:pre-wrap; }
+  .inbox-message.outbound { background:var(--accent-dim, var(--surface-2)); }
+  @media (max-width: 800px) {
+    .inbox-layout { flex-direction:column; }
+    .inbox-thread-list { width:100%; max-height:300px; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <h1 style="margin:0;">Inbox</h1>
+      <div>
+        <button type="button" class="secondary" id="sync-now-btn">Sync now</button>
+        <button type="button" id="compose-btn">Compose</button>
+      </div>
+    </div>
+    <p class="subtitle">Shared inbox for sales@thomsonenergy.com.au - visible to every staff member.</p>
+
+    <div class="card">
+      <div class="inbox-layout">
+        <div class="inbox-thread-list" id="thread-list"><p class="subtitle">Loading...</p></div>
+        <div class="inbox-detail" id="thread-detail">
+          <p class="subtitle">Select a conversation on the left, or click Compose to start a new one.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=18"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    function timeAgo(dateStr) {
+      if (!dateStr) return '';
+      const diffMs = Date.now() - new Date(dateStr).getTime();
+      const mins = Math.floor(diffMs / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return `${mins}m ago`;
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return `${hours}h ago`;
+      const days = Math.floor(hours / 24);
+      return `${days}d ago`;
+    }
+
+    let activeThreadId = null;
+
+    async function loadThreadList() {
+      const listEl = document.getElementById('thread-list');
+      const { data: threads, error } = await supabaseClient
+        .from('email_threads')
+        .select('*, clients(name)')
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(100);
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      if (!threads.length) {
+        listEl.innerHTML = `<p class="subtitle">No emails yet - click "Sync now" once sales@ is connected in Settings.</p>`;
+        return;
+      }
+
+      listEl.innerHTML = threads.map(t => `
+        <a class="inbox-thread-item ${t.id === activeThreadId ? 'active' : ''} ${!t.is_read ? 'unread' : ''}" data-id="${t.id}">
+          <div class="inbox-subject">${t.subject || '(no subject)'}</div>
+          <p class="subtitle" style="margin:2px 0 0; font-size:12px;">${t.clients?.name ? t.clients.name + ' &middot; ' : ''}${timeAgo(t.last_message_at)}</p>
+        </a>`).join('');
+
+      listEl.querySelectorAll('.inbox-thread-item').forEach(el => {
+        el.addEventListener('click', () => openThread(el.dataset.id));
+      });
+    }
+
+    function messageHtml(m, myUserId, staffName) {
+      const senderLabel = m.direction === 'outbound'
+        ? (m.created_by === myUserId ? 'You' : staffName(m.created_by))
+        : (m.from_address || 'Client');
+      return `
+        <div class="inbox-message ${m.direction}">
+          <p class="subtitle" style="margin:0 0 8px; font-size:12px;"><strong style="color:var(--text);">${senderLabel}</strong> &middot; ${new Date(m.sent_at).toLocaleString('en-AU')}</p>
+          <div>${escapeHtml(m.body_text || '')}</div>
+        </div>`;
+    }
+
+    async function openThread(threadId) {
+      activeThreadId = threadId;
+      document.querySelectorAll('.inbox-thread-item').forEach(el => el.classList.toggle('active', el.dataset.id === threadId));
+
+      const detailEl = document.getElementById('thread-detail');
+      detailEl.innerHTML = `<p class="subtitle">Loading...</p>`;
+
+      const [{ data: thread }, { data: emails }, { data: staff }, { data: { user } }] = await Promise.all([
+        supabaseClient.from('email_threads').select('*, clients(name)').eq('id', threadId).single(),
+        supabaseClient.from('emails').select('*').eq('thread_id', threadId).order('sent_at', { ascending: true }),
+        supabaseClient.from('profiles').select('id, full_name'),
+        supabaseClient.auth.getUser(),
+      ]);
+      const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'A team member';
+
+      detailEl.innerHTML = `
+        <h2 style="margin:0 0 4px;">${thread.subject || '(no subject)'}</h2>
+        ${thread.clients?.name ? `<p class="subtitle" style="margin:0 0 14px;">${thread.clients.name}</p>` : ''}
+        <div id="thread-messages">${(emails || []).map(m => messageHtml(m, user.id, staffName)).join('')}</div>
+        <div class="card" style="margin-top:16px;">
+          <label style="margin-top:0">Reply</label>
+          <textarea id="reply-body" style="min-height:120px;" placeholder="Type your reply..."></textarea>
+          <button type="button" id="reply-send-btn" style="margin-top:10px;">Send reply</button>
+          <div id="reply-msg"></div>
+        </div>`;
+
+      if (!thread.is_read) {
+        await supabaseClient.from('email_threads').update({ is_read: true }).eq('id', threadId);
+        await loadThreadList();
+      }
+
+      document.getElementById('reply-send-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('reply-send-btn');
+        const msg = document.getElementById('reply-msg');
+        const bodyText = document.getElementById('reply-body').value.trim();
+        if (!bodyText) { msg.innerHTML = `<div class="error-box">Enter a reply first.</div>`; return; }
+
+        const lastInbound = (emails || []).filter(m => m.direction === 'inbound').slice(-1)[0];
+        const lastAny = (emails || []).slice(-1)[0];
+        const toAddress = (lastInbound || lastAny)?.from_address;
+        if (!toAddress) { msg.innerHTML = `<div class="error-box">Couldn't work out who to reply to.</div>`; return; }
+
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/send-gmail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ to: toAddress, subject: thread.subject || '', bodyText, replyToThreadId: threadId }),
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error);
+          await openThread(threadId);
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Send reply';
+        }
+      });
+    }
+
+    function openComposePanel() {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:520px; width:100%;">
+          <h2>New email</h2>
+          <label style="margin-top:0">To</label>
+          <input id="compose-to" placeholder="client@example.com" />
+          <label>Subject</label>
+          <input id="compose-subject" />
+          <label>Message</label>
+          <textarea id="compose-body" style="min-height:160px;"></textarea>
+          <div style="margin-top:14px;">
+            <button id="compose-send-btn">Send</button>
+            <button type="button" class="secondary" id="compose-cancel-btn">Cancel</button>
+          </div>
+          <div id="compose-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#compose-cancel-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#compose-send-btn').addEventListener('click', async () => {
+        const btn = overlay.querySelector('#compose-send-btn');
+        const msg = overlay.querySelector('#compose-msg');
+        const to = overlay.querySelector('#compose-to').value.trim();
+        const subject = overlay.querySelector('#compose-subject').value.trim();
+        const bodyText = overlay.querySelector('#compose-body').value.trim();
+        if (!to || !subject || !bodyText) { msg.innerHTML = `<div class="error-box">Fill in all fields.</div>`; return; }
+
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/send-gmail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ to, subject, bodyText }),
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error);
+          overlay.remove();
+          await loadThreadList();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Send';
+        }
+      });
+    }
+
+    document.getElementById('compose-btn').addEventListener('click', openComposePanel);
+
+    document.getElementById('sync-now-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('sync-now-btn');
+      btn.disabled = true;
+      btn.textContent = 'Syncing...';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/sync-gmail', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        await loadThreadList();
+      } catch (err) {
+        alert(err.message);
+      }
+      btn.disabled = false;
+      btn.textContent = 'Sync now';
+    });
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('inbox');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      await loadThreadList();
+    })();
+  </script>
+</body>
+</html>

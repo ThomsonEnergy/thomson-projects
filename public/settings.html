@@ -218,6 +218,9 @@
             </div>
             <label>Mobile number</label>
             <input id="my-profile-mobile" />
+            <label>Email signature</label>
+            <textarea id="my-profile-signature" style="min-height:80px;" placeholder="e.g. Jasper Thomson&#10;Thomson Energy&#10;0400 000 000"></textarea>
+            <p class="subtitle" style="margin:2px 0 0;">Appended automatically to any email you send from the shared Inbox (sales@thomsonenergy.com.au) - so the client can see who they're actually talking to.</p>
             <button id="my-profile-save-btn" style="margin-top:14px;">Save</button>
             <div id="my-profile-msg"></div>
           </div>
@@ -532,6 +535,12 @@
             <label>Formbay API Key <span class="key-status" data-key="formbay"></span></label>
             <input id="key-formbay" type="password" placeholder="From your Formbay account" autocomplete="off" />
 
+            <label>Google Client ID <span class="key-status" data-key="google_client_id"></span></label>
+            <input id="key-google-client-id" type="password" placeholder="From your Google Cloud OAuth client" autocomplete="off" />
+
+            <label>Google Client Secret <span class="key-status" data-key="google_client_secret"></span></label>
+            <input id="key-google-client-secret" type="password" placeholder="From the same OAuth client" autocomplete="off" />
+
             <label>Airwallex Client ID <span class="key-status" data-key="airwallex_client_id"></span></label>
             <input id="key-airwallex-client-id" type="password" placeholder="Account > Developer > API Keys" autocomplete="off" />
 
@@ -557,6 +566,19 @@
             </p>
             <button id="test-formbay-btn" class="secondary">Test connection</button>
             <pre id="test-formbay-result" style="margin-top:12px; white-space:pre-wrap; font-size:12px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:12px; display:none; max-height:400px; overflow-y:auto;"></pre>
+          </div>
+
+          <div class="card">
+            <h2>Google Workspace (Gmail)</h2>
+            <p class="subtitle" style="margin-bottom:10px;">
+              Save the Client ID/Secret above first (from a Google Cloud OAuth client - see SETUP.md for the one-time
+              setup steps), then connect sales@thomsonenergy.com.au here. Once connected, every active staff member
+              can read and send from that mailbox in the Inbox tab.
+            </p>
+            <p>Status: <span id="google-connection-status">Checking...</span></p>
+            <button type="button" class="secondary" id="google-connect-btn">Connect sales@thomsonenergy.com.au</button>
+            <button type="button" class="secondary" id="google-sync-btn" style="margin-left:8px;">Sync now</button>
+            <div id="google-connect-msg" style="margin-top:10px;"></div>
           </div>
         </div>
 
@@ -1514,12 +1536,13 @@
     async function loadMyProfile(userId) {
       myProfileUserId = userId;
       const [{ data: profile }, { data: rates }, { data: licences }] = await Promise.all([
-        supabaseClient.from('profiles').select('mobile_number, photo_url').eq('id', userId).single(),
+        supabaseClient.from('profiles').select('mobile_number, photo_url, email_signature').eq('id', userId).single(),
         supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle(),
         supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date'),
       ]);
 
       document.getElementById('my-profile-mobile').value = profile?.mobile_number || '';
+      document.getElementById('my-profile-signature').value = profile?.email_signature || '';
       const photoPreview = document.getElementById('my-profile-photo-preview');
       if (profile?.photo_url) { photoPreview.src = profile.photo_url; photoPreview.style.display = 'block'; }
 
@@ -1608,7 +1631,10 @@
     document.getElementById('my-profile-save-btn').addEventListener('click', async () => {
       const msg = document.getElementById('my-profile-msg');
       const { error } = await supabaseClient.from('profiles')
-        .update({ mobile_number: document.getElementById('my-profile-mobile').value.trim() || null })
+        .update({
+          mobile_number: document.getElementById('my-profile-mobile').value.trim() || null,
+          email_signature: document.getElementById('my-profile-signature').value.trim() || null,
+        })
         .eq('id', myProfileUserId);
       msg.innerHTML = error ? `<div class="error-box">${error.message}</div>` : `<div class="success-box">Saved.</div>`;
     });
@@ -2443,6 +2469,13 @@
             ? '<span style="color:var(--green); font-weight:600;">&#10003; set</span>'
             : '<span style="color:var(--muted);">not set</span>';
         });
+
+        const googleStatusEl = document.getElementById('google-connection-status');
+        if (googleStatusEl) {
+          googleStatusEl.innerHTML = data.status.google_refresh_token
+            ? '<span style="color:var(--green); font-weight:600;">Connected</span>'
+            : '<span style="color:var(--muted);">Not connected</span>';
+        }
       } catch {
         // fails quietly - the fields still work, they just won't show a status
       }
@@ -2457,6 +2490,8 @@
         { key_name: 'xero_client_secret', key_value: document.getElementById('key-xero-client-secret').value.trim() },
         { key_name: 'xero_webhook_key', key_value: document.getElementById('key-xero-webhook-key').value.trim() },
         { key_name: 'formbay', key_value: document.getElementById('key-formbay').value.trim() },
+        { key_name: 'google_client_id', key_value: document.getElementById('key-google-client-id').value.trim() },
+        { key_name: 'google_client_secret', key_value: document.getElementById('key-google-client-secret').value.trim() },
         { key_name: 'airwallex_client_id', key_value: document.getElementById('key-airwallex-client-id').value.trim() },
         { key_name: 'airwallex_api_key', key_value: document.getElementById('key-airwallex-api-key').value.trim() },
         { key_name: 'airwallex_webhook_secret', key_value: document.getElementById('key-airwallex-webhook-secret').value.trim() },
@@ -2506,6 +2541,47 @@
       }
       btn.disabled = false;
       btn.textContent = 'Test connection';
+    });
+
+    document.getElementById('google-connect-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('google-connect-btn');
+      const msg = document.getElementById('google-connect-msg');
+      btn.disabled = true;
+      msg.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/google-oauth-start', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        window.location.href = data.url;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('google-sync-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('google-sync-btn');
+      const msg = document.getElementById('google-connect-msg');
+      btn.disabled = true;
+      btn.textContent = 'Syncing...';
+      msg.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/sync-gmail', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        msg.innerHTML = `<div class="success-box">Synced - ${data.synced} new message(s).</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+      btn.disabled = false;
+      btn.textContent = 'Sync now';
     });
 
     // --- Xero Mapping ---
