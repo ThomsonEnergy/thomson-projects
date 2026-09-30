@@ -62,6 +62,7 @@
       const [{ data: projects, error }, { data: poRows }] = await Promise.all([
         supabaseClient.from('projects')
           .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
+          .not('job_number', 'is', null)
           .neq('pipeline_stage', 'archived')
           .order('created_at', { ascending: false }),
         supabaseClient.from('purchase_orders').select('project_id, amount, status, purchase_order_line_items(quantity, unit_cost)').neq('status', 'ordered'),
