@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=24"></script>
+  <script src="/js/supabase-client.js?v=25"></script>
   <script src="/js/theme.js"></script>
   <script>
     const inspectionId = new URLSearchParams(window.location.search).get('id');
@@ -88,9 +88,8 @@
               <button type="button" class="insp-yn-btn yn-yes ${a?.answer_yes_no === true ? 'selected' : ''}">Yes</button>
               <button type="button" class="insp-yn-btn secondary yn-no ${a?.answer_yes_no === false ? 'selected' : ''}">No</button>
             ` : `
-              ${a?.photo_path ? `<img class="insp-photo-thumb" src="${a.photo_path}" />` : ''}
+              ${a?.photo_path ? `<img class="insp-photo-thumb insp-photo-view" src="${a.photo_path}" style="cursor:pointer;" />` : ''}
               <input type="file" class="insp-photo-file" accept="image/*" capture="environment" style="display:block; margin-bottom:8px;" />
-              <button type="button" class="secondary insp-photo-upload-btn">${a?.photo_path ? 'Replace photo' : 'Upload photo'}</button>
             `}
             <div class="insp-item-msg"></div>
           </div>
@@ -111,21 +110,22 @@
           });
         });
 
-        const uploadBtn = el.querySelector('.insp-photo-upload-btn');
-        if (uploadBtn) {
-          uploadBtn.addEventListener('click', async () => {
-            const fileInput = el.querySelector('.insp-photo-file');
-            if (!fileInput.files.length) { msgEl.innerHTML = `<div class="error-box">Choose a photo first.</div>`; return; }
-            uploadBtn.disabled = true;
-            uploadBtn.textContent = 'Uploading...';
+        const photoViewImg = el.querySelector('.insp-photo-view');
+        if (photoViewImg) photoViewImg.addEventListener('click', () => openPhotoLightbox([photoViewImg.src], 0));
+
+        const fileInput = el.querySelector('.insp-photo-file');
+        if (fileInput) {
+          fileInput.addEventListener('change', async () => {
+            if (!fileInput.files.length) return;
+            fileInput.disabled = true;
+            msgEl.innerHTML = `<p class="subtitle">Uploading...</p>`;
             try {
               const [url] = await uploadPhotos(fileInput.files, `inspections/${inspectionId}`, 'site-photos');
               await saveAnswer(itemId, { photo_path: url });
               renderItems();
             } catch (err) {
               msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
-              uploadBtn.disabled = false;
-              uploadBtn.textContent = item.item_type === 'photo' ? 'Upload photo' : 'Upload photo';
+              fileInput.disabled = false;
             }
           });
         }

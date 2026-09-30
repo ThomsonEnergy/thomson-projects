@@ -75,7 +75,6 @@
             <p class="subtitle" style="margin-bottom:10px;">Your logo appears on the client proposal cover page.</p>
             <div id="logo-preview" style="margin-bottom:12px;"></div>
             <input type="file" id="logo-file" accept="image/*" />
-            <button type="button" id="logo-upload-btn" class="secondary" style="margin-top:10px;">Upload logo</button>
             <div id="logo-msg"></div>
             <label>Tagline (optional, shown under your logo on the cover page)</label>
             <input id="tagline" placeholder="e.g. Renewable Energy Specialists" />
@@ -126,7 +125,6 @@
             <p class="subtitle" style="margin-bottom:10px;">Upload photos of previous jobs. These appear on the title page of every quote you send.</p>
             <div id="portfolio-thumbs" style="margin-bottom:10px;"></div>
             <input type="file" id="portfolio-file" accept="image/*" multiple />
-            <button type="button" id="portfolio-upload-btn" class="secondary" style="margin-top:10px;">Upload photos</button>
             <div id="portfolio-msg"></div>
           </div>
 
@@ -608,7 +606,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=24"></script>
+  <script src="/js/supabase-client.js?v=25"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -686,7 +684,7 @@
       container.innerHTML = portfolioPhotos.map((p, i) => `
         <div style="display:inline-block; margin:0 10px 10px 0; text-align:center; vertical-align:top;">
           <div style="position:relative;">
-            <img src="${p.url}" style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid var(--border);" />
+            <img src="${p.url}" data-i="${i}" class="portfolio-view" style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid var(--border); cursor:pointer;" />
             <button type="button" data-i="${i}" class="portfolio-remove" style="position:absolute; top:-6px; right:-6px; width:20px; height:20px; padding:0; border-radius:50%; font-size:11px; line-height:1;">x</button>
           </div>
           <select class="portfolio-category" data-i="${i}" style="margin-top:6px; width:90px; font-size:11px; padding:4px;">
@@ -696,6 +694,9 @@
           </select>
         </div>
       `).join('');
+      container.querySelectorAll('.portfolio-view').forEach(img => {
+        img.addEventListener('click', () => openPhotoLightbox(portfolioPhotos.map(p => p.url), parseInt(img.dataset.i)));
+      });
       container.querySelectorAll('.portfolio-remove').forEach(btn => {
         btn.addEventListener('click', () => {
           portfolioPhotos.splice(parseInt(btn.dataset.i), 1);
@@ -709,14 +710,11 @@
       });
     }
 
-    document.getElementById('logo-upload-btn').addEventListener('click', async () => {
+    document.getElementById('logo-file').addEventListener('change', async () => {
       const fileInput = document.getElementById('logo-file');
       const msg = document.getElementById('logo-msg');
-      if (!fileInput.files.length) {
-        msg.innerHTML = `<div class="error-box">Choose a logo file first.</div>`;
-        return;
-      }
-      msg.innerHTML = '';
+      if (!fileInput.files.length) return;
+      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
       try {
         const [url] = await uploadPhotos(fileInput.files, 'logo');
         logoUrl = url;
@@ -728,14 +726,11 @@
       }
     });
 
-    document.getElementById('portfolio-upload-btn').addEventListener('click', async () => {
+    document.getElementById('portfolio-file').addEventListener('change', async () => {
       const fileInput = document.getElementById('portfolio-file');
       const msg = document.getElementById('portfolio-msg');
-      if (!fileInput.files.length) {
-        msg.innerHTML = `<div class="error-box">Choose one or more photos first.</div>`;
-        return;
-      }
-      msg.innerHTML = '';
+      if (!fileInput.files.length) return;
+      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
       try {
         const urls = await uploadPhotos(fileInput.files, 'portfolio');
         urls.forEach(url => portfolioPhotos.push({ url, category: 'general' }));

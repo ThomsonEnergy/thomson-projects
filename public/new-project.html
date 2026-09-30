@@ -140,7 +140,6 @@
       <label>Supporting documents (optional)</label>
       <div id="sow-doc-list" style="margin-bottom:8px;"></div>
       <input type="file" id="sow-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple />
-      <button type="button" id="sow-doc-upload-btn" class="secondary" style="margin-top:10px;">Upload documents</button>
       <p class="subtitle" style="margin:6px 0 0; font-size:12px;">PDF plans/drawings or photos of bills work best. A handful of files, not a full folder.</p>
       <div id="sow-doc-msg"></div>
 
@@ -168,7 +167,6 @@
       <p class="subtitle" style="margin-bottom:10px;">Reference photos, renders, or similar completed jobs.</p>
       <div id="reference-thumbs" style="margin-bottom:10px;"></div>
       <input type="file" id="reference-file" accept="image/*" multiple />
-      <button type="button" id="reference-upload-btn" class="secondary" style="margin-top:10px;">Upload photos</button>
       <div id="reference-msg"></div>
     </div>
 
@@ -244,7 +242,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=24"></script>
+  <script src="/js/supabase-client.js?v=25"></script>
   <script src="/js/theme.js"></script>
   <script>
     const editId = new URLSearchParams(window.location.search).get('id');
@@ -666,7 +664,6 @@
         <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${description}" style="margin-bottom:8px;" />
         <div class="pg-thumbs" style="margin-bottom:8px;"></div>
         <input type="file" class="pg-file" accept="image/*" multiple style="font-size:12px;" />
-        <button type="button" class="secondary pg-upload" style="font-size:12px; padding:6px 12px; margin-left:6px;">Upload</button>
         <button type="button" class="secondary pg-remove" style="font-size:12px; padding:6px 12px;">Remove group</button>
       `;
       stageRow.querySelector('.photo-groups').appendChild(pg);
@@ -679,7 +676,10 @@
       };
       renderThumbs();
 
-      pg.querySelector('.pg-upload').addEventListener('click', async () => {
+      // Fires the moment photos are chosen - previously needed a second
+      // "Upload" click that staff often skipped, assuming picking the
+      // file was already the whole job done.
+      pg.querySelector('.pg-file').addEventListener('change', async () => {
         const fileInput = pg.querySelector('.pg-file');
         if (!fileInput.files.length) return;
         const urls = await uploadPhotos(fileInput.files, 'stage-photos');
@@ -719,11 +719,11 @@
       });
     }
 
-    document.getElementById('sow-doc-upload-btn').addEventListener('click', async () => {
+    document.getElementById('sow-doc-file').addEventListener('change', async () => {
       const fileInput = document.getElementById('sow-doc-file');
       const msg = document.getElementById('sow-doc-msg');
-      if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more files first.</div>`; return; }
-      msg.innerHTML = '';
+      if (!fileInput.files.length) return;
+      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
       try {
         for (const file of fileInput.files) {
           const path = await uploadPrivateFile(file, 'sow-source');
@@ -731,6 +731,7 @@
         }
         renderSowDocList();
         fileInput.value = '';
+        msg.innerHTML = '';
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
       }
@@ -842,16 +843,17 @@
 
     // ---------- reference photos ----------
 
-    document.getElementById('reference-upload-btn').addEventListener('click', async () => {
+    document.getElementById('reference-file').addEventListener('change', async () => {
       const fileInput = document.getElementById('reference-file');
       const msg = document.getElementById('reference-msg');
-      if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more photos first.</div>`; return; }
-      msg.innerHTML = '';
+      if (!fileInput.files.length) return;
+      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
       try {
         const urls = await uploadPhotos(fileInput.files, 'reference');
         referencePhotos.push(...urls);
         renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
         fileInput.value = '';
+        msg.innerHTML = '';
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
       }

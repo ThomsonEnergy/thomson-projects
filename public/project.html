@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=24"></script>
+  <script src="/js/supabase-client.js?v=25"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -491,7 +491,6 @@
         <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${description}" style="margin-bottom:8px;" />
         <div class="pg-thumbs" style="margin-bottom:8px;"></div>
         <input type="file" class="pg-file" accept="image/*" multiple style="font-size:12px;" />
-        <button type="button" class="secondary pg-upload" style="font-size:12px; padding:6px 12px; margin-left:6px;">Upload</button>
         <button type="button" class="secondary pg-remove" style="font-size:12px; padding:6px 12px;">Remove group</button>
       `;
       stageRow.querySelector('.photo-groups').appendChild(pg);
@@ -502,7 +501,10 @@
       };
       renderThumbs();
 
-      pg.querySelector('.pg-upload').addEventListener('click', async () => {
+      // Fires the moment photos are chosen - previously needed a second
+      // "Upload" click that staff often skipped, assuming picking the
+      // file was already the whole job done.
+      pg.querySelector('.pg-file').addEventListener('change', async () => {
         const fileInput = pg.querySelector('.pg-file');
         if (!fileInput.files.length) return;
         const urls = await uploadPhotos(fileInput.files, 'stage-photos');
@@ -726,7 +728,6 @@
           <label>Supporting documents (optional)</label>
           <div id="sow-doc-list" style="margin-bottom:8px;"></div>
           <input type="file" id="sow-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple />
-          <button type="button" id="sow-doc-upload-btn" class="secondary" style="margin-top:10px;">Upload documents</button>
           <div id="sow-doc-msg"></div>
 
           <label style="margin-top:16px;">Scope of works style</label>
@@ -749,7 +750,6 @@
           <p class="subtitle" style="margin-bottom:10px;">Reference photos, renders, or similar completed jobs.</p>
           <div id="reference-thumbs" style="margin-bottom:10px;"></div>
           <input type="file" id="reference-file" accept="image/*" multiple />
-          <button type="button" id="reference-upload-btn" class="secondary" style="margin-top:10px;">Upload photos</button>
           <div id="reference-msg"></div>
         </div>
 
@@ -878,11 +878,11 @@
         }, 250);
       });
 
-      document.getElementById('sow-doc-upload-btn').addEventListener('click', async () => {
+      document.getElementById('sow-doc-file').addEventListener('change', async () => {
         const fileInput = document.getElementById('sow-doc-file');
         const msg = document.getElementById('sow-doc-msg');
-        if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more files first.</div>`; return; }
-        msg.innerHTML = '';
+        if (!fileInput.files.length) return;
+        msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
         try {
           for (const file of fileInput.files) {
             const path = await uploadPrivateFile(file, 'sow-source');
@@ -890,6 +890,7 @@
           }
           renderEditSowDocList();
           fileInput.value = '';
+          msg.innerHTML = '';
         } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
       });
 
@@ -947,16 +948,17 @@
         }
       });
 
-      document.getElementById('reference-upload-btn').addEventListener('click', async () => {
+      document.getElementById('reference-file').addEventListener('change', async () => {
         const fileInput = document.getElementById('reference-file');
         const msg = document.getElementById('reference-msg');
-        if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more photos first.</div>`; return; }
-        msg.innerHTML = '';
+        if (!fileInput.files.length) return;
+        msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
         try {
           const urls = await uploadPhotos(fileInput.files, 'reference');
           referencePhotos.push(...urls);
           renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
           fileInput.value = '';
+          msg.innerHTML = '';
         } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
       });
 
@@ -2608,6 +2610,7 @@
           ${project.job_number && !editMode && pricingVisible ? `<button class="settings-tab" data-panel="invoices">Invoices</button>` : ''}
           <button class="settings-tab" data-panel="details">Details</button>
           ${!editMode ? `<button class="settings-tab" data-panel="documents">Documents</button>` : ''}
+          ${project.job_number && !editMode ? `<button class="settings-tab" data-panel="photos">Site Photos</button>` : ''}
         </div>
 
         <div class="job-tab-layout">
@@ -3102,8 +3105,19 @@
                   <input id="doc-new-folder" placeholder="New folder name" style="flex:1; min-width:160px;" />
                 </div>
                 <input type="file" id="doc-file-input" multiple />
-                <button type="button" id="doc-upload-btn" class="secondary" style="margin-top:10px;">Upload</button>
                 <div id="doc-upload-msg"></div>
+              </div>
+            </div>
+            ` : ''}
+
+            ${project.job_number && !editMode ? `
+            <div class="settings-panel" id="panel-photos">
+              <div class="card">
+                <h2>Site photos</h2>
+                <p class="subtitle" style="margin-bottom:14px;">Uploaded by field staff, mostly at clock-out. Click any photo for a full-size preview.</p>
+                <input type="file" id="site-photo-file" accept="image/*" multiple />
+                <div id="site-photo-upload-msg"></div>
+                <div id="site-photos-list" style="margin-top:14px;"><p class="subtitle">Loading...</p></div>
               </div>
             </div>
             ` : ''}
@@ -3171,6 +3185,7 @@
 
       loadDocuments(project.id);
       wireDocumentUpload(project);
+      if (document.getElementById('site-photos-list')) { loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
       if (document.getElementById('ccew-section')) initCcewSection(project);
 
       const costAllocatedEl = document.getElementById('cost-allocated-value');
@@ -3656,9 +3671,8 @@
                 <button type="button" class="insp-yn-btn yn-yes ${a?.answer_yes_no === true ? 'selected' : ''}">Yes</button>
                 <button type="button" class="insp-yn-btn secondary yn-no ${a?.answer_yes_no === false ? 'selected' : ''}">No</button>
               ` : `
-                ${a?.photo_path ? `<img class="insp-photo-thumb" src="${a.photo_path}" />` : ''}
+                ${a?.photo_path ? `<img class="insp-photo-thumb insp-photo-view" src="${a.photo_path}" style="cursor:pointer;" />` : ''}
                 <input type="file" class="insp-photo-file" accept="image/*,.pdf" style="display:block; margin-bottom:8px;" />
-                <button type="button" class="secondary insp-photo-upload-btn">${a?.photo_path ? 'Replace' : 'Upload'}</button>
               `}
               <div class="insp-item-msg"></div>
             </div>
@@ -3676,21 +3690,22 @@
             });
           });
 
-          const uploadBtn = el.querySelector('.insp-photo-upload-btn');
-          if (uploadBtn) {
-            uploadBtn.addEventListener('click', async () => {
-              const fileInput = el.querySelector('.insp-photo-file');
-              if (!fileInput.files.length) { msgEl.innerHTML = `<div class="error-box">Choose a file first.</div>`; return; }
-              uploadBtn.disabled = true;
-              uploadBtn.textContent = 'Uploading...';
+          const photoViewImg = el.querySelector('.insp-photo-view');
+          if (photoViewImg) photoViewImg.addEventListener('click', () => openPhotoLightbox([photoViewImg.src], 0));
+
+          const fileInput = el.querySelector('.insp-photo-file');
+          if (fileInput) {
+            fileInput.addEventListener('change', async () => {
+              if (!fileInput.files.length) return;
+              fileInput.disabled = true;
+              msgEl.innerHTML = `<p class="subtitle">Uploading...</p>`;
               try {
                 const [url] = await uploadPhotos(fileInput.files, `quote-compliance/${project.id}`, 'site-photos');
                 await saveAnswer(itemId, { photo_path: url });
                 renderChecklist();
               } catch (err) {
                 msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
-                uploadBtn.disabled = false;
-                uploadBtn.textContent = 'Upload';
+                fileInput.disabled = false;
               }
             });
           }
@@ -4246,18 +4261,66 @@
       });
     }
 
+    // Site photos (project_photos) were being written at clock-out this
+    // whole time but never actually shown anywhere - this is the first
+    // place they're rendered, so a job with 30+ photos from the field has
+    // somewhere to browse them instead of piling up unseen.
+    async function loadSitePhotos(projectId) {
+      const listEl = document.getElementById('site-photos-list');
+      const { data: photos, error } = await supabaseClient
+        .from('project_photos')
+        .select('id, url, staff_id, created_at, profiles(full_name)')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (!photos.length) { listEl.innerHTML = `<p class="subtitle">No site photos yet.</p>`; return; }
+
+      const urls = photos.map(p => p.url);
+      listEl.innerHTML = `
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">
+          ${photos.map((p, i) => `
+            <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
+              <img src="${p.url}" data-i="${i}" class="site-photo-view" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" />
+              <div style="padding:6px 8px; font-size:11px; color:var(--muted);">
+                ${p.profiles?.full_name || 'Unknown'}<br>${new Date(p.created_at).toLocaleDateString('en-AU')}
+              </div>
+            </div>
+          `).join('')}
+        </div>`;
+
+      listEl.querySelectorAll('.site-photo-view').forEach(img => {
+        img.addEventListener('click', () => openPhotoLightbox(urls, parseInt(img.dataset.i)));
+      });
+    }
+
+    function wireSitePhotoUpload(projectId) {
+      document.getElementById('site-photo-file').addEventListener('change', async () => {
+        const fileInput = document.getElementById('site-photo-file');
+        const msg = document.getElementById('site-photo-upload-msg');
+        if (!fileInput.files.length) return;
+        msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const urls = await uploadPhotos(fileInput.files, projectId, 'site-photos');
+          const { error } = await supabaseClient.from('project_photos').insert(urls.map(url => ({ project_id: projectId, staff_id: user.id, url })));
+          if (error) throw error;
+          fileInput.value = '';
+          msg.innerHTML = '';
+          await loadSitePhotos(projectId);
+        } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+      });
+    }
+
     function wireDocumentUpload(project) {
-      document.getElementById('doc-upload-btn').addEventListener('click', async () => {
-        const btn = document.getElementById('doc-upload-btn');
+      document.getElementById('doc-file-input').addEventListener('change', async () => {
         const fileInput = document.getElementById('doc-file-input');
         const msg = document.getElementById('doc-upload-msg');
         const newFolder = document.getElementById('doc-new-folder').value.trim();
         const folder = newFolder || document.getElementById('doc-folder-select').value || 'General';
-        if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose one or more files first.</div>`; return; }
+        if (!fileInput.files.length) return;
 
-        msg.innerHTML = '';
-        btn.disabled = true;
-        btn.textContent = 'Uploading...';
+        msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
+        fileInput.disabled = true;
         try {
           const { data: { user } } = await supabaseClient.auth.getUser();
           for (const file of fileInput.files) {
@@ -4268,15 +4331,16 @@
             if (error) throw error;
           }
           await logActivity('project', project.id, 'documents_uploaded', `Uploaded ${fileInput.files.length} document${fileInput.files.length === 1 ? '' : 's'} to ${folder}`);
+          const count = fileInput.files.length;
           fileInput.value = '';
           document.getElementById('doc-new-folder').value = '';
           selectedDocFolder = folder;
           await loadDocuments(project.id);
+          msg.innerHTML = `<div class="success-box">${count} document${count === 1 ? '' : 's'} added.</div>`;
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${err.message}</div>`;
         } finally {
-          btn.disabled = false;
-          btn.textContent = 'Upload';
+          fileInput.disabled = false;
         }
       });
     }

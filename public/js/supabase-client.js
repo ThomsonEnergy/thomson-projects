@@ -133,15 +133,58 @@ async function uploadPhotos(fileList, folder, bucket = 'proposal-photos') {
   return urls;
 }
 
+// Full-size click-through viewer for any set of photo URLs - shared by
+// every thumbnail strip in the app (renderPhotoThumbs below,
+// settings.html's renderCategorizedThumbs, quote.html's galleries,
+// project.html's site photos) so finding "the one that looks right"
+// among a job's 30 photos doesn't mean squinting at 90x90 crops.
+// Arrow keys/buttons move through the exact array passed in, starting
+// at startIndex - the caller's own array order is what the viewer walks.
+function openPhotoLightbox(urls, startIndex = 0) {
+  let index = startIndex;
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:300; display:flex; align-items:center; justify-content:center;';
+  const navBtnStyle = 'position:absolute; top:50%; transform:translateY(-50%); background:rgba(255,255,255,0.1); color:#fff; border:none; width:44px; height:44px; border-radius:50%; font-size:20px; cursor:pointer;';
+
+  function render() {
+    overlay.innerHTML = `
+      <button type="button" id="lb-close" style="position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.1); color:#fff; border:none; width:36px; height:36px; border-radius:50%; font-size:18px; cursor:pointer;">&times;</button>
+      ${urls.length > 1 ? `<button type="button" id="lb-prev" style="${navBtnStyle} left:16px;">&larr;</button>` : ''}
+      <img src="${urls[index]}" style="max-width:88vw; max-height:85vh; object-fit:contain; border-radius:8px;" />
+      ${urls.length > 1 ? `<button type="button" id="lb-next" style="${navBtnStyle} right:16px;">&rarr;</button>` : ''}
+      ${urls.length > 1 ? `<div style="position:absolute; bottom:20px; left:0; right:0; text-align:center; color:#fff; font-size:13px;">${index + 1} / ${urls.length}</div>` : ''}
+    `;
+    overlay.querySelector('#lb-close').addEventListener('click', () => overlay.remove());
+    if (urls.length > 1) {
+      overlay.querySelector('#lb-prev').addEventListener('click', (e) => { e.stopPropagation(); index = (index - 1 + urls.length) % urls.length; render(); });
+      overlay.querySelector('#lb-next').addEventListener('click', (e) => { e.stopPropagation(); index = (index + 1) % urls.length; render(); });
+    }
+  }
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.addEventListener('keydown', function onKey(e) {
+    if (!document.body.contains(overlay)) { document.removeEventListener('keydown', onKey); return; }
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }
+    else if (e.key === 'ArrowLeft' && urls.length > 1) { index = (index - 1 + urls.length) % urls.length; render(); }
+    else if (e.key === 'ArrowRight' && urls.length > 1) { index = (index + 1) % urls.length; render(); }
+  });
+  render();
+  document.body.appendChild(overlay);
+}
+
 // Renders a small thumbnail strip with remove buttons into `containerEl`,
-// keeping `photosArray` (array of URL strings) in sync.
+// keeping `photosArray` (array of URL strings) in sync. Clicking a
+// thumbnail (rather than its x) opens the full-size lightbox instead of
+// doing nothing.
 function renderPhotoThumbs(containerEl, photosArray, onChange) {
   containerEl.innerHTML = photosArray.map((url, i) => `
     <div style="position:relative; display:inline-block; margin:0 8px 8px 0;">
-      <img src="${url}" style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid var(--border);" />
+      <img src="${url}" data-i="${i}" class="thumb-view" style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid var(--border); cursor:pointer;" />
       <button type="button" data-i="${i}" class="thumb-remove" style="position:absolute; top:-6px; right:-6px; width:20px; height:20px; padding:0; border-radius:50%; font-size:11px; line-height:1;">x</button>
     </div>
   `).join('');
+  containerEl.querySelectorAll('.thumb-view').forEach(img => {
+    img.addEventListener('click', () => openPhotoLightbox(photosArray, parseInt(img.dataset.i)));
+  });
   containerEl.querySelectorAll('.thumb-remove').forEach(btn => {
     btn.addEventListener('click', () => {
       photosArray.splice(parseInt(btn.dataset.i), 1);
@@ -1154,7 +1197,6 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
           <label style="margin-top:0">Site photos</label>
           <input type="file" id="cko-photo-file" accept="image/*" multiple capture="environment" />
-          <button type="button" class="secondary" id="cko-photo-upload-btn" style="margin-top:8px;">Upload</button>
           <div id="cko-photo-msg"></div>
         </div>
 
@@ -1199,10 +1241,13 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       section.querySelector('#cko-note-sig-clear-btn').addEventListener('click', () => { sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); hasSignature = false; });
     });
 
-    overlay.querySelector('#cko-photo-upload-btn').addEventListener('click', async () => {
+    // Fires the moment photos are chosen - previously needed a second
+    // "Upload" click that staff often skipped, assuming picking the file
+    // was already the whole job done.
+    overlay.querySelector('#cko-photo-file').addEventListener('change', async () => {
       const fileInput = overlay.querySelector('#cko-photo-file');
       const msg = overlay.querySelector('#cko-photo-msg');
-      if (!fileInput.files.length) { msg.innerHTML = `<div class="error-box">Choose a photo first.</div>`; return; }
+      if (!fileInput.files.length) return;
       msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
       try {
         const urls = await uploadPhotos(fileInput.files, project.id, 'site-photos');
