@@ -40,7 +40,16 @@ async function renderPageToPdf(url) {
   // memory-constrained Lambda container into an OOM kill.
   chromium.setGraphicsMode = false;
   const browser = await puppeteer.launch({
-    args: chromium.args,
+    // @sparticuz/chromium's own default args do NOT include this - and
+    // Lambda's /dev/shm is tiny (often 64MB) compared to a real machine's.
+    // Chromium's renderer normally uses /dev/shm for compositing buffers,
+    // so it was hitting that tiny shared-memory ceiling and getting OOM-
+    // killed almost immediately (~10s in, regardless of how light the
+    // actual page was - confirmed against a quote with under a dozen
+    // small photos still OOMing at 2048MB). This forces it onto regular
+    // /tmp disk-backed memory instead, which is the documented fix for
+    // exactly this failure mode in a Lambda-style container.
+    args: [...chromium.args, '--disable-dev-shm-usage'],
     executablePath: await chromium.executablePath(),
     headless: chromium.headless,
     // Puppeteer's default connects to the browser over a WebSocket to

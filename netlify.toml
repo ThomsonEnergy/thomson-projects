@@ -4,9 +4,14 @@
 
 # Headless Chromium (quote/invoice PDF rendering) needs more headroom than
 # the default Lambda allocation - it was OOM-killing consistently even
-# rendering a plain, photo-free invoice page.
+# rendering a plain, photo-free invoice page (root cause fixed directly in
+# generate-client-document-pdf.js - see the --disable-dev-shm-usage
+# comment there). Maxed out at 4096mb (Netlify's ceiling) anyway, on top
+# of that fix, since AWS Lambda hands out CPU proportional to configured
+# memory - this is also the actual lever for "generating a PDF takes
+# ages", not just a memory safety margin.
 [functions.generate-client-document-pdf]
-  memory = "2048mb"
+  memory = "4096mb"
 
 # First scheduled/cron function in this codebase - moves a job that's
 # been sitting at 'complete' for more than 2 days into 'archived'. See
