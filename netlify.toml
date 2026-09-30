@@ -8,6 +8,12 @@
 [functions.generate-client-document-pdf]
   memory = "2048mb"
 
+# First scheduled/cron function in this codebase - moves a job that's
+# been sitting at 'complete' for more than 2 days into 'archived'. See
+# archive-completed-jobs.js.
+[functions.archive-completed-jobs]
+  schedule = "@daily"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
