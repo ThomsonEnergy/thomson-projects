@@ -174,7 +174,7 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=22"></script>
+  <script src="/js/supabase-client.js?v=23"></script>
   <script src="/js/theme.js"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
@@ -559,6 +559,9 @@
 
         const { error } = await supabaseClient.from('schedule_assignments').insert(insert);
         if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (insert.block_type === 'job') {
+          await supabaseClient.from('projects').update({ pipeline_stage: 'job_booked' }).eq('id', insert.project_id).eq('pipeline_stage', 'ready_to_book');
+        }
         overlay.remove();
         await loadDay();
       });
@@ -607,6 +610,9 @@
             assignment_date: dateToStr(dayViewDate), start_time: startTime, end_time: endTime,
           });
           if (error) { alert(error.message); return; }
+          if (!isSiteVisit) {
+            await supabaseClient.from('projects').update({ pipeline_stage: 'job_booked' }).eq('id', project.id).eq('pipeline_stage', 'ready_to_book');
+          }
           await loadDay();
         });
 

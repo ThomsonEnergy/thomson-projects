@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=22"></script>
+  <script src="/js/supabase-client.js?v=23"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -3041,7 +3041,7 @@
                 <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
                 <input readonly value="${quoteUrl}" style="margin-bottom:10px;" onclick="this.select()" />
                 <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                  <a class="btn secondary" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Quote: ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your quote here:\n' + quoteUrl + '\n\nThanks,\nThomson Energy' })}">Email quote to client</a>
+                  <a class="btn secondary" id="email-quote-btn" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Quote: ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your quote here:\n' + quoteUrl + '\n\nThanks,\nThomson Energy' })}">Email quote to client</a>
                   ${project.quote_pdf_path ? `<button type="button" class="secondary" id="view-quote-pdf-btn">View PDF</button>` : ''}
                   <button type="button" class="secondary" id="generate-quote-pdf-btn" style="${project.quote_pdf_path ? 'font-size:12px; padding:6px 10px;' : ''}">${project.quote_pdf_path ? 'Regenerate' : 'Generate PDF'}</button>
                   ${project.quote_pdf_generated_at ? `<span class="subtitle" style="font-size:11px;">Generated ${new Date(project.quote_pdf_generated_at).toLocaleString('en-AU')}</span>` : ''}
@@ -3269,6 +3269,15 @@
         }
         installerSummaryBtn.disabled = false;
         installerSummaryBtn.textContent = 'Regenerate';
+      });
+
+      const emailQuoteBtn = document.getElementById('email-quote-btn');
+      if (emailQuoteBtn && !project.job_number) emailQuoteBtn.addEventListener('click', () => {
+        // Doesn't block the mailto/Gmail-compose link's own navigation -
+        // just also records that it's been sent. Only advances a quote
+        // still sitting at draft_quote, so re-sending an already-approved
+        // (or since-progressed) quote can't push it backwards.
+        supabaseClient.from('projects').update({ pipeline_stage: 'quote_sent' }).eq('id', project.id).eq('pipeline_stage', 'draft_quote');
       });
 
       const viewQuotePdfBtn = document.getElementById('view-quote-pdf-btn');
@@ -3766,6 +3775,7 @@
           }).eq('id', btn.dataset.id);
           const task = tasks.find(t => t.id === btn.dataset.id);
           await logActivity('project', projectId, 'task_completed', `Task completed: ${task?.description || ''}`);
+          if (task?.required_before_scheduling) await refreshPipelineTaskGate(projectId);
           await loadJobTasks(projectId);
         });
       });
@@ -3916,6 +3926,7 @@
           if (error) throw error;
           const who = personId ? staff.find(s => s.id === personId)?.full_name : (assignType === 'role' ? overlay.querySelector('#at-role').value : null);
           await logActivity('project', projectId, 'task_added', `Task added: ${description}${who ? ` (assigned to ${who})` : ''}`);
+          if (overlay.querySelector('#at-required').checked) await refreshPipelineTaskGate(projectId);
           overlay.remove();
           await loadJobTasks(projectId);
         } catch (err) {

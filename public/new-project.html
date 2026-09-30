@@ -244,7 +244,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=22"></script>
+  <script src="/js/supabase-client.js?v=23"></script>
   <script src="/js/theme.js"></script>
   <script>
     const editId = new URLSearchParams(window.location.search).get('id');
@@ -1152,6 +1152,9 @@
         accounts_contact_id: assignedContactIds.accounts_contact_id || null,
       };
       if (!editId && prefillLeadId) projectFields.lead_id = prefillLeadId;
+      // Only on creation - re-saving edits to an already-sent/approved
+      // quote must never reset its pipeline_stage back to draft.
+      if (!editId) projectFields.pipeline_stage = 'draft_quote';
 
       // Quote number is drawn once, atomically, only when a new quote is
       // created - editing an existing one never reassigns it. Job number

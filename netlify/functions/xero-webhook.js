@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const { getAdminClient } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { xeroRequest } = require('./_shared/xero-client');
+const { advanceToActionOrReady } = require('./_shared/advance-job-stage');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -52,7 +53,7 @@ exports.handler = async (event) => {
 
       const { data: invoiceRow } = await supabaseAdmin
         .from('invoices')
-        .select('id, paid_at')
+        .select('id, paid_at, is_deposit, project_id')
         .eq('xero_invoice_id', evt.resourceId)
         .maybeSingle();
       if (!invoiceRow) continue; // not one of ours, or not pushed to Xero (yet)
@@ -68,14 +69,29 @@ exports.handler = async (event) => {
       // Status at AUTHORISED in that case), which would otherwise get
       // wrongly recorded here as paid_at.
       const isPaid = xeroInvoice.Status === 'PAID';
+      const justPaid = isPaid && !invoiceRow.paid_at;
 
       await supabaseAdmin
         .from('invoices')
         .update({
           xero_invoice_status: xeroInvoice.Status,
-          paid_at: isPaid && !invoiceRow.paid_at ? new Date().toISOString() : invoiceRow.paid_at,
+          paid_at: justPaid ? new Date().toISOString() : invoiceRow.paid_at,
         })
         .eq('id', invoiceRow.id);
+
+      // Deposit invoice just cleared - advance the job off
+      // 'quote_approved' rather than leaving it waiting on a payment
+      // that's already arrived. Only touches the row if it's still
+      // sitting at quote_approved, so a redelivered/duplicate webhook
+      // (or a deposit paid well after the job moved on for some other
+      // reason) can't push it backwards.
+      if (justPaid && invoiceRow.is_deposit && invoiceRow.project_id) {
+        const { data: project } = await supabaseAdmin.from('projects').select('pipeline_stage').eq('id', invoiceRow.project_id).maybeSingle();
+        if (project?.pipeline_stage === 'quote_approved') {
+          await supabaseAdmin.from('projects').update({ pipeline_stage: 'deposit_paid' }).eq('id', invoiceRow.project_id);
+          await advanceToActionOrReady(supabaseAdmin, invoiceRow.project_id);
+        }
+      }
     }
   } catch (err) {
     // Log but still return 200 - Xero will retry on non-2xx, and a

@@ -5,10 +5,13 @@
 // as the actual job, with its own copy of every stage/line item/photo
 // group.
 //
-// The new row is inserted the same way a Direct Job is (pipeline_stage:
-// 'job_booked', job_number left unset) so the same database trigger that
-// already assigns a job number to a fresh Direct Job does it here too -
-// nothing new to draw or risk double-assigning.
+// The new row is inserted the same way a Direct Job is (job_number left
+// unset) so the same database trigger that already assigns a job number
+// to a fresh Direct Job does it here too - nothing new to draw or risk
+// double-assigning. Unlike a Direct Job though, this doesn't start at
+// pipeline_stage 'job_booked' - it starts at 'quote_approved' and lets
+// the deposit-paid webhook (or, if no deposit is required at all,
+// advanceToActionOrReady immediately below) carry it on from there.
 //
 // Deposit invoicing is ported from the old accept-quote.js (back when
 // approving just flipped job_number on the same row) - same proportional-
@@ -18,6 +21,7 @@
 const crypto = require('crypto');
 const { computeDueDate } = require('./compute-due-date');
 const { createDefaultJobTasks } = require('./create-default-job-tasks');
+const { advanceToActionOrReady } = require('./advance-job-stage');
 
 function splitLabourMaterial(centre, amount) {
   const labourCost = Number(centre.estimated_labour_cost) || 0;
@@ -68,6 +72,7 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
       cost_centre_id: null,
       client_id: null,
       description: 'Deposit',
+      is_deposit: true,
       invoice_number: invoiceNumberStr,
       invoice_token: invoiceToken,
       labour_amount: totalLabour,
@@ -162,7 +167,7 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
       sales_contact_id: quote.sales_contact_id,
       accounts_contact_id: quote.accounts_contact_id,
       source_quote_id: quote.id,
-      pipeline_stage: 'job_booked',
+      pipeline_stage: 'quote_approved',
       status: 'in_progress',
     })
     .select()
@@ -227,6 +232,10 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
   await createDefaultJobTasks(supabaseAdmin, job, newStages);
 
   const invoiceToken = await raiseDepositInvoice(supabaseAdmin, job, newStages);
+  // No deposit invoice means nothing will ever fire the deposit-paid
+  // webhook for this job - move it past that stage immediately instead
+  // of leaving it stuck at 'quote_approved' forever.
+  if (!invoiceToken) await advanceToActionOrReady(supabaseAdmin, job.id);
 
   return { jobId: job.id, jobNumber: job.job_number, invoiceToken };
 }

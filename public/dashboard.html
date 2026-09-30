@@ -31,7 +31,7 @@
     <div style="display:flex; justify-content:space-between; align-items:start; flex-wrap:wrap; gap:12px;">
       <div>
         <h1>Job pipeline</h1>
-        <p class="subtitle">Every project, left to right through its lifecycle. Move a card manually for now - automatic stage changes come online in later phases.</p>
+        <p class="subtitle">Every project, left to right through its lifecycle. Quote Approved through Job Booked now move automatically (quote approval, deposit paid, mandatory tasks, scheduling) - Job Not Complete onward still moves by hand until later phases land.</p>
       </div>
       <button class="secondary" id="new-direct-job-btn">+ New job (no quote)</button>
     </div>
@@ -41,19 +41,23 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=22"></script>
+  <script src="/js/supabase-client.js?v=23"></script>
   <script src="/js/theme.js"></script>
   <script>
     const STAGES = [
       { key: 'lead',              label: 'Lead' },
       { key: 'draft_quote',       label: 'Draft Quote' },
+      { key: 'quote_sent',        label: 'Quote Sent' },
       { key: 'quote_approved',    label: 'Quote Approved' },
       { key: 'deposit_paid',      label: 'Deposit Paid' },
+      { key: 'awaiting_action',   label: 'Awaiting Action' },
       { key: 'ready_to_book',     label: 'Ready to Book' },
       { key: 'job_booked',        label: 'Job Booked' },
       { key: 'job_not_complete',  label: 'Job Not Complete' },
       { key: 'client_handover',   label: 'Client Handover' },
-      { key: 'awaiting_payment',  label: 'Awaiting Payment' },
+      { key: 'ready_to_invoice',  label: 'Ready to Invoice' },
+      { key: 'awaiting_payment',  label: 'Invoice Sent - Awaiting Payment' },
+      { key: 'complete',          label: 'Complete' },
     ];
     // Archived sits off-board per the spec - it's a valid stage value but
     // doesn't get its own column here.

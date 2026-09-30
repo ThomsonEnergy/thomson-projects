@@ -1399,6 +1399,28 @@ function openQuickJobPanel(onCreated) {
   document.body.appendChild(overlay);
 }
 
+// Mirrors advance-job-stage.js's server-side logic (run right after a
+// deposit is paid) - re-checked any time a required-before-scheduling
+// task is completed or a new one is added, but only while the job
+// hasn't been scheduled yet (awaiting_action/ready_to_book). Once it's
+// actually job_booked or further along, a task change shouldn't silently
+// move it backwards - see PROJECT_SPEC/the job-not-complete flow for
+// how a job returns to awaiting_action deliberately instead.
+async function refreshPipelineTaskGate(projectId) {
+  const { data: project } = await supabaseClient.from('projects').select('pipeline_stage').eq('id', projectId).maybeSingle();
+  if (!project || !['awaiting_action', 'ready_to_book'].includes(project.pipeline_stage)) return;
+  const { data: outstanding } = await supabaseClient
+    .from('job_tasks')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('required_before_scheduling', true)
+    .eq('completed', false);
+  const stage = (outstanding || []).length ? 'awaiting_action' : 'ready_to_book';
+  if (stage !== project.pipeline_stage) {
+    await supabaseClient.from('projects').update({ pipeline_stage: stage }).eq('id', projectId);
+  }
+}
+
 // Best-effort carry-over of a site inspection across lead -> quote -> job.
 // A job created from an approved quote is a NEW projects row
 // (source_quote_id points back at the quote, lead_id is never copied onto
