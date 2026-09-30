@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const { getAdminClient } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { xeroRequest } = require('./_shared/xero-client');
-const { advanceToActionOrReady } = require('./_shared/advance-job-stage');
+const { advanceToActionOrReady, checkAndAdvanceComplete } = require('./_shared/advance-job-stage');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -85,12 +85,15 @@ exports.handler = async (event) => {
       // sitting at quote_approved, so a redelivered/duplicate webhook
       // (or a deposit paid well after the job moved on for some other
       // reason) can't push it backwards.
-      if (justPaid && invoiceRow.is_deposit && invoiceRow.project_id) {
-        const { data: project } = await supabaseAdmin.from('projects').select('pipeline_stage').eq('id', invoiceRow.project_id).maybeSingle();
-        if (project?.pipeline_stage === 'quote_approved') {
-          await supabaseAdmin.from('projects').update({ pipeline_stage: 'deposit_paid' }).eq('id', invoiceRow.project_id);
-          await advanceToActionOrReady(supabaseAdmin, invoiceRow.project_id);
+      if (justPaid && invoiceRow.project_id) {
+        if (invoiceRow.is_deposit) {
+          const { data: project } = await supabaseAdmin.from('projects').select('pipeline_stage').eq('id', invoiceRow.project_id).maybeSingle();
+          if (project?.pipeline_stage === 'quote_approved') {
+            await supabaseAdmin.from('projects').update({ pipeline_stage: 'deposit_paid' }).eq('id', invoiceRow.project_id);
+            await advanceToActionOrReady(supabaseAdmin, invoiceRow.project_id);
+          }
         }
+        await checkAndAdvanceComplete(supabaseAdmin, invoiceRow.project_id);
       }
     }
   } catch (err) {

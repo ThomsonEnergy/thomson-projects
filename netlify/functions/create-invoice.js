@@ -140,6 +140,14 @@ exports.handler = async (event) => {
       return supabaseAdmin.from('cost_centres').update({ invoiced_amount: before + c.labour_amount + c.material_amount }).eq('id', c.cost_centre_id);
     }));
 
+    // The final claim landing while the job's sitting at Ready to Invoice
+    // (reached once client handover is done) is exactly the "invoice
+    // sent" moment the pipeline board is waiting on - a progress claim
+    // raised earlier, mid-install, shouldn't touch the stage at all.
+    if (isFinalClaim) {
+      await supabaseAdmin.from('projects').update({ pipeline_stage: 'awaiting_payment' }).eq('id', projectId).eq('pipeline_stage', 'ready_to_invoice');
+    }
+
     // No Airwallex payment link is created here. It's generated on demand
     // the moment the client actually clicks "Pay online" on the invoice
     // page (see get-or-create-payment-link.js) - two deliberate reasons:

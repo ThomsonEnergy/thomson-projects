@@ -336,4 +336,8 @@ select '112', 'pipeline_automation_phase1',
   case when exists (select 1 from information_schema.columns where table_name = 'invoices' and column_name = 'is_deposit')
     and exists (select 1 from pg_constraint where conrelid = 'projects'::regclass and conname = 'projects_pipeline_stage_check' and pg_get_constraintdef(oid) like '%quote_sent%')
   then 'present' else 'MISSING' end
+union all
+select '113', 'pipeline_automation_phase2',
+  case when exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'completed_at')
+  then 'present' else 'MISSING' end
 order by 1;

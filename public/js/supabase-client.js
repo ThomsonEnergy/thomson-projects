@@ -731,7 +731,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   let project = null, centres = [];
   if (entry.project_id) {
     const [{ data: proj }, { data: cc }] = await Promise.all([
-      supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved').eq('id', entry.project_id).maybeSingle(),
+      supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved, pipeline_stage').eq('id', entry.project_id).maybeSingle(),
       supabaseClient.from('cost_centres').select('id, name').eq('project_id', entry.project_id).order('sort_order'),
     ]);
     project = proj;
@@ -1059,8 +1059,75 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       if (msg) msg.innerHTML = `<div class="error-box">${saveError.message}</div>`;
       return;
     }
-    if (project) renderStep3();
+    // Only asked for an actual job (not a quote/site-visit), and only
+    // while it's genuinely mid-install - once it's moved on to handover
+    // or beyond there's nothing left to ask about here.
+    if (project && project.job_number && ['job_booked', 'job_not_complete'].includes(project.pipeline_stage)) renderStepJobStatus();
+    else if (project) renderStep3();
     else await finishAndMaybeSwitch();
+  }
+
+  // "Complete" moves the job on to Client Handover. "Not complete - back
+  // tomorrow" is the routine, no-note-needed case for an ordinary
+  // multi-day job - it auto-books the same person on the same job for
+  // the next calendar day and flags (doesn't block) if that slot's
+  // already got something else on it. This is separate from the
+  // Job Not Complete a PM can still set by hand from the pipeline board
+  // for something genuinely stuck, not just "see you tomorrow".
+  function renderStepJobStatus() {
+    overlay.innerHTML = `
+      <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
+        <h2>How's the job?</h2>
+        <p class="subtitle" style="margin-bottom:12px;">${projectRef(project)}</p>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <button type="button" id="cko-job-complete">Complete</button>
+          <button type="button" class="secondary" id="cko-job-not-complete">Not complete - back tomorrow</button>
+        </div>
+        <div id="cko-job-status-msg" style="margin-top:10px;"></div>
+      </div>`;
+
+    overlay.querySelector('#cko-job-complete').addEventListener('click', async () => {
+      await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+      await logActivity('project', project.id, 'job_complete', 'Marked complete at clock-out - moved to Client Handover');
+      renderStep3();
+    });
+
+    overlay.querySelector('#cko-job-not-complete').addEventListener('click', async () => {
+      const msgEl = overlay.querySelector('#cko-job-status-msg');
+      const btn = overlay.querySelector('#cko-job-not-complete');
+      btn.disabled = true;
+      try {
+        await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+
+        const tomorrow = new Date(state.outIso);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+
+        const { data: existingTomorrow } = await supabaseClient
+          .from('schedule_assignments')
+          .select('id, project_id, projects(name, job_number)')
+          .eq('staff_id', entry.staff_id)
+          .eq('assignment_date', tomorrowStr);
+        const doubleBooked = (existingTomorrow || []).filter(a => a.project_id !== project.id);
+
+        await supabaseClient.from('schedule_assignments').insert({
+          staff_id: entry.staff_id, project_id: project.id, block_type: 'job',
+          assignment_date: tomorrowStr, start_time: '07:00', end_time: '15:00',
+        });
+        await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - booked back in for ${tomorrowStr}`);
+
+        if (doubleBooked.length) {
+          await logActivity('project', project.id, 'schedule_conflict', `Also booked on ${tomorrowStr} against: ${doubleBooked.map(a => a.projects?.name || 'another job').join(', ')}`);
+          msgEl.innerHTML = `<div class="error-box">Heads up - you're already booked on something else for ${tomorrowStr} too. Let your PM know.</div>`;
+          setTimeout(renderStep3, 2500);
+        } else {
+          renderStep3();
+        }
+      } catch (err) {
+        msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        btn.disabled = false;
+      }
+    });
   }
 
   // Clocking out is done at this point - if this clock-out was part of a
@@ -1397,6 +1464,37 @@ function openQuickJobPanel(onCreated) {
   });
 
   document.body.appendChild(overlay);
+}
+
+// Re-checked any time the handover data fields are saved or a
+// task_type='handover' job_task is completed - advances Client Handover
+// -> Ready to Invoice once both are true: every handover task done, AND
+// (solar jobs only - this data doesn't exist on the handover card for
+// anything else) NMI, panel/inverter serials, and a Formbay lodgement
+// status are all filled in.
+async function checkAndAdvanceHandover(projectId) {
+  const { data: project } = await supabaseClient
+    .from('projects')
+    .select('pipeline_stage, proposal_template, nmi, panel_serial_numbers, inverter_serial_numbers, formbay_lodgement_status')
+    .eq('id', projectId)
+    .maybeSingle();
+  if (!project || project.pipeline_stage !== 'client_handover') return;
+
+  if (project.proposal_template === 'solar') {
+    const dataComplete = !!(project.nmi || '').trim() && !!(project.panel_serial_numbers || '').trim()
+      && !!(project.inverter_serial_numbers || '').trim() && !!project.formbay_lodgement_status;
+    if (!dataComplete) return;
+  }
+
+  const { data: outstanding } = await supabaseClient
+    .from('job_tasks')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('task_type', 'handover')
+    .eq('completed', false);
+  if ((outstanding || []).length) return;
+
+  await supabaseClient.from('projects').update({ pipeline_stage: 'ready_to_invoice' }).eq('id', projectId).eq('pipeline_stage', 'client_handover');
 }
 
 // Mirrors advance-job-stage.js's server-side logic (run right after a

@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=23"></script>
+  <script src="/js/supabase-client.js?v=24"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -3155,6 +3155,7 @@
           const { error } = await supabaseClient.from('projects').update(updates).eq('id', project.id);
           if (error) throw error;
           Object.assign(project, updates);
+          await checkAndAdvanceHandover(project.id);
           msgEl.innerHTML = `<div class="success-box">Saved.</div>`;
         } catch (err) {
           msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
@@ -3776,6 +3777,7 @@
           const task = tasks.find(t => t.id === btn.dataset.id);
           await logActivity('project', projectId, 'task_completed', `Task completed: ${task?.description || ''}`);
           if (task?.required_before_scheduling) await refreshPipelineTaskGate(projectId);
+          if (task?.task_type === 'handover') await checkAndAdvanceHandover(projectId);
           await loadJobTasks(projectId);
         });
       });

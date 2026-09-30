@@ -9,7 +9,7 @@
 const crypto = require('crypto');
 const { getAdminClient } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
-const { advanceToActionOrReady } = require('./_shared/advance-job-stage');
+const { advanceToActionOrReady, checkAndAdvanceComplete } = require('./_shared/advance-job-stage');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -70,12 +70,15 @@ exports.handler = async (event) => {
         // Same deposit -> quote_approved advancement as xero-webhook.js -
         // see advance-job-stage.js for why this only moves a job that's
         // still actually waiting at quote_approved.
-        if (invoiceRow.is_deposit && invoiceRow.project_id) {
-          const { data: project } = await supabaseAdmin.from('projects').select('pipeline_stage').eq('id', invoiceRow.project_id).maybeSingle();
-          if (project?.pipeline_stage === 'quote_approved') {
-            await supabaseAdmin.from('projects').update({ pipeline_stage: 'deposit_paid' }).eq('id', invoiceRow.project_id);
-            await advanceToActionOrReady(supabaseAdmin, invoiceRow.project_id);
+        if (invoiceRow.project_id) {
+          if (invoiceRow.is_deposit) {
+            const { data: project } = await supabaseAdmin.from('projects').select('pipeline_stage').eq('id', invoiceRow.project_id).maybeSingle();
+            if (project?.pipeline_stage === 'quote_approved') {
+              await supabaseAdmin.from('projects').update({ pipeline_stage: 'deposit_paid' }).eq('id', invoiceRow.project_id);
+              await advanceToActionOrReady(supabaseAdmin, invoiceRow.project_id);
+            }
           }
+          await checkAndAdvanceComplete(supabaseAdmin, invoiceRow.project_id);
         }
       } else if (!invoiceRow) {
         console.error(`Airwallex webhook: payment_link.paid for link ${linkId} (reference ${reference}) didn't match any invoice.`);

@@ -22,4 +22,22 @@ async function advanceToActionOrReady(supabaseAdmin, projectId) {
   return stage;
 }
 
-module.exports = { advanceToActionOrReady };
+// Run from both payment webhooks any time an invoice is marked paid -
+// only actually does anything once a job has reached 'awaiting_payment'
+// (the final claim was already sent) and every invoice tied to it
+// (deposit, any progress claims, the final claim) now has paid_at set.
+async function checkAndAdvanceComplete(supabaseAdmin, projectId) {
+  const { data: project } = await supabaseAdmin.from('projects').select('pipeline_stage').eq('id', projectId).maybeSingle();
+  if (!project || project.pipeline_stage !== 'awaiting_payment') return;
+
+  const { data: invoices } = await supabaseAdmin.from('invoices').select('paid_at').eq('project_id', projectId);
+  if (!invoices || !invoices.length || !invoices.every(inv => !!inv.paid_at)) return;
+
+  await supabaseAdmin
+    .from('projects')
+    .update({ pipeline_stage: 'complete', completed_at: new Date().toISOString() })
+    .eq('id', projectId)
+    .eq('pipeline_stage', 'awaiting_payment');
+}
+
+module.exports = { advanceToActionOrReady, checkAndAdvanceComplete };
