@@ -2610,7 +2610,7 @@
           ${project.job_number && !editMode && pricingVisible ? `<button class="settings-tab" data-panel="invoices">Invoices</button>` : ''}
           <button class="settings-tab" data-panel="details">Details</button>
           ${!editMode ? `<button class="settings-tab" data-panel="documents">Documents</button>` : ''}
-          ${project.job_number && !editMode ? `<button class="settings-tab" data-panel="photos">Site Photos</button>` : ''}
+          ${!editMode ? `<button class="settings-tab" data-panel="photos">Site Photos</button>` : ''}
         </div>
 
         <div class="job-tab-layout">
@@ -3110,7 +3110,7 @@
             </div>
             ` : ''}
 
-            ${project.job_number && !editMode ? `
+            ${!editMode ? `
             <div class="settings-panel" id="panel-photos">
               <div class="card">
                 <h2>Site photos</h2>
