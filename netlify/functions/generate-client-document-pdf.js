@@ -154,7 +154,14 @@ exports.handler = async (event) => {
         .single();
       if (error || !project || !project.quote_token) throw new Error(error?.message || 'Quote not found or has no link yet');
 
-      const contentPdfBytes = await renderPageToPdf(`${siteUrl}/quote.html?token=${project.quote_token}&print=1`);
+      // hidecover=1 - this function already prepends its own title page
+      // (drawCoverPage below), so quote.html's own built-in cover banner
+      // (and its own cover_photos) would otherwise print a second,
+      // redundant title page - see the hideCoverBanner comment in
+      // quote.html. Never set on the plain "Download PDF" link a person
+      // might click themselves, which still wants that banner as its one
+      // and only cover.
+      const contentPdfBytes = await renderPageToPdf(`${siteUrl}/quote.html?token=${project.quote_token}&print=1&hidecover=1`);
       const docLabel = project.proposal_template === 'quick_estimate' ? 'Estimate' : 'Proposal';
       const finalPdf = await buildFinalPdf(contentPdfBytes, supabaseAdmin, {
         docTitle: `${docLabel}${project.quote_number ? ` Q${project.quote_number}` : ''}`,

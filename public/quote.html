@@ -143,7 +143,18 @@
       const detailParts = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
       const licenseParts = (s.licenses || '').trim();
 
-      const coverHtml = `
+      // generate-client-document-pdf.js prepends its own dedicated title
+      // page (logo, "Proposal Q1042", prepared for, date, company
+      // letterhead) ahead of this whole page - this banner is the same
+      // information a second time, which is what "2 proposal pages"
+      // looked like, and its own cover_photos add real weight to a
+      // document that already carries a title-page photo. &hidecover=1
+      // (set only by that function, never by a person's own "Download
+      // PDF" link, which still prints this banner as the page's one and
+      // only cover) skips it entirely rather than just hiding it, so its
+      // images never even load.
+      const hideCoverBanner = new URLSearchParams(window.location.search).get('hidecover') === '1';
+      const bannerHtml = `
         <div class="cover-banner">
           ${coverPhotos.length ? `<div class="cover-photo-grid">${coverPhotos.map(url => `<img src="${url}" />`).join('')}</div>` : ''}
           <div class="cover-scrim"></div>
@@ -159,7 +170,9 @@
               <span>${s.company_name || ''}${detailParts.length ? ' &middot; ' + detailParts.join(' &middot; ') : ''}</span>
               ${licenseParts ? `<span>${licenseParts}</span>` : ''}
             </div>` : ''}
-        </div>
+        </div>`;
+      const coverHtml = `
+        ${hideCoverBanner ? '' : bannerHtml}
         <p class="subtitle" style="margin:0 0 24px;">Prepared for ${project.client_name}${project.client_address ? ' &middot; ' + mapsLink(project.client_address) : ''}</p>
         ${template === 'quick_estimate' ? `<div class="card" style="border-color:var(--accent); margin-bottom:24px;"><p style="margin:0; font-weight:600;">${project.estimate_disclaimer_text || 'Estimate only - final invoice based on actual hours and materials used.'}</p></div>` : ''}
       `;
@@ -199,7 +212,7 @@
       const sowHtml = project.sow_text ? `
         <div class="card">
           <h2>Scope of works</h2>
-          <p class="subtitle" style="white-space:pre-wrap; line-height:1.7; color:var(--text);">${project.sow_text}</p>
+          <p style="white-space:pre-wrap; line-height:1.7;">${project.sow_text}</p>
         </div>` : '';
 
       const pylonSummary = pylonSystemSummary(project.pylon_data);
