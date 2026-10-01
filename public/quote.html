@@ -95,7 +95,7 @@
     <div id="content"><p class="subtitle">Loading your proposal...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=25"></script>
+  <script src="/js/supabase-client.js?v=26"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
 
@@ -156,7 +156,7 @@
       const hideCoverBanner = new URLSearchParams(window.location.search).get('hidecover') === '1';
       const bannerHtml = `
         <div class="cover-banner">
-          ${coverPhotos.length ? `<div class="cover-photo-grid">${coverPhotos.map(url => `<img src="${url}" />`).join('')}</div>` : ''}
+          ${coverPhotos.length ? `<div class="cover-photo-grid">${coverPhotos.map(url => `<img src="${supaImageVariant(url, 1000, 70)}" />`).join('')}</div>` : ''}
           <div class="cover-scrim"></div>
           <div class="cover-content">
             ${s.logo_url ? `<div class="cover-logo-badge"><img src="${s.logo_url}" class="cover-logo" /></div>` : `<p style="font-size:22px; font-weight:700; margin:0 0 8px;">${s.company_name || ''}</p>`}
@@ -185,7 +185,7 @@
             ${c.photo_groups.map(g => `
               <p class="subtitle" style="margin:0 0 6px;">${g.description || ''}</p>
               <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:14px;">
-                ${(g.photos || []).map(p => `<img src="${p.url || p}" style="width:100%; height:130px; object-fit:cover; border-radius:8px;" />`).join('')}
+                ${(g.photos || []).map(p => `<img src="${supaImageVariant(p.url || p, 500, 70)}" style="width:100%; height:130px; object-fit:cover; border-radius:8px;" />`).join('')}
               </div>
             `).join('')}
           `).join('')}
@@ -229,7 +229,7 @@
         <div class="card">
           <h2>What it will look like</h2>
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px;">
-            ${referencePhotos.map(url => `<img src="${url}" style="width:100%; height:150px; object-fit:cover; border-radius:8px;" />`).join('')}
+            ${referencePhotos.map(url => `<img src="${supaImageVariant(url, 500, 70)}" style="width:100%; height:150px; object-fit:cover; border-radius:8px;" />`).join('')}
           </div>
         </div>` : '';
 

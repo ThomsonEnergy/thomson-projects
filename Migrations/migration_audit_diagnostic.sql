@@ -346,4 +346,8 @@ select '114', 'shared_gmail_inbox',
     and exists (select 1 from information_schema.tables where table_name = 'emails')
     and exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'email_signature')
   then 'present' else 'MISSING' end
+union all
+select '115', 'cover_photo',
+  case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'cover_photo_url')
+  then 'present' else 'MISSING' end
 order by 1;

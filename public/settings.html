@@ -121,8 +121,16 @@
           </div>
 
           <div class="card">
-            <h2>Portfolio photos (used on every proposal's cover page)</h2>
-            <p class="subtitle" style="margin-bottom:10px;">Upload photos of previous jobs. These appear on the title page of every quote you send.</p>
+            <h2>Cover page photo</h2>
+            <p class="subtitle" style="margin-bottom:10px;">One fixed background photo, used on the title page of every generated quote/invoice PDF - client name, job details and your logo are overlaid on top at generation time. Upload something high quality but not enormous; it's resized automatically either way.</p>
+            <div id="cover-photo-preview" style="margin-bottom:12px;"></div>
+            <input type="file" id="cover-photo-file" accept="image/*" />
+            <div id="cover-photo-msg"></div>
+          </div>
+
+          <div class="card">
+            <h2>Portfolio photos (shown on the quote's own page when a client opens their link)</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Upload photos of previous jobs. These appear as a header banner on the client-facing quote page itself (not the generated PDF's title page - see Cover page photo above), picked to match the job's category.</p>
             <div id="portfolio-thumbs" style="margin-bottom:10px;"></div>
             <input type="file" id="portfolio-file" accept="image/*" multiple />
             <div id="portfolio-msg"></div>
@@ -628,11 +636,12 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=25"></script>
+  <script src="/js/supabase-client.js?v=26"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
     let logoUrl = '';
+    let coverPhotoUrl = '';
 
     // --- Tab switching ---
     document.querySelectorAll('.settings-tab').forEach(btn => {
@@ -666,6 +675,12 @@
         : `<p class="subtitle" style="margin:0;">No logo uploaded yet.</p>`;
     }
 
+    function renderCoverPhotoPreview() {
+      document.getElementById('cover-photo-preview').innerHTML = coverPhotoUrl
+        ? `<img src="${supaImageVariant(coverPhotoUrl, 400, 70)}" style="max-height:140px; max-width:260px; border-radius:8px; object-fit:cover;" />`
+        : `<p class="subtitle" style="margin:0;">No cover photo uploaded yet - the title page prints plain white/black text until one is set.</p>`;
+    }
+
     async function loadSettings() {
       const { data, error } = await supabaseClient.from('company_settings').select('*').eq('id', 1).single();
       if (error) {
@@ -674,7 +689,9 @@
       }
       portfolioPhotos = (data.portfolio_photos || []).map(p => typeof p === 'string' ? { url: p, category: 'general' } : { url: p.url, category: p.category || 'general' });
       logoUrl = data.logo_url || '';
+      coverPhotoUrl = data.cover_photo_url || '';
       renderLogoPreview();
+      renderCoverPhotoPreview();
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';
@@ -748,6 +765,22 @@
       }
     });
 
+    document.getElementById('cover-photo-file').addEventListener('change', async () => {
+      const fileInput = document.getElementById('cover-photo-file');
+      const msg = document.getElementById('cover-photo-msg');
+      if (!fileInput.files.length) return;
+      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
+      try {
+        const [url] = await uploadPhotos(fileInput.files, 'cover-photo');
+        coverPhotoUrl = url;
+        renderCoverPhotoPreview();
+        fileInput.value = '';
+        msg.innerHTML = `<div class="success-box">Uploaded. Click "Save company details" below to keep this.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      }
+    });
+
     document.getElementById('portfolio-file').addEventListener('change', async () => {
       const fileInput = document.getElementById('portfolio-file');
       const msg = document.getElementById('portfolio-msg');
@@ -771,6 +804,7 @@
         .update({
           portfolio_photos: portfolioPhotos,
           logo_url: logoUrl,
+          cover_photo_url: coverPhotoUrl,
           tagline: document.getElementById('tagline').value.trim(),
           company_name: document.getElementById('company-name').value.trim(),
           abn: document.getElementById('abn').value.trim(),

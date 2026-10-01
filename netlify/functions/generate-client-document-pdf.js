@@ -168,7 +168,7 @@ exports.handler = async (event) => {
         preparedFor: project.client_name,
         subtitle: project.name,
         dateLabel: new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }),
-        proposalTemplate: project.proposal_template,
+        showCoverPhoto: true,
       });
 
       path = `client-documents/quotes/${project.id}.pdf`;
@@ -178,7 +178,7 @@ exports.handler = async (event) => {
     } else if (doc_type === 'invoice') {
       const { data: invoice, error } = await supabaseAdmin
         .from('invoices')
-        .select('id, invoice_number, invoice_token, project_id, projects(name, client_name, proposal_template)')
+        .select('id, invoice_number, invoice_token, project_id, projects(name, client_name)')
         .eq('id', record_id)
         .single();
       if (error || !invoice || !invoice.invoice_token) throw new Error(error?.message || 'Invoice not found or has no link yet');
@@ -189,7 +189,7 @@ exports.handler = async (event) => {
         preparedFor: invoice.projects?.client_name || null,
         subtitle: invoice.projects?.name || null,
         dateLabel: new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }),
-        proposalTemplate: invoice.projects?.proposal_template,
+        showCoverPhoto: true,
       });
 
       path = `client-documents/invoices/${invoice.id}.pdf`;

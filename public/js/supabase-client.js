@@ -133,6 +133,26 @@ async function uploadPhotos(fileList, folder, bucket = 'proposal-photos') {
   return urls;
 }
 
+// Requests a resized, recompressed rendition of a Supabase Storage photo
+// via its built-in image-transformation endpoint, rather than the full
+// original file - a gallery thumbnail or a PDF cover photo never needs a
+// multi-MB source image at full resolution (confirmed one real portfolio
+// photo was 4.49MB; the same photo at width 1200/quality 70 is 341KB).
+// Client-side compressImage() above already caps uploads at 1920px/0.82,
+// but a detailed drone photo can still land in the multiple-MB range at
+// that size - this is the second, display-time pass that actually fixes
+// it, and costs nothing extra to add since every photo in this app is
+// already a Supabase Storage public URL. Falls back to the original URL
+// untouched for anything that isn't (e.g. a blank/missing value).
+function supaImageVariant(url, width = 1200, quality = 70) {
+  if (!url || typeof url !== 'string') return url;
+  const marker = '/storage/v1/object/public/';
+  const idx = url.indexOf(marker);
+  if (idx === -1) return url;
+  const rendered = `${url.slice(0, idx)}/storage/v1/render/image/public/${url.slice(idx + marker.length)}`;
+  return `${rendered}?width=${width}&quality=${quality}`;
+}
+
 // Full-size click-through viewer for any set of photo URLs - shared by
 // every thumbnail strip in the app (renderPhotoThumbs below,
 // settings.html's renderCategorizedThumbs, quote.html's galleries,

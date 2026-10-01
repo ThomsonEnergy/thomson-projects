@@ -11,8 +11,12 @@ const { StandardFonts, rgb } = require('pdf-lib');
 // Full-bleed photo background, centered layout - picked over a mockup of
 // a plain accent-color header block or a photo-banner-up-top treatment
 // (both reviewed and rejected in favour of this one). The photo is one
-// of the company's own portfolio photos (Settings > Portfolio photos),
-// matched to the job's category where possible.
+// fixed, dedicated cover photo (Settings > Cover page photo) - the same
+// image on every document, rather than a different real portfolio photo
+// picked per job. A single company-controlled image is both simpler to
+// keep looking good behind overlaid text and easier to keep a sensible
+// file size, versus inheriting whatever a given job's own photo happens
+// to be (one was found to be 4.49MB at full resolution).
 
 const PAGE_WIDTH = 595.28; // A4 in points
 const PAGE_HEIGHT = 841.89;
@@ -23,6 +27,21 @@ async function fetchCompanySettings(supabaseAdmin) {
   return data || {};
 }
 
+// Requests a resized, recompressed rendition via Supabase Storage's own
+// image-transformation endpoint rather than the original file - the same
+// 4.49MB drone photo renders at width 1400/quality 70 as ~250KB, plenty
+// for a full-bleed A4 background sitting behind a 50%-opacity dark wash.
+// Falls back to the original URL for anything not a Supabase Storage
+// public URL (shouldn't normally happen, but embedImageFromUrl below
+// still works fine against the untransformed original either way).
+function resizedImageUrl(url, width, quality = 70) {
+  if (!url) return url;
+  const marker = '/storage/v1/object/public/';
+  const idx = url.indexOf(marker);
+  if (idx === -1) return url;
+  return `${url.slice(0, idx)}/storage/v1/render/image/public/${url.slice(idx + marker.length)}?width=${width}&quality=${quality}`;
+}
+
 async function embedImageFromUrl(pdfDoc, url) {
   if (!url) return null;
   try {
@@ -31,41 +50,28 @@ async function embedImageFromUrl(pdfDoc, url) {
     const bytes = Buffer.from(await res.arrayBuffer());
     const ext = (url.split('.').pop() || '').toLowerCase().split('?')[0];
     if (ext === 'png') return await pdfDoc.embedPng(bytes);
-    return await pdfDoc.embedJpg(bytes); // jpg/jpeg - the only other format logos/portfolio photos get uploaded as
+    return await pdfDoc.embedJpg(bytes); // jpg/jpeg - the only other format logos/cover photos get uploaded as
   } catch (err) {
     console.error(`Could not embed image from ${url}:`, err.message);
     return null;
   }
 }
 
-// Solar quotes get a solar portfolio photo, everything else (new build,
-// quick estimate, time & materials, a no-quote direct job) gets an
-// electrical one - this is an electrical contractor first, solar is the
-// specific case. Falls back to any portfolio photo at all (ignoring
-// category) if there's no exact match yet, and to no background (plain
-// white, the original look) if the portfolio library is empty.
-function pickCoverPhoto(portfolioPhotos, proposalTemplate) {
-  const photos = portfolioPhotos || [];
-  if (!photos.length) return null;
-  const wantCategory = proposalTemplate === 'solar' ? 'solar' : 'electrical';
-  const matching = photos.filter((p) => p.category === wantCategory);
-  const pool = matching.length ? matching : photos;
-  return pool[Math.floor(Math.random() * pool.length)].url;
-}
-
 // docTitle: e.g. "Employment Contract", "Quote Q1042", "Tax Invoice SI3021"
 // preparedFor: e.g. an employee name or client name
 // subtitle: optional second line under preparedFor (a project name, etc.)
-// proposalTemplate: project.proposal_template - drives which portfolio
-// photo gets picked (see pickCoverPhoto) - omit for a plain white cover
-// (e.g. an employment contract, which isn't tied to a job at all).
-async function drawCoverPage(pdfDoc, supabaseAdmin, { docTitle, preparedFor, subtitle, dateLabel, proposalTemplate }) {
+// showCoverPhoto: true for a client-facing quote/invoice - an employment
+// contract (generate-signed-document.js, which never sets this) stays on
+// the plain white/black treatment, since a job-site photo behind HR
+// paperwork doesn't make sense there.
+async function drawCoverPage(pdfDoc, supabaseAdmin, { docTitle, preparedFor, subtitle, dateLabel, showCoverPhoto }) {
   const settings = await fetchCompanySettings(supabaseAdmin);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const logoImage = await embedImageFromUrl(pdfDoc, settings.logo_url);
-  const coverPhotoUrl = proposalTemplate ? pickCoverPhoto(settings.portfolio_photos, proposalTemplate) : null;
-  const coverPhotoImage = coverPhotoUrl ? await embedImageFromUrl(pdfDoc, coverPhotoUrl) : null;
+  const coverPhotoImage = (showCoverPhoto && settings.cover_photo_url)
+    ? await embedImageFromUrl(pdfDoc, resizedImageUrl(settings.cover_photo_url, 1400))
+    : null;
 
   const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
 
