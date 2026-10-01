@@ -17,6 +17,44 @@ const { drawCoverPage } = require('./_shared/pdf-cover-page');
 // place - the browser just awaits this directly.
 
 async function renderPageToPdf(url) {
+  // Known puppeteer-core/Chromium failure mode with pipe:true (the
+  // transport this uses - see below): if the Chromium process dies
+  // unexpectedly mid-render, the next CDP command's pipe write throws
+  // "write EPIPE" as a genuine Node uncaughtException, not a rejected
+  // promise this function's own try/catch can see - it crashes the
+  // whole Lambda runtime (Runtime.ExitError) instead of just failing
+  // this one request. Confirmed happening in production (duration ~11s,
+  // memory ~2.9GB, stack through puppeteer-core's PipeTransport.send).
+  // This temporarily installs a process-wide safety net for exactly the
+  // window this risky operation runs in, converting that stray crash
+  // into a normal rejection this function already knows how to report
+  // (quote_pdf_error/pdf_error, a clean error response) - removed again
+  // immediately after, success or failure, so it doesn't mask anything
+  // unrelated to this render.
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const onFatal = (err) => {
+      if (settled) return;
+      settled = true;
+      cleanupListeners();
+      console.error('Uncaught error during PDF render (Chromium likely crashed):', err);
+      reject(new Error(`Chromium crashed while rendering the PDF (${err?.code || err?.message || 'unknown error'}) - try again`));
+    };
+    function cleanupListeners() {
+      process.removeListener('uncaughtException', onFatal);
+      process.removeListener('unhandledRejection', onFatal);
+    }
+    process.once('uncaughtException', onFatal);
+    process.once('unhandledRejection', onFatal);
+
+    renderPageToPdfUnsafe(url).then(
+      (buf) => { if (!settled) { settled = true; cleanupListeners(); resolve(buf); } },
+      (err) => { if (!settled) { settled = true; cleanupListeners(); reject(err); } }
+    );
+  });
+}
+
+async function renderPageToPdfUnsafe(url) {
   // Required lazily, inside the function, rather than at module top level -
   // requiring puppeteer-core at module load time meant simply IMPORTING
   // this file (which Netlify's function bundler/router does for every
@@ -73,7 +111,11 @@ async function renderPageToPdf(url) {
     const pdfBytes = await page.pdf({ format: 'a4', printBackground: true, margin: { top: '20px', bottom: '20px' } });
     return Buffer.from(pdfBytes);
   } finally {
-    await browser.close();
+    // If Chromium already crashed, this itself throws on the same dead
+    // pipe - swallow that specifically (the real error from above is
+    // what actually matters and is already on its way out), don't let
+    // cleanup mask or replace it.
+    try { await browser.close(); } catch (closeErr) { console.error('browser.close() failed (Chromium likely already exited):', closeErr.message); }
   }
 }
 
