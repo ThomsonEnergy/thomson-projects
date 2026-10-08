@@ -100,7 +100,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=45"></script>
+  <script src="/js/supabase-client.js?v=46"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -156,12 +156,20 @@
     // is a link through to the project so they can jump straight into it,
     // and it surfaces the SOW plus outstanding tasks right there without
     // needing to go searching for the job first.
+    // Writes a missing installer summary once per page load, then calls done().
+    const summaryTried = new Set();
+    function autoWriteSummary(projectId, done) {
+      if (summaryTried.has(projectId)) return;
+      summaryTried.add(projectId);
+      requestInstallerSummary(projectId, { onlyIfStale: true }).then(done).catch(err => console.error('Installer summary failed:', err));
+    }
+
     async function renderActiveJobCard(projectId) {
       const cardEl = document.getElementById('active-job-card');
       if (!projectId) { cardEl.style.display = 'none'; cardEl.innerHTML = ''; return; }
 
       const [{ data: project }, { data: tasks }] = await Promise.all([
-        supabaseClient.from('projects').select('id, name, job_number, quote_number, sow_text, notes, proposal_template, template_answers').eq('id', projectId).maybeSingle(),
+        supabaseClient.from('projects').select('id, name, job_number, quote_number, sow_text, installer_summary, notes, proposal_template, template_answers').eq('id', projectId).maybeSingle(),
         supabaseClient.from('job_tasks').select('id, description, task_type').eq('project_id', projectId).eq('completed', false).order('created_at'),
       ]);
       if (!project) { cardEl.style.display = 'none'; cardEl.innerHTML = ''; return; }
@@ -169,6 +177,9 @@
       const onsiteTasks = (tasks || []).filter(t => t.task_type === 'onsite');
       const prejobTasks = (tasks || []).filter(t => t.task_type !== 'onsite');
       const sowPreview = project.sow_text ? (project.sow_text.length > 400 ? project.sow_text.slice(0, 400) + '...' : project.sow_text) : '';
+      // The AI-written inclusions / exclusions come first. A job that has a scope
+      // but no summary yet gets one written now and the card refreshes itself.
+      if (!project.installer_summary && project.sow_text && project.sow_text.trim()) autoWriteSummary(project.id, () => renderActiveJobCard(projectId));
 
       cardEl.style.display = 'block';
       cardEl.innerHTML = `
@@ -180,7 +191,10 @@
           ${TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length ? `
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</p>
             <div style="margin:0 0 12px;">${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}</div>` : ''}
-          ${sowPreview ? `<p class="subtitle" style="margin:0 0 12px; white-space:pre-wrap;">${sowPreview}</p>` : ''}
+          ${project.installer_summary ? `
+            <p style="margin:0 0 4px; font-weight:600; font-size:13px;">Installer summary</p>
+            <p style="margin:0 0 12px; white-space:pre-wrap; font-size:14px; color:var(--text);">${escapeHtml(project.installer_summary)}</p>`
+            : (sowPreview ? `<p class="subtitle" style="margin:0 0 12px; white-space:pre-wrap;">${escapeHtml(sowPreview)}</p>` : '')}
           ${onsiteTasks.length ? `
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">Onsite tasks</p>
             ${onsiteTasks.map(t => `<p class="subtitle" style="margin:0 0 4px; font-size:13px;">- ${t.description}</p>`).join('')}
@@ -217,6 +231,22 @@
           selectClockJob(btn.dataset.projectId || null, btn.textContent.trim());
         });
       });
+
+      // A short brief for each job you're booked on today: what's in and out of scope.
+      const ids = [...new Set(data.map(a => a.project_id).filter(Boolean))];
+      if (ids.length) {
+        const { data: briefs } = await supabaseClient.from('projects').select('id, name, job_number, quote_number, installer_summary, sow_text').in('id', ids);
+        const withSummary = (briefs || []).filter(p => p.installer_summary);
+        (briefs || []).filter(p => !p.installer_summary && p.sow_text && p.sow_text.trim()).forEach(p => autoWriteSummary(p.id, loadTodaysSchedule));
+        if (withSummary.length) {
+          container.insertAdjacentHTML('beforeend', withSummary.map(p => `
+            <details style="border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
+              <summary style="cursor:pointer; font-weight:600;">Job brief: ${escapeHtml(projectRef(p))}</summary>
+              <p style="white-space:pre-wrap; font-size:14px; margin:8px 0;">${escapeHtml(p.installer_summary)}</p>
+              <a href="/project.html?id=${p.id}" class="link-quiet" style="font-size:13px;">Open the job</a>
+            </details>`).join(''));
+        }
+      }
     }
 
     // "Your schedule" card - Day/Week toggle, separate from the quick-

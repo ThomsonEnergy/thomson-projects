@@ -412,4 +412,8 @@ union all
 select '129', 'licence_shares',
   case when exists (select 1 from information_schema.tables where table_name = 'licence_shares')
   then 'present' else 'MISSING' end
+union all
+select '130', 'projects.installer_summary_hash',
+  case when exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'installer_summary_hash')
+  then 'present' else 'MISSING' end
 order by 1;

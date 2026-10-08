@@ -4208,6 +4208,21 @@ async function logActivity(entityType, entityId, action, description) {
   }
 }
 
+// Asks the server to write (or refresh) the installer summary for a quote/job
+// from its scope of works. With onlyIfStale it does nothing unless the scope or
+// stages have changed since the summary was last written. Throws on failure.
+async function requestInstallerSummary(projectId, opts = {}) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const res = await fetch('/.netlify/functions/generate-installer-summary', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ projectId, onlyIfStale: !!opts.onlyIfStale, force: !!opts.force }),
+  });
+  const data = await res.json().catch(() => ({ ok: false, error: 'Unexpected reply from the server' }));
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Could not write the installer summary');
+  return data;
+}
+
 // Logs meaningful per-stage differences after a quote/job save - stages
 // added, removed, renamed, or re-priced. Was previously never called at
 // all, so saving a quote/job's stage editor left no trace in its own

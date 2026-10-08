@@ -250,7 +250,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=45"></script>
+  <script src="/js/supabase-client.js?v=46"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -1245,6 +1245,10 @@
       }
 
       await logActivity('project', projectId, editId ? 'stage_updated' : 'created', editId ? 'Quote details and stages updated' : 'Quote created');
+
+      // Write the installer summary now (only if the scope is new or changed) so
+      // it is waiting on the job card by the time the work is booked.
+      if (sow_text && sow_text.trim()) { try { await requestInstallerSummary(projectId, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
 
       window.location.href = `/project.html?id=${projectId}`;
     });

@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=45"></script>
+  <script src="/js/supabase-client.js?v=46"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=4"></script>
   <script src="/js/assets.js?v=1"></script>
@@ -1490,6 +1490,9 @@
           await logActivity('project', project.id, 'variation_recorded', pendingVariation.description);
         }
 
+        const sowNow = document.getElementById('p-sow');
+        if (sowNow && sowNow.value.trim()) { try { await requestInstallerSummary(project.id, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
+
         editMode = false;
         const refreshed = await loadProject();
         const myRole = await getMyRole();
@@ -2638,6 +2641,18 @@
                   <h2>${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</h2>
                   ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}` : ''}
               </div>` : ''}
+              ${project.job_number && !editMode ? `
+              <div class="card" id="installer-summary-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+                  <h2 style="margin:0;">Installer summary</h2>
+                  <button type="button" class="secondary" id="installer-summary-btn" style="font-size:12px; padding:6px 10px;">${project.installer_summary ? 'Regenerate' : 'Generate summary'}</button>
+                </div>
+                <p class="subtitle" style="margin:0 0 8px;">What is and is not included, in plain language for whoever is doing the job on site. Written by AI from the scope of works and kept up to date when the scope changes. It also shows on My Day when you clock in.</p>
+                <div id="installer-summary-text" style="white-space:pre-wrap; font-size:14px;">${project.installer_summary ? escapeHtml(project.installer_summary) : (project.sow_text && project.sow_text.trim() ? '<span class="subtitle">Writing the summary...</span>' : '<span class="subtitle">No scope of works on this job yet, so there is nothing to summarise.</span>')}</div>
+                <p id="installer-summary-stamp" class="subtitle" style="margin-top:8px; font-size:11px;">${project.installer_summary && project.installer_summary_generated_at ? 'Generated ' + new Date(project.installer_summary_generated_at).toLocaleString('en-AU') : ''}</p>
+                <div id="installer-summary-msg"></div>
+              </div>
+              ` : ''}
               ${!editMode ? '<div id="meetings-card"></div><div id="assets-card"></div><div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
@@ -2733,18 +2748,6 @@
               </div>
               ` : ''}
 
-              ${project.job_number && !editMode ? `
-              <div class="card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                  <h2 style="margin:0;">Installer summary</h2>
-                  <button type="button" class="secondary" id="installer-summary-btn" style="font-size:12px; padding:6px 10px;">${project.installer_summary ? 'Regenerate' : 'Generate summary'}</button>
-                </div>
-                <p class="subtitle" style="margin:0 0 8px;">Plain-language inclusions/exclusions for whoever's doing the job on site - condensed from the scope of works, not a replacement for it.</p>
-                <div id="installer-summary-text" style="white-space:pre-wrap; font-size:14px;">${project.installer_summary ? escapeHtml(project.installer_summary) : '<span class="subtitle">Not generated yet.</span>'}</div>
-                ${project.installer_summary && project.installer_summary_generated_at ? `<p class="subtitle" style="margin-top:8px; font-size:11px;">Generated ${new Date(project.installer_summary_generated_at).toLocaleString('en-AU')}</p>` : ''}
-                <div id="installer-summary-msg"></div>
-              </div>
-              ` : ''}
 
               <div class="card">
                 <h2>Needs attention</h2>
@@ -3334,38 +3337,39 @@
       });
 
       const installerSummaryBtn = document.getElementById('installer-summary-btn');
-      if (installerSummaryBtn) installerSummaryBtn.addEventListener('click', async () => {
+      if (installerSummaryBtn) {
         const textEl = document.getElementById('installer-summary-text');
         const msgEl = document.getElementById('installer-summary-msg');
-        if (!project.sow_text || !project.sow_text.trim()) {
-          msgEl.innerHTML = `<div class="error-box">This job has no scope of works to summarise yet - add one under Edit quote first.</div>`;
-          return;
-        }
-        installerSummaryBtn.disabled = true;
-        installerSummaryBtn.textContent = 'Generating...';
-        msgEl.innerHTML = '';
-        try {
-          const stages = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order)
-            .map(c => ({ name: c.name, description: c.description }));
-          const res = await fetch('/.netlify/functions/generate-installer-summary', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectName: project.name, sowText: project.sow_text, stages }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate a summary');
-          const generatedAt = new Date().toISOString();
-          const { error: updErr } = await supabaseClient.from('projects').update({ installer_summary: data.summary, installer_summary_generated_at: generatedAt }).eq('id', project.id);
-          if (updErr) throw updErr;
+        const stampEl = document.getElementById('installer-summary-stamp');
+        const showSummary = (data) => {
           project.installer_summary = data.summary;
-          project.installer_summary_generated_at = generatedAt;
-          textEl.innerHTML = escapeHtml(data.summary);
-          await logActivity('project', project.id, 'installer_summary_generated', 'Generated the installer job summary');
-        } catch (err) {
-          msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
-        }
-        installerSummaryBtn.disabled = false;
-        installerSummaryBtn.textContent = 'Regenerate';
-      });
+          textEl.textContent = data.summary;
+          if (data.generated_at) { project.installer_summary_generated_at = data.generated_at; stampEl.textContent = 'Generated ' + new Date(data.generated_at).toLocaleString('en-AU'); }
+          installerSummaryBtn.textContent = 'Regenerate';
+        };
+        const run = async (opts, quiet) => {
+          installerSummaryBtn.disabled = true;
+          const label = installerSummaryBtn.textContent;
+          installerSummaryBtn.textContent = 'Writing...';
+          msgEl.innerHTML = '';
+          try {
+            const data = await requestInstallerSummary(project.id, opts);
+            if (!data.skipped) { showSummary(data); await logActivity('project', project.id, 'installer_summary_generated', 'Generated the installer job summary'); }
+            else installerSummaryBtn.textContent = label;
+          } catch (err) {
+            installerSummaryBtn.textContent = label;
+            if (!quiet) msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+            else textEl.innerHTML = '<span class="subtitle">Could not write the summary automatically. Press Generate summary to try again.</span>';
+          }
+          installerSummaryBtn.disabled = false;
+        };
+        installerSummaryBtn.addEventListener('click', () => {
+          if (!project.sow_text || !project.sow_text.trim()) { msgEl.innerHTML = '<div class="error-box">This job has no scope of works to summarise yet. Add one under Edit quote first.</div>'; return; }
+          run({ force: true }, false);
+        });
+        // A job with a scope of works but no summary yet gets one written automatically.
+        if (!project.installer_summary && project.sow_text && project.sow_text.trim()) run({ onlyIfStale: true }, true);
+      }
 
       const emailQuoteBtn = document.getElementById('email-quote-btn');
       if (emailQuoteBtn && !project.job_number) emailQuoteBtn.addEventListener('click', () => {
