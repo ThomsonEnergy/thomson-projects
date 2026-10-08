@@ -115,6 +115,26 @@
   .mobile-entry .me-time { color: var(--muted); font-size: 12px; white-space: nowrap; }
   .mobile-add-btn { width: 100%; margin-top: 4px; font-size: 12px; padding: 8px; }
 
+  /* dragging bookings around the day board */
+  .day-block { transition: box-shadow 0.12s; }
+  .day-block.dragging { box-shadow: 0 10px 28px rgba(0,0,0,0.4); cursor: grabbing; opacity: 0.95; z-index: 1000; }
+  .day-block.will-delete { background: var(--red) !important; color: #fff !important; border-color: var(--red) !important; opacity: 0.9; }
+  .day-block.drag-ghost { background: transparent; border: 2px dashed var(--accent); opacity: 0.75; pointer-events: none; z-index: 1; }
+  .schedule-dragging, .schedule-dragging * { user-select: none; -webkit-user-select: none; cursor: grabbing !important; }
+  .schedule-delete-zone .day-board-main { outline: 2px dashed var(--red); outline-offset: 6px; border-radius: 6px; }
+  .drag-tip {
+    position: fixed; z-index: 1100; pointer-events: none; background: #0f172a; color: #fff;
+    padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  }
+  .undo-toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 1200;
+    background: #0f172a; color: #fff; padding: 10px 14px; border-radius: 10px; display: flex; gap: 14px; align-items: center;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4); font-size: 14px;
+  }
+  .undo-toast button { background: #38bdf8; color: #0f172a; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 700; cursor: pointer; }
+  .day-block[data-id]:not([data-reconciled="1"]) { cursor: grab; }
+
   @media (max-width: 700px), (pointer: coarse) {
     .day-board-main { display: none; }
     .day-board-sidebar { display: none; }
@@ -164,7 +184,7 @@
             <div class="job-search-card">
               <label style="margin-top:0">Find a job</label>
               <input id="job-search-input" placeholder="Job number, name, client, address..." autocomplete="off" />
-              <p class="subtitle" style="margin:8px 0 0;">Drag a job onto a staff member's timeline to schedule them. On mobile, use the + Add button under each person instead.</p>
+              <p class="subtitle" style="margin:8px 0 0;">Drag a job onto a staff member's timeline to schedule them. Drag a booking to another row to hand it to someone else, or off the board to remove it (with Undo). On mobile, use the + Add button under each person instead.</p>
               <div id="job-search-results" style="margin-top:10px;"></div>
             </div>
           </div>
@@ -579,14 +599,39 @@
       return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     }
 
+    // Dashed preview of where a job dragged in from the sidebar will land.
+    let currentSidebarDrag = null;
+    let sidebarGhost = null;
+    function sidebarDropStart(timeline, clientX) {
+      const dur = currentSidebarDrag && currentSidebarDrag.job_number ? 8 * 60 : 60;
+      const left = clientX - timeline.getBoundingClientRect().left;
+      const start = Math.max(DAY_START_HOUR * 60, Math.min(DAY_END_HOUR * 60 - dur, minutesFromX(Math.max(0, left), timeline)));
+      return { start, dur };
+    }
+    function showSidebarDropGhost(timeline, clientX) {
+      const { start, dur } = sidebarDropStart(timeline, clientX);
+      if (!sidebarGhost) { sidebarGhost = document.createElement('div'); sidebarGhost.className = 'day-block drag-ghost'; }
+      if (sidebarGhost.parentElement !== timeline) timeline.appendChild(sidebarGhost);
+      sidebarGhost.style.left = ((start - DAY_START_HOUR * 60) / 60 * pxPerHour) + 'px';
+      sidebarGhost.style.width = (dur / 60 * pxPerHour) + 'px';
+    }
+    function clearSidebarDropGhost() {
+      if (sidebarGhost) { sidebarGhost.remove(); sidebarGhost = null; }
+    }
+
     function wireStaffTimelines() {
       if (!canEditSchedule()) return; // read-only for Staff - nothing here would be allowed to write anyway
       document.querySelectorAll('.staff-timeline').forEach(timeline => {
-        timeline.addEventListener('dragover', (e) => { e.preventDefault(); timeline.classList.add('drag-over'); });
-        timeline.addEventListener('dragleave', () => timeline.classList.remove('drag-over'));
+        timeline.addEventListener('dragover', (e) => { e.preventDefault(); timeline.classList.add('drag-over'); showSidebarDropGhost(timeline, e.clientX); });
+        timeline.addEventListener('dragleave', (e) => {
+          if (e.relatedTarget && timeline.contains(e.relatedTarget)) return;
+          timeline.classList.remove('drag-over');
+          clearSidebarDropGhost();
+        });
         timeline.addEventListener('drop', async (e) => {
           e.preventDefault();
           timeline.classList.remove('drag-over');
+          clearSidebarDropGhost();
           const projectData = e.dataTransfer.getData('text/plain');
           if (!projectData) return;
           const project = JSON.parse(projectData);
@@ -595,8 +640,7 @@
             alert(`This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done:\n${blocking.map(d => '- ' + d).join('\n')}`);
             return;
           }
-          const rect = timeline.getBoundingClientRect();
-          const startMin = minutesFromX(e.clientX - rect.left, timeline);
+          const startMin = sidebarDropStart(timeline, e.clientX).start;
           const startTime = minutesToTimeStr(startMin);
           // No job number yet means this is a lead/draft quote, not an
           // approved job - scheduling time against it means visiting the
@@ -666,80 +710,242 @@
       });
     }
 
+    // ---------- dragging bookings around the day board ----------
+    // Pointer events (not mouse events) so it works the same with a mouse, a
+    // pen or a touchscreen laptop. A booking can be: dragged sideways to
+    // change its time (snaps to 15 min), dragged up/down onto another
+    // person's row to hand it to them, resized from either end, or dragged
+    // off the board altogether to remove it (with an Undo). While you drag, a
+    // dashed outline shows exactly where it will land, and a small label
+    // shows the time (and who it's going to). The phone layout is a separate
+    // tap-based list and isn't touched by any of this.
+
+    let dragTipEl = null;
+    function dragTip() {
+      if (!dragTipEl) {
+        dragTipEl = document.createElement('div');
+        dragTipEl.className = 'drag-tip';
+        document.body.appendChild(dragTipEl);
+      }
+      return dragTipEl;
+    }
+    function hideDragTip() {
+      if (dragTipEl) { dragTipEl.remove(); dragTipEl = null; }
+    }
+
+    function showUndoToast(message, onUndo) {
+      document.querySelectorAll('.undo-toast').forEach(t => t.remove());
+      const toast = document.createElement('div');
+      toast.className = 'undo-toast';
+      toast.innerHTML = `<span>${message}</span><button type="button">Undo</button>`;
+      document.body.appendChild(toast);
+      const timer = setTimeout(() => toast.remove(), 9000);
+      toast.querySelector('button').addEventListener('click', async () => {
+        clearTimeout(timer);
+        toast.remove();
+        await onUndo();
+      });
+    }
+
+    async function deleteBooking(assignment, label) {
+      const { error } = await supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id);
+      if (error) { alert(error.message); return false; }
+      showUndoToast(`${label} removed`, async () => {
+        const { id, staff_id, project_id, assignment_date, notes, start_time, end_time, block_type, note, site_inspection_id } = assignment;
+        const { error: restoreErr } = await supabaseClient.from('schedule_assignments').insert({
+          id, staff_id, project_id, assignment_date, notes, start_time, end_time, block_type, note, site_inspection_id,
+        });
+        if (restoreErr) alert(`Could not undo: ${restoreErr.message}`);
+        await loadDay();
+      });
+      return true;
+    }
+
+    function timelineBookingLabel(assignment) {
+      if (assignment.projects) return projectRef(assignment.projects);
+      return CATEGORY_LABELS[assignment.block_type] || 'Booking';
+    }
+
+    function beginBlockDrag(e, block, assignment) {
+      if (e.button !== undefined && e.button !== 0) return;
+      const handle = e.target.closest('.block-resize-handle');
+      const mode = handle ? (handle.dataset.edge === 'left' ? 'resize-left' : 'resize-right') : 'move';
+      const originTimeline = block.closest('.staff-timeline');
+      const board = document.querySelector('.day-board-main');
+      const rect = block.getBoundingClientRect();
+      const startX = e.clientX, startY = e.clientY;
+      const origLeft = parseFloat(block.style.left);
+      const origWidth = parseFloat(block.style.width);
+      const grabOffsetX = e.clientX - rect.left;
+      const durationMin = Math.round(origWidth / pxPerHour * 60);
+      const dayStartMin = DAY_START_HOUR * 60, dayEndMin = DAY_END_HOUR * 60;
+      let dragging = false, ghost = null;
+      let targetRow = originTimeline.closest('.staff-row');
+      let overDelete = false;
+      let finalStart = null, finalEnd = null;
+
+      block.setPointerCapture(e.pointerId);
+
+      function rowAt(x, y) {
+        const els = document.elementsFromPoint(x, y);
+        const row = els.find(el => el.classList && el.classList.contains('staff-row'));
+        return row || null;
+      }
+      const clampStart = (m) => Math.max(dayStartMin, Math.min(dayEndMin - durationMin, m));
+
+      function begin() {
+        dragging = true;
+        document.body.classList.add('schedule-dragging');
+        if (mode === 'move') {
+          ghost = document.createElement('div');
+          ghost.className = 'day-block drag-ghost';
+          ghost.style.left = origLeft + 'px';
+          ghost.style.width = origWidth + 'px';
+          originTimeline.appendChild(ghost);
+          block.classList.add('dragging');
+          block.style.position = 'fixed';
+          block.style.top = rect.top + 'px';
+          block.style.height = rect.height + 'px';
+          block.style.bottom = 'auto';
+          block.style.left = rect.left + 'px';
+          block.style.width = rect.width + 'px';
+          block.style.zIndex = '1000';
+        }
+      }
+
+      function onMove(ev) {
+        if (!dragging) {
+          if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
+          begin();
+        }
+        const tip = dragTip();
+        tip.style.left = (ev.clientX + 14) + 'px';
+        tip.style.top = (ev.clientY + 14) + 'px';
+
+        if (mode === 'move') {
+          block.style.left = (ev.clientX - grabOffsetX) + 'px';
+          block.style.top = (rect.top + (ev.clientY - startY)) + 'px';
+
+          const br = board.getBoundingClientRect();
+          const m = 28; // a bit of slack so dropping near the edge of the board doesn't delete
+          overDelete = ev.clientX < br.left - m || ev.clientX > br.right + m || ev.clientY < br.top - m || ev.clientY > br.bottom + m;
+          block.classList.toggle('will-delete', overDelete);
+          document.querySelectorAll('.staff-timeline.drag-over').forEach(t => t.classList.remove('drag-over'));
+          document.body.classList.toggle('schedule-delete-zone', overDelete);
+
+          if (overDelete) {
+            ghost.style.display = 'none';
+            tip.textContent = 'Release to remove this booking';
+            return;
+          }
+          const row = rowAt(ev.clientX, ev.clientY) || targetRow;
+          targetRow = row;
+          const timeline = row.querySelector('.staff-timeline');
+          timeline.classList.add('drag-over');
+          const tl = timeline.getBoundingClientRect();
+          const startMin = clampStart(minutesFromX(Math.max(0, ev.clientX - grabOffsetX - tl.left), timeline));
+          finalStart = startMin; finalEnd = startMin + durationMin;
+          if (ghost.parentElement !== timeline) timeline.appendChild(ghost);
+          ghost.style.display = '';
+          ghost.style.left = ((startMin - dayStartMin) / 60 * pxPerHour) + 'px';
+          ghost.style.width = origWidth + 'px';
+          const person = row.querySelector('.staff-name-col').textContent.trim();
+          const moved = timeline !== originTimeline;
+          tip.textContent = `${minutesToTimeStr(startMin)} - ${minutesToTimeStr(finalEnd)}${moved ? ' - ' + person : ''}`;
+        } else {
+          const dx = ev.clientX - startX;
+          if (mode === 'resize-right') {
+            const endMin = Math.max(minutesFromX(origLeft, originTimeline) + 15, minutesFromX(origLeft + origWidth + dx, originTimeline));
+            finalStart = minutesFromX(origLeft, originTimeline);
+            finalEnd = Math.min(dayEndMin, endMin);
+          } else {
+            const endMin = minutesFromX(origLeft + origWidth, originTimeline);
+            finalEnd = endMin;
+            finalStart = Math.min(endMin - 15, Math.max(dayStartMin, minutesFromX(Math.max(0, origLeft + dx), originTimeline)));
+          }
+          block.style.left = ((finalStart - dayStartMin) / 60 * pxPerHour) + 'px';
+          block.style.width = ((finalEnd - finalStart) / 60 * pxPerHour) + 'px';
+          tip.textContent = `${minutesToTimeStr(finalStart)} - ${minutesToTimeStr(finalEnd)}`;
+        }
+      }
+
+      function cleanup() {
+        block.removeEventListener('pointermove', onMove);
+        block.removeEventListener('pointerup', onUp);
+        block.removeEventListener('pointercancel', onCancel);
+        document.removeEventListener('keydown', onKey);
+        document.body.classList.remove('schedule-dragging', 'schedule-delete-zone');
+        document.querySelectorAll('.staff-timeline.drag-over').forEach(t => t.classList.remove('drag-over'));
+        hideDragTip();
+        if (ghost) ghost.remove();
+      }
+      function onKey(ev) { if (ev.key === 'Escape') onCancel(); }
+      async function onCancel() { cleanup(); if (dragging) await loadDay(); }
+
+      async function onUp() {
+        const wasDragging = dragging;
+        const deleting = overDelete;
+        const toRow = targetRow;
+        cleanup();
+        if (!wasDragging) return;
+        block.releasePointerCapture && block.hasPointerCapture && block.hasPointerCapture(e.pointerId) && block.releasePointerCapture(e.pointerId);
+
+        if (mode === 'move' && deleting) {
+          await deleteBooking(assignment, timelineBookingLabel(assignment));
+          await loadDay();
+          return;
+        }
+        const newStaffId = mode === 'move' ? toRow.querySelector('.staff-timeline').dataset.staffId : assignment.staff_id;
+        const changedPerson = newStaffId !== assignment.staff_id;
+        if (finalStart === null) { await loadDay(); return; }
+        const newStart = minutesToTimeStr(finalStart), newEnd = minutesToTimeStr(finalEnd);
+        if (!changedPerson && newStart === assignment.start_time.slice(0, 5) && newEnd === assignment.end_time.slice(0, 5)) { await loadDay(); return; }
+
+        if (changedPerson && toRow.querySelector('.day-block.leave')) {
+          const name = toRow.querySelector('.staff-name-col').textContent.trim();
+          if (!confirm(`${name} is on leave this day. Move the booking to them anyway?`)) { await loadDay(); return; }
+        }
+        const { error } = await supabaseClient.from('schedule_assignments')
+          .update({ staff_id: newStaffId, start_time: newStart, end_time: newEnd })
+          .eq('id', assignment.id);
+        if (error) alert(error.message);
+        await loadDay();
+      }
+
+      block.addEventListener('pointermove', onMove);
+      block.addEventListener('pointerup', onUp);
+      block.addEventListener('pointercancel', onCancel);
+      document.addEventListener('keydown', onKey);
+      block._wasDragged = () => dragging;
+    }
+
     function wireDayBlocks(assignments) {
       document.querySelectorAll('.day-block[data-id]').forEach(block => {
         const isReconciled = block.dataset.reconciled === '1';
-        const timeline = block.closest('.staff-timeline');
-        let dragMode = null; // 'move' | 'resize-left' | 'resize-right'
-        let startX = 0;
-        let originalLeft = 0, originalWidth = 0;
-        let moved = false;
-
-        function onMouseMove(e) {
-          const dx = e.clientX - startX;
-          if (Math.abs(dx) > 3) moved = true;
-          if (dragMode === 'move') {
-            block.style.left = Math.max(0, originalLeft + dx) + 'px';
-          } else if (dragMode === 'resize-right') {
-            block.style.width = Math.max(20, originalWidth + dx) + 'px';
-          } else if (dragMode === 'resize-left') {
-            const newLeft = Math.max(0, originalLeft + dx);
-            const newWidth = originalWidth - (newLeft - originalLeft);
-            if (newWidth > 20) { block.style.left = newLeft + 'px'; block.style.width = newWidth + 'px'; }
-          }
-        }
-
-        async function onMouseUp() {
-          document.removeEventListener('mousemove', onMouseMove);
-          document.removeEventListener('mouseup', onMouseUp);
-          if (!moved) { dragMode = null; return; }
-
-          const finalLeft = parseFloat(block.style.left);
-          const finalWidth = parseFloat(block.style.width);
-          const startMin = minutesFromX(finalLeft, timeline);
-          const endMin = minutesFromX(finalLeft + finalWidth, timeline);
-          const { error } = await supabaseClient.from('schedule_assignments')
-            .update({ start_time: minutesToTimeStr(startMin), end_time: minutesToTimeStr(endMin) })
-            .eq('id', block.dataset.id);
-          if (error) alert(error.message);
-          await loadDay();
-          dragMode = null;
-        }
+        const assignment = assignments.find(a => a.id === block.dataset.id);
+        let suppressClick = false;
 
         // Reconciled blocks represent real, already-paid hours - locked
         // from drag/resize entirely, not just visually different. Only
         // deleting one (an admin correcting a genuine mistake) is still
         // possible, via the click handler below. Drag/resize is also
         // locked out entirely for Staff, same reason as wireStaffTimelines.
-        if (!isReconciled && canEditSchedule()) {
-          block.querySelectorAll('.block-resize-handle').forEach(handle => {
-            handle.addEventListener('mousedown', (e) => {
-              e.stopPropagation();
-              dragMode = handle.dataset.edge === 'left' ? 'resize-left' : 'resize-right';
-              startX = e.clientX;
-              originalLeft = parseFloat(block.style.left);
-              originalWidth = parseFloat(block.style.width);
-              moved = false;
-              document.addEventListener('mousemove', onMouseMove);
-              document.addEventListener('mouseup', onMouseUp);
-            });
-          });
-
-          block.addEventListener('mousedown', (e) => {
-            if (e.target.closest('.block-resize-handle')) return;
-            dragMode = 'move';
-            startX = e.clientX;
-            originalLeft = parseFloat(block.style.left);
-            originalWidth = parseFloat(block.style.width);
-            moved = false;
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
+        if (!isReconciled && canEditSchedule() && assignment) {
+          block.style.touchAction = 'none';
+          block.addEventListener('pointerdown', (e) => {
+            beginBlockDrag(e, block, assignment);
+            // A drag ends with a click on the same element - swallow that one.
+            const swallow = () => {
+              suppressClick = !!(block._wasDragged && block._wasDragged());
+              setTimeout(() => { suppressClick = false; }, 0);
+              block.removeEventListener('pointerup', swallow);
+            };
+            block.addEventListener('pointerup', swallow);
           });
         }
 
         block.addEventListener('click', (e) => {
-          if (moved) return; // was a drag, not a click - already handled above
-          const assignment = assignments.find(a => a.id === block.dataset.id);
+          if (suppressClick) return; // that was the end of a drag, not a click
           if (!assignment) return;
 
           if (isReconciled) {
@@ -798,7 +1004,9 @@
       resultsEl.querySelectorAll('.job-card').forEach(card => {
         card.addEventListener('dragstart', (e) => {
           e.dataTransfer.setData('text/plain', card.dataset.project.replace(/&apos;/g, "'"));
+          currentSidebarDrag = JSON.parse(card.dataset.project.replace(/&apos;/g, "'"));
         });
+        card.addEventListener('dragend', () => { currentSidebarDrag = null; clearSidebarDropGhost(); });
       });
     }
     let jobSearchTimeout;
