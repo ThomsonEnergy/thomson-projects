@@ -244,7 +244,9 @@ function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
 // opts: { projectId, folder, onSaved }. Falls back to the browser's own PDF
 // viewer in an iframe if pdf.js can't be loaded.
 async function openPdfViewer(path, title, opts = {}) {
+  ensureDarkOverlayStyles();
   const overlay = document.createElement('div');
+  overlay.className = 'te-dark-overlay';
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:300; display:flex; flex-direction:column; align-items:center; padding:12px; gap:10px;';
   overlay.innerHTML = `<p style="color:#fff;">Loading...</p>`;
   document.body.appendChild(overlay);
@@ -261,6 +263,7 @@ async function openPdfViewer(path, title, opts = {}) {
     // pdf.js unavailable (offline CDN, etc.) - the browser's own viewer
     // still shows the document, just without page images or markup.
     if (signedUrl) {
+      overlay.className = '';
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:300; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:900px; width:100%; height:90vh; display:flex; flex-direction:column; padding:0; overflow:hidden;">
@@ -557,6 +560,25 @@ function supaImageVariant(url, width = 1200, quality = 70) {
   return `${rendered}?width=${width}&quality=${quality}`;
 }
 
+// The photo viewer, PDF viewer and markup editor sit on a near-black
+// background whatever the app theme is, so the theme's own button/input
+// colours (dark text on a light theme) vanish there. This gives everything
+// inside them their own readable colours.
+function ensureDarkOverlayStyles() {
+  if (document.getElementById('te-dark-overlay-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'te-dark-overlay-styles';
+  style.textContent = `
+    .te-dark-overlay button.secondary { background:#1e293b !important; color:#f8fafc !important; border:1px solid #64748b !important; }
+    .te-dark-overlay button.secondary:hover { background:#334155 !important; }
+    .te-dark-overlay button:disabled { opacity:0.5; }
+    .te-dark-overlay input, .te-dark-overlay select { background:#0f172a !important; color:#f8fafc !important; border:1px solid #64748b !important; }
+    .te-dark-overlay input::placeholder { color:#94a3b8; }
+    .te-dark-overlay label, .te-dark-overlay .subtitle { color:#e2e8f0 !important; }
+  `;
+  document.head.appendChild(style);
+}
+
 // Full-size click-through viewer for any set of photo URLs - shared by
 // every thumbnail strip in the app (renderPhotoThumbs below,
 // settings.html's renderCategorizedThumbs, quote.html's galleries,
@@ -570,7 +592,9 @@ function supaImageVariant(url, width = 1200, quality = 70) {
 // onMarkup(index, blob), onClose() }. Without it, it's a plain viewer.
 function openPhotoLightbox(urls, startIndex = 0, opts = null) {
   let index = startIndex;
+  ensureDarkOverlayStyles();
   const overlay = document.createElement('div');
+  overlay.className = 'te-dark-overlay';
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:300; display:flex; align-items:center; justify-content:center;';
   const navBtnStyle = 'position:absolute; top:50%; transform:translateY(-50%); background:rgba(255,255,255,0.1); color:#fff; border:none; width:44px; height:44px; border-radius:50%; font-size:20px; cursor:pointer;';
 
@@ -648,7 +672,8 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
 // schedule) and a scale already set on one of them.
 async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   const overlay = document.createElement('div');
-  overlay.className = 'photo-markup-overlay';
+  ensureDarkOverlayStyles();
+  overlay.className = 'photo-markup-overlay te-dark-overlay';
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.96); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:center; justify-content:safe center; gap:8px; padding:12px; overflow:auto;';
   overlay.innerHTML = `<p style="color:#fff;">Loading photo...</p>`;
   document.body.appendChild(overlay);
