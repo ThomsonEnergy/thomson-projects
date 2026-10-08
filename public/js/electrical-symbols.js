@@ -58,7 +58,20 @@ const ELECTRICAL_SYMBOLS = [
 const ELECTRICAL_SYMBOL_BY_ID = {};
 ELECTRICAL_SYMBOLS.forEach(s => { ELECTRICAL_SYMBOL_BY_ID[s.id] = s; });
 
-const CABLE_TYPES = ['Power 2.5mm TPS', 'Lighting 1.5mm TPS', 'Data Cat6', 'Solar DC 4mm2', 'Mains 16mm'];
+// Cable kinds and the sizes that apply to each (the editor shows a kind
+// dropdown, then only that kind's sizes). A cable is named "<kind> <size>",
+// e.g. "TPS 2.5mm2", and each kind+size is its own line in the schedule.
+const CABLE_KINDS = [
+  { kind: 'TPS', unit: 'mm2', sizes: ['1', '1.5', '2.5', '4', '6', '10', '16'], def: '2.5' },
+  { kind: 'XLPE', unit: 'mm2', sizes: ['6', '10', '16', '25', '35', '50', '70', '95', '120', '150', '185', '240'], def: '16' },
+  { kind: 'Orange Circ', unit: 'mm2', sizes: ['1.5', '2.5', '4', '6', '10', '16'], def: '2.5' },
+  { kind: 'Solar DC', unit: 'mm2', sizes: ['4', '6', '10'], def: '4' },
+  { kind: 'Data', unit: '', sizes: ['Cat5e', 'Cat6', 'Cat6a'], def: 'Cat6' },
+];
+function cableLabel(kind, size) {
+  const k = CABLE_KINDS.find(c => c.kind === kind);
+  return k && k.unit ? `${kind} ${size}${k.unit}` : `${kind} ${size}`;
+}
 
 // ---------- counting ----------
 

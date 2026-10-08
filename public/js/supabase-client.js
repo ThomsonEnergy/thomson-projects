@@ -738,7 +738,10 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   let cableDraft = null; // a cable path being clicked out, point by point
   let currentSymbol = plan ? ELECTRICAL_SYMBOLS[0].id : null;
   let circuit = ''; // label given to each symbol as it's placed (e.g. "C1")
-  let cableType = plan ? CABLE_TYPES[0] : '';
+  let cableKind = plan ? CABLE_KINDS[0].kind : '';
+  let cableSize = plan ? CABLE_KINDS[0].def : '';
+  let customCable = ''; // a typed-in name, when "Other..." is the kind
+  const cableName = () => (cableKind === '__custom' ? customCable : cableLabel(cableKind, cableSize));
   let allowance = 10;
   let scheduleScope = 'page';
   if (plan) {
@@ -768,7 +771,8 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       <span style="color:#fff; font-size:12px;">Circuit</span><input id="mk-circuit" placeholder="e.g. C1" maxlength="20" style="${smallInput} width:70px;" />
       ${toolBtn('label', 'Label')}
       ${toolBtn('scale', 'Set scale')}${toolBtn('measure', 'Measure')}${toolBtn('cable', 'Cable path')}
-      <select id="mk-cable-type" style="${smallInput}">${CABLE_TYPES.map(t => `<option>${t}</option>`).join('')}<option value="__custom">Other...</option></select>
+      <select id="mk-cable-kind" style="${smallInput}">${CABLE_KINDS.map(c => `<option>${c.kind}</option>`).join('')}<option value="__custom">Other...</option></select>
+      <select id="mk-cable-size" style="${smallInput}"></select>
       <button type="button" id="mk-finish-cable" style="padding:6px 12px; font-size:13px; display:none;">Finish cable</button>
       <span style="color:#fff; font-size:12px;">Grid snap</span><select id="mk-grid" style="${smallInput}"><option value="0">Off</option><option value="1">Fine</option><option value="2">Medium</option><option value="3">Coarse</option></select>
       <span style="color:#fff; font-size:12px;">Allowance</span><input id="mk-allow" type="number" min="0" max="100" value="${allowance}" style="${smallInput} width:60px;" /><span style="color:#fff; font-size:12px;">%</span>
@@ -1065,17 +1069,30 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
 
   if (plan) {
     overlay.querySelectorAll('.mk-sym').forEach(b => b.addEventListener('click', () => { currentSymbol = b.dataset.id; setTool('symbol'); }));
-    overlay.querySelector('#mk-cable-type').addEventListener('change', (e) => {
-      if (e.target.value === '__custom') {
-        const name = (window.prompt('Cable name (e.g. 4mm Twin & Earth):') || '').trim();
-        if (name) {
-          const opt = document.createElement('option'); opt.textContent = name;
-          e.target.insertBefore(opt, e.target.querySelector('option[value="__custom"]'));
-          e.target.value = name; cableType = name;
-        } else e.target.value = cableType;
-      } else cableType = e.target.value;
-      if (cableDraft) cableDraft.cable = cableType;
+    // Cable: pick a kind, then one of that kind's sizes.
+    const kindSel = overlay.querySelector('#mk-cable-kind');
+    const sizeSel = overlay.querySelector('#mk-cable-size');
+    const fillSizes = () => {
+      const k = CABLE_KINDS.find(c => c.kind === cableKind);
+      sizeSel.style.display = k ? '' : 'none';
+      if (!k) return;
+      sizeSel.innerHTML = k.sizes.map(sz => `<option value="${sz}">${sz}${k.unit}</option>`).join('');
+      sizeSel.value = cableSize;
+    };
+    const cableChanged = () => { if (cableDraft) cableDraft.cable = cableName(); };
+    kindSel.addEventListener('change', () => {
+      if (kindSel.value === '__custom') {
+        const name = (window.prompt('Cable name (e.g. 4 core 16mm2 SDI):') || '').trim();
+        if (!name) { kindSel.value = cableKind === '__custom' ? '__custom' : cableKind; return; }
+        customCable = name; cableKind = '__custom';
+      } else {
+        cableKind = kindSel.value;
+        cableSize = CABLE_KINDS.find(c => c.kind === cableKind).def;
+      }
+      fillSizes(); cableChanged();
     });
+    sizeSel.addEventListener('change', () => { cableSize = sizeSel.value; cableChanged(); });
+    fillSizes();
     overlay.querySelector('#mk-circuit').addEventListener('input', (e) => { circuit = e.target.value.trim(); });
     overlay.querySelector('#mk-grid').addEventListener('change', (e) => { gridMode = parseInt(e.target.value, 10) || 0; redraw(); });
     overlay.querySelector('#mk-allow').addEventListener('input', (e) => {
@@ -1188,7 +1205,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     }
     if (tool === 'cable') {
       if (!ppm()) { window.alert('Set the scale first (use "Set scale" on something you know the length of) so cable lengths can be measured.'); return; }
-      if (!cableDraft) cableDraft = { type: 'cable', colour, width: baseWidth(), cable: cableType, points: [[x, y]] };
+      if (!cableDraft) cableDraft = { type: 'cable', colour, width: baseWidth(), cable: cableName(), points: [[x, y]] };
       else cableDraft.points.push([x, y]);
       refreshControls(); redraw();
       return;
