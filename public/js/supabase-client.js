@@ -109,21 +109,79 @@ async function renderPdfThumbnail(url, longEdge = 360) {
   return dataUrl;
 }
 
-// Draws markup-editor shapes (pen, arrow, box, text - coordinates in the
-// editor's own image pixels, y down) onto a PDF page as real vector
-// graphics. Throws if anything can't be drawn (e.g. text pdf-lib can't
-// encode) so the caller can fall back to flattening that page.
+// Draws markup-editor shapes (pen, arrow, box, text, plus the plan tools:
+// symbols, schedule, scale, measure, cable - coordinates in the editor's own
+// image pixels, y down) onto a PDF page as real vector graphics. Throws if
+// anything can't be drawn (e.g. text pdf-lib can't encode) so the caller can
+// fall back to flattening that page.
 function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
   const { rgb, LineCapStyle } = PDFLib;
   const { width: pw, height: ph } = page.getSize();
   const k = pw / W;
   const X = (x) => x * k;
   const Y = (y) => ph - y * k;
+  const map = { X, Y, k, ph };
   const col = (hex) => rgb(parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255);
+  const planLoaded = typeof scalePxPerMetre === 'function';
+  const ppm = planLoaded ? scalePxPerMetre(shapes) : null;
+
+  // One piece of text drawn "fill and outline" (a PDF text render mode),
+  // not several offset copies - so searching/selecting the PDF finds the
+  // words once. `size` is in PDF points; (x, baseline y) in PDF points.
+  const outlinedText = (text, x, y, size, hex) => {
+    const c = col(hex);
+    const outline = hex === '#000000' ? rgb(1, 1, 1) : rgb(0, 0, 0);
+    const safe = String(text).replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
+    if (PDFLib.TextRenderingMode && PDFLib.setTextRenderingMode && PDFLib.setStrokingColor && PDFLib.setLineWidth) {
+      page.pushOperators(
+        PDFLib.pushGraphicsState(),
+        PDFLib.setTextRenderingMode(PDFLib.TextRenderingMode.FillAndOutline),
+        PDFLib.setLineWidth(size * 0.07),
+        PDFLib.setStrokingColor(outline),
+      );
+      page.drawText(safe, { x, y, size, font, color: c });
+      page.pushOperators(PDFLib.popGraphicsState());
+    } else {
+      page.drawText(safe, { x, y, size, font, color: c });
+    }
+  };
+  // A centred label at an editor-pixel position.
+  const centredLabel = (text, cx, cy, sizePx, hex) => {
+    const size = sizePx * k;
+    const w = font.widthOfTextAtSize(String(text), size);
+    outlinedText(text, X(cx) - w / 2, Y(cy) - size * 0.35, size, hex);
+  };
+  const midpointOf = (points) => {
+    const half = polylineLength(points) / 2;
+    let acc = 0;
+    for (let i = 1; i < points.length; i++) {
+      const seg = Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+      if (acc + seg >= half && seg > 0) {
+        const t = (half - acc) / seg;
+        return [points[i - 1][0] + (points[i][0] - points[i - 1][0]) * t, points[i - 1][1] + (points[i][1] - points[i - 1][1]) * t];
+      }
+      acc += seg;
+    }
+    return points[0];
+  };
+  const endTicks = (s, c, lw) => {
+    const a = Math.atan2(s.y2 - s.y1, s.x2 - s.x1) + Math.PI / 2;
+    const t = s.width * 2.5;
+    [[s.x1, s.y1], [s.x2, s.y2]].forEach(([x, y]) => {
+      page.drawLine({
+        start: { x: X(x - Math.cos(a) * t), y: Y(y - Math.sin(a) * t) }, end: { x: X(x + Math.cos(a) * t), y: Y(y + Math.sin(a) * t) },
+        thickness: lw, color: c, lineCap: LineCapStyle.Round,
+      });
+    });
+  };
+  const metresText = (px) => {
+    const m = px / ppm;
+    return `${m.toFixed(m < 10 ? 2 : 1)} m`;
+  };
 
   for (const s of shapes) {
     const c = col(s.colour);
-    const lw = s.width * k;
+    const lw = (s.width || 4) * k;
     if (s.type === 'pen') {
       const pts = s.points.length === 1 ? [s.points[0], [s.points[0][0] + 0.01, s.points[0][1]]] : s.points;
       for (let i = 1; i < pts.length; i++) {
@@ -149,27 +207,28 @@ function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
       // SVG paths are drawn from the top-left and y-down, same as the editor.
       page.drawSvgPath(`M ${s.x2} ${s.y2} L ${ax} ${ay} L ${bx} ${by} Z`, { x: 0, y: ph, scale: k, color: c, borderWidth: 0 });
     } else if (s.type === 'text') {
-      const text = String(s.text).replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
       const size = Math.round(s.width * 6) * k;
-      const baseX = X(s.x1);
-      const baseY = Y(s.y1) - size * 0.82;
-      // Same contrasting outline the editor draws, so it stays readable on
-      // any background.
-      const outline = s.colour === '#000000' ? rgb(1, 1, 1) : rgb(0, 0, 0);
-      // One piece of text drawn "fill and outline" (a PDF text render mode),
-      // not several offset copies - so searching/selecting the PDF finds the
-      // words once.
-      if (PDFLib.TextRenderingMode && PDFLib.setTextRenderingMode && PDFLib.setStrokingColor && PDFLib.setLineWidth) {
-        page.pushOperators(
-          PDFLib.pushGraphicsState(),
-          PDFLib.setTextRenderingMode(PDFLib.TextRenderingMode.FillAndOutline),
-          PDFLib.setLineWidth(size * 0.07),
-          PDFLib.setStrokingColor(outline),
-        );
-        page.drawText(text, { x: baseX, y: baseY, size, font, color: c });
-        page.pushOperators(PDFLib.popGraphicsState());
-      } else {
-        page.drawText(text, { x: baseX, y: baseY, size, font, color: c });
+      outlinedText(s.text, X(s.x1), Y(s.y1) - size * 0.82, size, s.colour);
+    } else if (s.type === 'symbol' && planLoaded) {
+      drawSymbolPdf(PDFLib, page, font, s.symbolId, s.x1, s.y1, s.side, s.colour, Math.max(1.5, s.side * 0.06), map);
+    } else if (s.type === 'schedule' && planLoaded && s.rows) {
+      drawSchedulePdf(PDFLib, page, font, s, s.rows, map);
+    } else if ((s.type === 'scale' || s.type === 'measure') && planLoaded) {
+      page.drawLine({ start: { x: X(s.x1), y: Y(s.y1) }, end: { x: X(s.x2), y: Y(s.y2) }, thickness: lw, color: c, lineCap: LineCapStyle.Round });
+      endTicks(s, c, lw);
+      const label = s.type === 'scale' ? `Scale: ${s.metres} m` : (ppm ? metresText(Math.hypot(s.x2 - s.x1, s.y2 - s.y1)) : '?');
+      centredLabel(label, (s.x1 + s.x2) / 2, (s.y1 + s.y2) / 2 - Math.max(14, s.width * 4), Math.max(14, s.width * 4.5), s.colour);
+    } else if (s.type === 'cable' && planLoaded) {
+      for (let i = 1; i < s.points.length; i++) {
+        page.drawLine({
+          start: { x: X(s.points[i - 1][0]), y: Y(s.points[i - 1][1]) }, end: { x: X(s.points[i][0]), y: Y(s.points[i][1]) },
+          thickness: lw, color: c, lineCap: LineCapStyle.Round, dashArray: [lw * 3, lw * 2],
+        });
+      }
+      s.points.forEach(([x, y]) => page.drawCircle({ x: X(x), y: Y(y), size: lw * 0.9, color: c }));
+      if (ppm && s.points.length > 1) {
+        const [mx, my] = midpointOf(s.points);
+        centredLabel(metresText(polylineLength(s.points)), mx, my - Math.max(12, s.width * 3.5), Math.max(13, s.width * 4), s.colour);
       }
     }
   }
@@ -232,12 +291,94 @@ async function openPdfViewer(path, title, opts = {}) {
     return { url: annotatedUrls.has(i) ? annotatedUrls.get(i) : rendered[i].dataUrl };
   }
 
+  // Copies one page of this PDF into a NEW PDF, once per name given - the
+  // builder's blank electrical page becomes a Lighting, a Power and a Cable
+  // paths page, each ready to mark up. The original is untouched; the new
+  // document lands in the job's Plans folder and opens straight away.
+  function openPlanPagesDialog() {
+    const baseName = String(title || 'Plan').replace(/\.pdf$/i, '');
+    const dlg = document.createElement('div');
+    dlg.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:350; display:flex; align-items:center; justify-content:center; padding:16px;';
+    const rowHtml = (name) => `<div class="pp-row" style="display:flex; gap:6px; margin-bottom:6px;"><input class="pp-name" value="${escapeHtml(name)}" style="flex:1; margin:0;" /><button type="button" class="secondary pp-remove" style="padding:6px 10px;">&times;</button></div>`;
+    dlg.innerHTML = `
+      <div class="card" style="max-width:460px; width:100%; max-height:90vh; overflow-y:auto;">
+        <h2>Copy a page into plan pages</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Makes a new PDF with one copy of the chosen page for each name below - e.g. the blank electrical page, once each for lighting, power and cable paths. The original stays as it is.</p>
+        <label style="margin-top:0;">Page to copy (1-${pageCount})</label>
+        <input id="pp-page" type="number" min="1" max="${pageCount}" value="${index + 1}" />
+        <label>One copy for each</label>
+        <div id="pp-list">${['Lighting plan', 'Power plan', 'Cable paths'].map(rowHtml).join('')}</div>
+        <button type="button" class="secondary" id="pp-add" style="font-size:12px; padding:6px 10px;">+ Add another page</button>
+        <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="pp-title" checked style="width:auto;" /> Print the name at the top of each page</label>
+        <label>Save as</label>
+        <input id="pp-save-name" value="${escapeHtml(baseName)} - Electrical plans" />
+        <div id="pp-msg"></div>
+        <div style="margin-top:12px; display:flex; gap:8px;">
+          <button type="button" id="pp-go">Create plan pages</button>
+          <button type="button" class="secondary" id="pp-cancel">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(dlg);
+    const wireRemove = () => dlg.querySelectorAll('.pp-remove').forEach(b => { b.onclick = () => b.closest('.pp-row').remove(); });
+    wireRemove();
+    dlg.querySelector('#pp-add').addEventListener('click', () => {
+      dlg.querySelector('#pp-list').insertAdjacentHTML('beforeend', rowHtml(''));
+      wireRemove();
+    });
+    dlg.querySelector('#pp-cancel').addEventListener('click', () => dlg.remove());
+    dlg.querySelector('#pp-go').addEventListener('click', async () => {
+      const msgEl = dlg.querySelector('#pp-msg');
+      const goBtn = dlg.querySelector('#pp-go');
+      const pageNum = parseInt(dlg.querySelector('#pp-page').value, 10);
+      const names = [...dlg.querySelectorAll('.pp-name')].map(i => i.value.trim()).filter(Boolean);
+      const saveName = dlg.querySelector('#pp-save-name').value.trim();
+      if (!(pageNum >= 1 && pageNum <= pageCount)) { msgEl.innerHTML = `<div class="error-box">Pick a page between 1 and ${pageCount}.</div>`; return; }
+      if (!names.length) { msgEl.innerHTML = `<div class="error-box">Add at least one page name.</div>`; return; }
+      if (!saveName) { msgEl.innerHTML = `<div class="error-box">Give the new PDF a name.</div>`; return; }
+      goBtn.disabled = true; goBtn.textContent = 'Creating...'; msgEl.innerHTML = '';
+      try {
+        const PDFLib = await loadPdfLib();
+        const src = await PDFLib.PDFDocument.load(bytes);
+        const out = await PDFLib.PDFDocument.create();
+        const font = await out.embedFont(PDFLib.StandardFonts.HelveticaBold);
+        const printTitle = dlg.querySelector('#pp-title').checked;
+        for (const name of names) {
+          const [copy] = await out.copyPages(src, [pageNum - 1]);
+          const page = out.addPage(copy);
+          if (printTitle) {
+            const { height } = page.getSize();
+            page.drawText(name.toUpperCase().replace(/[^\x20-\x7E\xA0-\xFF]/g, '?'), { x: 28, y: height - 40, size: 20, font, color: PDFLib.rgb(0, 0, 0) });
+          }
+        }
+        const outBytes = await out.save();
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const outPath = `documents/${opts.projectId}/${Date.now()}-plan-pages.pdf`;
+        const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(outPath, new Blob([outBytes], { type: 'application/pdf' }), { contentType: 'application/pdf' });
+        if (upErr) throw upErr;
+        const fileName = `${saveName.replace(/\.pdf$/i, '')}.pdf`;
+        const { error: insErr } = await supabaseClient.from('project_documents').insert({
+          project_id: opts.projectId, folder: 'Plans', file_path: outPath, file_name: fileName, mime_type: 'application/pdf', uploaded_by: user.id,
+        });
+        if (insErr) throw insErr;
+        dlg.remove();
+        annotatedUrls.forEach(u => URL.revokeObjectURL(u));
+        close();
+        if (opts.onSaved) opts.onSaved();
+        openPdfViewer(outPath, fileName, { ...opts, folder: 'Plans' });
+      } catch (err) {
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        goBtn.disabled = false; goBtn.textContent = 'Create plan pages';
+      }
+    });
+  }
+
   async function render() {
     overlay.innerHTML = `
       <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center; color:#fff; width:100%;">
         <strong style="margin-right:8px;">${escapeHtml(title || 'Document')}</strong>
         ${pageCount > 1 ? `<button type="button" class="secondary" id="pv-prev" style="padding:6px 12px;">&larr;</button><span>Page ${index + 1} / ${pageCount}</span><button type="button" class="secondary" id="pv-next" style="padding:6px 12px;">&rarr;</button>` : ''}
         ${canMarkup ? `<button type="button" id="pv-markup" style="padding:6px 12px;">Mark up this page</button>` : ''}
+        ${canMarkup ? `<button type="button" class="secondary" id="pv-planpages" style="padding:6px 12px;">Copy page into plan pages</button>` : ''}
         ${canMarkup && annotated.size ? `<button type="button" id="pv-save" style="padding:6px 12px;">Save marked-up copy (${annotated.size} page${annotated.size === 1 ? '' : 's'})</button>` : ''}
         <a id="pv-download" class="link-quiet" href="${signedUrl}" target="_blank" style="color:#fff; font-size:13px;">Download original</a>
         <button type="button" class="secondary" id="pv-close" style="padding:6px 12px;">Close</button>
@@ -257,6 +398,8 @@ async function openPdfViewer(path, title, opts = {}) {
     if (!holder) return; // navigated away / closed while rendering
     holder.innerHTML = `<img src="${img.url}" style="max-width:100%; max-height:100%; object-fit:contain; background:#fff; border-radius:4px; align-self:flex-start;" />`;
 
+    const planBtn = overlay.querySelector('#pv-planpages');
+    if (planBtn) planBtn.addEventListener('click', openPlanPagesDialog);
     const markupBtn = overlay.querySelector('#pv-markup');
     if (markupBtn) {
       markupBtn.addEventListener('click', () => {
@@ -264,12 +407,20 @@ async function openPdfViewer(path, title, opts = {}) {
         // so a page can be edited again rather than drawn over a flattened copy.
         const pageIndex = index;
         const prev = annotated.get(pageIndex);
+        // Plan tools (symbol schedule, cable lengths, scale) work across a
+        // document's pages: an "all pages" schedule adds up the other
+        // marked-up pages, and a scale set on one page is offered to the rest.
+        const others = [...annotated.entries()].filter(([i]) => i !== pageIndex).map(([, a]) => a);
+        const planExtra = typeof summariseMarkup === 'function' ? {
+          otherSummaries: others.map(a => summariseMarkup(a.shapes)),
+          inheritedScale: (others.map(a => a.shapes.find(sh => sh.type === 'scale')).find(Boolean)) || null,
+        } : {};
         openPhotoMarkup(rendered[pageIndex].dataUrl, async (blob, shapes, size) => {
           if (annotatedUrls.has(pageIndex)) URL.revokeObjectURL(annotatedUrls.get(pageIndex));
           annotated.set(pageIndex, { blob, shapes, width: size.width, height: size.height });
           annotatedUrls.set(pageIndex, URL.createObjectURL(blob));
           render();
-        }, prev ? prev.shapes : null);
+        }, prev ? prev.shapes : null, planExtra);
       });
     }
     const saveBtn = overlay.querySelector('#pv-save');
@@ -483,13 +634,22 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
 }
 
 // Draw-on-a-photo editor: freehand pen, arrow, box and text in a few
-// colours/sizes, with undo. Hands the finished picture to `onSave(blob)` as
-// a JPEG - the caller decides where it goes (the original is never touched
-// here). Output is capped at 1920px on the long edge, same as uploads.
-async function openPhotoMarkup(url, onSave, initialShapes = null) {
+// colours/sizes, with undo. Hands the finished picture to `onSave(blob, shapes,
+// size)` as a JPEG plus the drawings as data - the caller decides where it goes
+// (the original is never touched here). Output is capped at 1920px on the long
+// edge, same as uploads.
+//
+// When electrical-symbols.js is also loaded it becomes a plan editor: a
+// library of electrical symbols to place, a scale (draw a line across a known
+// length), a measure tool, cable paths whose lengths come from that scale, and
+// a live schedule of the symbols and cable lengths that can be stamped onto
+// the page. `extra` (PDF viewer only): { otherSummaries, inheritedScale } -
+// summaries of the document's other marked-up pages (for an "all pages"
+// schedule) and a scale already set on one of them.
+async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'photo-markup-overlay';
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.96); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:12px;';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.96); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:center; justify-content:safe center; gap:8px; padding:12px; overflow:auto;';
   overlay.innerHTML = `<p style="color:#fff;">Loading photo...</p>`;
   document.body.appendChild(overlay);
 
@@ -504,11 +664,13 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
     return;
   }
 
+  const plan = typeof ELECTRICAL_SYMBOLS !== 'undefined';
   const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
   const W = Math.round(bitmap.width * scale);
   const H = Math.round(bitmap.height * scale);
   const COLOURS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#ffffff', '#000000'];
   const SIZES = [1, 2, 3.5];
+  const SYMBOL_SIZES = [1, 1.5, 2.2];
   let tool = 'pen', colour = COLOURS[0], sizeIdx = 1;
   let fillMode = 0; // boxes only: 0 outline, 1 solid fill, 2 see-through highlight
   const FILL_LABELS = ['Outline', 'Solid fill', 'Highlight'];
@@ -517,11 +679,24 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
   const shapes = initialShapes ? JSON.parse(JSON.stringify(initialShapes)) : [];
   let current = null;
   let dragging = null; // { shape, x, y } while the Move tool is dragging a shape
+  let cableDraft = null; // a cable path being clicked out, point by point
+  let currentSymbol = plan ? ELECTRICAL_SYMBOLS[0].id : null;
+  let cableType = plan ? CABLE_TYPES[0] : '';
+  let allowance = 10;
+  let scheduleScope = 'page';
+  if (plan) {
+    // A scale already set on another page of this document carries over (the
+    // lighting / power / cable pages are copies of the same blank page).
+    if (extra.inheritedScale && !shapes.some(s => s.type === 'scale')) shapes.push(JSON.parse(JSON.stringify(extra.inheritedScale)));
+    const existing = shapes.find(s => s.type === 'schedule');
+    if (existing) { allowance = existing.allowance ?? allowance; scheduleScope = existing.scope || 'page'; }
+  }
 
-  const toolBtn = (id, label) => `<button type="button" class="secondary mk-tool" data-tool="${id}" style="padding:6px 12px; font-size:13px;">${label}</button>`;
+  const toolBtn = (id, label, extraId = '') => `<button type="button" class="secondary mk-tool" data-tool="${id}" ${extraId ? `id="${extraId}"` : ''} style="padding:6px 12px; font-size:13px;">${label}</button>`;
+  const smallInput = 'padding:5px 8px; font-size:12px; margin:0; width:auto;';
   overlay.innerHTML = `
     <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
-      ${toolBtn('pen', 'Pen')}${toolBtn('arrow', 'Arrow')}${toolBtn('box', 'Box')}${toolBtn('text', 'Text')}${toolBtn('move', 'Move')}
+      ${toolBtn('pen', 'Pen')}${toolBtn('arrow', 'Arrow')}${toolBtn('box', 'Box')}${toolBtn('text', 'Text')}${toolBtn('move', 'Move')}${toolBtn('erase', 'Delete')}
       <button type="button" class="secondary" id="mk-fill" style="padding:6px 12px; font-size:13px;">Outline</button>
       <span style="width:8px;"></span>
       ${COLOURS.map(c => `<button type="button" class="mk-colour" data-c="${c}" style="width:26px; height:26px; padding:0; border-radius:50%; background:${c}; border:2px solid #fff;"></button>`).join('')}
@@ -530,7 +705,23 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
       <span style="width:8px;"></span>
       <button type="button" class="secondary" id="mk-undo" style="padding:6px 12px; font-size:13px;">Undo</button>
     </div>
-    <canvas id="mk-canvas" width="${W}" height="${H}" style="max-width:94vw; max-height:70vh; touch-action:none; border-radius:6px; cursor:crosshair;"></canvas>
+    ${plan ? `
+    <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
+      ${toolBtn('symbol', 'Symbols', 'mk-symbols-btn')}
+      ${toolBtn('scale', 'Set scale')}${toolBtn('measure', 'Measure')}${toolBtn('cable', 'Cable path')}
+      <select id="mk-cable-type" style="${smallInput}">${CABLE_TYPES.map(t => `<option>${t}</option>`).join('')}<option value="__custom">Other...</option></select>
+      <button type="button" id="mk-finish-cable" style="padding:6px 12px; font-size:13px; display:none;">Finish cable</button>
+      <span style="color:#fff; font-size:12px;">Allowance</span><input id="mk-allow" type="number" min="0" max="100" value="${allowance}" style="${smallInput} width:60px;" /><span style="color:#fff; font-size:12px;">%</span>
+      <select id="mk-scope" style="${smallInput}"><option value="page">Schedule: this page</option><option value="all">Schedule: all pages</option></select>
+      <button type="button" class="secondary" id="mk-schedule" style="padding:6px 12px; font-size:13px;">Add schedule</button>
+    </div>
+    <div id="mk-palette" style="display:none; max-height:22vh; overflow:auto; background:#fff; border-radius:8px; padding:8px; max-width:94vw;">
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+        ${ELECTRICAL_SYMBOLS.map(s => `<button type="button" class="mk-sym" data-id="${s.id}" title="${s.name}" style="width:84px; padding:4px; background:#fff; color:#000; border:1px solid #ccc; border-radius:6px; font-size:10px; line-height:1.15;"><canvas width="44" height="44" data-id="${s.id}" style="display:block; margin:0 auto 2px;"></canvas>${s.name}</button>`).join('')}
+      </div>
+    </div>
+    <div id="mk-counts" style="color:#cbd5e1; font-size:12px; max-width:94vw; text-align:center;"></div>` : ''}
+    <canvas id="mk-canvas" width="${W}" height="${H}" style="max-width:94vw; max-height:${plan ? '56vh' : '70vh'}; touch-action:none; border-radius:6px; cursor:crosshair; flex-shrink:0;"></canvas>
     <div id="mk-msg" style="color:#fca5a5; font-size:12px;"></div>
     <div style="display:flex; gap:8px;">
       <button type="button" id="mk-save">Save marked-up copy</button>
@@ -540,8 +731,52 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
   const canvas = overlay.querySelector('#mk-canvas');
   const ctx = canvas.getContext('2d');
   const baseWidth = () => Math.max(3, W / 300) * SIZES[sizeIdx];
+  const symbolSide = () => Math.max(22, W / 45) * SYMBOL_SIZES[sizeIdx];
+  const ppm = () => (plan ? scalePxPerMetre(shapes) : null);
+  const fmtM = (px) => `${(px / ppm()).toFixed(px / ppm() < 10 ? 2 : 1)} m`;
+  const scheduleRows = (s) => buildSchedule(shapes, (s.scope || scheduleScope) === 'all' ? extra.otherSummaries : [], s.allowance ?? allowance);
+
+  if (plan) {
+    overlay.querySelectorAll('#mk-palette canvas').forEach(cv => {
+      drawSymbolCanvas(cv.getContext('2d'), cv.dataset.id, 4, 4, 36, '#000000', 2);
+    });
+  }
+
+  function outlinedLabel(text, x, y, size, fillColour) {
+    ctx.save();
+    ctx.font = `bold ${size}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round'; ctx.lineWidth = size * 0.28;
+    ctx.strokeStyle = fillColour === '#000000' ? '#ffffff' : '#000000';
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = fillColour; ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+  // Point half-way along a path, for putting a length label there.
+  function midpointOf(points) {
+    const half = polylineLength(points) / 2;
+    let acc = 0;
+    for (let i = 1; i < points.length; i++) {
+      const seg = Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+      if (acc + seg >= half && seg > 0) {
+        const t = (half - acc) / seg;
+        return [points[i - 1][0] + (points[i][0] - points[i - 1][0]) * t, points[i - 1][1] + (points[i][1] - points[i - 1][1]) * t];
+      }
+      acc += seg;
+    }
+    return points[0];
+  }
+  function endTicks(s, size) {
+    const a = Math.atan2(s.y2 - s.y1, s.x2 - s.x1) + Math.PI / 2;
+    [[s.x1, s.y1], [s.x2, s.y2]].forEach(([x, y]) => {
+      ctx.beginPath();
+      ctx.moveTo(x - Math.cos(a) * size, y - Math.sin(a) * size);
+      ctx.lineTo(x + Math.cos(a) * size, y + Math.sin(a) * size);
+      ctx.stroke();
+    });
+  }
 
   function drawShape(s) {
+    ctx.save();
     ctx.strokeStyle = s.colour; ctx.fillStyle = s.colour; ctx.lineWidth = s.width;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     if (s.type === 'pen') {
@@ -574,40 +809,102 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
       ctx.strokeStyle = s.colour === '#000000' ? '#ffffff' : '#000000';
       ctx.strokeText(s.text, s.x1, s.y1);
       ctx.fillText(s.text, s.x1, s.y1);
+    } else if (s.type === 'symbol') {
+      drawSymbolCanvas(ctx, s.symbolId, s.x1, s.y1, s.side, s.colour, Math.max(1.5, s.side * 0.06));
+    } else if (s.type === 'schedule') {
+      drawScheduleCanvas(ctx, s, scheduleRows(s));
+    } else if (s.type === 'scale' || s.type === 'measure') {
+      const tick = s.width * 2.5;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      endTicks(s, tick);
+      const text = s.type === 'scale' ? `Scale: ${s.metres} m` : (ppm() ? fmtM(Math.hypot(s.x2 - s.x1, s.y2 - s.y1)) : '?');
+      outlinedLabel(text, (s.x1 + s.x2) / 2, (s.y1 + s.y2) / 2 - Math.max(14, s.width * 4), Math.max(14, s.width * 4.5), s.colour);
+    } else if (s.type === 'cable') {
+      const pts = cableDraft === s && s.hover ? [...s.points, s.hover] : s.points;
+      ctx.setLineDash([s.width * 3, s.width * 2]);
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      s.points.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, s.width * 0.9, 0, Math.PI * 2); ctx.fill(); });
+      if (pts.length > 1 && ppm()) {
+        const [mx, my] = midpointOf(pts);
+        outlinedLabel(fmtM(polylineLength(pts)), mx, my - Math.max(12, s.width * 3.5), Math.max(13, s.width * 4), s.colour);
+      }
     }
+    ctx.restore();
+  }
+
+  function distToSeg(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2)) : 0;
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
   }
   function shapeBounds(s) {
     let x1, y1, x2, y2;
-    if (s.type === 'pen') {
+    if (s.points) {
       const xs = s.points.map(p => p[0]), ys = s.points.map(p => p[1]);
       x1 = Math.min(...xs); x2 = Math.max(...xs); y1 = Math.min(...ys); y2 = Math.max(...ys);
     } else if (s.type === 'text') {
       ctx.font = `bold ${Math.round(s.width * 6)}px sans-serif`;
       x1 = s.x1; y1 = s.y1; x2 = s.x1 + ctx.measureText(s.text).width; y2 = s.y1 + s.width * 6;
+    } else if (s.type === 'symbol') {
+      x1 = s.x1; y1 = s.y1; x2 = s.x1 + s.side; y2 = s.y1 + s.side;
+    } else if (s.type === 'schedule') {
+      const { width, height } = scheduleItems(s, scheduleRows(s));
+      x1 = s.x1; y1 = s.y1; x2 = s.x1 + width; y2 = s.y1 + height;
     } else {
       x1 = Math.min(s.x1, s.x2); x2 = Math.max(s.x1, s.x2); y1 = Math.min(s.y1, s.y2); y2 = Math.max(s.y1, s.y2);
     }
-    const pad = Math.max(s.width * 2, 14);
+    const pad = Math.max((s.width || 4) * 2, 14);
     return { x1: x1 - pad, y1: y1 - pad, x2: x2 + pad, y2: y2 + pad };
   }
   function moveShape(s, dx, dy) {
-    if (s.type === 'pen') s.points = s.points.map(([x, y]) => [x + dx, y + dy]);
+    if (s.points) s.points = s.points.map(([x, y]) => [x + dx, y + dy]);
     else {
       s.x1 += dx; s.y1 += dy;
       if (s.x2 !== undefined) { s.x2 += dx; s.y2 += dy; }
     }
   }
-  function shapeAt(x, y) {
-    for (let i = shapes.length - 1; i >= 0; i--) {
-      const b = shapeBounds(shapes[i]);
-      if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return shapes[i];
+  // Lines and paths are picked by how close the click is to the line itself,
+  // not by their (often huge) bounding box, so a long cable run doesn't
+  // swallow clicks meant for what's underneath it.
+  function shapeHit(s, x, y) {
+    const tol = Math.max((s.width || 4) * 2, 12);
+    if (s.points) {
+      if (s.points.length === 1) return Math.hypot(x - s.points[0][0], y - s.points[0][1]) <= tol;
+      for (let i = 1; i < s.points.length; i++) {
+        if (distToSeg(x, y, s.points[i - 1][0], s.points[i - 1][1], s.points[i][0], s.points[i][1]) <= tol) return true;
+      }
+      return false;
     }
+    if (s.type === 'arrow' || s.type === 'measure' || s.type === 'scale') return distToSeg(x, y, s.x1, s.y1, s.x2, s.y2) <= tol;
+    const b = shapeBounds(s);
+    return x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2;
+  }
+  function shapeAt(x, y) {
+    for (let i = shapes.length - 1; i >= 0; i--) if (shapeHit(shapes[i], x, y)) return shapes[i];
     return null;
   }
+
+  function updateCounts() {
+    if (!plan) return;
+    const el = overlay.querySelector('#mk-counts');
+    const sum = summariseMarkup(shapes);
+    const parts = ELECTRICAL_SYMBOLS.filter(s => sum.symbols[s.id]).map(s => `${s.name} x${sum.symbols[s.id]}`);
+    Object.entries(sum.cables).forEach(([name, c]) => {
+      parts.push(ppm() ? `${name}: ${c.runs} run${c.runs === 1 ? '' : 's'}, ${c.metres.toFixed(1)} m` : `${name}: ${c.runs} run${c.runs === 1 ? '' : 's'} (set the scale for lengths)`);
+    });
+    el.textContent = parts.length ? `On this page: ${parts.join('  |  ')}` : (ppm() ? `Scale set. Place symbols, measure, or trace cable paths.` : 'Start with "Set scale": draw a line across something you know the length of.');
+    overlay.querySelector('#mk-schedule').textContent = shapes.some(s => s.type === 'schedule') ? 'Remove schedule' : 'Add schedule';
+  }
+
   function redraw() {
     ctx.drawImage(bitmap, 0, 0, W, H);
     shapes.forEach(drawShape);
     if (current) drawShape(current);
+    if (cableDraft) drawShape(cableDraft);
     if (dragging) {
       const b = shapeBounds(dragging.shape);
       ctx.save();
@@ -615,6 +912,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
       ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
       ctx.restore();
     }
+    updateCounts();
   }
   function refreshControls() {
     canvas.style.cursor = tool === 'move' ? 'move' : 'crosshair';
@@ -622,18 +920,96 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
     overlay.querySelectorAll('.mk-tool').forEach(b => { b.style.outline = b.dataset.tool === tool ? '2px solid #fff' : 'none'; });
     overlay.querySelectorAll('.mk-colour').forEach(b => { b.style.outline = b.dataset.c === colour ? '2px solid #38bdf8' : 'none'; b.style.outlineOffset = '2px'; });
     overlay.querySelectorAll('.mk-size').forEach(b => { b.style.outline = parseInt(b.dataset.i) === sizeIdx ? '2px solid #fff' : 'none'; });
+    if (plan) {
+      overlay.querySelectorAll('.mk-sym').forEach(b => { b.style.outline = b.dataset.id === currentSymbol ? '3px solid #38bdf8' : 'none'; });
+      overlay.querySelector('#mk-finish-cable').style.display = cableDraft ? '' : 'none';
+    }
   }
-  overlay.querySelectorAll('.mk-tool').forEach(b => b.addEventListener('click', () => { tool = b.dataset.tool; refreshControls(); }));
+  function setTool(t) {
+    if (cableDraft && t !== 'cable') cableDraft = null;
+    tool = t;
+    refreshControls(); redraw();
+  }
+  overlay.querySelectorAll('.mk-tool').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.tool === 'symbol') {
+      const pal = overlay.querySelector('#mk-palette');
+      pal.style.display = pal.style.display === 'none' ? 'block' : 'none';
+    }
+    setTool(b.dataset.tool);
+  }));
   overlay.querySelectorAll('.mk-colour').forEach(b => b.addEventListener('click', () => { colour = b.dataset.c; refreshControls(); }));
   overlay.querySelectorAll('.mk-size').forEach(b => b.addEventListener('click', () => { sizeIdx = parseInt(b.dataset.i); refreshControls(); }));
-  overlay.querySelector('#mk-undo').addEventListener('click', () => { shapes.pop(); redraw(); });
+  overlay.querySelector('#mk-undo').addEventListener('click', () => {
+    if (cableDraft) { cableDraft.points.pop(); if (!cableDraft.points.length) cableDraft = null; refreshControls(); redraw(); return; }
+    shapes.pop(); redraw();
+  });
   overlay.querySelector('#mk-cancel').addEventListener('click', () => overlay.remove());
+
+  if (plan) {
+    overlay.querySelectorAll('.mk-sym').forEach(b => b.addEventListener('click', () => { currentSymbol = b.dataset.id; setTool('symbol'); }));
+    overlay.querySelector('#mk-cable-type').addEventListener('change', (e) => {
+      if (e.target.value === '__custom') {
+        const name = (window.prompt('Cable name (e.g. 4mm Twin & Earth):') || '').trim();
+        if (name) {
+          const opt = document.createElement('option'); opt.textContent = name;
+          e.target.insertBefore(opt, e.target.querySelector('option[value="__custom"]'));
+          e.target.value = name; cableType = name;
+        } else e.target.value = cableType;
+      } else cableType = e.target.value;
+      if (cableDraft) cableDraft.cable = cableType;
+    });
+    overlay.querySelector('#mk-allow').addEventListener('input', (e) => {
+      allowance = Math.max(0, parseFloat(e.target.value) || 0);
+      shapes.filter(s => s.type === 'schedule').forEach(s => { s.allowance = allowance; });
+      redraw();
+    });
+    overlay.querySelector('#mk-scope').value = scheduleScope;
+    overlay.querySelector('#mk-scope').addEventListener('change', (e) => {
+      scheduleScope = e.target.value;
+      shapes.filter(s => s.type === 'schedule').forEach(s => { s.scope = scheduleScope; });
+      redraw();
+    });
+    overlay.querySelector('#mk-schedule').addEventListener('click', () => {
+      const idx = shapes.findIndex(s => s.type === 'schedule');
+      if (idx >= 0) { shapes.splice(idx, 1); redraw(); return; }
+      const side = symbolSide();
+      shapes.push({
+        type: 'schedule', colour: colour === '#ffffff' ? '#000000' : colour, side, width: Math.max(1.5, side * 0.06),
+        x1: Math.max(10, W - side * 13.5 - 20), y1: 20, allowance, scope: scheduleScope,
+      });
+      setTool('move');
+    });
+    const finishCable = () => {
+      if (!cableDraft) return;
+      if (cableDraft.points.length >= 2) {
+        delete cableDraft.hover;
+        shapes.push(cableDraft);
+      }
+      cableDraft = null;
+      refreshControls(); redraw();
+    };
+    overlay.querySelector('#mk-finish-cable').addEventListener('click', finishCable);
+    document.addEventListener('keydown', function onKey(e) {
+      if (!document.body.contains(overlay)) { document.removeEventListener('keydown', onKey); return; }
+      if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+      if (e.key === 'Enter') finishCable();
+      else if (e.key === 'Escape' && cableDraft) { cableDraft = null; refreshControls(); redraw(); }
+    });
+    canvas.addEventListener('dblclick', () => {
+      if (tool !== 'cable' || !cableDraft) return;
+      // The two clicks of a double-click each added a point at the same spot.
+      const p = cableDraft.points;
+      if (p.length > 1 && Math.hypot(p[p.length - 1][0] - p[p.length - 2][0], p[p.length - 1][1] - p[p.length - 2][1]) < 6) p.pop();
+      finishCable();
+    });
+    refreshControls();
+  }
 
   const pos = (e) => {
     const r = canvas.getBoundingClientRect();
     return [(e.clientX - r.left) * (W / r.width), (e.clientY - r.top) * (H / r.height)];
   };
-  overlay.querySelector('#mk-fill').addEventListener('click', () => { fillMode = (fillMode + 1) % 3; tool = 'box'; refreshControls(); });
+  overlay.querySelector('#mk-fill').addEventListener('click', () => { fillMode = (fillMode + 1) % 3; setTool('box'); });
   canvas.addEventListener('pointerdown', (e) => {
     const [x, y] = pos(e);
     if (tool === 'move') {
@@ -644,19 +1020,37 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
       redraw();
       return;
     }
+    if (tool === 'erase') {
+      const hit = shapeAt(x, y);
+      if (hit) { shapes.splice(shapes.indexOf(hit), 1); redraw(); }
+      return;
+    }
     if (tool === 'text') {
       const text = window.prompt('Text to add:');
       if (text && text.trim()) {
         shapes.push({ type: 'text', colour, width: baseWidth(), x1: x, y1: y, text: text.trim() });
         // Straight into Move so the text can be dragged to the right spot.
-        tool = 'move'; refreshControls(); redraw();
+        setTool('move');
       }
+      return;
+    }
+    if (tool === 'symbol') {
+      const side = symbolSide();
+      shapes.push({ type: 'symbol', symbolId: currentSymbol, colour, side, width: Math.max(1.5, side * 0.06), x1: x - side / 2, y1: y - side / 2 });
+      redraw();
+      return;
+    }
+    if (tool === 'cable') {
+      if (!ppm()) { window.alert('Set the scale first (use "Set scale" on something you know the length of) so cable lengths can be measured.'); return; }
+      if (!cableDraft) cableDraft = { type: 'cable', colour, width: baseWidth(), cable: cableType, points: [[x, y]] };
+      else cableDraft.points.push([x, y]);
+      refreshControls(); redraw();
       return;
     }
     canvas.setPointerCapture(e.pointerId);
     current = tool === 'pen'
       ? { type: 'pen', colour, width: baseWidth(), points: [[x, y]] }
-      : { type: tool, colour, width: baseWidth(), x1: x, y1: y, x2: x, y2: y, ...(tool === 'box' ? { fill: fillMode } : {}) };
+      : { type: tool, colour: tool === 'scale' ? '#0ea5e9' : colour, width: baseWidth(), x1: x, y1: y, x2: x, y2: y, ...(tool === 'box' ? { fill: fillMode } : {}) };
     redraw();
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -667,6 +1061,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
       redraw();
       return;
     }
+    if (cableDraft) { cableDraft.hover = [x, y]; redraw(); return; }
     if (!current) return;
     if (current.type === 'pen') current.points.push([x, y]);
     else { current.x2 = x; current.y2 = y; }
@@ -685,7 +1080,24 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
   });
   const finish = () => {
     if (dragging) { dragging = null; redraw(); return; }
-    if (current) { shapes.push(current); current = null; redraw(); }
+    if (!current) return;
+    const s = current;
+    current = null;
+    if (s.type === 'scale' || s.type === 'measure') {
+      if (Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < 8) { redraw(); return; }
+      if (s.type === 'scale') {
+        const metres = parseFloat(window.prompt('How long is that line in real life, in metres?'));
+        if (!(metres > 0)) { redraw(); return; }
+        s.metres = metres;
+        for (let i = shapes.length - 1; i >= 0; i--) if (shapes[i].type === 'scale') shapes.splice(i, 1);
+        shapes.push(s);
+        setTool('measure');
+        return;
+      }
+      if (!ppm()) { window.alert('Set the scale first.'); redraw(); return; }
+    }
+    shapes.push(s);
+    redraw();
   };
   canvas.addEventListener('pointerup', finish);
   canvas.addEventListener('pointercancel', finish);
@@ -695,11 +1107,17 @@ async function openPhotoMarkup(url, onSave, initialShapes = null) {
     const msgEl = overlay.querySelector('#mk-msg');
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; msgEl.textContent = '';
     try {
+      cableDraft = null; dragging = null; current = null;
+      redraw();
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
       if (!blob) throw new Error('Could not export the picture');
+      // Schedules carry the rows they showed when saved, so the PDF export
+      // doesn't need the other pages' data to draw them.
+      const out = JSON.parse(JSON.stringify(shapes));
+      if (plan) out.forEach(s => { if (s.type === 'schedule') s.rows = scheduleRows(s); });
       // Second/third arguments are for callers that want the drawings as data
       // (shapes in image-pixel coordinates) as well as the flattened picture.
-      await onSave(blob, JSON.parse(JSON.stringify(shapes)), { width: W, height: H });
+      await onSave(blob, out, { width: W, height: H });
       overlay.remove();
     } catch (err) {
       msgEl.textContent = err.message;

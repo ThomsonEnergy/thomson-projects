@@ -31,8 +31,9 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=30"></script>
+  <script src="/js/supabase-client.js?v=31"></script>
   <script src="/js/template-questions.js"></script>
+  <script src="/js/electrical-symbols.js?v=1"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -4208,9 +4209,14 @@
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
-      const folders = [...new Set((docs || []).map(d => d.folder))].sort();
-      const folderOptions = ['General', ...folders.filter(f => f !== 'General')];
+      // "Plans" exists on every job and quote, even before anything's been
+      // uploaded to it - it's where the builder's plans go, and where the
+      // electrical plan pages made from them are saved.
+      const folders = [...new Set(['Plans', ...(docs || []).map(d => d.folder)])]
+        .sort((a, b) => (a === 'Plans' ? -1 : b === 'Plans' ? 1 : a.localeCompare(b)));
+      const folderOptions = ['Plans', 'General', ...folders.filter(f => f !== 'Plans' && f !== 'General')];
       folderSelect.innerHTML = folderOptions.map(f => `<option value="${f}">${f}</option>`).join('');
+      folderSelect.value = folderOptions.includes(selectedDocFolder) ? selectedDocFolder : 'General';
 
       pillsEl.innerHTML = ['All', ...folders].map(f => `
         <button type="button" class="secondary doc-folder-pill" data-folder="${f}" style="font-size:12px; padding:6px 12px; ${f === selectedDocFolder ? 'background:var(--accent-dim); color:var(--accent);' : ''}">${f}</button>
@@ -4221,7 +4227,9 @@
 
       const visible = selectedDocFolder === 'All' ? (docs || []) : (docs || []).filter(d => d.folder === selectedDocFolder);
       if (!visible.length) {
-        listEl.innerHTML = `<p class="subtitle">No documents${selectedDocFolder === 'All' ? '' : ' in this folder'} yet.</p>`;
+        listEl.innerHTML = selectedDocFolder === 'Plans'
+          ? `<p class="subtitle">No plans yet. Upload the builder's plans here, then open one and use "Copy page into plan pages" to make lighting, power and cable path pages to mark up with electrical symbols.</p>`
+          : `<p class="subtitle">No documents${selectedDocFolder === 'All' ? '' : ' in this folder'} yet.</p>`;
         return;
       }
 
