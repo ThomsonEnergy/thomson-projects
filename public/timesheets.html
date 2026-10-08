@@ -48,7 +48,10 @@
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
         <h2 style="margin:0;">Your timesheet this week</h2>
-        <button type="button" class="secondary" id="add-today-entry-btn">+ Add missed entry</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="secondary" id="add-tafe-day-btn">+ TAFE day (8h)</button>
+          <button type="button" class="secondary" id="add-today-entry-btn">+ Add missed entry</button>
+        </div>
       </div>
       <p class="subtitle" style="margin:0 0 10px;">Click any day to edit it - you can be logged against more than one job in a day, each with its own stage split, all in the one place.</p>
       <div id="my-week-days"><p class="subtitle">Loading...</p></div>
@@ -1075,6 +1078,58 @@
 
     document.getElementById('add-today-entry-btn').addEventListener('click', () => {
       openDayEditPanel(localDateStr(new Date()));
+    });
+
+    // One click for a TAFE day: 8 paid hours as Training time, with a 30 minute
+    // unpaid lunch. Entered as two blocks (7:00-12:00 and 12:30-15:30) so the
+    // gap IS the unpaid break and the day adds up to exactly 8 hours, which
+    // is what payroll counts. Training time goes to Xero as "Training (TAFE)".
+    const TAFE_DAY = { start: '07:00', breakStart: '12:00', breakEnd: '12:30', end: '15:30' };
+    document.getElementById('add-tafe-day-btn').addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:380px; width:100%;">
+          <h2 style="margin-top:0;">TAFE day</h2>
+          <p class="subtitle" style="margin-top:0;">Adds an 8 hour Training (TAFE) timesheet: 7:00am to 3:30pm with a 30 minute unpaid break at 12:00.</p>
+          <label>Which day?</label>
+          <input type="date" id="tafe-date" value="${localDateStr(new Date())}" />
+          <div style="margin-top:14px; display:flex; gap:8px;">
+            <button type="button" id="tafe-save">Add TAFE day</button>
+            <button type="button" class="secondary" id="tafe-cancel">Cancel</button>
+          </div>
+          <div id="tafe-msg" style="margin-top:8px;"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#tafe-cancel').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#tafe-save').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#tafe-msg');
+        const btn = overlay.querySelector('#tafe-save');
+        const dateStr = overlay.querySelector('#tafe-date').value;
+        if (!dateStr) { msg.innerHTML = '<div class="error-box">Pick a day.</div>'; return; }
+        btn.disabled = true;
+        try {
+          const t = (hhmm) => combineDateTime(dateStr, hhmm);
+          // refuse to double up on time already logged that day
+          const { data: clash, error: clashErr } = await supabaseClient.from('time_entries').select('id')
+            .eq('staff_id', myUserId).lt('clock_in', t(TAFE_DAY.end).toISOString()).or(`clock_out.is.null,clock_out.gt.${t(TAFE_DAY.start).toISOString()}`);
+          if (clashErr) throw clashErr;
+          if (clash && clash.length) throw new Error('You already have time logged during that day. Open the day from your week list to change it, or remove it first.');
+          const base = { staff_id: myUserId, project_id: null, time_category: 'training', notes: 'TAFE' };
+          const { error } = await supabaseClient.from('time_entries').insert([
+            { ...base, clock_in: t(TAFE_DAY.start).toISOString(), clock_out: t(TAFE_DAY.breakStart).toISOString(),
+              break_taken: true, break_start: t(TAFE_DAY.breakStart).toISOString(), break_minutes: 30, break_skip_reason: null },
+            { ...base, clock_in: t(TAFE_DAY.breakEnd).toISOString(), clock_out: t(TAFE_DAY.end).toISOString() },
+          ]);
+          if (error) throw error;
+          overlay.remove();
+          await refreshWeekViews();
+          await loadTimesheetIssues();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          btn.disabled = false;
+        }
+      });
     });
 
     document.getElementById('request-leave-btn').addEventListener('click', async () => {
