@@ -80,14 +80,14 @@
 
     <div class="card">
       <h2>Company feed</h2>
-      <textarea id="new-post-text" placeholder="Post something to the team..." style="min-height:70px;"></textarea>
-      <button id="new-post-btn" style="margin-top:8px;">Post</button>
-      <div id="feed-msg"></div>
+      <p class="subtitle" style="margin-bottom:10px;">Posts from the team, plus job notes people have chosen to share here - click a job number to jump to it.</p>
+      <div id="feed-composer"></div>
       <div id="feed-list" style="margin-top:16px;"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
   <script src="/js/supabase-client.js?v=42"></script>
+  <script src="/js/feed.js?v=1"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId, myRole, myName;
@@ -341,6 +341,24 @@
       if (myTasks && myTasks.length) {
         items.push({ group: 'job', label: `${myTasks.length} task${myTasks.length === 1 ? '' : 's'} assigned to you`, link: '/tasks.html' });
       }
+
+      // Posts someone's tagged you in that you haven't opened yet.
+      try {
+        const { data: tags } = await supabaseClient.from('feed_mentions')
+          .select('post_id, feed_posts(message, project_id, profiles(full_name), projects(id, name, job_number, quote_number))')
+          .eq('profile_id', myUserId).is('seen_at', null).order('created_at', { ascending: false });
+        (tags || []).forEach(t => {
+          const post = t.feed_posts;
+          if (!post) return;
+          const who = (post.profiles && post.profiles.full_name) || 'Someone';
+          const snippet = escapeHtml(post.message.length > 60 ? post.message.slice(0, 60) + '...' : post.message);
+          items.push({
+            group: 'job',
+            label: `${escapeHtml(who)} tagged you ${post.projects ? 'on ' + escapeHtml(projectRef(post.projects)) : 'in a post'}: "${snippet}"`,
+            link: post.projects ? `/project.html?id=${post.projects.id}&tab=feed` : '#feed-list',
+          });
+        });
+      } catch (err) { console.error('Tag check failed:', err); }
 
       // Jobs flagged Not Complete - relevant to everyone, no $ involved
       const { data: notComplete } = await supabaseClient
@@ -717,97 +735,8 @@
     }
 
     async function loadFeed() {
-      const el = document.getElementById('feed-list');
-      const { data: posts, error } = await supabaseClient
-        .from('feed_posts')
-        .select('*, profiles(full_name)')
-        .order('created_at', { ascending: false })
-        .limit(30);
-      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-      if (!posts.length) { el.innerHTML = `<p class="subtitle">No posts yet - be the first.</p>`; return; }
-
-      const postIds = posts.map(p => p.id);
-      const { data: likes } = await supabaseClient.from('feed_likes').select('post_id, author_id').in('post_id', postIds);
-      const { data: comments } = await supabaseClient.from('feed_comments').select('*, profiles(full_name)').in('post_id', postIds).order('created_at');
-
-      el.innerHTML = posts.map(post => {
-        const postLikes = (likes || []).filter(l => l.post_id === post.id);
-        const iLiked = postLikes.some(l => l.author_id === myUserId);
-        const postComments = (comments || []).filter(c => c.post_id === post.id);
-        return `
-          <div class="feed-post" data-post-id="${post.id}">
-            <div class="feed-author">${post.profiles ? post.profiles.full_name : 'Someone'}</div>
-            <div class="feed-meta">${new Date(post.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</div>
-            <p style="margin:8px 0 0; white-space:pre-wrap;">${post.message}</p>
-            <div class="feed-actions">
-              <button class="feed-like-btn ${iLiked ? 'liked' : ''}" data-post-id="${post.id}" data-liked="${iLiked}">
-                &#128077; ${postLikes.length || ''} ${iLiked ? 'Liked' : 'Like'}
-              </button>
-              <button class="feed-like-btn toggle-comments-btn" data-post-id="${post.id}">&#128172; Comment${postComments.length ? ' (' + postComments.length + ')' : ''}</button>
-            </div>
-            <div class="feed-comments" data-post-id="${post.id}" style="display:none; margin-top:10px; padding-left:12px; border-left:2px solid var(--border);">
-              ${postComments.map(c => `
-                <div class="feed-comment">
-                  <span class="feed-author">${c.profiles ? c.profiles.full_name : 'Someone'}</span>
-                  <span class="feed-meta">${new Date(c.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
-                  <div>${c.message}</div>
-                </div>`).join('')}
-              <div style="display:flex; gap:8px; margin-top:8px;">
-                <input class="new-comment-input" data-post-id="${post.id}" placeholder="Write a comment..." style="flex:1;" />
-                <button class="secondary send-comment-btn" data-post-id="${post.id}" style="padding:8px 14px;">Send</button>
-              </div>
-            </div>
-          </div>`;
-      }).join('');
-
-      el.querySelectorAll('.feed-like-btn[data-liked]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const postId = btn.dataset.postId;
-          const liked = btn.dataset.liked === 'true';
-          if (liked) {
-            await supabaseClient.from('feed_likes').delete().eq('post_id', postId).eq('author_id', myUserId);
-          } else {
-            await supabaseClient.from('feed_likes').insert({ post_id: postId, author_id: myUserId });
-          }
-          await loadFeed();
-        });
-      });
-
-      el.querySelectorAll('.toggle-comments-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const panel = el.querySelector(`.feed-comments[data-post-id="${btn.dataset.postId}"]`);
-          panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-        });
-      });
-
-      el.querySelectorAll('.send-comment-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const postId = btn.dataset.postId;
-          const input = el.querySelector(`.new-comment-input[data-post-id="${postId}"]`);
-          const message = input.value.trim();
-          if (!message) return;
-          btn.disabled = true;
-          const { error } = await supabaseClient.from('feed_comments').insert({ post_id: postId, author_id: myUserId, message });
-          if (error) { alert(error.message); btn.disabled = false; return; }
-          await loadFeed();
-        });
-      });
+      await renderFeedList(document.getElementById('feed-list'), { myUserId, isAdmin: myRole === 'admin' });
     }
-
-    document.getElementById('new-post-btn').addEventListener('click', async () => {
-      const msg = document.getElementById('feed-msg');
-      const textEl = document.getElementById('new-post-text');
-      const message = textEl.value.trim();
-      if (!message) return;
-      const btn = document.getElementById('new-post-btn');
-      btn.disabled = true;
-      const { error } = await supabaseClient.from('feed_posts').insert({ author_id: myUserId, message });
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; btn.disabled = false; return; }
-      textEl.value = '';
-      msg.innerHTML = '';
-      btn.disabled = false;
-      await loadFeed();
-    });
 
     (async function () {
       const session = await requireLogin();
@@ -831,6 +760,7 @@
       await renderQuickNav();
       await loadCallbackRequestsHome();
       await loadActionItems();
+      await mountFeedComposer(document.getElementById('feed-composer'), { myUserId, onPosted: loadFeed });
       await loadFeed();
     })();
   </script>

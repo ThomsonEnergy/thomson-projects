@@ -33,6 +33,7 @@
 
   <script src="/js/supabase-client.js?v=42"></script>
   <script src="/js/template-questions.js"></script>
+  <script src="/js/feed.js?v=1"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -2612,6 +2613,7 @@
           ${project.job_number && !editMode ? `<button class="settings-tab" data-panel="variations">Variations</button>` : ''}
           ${project.job_number && !editMode && pricingVisible ? `<button class="settings-tab" data-panel="invoices">Invoices</button>` : ''}
           <button class="settings-tab" data-panel="details">Details</button>
+          ${!editMode ? `<button class="settings-tab" data-panel="feed">Feed</button>` : ''}
           ${!editMode ? `<button class="settings-tab" data-panel="documents">Documents</button>` : ''}
           ${!editMode ? `<button class="settings-tab" data-panel="photos">Site Photos</button>` : ''}
         </div>
@@ -3036,6 +3038,16 @@
             </div>
             ` : ''}
 
+            ${!editMode ? `
+            <div class="settings-panel" id="panel-feed">
+              <div class="card">
+                <h2>Job feed</h2>
+                <p class="subtitle" style="margin-bottom:10px;">Notes about this job that everyone can like and comment on. Tag people to keep them in the loop (they get a notification on their Home page), and tick "Also show on the Home page" to share a note with the whole team.</p>
+                <div id="job-feed-composer"></div>
+              </div>
+              <div class="card"><div id="job-feed-list"><p class="subtitle">Loading...</p></div></div>
+            </div>` : ''}
+
             <div class="settings-panel" id="panel-details">
               ${editMode && !project.job_number ? editorPanelHtml(project) : `
               ${TEMPLATE_QUESTIONS[project.proposal_template] ? `
@@ -3229,6 +3241,20 @@
       if (document.getElementById('site-photos-list')) { loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
+      const feedTab = document.querySelector('#job-tabs .settings-tab[data-panel="feed"]');
+      if (feedTab) {
+        let feedLoaded = false;
+        feedTab.addEventListener('click', async () => {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const feedOpts = { myUserId: user.id, projectId: project.id, isAdmin: (await getMyRole()) === 'admin' };
+          if (!feedLoaded) {
+            feedLoaded = true;
+            await mountFeedComposer(document.getElementById('job-feed-composer'), { ...feedOpts, onPosted: () => renderFeedList(document.getElementById('job-feed-list'), feedOpts) });
+          }
+          await renderFeedList(document.getElementById('job-feed-list'), feedOpts);
+        });
+        if (new URLSearchParams(window.location.search).get('tab') === 'feed') feedTab.click();
+      }
       if (document.getElementById('variations-list')) loadVariationEntries(project, pricingVisible);
       if (document.getElementById('ccew-section')) initCcewSection(project);
 

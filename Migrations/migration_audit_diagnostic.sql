@@ -379,4 +379,9 @@ union all
 select '122', 'job_variation_entries',
   case when exists (select 1 from information_schema.tables where table_name = 'job_variation_entries')
   then 'present' else 'MISSING' end
+union all
+select '123', 'job_feed',
+  case when exists (select 1 from information_schema.tables where table_name = 'feed_mentions')
+    and exists (select 1 from information_schema.columns where table_name = 'feed_posts' and column_name = 'project_id')
+  then 'present' else 'MISSING' end
 order by 1;
