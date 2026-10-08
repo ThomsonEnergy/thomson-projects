@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=28"></script>
+  <script src="/js/supabase-client.js?v=29"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -2128,7 +2128,7 @@
       listEl.querySelectorAll('.view-invoice-pdf-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const inv = invoices.find(i => i.id === btn.dataset.invoiceId);
-          openPdfViewer(inv.pdf_path, `Invoice ${inv.invoice_number}`);
+          openPdfViewer(inv.pdf_path, `Invoice ${inv.invoice_number}`, { projectId: project.id, folder: 'Marked up' });
         });
       });
       listEl.querySelectorAll('.generate-invoice-pdf-btn').forEach(btn => {
@@ -3309,7 +3309,7 @@
       });
 
       const viewQuotePdfBtn = document.getElementById('view-quote-pdf-btn');
-      if (viewQuotePdfBtn) viewQuotePdfBtn.addEventListener('click', () => openPdfViewer(project.quote_pdf_path, `${project.name} - Quote`));
+      if (viewQuotePdfBtn) viewQuotePdfBtn.addEventListener('click', () => openPdfViewer(project.quote_pdf_path, `${project.name} - Quote`, { projectId: project.id, folder: 'Marked up' }));
 
       const generateQuotePdfBtn = document.getElementById('generate-quote-pdf-btn');
       if (generateQuotePdfBtn) generateQuotePdfBtn.addEventListener('click', async () => {
@@ -4192,6 +4192,10 @@
       await Promise.all([refreshList(), refreshPoList()]);
     }
 
+    function isPdfDoc(d) {
+      return (d.mime_type || '') === 'application/pdf' || /.pdf$/i.test(d.file_name || '');
+    }
+
     async function loadDocuments(projectId) {
       const listEl = document.getElementById('documents-list');
       const pillsEl = document.getElementById('doc-folder-pills');
@@ -4234,11 +4238,14 @@
             const url = signedUrls[i];
             const isImage = (d.mime_type || '').startsWith('image/');
             const isVideo = (d.mime_type || '').startsWith('video/');
+            const isPdf = isPdfDoc(d);
             const preview = isImage && url
               ? `<img src="${url}" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0;" />`
               : isVideo && url
                 ? `<video src="${url}" muted preload="metadata" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0; background:#000;"></video>`
-                : `<div style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px;">&#128196;</div>`;
+                : isPdf
+                  ? `<div class="doc-pdf-thumb" data-path="${d.file_path}" style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px; overflow:hidden;">&#128196;</div>`
+                  : `<div style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px;">&#128196;</div>`;
             return `
               <div class="doc-tile" style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
                 <a href="#" class="doc-view-link" data-path="${d.file_path}" style="display:block;">${preview}</a>
@@ -4251,10 +4258,50 @@
           }).join('')}
         </div>`;
 
+      // PDFs show their first page like a photo, filled in after the grid
+      // is up so one slow PDF never holds the rest of the tab back.
+      (async () => {
+        for (const thumb of listEl.querySelectorAll('.doc-pdf-thumb')) {
+          try {
+            const url = await getSignedDocUrl(thumb.dataset.path);
+            const dataUrl = await renderPdfThumbnail(url, 360);
+            thumb.innerHTML = `<img src="${dataUrl}" style="width:100%; height:100%; object-fit:cover; object-position:top;" />`;
+          } catch { /* keep the document icon */ }
+        }
+      })();
+
+      // PDFs and images open in the in-app viewer (and can be marked up);
+      // anything else (Word, Excel...) still opens in a new tab.
+      async function saveDocCopy(blob, doc, ext, mime) {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const path = `documents/${projectId}/${Date.now()}-marked-up.${ext}`;
+        const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(path, blob, { contentType: mime });
+        if (upErr) throw upErr;
+        const { error: insErr } = await supabaseClient.from('project_documents').insert({
+          project_id: projectId, folder: doc.folder, file_path: path,
+          file_name: `${doc.file_name.replace(/.[^.]+$/, '')} (marked up).${ext}`, mime_type: mime, uploaded_by: user.id,
+        });
+        if (insErr) throw insErr;
+      }
       listEl.querySelectorAll('.doc-view-link').forEach(a => {
         a.addEventListener('click', async (e) => {
           e.preventDefault();
           try {
+            const doc = visible.find(d => d.file_path === a.dataset.path);
+            if (doc && isPdfDoc(doc)) {
+              openPdfViewer(doc.file_path, doc.file_name, { projectId, folder: doc.folder, onSaved: () => loadDocuments(projectId) });
+              return;
+            }
+            if (doc && (doc.mime_type || '').startsWith('image/')) {
+              const images = visible.filter(d => (d.mime_type || '').startsWith('image/'));
+              const imageUrls = await Promise.all(images.map(d => getSignedDocUrl(d.file_path)));
+              openPhotoLightbox(imageUrls, images.indexOf(doc), {
+                captions: images.map(d => d.file_name),
+                onMarkup: async (i, blob) => { await saveDocCopy(blob, images[i], 'jpg', 'image/jpeg'); },
+                onClose: () => loadDocuments(projectId),
+              });
+              return;
+            }
             const url = await getSignedDocUrl(a.dataset.path);
             window.open(url, '_blank');
           } catch (err) { alert(err.message); }

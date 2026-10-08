@@ -48,36 +48,206 @@ async function getSignedDocUrl(path) {
   return data.signedUrl;
 }
 
-// Shared in-app PDF viewer - one place quotes, invoices, and signed
-// onboarding documents all show up, instead of every page picking its own
-// "open in a new tab" behaviour. Embeds the browser's native PDF renderer
-// in an iframe rather than anything custom - this is a viewer, not an
-// editor, so there's no reason to reinvent PDF rendering.
-async function openPdfViewer(path, title) {
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:300; padding:16px;';
-  overlay.innerHTML = `
-    <div class="card" style="max-width:900px; width:100%; height:90vh; display:flex; flex-direction:column; padding:0; overflow:hidden;">
-      <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--border); flex-shrink:0;">
-        <strong>${title || 'Document'}</strong>
-        <div>
-          <a id="pdf-viewer-download" class="link-quiet" style="margin-right:16px; font-size:13px;" target="_blank">Download</a>
-          <button type="button" class="secondary" id="pdf-viewer-close" style="font-size:12px; padding:6px 10px;">Close</button>
-        </div>
-      </div>
-      <div style="flex:1; min-height:0;"><p class="subtitle" style="padding:16px;">Loading...</p></div>
-    </div>`;
-  document.body.appendChild(overlay);
-  overlay.querySelector('#pdf-viewer-close').addEventListener('click', () => overlay.remove());
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
-  try {
-    const url = await getSignedDocUrl(path);
-    overlay.querySelector('#pdf-viewer-download').href = url;
-    overlay.querySelector('div[style*="flex:1"]').innerHTML = `<iframe src="${url}" style="width:100%; height:100%; border:none;"></iframe>`;
-  } catch (err) {
-    overlay.querySelector('div[style*="flex:1"]').innerHTML = `<div class="error-box" style="margin:16px;">${err.message}</div>`;
+// Lazy-loaded third-party libraries for PDFs - only fetched the first time a
+// PDF is actually opened, so pages that never show one pay nothing.
+let _pdfJsPromise = null;
+function loadPdfJs() {
+  if (!_pdfJsPromise) {
+    _pdfJsPromise = new Promise((resolve, reject) => {
+      if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        resolve(window.pdfjsLib);
+      };
+      s.onerror = () => { _pdfJsPromise = null; reject(new Error('Could not load the PDF renderer')); };
+      document.head.appendChild(s);
+    });
   }
+  return _pdfJsPromise;
+}
+let _pdfLibPromise = null;
+function loadPdfLib() {
+  if (!_pdfLibPromise) {
+    _pdfLibPromise = new Promise((resolve, reject) => {
+      if (window.PDFLib) { resolve(window.PDFLib); return; }
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js';
+      s.onload = () => resolve(window.PDFLib);
+      s.onerror = () => { _pdfLibPromise = null; reject(new Error('Could not load the PDF editor')); };
+      document.head.appendChild(s);
+    });
+  }
+  return _pdfLibPromise;
+}
+
+// Renders one page of an already-loaded pdf.js document to a JPEG data URL,
+// scaled so its longest edge is `longEdge` pixels.
+async function renderPdfPageToDataUrl(pdf, pageNumber, longEdge) {
+  const page = await pdf.getPage(pageNumber);
+  const base = page.getViewport({ scale: 1 });
+  const scale = longEdge / Math.max(base.width, base.height);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), width: base.width, height: base.height };
+}
+
+// First-page thumbnail of a PDF at a URL, as a data URL (for tiles that
+// should look like photos instead of a generic document icon).
+async function renderPdfThumbnail(url, longEdge = 360) {
+  const [pdfjs, res] = await Promise.all([loadPdfJs(), fetch(url)]);
+  if (!res.ok) throw new Error('Could not load the PDF');
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await res.arrayBuffer()) }).promise;
+  const { dataUrl } = await renderPdfPageToDataUrl(pdf, 1, longEdge);
+  return dataUrl;
+}
+
+// Shared in-app PDF viewer - one place quotes, invoices, documents and signed
+// onboarding documents all show up. Pages are rendered to images (pdf.js)
+// so a PDF looks and behaves like a photo: click through the pages, and -
+// when `opts.projectId` is given - mark a page up with the same editor
+// photos use. "Save marked-up copy" writes a NEW PDF into that project's
+// Documents (the original is never changed): untouched pages are kept as
+// they were, marked-up pages are replaced with the annotated picture.
+// opts: { projectId, folder, onSaved }. Falls back to the browser's own PDF
+// viewer in an iframe if pdf.js can't be loaded.
+async function openPdfViewer(path, title, opts = {}) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:300; display:flex; flex-direction:column; align-items:center; padding:12px; gap:10px;';
+  overlay.innerHTML = `<p style="color:#fff;">Loading...</p>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+
+  let signedUrl, bytes, pdf;
+  try {
+    signedUrl = await getSignedDocUrl(path);
+    const [pdfjs, res] = await Promise.all([loadPdfJs(), fetch(signedUrl)]);
+    if (!res.ok) throw new Error('Could not load the PDF');
+    bytes = new Uint8Array(await res.arrayBuffer());
+    pdf = await pdfjs.getDocument({ data: bytes.slice() }).promise;
+  } catch (err) {
+    // pdf.js unavailable (offline CDN, etc.) - the browser's own viewer
+    // still shows the document, just without page images or markup.
+    if (signedUrl) {
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:300; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:900px; width:100%; height:90vh; display:flex; flex-direction:column; padding:0; overflow:hidden;">
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--border); flex-shrink:0;">
+            <strong>${escapeHtml(title || 'Document')}</strong>
+            <button type="button" class="secondary" id="pdf-fallback-close" style="font-size:12px; padding:6px 10px;">Close</button>
+          </div>
+          <iframe src="${signedUrl}" style="flex:1; width:100%; border:none;"></iframe>
+        </div>`;
+      overlay.querySelector('#pdf-fallback-close').addEventListener('click', close);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    } else {
+      overlay.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div><button type="button" id="pdf-err-close">Close</button>`;
+      overlay.querySelector('#pdf-err-close').addEventListener('click', close);
+    }
+    return;
+  }
+
+  const pageCount = pdf.numPages;
+  const canMarkup = !!opts.projectId;
+  const rendered = {};            // pageIndex -> { dataUrl, width, height }
+  const annotated = new Map();    // pageIndex -> marked-up JPEG blob
+  const annotatedUrls = new Map(); // pageIndex -> object URL of that blob
+  let index = 0;
+
+  async function pageImage(i) {
+    if (annotatedUrls.has(i)) return { url: annotatedUrls.get(i) };
+    if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
+    return { url: rendered[i].dataUrl };
+  }
+
+  async function render() {
+    overlay.innerHTML = `
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center; color:#fff; width:100%;">
+        <strong style="margin-right:8px;">${escapeHtml(title || 'Document')}</strong>
+        ${pageCount > 1 ? `<button type="button" class="secondary" id="pv-prev" style="padding:6px 12px;">&larr;</button><span>Page ${index + 1} / ${pageCount}</span><button type="button" class="secondary" id="pv-next" style="padding:6px 12px;">&rarr;</button>` : ''}
+        ${canMarkup ? `<button type="button" id="pv-markup" style="padding:6px 12px;">Mark up this page</button>` : ''}
+        ${canMarkup && annotated.size ? `<button type="button" id="pv-save" style="padding:6px 12px;">Save marked-up copy (${annotated.size} page${annotated.size === 1 ? '' : 's'})</button>` : ''}
+        <a id="pv-download" class="link-quiet" href="${signedUrl}" target="_blank" style="color:#fff; font-size:13px;">Download original</a>
+        <button type="button" class="secondary" id="pv-close" style="padding:6px 12px;">Close</button>
+      </div>
+      <div id="pv-msg" style="color:#fca5a5; font-size:12px; min-height:14px;"></div>
+      <div style="flex:1; min-height:0; width:100%; overflow:auto; display:flex; justify-content:center;">
+        <p id="pv-loading" style="color:#fff;">Rendering page...</p>
+      </div>`;
+    overlay.querySelector('#pv-close').addEventListener('click', close);
+    if (pageCount > 1) {
+      overlay.querySelector('#pv-prev').addEventListener('click', () => { index = (index - 1 + pageCount) % pageCount; render(); });
+      overlay.querySelector('#pv-next').addEventListener('click', () => { index = (index + 1) % pageCount; render(); });
+    }
+
+    const img = await pageImage(index);
+    const holder = overlay.querySelector('#pv-loading') && overlay.querySelector('#pv-loading').parentElement;
+    if (!holder) return; // navigated away / closed while rendering
+    holder.innerHTML = `<img src="${img.url}" style="max-width:100%; max-height:100%; object-fit:contain; background:#fff; border-radius:4px; align-self:flex-start;" />`;
+
+    const markupBtn = overlay.querySelector('#pv-markup');
+    if (markupBtn) {
+      markupBtn.addEventListener('click', () => {
+        openPhotoMarkup(img.url, async (blob) => {
+          if (annotatedUrls.has(index)) URL.revokeObjectURL(annotatedUrls.get(index));
+          annotated.set(index, blob);
+          annotatedUrls.set(index, URL.createObjectURL(blob));
+          render();
+        });
+      });
+    }
+    const saveBtn = overlay.querySelector('#pv-save');
+    if (saveBtn) saveBtn.addEventListener('click', async () => {
+      const msgEl = overlay.querySelector('#pv-msg');
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; msgEl.textContent = '';
+      try {
+        const PDFLib = await loadPdfLib();
+        const doc = await PDFLib.PDFDocument.load(bytes);
+        for (const [i, blob] of annotated) {
+          if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
+          const { width, height } = rendered[i];
+          const jpg = await doc.embedJpg(await blob.arrayBuffer());
+          // Swap the page for a fresh one the size pdf.js showed it at
+          // (rotation included) with the marked-up picture filling it.
+          doc.insertPage(i, [width, height]).drawImage(jpg, { x: 0, y: 0, width, height });
+          doc.removePage(i + 1);
+        }
+        const outBytes = await doc.save();
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const outPath = `documents/${opts.projectId}/${Date.now()}-marked-up.pdf`;
+        const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(outPath, new Blob([outBytes], { type: 'application/pdf' }), { contentType: 'application/pdf' });
+        if (upErr) throw upErr;
+        const baseName = String(title || 'Document').replace(/\.pdf$/i, '');
+        const { error: insErr } = await supabaseClient.from('project_documents').insert({
+          project_id: opts.projectId, folder: opts.folder || 'Marked up', file_path: outPath,
+          file_name: `${baseName} (marked up).pdf`, mime_type: 'application/pdf', uploaded_by: user.id,
+        });
+        if (insErr) throw insErr;
+        annotatedUrls.forEach(u => URL.revokeObjectURL(u));
+        close();
+        if (opts.onSaved) opts.onSaved();
+      } catch (err) {
+        msgEl.textContent = `Could not save: ${err.message}`;
+        saveBtn.disabled = false; saveBtn.textContent = `Save marked-up copy (${annotated.size} page${annotated.size === 1 ? '' : 's'})`;
+      }
+    });
+  }
+
+  document.addEventListener('keydown', function onKey(e) {
+    if (!document.body.contains(overlay)) { document.removeEventListener('keydown', onKey); return; }
+    if (document.querySelector('.photo-markup-overlay')) return; // markup editor is on top
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+    else if (e.key === 'ArrowLeft' && pageCount > 1) { index = (index - 1 + pageCount) % pageCount; render(); }
+    else if (e.key === 'ArrowRight' && pageCount > 1) { index = (index + 1) % pageCount; render(); }
+  });
+  render();
 }
 
 // Resizes/re-encodes an image client-side before upload, so a multi-MB
@@ -220,6 +390,7 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
   document.addEventListener('keydown', function onKey(e) {
     if (!document.body.contains(overlay)) { document.removeEventListener('keydown', onKey); return; }
     if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+    if (document.querySelector('.photo-markup-overlay')) return; // markup editor is on top
     if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
     else if (e.key === 'ArrowLeft' && urls.length > 1) { index = (index - 1 + urls.length) % urls.length; render(); }
     else if (e.key === 'ArrowRight' && urls.length > 1) { index = (index + 1) % urls.length; render(); }
@@ -234,6 +405,7 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
 // here). Output is capped at 1920px on the long edge, same as uploads.
 async function openPhotoMarkup(url, onSave) {
   const overlay = document.createElement('div');
+  overlay.className = 'photo-markup-overlay';
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.96); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:12px;';
   overlay.innerHTML = `<p style="color:#fff;">Loading photo...</p>`;
   document.body.appendChild(overlay);
