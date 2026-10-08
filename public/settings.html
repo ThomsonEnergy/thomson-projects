@@ -636,7 +636,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=39"></script>
+  <script src="/js/supabase-client.js?v=40"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -1165,7 +1165,7 @@
             ${data.map(c => `
               <tr>
                 <td data-label="Type"><span class="badge draft">${c.credential_type}</span></td>
-                <td data-label="Name">${c.name}${c.file_path ? ` <a href="#" class="link-quiet cred-view" data-path="${c.file_path}" style="font-size:12px;">(view)</a>` : ''}</td>
+                <td data-label="Name">${c.name}${c.file_path ? ` <button type="button" class="secondary cred-view" data-path="${c.file_path}" data-title="${escapeHtml(c.name)}" style="font-size:12px; padding:4px 10px; margin-left:6px;">View file</button>` : ''}</td>
                 <td data-label="Provider">${c.provider || '-'}</td>
                 <td data-label="Reference">${c.reference_number || '-'}</td>
                 <td data-label="Expiry">${expiryBadge(c.expiry_date)}</td>
@@ -1179,7 +1179,7 @@
 
       el.querySelectorAll('.cred-view').forEach(a => a.addEventListener('click', async (e) => {
         e.preventDefault();
-        try { window.open(await getSignedDocUrl(a.dataset.path), '_blank'); } catch (err) { alert(err.message); }
+        try { await viewStoredFile(a.dataset.path, a.dataset.title); } catch (err) { alert(err.message); }
       }));
       el.querySelectorAll('.cred-edit-btn').forEach(btn => btn.addEventListener('click', () => {
         openCredentialPanel(data.find(c => c.id === btn.dataset.id));
@@ -1292,7 +1292,7 @@
               return `
               <tr>
                 <td data-label="Employee">${staffName}</td>
-                <td data-label="Licence">${l.licence_name}${l.file_path ? ` <a href="#" class="link-quiet lic-view" data-path="${l.file_path}" style="font-size:12px;">(view)</a>` : ''}</td>
+                <td data-label="Licence">${l.licence_name}${l.file_path ? ` <button type="button" class="secondary lic-view" data-path="${l.file_path}" data-title="${escapeHtml(staffName + ' - ' + l.licence_name)}" style="font-size:12px; padding:4px 10px; margin-left:6px;">View file</button>` : ` <span class="subtitle" style="font-size:12px;">(no file uploaded)</span>`}</td>
                 <td data-label="Number">${l.licence_number || '-'}</td>
                 <td data-label="Expiry">${expiryBadge(l.expiry_date)}</td>
                 <td data-label="">
@@ -1311,7 +1311,7 @@
 
       el.querySelectorAll('.lic-view').forEach(a => a.addEventListener('click', async (e) => {
         e.preventDefault();
-        try { window.open(await getSignedDocUrl(a.dataset.path), '_blank'); } catch (err) { alert(err.message); }
+        try { await viewStoredFile(a.dataset.path, a.dataset.title); } catch (err) { alert(err.message); }
       }));
       el.querySelectorAll('.lic-edit-btn').forEach(btn => btn.addEventListener('click', () => {
         const l = licences.find(x => x.id === btn.dataset.id);
@@ -1528,7 +1528,7 @@
           </div>
           <label style="margin:0 0 4px; font-size:12px;">Upload the certificate/licence document and it'll fill the fields above in automatically</label>
           <input type="file" class="my-licence-file" accept="image/*,.pdf" style="margin:0;" />
-          ${l.file_path ? `<a href="#" class="link-quiet my-licence-view" style="font-size:12px; margin-left:8px;">View uploaded file</a>` : ''}
+          <button type="button" class="secondary my-licence-view" style="font-size:12px; padding:4px 10px; margin-left:8px; ${l.file_path ? '' : 'display:none;'}">View uploaded file</button>
           <div class="my-licence-scan-msg" style="margin-top:4px;"></div>
         </div>`;
     }
@@ -1540,7 +1540,7 @@
         a.onclick = async (e) => {
           e.preventDefault();
           const row = a.closest('.my-licence-row');
-          try { window.open(await getSignedDocUrl(row.dataset.filePath), '_blank'); } catch (err) { alert(err.message); }
+          try { await viewStoredFile(row.dataset.filePath, row.querySelector('.my-licence-name').value || 'Licence'); } catch (err) { alert(err.message); }
         };
       });
       document.querySelectorAll('.my-licence-file').forEach(input => {
@@ -1554,6 +1554,7 @@
             const filePath = await uploadPrivateFile(file, 'licence-docs');
             row.dataset.filePath = filePath;
             row.dataset.fileName = file.name;
+            row.querySelector('.my-licence-view').style.display = '';
 
             const extracted = await runCredentialExtraction(file);
             if (extracted.name) row.querySelector('.my-licence-name').value = extracted.name;

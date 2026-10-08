@@ -48,6 +48,15 @@ async function getSignedDocUrl(path) {
   return data.signedUrl;
 }
 
+// Shows a stored private file in the app itself: a PDF in the PDF viewer, an
+// image in the photo viewer. Used for licences / credentials so they open
+// right there instead of in a new tab at a raw storage address.
+async function viewStoredFile(path, title) {
+  if (/\.pdf$/i.test(path)) { openPdfViewer(path, title || 'Document'); return; }
+  const url = await getSignedDocUrl(path);
+  openPhotoLightbox([url], 0);
+}
+
 // Lazy-loaded third-party libraries for PDFs - only fetched the first time a
 // PDF is actually opened, so pages that never show one pay nothing.
 let _pdfJsPromise = null;

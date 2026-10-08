@@ -367,4 +367,8 @@ union all
 select '119', 'plan_summary',
   case when exists (select 1 from information_schema.columns where table_name = 'project_documents' and column_name = 'plan_summary')
   then 'present' else 'MISSING' end
+union all
+select '120', 'timesheet_category_no_job',
+  case when exists (select 1 from pg_trigger where tgname = 'time_entries_category_fix')
+  then 'present' else 'MISSING' end
 order by 1;
