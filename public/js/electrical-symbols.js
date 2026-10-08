@@ -293,3 +293,149 @@ function drawSchedulePdf(PDFLib, page, font, shape, sched, map) {
     }
   });
 }
+
+// ---------- saved plan summaries + the schedule PDF ----------
+
+// Adds what was marked up in this session (annotated: Map pageIndex ->
+// { shapes }) onto the summary already saved for the document. Additive on
+// purpose: marks from an earlier save are baked into the PDF page and can't
+// be removed, so a re-marked page really does hold old + new.
+function mergePlanSummary(existing, annotated) {
+  const out = existing ? JSON.parse(JSON.stringify(existing)) : { allowance: 10, pages: {} };
+  out.pages = out.pages || {};
+  for (const [i, a] of annotated) {
+    const add = summariseMarkup(a.shapes);
+    const cur = out.pages[i] || (out.pages[i] = { symbols: {}, circuits: {}, cables: {} });
+    Object.entries(add.symbols).forEach(([k, n]) => { cur.symbols[k] = (cur.symbols[k] || 0) + n; });
+    Object.entries(add.circuits).forEach(([k, n]) => { cur.circuits[k] = (cur.circuits[k] || 0) + n; });
+    Object.entries(add.cables).forEach(([name, c]) => {
+      const t = cur.cables[name] || (cur.cables[name] = { runs: 0, metres: 0 });
+      t.runs += c.runs; t.metres += c.metres;
+    });
+    const sched = a.shapes.find(s => s.type === 'schedule');
+    if (sched && sched.allowance != null) out.allowance = sched.allowance;
+  }
+  return out;
+}
+
+function planSummaryIsEmpty(summary) {
+  return !summary || !Object.values(summary.pages || {}).some(p =>
+    Object.keys(p.symbols || {}).length || Object.keys(p.circuits || {}).length || Object.keys(p.cables || {}).length);
+}
+
+// All of a document's pages added together.
+function totalPlanSummary(summary) {
+  const t = { symbols: {}, circuits: {}, cables: {} };
+  Object.values((summary && summary.pages) || {}).forEach(p => {
+    Object.entries(p.symbols || {}).forEach(([k, n]) => { t.symbols[k] = (t.symbols[k] || 0) + n; });
+    Object.entries(p.circuits || {}).forEach(([k, n]) => { t.circuits[k] = (t.circuits[k] || 0) + n; });
+    Object.entries(p.cables || {}).forEach(([name, c]) => {
+      const x = t.cables[name] || (t.cables[name] = { runs: 0, metres: 0 });
+      x.runs += c.runs; x.metres += c.metres;
+    });
+  });
+  return t;
+}
+
+// Draws the schedule as an A4 PDF: a section per plan page (named), then the
+// totals across all pages. `info`: { company, projectName, clientName, ref,
+// sourceName, pageNames, summary }. Returns the PDF bytes.
+async function buildScheduleReportPdf(PDFLib, info) {
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const PW = 595.28, PH = 841.89, M = 42;
+  const black = rgb(0, 0, 0), grey = rgb(0.4, 0.4, 0.4), rule = rgb(0.8, 0.8, 0.8);
+  const safe = (t) => String(t ?? '').replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
+  const allowance = Number(info.summary.allowance) || 0;
+  const factor = 1 + allowance / 100;
+  const symbolMap = { X: (x) => x, Y: (y) => PH - y, k: 1, ph: PH };
+  const natural = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+
+  let page, y;
+  const newPage = () => { page = doc.addPage([PW, PH]); y = PH - M; };
+  const need = (h) => { if (y - h < M + 20) newPage(); };
+  const text = (t, x, size, f = font, color = black) => page.drawText(safe(t), { x, y, size, font: f, color });
+  const textRight = (t, xRight, size, f = font, color = black) => {
+    const w = f.widthOfTextAtSize(safe(t), size);
+    page.drawText(safe(t), { x: xRight - w, y, size, font: f, color });
+  };
+  const hr = () => page.drawLine({ start: { x: M, y }, end: { x: PW - M, y }, thickness: 0.6, color: rule });
+
+  newPage();
+  if (info.company) { text(info.company, M, 10, bold, grey); y -= 22; }
+  text('Electrical schedule', M, 22, bold); y -= 20;
+  text([info.projectName, info.clientName].filter(Boolean).join('  -  '), M, 11); y -= 14;
+  text([info.ref, `Prepared ${new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}`, info.sourceName ? `From plan: ${info.sourceName}` : null].filter(Boolean).join('   |   '), M, 9, font, grey);
+  y -= 10; hr(); y -= 22;
+
+  // One block of tables for a set of totals (a page, or the whole document).
+  function block(totals) {
+    const symbolIds = ELECTRICAL_SYMBOLS.filter(s => totals.symbols[s.id]);
+    if (symbolIds.length) {
+      need(30 + symbolIds.length * 20);
+      text('Symbols', M, 10, bold, grey); y -= 16;
+      symbolIds.forEach(s => {
+        need(22);
+        drawSymbolPdf(PDFLib, page, font, s.id, M, PH - y - 10, 14, '#000000', 1, symbolMap);
+        page.drawText(safe(s.name), { x: M + 24, y: y + 1, size: 10, font, color: black });
+        textRight(`x ${totals.symbols[s.id]}`, PW - M, 10, bold);
+        y -= 20;
+      });
+      y -= 6;
+    }
+    const circuits = Object.entries(totals.circuits).sort((a, b) => natural(a[0], b[0]));
+    if (circuits.length) {
+      need(30 + circuits.length * 18);
+      text('Circuits', M, 10, bold, grey); y -= 16;
+      circuits.forEach(([label, n]) => {
+        need(20);
+        text(label, M, 10, bold);
+        textRight(`${n} item${n === 1 ? '' : 's'}`, PW - M, 10);
+        y -= 18;
+      });
+      y -= 6;
+    }
+    const cables = Object.entries(totals.cables).sort((a, b) => natural(a[0], b[0]));
+    if (cables.length) {
+      need(40 + cables.length * 18);
+      text('Cables', M, 10, bold, grey);
+      textRight('Runs', PW - M - 190, 9, bold, grey);
+      textRight('Measured', PW - M - 100, 9, bold, grey);
+      textRight(`Order (+${allowance}%)`, PW - M, 9, bold, grey);
+      y -= 16;
+      cables.forEach(([name, c]) => {
+        need(20);
+        text(name, M, 10);
+        textRight(String(c.runs), PW - M - 190, 10);
+        textRight(c.metres > 0 ? `${c.metres.toFixed(1)} m` : 'no scale', PW - M - 100, 10);
+        textRight(c.metres > 0 ? `${(c.metres * factor).toFixed(1)} m` : '-', PW - M, 10, bold);
+        y -= 18;
+      });
+      y -= 6;
+    }
+    if (!symbolIds.length && !circuits.length && !cables.length) { text('Nothing marked up.', M, 10, font, grey); y -= 18; }
+  }
+
+  const pageKeys = Object.keys(info.summary.pages || {}).map(Number).sort((a, b) => a - b);
+  const populated = pageKeys.filter(i => !planSummaryIsEmpty({ pages: { x: info.summary.pages[i] } }));
+  populated.forEach(i => {
+    need(60);
+    text((info.pageNames && info.pageNames[i]) || `Page ${i + 1}`, M, 14, bold); y -= 8; hr(); y -= 16;
+    block(info.summary.pages[i]);
+    y -= 8;
+  });
+  if (populated.length > 1 || !populated.length) {
+    need(70);
+    text('Total - all pages', M, 14, bold); y -= 8; hr(); y -= 16;
+    block(totalPlanSummary(info.summary));
+  }
+
+  const pages = doc.getPages();
+  pages.forEach((p, i) => {
+    const label = `Page ${i + 1} of ${pages.length}`;
+    p.drawText(label, { x: PW - M - font.widthOfTextAtSize(label, 8), y: 24, size: 8, font, color: grey });
+  });
+  return doc.save();
+}

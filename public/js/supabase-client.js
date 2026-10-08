@@ -290,9 +290,10 @@ async function openPdfViewer(path, title, opts = {}) {
   // simply has no names and can't be renamed.
   let docRowId = null;
   let pageNames = [];
+  let planSummary = null; // what's already marked up on this document (see mergePlanSummary)
   try {
-    const { data: docRow } = await supabaseClient.from('project_documents').select('id, page_names').eq('file_path', path).maybeSingle();
-    if (docRow) { docRowId = docRow.id; pageNames = Array.isArray(docRow.page_names) ? docRow.page_names.slice() : []; }
+    const { data: docRow } = await supabaseClient.from('project_documents').select('id, page_names, plan_summary').eq('file_path', path).maybeSingle();
+    if (docRow) { docRowId = docRow.id; pageNames = Array.isArray(docRow.page_names) ? docRow.page_names.slice() : []; planSummary = docRow.plan_summary || null; }
   } catch { /* names are a nicety - the viewer works without them */ }
   const pageLabel = (i) => pageNames[i] || `Page ${i + 1}`;
   const rendered = {};            // pageIndex -> { dataUrl, width, height }
@@ -492,6 +493,13 @@ async function openPdfViewer(path, title, opts = {}) {
           project_id: opts.projectId, folder: opts.folder || 'Marked up', file_path: outPath,
           file_name: `${baseName} (marked up).pdf`, mime_type: 'application/pdf', uploaded_by: user.id,
           page_names: pageNames.some(Boolean) ? pageNames : null,
+          // Counts of what's now marked up, so the job/quote can export a
+          // schedule PDF later (carries forward what was already on the plan).
+          plan_summary: (() => {
+            if (typeof mergePlanSummary !== 'function') return planSummary;
+            const merged = mergePlanSummary(planSummary, annotated);
+            return planSummaryIsEmpty(merged) ? null : merged;
+          })(),
         });
         if (insErr) throw insErr;
         annotatedUrls.forEach(u => URL.revokeObjectURL(u));

@@ -31,9 +31,9 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=37"></script>
+  <script src="/js/supabase-client.js?v=38"></script>
   <script src="/js/template-questions.js"></script>
-  <script src="/js/electrical-symbols.js?v=3"></script>
+  <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -2625,6 +2625,7 @@
                   <h2>${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</h2>
                   ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}` : ''}
               </div>` : ''}
+              ${!editMode ? '<div id="plan-schedule-card"></div>' : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
                   <div class="stat"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
@@ -3199,6 +3200,7 @@
       loadDocuments(project.id);
       wireDocumentUpload(project);
       if (document.getElementById('site-photos-list')) { loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
+      if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('ccew-section')) initCcewSection(project);
 
       const costAllocatedEl = document.getElementById('cost-allocated-value');
@@ -4326,6 +4328,80 @@
             await loadDocuments(projectId);
           } catch (err) { alert(err.message); }
         });
+      });
+    }
+
+    // Electrical schedule card (Summary tab): totals from the latest
+    // marked-up plan, with a button that exports them as a schedule PDF into
+    // the job's Documents (Schedules folder). The numbers come from the
+    // plan_summary saved when a marked-up copy of a plan is made.
+    async function loadPlanScheduleCard(project) {
+      const el = document.getElementById('plan-schedule-card');
+      if (!el || typeof buildScheduleReportPdf !== 'function') return;
+      const { data: docs } = await supabaseClient
+        .from('project_documents')
+        .select('id, file_name, created_at, page_names, plan_summary')
+        .eq('project_id', project.id)
+        .not('plan_summary', 'is', null)
+        .order('created_at', { ascending: false });
+      const usable = (docs || []).filter(d => !planSummaryIsEmpty(d.plan_summary));
+      if (!usable.length) { el.innerHTML = ''; return; }
+
+      const render = (doc) => {
+        const t = totalPlanSummary(doc.plan_summary);
+        const symbolCount = Object.values(t.symbols).reduce((a, b) => a + b, 0);
+        const metres = Object.values(t.cables).reduce((a, c) => a + c.metres, 0);
+        const bits = [
+          symbolCount ? `${symbolCount} symbol${symbolCount === 1 ? '' : 's'}` : null,
+          Object.keys(t.circuits).length ? `${Object.keys(t.circuits).length} circuit${Object.keys(t.circuits).length === 1 ? '' : 's'}` : null,
+          Object.keys(t.cables).length ? `cables ${metres > 0 ? metres.toFixed(1) + ' m measured' : '(no scale set)'}` : null,
+        ].filter(Boolean).join(' &middot; ');
+        return bits;
+      };
+      el.innerHTML = `
+        <div class="card">
+          <h2>Electrical schedule</h2>
+          <p class="subtitle" style="margin-bottom:8px;">Symbols, circuits and cable lengths marked up on the plans - export it as a PDF to send or attach to the quote.</p>
+          ${usable.length > 1 ? `
+            <label style="margin-top:0;">From plan</label>
+            <select id="plan-schedule-source">${usable.map((d, i) => `<option value="${i}">${escapeHtml(d.file_name)} (${new Date(d.created_at).toLocaleDateString('en-AU')})</option>`).join('')}</select>` : `<p class="subtitle" style="margin:0 0 8px;">From <strong>${escapeHtml(usable[0].file_name)}</strong></p>`}
+          <p id="plan-schedule-totals" style="margin:8px 0 12px;">${render(usable[0])}</p>
+          <button type="button" id="plan-schedule-export">Export schedule PDF</button>
+          <div id="plan-schedule-msg"></div>
+        </div>`;
+
+      const pick = () => usable[parseInt((document.getElementById('plan-schedule-source') || { value: 0 }).value, 10) || 0];
+      const sourceSel = document.getElementById('plan-schedule-source');
+      if (sourceSel) sourceSel.addEventListener('change', () => { document.getElementById('plan-schedule-totals').innerHTML = render(pick()); });
+      document.getElementById('plan-schedule-export').addEventListener('click', async () => {
+        const btn = document.getElementById('plan-schedule-export');
+        const msg = document.getElementById('plan-schedule-msg');
+        const doc = pick();
+        btn.disabled = true; btn.textContent = 'Building...'; msg.innerHTML = '';
+        try {
+          const PDFLib = await loadPdfLib();
+          const { data: company } = await supabaseClient.from('company_settings').select('company_name').eq('id', 1).maybeSingle();
+          const bytes = await buildScheduleReportPdf(PDFLib, {
+            company: company && company.company_name, projectName: project.name, clientName: project.client_name,
+            ref: projectRef(project), sourceName: doc.file_name, pageNames: doc.page_names || [], summary: doc.plan_summary,
+          });
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const path = `documents/${project.id}/${Date.now()}-schedule.pdf`;
+          const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(path, new Blob([bytes], { type: 'application/pdf' }), { contentType: 'application/pdf' });
+          if (upErr) throw upErr;
+          const fileName = `Electrical schedule - ${project.name}.pdf`;
+          const { error: insErr } = await supabaseClient.from('project_documents').insert({
+            project_id: project.id, folder: 'Schedules', file_path: path, file_name: fileName, mime_type: 'application/pdf', uploaded_by: user.id,
+          });
+          if (insErr) throw insErr;
+          await logActivity('project', project.id, 'schedule_exported', 'Exported the electrical schedule PDF');
+          msg.innerHTML = `<div class="success-box">Saved to Documents &gt; Schedules.</div>`;
+          openPdfViewer(path, fileName, { projectId: project.id, folder: 'Schedules', onSaved: () => loadDocuments(project.id) });
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        } finally {
+          btn.disabled = false; btn.textContent = 'Export schedule PDF';
+        }
       });
     }
 
