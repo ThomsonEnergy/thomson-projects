@@ -44,14 +44,32 @@ exports.handler = async (event) => {
       .single();
     if (insErr) throw insErr;
 
-    // Fire-and-forget - a background function replies 202 immediately
-    // regardless of what it returns, so there's nothing useful to await
-    // here beyond the request actually going out.
-    fetch(`${process.env.URL || ''}/.netlify/functions/ai-chat-background`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_id: job.id, token, messages }),
-    }).catch(() => {});
+    // A background function replies 202 straight away regardless of how
+    // long its work takes, so awaiting this is quick - and it has to be
+    // awaited: a serverless function can be frozen the moment it returns,
+    // so an un-awaited request can be dropped before it ever leaves,
+    // leaving the job "pending" forever (this was why the chat just
+    // timed out). If the worker can't be started, say so on the job now
+    // instead of leaving the browser polling until it gives up.
+    let startError = null;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const bgRes = await fetch(`${process.env.URL || 'https://thomsonprojects.netlify.app'}/.netlify/functions/ai-chat-background`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: job.id, token, messages }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!bgRes.ok) startError = `The AI worker didn't start (HTTP ${bgRes.status}).`;
+    } catch (err) {
+      startError = `The AI worker couldn't be reached: ${err.message}`;
+    }
+    if (startError) {
+      await userClient.from('ai_chat_jobs').update({ status: 'error', error: startError }).eq('id', job.id);
+      return { statusCode: 502, body: JSON.stringify({ ok: false, error: startError }) };
+    }
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, job_id: job.id }) };
   } catch (err) {
