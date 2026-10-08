@@ -75,7 +75,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=38"></script>
+  <script src="/js/supabase-client.js?v=39"></script>
   <script src="/js/theme.js"></script>
   <script>
     async function syncToRepo() {
@@ -151,7 +151,7 @@
         : (isDevModeActive() ? `<button type="button" class="secondary approve-report-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Approve</button>` : `<span class="subtitle" style="font-size:12px;">Not approved yet</span>`);
       const reportComments = comments.filter(c => c.report_id === r.id);
       return `
-        <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px;">
+        <div class="report-card" data-id="${r.id}" style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
             <div>
               ${typeBadge}
@@ -167,6 +167,7 @@
             ${r.status !== 'in_progress' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="in_progress" style="font-size:12px; padding:6px 10px;">Mark in progress</button>` : ''}
             ${r.status !== 'resolved' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="resolved" style="font-size:12px; padding:6px 10px;">Mark resolved</button>` : ''}
             ${r.status !== 'open' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="open" style="font-size:12px; padding:6px 10px;">Reopen</button>` : ''}
+            <button type="button" class="secondary edit-report-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
             <button type="button" class="secondary delete-report-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Delete</button>
           </div>
           <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
@@ -218,6 +219,53 @@
           if (updErr) { alert(updErr.message); return; }
           await loadReports();
           await syncToRepo();
+        });
+      });
+      // Edit in place: swaps the card for a small form (type, title, page,
+      // description, expected) so a report can be corrected without deleting
+      // and resubmitting it - status, approval and replies are kept.
+      document.querySelectorAll('.edit-report-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const r = (reports || []).find(x => x.id === btn.dataset.id);
+          const card = btn.closest('.report-card');
+          if (!r || !card) return;
+          const val = (v) => escapeHtml(v || '');
+          card.innerHTML = `
+            <label style="margin-top:0;">Type</label>
+            <select class="er-type"><option value="bug" ${r.report_type === 'bug' ? 'selected' : ''}>Bug - something's broken</option><option value="update_idea" ${r.report_type === 'update_idea' ? 'selected' : ''}>Update idea - something to add or change</option></select>
+            <label>Title</label>
+            <input class="er-title" value="${val(r.title)}" />
+            <label>Page or feature (optional)</label>
+            <input class="er-page" value="${val(r.page_or_feature)}" />
+            <label>${r.report_type === 'bug' ? "What's happening?" : 'What do you want?'}</label>
+            <textarea class="er-desc" style="min-height:100px;">${val(r.description)}</textarea>
+            <div class="er-expected-wrap" style="${r.report_type === 'bug' ? '' : 'display:none;'}">
+              <label>What should happen instead?</label>
+              <textarea class="er-expected" style="min-height:70px;">${val(r.expected_behavior)}</textarea>
+            </div>
+            <div style="margin-top:12px; display:flex; gap:8px;">
+              <button type="button" class="er-save">Save changes</button>
+              <button type="button" class="secondary er-cancel">Cancel</button>
+            </div>
+            <div class="er-msg"></div>`;
+          const typeSel = card.querySelector('.er-type');
+          typeSel.addEventListener('change', () => { card.querySelector('.er-expected-wrap').style.display = typeSel.value === 'bug' ? '' : 'none'; });
+          card.querySelector('.er-cancel').addEventListener('click', () => loadReports());
+          card.querySelector('.er-save').addEventListener('click', async () => {
+            const msgEl = card.querySelector('.er-msg');
+            const title = card.querySelector('.er-title').value.trim();
+            const description = card.querySelector('.er-desc').value.trim();
+            if (!title || !description) { msgEl.innerHTML = `<div class="error-box">Enter a title and description.</div>`; return; }
+            const isBug = typeSel.value === 'bug';
+            const { error: editErr } = await supabaseClient.from('bug_reports').update({
+              report_type: typeSel.value, title, description,
+              page_or_feature: card.querySelector('.er-page').value.trim() || null,
+              expected_behavior: isBug ? (card.querySelector('.er-expected').value.trim() || null) : null,
+            }).eq('id', r.id);
+            if (editErr) { msgEl.innerHTML = `<div class="error-box">${editErr.message}</div>`; return; }
+            await loadReports();
+            await syncToRepo();
+          });
         });
       });
       document.querySelectorAll('.delete-report-btn').forEach(btn => {

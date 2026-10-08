@@ -31,6 +31,8 @@
     <h1>Timesheets</h1>
     <p class="subtitle">Your timesheet history, leave, and pay-week overview. Clock in/out from <a href="/my-day.html" class="link-quiet">My Day</a>.</p>
 
+    <div id="timesheet-issues"></div>
+
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
         <h2 style="margin:0;">Pay week</h2>
@@ -149,7 +151,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=38"></script>
+  <script src="/js/supabase-client.js?v=39"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId = null;
@@ -179,6 +181,41 @@
       return breakEntry.break_taken
         ? `<span class="subtitle" style="font-size:12px;">Break: ${breakEntry.break_minutes}m${breakEntry.break_start ? ' from ' + fmtTime(breakEntry.break_start) : ''}</span>`
         : `<span style="font-size:12px; color:var(--red);">No break taken${breakEntry.break_skip_reason ? ' - ' + breakEntry.break_skip_reason : ''}</span>`;
+    }
+
+    // Overlapping entries / forgotten clock-outs, with a Fix button that opens
+    // that day for editing. Staff see their own; admin/finance see everyone's.
+    const issueNames = {};
+    async function loadTimesheetIssues() {
+      const el = document.getElementById('timesheet-issues');
+      const role = await getMyRole();
+      const everyone = role === 'admin' || role === 'finance';
+      const { overlaps, stale } = await findTimesheetProblems({ staffId: everyone ? null : myUserId });
+      if (!overlaps.length && !stale.length) { el.innerHTML = ''; return; }
+      const ids = [...new Set([...overlaps.map(o => o.staffId), ...stale.map(s => s.staff_id)])];
+      const { data: people } = await supabaseClient.from('profiles').select('id, full_name').in('id', ids);
+      (people || []).forEach(p => { issueNames[p.id] = p.full_name || 'Someone'; });
+      const who = (id) => (id === myUserId ? 'You' : (issueNames[id] || 'Someone'));
+      const ref = (e) => (e.projects ? projectRef(e.projects) : 'General / Office');
+      const range = (e) => `${fmtDateTime(e.clock_in)} - ${e.clock_out ? fmtTime(e.clock_out) : 'now'}`;
+      el.innerHTML = `
+        <div class="card" style="border-color:var(--red);">
+          <h2 style="color:var(--red); margin-bottom:6px;">Timesheets need fixing</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Two entries for the same person cover the same time, or someone's still clocked in from a previous day. Fix these before pay is run.</p>
+          ${overlaps.map(o => `
+            <div class="day-item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
+              <span><strong>${who(o.staffId)}</strong>: ${ref(o.a)} (${range(o.a)}) overlaps ${ref(o.b)} (${range(o.b)})</span>
+              <button type="button" class="secondary fix-day-btn" data-date="${o.date}" data-staff="${o.staffId}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Fix</button>
+            </div>`).join('')}
+          ${stale.map(s => `
+            <div class="day-item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
+              <span><strong>${who(s.staff_id)}</strong> is still clocked in to ${ref(s)} since ${fmtDateTime(s.clock_in)} - add the clock-out time</span>
+              <button type="button" class="secondary fix-day-btn" data-date="${sydneyDateKey(new Date(s.clock_in))}" data-staff="${s.staff_id}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Fix</button>
+            </div>`).join('')}
+        </div>`;
+      el.querySelectorAll('.fix-day-btn').forEach(b => b.addEventListener('click', () => {
+        openDayEditPanel(b.dataset.date, b.dataset.staff, issueNames[b.dataset.staff] || '');
+      }));
     }
 
     async function loadProjectOptions() {
@@ -915,6 +952,25 @@
           }
         }
 
+        // ...and none can double up on anything ELSE already saved for this
+        // person (another job's entry, a clock-in still running, an entry
+        // that runs over from the day before), which is how two timesheets
+        // for the same time were getting created.
+        const ownIds = new Set([...dayBlocks, ...dayRemovedBlocks].map(b => b.id).filter(Boolean));
+        for (const b of activeBlocks) {
+          const start = combineDateTime(dateStr, b.clockInTime);
+          const end = b.clockOutTime ? combineDateTime(dateStr, b.clockOutTime) : new Date(`${dateStr}T23:59:59`);
+          const { data: clashes } = await supabaseClient.from('time_entries')
+            .select('id, clock_in, clock_out, projects(name, job_number, quote_number)')
+            .eq('staff_id', staffId)
+            .lt('clock_in', end.toISOString())
+            .or(`clock_out.gt.${start.toISOString()},clock_out.is.null`);
+          const clash = (clashes || []).find(c => !ownIds.has(c.id));
+          if (clash) {
+            throw new Error(`These times overlap another timesheet entry (${clash.projects ? projectRef(clash.projects) : 'General / Office'}, ${fmtDateTime(clash.clock_in)} - ${clash.clock_out ? fmtTime(clash.clock_out) : 'still clocked in'}). Fix or remove that one first.`);
+          }
+        }
+
         for (const removed of dayRemovedBlocks) {
           const { error } = await supabaseClient.from('time_entries').delete().eq('id', removed.id);
           if (error) throw error;
@@ -1010,6 +1066,7 @@
         overlay.remove();
         if (isSelf) await loadMyWeek();
         if (canSeeTeamWeek) await loadTeamWeek();
+        await loadTimesheetIssues();
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
         btn.disabled = false;
@@ -1207,6 +1264,12 @@
       initTeamWeekCard(myRole);
       initDevModeEntriesCard(myRole);
       await refreshWeekViews();
+      await loadTimesheetIssues();
+      const fixParams = new URLSearchParams(window.location.search);
+      if (fixParams.get('fix')) {
+        const fixStaff = fixParams.get('staff') || myUserId;
+        if (fixStaff === myUserId || canSeeTeamWeek) openDayEditPanel(fixParams.get('fix'), fixStaff, issueNames[fixStaff] || '');
+      }
       await loadMyLeave();
       await loadApprovals(myRole);
       initXeroPayrollCard(myRole);

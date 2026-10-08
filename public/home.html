@@ -87,7 +87,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=38"></script>
+  <script src="/js/supabase-client.js?v=39"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId, myRole, myName;
@@ -373,6 +373,25 @@
         });
       }
 
+      // Overlapping timesheet entries and forgotten clock-outs - your own, or
+      // everyone's for admin/finance. Links straight to the day to fix.
+      try {
+        const everyone = myRole === 'admin' || myRole === 'finance';
+        const { overlaps, stale } = await findTimesheetProblems({ staffId: everyone ? null : myUserId });
+        if (overlaps.length || stale.length) {
+          const ids = [...new Set([...overlaps.map(o => o.staffId), ...stale.map(s => s.staff_id)])];
+          const { data: people } = await supabaseClient.from('profiles').select('id, full_name').in('id', ids);
+          const nameOf = (id) => (id === myUserId ? 'Your' : ((people || []).find(p => p.id === id)?.full_name || 'A staff member') + "'s");
+          const ref = (e) => (e.projects ? projectRef(e.projects) : 'General / Office');
+          overlaps.forEach(o => {
+            items.push({ group: 'timesheets', label: `${nameOf(o.staffId)} timesheet overlaps on ${new Date(o.date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}: ${ref(o.a)} and ${ref(o.b)} - fix it`, link: `/timesheets.html?fix=${o.date}&staff=${o.staffId}` });
+          });
+          stale.forEach(s => {
+            items.push({ group: 'timesheets', label: `${nameOf(s.staff_id)} still clocked in to ${ref(s)} since ${new Date(s.clock_in).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} - add the clock-out`, link: `/timesheets.html?fix=${sydneyDateKey(new Date(s.clock_in))}&staff=${s.staff_id}` });
+          });
+        }
+      } catch (err) { console.error('Timesheet check failed:', err); }
+
       if (myRole === 'admin' || myRole === 'finance') {
         const { data: pendingLeave } = await supabaseClient
           .from('leave_requests')
@@ -441,6 +460,7 @@
       }
       const GROUPS = [
         { key: 'job', title: 'Job specific' },
+        { key: 'timesheets', title: 'Timesheets' },
         { key: 'quotes', title: 'Quotes' },
         { key: 'invoices', title: 'Overdue invoices' },
         { key: 'admin', title: 'Admin' },

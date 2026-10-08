@@ -1864,6 +1864,43 @@ function splitAtSydneyMidnight(clockInIso, clockOutIso) {
   return segments.length ? segments : [{ clock_in: clockInIso, clock_out: clockOutIso }];
 }
 
+// Finds timesheet problems in the last `days` days: entries for the same
+// person that overlap each other (usually a manual entry added over time that
+// was already logged), and entries left clocked in for 16+ hours (a forgotten
+// clock-out - these would otherwise overlap everything after them, so they're
+// reported on their own). staffId = one person; omit it for everyone the
+// caller's role is allowed to see. Returns { overlaps: [{ a, b, date, staffId }],
+// stale: [entry] } with entries as { id, staff_id, clock_in, clock_out, projects }.
+async function findTimesheetProblems({ staffId = null, days = 45 } = {}) {
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  let q = supabaseClient.from('time_entries')
+    .select('id, staff_id, clock_in, clock_out, project_id, projects(name, job_number, quote_number)')
+    .gte('clock_in', since).order('clock_in');
+  if (staffId) q = q.eq('staff_id', staffId);
+  const { data } = await q;
+  const now = Date.now();
+  const STALE_MS = 16 * 3600000;
+  const entries = data || [];
+  const stale = entries.filter(e => !e.clock_out && now - new Date(e.clock_in).getTime() > STALE_MS);
+  const live = entries
+    .filter(e => e.clock_out || now - new Date(e.clock_in).getTime() <= STALE_MS)
+    .map(e => ({ e, start: new Date(e.clock_in).getTime(), end: e.clock_out ? new Date(e.clock_out).getTime() : now }));
+  const byStaff = {};
+  live.forEach(x => { (byStaff[x.e.staff_id] = byStaff[x.e.staff_id] || []).push(x); });
+  const overlaps = [];
+  Object.entries(byStaff).forEach(([sid, list]) => {
+    list.sort((p, q2) => p.start - q2.start);
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length && list[j].start < list[i].end; j++) {
+        // a minute's overlap is rounding, not a double-booking
+        if (Math.min(list[i].end, list[j].end) - list[j].start < 60000) continue;
+        overlaps.push({ a: list[i].e, b: list[j].e, date: sydneyDateKey(new Date(list[j].start)), staffId: sid });
+      }
+    }
+  });
+  return { overlaps, stale };
+}
+
 // Punches (clock in/out button presses, not manual entries or later edits)
 // round to the nearest 15 minutes - real punches drift by a minute or two
 // either way, and that shouldn't show up as odd timesheet totals.

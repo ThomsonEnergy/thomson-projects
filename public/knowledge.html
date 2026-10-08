@@ -34,7 +34,11 @@
     <div class="card">
       <h2>Library</h2>
       <div class="grid cols-2" style="margin-bottom:12px;">
-        <input id="kb-search" placeholder="Search title or content..." autocomplete="off" />
+        <div style="display:flex; gap:8px;">
+          <input id="kb-search" placeholder="Search title or content..." autocomplete="off" style="flex:1; min-width:0;" />
+          <button type="button" id="kb-search-btn">Search</button>
+          <button type="button" class="secondary" id="kb-search-clear">Clear</button>
+        </div>
         <select id="kb-filter-category">
           <option value="">All categories</option>
           <option value="Install Guides">Install Guides</option>
@@ -92,7 +96,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=38"></script>
+  <script src="/js/supabase-client.js?v=39"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allEntries = [];
@@ -328,6 +332,11 @@
       renderList();
     }
     document.getElementById('kb-search').addEventListener('input', renderList);
+    // Results already update as you type - the button and Enter key are for
+    // anyone who types something and then looks for a way to "go".
+    document.getElementById('kb-search-btn').addEventListener('click', renderList);
+    document.getElementById('kb-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); renderList(); } });
+    document.getElementById('kb-search-clear').addEventListener('click', () => { document.getElementById('kb-search').value = ''; renderList(); });
     document.getElementById('kb-filter-category').addEventListener('change', renderList);
 
     (async () => {
