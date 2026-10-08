@@ -350,4 +350,9 @@ union all
 select '115', 'cover_photo',
   case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'cover_photo_url')
   then 'present' else 'MISSING' end
+union all
+select '116', 'renovation_service_templates',
+  case when exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'template_answers')
+    and exists (select 1 from pg_constraint where conrelid = 'projects'::regclass and conname = 'projects_proposal_template_check' and pg_get_constraintdef(oid) like '%service_work%')
+  then 'present' else 'MISSING' end
 order by 1;

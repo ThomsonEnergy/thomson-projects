@@ -32,6 +32,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=26"></script>
+  <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -234,6 +235,7 @@
     let sowDocs = [];
     let assignedContactIds = {};
     let currentTemplate = 'new_build';
+    let templateAnswers = {};
 
     const TEMPLATE_INFO = {
       new_build: {
@@ -243,6 +245,14 @@
       solar: {
         note: 'Pylon design link is prominent on the cover page. Defaults to a single stage - add more if needed.',
         photoCategory: 'solar', singleStage: false, showDeposit: true, showPylon: true,
+      },
+      renovation: {
+        note: 'Multi-stage renovation with a deposit. Asks reno-specific questions (asbestos, switchboard, approvals, occupancy) that set up the pre-work and handover tasks.',
+        photoCategory: 'electrical', singleStage: false, showDeposit: true, showPylon: false,
+      },
+      service_work: {
+        note: 'Single-stage service call or repair, no deposit. Asks about urgency, access and parts, and sets up the pre-visit and sign-off tasks.',
+        photoCategory: 'electrical', singleStage: true, showDeposit: false, showPylon: false,
       },
       quick_estimate: {
         note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page - invoiced from actual hours and materials, not this figure.',
@@ -544,6 +554,12 @@
           || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.';
       }
 
+      const questionsEl = document.getElementById('template-questions');
+      Object.assign(templateAnswers, readTemplateAnswers(questionsEl));
+      document.getElementById('template-questions-card').style.display = TEMPLATE_QUESTIONS[template] ? 'block' : 'none';
+      document.getElementById('template-questions-title').textContent = TEMPLATE_QUESTION_TITLES[template] || '';
+      renderTemplateQuestions(questionsEl, template, templateAnswers);
+
       document.getElementById('pylon-card').style.display = info.showPylon ? 'block' : 'none';
       if (!info.showPylon) { document.getElementById('p-pylon-link').value = ''; document.getElementById('p-pylon-id').value = ''; }
     }
@@ -648,6 +664,8 @@
             <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
             <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
             <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
+            <button type="button" class="secondary template-option" data-template="renovation">Renovation</button>
+            <button type="button" class="secondary template-option" data-template="service_work">Service Work</button>
           </div>
           <p class="subtitle" id="template-note" style="margin:12px 0 0;"></p>
           <p class="subtitle" style="margin-top:6px;">Need to skip the quote entirely? Use "+ New job (no quote)" on the Job pipeline board instead.</p>
@@ -656,6 +674,12 @@
         <div class="card" id="estimate-disclaimer-card" style="display:none;">
           <h2>Estimate wording</h2>
           <textarea id="p-estimate-disclaimer" style="min-height:80px;"></textarea>
+        </div>
+
+        <div class="card" id="template-questions-card" style="display:none;">
+          <h2 id="template-questions-title"></h2>
+          <p class="subtitle" style="margin-bottom:10px;">Answers here set up this job's task list once the quote is approved - not shown to the client.</p>
+          <div class="grid cols-2" id="template-questions"></div>
         </div>
 
         <div class="card">
@@ -1048,6 +1072,7 @@
       document.getElementById('cancel-edit-btn').addEventListener('click', () => { editMode = false; render(project, true); });
 
       if (isQuoteEdit) {
+        templateAnswers = project.template_answers || {};
         applyEditTemplate(project.proposal_template || 'new_build');
         document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';
         document.getElementById('p-name').value = project.name || '';
@@ -1343,6 +1368,7 @@
             reference_photos: referencePhotos.map(url => ({ url })),
             cover_photos: coverPhotos,
             proposal_template: currentTemplate,
+            template_answers: readTemplateAnswers(document.getElementById('template-questions')),
             estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
             project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
             site_contact_id: assignedContactIds.site_contact_id || null,
@@ -2972,6 +2998,11 @@
 
             <div class="settings-panel" id="panel-details">
               ${editMode && !project.job_number ? editorPanelHtml(project) : `
+              ${TEMPLATE_QUESTIONS[project.proposal_template] ? `
+              <div class="card">
+                <h2>${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</h2>
+                ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}
+              </div>` : ''}
               <div class="card">
                 <h2>Notes</h2>
                 <p class="subtitle" style="margin-bottom:8px;">Background/context that sticks around regardless of how the job progresses - e.g. what a lead originally asked for. Not shown to the client.</p>
@@ -3350,6 +3381,7 @@
               reference_photos: fullProject.reference_photos,
               cover_photos: fullProject.cover_photos,
               proposal_template: fullProject.proposal_template,
+              template_answers: fullProject.template_answers,
             })
             .select()
             .single();

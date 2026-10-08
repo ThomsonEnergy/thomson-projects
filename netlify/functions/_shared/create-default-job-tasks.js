@@ -1,7 +1,7 @@
 // Called from create-job-from-quote.js right after a job's cost centres
 // are copied over from its source quote. Only does anything for a solar
-// job (proposal_template === 'solar') - other templates don't have this
-// checklist.
+// job (proposal_template === 'solar'), or a renovation / service work job
+// (their tasks come from the quote's answers - see template-job-tasks.js).
 //
 // Inserts two batches of job_tasks:
 //  - prejob (before install): one "order <gear>" task per item Pylon has
@@ -22,8 +22,16 @@
 
 const { evaluate } = require('./solar-compliance-rules');
 const { wordSolarTasks } = require('./word-solar-tasks');
+const { tasksFor } = require('./template-job-tasks');
 
 async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
+  if (job.proposal_template === 'renovation' || job.proposal_template === 'service_work') {
+    const rows = tasksFor(job.proposal_template, job.template_answers || {}).map((t) => ({ ...t, project_id: job.id }));
+    if (!rows.length) return;
+    const { error } = await supabaseAdmin.from('job_tasks').insert(rows);
+    if (error) console.error('Failed to insert default job tasks:', error.message);
+    return;
+  }
   if (job.proposal_template !== 'solar') return;
 
   const pylonData = job.pylon_data || {};

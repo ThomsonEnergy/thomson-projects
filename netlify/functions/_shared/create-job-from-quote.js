@@ -159,6 +159,7 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
       reference_photos: quote.reference_photos,
       cover_photos: quote.cover_photos,
       proposal_template: quote.proposal_template,
+      template_answers: quote.template_answers,
       laha_approved: quote.laha_approved,
       estimate_disclaimer_text: quote.estimate_disclaimer_text,
       project_manager_contact_id: quote.project_manager_contact_id,

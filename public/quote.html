@@ -161,7 +161,7 @@
           <div class="cover-content">
             ${s.logo_url ? `<div class="cover-logo-badge"><img src="${s.logo_url}" class="cover-logo" /></div>` : `<p style="font-size:22px; font-weight:700; margin:0 0 8px;">${s.company_name || ''}</p>`}
             ${s.tagline ? `<p class="cover-tagline">${s.tagline}</p>` : '<div style="margin-bottom:40px;"></div>'}
-            <p class="cover-eyebrow">${template === 'quick_estimate' ? 'Estimate' : 'Proposal'}</p>
+            <p class="cover-eyebrow">${{ quick_estimate: 'Estimate', service_work: 'Service Quote' }[template] || 'Proposal'}</p>
             <h1 class="cover-title">${project.name}</h1>
             <p class="cover-subtitle">${project.proposal_subtitle || ('Prepared for ' + project.client_name)}</p>
           </div>
@@ -199,7 +199,7 @@
           ${centres.map(c => `<tr><td>${c.name}, due on completion</td><td class="num">${money(c.quoted_amount * (1 - depositPercent / 100))}</td></tr>`).join('')}
         `;
 
-      const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials') ? '' : `
+      const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials' || template === 'service_work') ? '' : `
         <div class="card">
           <h2>Payment schedule</h2>
           <table>

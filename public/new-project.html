@@ -39,6 +39,8 @@
         <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
         <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
         <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
+        <button type="button" class="secondary template-option" data-template="renovation">Renovation</button>
+        <button type="button" class="secondary template-option" data-template="service_work">Service Work</button>
       </div>
       <p class="subtitle" style="margin-top:10px;">Need to skip the quote entirely? Use "+ New job (no quote)" on the Job pipeline board instead.</p>
       <p class="subtitle" id="template-note" style="margin:12px 0 0;"></p>
@@ -48,6 +50,12 @@
       <h2>Estimate wording</h2>
       <p class="subtitle" style="margin-bottom:10px;">Shown as a banner on the client's estimate page. Edit if this job needs different wording.</p>
       <textarea id="p-estimate-disclaimer" style="min-height:80px;"></textarea>
+    </div>
+
+    <div class="card" id="template-questions-card" style="display:none;">
+      <h2 id="template-questions-title"></h2>
+      <p class="subtitle" style="margin-bottom:10px;">Answers here set up this job's task list once the quote is approved - not shown to the client.</p>
+      <div class="grid cols-2" id="template-questions"></div>
     </div>
 
     <div class="card">
@@ -243,6 +251,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=26"></script>
+  <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
     const editId = new URLSearchParams(window.location.search).get('id');
@@ -250,6 +259,7 @@
     let referencePhotos = [];
     let rowCount = 0;
     let currentTemplate = 'new_build';
+    let templateAnswers = {};
     let companySettings = {};
     let selectedClientId = null;
     let RATE_TIERS = [];
@@ -343,6 +353,14 @@
         showDeposit: true,
         showPylon: true,
       },
+      renovation: {
+        note: 'Multi-stage renovation with a deposit. Asks reno-specific questions (asbestos, switchboard, approvals, occupancy) that set up the pre-work and handover tasks.',
+        photoCategory: 'electrical', singleStage: false, showDeposit: true, showPylon: false,
+      },
+      service_work: {
+        note: 'Single-stage service call or repair, no deposit. Asks about urgency, access and parts, and sets up the pre-visit and sign-off tasks.',
+        photoCategory: 'electrical', singleStage: true, showDeposit: false, showPylon: false,
+      },
       quick_estimate: {
         note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page - invoiced from actual hours and materials, not this figure.',
         photoCategory: 'general',
@@ -378,6 +396,12 @@
         disclaimerField.value = companySettings.default_estimate_disclaimer
           || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.';
       }
+
+      const questionsEl = document.getElementById('template-questions');
+      Object.assign(templateAnswers, readTemplateAnswers(questionsEl));
+      document.getElementById('template-questions-card').style.display = TEMPLATE_QUESTIONS[template] ? 'block' : 'none';
+      document.getElementById('template-questions-title').textContent = TEMPLATE_QUESTION_TITLES[template] || '';
+      renderTemplateQuestions(questionsEl, template, templateAnswers);
 
       document.getElementById('pylon-card').style.display = info.showPylon ? 'block' : 'none';
       if (!info.showPylon) {
@@ -1146,6 +1170,7 @@
         reference_photos: referencePhotos.map(url => ({ url })),
         cover_photos: coverPhotos,
         proposal_template: currentTemplate,
+        template_answers: readTemplateAnswers(document.getElementById('template-questions')),
         estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
         project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
         site_contact_id: assignedContactIds.site_contact_id || null,
@@ -1275,6 +1300,7 @@
         project.quote_number ? `Q${project.quote_number}` : null,
         project.job_number ? `J${project.job_number}` : null,
       ].filter(Boolean).join(' · ');
+      templateAnswers = project.template_answers || {};
       applyTemplate(project.proposal_template || 'new_build');
       document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';
       offerLeadAttachmentImport(project.lead_id);

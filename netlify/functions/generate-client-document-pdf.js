@@ -162,7 +162,7 @@ exports.handler = async (event) => {
       // might click themselves, which still wants that banner as its one
       // and only cover.
       const contentPdfBytes = await renderPageToPdf(`${siteUrl}/quote.html?token=${project.quote_token}&print=1&hidecover=1`);
-      const docLabel = project.proposal_template === 'quick_estimate' ? 'Estimate' : 'Proposal';
+      const docLabel = { quick_estimate: 'Estimate', service_work: 'Service Quote' }[project.proposal_template] || 'Proposal';
       const finalPdf = await buildFinalPdf(contentPdfBytes, supabaseAdmin, {
         docTitle: `${docLabel}${project.quote_number ? ` Q${project.quote_number}` : ''}`,
         preparedFor: project.client_name,
