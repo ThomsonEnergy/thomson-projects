@@ -2560,7 +2560,7 @@
         <div style="margin-bottom:20px;">
           ${pricingVisible && !editMode ? `
             ${!isFrozenQuote ? `<button id="edit-toggle-btn" class="secondary">${project.job_number ? 'Edit stages' : 'Edit quote'}</button>` : ''}
-            <button id="duplicate-btn" class="secondary">Duplicate as new project</button>
+            ${!project.job_number ? `<button id="duplicate-btn" class="secondary">Duplicate as new quote</button>` : ''}
             ${project.job_number && project.source_quote?.quote_token ? `<a class="btn secondary" href="/quote.html?token=${project.source_quote.quote_token}" target="_blank">Go to quote</a>` : ''}
             ${isFrozenQuote && project.resulting_job ? `<a class="btn secondary" href="/project.html?id=${project.resulting_job.id}">Go to job${project.resulting_job.job_number ? ' (J' + project.resulting_job.job_number + ')' : ''}</a>` : ''}
             ${!project.job_number && !isAccepted ? `<button type="button" class="secondary" id="mark-approved-btn">Mark approved manually</button>` : ''}
@@ -2906,7 +2906,7 @@
                 </div>`;
               }).join('')}
 
-              ${pricingVisible ? centres.map((c, i) => {
+              ${pricingVisible && project.job_number ? centres.map((c, i) => {
                 const { stageInvoices, claimedTotal, quotedAmt, remaining, stcApplied, stcRemaining } = stageClaimSummary(c);
                 return `
                 <div class="card">
