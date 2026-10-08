@@ -2615,6 +2615,15 @@
           <div class="job-tab-main">
 
             <div class="settings-panel active" id="panel-summary">
+              ${!editMode && (project.notes || (TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length)) ? `
+              <div class="card">
+                ${project.notes ? `
+                  <h2>Notes</h2>
+                  <p style="white-space:pre-wrap; margin:0 0 ${TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length ? '18px' : '0'};">${escapeHtml(project.notes)}</p>` : ''}
+                ${TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length ? `
+                  <h2>${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</h2>
+                  ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}` : ''}
+              </div>` : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
                   <div class="stat"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
