@@ -87,7 +87,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=42"></script>
-  <script src="/js/feed.js?v=1"></script>
+  <script src="/js/feed.js?v=2"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId, myRole, myName;
@@ -345,16 +345,20 @@
       // Posts someone's tagged you in that you haven't opened yet.
       try {
         const { data: tags } = await supabaseClient.from('feed_mentions')
-          .select('post_id, feed_posts(message, project_id, profiles(full_name), projects(id, name, job_number, quote_number))')
+          .select('post_id, comment_id, feed_comments(message, profiles(full_name)), feed_posts(message, project_id, profiles(full_name), projects(id, name, job_number, quote_number))')
           .eq('profile_id', myUserId).is('seen_at', null).order('created_at', { ascending: false });
         (tags || []).forEach(t => {
           const post = t.feed_posts;
           if (!post) return;
-          const who = (post.profiles && post.profiles.full_name) || 'Someone';
-          const snippet = escapeHtml(post.message.length > 60 ? post.message.slice(0, 60) + '...' : post.message);
+          // Tagged in a comment: say who commented and show the comment; in a
+          // post: who posted and the post.
+          const source = t.feed_comments || post;
+          const who = (source.profiles && source.profiles.full_name) || 'Someone';
+          const snippet = escapeHtml(source.message.length > 60 ? source.message.slice(0, 60) + '...' : source.message);
+          const where = post.projects ? 'on ' + escapeHtml(projectRef(post.projects)) : (t.feed_comments ? 'in a comment' : 'in a post');
           items.push({
             group: 'job',
-            label: `${escapeHtml(who)} tagged you ${post.projects ? 'on ' + escapeHtml(projectRef(post.projects)) : 'in a post'}: "${snippet}"`,
+            label: `${escapeHtml(who)} tagged you ${t.feed_comments && post.projects ? 'in a comment ' : ''}${where}: "${snippet}"`,
             link: post.projects ? `/project.html?id=${post.projects.id}&tab=feed` : '#feed-list',
           });
         });

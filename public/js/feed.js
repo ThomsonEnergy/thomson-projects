@@ -91,11 +91,12 @@ async function renderFeedList(el, opts) {
   if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
   if (!posts.length) { el.innerHTML = `<p class="subtitle">${opts.projectId ? 'No notes on this job yet - add the first one above.' : 'No posts yet - be the first.'}</p>`; return; }
 
+  const staff = (await feedStaff()).filter(p => p.id !== opts.myUserId);
   const postIds = posts.map(p => p.id);
   const [{ data: likes }, { data: comments }, { data: mentions }] = await Promise.all([
     supabaseClient.from('feed_likes').select('post_id, author_id').in('post_id', postIds),
     supabaseClient.from('feed_comments').select('*, profiles(full_name)').in('post_id', postIds).order('created_at'),
-    supabaseClient.from('feed_mentions').select('post_id, profile_id, profiles(full_name)').in('post_id', postIds),
+    supabaseClient.from('feed_mentions').select('post_id, comment_id, profile_id, profiles(full_name)').in('post_id', postIds),
   ]);
 
   const projectRefOf = (p) => (typeof projectRef === 'function' ? projectRef(p) : (p.name || 'Job'));
@@ -103,7 +104,7 @@ async function renderFeedList(el, opts) {
     const postLikes = (likes || []).filter(l => l.post_id === post.id);
     const iLiked = postLikes.some(l => l.author_id === opts.myUserId);
     const postComments = (comments || []).filter(c => c.post_id === post.id);
-    const tagged = (mentions || []).filter(m => m.post_id === post.id);
+    const tagged = (mentions || []).filter(m => m.post_id === post.id && !m.comment_id);
     const mine = post.author_id === opts.myUserId;
     return `
       <div class="feed-post" data-post-id="${post.id}">
@@ -129,10 +130,17 @@ async function renderFeedList(el, opts) {
               <span class="feed-author">${escapeHtml(c.profiles ? c.profiles.full_name : 'Someone')}</span>
               <span class="feed-meta">${feedWhen(c.created_at)}</span>
               <div style="white-space:pre-wrap;">${escapeHtml(c.message)}</div>
+              ${(mentions || []).filter(m => m.comment_id === c.id).length ? `<div class="feed-meta">Tagged: ${(mentions || []).filter(m => m.comment_id === c.id).map(t => escapeHtml((t.profiles && t.profiles.full_name) || 'Someone')).join(', ')}</div>` : ''}
             </div>`).join('')}
           <div style="display:flex; gap:8px; margin-top:8px;">
             <input class="new-comment-input" data-post-id="${post.id}" placeholder="Write a comment..." style="flex:1;" />
+            <button type="button" class="secondary comment-tag-btn" data-post-id="${post.id}" title="Tag people in this comment" style="padding:8px 12px;">@</button>
             <button class="secondary send-comment-btn" data-post-id="${post.id}" style="padding:8px 14px;">Send</button>
+          </div>
+          <div class="comment-tag-panel" data-post-id="${post.id}" style="display:none; margin-top:6px; padding:10px; border:1px solid var(--border); border-radius:8px; max-height:160px; overflow-y:auto;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:4px 12px;">
+              ${staff.map(p => `<label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="checkbox" class="comment-tag-check" data-post-id="${post.id}" value="${p.id}" style="width:auto;" /> ${escapeHtml(p.full_name || 'Unnamed')}</label>`).join('')}
+            </div>
           </div>
         </div>
       </div>`;
@@ -149,14 +157,28 @@ async function renderFeedList(el, opts) {
     const panel = el.querySelector(`.feed-comments[data-post-id="${btn.dataset.postId}"]`);
     panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
   }));
+  el.querySelectorAll('.comment-tag-btn').forEach(btn => btn.addEventListener('click', () => {
+    const panel = el.querySelector(`.comment-tag-panel[data-post-id="${btn.dataset.postId}"]`);
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  }));
+  el.querySelectorAll('.comment-tag-check').forEach(c => c.addEventListener('change', () => {
+    const n = el.querySelectorAll(`.comment-tag-check[data-post-id="${c.dataset.postId}"]:checked`).length;
+    el.querySelector(`.comment-tag-btn[data-post-id="${c.dataset.postId}"]`).textContent = n ? `@ ${n}` : '@';
+  }));
   el.querySelectorAll('.send-comment-btn').forEach(btn => btn.addEventListener('click', async () => {
     const postId = btn.dataset.postId;
     const input = el.querySelector(`.new-comment-input[data-post-id="${postId}"]`);
     const message = input.value.trim();
     if (!message) return;
     btn.disabled = true;
-    const { error: cErr } = await supabaseClient.from('feed_comments').insert({ post_id: postId, author_id: opts.myUserId, message });
+    const { data: comment, error: cErr } = await supabaseClient.from('feed_comments')
+      .insert({ post_id: postId, author_id: opts.myUserId, message }).select('id').single();
     if (cErr) { alert(cErr.message); btn.disabled = false; return; }
+    const tagged = [...el.querySelectorAll(`.comment-tag-check[data-post-id="${postId}"]:checked`)].map(c => c.value);
+    if (tagged.length) {
+      const { error: tagErr } = await supabaseClient.from('feed_mentions').insert(tagged.map(pid => ({ post_id: postId, comment_id: comment.id, profile_id: pid })));
+      if (tagErr) alert(`Comment posted, but tagging failed: ${tagErr.message}`);
+    }
     await reload();
   }));
   el.querySelectorAll('.feed-delete-btn').forEach(btn => btn.addEventListener('click', async () => {
