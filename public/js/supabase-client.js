@@ -48,6 +48,31 @@ async function getSignedDocUrl(path) {
   return data.signedUrl;
 }
 
+// Expiry date display for licences / insurance: red when expired or within
+// 30 days. Shared by the Team page (company and employee licences) and
+// Settings > My Profile (a person's own licences).
+function expiryBadge(dateStr) {
+  if (!dateStr) return `<span class="subtitle">No expiry set</span>`;
+  const days = Math.ceil((new Date(dateStr) - new Date(new Date().toDateString())) / 86400000);
+  const dateLabel = new Date(dateStr).toLocaleDateString('en-AU');
+  if (days < 0) return `<span style="color:var(--red); font-weight:600;">Expired ${dateLabel}</span>`;
+  if (days <= 30) return `<span style="color:var(--red); font-weight:600;">${dateLabel} (${days}d)</span>`;
+  return dateLabel;
+}
+
+async function runCredentialExtraction(file) {
+  const base64 = await fileToBase64(file);
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const res = await fetch('/.netlify/functions/extract-credential-doc', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ fileBase64: base64, mediaType: file.type }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+  return data.extracted;
+}
+
 // Shows a stored private file in the app itself: a PDF in the PDF viewer, an
 // image in the photo viewer. Used for licences / credentials so they open
 // right there instead of in a new tab at a raw storage address.
