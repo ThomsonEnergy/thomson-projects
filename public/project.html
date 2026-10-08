@@ -3792,9 +3792,58 @@
       renderChecklist();
     }
 
-    async function loadJobTasks(projectId) {
+    // ---------- Job card checklist (Google Tasks style) ----------
+    // Tasks are grouped Prejob / Onsite / Handover. Each group has a quick-add
+    // line (type + Enter), tasks tick off with a checkbox (ticked ones drop
+    // into a collapsed "Completed" list and can be un-ticked), and tapping a
+    // task opens its details: title, notes, who, due date, star, subtasks,
+    // move up / down and delete. The full "+ Add task" panel is still there
+    // for the calendar / repeat / required-before-scheduling options.
+    let jtExpanded = new Set();
+    let jtDoneOpen = new Set();
+
+    function ensureJobTaskStyles() {
+      if (document.getElementById('jt-styles')) return;
+      const st = document.createElement('style');
+      st.id = 'jt-styles';
+      st.textContent = `
+        .jt-group { margin-bottom:18px; }
+        .jt-group h3 { font-size:14px; margin:0 0 6px; }
+        .jt-item { border-bottom:1px solid var(--border); }
+        .jt-item.sub { margin-left:30px; }
+        .jt-row { display:flex; align-items:flex-start; gap:10px; padding:9px 0; }
+        .jt-check { width:20px; height:20px; margin-top:2px; flex-shrink:0; cursor:pointer; }
+        .jt-main { flex:1; min-width:0; cursor:pointer; }
+        .jt-title { font-size:15px; color:var(--text); word-break:break-word; }
+        .jt-item.done .jt-title { text-decoration:line-through; color:var(--muted); }
+        .jt-meta { font-size:12px; color:var(--muted); margin-top:2px; }
+        .jt-star { background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; padding:0 4px; line-height:1; }
+        .jt-star.on { color:#e0a030; }
+        .jt-detail { padding:2px 0 12px 30px; display:grid; gap:8px; }
+        .jt-detail label { margin:0; font-size:12px; color:var(--muted); }
+        .jt-detail textarea { min-height:60px; }
+        .jt-detail-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+        .jt-actions { display:flex; gap:6px; flex-wrap:wrap; }
+        .jt-actions button { font-size:12px; padding:5px 10px; }
+        .jt-quick { margin:4px 0 8px; }
+        .jt-done-toggle { background:none; border:none; color:var(--muted); font-size:13px; cursor:pointer; padding:6px 0; }
+        @media (max-width: 600px) { .jt-detail-row { grid-template-columns:1fr; } .jt-item.sub { margin-left:18px; } .jt-detail { padding-left:18px; } }
+      `;
+      document.head.appendChild(st);
+    }
+
+    const JT_GROUPS = [
+      { key: 'prejob', label: 'Prejob / office', types: ['prejob', 'quote'] },
+      { key: 'onsite', label: 'Onsite', types: ['onsite'] },
+      { key: 'handover', label: 'Handover (STC/compliance paperwork)', types: ['handover'] },
+    ];
+
+    const jtGroupOf = (t) => (JT_GROUPS.find(g => g.types.includes(t.task_type)) || JT_GROUPS[0]).key;
+
+    async function loadJobTasks(projectId, focusSelector) {
       const listEl = document.getElementById('job-tasks-list');
-      const summaryEl = document.getElementById('summary-tasks-line');
+      if (!listEl) return;
+      ensureJobTaskStyles();
 
       // Wired up unconditionally, before any early return below - otherwise
       // a load error (e.g. job_tasks not migrated yet) leaves "+ Add task"
@@ -3803,12 +3852,12 @@
       if (addBtn) addBtn.onclick = () => openAddTaskPanel(projectId);
 
       const [{ data: tasks, error }, { data: staff }] = await Promise.all([
-        supabaseClient.from('job_tasks').select('*').eq('project_id', projectId)
-          .order('completed', { ascending: true }).order('required_before_scheduling', { ascending: false }),
-        supabaseClient.from('profiles').select('id, full_name'),
+        supabaseClient.from('job_tasks').select('*').eq('project_id', projectId).order('created_at', { ascending: true }),
+        supabaseClient.from('profiles').select('id, full_name, active'),
       ]);
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
+      const summaryEl = document.getElementById('summary-tasks-line');
       if (summaryEl) {
         const outstanding = (tasks || []).filter(t => !t.completed);
         const requiredOutstanding = outstanding.filter(t => t.required_before_scheduling);
@@ -3817,61 +3866,228 @@
           : `<p class="subtitle">${outstanding.length} task${outstanding.length === 1 ? '' : 's'} outstanding${requiredOutstanding.length ? `, <span style="color:var(--red);">${requiredOutstanding.length} required before scheduling</span>` : ''}.</p>`;
       }
 
-      if (!tasks.length) { listEl.innerHTML = `<p class="subtitle">No tasks yet.</p>`; return; }
+      listEl._jt = { projectId, tasks: tasks || [], staff: staff || [] };
+      bindJobTaskEvents(listEl);
+      renderJobTasks(listEl);
+      if (focusSelector) { const f = listEl.querySelector(focusSelector); if (f) f.focus(); }
+    }
 
-      const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'Someone';
+    function jtSort(a, b) {
+      return (Number(b.starred) - Number(a.starred))
+        || ((a.sort_order ?? 1e9) - (b.sort_order ?? 1e9))
+        || String(a.created_at).localeCompare(String(b.created_at));
+    }
+
+    function renderJobTasks(listEl) {
+      const { tasks, staff } = listEl._jt;
+      const staffName = (id) => (staff.find(s => s.id === id) || {}).full_name || 'Someone';
       const today = new Date(); today.setHours(0, 0, 0, 0);
+      const subsOf = (id) => tasks.filter(t => t.parent_task_id === id).sort((a, b) => (Number(a.completed) - Number(b.completed)) || jtSort(a, b));
 
-      function taskRowHtml(t) {
-        const who = t.assigned_to_user_id ? staffName(t.assigned_to_user_id) : t.assigned_to_role ? `Anyone in ${t.assigned_to_role}` : 'Unassigned';
-        const isOverdue = t.due_date && !t.completed && new Date(t.due_date) < today;
-        const dueLabel = t.due_date ? `Due ${new Date(t.due_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}` : '';
+      function itemHtml(t, isSub) {
+        const subs = isSub ? [] : subsOf(t.id);
+        const who = t.assigned_to_user_id ? staffName(t.assigned_to_user_id) : t.assigned_to_role ? `Anyone in ${t.assigned_to_role}` : '';
+        const overdue = t.due_date && !t.completed && new Date(t.due_date + 'T00:00:00') < today;
+        const due = t.due_date ? new Date(t.due_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
+        const bits = [];
+        if (who) bits.push(escapeHtml(who));
+        if (due) bits.push(`<span style="${overdue ? 'color:var(--red);' : ''}">Due ${due}</span>`);
+        if (subs.length) bits.push(`${subs.filter(s => s.completed).length}/${subs.length} subtasks`);
+        if (t.notes) bits.push('Has notes');
+        if (t.recurrence) bits.push(`Repeats ${t.recurrence}`);
+        if (t.schedule_assignment_id) bits.push('On calendar');
+        if (t.required_before_scheduling && !t.completed) bits.push('<span style="color:var(--red);">Required before scheduling</span>');
+        const open = jtExpanded.has(t.id);
         return `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); ${t.completed ? 'opacity:0.5;' : ''}">
-            <div>
-              <span style="${t.completed ? 'text-decoration:line-through;' : ''}">${t.description}</span>
-              <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
-                ${who}
-                ${dueLabel ? ` &middot; <span style="${isOverdue ? 'color:var(--red);' : ''}">${dueLabel}</span>` : ''}
-                ${t.recurrence ? ` &middot; Repeats ${t.recurrence}` : ''}
-                ${t.schedule_assignment_id ? ` &middot; On calendar` : ''}
-                ${t.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
-              </p>
+          <div class="jt-item ${isSub ? 'sub' : ''} ${t.completed ? 'done' : ''}" data-id="${t.id}">
+            <div class="jt-row">
+              <input type="checkbox" class="jt-check" data-id="${t.id}" ${t.completed ? 'checked' : ''} title="${t.completed ? 'Mark as not done' : 'Tick off'}" />
+              <div class="jt-main" data-toggle="${t.id}">
+                <div class="jt-title">${escapeHtml(t.description)}</div>
+                ${bits.length ? `<div class="jt-meta">${bits.join(' &middot; ')}</div>` : ''}
+              </div>
+              <button type="button" class="jt-star ${t.starred ? 'on' : ''}" data-act="star" data-id="${t.id}" title="${t.starred ? 'Remove star' : 'Star this task'}">${t.starred ? '&#9733;' : '&#9734;'}</button>
             </div>
-            ${!t.completed ? `<button type="button" class="secondary complete-job-task-btn" data-id="${t.id}" style="font-size:12px; padding:6px 10px;">Done</button>` : ''}
+            ${open ? `
+              <div class="jt-detail">
+                <div><label>Task</label><input class="jt-title-edit" data-id="${t.id}" value="${escapeHtml(t.description)}" /></div>
+                <div><label>Notes</label><textarea class="jt-notes" data-id="${t.id}" placeholder="Add details...">${escapeHtml(t.notes || '')}</textarea></div>
+                <div class="jt-detail-row">
+                  <div><label>Assigned to</label><select class="jt-assign" data-id="${t.id}">
+                    <option value="">${t.assigned_to_role && !t.assigned_to_user_id ? 'Anyone in ' + escapeHtml(t.assigned_to_role) : 'Unassigned'}</option>
+                    ${staff.filter(s => s.active !== false || s.id === t.assigned_to_user_id).sort((a, b) => String(a.full_name).localeCompare(String(b.full_name))).map(s => `<option value="${s.id}" ${s.id === t.assigned_to_user_id ? 'selected' : ''}>${escapeHtml(s.full_name || 'Unnamed')}</option>`).join('')}
+                  </select></div>
+                  <div><label>Due date</label><input type="date" class="jt-due" data-id="${t.id}" value="${t.due_date || ''}" /></div>
+                </div>
+                ${!isSub ? `<div><label>Subtasks</label>
+                  <input class="jt-sub-add" data-parent="${t.id}" placeholder="Add a subtask and press Enter" style="margin-top:4px;" /></div>` : ''}
+                <div class="jt-actions">
+                  <button type="button" class="secondary" data-act="up" data-id="${t.id}">Move up</button>
+                  <button type="button" class="secondary" data-act="down" data-id="${t.id}">Move down</button>
+                  <button type="button" class="secondary" data-act="delete" data-id="${t.id}">Delete</button>
+                </div>
+              </div>` : ''}
+            ${subs.map(s => itemHtml(s, true)).join('')}
           </div>`;
       }
 
-      const prejobTasks = tasks.filter(t => t.task_type === 'prejob' || t.task_type === 'quote' || !t.task_type);
-      const onsiteTasks = tasks.filter(t => t.task_type === 'onsite');
-      const handoverTasks = tasks.filter(t => t.task_type === 'handover');
+      listEl.innerHTML = JT_GROUPS.map(g => {
+        const tops = tasks.filter(t => !t.parent_task_id && jtGroupOf(t) === g.key);
+        const openTops = tops.filter(t => !t.completed).sort(jtSort);
+        const doneTops = tops.filter(t => t.completed).sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
+        const showDone = jtDoneOpen.has(g.key);
+        return `
+          <div class="jt-group" data-group="${g.key}">
+            <h3>${g.label}</h3>
+            <input class="jt-quick" data-type="${g.key}" placeholder="+ Add a task and press Enter" />
+            ${openTops.map(t => itemHtml(t, false)).join('') || (doneTops.length ? '<p class="subtitle" style="margin:4px 0;">All done.</p>' : '<p class="subtitle" style="margin:4px 0;">None.</p>')}
+            ${doneTops.length ? `
+              <button type="button" class="jt-done-toggle" data-act="toggle-done" data-group="${g.key}">${showDone ? '&#9662;' : '&#9656;'} Completed (${doneTops.length})</button>
+              ${showDone ? doneTops.map(t => itemHtml(t, false)).join('') : ''}` : ''}
+          </div>`;
+      }).join('');
+    }
 
-      listEl.innerHTML = `
-        <div style="margin-bottom:16px;">
-          <h3 style="font-size:14px; margin:0 0 4px;">Prejob / office</h3>
-          ${prejobTasks.length ? prejobTasks.map(taskRowHtml).join('') : '<p class="subtitle">None.</p>'}
-        </div>
-        <div style="margin-bottom:16px;">
-          <h3 style="font-size:14px; margin:0 0 4px;">Onsite</h3>
-          ${onsiteTasks.length ? onsiteTasks.map(taskRowHtml).join('') : '<p class="subtitle">None.</p>'}
-        </div>
-        <div>
-          <h3 style="font-size:14px; margin:0 0 4px;">Handover (STC/compliance paperwork)</h3>
-          ${handoverTasks.length ? handoverTasks.map(taskRowHtml).join('') : '<p class="subtitle">None.</p>'}
-        </div>`;
+    function bindJobTaskEvents(listEl) {
+      if (listEl._jtBound) return;
+      listEl._jtBound = true;
+      const state = () => listEl._jt;
+      const find = (id) => state().tasks.find(t => t.id === id);
+      const reload = (focus) => loadJobTasks(state().projectId, focus);
+      const patch = async (id, fields) => {
+        const { error } = await supabaseClient.from('job_tasks').update(fields).eq('id', id);
+        if (error) alert('Could not save that: ' + error.message);
+        return !error;
+      };
 
-      listEl.querySelectorAll('.complete-job-task-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const { data: { user } } = await supabaseClient.auth.getUser();
-          await supabaseClient.from('job_tasks').update({
-            completed: true, completed_by: user.id, completed_at: new Date().toISOString(),
-          }).eq('id', btn.dataset.id);
-          const task = tasks.find(t => t.id === btn.dataset.id);
-          await logActivity('project', projectId, 'task_completed', `Task completed: ${task?.description || ''}`);
-          if (task?.required_before_scheduling) await refreshPipelineTaskGate(projectId);
-          if (task?.task_type === 'handover') await checkAndAdvanceHandover(projectId);
-          await loadJobTasks(projectId);
+      async function setCompleted(t, done) {
+        const { projectId, tasks } = state();
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const now = new Date().toISOString();
+        const fields = done ? { completed: true, completed_by: user.id, completed_at: now } : { completed: false, completed_by: null, completed_at: null };
+        if (!(await patch(t.id, fields))) { await reload(); return; }
+        if (done && !t.parent_task_id) {
+          // ticking a task finishes its subtasks too
+          await supabaseClient.from('job_tasks').update(fields).eq('parent_task_id', t.id).eq('completed', false);
+        }
+        if (!done && t.parent_task_id) {
+          const parent = tasks.find(p => p.id === t.parent_task_id);
+          if (parent && parent.completed) await patch(parent.id, fields);
+        }
+        await logActivity('project', projectId, done ? 'task_completed' : 'task_reopened', `Task ${done ? 'completed' : 'reopened'}: ${t.description || ''}`);
+        const top = t.parent_task_id ? tasks.find(p => p.id === t.parent_task_id) : t;
+        if (top && top.required_before_scheduling) await refreshPipelineTaskGate(projectId);
+        if (done && top && top.task_type === 'handover') await checkAndAdvanceHandover(projectId);
+        await reload();
+      }
+
+      async function addTask(description, groupKey, parentId) {
+        const { projectId, tasks } = state();
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const parent = parentId ? find(parentId) : null;
+        const siblings = tasks.filter(t => (t.parent_task_id || null) === (parentId || null) && (parent || jtGroupOf(t) === groupKey));
+        // Tasks made before ordering existed have no position yet - number
+        // them in their current order first so a new one lands at the bottom.
+        const ordered = siblings.slice().sort(jtSort);
+        if (ordered.some(t => t.sort_order == null)) {
+          await Promise.all(ordered.map((t, n) => supabaseClient.from('job_tasks').update({ sort_order: n + 1 }).eq('id', t.id)));
+          ordered.forEach((t, n) => { t.sort_order = n + 1; });
+        }
+        const max = ordered.reduce((m, t) => Math.max(m, t.sort_order ?? 0), 0);
+        const { error } = await supabaseClient.from('job_tasks').insert({
+          project_id: projectId, description, task_type: parent ? parent.task_type : groupKey,
+          parent_task_id: parentId || null, sort_order: max + 1, created_by: user.id,
         });
+        if (error) { alert('Could not add that: ' + error.message); return; }
+        if (!parentId) await logActivity('project', projectId, 'task_added', `Task added: ${description}`);
+        if (parentId) jtExpanded.add(parentId);
+        await reload(parentId ? `.jt-sub-add[data-parent="${parentId}"]` : `.jt-quick[data-type="${groupKey}"]`);
+      }
+
+      async function move(t, dir) {
+        const { tasks } = state();
+        const sibs = tasks.filter(x => (x.parent_task_id || null) === (t.parent_task_id || null) && !x.completed && (t.parent_task_id || jtGroupOf(x) === jtGroupOf(t))).sort(jtSort);
+        const i = sibs.findIndex(x => x.id === t.id), j = i + dir;
+        if (i < 0 || j < 0 || j >= sibs.length) return;
+        [sibs[i], sibs[j]] = [sibs[j], sibs[i]];
+        // starred tasks always float to the top, so only reorder within that tier
+        await Promise.all(sibs.map((x, n) => (x.sort_order === n + 1 ? null : supabaseClient.from('job_tasks').update({ sort_order: n + 1 }).eq('id', x.id))));
+        await reload();
+      }
+
+      listEl.addEventListener('click', async (e) => {
+        const actEl = e.target.closest('[data-act]');
+        if (actEl) {
+          const act = actEl.dataset.act;
+          if (act === 'toggle-done') {
+            const g = actEl.dataset.group;
+            if (jtDoneOpen.has(g)) jtDoneOpen.delete(g); else jtDoneOpen.add(g);
+            renderJobTasks(listEl);
+            return;
+          }
+          const t = find(actEl.dataset.id);
+          if (!t) return;
+          if (act === 'star') { await patch(t.id, { starred: !t.starred }); await reload(); }
+          else if (act === 'up') await move(t, -1);
+          else if (act === 'down') await move(t, 1);
+          else if (act === 'delete') {
+            const subs = state().tasks.filter(x => x.parent_task_id === t.id).length;
+            if (!confirm(subs ? `Delete this task and its ${subs} subtask${subs === 1 ? '' : 's'}?` : 'Delete this task?')) return;
+            await supabaseClient.from('job_tasks').delete().eq('id', t.id);
+            jtExpanded.delete(t.id);
+            if (t.required_before_scheduling) await refreshPipelineTaskGate(state().projectId);
+            await logActivity('project', state().projectId, 'task_deleted', `Task deleted: ${t.description || ''}`);
+            await reload();
+          }
+          return;
+        }
+        const tog = e.target.closest('[data-toggle]');
+        if (tog) {
+          const id = tog.dataset.toggle;
+          if (jtExpanded.has(id)) jtExpanded.delete(id); else jtExpanded.add(id);
+          renderJobTasks(listEl);
+        }
+      });
+
+      listEl.addEventListener('change', async (e) => {
+        const el = e.target;
+        const t = el.dataset.id ? find(el.dataset.id) : null;
+        if (!t) return;
+        if (el.classList.contains('jt-check')) await setCompleted(t, el.checked);
+        else if (el.classList.contains('jt-assign')) { await patch(t.id, { assigned_to_user_id: el.value || null, assigned_to_role: el.value ? null : t.assigned_to_role }); await reload(); }
+        else if (el.classList.contains('jt-due')) { await patch(t.id, { due_date: el.value || null }); await reload(); }
+      });
+
+      listEl.addEventListener('keydown', async (e) => {
+        if (e.key !== 'Enter' || e.isComposing) return;
+        const el = e.target;
+        if (el.classList.contains('jt-quick') || el.classList.contains('jt-sub-add')) {
+          e.preventDefault();
+          const text = el.value.trim();
+          if (!text) return;
+          el.disabled = true;
+          await addTask(text, el.dataset.type, el.dataset.parent || null);
+        } else if (el.classList.contains('jt-title-edit')) { e.preventDefault(); el.blur(); }
+      });
+
+      // Notes / title save when you click away, without re-rendering (which
+      // would swallow whatever you clicked on next).
+      listEl.addEventListener('focusout', async (e) => {
+        const el = e.target;
+        const t = el.dataset && el.dataset.id ? find(el.dataset.id) : null;
+        if (!t) return;
+        if (el.classList.contains('jt-notes')) {
+          const v = el.value.trim() || null;
+          if (v !== (t.notes || null) && await patch(t.id, { notes: v })) t.notes = v;
+        } else if (el.classList.contains('jt-title-edit')) {
+          const v = el.value.trim();
+          if (!v) { el.value = t.description; return; }
+          if (v !== t.description && await patch(t.id, { description: v })) {
+            t.description = v;
+            const titleEl = listEl.querySelector(`.jt-item[data-id="${t.id}"] .jt-title`);
+            if (titleEl) titleEl.textContent = v;
+          }
+        }
       });
     }
 

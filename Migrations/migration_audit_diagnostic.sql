@@ -398,4 +398,9 @@ select '126', 'meetings + job_tasks.meeting_id',
   case when exists (select 1 from information_schema.tables where table_name = 'meetings')
     and exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'followed_up_at')
   then 'present' else 'MISSING' end
+union all
+select '127', 'job_tasks checklist columns',
+  case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'parent_task_id')
+    and exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'sort_order')
+  then 'present' else 'MISSING' end
 order by 1;
