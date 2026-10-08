@@ -393,4 +393,9 @@ select '125', 'customer_assets',
   case when exists (select 1 from information_schema.tables where table_name = 'customer_assets')
     and exists (select 1 from information_schema.tables where table_name = 'asset_reminder_log')
   then 'present' else 'MISSING' end
+union all
+select '126', 'meetings + job_tasks.meeting_id',
+  case when exists (select 1 from information_schema.tables where table_name = 'meetings')
+    and exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'followed_up_at')
+  then 'present' else 'MISSING' end
 order by 1;

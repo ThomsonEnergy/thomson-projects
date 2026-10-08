@@ -52,7 +52,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=44"></script>
+  <script src="/js/supabase-client.js?v=45"></script>
   <script src="/js/theme.js"></script>
   <script>
     function taskRow(task, showPickUp) {
@@ -66,6 +66,8 @@
             <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
               ${jobLabel}
               ${task.due_date ? ` &middot; Due ${task.due_date}` : ''}
+              ${task.meetings ? ` &middot; <a href="/meetings.html?id=${task.meeting_id}" class="link-quiet">Meeting: ${escapeHtml(task.meetings.title)}</a>` : ''}
+              ${task.remind_at && new Date(task.remind_at) <= new Date() ? ' &middot; <span style="color:var(--red);">Reminder due</span>' : ''}
               ${task.recurrence ? ` &middot; Repeats ${task.recurrence}` : ''}
               ${task.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
             </p>
@@ -83,7 +85,7 @@
 
       const { data: allTasks, error } = await supabaseClient
         .from('job_tasks')
-        .select('*, projects(name, job_number)')
+        .select('*, projects(name, job_number), meetings(id, title)')
         .eq('completed', false)
         .order('required_before_scheduling', { ascending: false })
         .order('created_at', { ascending: true });

@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=44"></script>
+  <script src="/js/supabase-client.js?v=45"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=4"></script>
   <script src="/js/assets.js?v=1"></script>
@@ -2632,7 +2632,7 @@
                   <h2>${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</h2>
                   ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}` : ''}
               </div>` : ''}
-              ${!editMode ? '<div id="assets-card"></div><div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
+              ${!editMode ? '<div id="meetings-card"></div><div id="assets-card"></div><div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
                   <div class="stat"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
@@ -3243,6 +3243,7 @@
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
       if (document.getElementById('assets-card')) loadAssetsCard(project);
+      if (document.getElementById('meetings-card')) loadMeetingsCard(project);
       const feedTab = document.querySelector('#job-tabs .settings-tab[data-panel="feed"]');
       if (feedTab) {
         let feedLoaded = false;
@@ -4389,6 +4390,35 @@
           } catch (err) { alert(err.message); }
         });
       });
+    }
+
+    // Meetings held about this job (meetings.html), with how many of their
+    // follow-up actions are still open. Hidden until there is one, but the
+    // "+ Meeting" link is always reachable from the Meetings page.
+    async function loadMeetingsCard(project) {
+      const el = document.getElementById('meetings-card');
+      if (!el) return;
+      const { data: ms } = await supabaseClient.from('meetings')
+        .select('id, title, meeting_date, job_tasks(id, completed, followed_up_at)')
+        .eq('project_id', project.id).order('meeting_date', { ascending: false });
+      if (!(ms || []).length) {
+        el.innerHTML = `<div class="card"><div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0;">Meetings</h2><a href="/meetings.html?new=1&project=${project.id}"><button type="button" class="secondary" style="font-size:12px; padding:6px 10px;">+ Meeting notes</button></a></div></div>`;
+        return;
+      }
+      el.innerHTML = `<div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+          <h2 style="margin:0;">Meetings</h2>
+          <a href="/meetings.html?new=1&project=${project.id}"><button type="button" class="secondary" style="font-size:12px; padding:6px 10px;">+ Meeting notes</button></a>
+        </div>
+        ${ms.map(m => {
+          const acts = m.job_tasks || [];
+          const open = acts.filter(a => !a.completed || !a.followed_up_at).length;
+          return `<div style="display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
+            <a href="/meetings.html?id=${m.id}" class="link-quiet">${escapeHtml(m.title)}</a>
+            <span class="subtitle" style="margin:0; white-space:nowrap;">${new Date(m.meeting_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}${open ? ' &middot; <span style="color:#d9a23b;">' + open + ' to follow up</span>' : (acts.length ? ' &middot; all followed up' : '')}</span>
+          </div>`;
+        }).join('')}
+      </div>`;
     }
 
     // Installed equipment for this job, recorded against the customer so

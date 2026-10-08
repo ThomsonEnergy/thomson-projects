@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Meetings - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=13" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .mt-tabs { display:flex; gap:6px; margin:14px 0 4px; flex-wrap:wrap; }
+  .mt-tab { background:var(--surface-2); color:var(--text); border:1px solid var(--border); padding:8px 14px; border-radius:8px; font-size:14px; cursor:pointer; }
+  .mt-tab.active { background:var(--accent); color:var(--accent-contrast); border-color:var(--accent); font-weight:600; }
+  .mt-row { display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-bottom:1px solid var(--border); }
+  .mt-row:last-child { border-bottom:none; }
+  .mt-check { width:22px; height:22px; margin-top:2px; flex-shrink:0; cursor:pointer; }
+  .mt-main { flex:1; min-width:0; }
+  .mt-desc { font-size:15px; color:var(--text); word-break:break-word; }
+  .mt-desc.done { text-decoration:line-through; color:var(--muted); }
+  .mt-meta { font-size:12px; color:var(--muted); margin-top:3px; display:flex; flex-wrap:wrap; gap:4px 12px; }
+  .mt-chip { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; border:1px solid var(--border); }
+  .mt-chip.red { color:var(--red); border-color:var(--red); }
+  .mt-chip.amber { color:#d9a23b; border-color:#d9a23b; }
+  .mt-chip.green { color:#3fb97a; border-color:#3fb97a; }
+  .mt-btns { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .mt-btns button { font-size:12px; padding:5px 10px; }
+  .mt-list-row { display:grid; grid-template-columns: 110px 1fr 180px 150px; gap:12px; padding:12px 8px; border-bottom:1px solid var(--border); cursor:pointer; align-items:center; }
+  .mt-list-row:hover { background:var(--surface-2); }
+  .mt-attendees { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:4px 12px; }
+  .mt-attendees label { display:flex; align-items:center; gap:6px; margin:0; font-weight:400; }
+  .mt-attendees input { width:auto; }
+  .mt-chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .mt-chips button { font-size:12px; padding:4px 10px; }
+  @media (max-width: 700px) {
+    .mt-list-row { grid-template-columns: 1fr; gap:2px; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div id="mt-list-view">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+        <div>
+          <h1 style="margin-bottom:4px;">Meetings</h1>
+          <p class="subtitle">Write up what was discussed, turn it into actions for the team, and confirm each one gets followed up.</p>
+        </div>
+        <button type="button" id="new-meeting-btn">+ New meeting</button>
+      </div>
+      <div class="mt-tabs">
+        <button type="button" class="mt-tab active" data-tab="meetings">Meetings</button>
+        <button type="button" class="mt-tab" data-tab="followups" id="mt-tab-followups">Follow-ups</button>
+      </div>
+      <div class="card" id="mt-meetings-card">
+        <input id="mt-search" placeholder="Search meetings by title, notes or job..." autocomplete="off" style="margin-bottom:10px;" />
+        <div id="mt-meetings"><p class="subtitle">Loading...</p></div>
+      </div>
+      <div class="card" id="mt-followups-card" style="display:none;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+          <select id="mt-fu-filter" style="max-width:240px;">
+            <option value="open">Still open</option>
+            <option value="confirm">Done, waiting for confirmation</option>
+            <option value="mine">Assigned to me</option>
+            <option value="all">Everything</option>
+          </select>
+        </div>
+        <div id="mt-followups"><p class="subtitle">Loading...</p></div>
+      </div>
+    </div>
+
+    <div id="mt-detail-view" style="display:none;"></div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=45"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let me = null, myRole = 'staff', staff = [], staffById = {};
+    let meetings = [];
+    let currentTab = 'meetings';
+
+    const ACTION_SELECT = '*, assignee:assigned_to_user_id(full_name), confirmer:followed_up_by(full_name), meetings(id, title, meeting_date, created_by)';
+
+    // ---------- small helpers ----------
+    const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const todayStr = () => isoDate(new Date());
+    const fmtDate = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+    const fmtShortDate = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '-';
+    const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+    const pad2 = (n) => String(n).padStart(2, '0');
+    // <input type="datetime-local"> value <-> ISO timestamp
+    function toLocalInput(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return `${isoDate(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    }
+    function fromLocalInput(v) { return v ? new Date(v).toISOString() : null; }
+    const nameOf = (id) => (id && staffById[id]) ? staffById[id].full_name : null;
+    function addDays(iso, n) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return isoDate(d); }
+    function staffOptions(selectedId, blankLabel) {
+      return (blankLabel ? `<option value="">${escapeHtml(blankLabel)}</option>` : '') +
+        staff.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${escapeHtml(s.full_name || 'Unnamed')}</option>`).join('');
+    }
+    function showToast(msg) {
+      const t = document.createElement('div');
+      t.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--surface-2); color:var(--text); border:1px solid var(--border); padding:10px 16px; border-radius:8px; z-index:300; box-shadow:0 4px 14px rgba(0,0,0,.4);';
+      t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 2600);
+    }
+    function modal(html) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:480px; width:100%; max-height:88vh; overflow-y:auto;">${html}</div>`;
+      document.body.appendChild(overlay);
+      return overlay;
+    }
+
+    // ---------- calendar helpers ----------
+    // What goes on the calendar for an action: its reminder time if it has one
+    // (30 minutes), otherwise an all-day entry on its due date.
+    function actionEvent(task) {
+      const title = `Follow up: ${task.description}`;
+      const meetingTitle = task.meetings ? task.meetings.title : '';
+      const details = `From the meeting "${meetingTitle}"${task.assignee ? ` - assigned to ${task.assignee.full_name}` : ''}.\n${location.origin}/meetings.html?id=${task.meeting_id}`;
+      if (task.remind_at) {
+        const start = new Date(task.remind_at);
+        return { title, details, start, end: new Date(start.getTime() + 30 * 60000), allDay: false };
+      }
+      if (task.due_date) return { title, details, date: task.due_date, allDay: true };
+      return null;
+    }
+    function meetingEvent(m) {
+      const details = `${m.location ? 'Where: ' + m.location + '\n' : ''}${location.origin}/meetings.html?id=${m.id}`;
+      if (m.meeting_time) {
+        const start = new Date(`${m.meeting_date}T${m.meeting_time.slice(0, 5)}:00`);
+        return { title: m.title, details, start, end: new Date(start.getTime() + 3600000), allDay: false, where: m.location || '' };
+      }
+      return { title: m.title, details, date: m.meeting_date, allDay: true, where: m.location || '' };
+    }
+    const gcalStamp = (d) => `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}T${pad2(d.getHours())}${pad2(d.getMinutes())}00`;
+    const gcalDay = (iso) => iso.replace(/-/g, '');
+    function googleCalendarUrl(ev) {
+      const dates = ev.allDay ? `${gcalDay(ev.date)}/${gcalDay(addDays(ev.date, 1))}` : `${gcalStamp(ev.start)}/${gcalStamp(ev.end)}`;
+      const p = new URLSearchParams({ action: 'TEMPLATE', text: ev.title, details: ev.details, dates, ctz: 'Australia/Sydney' });
+      if (ev.where) p.set('location', ev.where);
+      return 'https://calendar.google.com/calendar/render?' + p.toString();
+    }
+    const icsEscape = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+    function buildIcs(ev) {
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+      const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Thomson Energy//Meetings//EN', 'BEGIN:VEVENT',
+        `UID:${Date.now()}-${Math.random().toString(36).slice(2)}@thomsonenergy.com.au`, `DTSTAMP:${stamp}`];
+      if (ev.allDay) { lines.push(`DTSTART;VALUE=DATE:${gcalDay(ev.date)}`, `DTEND;VALUE=DATE:${gcalDay(addDays(ev.date, 1))}`); }
+      else { lines.push(`DTSTART:${gcalStamp(ev.start)}`, `DTEND:${gcalStamp(ev.end)}`); }
+      lines.push(`SUMMARY:${icsEscape(ev.title)}`, `DESCRIPTION:${icsEscape(ev.details)}`);
+      if (ev.where) lines.push(`LOCATION:${icsEscape(ev.where)}`);
+      if (!ev.allDay) lines.push('BEGIN:VALARM', 'TRIGGER:-PT15M', 'ACTION:DISPLAY', 'DESCRIPTION:Reminder', 'END:VALARM');
+      lines.push('END:VEVENT', 'END:VCALENDAR');
+      return lines.join('\r\n');
+    }
+    function downloadIcs(ev, filename) {
+      const blob = new Blob([buildIcs(ev)], { type: 'text/calendar' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    // One panel for "put this on a calendar" used by both an action and the
+    // meeting itself. canSchedule = also offer the team Schedule board.
+    function openCalendarPanel(ev, opts) {
+      if (!ev) { alert('Give it a due date or a reminder first so there is a day to put on the calendar.'); return; }
+      const when = ev.allDay ? fmtDate(ev.date) : fmtDateTime(ev.start.toISOString());
+      const o = modal(`
+        <h2 style="margin-top:0;">Add to calendar</h2>
+        <p class="subtitle" style="margin-top:0;">${escapeHtml(ev.title)}<br>${escapeHtml(when)}</p>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+          ${opts.schedule ? `<button type="button" id="cal-schedule">Put on ${escapeHtml(opts.schedule.staffName)}'s Schedule</button>
+            <p class="subtitle" style="margin:-2px 0 4px; font-size:12px;">Shows on the team Schedule board for ${escapeHtml(fmtShortDate(opts.schedule.date))}.</p>` : ''}
+          <button type="button" class="secondary" id="cal-google">Add to Google Calendar</button>
+          <button type="button" class="secondary" id="cal-ics">Download for Outlook / Apple Calendar (.ics)</button>
+          <button type="button" class="secondary" id="cal-close">Close</button>
+        </div>`);
+      o.querySelector('#cal-close').addEventListener('click', () => o.remove());
+      o.querySelector('#cal-ics').addEventListener('click', () => downloadIcs(ev, 'follow-up.ics'));
+      o.querySelector('#cal-google').addEventListener('click', () => window.open(googleCalendarUrl(ev), '_blank', 'noopener'));
+      const sch = o.querySelector('#cal-schedule');
+      if (sch) sch.addEventListener('click', async () => {
+        sch.disabled = true; sch.textContent = 'Adding...';
+        try { await opts.schedule.run(); o.remove(); showToast('Added to the Schedule'); }
+        catch (err) { sch.disabled = false; sch.textContent = 'Try again'; alert('Could not add it: ' + err.message); }
+      });
+    }
+
+    // ---------- list view ----------
+    async function loadMeetings() {
+      const { data, error } = await supabaseClient.from('meetings')
+        .select('*, projects(id, name, job_number, quote_number), job_tasks(id, completed, followed_up_at)')
+        .order('meeting_date', { ascending: false }).order('created_at', { ascending: false });
+      if (error) { document.getElementById('mt-meetings').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      meetings = data || [];
+      renderMeetingList();
+    }
+    function renderMeetingList() {
+      const q = document.getElementById('mt-search').value.trim().toLowerCase();
+      const rows = meetings.filter(m => !q || [m.title, m.notes, m.location, m.projects ? projectRef(m.projects) : ''].join(' ').toLowerCase().includes(q));
+      const el = document.getElementById('mt-meetings');
+      if (!rows.length) { el.innerHTML = `<p class="subtitle">${meetings.length ? 'No meetings match.' : 'No meetings yet. Click "+ New meeting" after your next one.'}</p>`; return; }
+      el.innerHTML = rows.map(m => {
+        const acts = m.job_tasks || [];
+        const open = acts.filter(a => !a.completed).length;
+        const waiting = acts.filter(a => a.completed && !a.followed_up_at).length;
+        let status = '<span class="subtitle">No actions</span>';
+        if (acts.length) {
+          const parts = [];
+          if (open) parts.push(`<span class="mt-chip amber">${open} open</span>`);
+          if (waiting) parts.push(`<span class="mt-chip amber">${waiting} to confirm</span>`);
+          status = parts.length ? parts.join(' ') : '<span class="mt-chip green">All followed up</span>';
+        }
+        return `<div class="mt-list-row" data-id="${m.id}">
+          <div class="subtitle" style="margin:0;">${escapeHtml(fmtShortDate(m.meeting_date))}${m.meeting_time ? ' ' + escapeHtml(m.meeting_time.slice(0, 5)) : ''}</div>
+          <div><strong>${escapeHtml(m.title)}</strong></div>
+          <div class="subtitle" style="margin:0;">${m.projects ? escapeHtml(projectRef(m.projects)) : ''}</div>
+          <div>${status}</div>
+        </div>`;
+      }).join('');
+      el.querySelectorAll('.mt-list-row').forEach(r => r.addEventListener('click', () => openMeeting(r.dataset.id)));
+    }
+
+    // ---------- follow-ups tab ----------
+    async function loadFollowUps() {
+      const el = document.getElementById('mt-followups');
+      const { data, error } = await supabaseClient.from('job_tasks').select(ACTION_SELECT)
+        .not('meeting_id', 'is', null).order('due_date', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true });
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const filter = document.getElementById('mt-fu-filter').value;
+      let rows = data || [];
+      if (filter === 'open') rows = rows.filter(t => !t.completed);
+      else if (filter === 'confirm') rows = rows.filter(t => t.completed && !t.followed_up_at);
+      else if (filter === 'mine') rows = rows.filter(t => t.assigned_to_user_id === me && !t.followed_up_at);
+      const waitingCount = (data || []).filter(t => t.completed && !t.followed_up_at).length;
+      document.getElementById('mt-tab-followups').textContent = waitingCount ? `Follow-ups (${waitingCount} to confirm)` : 'Follow-ups';
+      if (!rows.length) { el.innerHTML = '<p class="subtitle">Nothing here.</p>'; return; }
+      el.innerHTML = rows.map(t => actionRow(t, true)).join('');
+      bindActionEvents(el, rows, null);
+    }
+
+    // ---------- action rows ----------
+    function actionStatus(t) {
+      const today = todayStr();
+      if (t.completed && t.followed_up_at) {
+        return `<span class="mt-chip green">Followed up${t.confirmer ? ' - confirmed by ' + escapeHtml(t.confirmer.full_name) : ''}</span>`;
+      }
+      if (t.completed) return '<span class="mt-chip amber">Done - waiting for confirmation</span>';
+      const chips = [];
+      if (t.due_date && t.due_date < today) chips.push('<span class="mt-chip red">Overdue</span>');
+      if (t.remind_at && new Date(t.remind_at) <= new Date()) chips.push('<span class="mt-chip amber">Reminder due</span>');
+      return chips.join(' ');
+    }
+    function actionRow(t, showMeeting) {
+      const who = t.assignee ? t.assignee.full_name : (t.assigned_to_role ? 'Role: ' + t.assigned_to_role : 'Unassigned');
+      const reminderDue = !t.completed && t.remind_at && new Date(t.remind_at) <= new Date();
+      return `<div class="mt-row" data-id="${t.id}">
+        <input type="checkbox" class="mt-check" data-act="toggle" data-id="${t.id}" ${t.completed ? 'checked' : ''} title="${t.completed ? 'Mark as not done' : 'Tick off when done'}" />
+        <div class="mt-main">
+          <div class="mt-desc ${t.completed ? 'done' : ''}">${escapeHtml(t.description)}</div>
+          <div class="mt-meta">
+            <span>${escapeHtml(who)}</span>
+            ${t.due_date ? `<span>Due ${escapeHtml(fmtShortDate(t.due_date))}</span>` : ''}
+            ${t.remind_at && !t.completed ? `<span>Reminder ${escapeHtml(fmtDateTime(t.remind_at))}</span>` : ''}
+            ${t.schedule_assignment_id ? '<span>On the Schedule</span>' : ''}
+            ${showMeeting && t.meetings ? `<a class="link-quiet" href="/meetings.html?id=${t.meeting_id}">From: ${escapeHtml(t.meetings.title)}</a>` : ''}
+            ${actionStatus(t)}
+          </div>
+          <div class="mt-btns">
+            ${t.completed && !t.followed_up_at ? `<button type="button" data-act="confirm" data-id="${t.id}">Confirm followed up</button>` : ''}
+            ${reminderDue ? `<button type="button" class="secondary" data-act="snooze1" data-id="${t.id}">Snooze 1 day</button><button type="button" class="secondary" data-act="snooze7" data-id="${t.id}">Snooze 1 week</button>` : ''}
+            ${!t.completed ? `<button type="button" class="secondary" data-act="calendar" data-id="${t.id}">Calendar</button>` : ''}
+            <button type="button" class="secondary" data-act="edit" data-id="${t.id}">Edit</button>
+            <button type="button" class="secondary" data-act="delete" data-id="${t.id}">Delete</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // `after` re-renders whichever view we're on. meeting is only set in the
+    // detail view (needed for calendar details / editing).
+    function bindActionEvents(container, tasks, meeting) {
+      const refresh = async () => { if (meeting) await renderActions(meeting); else await loadFollowUps(); };
+      container.querySelectorAll('[data-act]').forEach(el => {
+        const handler = async (e) => {
+          const t = tasks.find(x => x.id === el.dataset.id);
+          if (!t) return;
+          const act = el.dataset.act;
+          if (act === 'toggle') {
+            const done = el.checked;
+            await supabaseClient.from('job_tasks').update(done
+              ? { completed: true, completed_by: me, completed_at: new Date().toISOString() }
+              : { completed: false, completed_by: null, completed_at: null, followed_up_at: null, followed_up_by: null }).eq('id', t.id);
+            await refresh();
+          } else if (act === 'confirm') {
+            await supabaseClient.from('job_tasks').update({ followed_up_at: new Date().toISOString(), followed_up_by: me }).eq('id', t.id);
+            showToast('Marked as followed up');
+            await refresh();
+          } else if (act === 'snooze1' || act === 'snooze7') {
+            const next = new Date(); next.setDate(next.getDate() + (act === 'snooze1' ? 1 : 7)); next.setHours(8, 0, 0, 0);
+            await supabaseClient.from('job_tasks').update({ remind_at: next.toISOString() }).eq('id', t.id);
+            showToast('Reminder moved to ' + fmtDateTime(next.toISOString()));
+            await refresh();
+          } else if (act === 'edit') {
+            openActionPanel(t.meetings ? { id: t.meeting_id, project_id: meeting ? meeting.project_id : null } : meeting, t, refresh);
+          } else if (act === 'calendar') {
+            openCalendarPanel(actionEvent(t), { schedule: scheduleOption(t, refresh) });
+          } else if (act === 'delete') {
+            if (!confirm('Delete this action?')) return;
+            if (t.schedule_assignment_id) { try { await supabaseClient.from('schedule_assignments').delete().eq('id', t.schedule_assignment_id); } catch (err) { /* not allowed for this role - leave it */ } }
+            await supabaseClient.from('job_tasks').delete().eq('id', t.id);
+            await refresh();
+          }
+        };
+        el.addEventListener(el.dataset.act === 'toggle' ? 'change' : 'click', handler);
+      });
+    }
+
+    // Putting it on the team Schedule board is for admin/finance/sales (the
+    // schedule's own rule); everyone else gets Google / .ics only.
+    function scheduleOption(t, refresh) {
+      if (!isPricingRole(myRole) || !t.assigned_to_user_id || !t.due_date || t.schedule_assignment_id) return null;
+      const start = t.remind_at ? toLocalInput(t.remind_at).slice(11) : '09:00';
+      const [h, m] = start.split(':').map(Number);
+      const endH = Math.min(h + 1, 23);
+      return {
+        staffName: nameOf(t.assigned_to_user_id) || 'their',
+        date: t.due_date,
+        run: async () => {
+          const { data, error } = await supabaseClient.from('schedule_assignments').insert({
+            staff_id: t.assigned_to_user_id, project_id: null, block_type: 'office',
+            note: `Follow up: ${t.description}`.slice(0, 200), assignment_date: t.due_date,
+            start_time: `${pad2(h)}:${pad2(m)}`, end_time: `${pad2(endH)}:${pad2(m)}`,
+          }).select('id').single();
+          if (error) throw error;
+          await supabaseClient.from('job_tasks').update({ schedule_assignment_id: data.id }).eq('id', t.id);
+          await refresh();
+        },
+      };
+    }
+
+    // ---------- add / edit one action ----------
+    function openActionPanel(meeting, task, onDone) {
+      const editing = !!task;
+      const o = modal(`
+        <h2 style="margin-top:0;">${editing ? 'Edit action' : 'Add action'}</h2>
+        <label style="margin-top:0;">What needs doing</label>
+        <input id="ap-desc" value="${editing ? escapeHtml(task.description) : ''}" placeholder="e.g. Send Bob the revised quote" />
+        <label>Who is responsible</label>
+        <select id="ap-who">${staffOptions(editing ? task.assigned_to_user_id : null, 'Nobody yet - anyone can pick it up')}</select>
+        <label>Due date</label>
+        <input type="date" id="ap-due" value="${editing && task.due_date ? task.due_date : ''}" />
+        <label>Remind them</label>
+        <input type="datetime-local" id="ap-remind" value="${editing ? toLocalInput(task.remind_at) : ''}" />
+        <div class="mt-chips">
+          <button type="button" class="secondary" data-preset="due-morning">Morning of due date</button>
+          <button type="button" class="secondary" data-preset="due-before">Day before due</button>
+          <button type="button" class="secondary" data-preset="week">In 1 week</button>
+          <button type="button" class="secondary" data-preset="none">No reminder</button>
+        </div>
+        <p class="subtitle" style="font-size:12px;">They see the reminder on their Home page once it is due, until they tick it off.</p>
+        <div style="margin-top:14px;">
+          <button type="button" id="ap-save">${editing ? 'Save' : 'Add action'}</button>
+          <button type="button" class="secondary" id="ap-cancel">Cancel</button>
+        </div>
+        <div id="ap-msg"></div>`);
+      const setRemind = (iso8, daysOffset) => {
+        const due = o.querySelector('#ap-due').value;
+        if (!due) { o.querySelector('#ap-msg').innerHTML = '<div class="error-box">Pick a due date first.</div>'; return; }
+        o.querySelector('#ap-msg').innerHTML = '';
+        o.querySelector('#ap-remind').value = `${addDays(due, daysOffset)}T08:00`;
+      };
+      o.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => {
+        const p = b.dataset.preset;
+        if (p === 'none') o.querySelector('#ap-remind').value = '';
+        else if (p === 'week') o.querySelector('#ap-remind').value = `${addDays(todayStr(), 7)}T08:00`;
+        else setRemind(null, p === 'due-before' ? -1 : 0);
+      }));
+      o.querySelector('#ap-cancel').addEventListener('click', () => o.remove());
+      o.querySelector('#ap-save').addEventListener('click', async () => {
+        const msg = o.querySelector('#ap-msg');
+        const description = o.querySelector('#ap-desc').value.trim();
+        if (!description) { msg.innerHTML = '<div class="error-box">Enter what needs doing.</div>'; return; }
+        const who = o.querySelector('#ap-who').value || null;
+        const payload = {
+          description, assigned_to_user_id: who, due_date: o.querySelector('#ap-due').value || null,
+          remind_at: fromLocalInput(o.querySelector('#ap-remind').value),
+        };
+        const btn = o.querySelector('#ap-save'); btn.disabled = true;
+        const res = editing
+          ? await supabaseClient.from('job_tasks').update(payload).eq('id', task.id)
+          : await supabaseClient.from('job_tasks').insert({ ...payload, meeting_id: meeting.id, project_id: meeting.project_id || null, task_type: 'prejob', created_by: me });
+        if (res.error) { msg.innerHTML = `<div class="error-box">${escapeHtml(res.error.message)}</div>`; btn.disabled = false; return; }
+        o.remove();
+        if (onDone) await onDone();
+      });
+      setTimeout(() => o.querySelector('#ap-desc').focus(), 30);
+    }
+
+    // Several at once: one per line. Lines starting with a bullet / dash /
+    // checkbox in the notes are offered up automatically.
+    function actionLinesFromNotes(notes) {
+      return String(notes || '').split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(l => /^([-*\u2022]|\[ ?\]|todo\b|action\b)/i.test(l))
+        .map(l => l.replace(/^([-*\u2022]\s*(\[ ?\]\s*)?|\[ ?\]\s*|todo:?\s*|action:?\s*)/i, '').trim())
+        .filter(Boolean);
+    }
+    function openBulkPanel(meeting, notesText, onDone) {
+      const lines = actionLinesFromNotes(notesText);
+      const o = modal(`
+        <h2 style="margin-top:0;">Add several actions</h2>
+        <p class="subtitle" style="margin-top:0;">One action per line.${lines.length ? ` Pulled in ${lines.length} line${lines.length === 1 ? '' : 's'} from your notes that start with a dash, bullet or "todo".` : ' Tip: start lines in your notes with a dash and they will be pulled in here.'}</p>
+        <textarea id="bk-lines" style="min-height:140px;" placeholder="Send Bob the revised quote&#10;Order the 24 pole RCD board&#10;Book the switchboard inspection">${escapeHtml(lines.join('\n'))}</textarea>
+        <label>Give them all to</label>
+        <select id="bk-who">${staffOptions(null, 'Nobody yet - I will assign them after')}</select>
+        <label>Due date (optional)</label>
+        <input type="date" id="bk-due" />
+        <div style="margin-top:14px;">
+          <button type="button" id="bk-save">Add actions</button>
+          <button type="button" class="secondary" id="bk-cancel">Cancel</button>
+        </div>
+        <div id="bk-msg"></div>`);
+      o.querySelector('#bk-cancel').addEventListener('click', () => o.remove());
+      o.querySelector('#bk-save').addEventListener('click', async () => {
+        const rows = o.querySelector('#bk-lines').value.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (!rows.length) { o.querySelector('#bk-msg').innerHTML = '<div class="error-box">Add at least one line.</div>'; return; }
+        const who = o.querySelector('#bk-who').value || null, due = o.querySelector('#bk-due').value || null;
+        const { error } = await supabaseClient.from('job_tasks').insert(rows.map(description => ({
+          description, assigned_to_user_id: who, due_date: due, meeting_id: meeting.id, project_id: meeting.project_id || null, task_type: 'prejob', created_by: me,
+        })));
+        if (error) { o.querySelector('#bk-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        o.remove();
+        if (onDone) await onDone();
+      });
+    }
+
+    // ---------- meeting detail ----------
+    let currentMeeting = null;
+    async function openMeeting(id, prefill) {
+      document.getElementById('mt-list-view').style.display = 'none';
+      const view = document.getElementById('mt-detail-view');
+      view.style.display = 'block';
+      view.innerHTML = '<p class="subtitle">Loading...</p>';
+      let m = null;
+      if (id) {
+        const { data, error } = await supabaseClient.from('meetings').select('*, projects(id, name, job_number, quote_number)').eq('id', id).maybeSingle();
+        if (error || !data) { view.innerHTML = `<div class="error-box">Could not open that meeting.</div><p><a href="/meetings.html">Back to meetings</a></p>`; return; }
+        m = data;
+      }
+      currentMeeting = m;
+      if (!window.__mtNavigating) history.pushState({}, '', id ? `/meetings.html?id=${id}` : '/meetings.html?new=1');
+      renderDetail(m, prefill || {});
+    }
+    function closeMeeting() {
+      document.getElementById('mt-detail-view').style.display = 'none';
+      document.getElementById('mt-list-view').style.display = 'block';
+      currentMeeting = null;
+      if (!window.__mtNavigating) history.pushState({}, '', '/meetings.html');
+      loadMeetings();
+      if (currentTab === 'followups') loadFollowUps();
+    }
+
+    function renderDetail(m, prefill) {
+      const view = document.getElementById('mt-detail-view');
+      const isNew = !m;
+      const proj = isNew ? (prefill.project || null) : m.projects;
+      let projectId = isNew ? (prefill.project ? prefill.project.id : null) : m.project_id;
+      const attendees = new Set(isNew ? [me] : (m.attendee_ids || []));
+      view.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+          <a href="/meetings.html" id="mt-back" class="link-quiet">&larr; All meetings</a>
+          ${isNew ? '' : '<div style="display:flex; gap:6px;"><button type="button" class="secondary" id="mt-cal" style="font-size:12px; padding:6px 10px;">Add meeting to calendar</button><button type="button" class="secondary" id="mt-delete" style="font-size:12px; padding:6px 10px;">Delete meeting</button></div>'}
+        </div>
+        <div class="card">
+          <h2 style="margin-top:0;">${isNew ? 'New meeting' : 'Meeting'}</h2>
+          <label style="margin-top:0;">Title</label>
+          <input id="md-title" value="${isNew ? '' : escapeHtml(m.title)}" placeholder="e.g. Site meeting with Bob about the switchboard" />
+          <div class="grid cols-2">
+            <div><label>Date</label><input type="date" id="md-date" value="${isNew ? todayStr() : m.meeting_date}" /></div>
+            <div><label>Time (optional)</label><input type="time" id="md-time" value="${!isNew && m.meeting_time ? m.meeting_time.slice(0, 5) : ''}" /></div>
+          </div>
+          <label>Where (optional)</label>
+          <input id="md-location" value="${isNew ? '' : escapeHtml(m.location || '')}" placeholder="Site address, office, phone call..." />
+          <label>Job (optional)</label>
+          <input id="md-job-search" placeholder="Search job number, name, client..." autocomplete="off" value="${proj ? escapeHtml(projectRef(proj)) : ''}" />
+          <div id="md-job-results"></div>
+          <p class="subtitle" id="md-job-selected" style="margin:4px 0 0;">${proj ? 'Linked to ' + escapeHtml(projectRef(proj)) + ' - <a href="#" id="md-job-clear">remove</a>' : ''}</p>
+          <label>Who was there</label>
+          <div class="mt-attendees" id="md-attendees">
+            ${staff.map(s => `<label><input type="checkbox" value="${s.id}" ${attendees.has(s.id) ? 'checked' : ''} /> ${escapeHtml(s.full_name || 'Unnamed')}</label>`).join('')}
+          </div>
+          <label>Notes</label>
+          <textarea id="md-notes" style="min-height:200px;" placeholder="What was discussed and decided. Start a line with a dash to list something that needs doing, then use Add several actions to turn those lines into follow-ups.">${isNew ? '' : escapeHtml(m.notes || '')}</textarea>
+          <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button type="button" id="md-save">${isNew ? 'Save meeting' : 'Save changes'}</button>
+            <span id="md-msg"></span>
+          </div>
+        </div>
+        <div class="card" id="md-actions-card">
+          ${isNew ? '<h2 style="margin-top:0;">Actions</h2><p class="subtitle" style="margin:0;">Save the meeting first, then add the actions that came out of it.</p>' : `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+              <h2 style="margin:0;">Actions</h2>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="secondary" id="md-bulk" style="font-size:12px; padding:6px 10px;">Add several</button>
+                <button type="button" id="md-add" style="font-size:12px; padding:6px 10px;">+ Add action</button>
+              </div>
+            </div>
+            <p class="subtitle" style="margin-top:0;">Each action goes to its person's Tasks and Home page. They tick it off, then you confirm it was followed up.</p>
+            <div id="md-actions"><p class="subtitle">Loading...</p></div>`}
+        </div>`;
+
+      document.getElementById('mt-back').addEventListener('click', (e) => { e.preventDefault(); closeMeeting(); });
+
+      // job picker
+      const search = document.getElementById('md-job-search');
+      let timer;
+      search.addEventListener('input', () => {
+        clearTimeout(timer);
+        const q = search.value.trim(), res = document.getElementById('md-job-results');
+        if (q.length < 2) { res.innerHTML = ''; return; }
+        timer = setTimeout(async () => {
+          const found = await searchProjects(q);
+          res.innerHTML = found.length ? `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">${found.map(p => `<div class="md-job-pick" data-id="${p.id}" data-label="${escapeHtml(projectRef(p))}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))} <span class="subtitle">${escapeHtml(p.client_name || '')}</span></div>`).join('')}</div>` : '<p class="subtitle" style="margin-top:4px;">No matches.</p>';
+          res.querySelectorAll('.md-job-pick').forEach(r => r.addEventListener('click', () => {
+            projectId = r.dataset.id; search.value = r.dataset.label; res.innerHTML = '';
+            document.getElementById('md-job-selected').innerHTML = `Linked to ${r.dataset.label} - <a href="#" id="md-job-clear">remove</a>`;
+            bindClear();
+          }));
+        }, 250);
+      });
+      function bindClear() {
+        const c = document.getElementById('md-job-clear');
+        if (c) c.addEventListener('click', (e) => { e.preventDefault(); projectId = null; search.value = ''; document.getElementById('md-job-selected').innerHTML = ''; });
+      }
+      bindClear();
+
+      document.getElementById('md-save').addEventListener('click', async () => {
+        const msg = document.getElementById('md-msg');
+        const title = document.getElementById('md-title').value.trim();
+        if (!title) { msg.innerHTML = '<span style="color:var(--red);">Give the meeting a title.</span>'; return; }
+        const payload = {
+          title, meeting_date: document.getElementById('md-date').value || todayStr(),
+          meeting_time: document.getElementById('md-time').value || null,
+          location: document.getElementById('md-location').value.trim() || null,
+          project_id: projectId || null,
+          attendee_ids: [...document.querySelectorAll('#md-attendees input:checked')].map(i => i.value),
+          notes: document.getElementById('md-notes').value,
+        };
+        const btn = document.getElementById('md-save'); btn.disabled = true;
+        let res;
+        if (isNew) res = await supabaseClient.from('meetings').insert({ ...payload, created_by: me }).select('id').single();
+        else res = await supabaseClient.from('meetings').update(payload).eq('id', m.id).select('id').single();
+        btn.disabled = false;
+        if (res.error) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(res.error.message)}</span>`; return; }
+        if (isNew) { await openMeeting(res.data.id); showToast('Meeting saved. Now add the actions.'); }
+        else {
+          // keep actions' job in step with the meeting's job
+          await supabaseClient.from('job_tasks').update({ project_id: payload.project_id }).eq('meeting_id', m.id);
+          msg.innerHTML = '<span style="color:#3fb97a;">Saved</span>';
+          currentMeeting = { ...m, ...payload };
+          setTimeout(() => { msg.innerHTML = ''; }, 2000);
+        }
+      });
+
+      if (!isNew) {
+        document.getElementById('mt-delete').addEventListener('click', async () => {
+          if (!confirm('Delete this meeting and all of its actions?')) return;
+          await supabaseClient.from('meetings').delete().eq('id', m.id);
+          closeMeeting();
+        });
+        document.getElementById('mt-cal').addEventListener('click', () => openCalendarPanel(meetingEvent(currentMeeting || m), {}));
+        document.getElementById('md-add').addEventListener('click', () => openActionPanel(currentMeeting || m, null, () => renderActions(currentMeeting || m)));
+        document.getElementById('md-bulk').addEventListener('click', () => openBulkPanel(currentMeeting || m, document.getElementById('md-notes').value, () => renderActions(currentMeeting || m)));
+        renderActions(m);
+      }
+    }
+
+    async function renderActions(m) {
+      const el = document.getElementById('md-actions');
+      if (!el) return;
+      const { data, error } = await supabaseClient.from('job_tasks').select(ACTION_SELECT).eq('meeting_id', m.id).order('created_at', { ascending: true });
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const tasks = data || [];
+      if (!tasks.length) { el.innerHTML = '<p class="subtitle">No actions yet.</p>'; return; }
+      // open first, then waiting for confirmation, then fully followed up
+      const rank = (t) => (!t.completed ? 0 : (!t.followed_up_at ? 1 : 2));
+      tasks.sort((a, b) => rank(a) - rank(b));
+      el.innerHTML = tasks.map(t => actionRow(t, false)).join('');
+      bindActionEvents(el, tasks, currentMeeting || m);
+    }
+
+    // ---------- tabs / boot ----------
+    function setTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.mt-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      document.getElementById('mt-meetings-card').style.display = tab === 'meetings' ? 'block' : 'none';
+      document.getElementById('mt-followups-card').style.display = tab === 'followups' ? 'block' : 'none';
+      if (tab === 'followups') loadFollowUps();
+    }
+
+    async function routeFromUrl() {
+      const params = new URLSearchParams(location.search);
+      window.__mtNavigating = true;
+      try {
+        if (params.get('id')) await openMeeting(params.get('id'));
+        else if (params.get('new')) {
+          let project = null;
+          if (params.get('project')) {
+            const { data } = await supabaseClient.from('projects').select('id, name, job_number, quote_number').eq('id', params.get('project')).maybeSingle();
+            project = data;
+          }
+          await openMeeting(null, { project });
+        } else {
+          document.getElementById('mt-detail-view').style.display = 'none';
+          document.getElementById('mt-list-view').style.display = 'block';
+          await loadMeetings();
+        }
+      } finally { window.__mtNavigating = false; }
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      me = session.user.id;
+      syncThemeFromProfile();
+      renderMainNav('meetings');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      myRole = await getMyRole();
+      const { data } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
+      staff = data || [];
+      staff.forEach(s => { staffById[s.id] = s; });
+
+      document.getElementById('new-meeting-btn').addEventListener('click', () => openMeeting(null));
+      document.querySelectorAll('.mt-tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+      document.getElementById('mt-search').addEventListener('input', renderMeetingList);
+      document.getElementById('mt-fu-filter').addEventListener('change', loadFollowUps);
+      window.addEventListener('popstate', routeFromUrl);
+      await routeFromUrl();
+      // number on the Follow-ups tab even before it is opened
+      supabaseClient.from('job_tasks').select('id', { count: 'exact', head: true }).not('meeting_id', 'is', null).eq('completed', true).is('followed_up_at', null)
+        .then(({ count }) => { if (count) document.getElementById('mt-tab-followups').textContent = `Follow-ups (${count} to confirm)`; });
+    })();
+  </script>
+</body>
+</html>

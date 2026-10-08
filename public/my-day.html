@@ -100,7 +100,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=44"></script>
+  <script src="/js/supabase-client.js?v=45"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -442,6 +442,8 @@
             ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>` : `<span>${task.description}</span>`}
             <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
               ${jobLabel}
+              ${task.meetings ? ` &middot; <a href="/meetings.html?id=${task.meeting_id}" class="link-quiet">Meeting: ${escapeHtml(task.meetings.title)}</a>` : ''}
+              ${task.remind_at && new Date(task.remind_at) <= new Date() ? ' &middot; <span style="color:var(--red);">Reminder due</span>' : ''}
               ${task.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
             </p>
           </div>
@@ -455,7 +457,7 @@
     async function loadTasks() {
       const { data: allTasks, error } = await supabaseClient
         .from('job_tasks')
-        .select('*, projects(name, job_number)')
+        .select('*, projects(name, job_number), meetings(id, title)')
         .eq('completed', false)
         .order('required_before_scheduling', { ascending: false })
         .order('created_at', { ascending: true });

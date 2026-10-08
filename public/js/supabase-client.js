@@ -1529,6 +1529,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;' },
   { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html', icon: '&#128230;' },
   { key: 'tasks', label: 'Tasks', href: '/tasks.html', icon: '&#9989;' },
+  { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;' },
   { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;' },
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;' },
   { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;' },

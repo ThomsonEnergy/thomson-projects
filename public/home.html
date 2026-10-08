@@ -86,7 +86,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=44"></script>
+  <script src="/js/supabase-client.js?v=45"></script>
   <script src="/js/feed.js?v=4"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -341,6 +341,28 @@
       if (myTasks && myTasks.length) {
         items.push({ group: 'job', label: `${myTasks.length} task${myTasks.length === 1 ? '' : 's'} assigned to you`, link: '/tasks.html' });
       }
+
+      // Follow-ups from meetings: reminders that have come due, anything
+      // overdue, and (for whoever ran the meeting) done items waiting for a
+      // "yes, that was followed up" confirmation.
+      try {
+        const nowIso = new Date().toISOString();
+        const { data: meetingActs } = await supabaseClient.from('job_tasks')
+          .select('id, description, due_date, remind_at, completed, followed_up_at, assigned_to_user_id, meeting_id, meetings(id, title, created_by)')
+          .not('meeting_id', 'is', null).is('followed_up_at', null);
+        let awaiting = 0, awaitingMeeting = null;
+        (meetingActs || []).forEach(t => {
+          const link = `/meetings.html?id=${t.meeting_id}`;
+          const title = t.meetings ? escapeHtml(t.meetings.title) : 'a meeting';
+          const snippet = escapeHtml(t.description.length > 60 ? t.description.slice(0, 60) + '...' : t.description);
+          if (!t.completed && t.assigned_to_user_id === myUserId) {
+            if (t.due_date && t.due_date < todayStr) items.push({ group: 'job', label: `Overdue follow-up from "${title}": ${snippet}`, link });
+            else if (t.remind_at && t.remind_at <= nowIso) items.push({ group: 'job', label: `Reminder, follow up from "${title}": ${snippet}`, link });
+          }
+          if (t.completed && t.meetings && t.meetings.created_by === myUserId) { awaiting++; awaitingMeeting = awaitingMeeting === null ? t.meeting_id : (awaitingMeeting === t.meeting_id ? awaitingMeeting : ''); }
+        });
+        if (awaiting) items.push({ group: 'job', label: `${awaiting} meeting follow-up${awaiting === 1 ? '' : 's'} done and waiting for you to confirm`, link: awaitingMeeting ? `/meetings.html?id=${awaitingMeeting}` : '/meetings.html' });
+      } catch (err) { console.error('Meeting follow-up check failed:', err); }
 
       // Posts someone's tagged you in that you haven't opened yet.
       try {
