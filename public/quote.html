@@ -199,7 +199,7 @@
           ${centres.map(c => `<tr><td>${c.name}, due on completion</td><td class="num">${money(c.quoted_amount * (1 - depositPercent / 100))}</td></tr>`).join('')}
         `;
 
-      const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials' || template === 'service_work') ? '' : `
+      const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials') ? '' : `
         <div class="card">
           <h2>Payment schedule</h2>
           <table>

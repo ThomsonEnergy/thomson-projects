@@ -358,8 +358,8 @@
         photoCategory: 'electrical', singleStage: false, showDeposit: true, showPylon: false,
       },
       service_work: {
-        note: 'Single-stage service call or repair, no deposit. Asks about urgency, access and parts, and sets up the pre-visit and sign-off tasks.',
-        photoCategory: 'electrical', singleStage: true, showDeposit: false, showPylon: false,
+        note: 'Single-stage service call or repair with a deposit. Asks about urgency, access and parts, and sets up the pre-visit and sign-off tasks.',
+        photoCategory: 'electrical', singleStage: true, showDeposit: true, showPylon: false,
       },
       quick_estimate: {
         note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page - invoiced from actual hours and materials, not this figure.',
@@ -370,7 +370,8 @@
       },
     };
 
-    function applyTemplate(template) {
+    function applyTemplate(template, applyDefaults = false) {
+      const prevTemplate = currentTemplate;
       currentTemplate = template;
       document.querySelectorAll('.template-option').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.template === template);
@@ -388,6 +389,7 @@
       const depositCard = document.getElementById('deposit-card');
       if (depositCard) depositCard.style.display = info.showDeposit ? 'block' : 'none';
       if (!info.showDeposit) document.getElementById('p-deposit').value = 0;
+      else if (applyDefaults) applyTemplatePaymentDefaults(prevTemplate, template);
 
       const disclaimerCard = document.getElementById('estimate-disclaimer-card');
       const disclaimerField = document.getElementById('p-estimate-disclaimer');
@@ -412,7 +414,7 @@
     }
 
     document.querySelectorAll('.template-option').forEach(btn => {
-      btn.addEventListener('click', () => applyTemplate(btn.dataset.template));
+      btn.addEventListener('click', () => applyTemplate(btn.dataset.template, true));
     });
 
     // ---------- line items ----------
@@ -1434,7 +1436,7 @@
       } else {
         const params = new URLSearchParams(window.location.search);
         const requestedTemplate = params.get('template') || 'new_build';
-        applyTemplate(requestedTemplate);
+        applyTemplate(requestedTemplate, true);
         document.getElementById('p-terms').value = companySettings.default_terms || '';
         ['Site Power', 'Rough In', 'Fit Off', 'Finishing Touches'].forEach(n => addRow({ name: n }));
         updateTotal();

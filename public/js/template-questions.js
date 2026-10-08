@@ -69,3 +69,55 @@ function templateAnswersSummaryHtml(template, answers) {
   ).join('');
   return rows ? `<table><tbody>${rows}</tbody></table>` : `<p class="subtitle">No answers recorded yet.</p>`;
 }
+
+// Default deposit % and payment milestones for each template, pre-filled in
+// the quote editor (new-project.html / project.html) and editable per quote
+// from there. Milestones are what the client sees on the quote's payment
+// schedule - everything is invoiced after completion of each milestone, or
+// as a progress claim at the end of the month (see the schedule's footnote
+// in quote.html). The deposit % is what's actually auto-invoiced on approval.
+const TEMPLATE_PAYMENT_DEFAULTS = {
+  new_build: { deposit: 10, milestones: [] },
+  renovation: { deposit: 10, milestones: [] },
+  service_work: { deposit: 10, milestones: [] },
+  solar: {
+    deposit: 10,
+    milestones: [
+      { label: 'Deposit, due on acceptance', percent: 10 },
+      { label: 'On ordering materials', percent: 40 },
+      { label: 'On installation complete', percent: 30 },
+      { label: 'On commissioning and handover', percent: 20 },
+    ],
+  },
+  quick_estimate: { deposit: 0, milestones: [] },
+};
+
+// Fills the deposit field and milestone rows with the new template's
+// defaults - but only where the person hasn't changed them: the deposit is
+// replaced only if it's blank or still the previous template's default, and
+// the milestones only if there are none or they're still the previous
+// template's untouched defaults. Relies on the page's own milestoneRowHtml /
+// wireMilestoneRows / refreshMilestoneTotal.
+function applyTemplatePaymentDefaults(prevTemplate, template) {
+  const prev = TEMPLATE_PAYMENT_DEFAULTS[prevTemplate] || { deposit: null, milestones: [] };
+  const next = TEMPLATE_PAYMENT_DEFAULTS[template];
+  if (!next) return;
+
+  const depositEl = document.getElementById('p-deposit');
+  if (depositEl && next.deposit > 0 && (depositEl.value === '' || Number(depositEl.value) === Number(prev.deposit) || Number(depositEl.value) === 0)) {
+    depositEl.value = next.deposit;
+  }
+
+  const rowsEl = document.getElementById('milestone-rows');
+  if (!rowsEl) return;
+  const current = [...rowsEl.querySelectorAll('.milestone-row')].map(r => ({
+    label: r.querySelector('.milestone-label').value.trim(),
+    percent: parseFloat(r.querySelector('.milestone-percent').value) || 0,
+  }));
+  const untouched = current.length === prev.milestones.length &&
+    current.every((m, i) => m.label === prev.milestones[i].label && m.percent === prev.milestones[i].percent);
+  if (!untouched) return;
+  rowsEl.innerHTML = next.milestones.map(m => milestoneRowHtml(m)).join('');
+  wireMilestoneRows();
+  refreshMilestoneTotal();
+}
