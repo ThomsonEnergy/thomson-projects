@@ -704,6 +704,8 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   const shapes = initialShapes ? JSON.parse(JSON.stringify(initialShapes)) : [];
   let current = null;
   let dragging = null; // { shape, x, y } while the Move tool is dragging a shape
+  let selected = null; // the shape the Move tool last picked (shows resize handles)
+  let resizing = null; // { shape, orig, handle, anchor, handleOrig } while a handle is dragged
   let cableDraft = null; // a cable path being clicked out, point by point
   let currentSymbol = plan ? ELECTRICAL_SYMBOLS[0].id : null;
   let cableType = plan ? CABLE_TYPES[0] : '';
@@ -866,7 +868,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     const t = len2 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2)) : 0;
     return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
   }
-  function shapeBounds(s) {
+  function shapeBounds(s, padded = true) {
     let x1, y1, x2, y2;
     if (s.points) {
       const xs = s.points.map(p => p[0]), ys = s.points.map(p => p[1]);
@@ -882,8 +884,33 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     } else {
       x1 = Math.min(s.x1, s.x2); x2 = Math.max(s.x1, s.x2); y1 = Math.min(s.y1, s.y2); y2 = Math.max(s.y1, s.y2);
     }
-    const pad = Math.max((s.width || 4) * 2, 14);
+    const pad = padded ? Math.max((s.width || 4) * 2, 14) : 0;
     return { x1: x1 - pad, y1: y1 - pad, x2: x2 + pad, y2: y2 + pad };
+  }
+  const isLineShape = (s) => s.type === 'arrow' || s.type === 'measure' || s.type === 'scale';
+  // Resize handles: both ends of a line/arrow/measure/scale, otherwise the
+  // four corners of the shape (TL, TR, BR, BL).
+  function handlePoints(s) {
+    if (isLineShape(s)) return [[s.x1, s.y1], [s.x2, s.y2]];
+    const b = shapeBounds(s, false);
+    return [[b.x1, b.y1], [b.x2, b.y1], [b.x2, b.y2], [b.x1, b.y2]];
+  }
+  // Dragging a corner scales the shape about the opposite corner (a box just
+  // takes the new corner; lines move the end that was grabbed).
+  function applyResize(p) {
+    const { shape: sh, orig, handle, anchor, handleOrig } = resizing;
+    if (isLineShape(sh)) {
+      if (handle === 0) { sh.x1 = p[0]; sh.y1 = p[1]; } else { sh.x2 = p[0]; sh.y2 = p[1]; }
+      return;
+    }
+    if (sh.type === 'box') { sh.x1 = anchor[0]; sh.y1 = anchor[1]; sh.x2 = p[0]; sh.y2 = p[1]; return; }
+    const d0 = Math.hypot(handleOrig[0] - anchor[0], handleOrig[1] - anchor[1]) || 1;
+    const f = Math.max(0.1, Math.hypot(p[0] - anchor[0], p[1] - anchor[1]) / d0);
+    const sc = (v, a) => a + (v - a) * f;
+    if (orig.points) sh.points = orig.points.map(([x, y]) => [sc(x, anchor[0]), sc(y, anchor[1])]);
+    else { sh.x1 = sc(orig.x1, anchor[0]); sh.y1 = sc(orig.y1, anchor[1]); }
+    if (sh.type === 'symbol' || sh.type === 'schedule') { sh.side = Math.max(8, orig.side * f); sh.width = Math.max(1.5, sh.side * 0.06); }
+    else if (sh.type === 'text') sh.width = Math.max(1, orig.width * f);
   }
   function moveShape(s, dx, dy) {
     if (s.points) s.points = s.points.map(([x, y]) => [x + dx, y + dy]);
@@ -930,11 +957,17 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     shapes.forEach(drawShape);
     if (current) drawShape(current);
     if (cableDraft) drawShape(cableDraft);
-    if (dragging) {
-      const b = shapeBounds(dragging.shape);
+    if (selected && tool === 'move') {
+      const b = shapeBounds(selected);
+      const hs = Math.max(8, W / 110);
       ctx.save();
       ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = Math.max(2, W / 600); ctx.setLineDash([8, 6]);
-      ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+      if (!isLineShape(selected)) ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+      ctx.setLineDash([]);
+      handlePoints(selected).forEach(([hx, hy]) => {
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+        ctx.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
+      });
       ctx.restore();
     }
     updateCounts();
@@ -952,6 +985,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   }
   function setTool(t) {
     if (cableDraft && t !== 'cable') cableDraft = null;
+    if (t !== 'move') selected = null;
     tool = t;
     refreshControls(); redraw();
   }
@@ -966,7 +1000,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   overlay.querySelectorAll('.mk-size').forEach(b => b.addEventListener('click', () => { sizeIdx = parseInt(b.dataset.i); refreshControls(); }));
   overlay.querySelector('#mk-undo').addEventListener('click', () => {
     if (cableDraft) { cableDraft.points.pop(); if (!cableDraft.points.length) cableDraft = null; refreshControls(); redraw(); return; }
-    shapes.pop(); redraw();
+    shapes.pop(); selected = null; redraw();
   });
   overlay.querySelector('#mk-cancel').addEventListener('click', () => overlay.remove());
 
@@ -1038,8 +1072,24 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   canvas.addEventListener('pointerdown', (e) => {
     const [x, y] = pos(e);
     if (tool === 'move') {
+      // A corner/end handle of the selected shape resizes it...
+      if (selected) {
+        const hs = handlePoints(selected);
+        const reach = Math.max(14, W / 70);
+        const idx = hs.findIndex(([hx, hy]) => Math.hypot(x - hx, y - hy) <= reach);
+        if (idx >= 0) {
+          canvas.setPointerCapture(e.pointerId);
+          resizing = {
+            shape: selected, orig: JSON.parse(JSON.stringify(selected)), handle: idx,
+            anchor: isLineShape(selected) ? null : hs[(idx + 2) % 4], handleOrig: hs[idx],
+          };
+          return;
+        }
+      }
+      // ...anything else picks a shape (and drags it), or clears the selection.
       const hit = shapeAt(x, y);
-      if (!hit) return;
+      selected = hit;
+      if (!hit) { redraw(); return; }
       canvas.setPointerCapture(e.pointerId);
       dragging = { shape: hit, x, y };
       redraw();
@@ -1080,6 +1130,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   });
   canvas.addEventListener('pointermove', (e) => {
     const [x, y] = pos(e);
+    if (resizing) { applyResize([x, y]); redraw(); return; }
     if (dragging) {
       moveShape(dragging.shape, x - dragging.x, y - dragging.y);
       dragging.x = x; dragging.y = y;
@@ -1104,6 +1155,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     }
   });
   const finish = () => {
+    if (resizing) { resizing = null; redraw(); return; }
     if (dragging) { dragging = null; redraw(); return; }
     if (!current) return;
     const s = current;
@@ -1132,7 +1184,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     const msgEl = overlay.querySelector('#mk-msg');
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; msgEl.textContent = '';
     try {
-      cableDraft = null; dragging = null; current = null;
+      cableDraft = null; dragging = null; current = null; selected = null; resizing = null;
       redraw();
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
       if (!blob) throw new Error('Could not export the picture');
