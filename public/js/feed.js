@@ -13,6 +13,54 @@ async function feedStaff() {
   return _feedStaffCache;
 }
 
+// Feed styling lives here (not in each page) so Home and every job look the
+// same. Name / time / message are three clearly different things: bold name,
+// small muted time, then the text itself; comments are speech-bubble style
+// under a post with their own avatar.
+function ensureFeedStyles() {
+  if (document.getElementById('feed-styles')) return;
+  const st = document.createElement('style');
+  st.id = 'feed-styles';
+  st.textContent = `
+    .fd-card { border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:14px; background:var(--surface); }
+    .fd-head { display:flex; gap:12px; align-items:flex-start; }
+    .fd-avatar { width:38px; height:38px; flex:none; border-radius:50%; color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; }
+    .fd-avatar.sm { width:30px; height:30px; font-size:12px; margin-top:2px; }
+    .fd-who { flex:1; min-width:0; }
+    .fd-name { font-weight:700; font-size:14px; color:var(--text); }
+    .fd-time { font-size:12px; color:var(--muted); }
+    .fd-pill { display:inline-block; background:var(--accent-dim); color:var(--accent); padding:2px 9px; border-radius:999px; font-weight:600; font-size:12px; text-decoration:none; }
+    .fd-body { color:var(--text); margin:10px 0 0; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; }
+    .fd-tags { margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; color:var(--muted); }
+    .fd-actions { display:flex; gap:4px; margin-top:12px; padding-top:8px; border-top:1px solid var(--border); }
+    .fd-actions button, .fd-delete { background:none; border:none; color:var(--muted); cursor:pointer; font-size:13px; padding:5px 10px; border-radius:6px; width:auto; }
+    .fd-actions button:hover, .fd-delete:hover { background:var(--surface-2); color:var(--text); }
+    .fd-actions button.liked { color:var(--accent); font-weight:700; }
+    .fd-delete { font-size:12px; flex:none; }
+    .fd-comments { margin-top:12px; display:flex; flex-direction:column; gap:10px; }
+    .fd-comment { display:flex; gap:10px; align-items:flex-start; }
+    .fd-bubble { background:var(--surface-2); border:1px solid var(--border); border-radius:4px 14px 14px 14px; padding:8px 12px; min-width:0; flex:1; max-width:680px; }
+    .fd-bubble-head { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; margin-bottom:3px; }
+    .fd-bubble-text { color:var(--text); line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; }
+    .fd-comment-form { display:flex; gap:8px; align-items:center; }
+    .fd-comment-form input { flex:1; margin:0; border-radius:999px; padding-left:14px; }
+    .fd-comment-form button { margin:0; white-space:nowrap; }
+    .fd-tag-panel { padding:10px; border:1px solid var(--border); border-radius:8px; max-height:160px; overflow-y:auto; }
+  `;
+  document.head.appendChild(st);
+}
+function feedInitials(name) {
+  return (String(name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('') || '?').toUpperCase();
+}
+function feedAvatarColour(name) {
+  let h = 0;
+  String(name || '').split('').forEach(ch => { h = (h * 31 + ch.charCodeAt(0)) % 360; });
+  return `hsl(${h}, 45%, 42%)`;
+}
+function feedAvatar(name, small) {
+  return `<div class="fd-avatar${small ? ' sm' : ''}" style="background:${feedAvatarColour(name)};" aria-hidden="true">${escapeHtml(feedInitials(name))}</div>`;
+}
+
 function feedWhen(iso) {
   return new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 }
@@ -21,6 +69,7 @@ function feedWhen(iso) {
 // feed), onPosted }. A job post has a "also show on the Home page" tick; any
 // post can tag people.
 async function mountFeedComposer(el, opts) {
+  ensureFeedStyles();
   const staff = (await feedStaff()).filter(s => s.id !== opts.myUserId);
   el.innerHTML = `
     <textarea class="feed-new-text" placeholder="${opts.projectId ? 'Write a note about this job...' : 'Post something to the team...'}" style="min-height:70px;"></textarea>
@@ -83,6 +132,7 @@ async function mountFeedComposer(el, opts) {
 // job's posts, on Home it's the Home-only (non-job) posts, so a job tag stays
 // as a notification until the job itself is opened.
 async function renderFeedList(el, opts) {
+  ensureFeedStyles();
   let q = supabaseClient.from('feed_posts')
     .select('*, profiles(full_name), projects(id, name, job_number, quote_number)')
     .order('created_at', { ascending: false }).limit(opts.limit || 30);
@@ -100,50 +150,58 @@ async function renderFeedList(el, opts) {
   ]);
 
   const projectRefOf = (p) => (typeof projectRef === 'function' ? projectRef(p) : (p.name || 'Job'));
+  const tagLine = (list) => list.length
+    ? `<div class="fd-tags">Tagged ${list.map(t => `<span class="fd-pill">@${escapeHtml((t.profiles && t.profiles.full_name) || 'Someone')}</span>`).join('')}</div>` : '';
   el.innerHTML = posts.map(post => {
     const postLikes = (likes || []).filter(l => l.post_id === post.id);
     const iLiked = postLikes.some(l => l.author_id === opts.myUserId);
     const postComments = (comments || []).filter(c => c.post_id === post.id);
     const tagged = (mentions || []).filter(m => m.post_id === post.id && !m.comment_id);
     const mine = post.author_id === opts.myUserId;
+    const author = post.profiles ? post.profiles.full_name : 'Someone';
     return `
-      <div class="feed-post" data-post-id="${post.id}">
-        <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
-          <div>
-            <span class="feed-author">${escapeHtml(post.profiles ? post.profiles.full_name : 'Someone')}</span>
-            ${post.projects && !opts.projectId ? `<a href="/project.html?id=${post.projects.id}&tab=feed" class="badge sent" style="margin-left:8px; text-decoration:none;">${escapeHtml(projectRefOf(post.projects))}</a>` : ''}
-            <div class="feed-meta">${feedWhen(post.created_at)}${post.projects && opts.projectId && post.show_on_home ? ' &middot; also on Home' : ''}</div>
+      <article class="fd-card feed-post" data-post-id="${post.id}">
+        <header class="fd-head">
+          ${feedAvatar(author)}
+          <div class="fd-who">
+            <div class="fd-name">${escapeHtml(author)}${post.projects && !opts.projectId ? ` <a href="/project.html?id=${post.projects.id}&tab=feed" class="fd-pill" style="margin-left:6px;">${escapeHtml(projectRefOf(post.projects))}</a>` : ''}</div>
+            <div class="fd-time">${feedWhen(post.created_at)}${post.projects && opts.projectId && post.show_on_home ? ' &middot; also on Home' : ''}</div>
           </div>
-          ${(mine || opts.isAdmin) ? `<button type="button" class="feed-like-btn feed-delete-btn" data-post-id="${post.id}" title="Delete this post">Delete</button>` : ''}
-        </div>
-        <p style="margin:8px 0 0; white-space:pre-wrap;">${escapeHtml(post.message)}</p>
-        ${tagged.length ? `<p class="feed-meta" style="margin:6px 0 0;">Tagged: ${tagged.map(t => escapeHtml((t.profiles && t.profiles.full_name) || 'Someone')).join(', ')}</p>` : ''}
-        <div class="feed-actions">
-          <button class="feed-like-btn ${iLiked ? 'liked' : ''}" data-post-id="${post.id}" data-liked="${iLiked}">
+          ${(mine || opts.isAdmin) ? `<button type="button" class="fd-delete feed-delete-btn" data-post-id="${post.id}" title="Delete this post">Delete</button>` : ''}
+        </header>
+        <div class="fd-body">${escapeHtml(post.message)}</div>
+        ${tagLine(tagged)}
+        <footer class="fd-actions">
+          <button type="button" class="feed-like-btn ${iLiked ? 'liked' : ''}" data-post-id="${post.id}" data-liked="${iLiked}">
             &#128077; ${postLikes.length || ''} ${iLiked ? 'Liked' : 'Like'}
           </button>
-          <button class="feed-like-btn toggle-comments-btn" data-post-id="${post.id}">&#128172; Comment${postComments.length ? ' (' + postComments.length + ')' : ''}</button>
-        </div>
-        <div class="feed-comments" data-post-id="${post.id}" style="display:${postComments.length && opts.projectId ? 'block' : 'none'}; margin-top:10px; padding-left:12px; border-left:2px solid var(--border);">
-          ${postComments.map(c => `
-            <div class="feed-comment">
-              <span class="feed-author">${escapeHtml(c.profiles ? c.profiles.full_name : 'Someone')}</span>
-              <span class="feed-meta">${feedWhen(c.created_at)}</span>
-              <div style="white-space:pre-wrap;">${escapeHtml(c.message)}</div>
-              ${(mentions || []).filter(m => m.comment_id === c.id).length ? `<div class="feed-meta">Tagged: ${(mentions || []).filter(m => m.comment_id === c.id).map(t => escapeHtml((t.profiles && t.profiles.full_name) || 'Someone')).join(', ')}</div>` : ''}
-            </div>`).join('')}
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <input class="new-comment-input" data-post-id="${post.id}" placeholder="Write a comment..." style="flex:1;" />
+          <button type="button" class="feed-like-btn toggle-comments-btn" data-post-id="${post.id}">&#128172; Comment${postComments.length ? ' (' + postComments.length + ')' : ''}</button>
+        </footer>
+        <div class="fd-comments feed-comments" data-post-id="${post.id}" style="${postComments.length && opts.projectId ? '' : 'display:none;'}">
+          ${postComments.map(c => {
+            const cName = c.profiles ? c.profiles.full_name : 'Someone';
+            return `
+            <div class="fd-comment feed-comment">
+              ${feedAvatar(cName, true)}
+              <div class="fd-bubble">
+                <div class="fd-bubble-head"><span class="fd-name">${escapeHtml(cName)}</span><span class="fd-time">${feedWhen(c.created_at)}</span></div>
+                <div class="fd-bubble-text">${escapeHtml(c.message)}</div>
+                ${tagLine((mentions || []).filter(m => m.comment_id === c.id))}
+              </div>
+            </div>`;
+          }).join('')}
+          <div class="fd-comment-form">
+            <input class="new-comment-input" data-post-id="${post.id}" placeholder="Write a comment..." />
             <button type="button" class="secondary comment-tag-btn" data-post-id="${post.id}" title="Tag people in this comment" style="padding:8px 12px;">@</button>
-            <button class="secondary send-comment-btn" data-post-id="${post.id}" style="padding:8px 14px;">Send</button>
+            <button type="button" class="secondary send-comment-btn" data-post-id="${post.id}" style="padding:8px 16px;">Send</button>
           </div>
-          <div class="comment-tag-panel" data-post-id="${post.id}" style="display:none; margin-top:6px; padding:10px; border:1px solid var(--border); border-radius:8px; max-height:160px; overflow-y:auto;">
+          <div class="fd-tag-panel comment-tag-panel" data-post-id="${post.id}" style="display:none;">
             <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:4px 12px;">
               ${staff.map(p => `<label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="checkbox" class="comment-tag-check" data-post-id="${post.id}" value="${p.id}" style="width:auto;" /> ${escapeHtml(p.full_name || 'Unnamed')}</label>`).join('')}
             </div>
           </div>
         </div>
-      </div>`;
+      </article>`;
   }).join('');
 
   const reload = () => renderFeedList(el, opts);
@@ -155,7 +213,7 @@ async function renderFeedList(el, opts) {
   }));
   el.querySelectorAll('.toggle-comments-btn').forEach(btn => btn.addEventListener('click', () => {
     const panel = el.querySelector(`.feed-comments[data-post-id="${btn.dataset.postId}"]`);
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
   }));
   el.querySelectorAll('.comment-tag-btn').forEach(btn => btn.addEventListener('click', () => {
     const panel = el.querySelector(`.comment-tag-panel[data-post-id="${btn.dataset.postId}"]`);
