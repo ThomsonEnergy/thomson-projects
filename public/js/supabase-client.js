@@ -704,6 +704,8 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   const shapes = initialShapes ? JSON.parse(JSON.stringify(initialShapes)) : [];
   let current = null;
   let dragging = null; // { shape, x, y } while the Move tool is dragging a shape
+  let gridMode = 0; // 0 off, 1 fine, 2 medium, 3 coarse - symbols and points snap to it
+  let exporting = false; // true while grabbing the picture, so the grid isn't baked into it
   let selected = null; // the shape the Move tool last picked (shows resize handles)
   let resizing = null; // { shape, orig, handle, anchor, handleOrig } while a handle is dragged
   let cableDraft = null; // a cable path being clicked out, point by point
@@ -738,6 +740,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       ${toolBtn('scale', 'Set scale')}${toolBtn('measure', 'Measure')}${toolBtn('cable', 'Cable path')}
       <select id="mk-cable-type" style="${smallInput}">${CABLE_TYPES.map(t => `<option>${t}</option>`).join('')}<option value="__custom">Other...</option></select>
       <button type="button" id="mk-finish-cable" style="padding:6px 12px; font-size:13px; display:none;">Finish cable</button>
+      <span style="color:#fff; font-size:12px;">Grid snap</span><select id="mk-grid" style="${smallInput}"><option value="0">Off</option><option value="1">Fine</option><option value="2">Medium</option><option value="3">Coarse</option></select>
       <span style="color:#fff; font-size:12px;">Allowance</span><input id="mk-allow" type="number" min="0" max="100" value="${allowance}" style="${smallInput} width:60px;" /><span style="color:#fff; font-size:12px;">%</span>
       <select id="mk-scope" style="${smallInput}"><option value="page">Schedule: this page</option><option value="all">Schedule: all pages</option></select>
       <button type="button" class="secondary" id="mk-schedule" style="padding:6px 12px; font-size:13px;">Add schedule</button>
@@ -760,6 +763,14 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   const baseWidth = () => Math.max(3, W / 300) * SIZES[sizeIdx];
   const symbolSide = () => Math.max(22, W / 45) * SYMBOL_SIZES[sizeIdx];
   const ppm = () => (plan ? scalePxPerMetre(shapes) : null);
+  // Grid spacing in canvas pixels: real-world steps once a scale is set
+  // (25 cm / 50 cm / 1 m), otherwise fixed fractions of the page width.
+  const gridPx = () => {
+    if (!gridMode) return 0;
+    const m = plan ? ppm() : null;
+    return m ? [0, 0.25, 0.5, 1][gridMode] * m : [0, W / 80, W / 40, W / 20][gridMode];
+  };
+  const snapPt = (x, y) => { const g = gridPx(); return g ? [Math.round(x / g) * g, Math.round(y / g) * g] : [x, y]; };
   const fmtM = (px) => `${(px / ppm()).toFixed(px / ppm() < 10 ? 2 : 1)} m`;
   const scheduleRows = (s) => buildSchedule(shapes, (s.scope || scheduleScope) === 'all' ? extra.otherSummaries : [], s.allowance ?? allowance);
 
@@ -950,10 +961,24 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     });
     el.textContent = parts.length ? `On this page: ${parts.join('  |  ')}` : (ppm() ? `Scale set. Place symbols, measure, or trace cable paths.` : 'Start with "Set scale": draw a line across something you know the length of.');
     overlay.querySelector('#mk-schedule').textContent = shapes.some(s => s.type === 'schedule') ? 'Remove schedule' : 'Add schedule';
+    const gridSel = overlay.querySelector('#mk-grid');
+    ['Fine', 'Medium', 'Coarse'].forEach((name, i) => {
+      gridSel.options[i + 1].textContent = ppm() ? `${name} (${['25 cm', '50 cm', '1 m'][i]})` : name;
+    });
   }
 
   function redraw() {
     ctx.drawImage(bitmap, 0, 0, W, H);
+    const g = gridPx();
+    if (g >= 5 && !exporting) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(14,165,233,0.35)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let gx = 0; gx <= W; gx += g) { ctx.moveTo(gx, 0); ctx.lineTo(gx, H); }
+      for (let gy = 0; gy <= H; gy += g) { ctx.moveTo(0, gy); ctx.lineTo(W, gy); }
+      ctx.stroke();
+      ctx.restore();
+    }
     shapes.forEach(drawShape);
     if (current) drawShape(current);
     if (cableDraft) drawShape(cableDraft);
@@ -1017,6 +1042,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       } else cableType = e.target.value;
       if (cableDraft) cableDraft.cable = cableType;
     });
+    overlay.querySelector('#mk-grid').addEventListener('change', (e) => { gridMode = parseInt(e.target.value, 10) || 0; redraw(); });
     overlay.querySelector('#mk-allow').addEventListener('input', (e) => {
       allowance = Math.max(0, parseFloat(e.target.value) || 0);
       shapes.filter(s => s.type === 'schedule').forEach(s => { s.allowance = allowance; });
@@ -1070,7 +1096,9 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   };
   overlay.querySelector('#mk-fill').addEventListener('click', () => { fillMode = (fillMode + 1) % 3; setTool('box'); });
   canvas.addEventListener('pointerdown', (e) => {
-    const [x, y] = pos(e);
+    const [rx, ry] = pos(e);
+    // Everything except freehand drawing and picking/dragging snaps to the grid.
+    const [x, y] = (tool === 'pen' || tool === 'move' || tool === 'erase') ? [rx, ry] : snapPt(rx, ry);
     if (tool === 'move') {
       // A corner/end handle of the selected shape resizes it...
       if (selected) {
@@ -1091,7 +1119,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       selected = hit;
       if (!hit) { redraw(); return; }
       canvas.setPointerCapture(e.pointerId);
-      dragging = { shape: hit, x, y };
+      dragging = { shape: hit, x0: x, y0: y, orig: JSON.parse(JSON.stringify(hit)) };
       redraw();
       return;
     }
@@ -1129,14 +1157,23 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     redraw();
   });
   canvas.addEventListener('pointermove', (e) => {
-    const [x, y] = pos(e);
-    if (resizing) { applyResize([x, y]); redraw(); return; }
+    const [rx, ry] = pos(e);
+    if (resizing) { applyResize([rx, ry]); redraw(); return; }
     if (dragging) {
-      moveShape(dragging.shape, x - dragging.x, y - dragging.y);
-      dragging.x = x; dragging.y = y;
+      // Always re-applied from where the shape started, so snapping to the
+      // grid doesn't accumulate rounding as the pointer moves.
+      const sh = dragging.shape;
+      Object.assign(sh, JSON.parse(JSON.stringify(dragging.orig)));
+      moveShape(sh, rx - dragging.x0, ry - dragging.y0);
+      if (gridPx()) {
+        const anchor = sh.type === 'symbol' ? [sh.x1 + sh.side / 2, sh.y1 + sh.side / 2] : (sh.points ? sh.points[0] : [sh.x1, sh.y1]);
+        const [ax, ay] = snapPt(anchor[0], anchor[1]);
+        moveShape(sh, ax - anchor[0], ay - anchor[1]);
+      }
       redraw();
       return;
     }
+    const [x, y] = (current && current.type === 'pen') ? [rx, ry] : snapPt(rx, ry);
     if (cableDraft) { cableDraft.hover = [x, y]; redraw(); return; }
     if (!current) return;
     if (current.type === 'pen') current.points.push([x, y]);
@@ -1185,8 +1222,10 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; msgEl.textContent = '';
     try {
       cableDraft = null; dragging = null; current = null; selected = null; resizing = null;
-      redraw();
-      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      exporting = true; redraw();
+      const blobPromise = new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      exporting = false; redraw();
+      const blob = await blobPromise;
       if (!blob) throw new Error('Could not export the picture');
       // Schedules carry the rows they showed when saved, so the PDF export
       // doesn't need the other pages' data to draw them.
