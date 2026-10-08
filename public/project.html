@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=26"></script>
+  <script src="/js/supabase-client.js?v=27"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -4282,27 +4282,49 @@
       const listEl = document.getElementById('site-photos-list');
       const { data: photos, error } = await supabaseClient
         .from('project_photos')
-        .select('id, url, staff_id, created_at, profiles(full_name)')
+        .select('id, url, caption, staff_id, created_at, profiles(full_name)')
         .eq('project_id', projectId)
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (!photos.length) { listEl.innerHTML = `<p class="subtitle">No site photos yet.</p>`; return; }
 
       const urls = photos.map(p => p.url);
+      const captions = photos.map(p => p.caption || '');
       listEl.innerHTML = `
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">
           ${photos.map((p, i) => `
             <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
-              <img src="${p.url}" data-i="${i}" class="site-photo-view" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" />
+              <img src="${supaImageVariant(p.url, 400, 70)}" data-i="${i}" class="site-photo-view" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" />
               <div style="padding:6px 8px; font-size:11px; color:var(--muted);">
-                ${p.profiles?.full_name || 'Unknown'}<br>${new Date(p.created_at).toLocaleDateString('en-AU')}
+                ${p.caption ? `<strong style="color:var(--text); font-size:12px;">${escapeHtml(p.caption)}</strong><br>` : ''}${p.profiles?.full_name || 'Unknown'}<br>${new Date(p.created_at).toLocaleDateString('en-AU')}
               </div>
             </div>
           `).join('')}
         </div>`;
 
       listEl.querySelectorAll('.site-photo-view').forEach(img => {
-        img.addEventListener('click', () => openPhotoLightbox(urls, parseInt(img.dataset.i)));
+        img.addEventListener('click', () => openPhotoLightbox(urls, parseInt(img.dataset.i), {
+          captions,
+          onRename: async (i, name) => {
+            const { error: renameErr } = await supabaseClient.from('project_photos').update({ caption: name || null }).eq('id', photos[i].id);
+            if (renameErr) throw renameErr;
+          },
+          // The marked-up picture is saved as a new photo alongside the
+          // original, so nothing is ever overwritten.
+          onMarkup: async (i, blob) => {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            const path = `${projectId}/${Date.now()}-markup.jpg`;
+            const { error: upErr } = await supabaseClient.storage.from('site-photos').upload(path, blob, { contentType: 'image/jpeg' });
+            if (upErr) throw upErr;
+            const { data: pub } = supabaseClient.storage.from('site-photos').getPublicUrl(path);
+            const base = captions[i] || 'Photo';
+            const { error: insErr } = await supabaseClient.from('project_photos').insert({
+              project_id: projectId, staff_id: user.id, url: pub.publicUrl, caption: `${base} (marked up)`,
+            });
+            if (insErr) throw insErr;
+          },
+          onClose: () => loadSitePhotos(projectId),
+        }));
       });
     }
 

@@ -160,35 +160,216 @@ function supaImageVariant(url, width = 1200, quality = 70) {
 // among a job's 30 photos doesn't mean squinting at 90x90 crops.
 // Arrow keys/buttons move through the exact array passed in, starting
 // at startIndex - the caller's own array order is what the viewer walks.
-function openPhotoLightbox(urls, startIndex = 0) {
+//
+// `opts` (optional) turns on naming and markup for callers whose photos are
+// real database rows: { captions: string[], onRename(index, name),
+// onMarkup(index, blob), onClose() }. Without it, it's a plain viewer.
+function openPhotoLightbox(urls, startIndex = 0, opts = null) {
   let index = startIndex;
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:300; display:flex; align-items:center; justify-content:center;';
   const navBtnStyle = 'position:absolute; top:50%; transform:translateY(-50%); background:rgba(255,255,255,0.1); color:#fff; border:none; width:44px; height:44px; border-radius:50%; font-size:20px; cursor:pointer;';
 
+  function close() {
+    overlay.remove();
+    if (opts && opts.onClose) opts.onClose();
+  }
+
   function render() {
+    const editable = opts && (opts.onRename || opts.onMarkup);
     overlay.innerHTML = `
       <button type="button" id="lb-close" style="position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.1); color:#fff; border:none; width:36px; height:36px; border-radius:50%; font-size:18px; cursor:pointer;">&times;</button>
       ${urls.length > 1 ? `<button type="button" id="lb-prev" style="${navBtnStyle} left:16px;">&larr;</button>` : ''}
-      <img src="${urls[index]}" style="max-width:88vw; max-height:85vh; object-fit:contain; border-radius:8px;" />
+      <img src="${urls[index]}" style="max-width:88vw; max-height:${editable ? '74vh' : '85vh'}; object-fit:contain; border-radius:8px;${editable ? ' margin-bottom:60px;' : ''}" />
       ${urls.length > 1 ? `<button type="button" id="lb-next" style="${navBtnStyle} right:16px;">&rarr;</button>` : ''}
-      ${urls.length > 1 ? `<div style="position:absolute; bottom:20px; left:0; right:0; text-align:center; color:#fff; font-size:13px;">${index + 1} / ${urls.length}</div>` : ''}
+      ${urls.length > 1 ? `<div style="position:absolute; bottom:${editable ? '70px' : '20px'}; left:0; right:0; text-align:center; color:#fff; font-size:13px;">${index + 1} / ${urls.length}</div>` : ''}
+      ${editable ? `
+        <div style="position:absolute; bottom:14px; left:50%; transform:translateX(-50%); display:flex; gap:8px; align-items:center; width:min(560px, 92vw);">
+          ${opts.onRename ? `<input id="lb-name" placeholder="Name this photo..." value="${String((opts.captions && opts.captions[index]) || '').replace(/"/g, '&quot;')}" style="flex:1; margin:0;" />` : '<span style="flex:1;"></span>'}
+          ${opts.onMarkup ? `<button type="button" id="lb-markup" style="white-space:nowrap;">Mark up</button>` : ''}
+        </div>
+        <div id="lb-msg" style="position:absolute; bottom:56px; left:0; right:0; text-align:center; color:#fca5a5; font-size:12px;"></div>` : ''}
     `;
-    overlay.querySelector('#lb-close').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#lb-close').addEventListener('click', close);
     if (urls.length > 1) {
       overlay.querySelector('#lb-prev').addEventListener('click', (e) => { e.stopPropagation(); index = (index - 1 + urls.length) % urls.length; render(); });
       overlay.querySelector('#lb-next').addEventListener('click', (e) => { e.stopPropagation(); index = (index + 1) % urls.length; render(); });
     }
+    const nameEl = overlay.querySelector('#lb-name');
+    if (nameEl) {
+      nameEl.addEventListener('change', async () => {
+        const msgEl = overlay.querySelector('#lb-msg');
+        try {
+          await opts.onRename(index, nameEl.value.trim());
+          if (opts.captions) opts.captions[index] = nameEl.value.trim();
+          msgEl.textContent = '';
+        } catch (err) { msgEl.textContent = `Could not save the name: ${err.message}`; }
+      });
+    }
+    const markupBtn = overlay.querySelector('#lb-markup');
+    if (markupBtn) {
+      markupBtn.addEventListener('click', () => {
+        openPhotoMarkup(urls[index], async (blob) => {
+          await opts.onMarkup(index, blob);
+          close();
+        });
+      });
+    }
   }
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   document.addEventListener('keydown', function onKey(e) {
     if (!document.body.contains(overlay)) { document.removeEventListener('keydown', onKey); return; }
-    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }
+    if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
     else if (e.key === 'ArrowLeft' && urls.length > 1) { index = (index - 1 + urls.length) % urls.length; render(); }
     else if (e.key === 'ArrowRight' && urls.length > 1) { index = (index + 1) % urls.length; render(); }
   });
   render();
   document.body.appendChild(overlay);
+}
+
+// Draw-on-a-photo editor: freehand pen, arrow, box and text in a few
+// colours/sizes, with undo. Hands the finished picture to `onSave(blob)` as
+// a JPEG - the caller decides where it goes (the original is never touched
+// here). Output is capped at 1920px on the long edge, same as uploads.
+async function openPhotoMarkup(url, onSave) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.96); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:12px;';
+  overlay.innerHTML = `<p style="color:#fff;">Loading photo...</p>`;
+  document.body.appendChild(overlay);
+
+  let bitmap;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Could not load the photo');
+    bitmap = await createImageBitmap(await res.blob());
+  } catch (err) {
+    overlay.innerHTML = `<p style="color:#fca5a5;">${err.message}</p><button type="button" id="mk-err-close">Close</button>`;
+    overlay.querySelector('#mk-err-close').addEventListener('click', () => overlay.remove());
+    return;
+  }
+
+  const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
+  const W = Math.round(bitmap.width * scale);
+  const H = Math.round(bitmap.height * scale);
+  const COLOURS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#ffffff', '#000000'];
+  const SIZES = [1, 2, 3.5];
+  let tool = 'pen', colour = COLOURS[0], sizeIdx = 1;
+  const shapes = [];
+  let current = null;
+
+  const toolBtn = (id, label) => `<button type="button" class="secondary mk-tool" data-tool="${id}" style="padding:6px 12px; font-size:13px;">${label}</button>`;
+  overlay.innerHTML = `
+    <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
+      ${toolBtn('pen', 'Pen')}${toolBtn('arrow', 'Arrow')}${toolBtn('box', 'Box')}${toolBtn('text', 'Text')}
+      <span style="width:8px;"></span>
+      ${COLOURS.map(c => `<button type="button" class="mk-colour" data-c="${c}" style="width:26px; height:26px; padding:0; border-radius:50%; background:${c}; border:2px solid #fff;"></button>`).join('')}
+      <span style="width:8px;"></span>
+      ${['S', 'M', 'L'].map((l, i) => `<button type="button" class="secondary mk-size" data-i="${i}" style="padding:6px 10px; font-size:12px;">${l}</button>`).join('')}
+      <span style="width:8px;"></span>
+      <button type="button" class="secondary" id="mk-undo" style="padding:6px 12px; font-size:13px;">Undo</button>
+    </div>
+    <canvas id="mk-canvas" width="${W}" height="${H}" style="max-width:94vw; max-height:70vh; touch-action:none; border-radius:6px; cursor:crosshair;"></canvas>
+    <div id="mk-msg" style="color:#fca5a5; font-size:12px;"></div>
+    <div style="display:flex; gap:8px;">
+      <button type="button" id="mk-save">Save marked-up copy</button>
+      <button type="button" class="secondary" id="mk-cancel">Cancel</button>
+    </div>`;
+
+  const canvas = overlay.querySelector('#mk-canvas');
+  const ctx = canvas.getContext('2d');
+  const baseWidth = () => Math.max(3, W / 300) * SIZES[sizeIdx];
+
+  function drawShape(s) {
+    ctx.strokeStyle = s.colour; ctx.fillStyle = s.colour; ctx.lineWidth = s.width;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (s.type === 'pen') {
+      ctx.beginPath();
+      s.points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      if (s.points.length === 1) ctx.lineTo(s.points[0][0] + 0.01, s.points[0][1]);
+      ctx.stroke();
+    } else if (s.type === 'box') {
+      ctx.strokeRect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1);
+    } else if (s.type === 'arrow') {
+      const angle = Math.atan2(s.y2 - s.y1, s.x2 - s.x1);
+      const head = s.width * 5;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(s.x2, s.y2);
+      ctx.lineTo(s.x2 - head * Math.cos(angle - 0.45), s.y2 - head * Math.sin(angle - 0.45));
+      ctx.lineTo(s.x2 - head * Math.cos(angle + 0.45), s.y2 - head * Math.sin(angle + 0.45));
+      ctx.closePath(); ctx.fill();
+    } else if (s.type === 'text') {
+      ctx.font = `bold ${Math.round(s.width * 6)}px sans-serif`;
+      ctx.textBaseline = 'top';
+      // Outline in the opposite tone so text stays readable on any photo.
+      ctx.lineWidth = s.width * 0.8;
+      ctx.strokeStyle = s.colour === '#000000' ? '#ffffff' : '#000000';
+      ctx.strokeText(s.text, s.x1, s.y1);
+      ctx.fillText(s.text, s.x1, s.y1);
+    }
+  }
+  function redraw() {
+    ctx.drawImage(bitmap, 0, 0, W, H);
+    shapes.forEach(drawShape);
+    if (current) drawShape(current);
+  }
+  function refreshControls() {
+    overlay.querySelectorAll('.mk-tool').forEach(b => { b.style.outline = b.dataset.tool === tool ? '2px solid #fff' : 'none'; });
+    overlay.querySelectorAll('.mk-colour').forEach(b => { b.style.outline = b.dataset.c === colour ? '2px solid #38bdf8' : 'none'; b.style.outlineOffset = '2px'; });
+    overlay.querySelectorAll('.mk-size').forEach(b => { b.style.outline = parseInt(b.dataset.i) === sizeIdx ? '2px solid #fff' : 'none'; });
+  }
+  overlay.querySelectorAll('.mk-tool').forEach(b => b.addEventListener('click', () => { tool = b.dataset.tool; refreshControls(); }));
+  overlay.querySelectorAll('.mk-colour').forEach(b => b.addEventListener('click', () => { colour = b.dataset.c; refreshControls(); }));
+  overlay.querySelectorAll('.mk-size').forEach(b => b.addEventListener('click', () => { sizeIdx = parseInt(b.dataset.i); refreshControls(); }));
+  overlay.querySelector('#mk-undo').addEventListener('click', () => { shapes.pop(); redraw(); });
+  overlay.querySelector('#mk-cancel').addEventListener('click', () => overlay.remove());
+
+  const pos = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return [(e.clientX - r.left) * (W / r.width), (e.clientY - r.top) * (H / r.height)];
+  };
+  canvas.addEventListener('pointerdown', (e) => {
+    const [x, y] = pos(e);
+    if (tool === 'text') {
+      const text = window.prompt('Text to add:');
+      if (text && text.trim()) { shapes.push({ type: 'text', colour, width: baseWidth(), x1: x, y1: y, text: text.trim() }); redraw(); }
+      return;
+    }
+    canvas.setPointerCapture(e.pointerId);
+    current = tool === 'pen'
+      ? { type: 'pen', colour, width: baseWidth(), points: [[x, y]] }
+      : { type: tool, colour, width: baseWidth(), x1: x, y1: y, x2: x, y2: y };
+    redraw();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!current) return;
+    const [x, y] = pos(e);
+    if (current.type === 'pen') current.points.push([x, y]);
+    else { current.x2 = x; current.y2 = y; }
+    redraw();
+  });
+  const finish = () => { if (current) { shapes.push(current); current = null; redraw(); } };
+  canvas.addEventListener('pointerup', finish);
+  canvas.addEventListener('pointercancel', finish);
+
+  overlay.querySelector('#mk-save').addEventListener('click', async () => {
+    const saveBtn = overlay.querySelector('#mk-save');
+    const msgEl = overlay.querySelector('#mk-msg');
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; msgEl.textContent = '';
+    try {
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      if (!blob) throw new Error('Could not export the picture');
+      await onSave(blob);
+      overlay.remove();
+    } catch (err) {
+      msgEl.textContent = err.message;
+      saveBtn.disabled = false; saveBtn.textContent = 'Save marked-up copy';
+    }
+  });
+
+  refreshControls();
+  redraw();
 }
 
 // Renders a small thumbnail strip with remove buttons into `containerEl`,
