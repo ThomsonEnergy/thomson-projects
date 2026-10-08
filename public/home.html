@@ -368,7 +368,7 @@
         (invoices || []).forEach(inv => {
           const daysSince = (today - new Date(inv.sent_at)) / 86400000;
           if (daysSince > 14) {
-            items.push({ group: 'admin', label: `Overdue: invoice ${inv.invoice_number} (${Math.floor(daysSince)} days)`, link: '/invoices.html' });
+            items.push({ group: 'invoices', label: `Overdue: invoice ${inv.invoice_number} (${Math.floor(daysSince)} days)`, link: '/invoices.html' });
           }
         });
       }
@@ -442,6 +442,7 @@
       const GROUPS = [
         { key: 'job', title: 'Job specific' },
         { key: 'quotes', title: 'Quotes' },
+        { key: 'invoices', title: 'Overdue invoices' },
         { key: 'admin', title: 'Admin' },
         { key: 'licences', title: 'Licences' },
       ];
