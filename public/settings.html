@@ -1880,7 +1880,7 @@
         overlay.querySelector('#profile-contract-body').style.display = 'block';
         overlay.querySelector('#contract-action-row').style.display = 'flex';
         overlay.querySelector('#mark-contract-ready-btn').disabled = false;
-        msg.innerHTML = `<div class="success-box">Draft generated - give it a read before marking it ready to sign, particularly anything still in [brackets] it couldn't resolve.</div>`;
+        msg.innerHTML = `<div class="success-box">Draft generated - give it a read before marking it ready to sign, particularly anything still in [brackets] it couldn't resolve. You can leave the employee's address as [insert employee address]: it is filled in from their own details when they open the contract to sign.</div>`;
       });
 
       overlay.querySelector('#save-contract-draft-btn').addEventListener('click', async () => {

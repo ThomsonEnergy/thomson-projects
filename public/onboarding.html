@@ -196,6 +196,24 @@
       return signatures.some(s => s.document_id === documentId && new Date(s.signed_at) >= cycleStart);
     }
 
+    // The admin approves the contract with the employee's own address left as
+    // [insert employee address]. What the employee reads and signs has their
+    // address (from step 1) dropped in, so nobody types it twice. Plain text
+    // here (it is also what gets saved as the signed copy); escape it when
+    // showing it.
+    const ADDRESS_PLACEHOLDER = '[insert employee address]';
+    function profileAddressLine() {
+      return [profile.residential_address, profile.residential_suburb, profile.residential_state, profile.residential_postcode].filter(Boolean).join(', ');
+    }
+    function documentTextFor(doc) {
+      if (!doc.is_contract) return doc.body;
+      const addr = profileAddressLine();
+      return addr ? contract.generated_body.split(ADDRESS_PLACEHOLDER).join(addr) : contract.generated_body;
+    }
+    function contractNeedsAddress() {
+      return !!(contract && contract.generated_body && contract.generated_body.includes(ADDRESS_PLACEHOLDER) && !profileAddressLine());
+    }
+
     function visibleDocsForStep3() {
       // The contract only appears once an admin has reviewed the
       // auto-filled draft and marked it ready - never the raw template.
@@ -227,6 +245,21 @@
       const listEl = document.getElementById('ob-doc-list');
       listEl.innerHTML = visible.map(d => {
         const signed = isSigned(d.id);
+        if (d.is_contract && !signed && contractNeedsAddress()) {
+          return `
+            <div style="padding:14px 0; border-bottom:1px solid var(--border);">
+              <p style="margin:0 0 8px; font-weight:600;">${d.title}</p>
+              <p class="subtitle" style="margin:0 0 10px;">Your contract is ready. It needs your home address first - it goes on the contract for you.</p>
+              <input id="ob-ca-address" placeholder="Street address" />
+              <div class="grid cols-3" style="margin-top:8px;">
+                <input id="ob-ca-suburb" placeholder="Suburb" />
+                <select id="ob-ca-state"><option value="">State</option>${['NSW', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'].map(s => `<option value="${s}">${s}</option>`).join('')}</select>
+                <input id="ob-ca-postcode" placeholder="Postcode" />
+              </div>
+              <button type="button" id="ob-ca-save" style="margin-top:10px;">Save and show my contract</button>
+              <div id="ob-ca-msg"></div>
+            </div>`;
+        }
         return `
           <div style="padding:14px 0; border-bottom:1px solid var(--border);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
@@ -234,11 +267,30 @@
               ${signed ? '<span class="badge accepted">Signed</span>' : ''}
             </div>
             ${signed ? '' : `
-              <div class="ob-doc-body">${d.is_contract ? contract.generated_body : d.body}</div>
+              <div class="ob-doc-body">${d.is_contract ? escapeHtml(documentTextFor(d)) : d.body}</div>
               <button type="button" class="secondary ob-sign-btn" data-id="${d.id}">Review &amp; sign</button>
             `}
           </div>`;
       }).join('') || '<p class="subtitle">Nothing to sign right now.</p>';
+
+      const caSave = document.getElementById('ob-ca-save');
+      if (caSave) caSave.addEventListener('click', async () => {
+        const msg = document.getElementById('ob-ca-msg');
+        const updates = {
+          residential_address: document.getElementById('ob-ca-address').value.trim(),
+          residential_suburb: document.getElementById('ob-ca-suburb').value.trim(),
+          residential_state: document.getElementById('ob-ca-state').value,
+          residential_postcode: document.getElementById('ob-ca-postcode').value.trim(),
+        };
+        if (!updates.residential_address || !updates.residential_suburb || !updates.residential_state || !updates.residential_postcode) {
+          msg.innerHTML = '<div class="error-box">Fill in the street address, suburb, state and postcode.</div>';
+          return;
+        }
+        const { error } = await supabaseClient.from('profiles').update(updates).eq('id', myUserId);
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        Object.assign(profile, updates);
+        goToStep(3);
+      });
 
       listEl.querySelectorAll('.ob-sign-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -261,11 +313,11 @@
     function openSignPanel(doc) {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      const bodyText = doc.is_contract ? contract.generated_body : doc.body;
+      const bodyText = documentTextFor(doc);
       overlay.innerHTML = `
         <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>${doc.title}</h2>
-          <div class="ob-doc-body" style="max-height:260px;">${bodyText}</div>
+          <div class="ob-doc-body" style="max-height:260px;">${doc.is_contract ? escapeHtml(bodyText) : bodyText}</div>
 
           <label style="margin-top:0">Your full name</label>
           <input id="sign-name-input" placeholder="Full name" value="${profile.full_name || ''}" />
