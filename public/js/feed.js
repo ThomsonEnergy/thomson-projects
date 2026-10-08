@@ -26,7 +26,7 @@ function ensureFeedStyles() {
     .fd-head { display:flex; gap:12px; align-items:flex-start; }
     .fd-avatar { width:38px; height:38px; flex:none; border-radius:50%; color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; }
     .fd-avatar.sm { width:30px; height:30px; font-size:12px; margin-top:2px; }
-    img.fd-avatar { display:block; object-fit:contain; background:var(--surface-2); }
+    img.fd-avatar { display:block; object-fit:cover; object-position:center top; background:var(--surface-2); }
     .fd-who { flex:1; min-width:0; }
     .fd-name { font-weight:700; font-size:14px; color:var(--text); }
     .fd-time { font-size:12px; color:var(--muted); }
@@ -64,7 +64,7 @@ function feedAvatar(name, small, photoUrl) {
   const cls = `fd-avatar${small ? ' sm' : ''}`;
   const initials = `<div class="${cls}" style="background:${feedAvatarColour(name)};${photoUrl ? 'display:none;' : ''}" aria-hidden="true">${escapeHtml(feedInitials(name))}</div>`;
   if (!photoUrl) return initials;
-  const src = typeof supaImageVariant === 'function' ? supaImageVariant(photoUrl, 120, 80) : photoUrl;
+  const src = typeof supaImageVariant === 'function' ? supaImageVariant(photoUrl, 160, 80) : photoUrl;
   return `<img class="${cls}" src="${escapeHtml(src)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />${initials}`;
 }
 

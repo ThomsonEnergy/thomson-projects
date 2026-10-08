@@ -630,7 +630,10 @@ function supaImageVariant(url, width = 1200, quality = 70) {
   const idx = url.indexOf(marker);
   if (idx === -1) return url;
   const rendered = `${url.slice(0, idx)}/storage/v1/render/image/public/${url.slice(idx + marker.length)}`;
-  return `${rendered}?width=${width}&quality=${quality}`;
+  // width alone makes Supabase crop a slice out of the middle of the picture at full size
+  // (a 1440x1920 photo came back as 400x1920). Giving it a square box and resize=contain
+  // scales the whole picture down to fit, keeping its shape.
+  return `${rendered}?width=${width}&height=${width}&resize=contain&quality=${quality}`;
 }
 
 // The photo viewer, PDF viewer and markup editor sit on a near-black
