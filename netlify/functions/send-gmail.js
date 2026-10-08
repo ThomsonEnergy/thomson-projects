@@ -11,6 +11,7 @@
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { gmailRequest, GMAIL_MAILBOX } = require('./_shared/google-client');
 const { buildMimeMessage } = require('./_shared/build-mime-message');
+const { signatureForUser, plainTextToHtml } = require('./_shared/build-email-signature');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -29,8 +30,10 @@ exports.handler = async (event) => {
     }
 
     const { supabaseAdmin, user } = auth;
-    const { data: profile } = await supabaseAdmin.from('profiles').select('full_name, email_signature').eq('id', user.id).single();
-    const fullBody = profile?.email_signature ? `${bodyText}\n\n${profile.email_signature}` : bodyText;
+    const { data: profile } = await supabaseAdmin.from('profiles').select('full_name').eq('id', user.id).single();
+    const signature = await signatureForUser(supabaseAdmin, user);
+    const fullBody = `${bodyText}\n\n${signature.text}`;
+    const fullHtml = `${plainTextToHtml(bodyText)}${signature.html}`;
 
     let thread = null;
     let lastMessage = null;
@@ -52,6 +55,7 @@ exports.handler = async (event) => {
       cc,
       subject: finalSubject,
       bodyText: fullBody,
+      bodyHtml: fullHtml,
       inReplyTo: lastMessage?.message_id_header || undefined,
       references: lastMessage?.message_id_header || undefined,
     });

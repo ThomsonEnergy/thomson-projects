@@ -565,6 +565,10 @@ async function openPdfViewer(path, title, opts = {}) {
 // (e.g. some HEIC variants) rather than blocking the upload.
 async function compressImage(file, maxDimension = 1920, quality = 0.82) {
   if (!file.type.startsWith('image/')) return file;
+  // Re-drawing on a canvas flattens a GIF to its first frame - leave
+  // animated GIFs (e.g. an animated logo or profile pic for the email
+  // signature) exactly as uploaded.
+  if (file.type === 'image/gif') return file;
   try {
     const bitmap = await createImageBitmap(file);
     const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));

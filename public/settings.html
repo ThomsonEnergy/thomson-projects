@@ -110,6 +110,21 @@
                 <input id="licenses" placeholder="QLD ECL 1508141 | NSW ECL 490514C" />
               </div>
             </div>
+            <p class="subtitle" style="margin:14px 0 0;">Social links - shown as badges in every staff email signature (leave blank to hide one).</p>
+            <div class="grid cols-3">
+              <div>
+                <label>Facebook</label>
+                <input id="social-facebook" placeholder="https://facebook.com/..." />
+              </div>
+              <div>
+                <label>Instagram</label>
+                <input id="social-instagram" placeholder="https://instagram.com/..." />
+              </div>
+              <div>
+                <label>LinkedIn</label>
+                <input id="social-linkedin" placeholder="https://linkedin.com/company/..." />
+              </div>
+            </div>
           </div>
 
           <div class="card">
@@ -225,11 +240,20 @@
             </div>
             <label>Mobile number</label>
             <input id="my-profile-mobile" />
-            <label>Email signature</label>
-            <textarea id="my-profile-signature" style="min-height:80px;" placeholder="e.g. Jasper Thomson&#10;Thomson Energy&#10;0400 000 000"></textarea>
-            <p class="subtitle" style="margin:2px 0 0;">Appended automatically to any email you send from the shared Inbox (sales@thomsonenergy.com.au) - so the client can see who they're actually talking to.</p>
+            <label>Qualifications line (optional)</label>
+            <input id="my-profile-signature" placeholder="e.g. Nominated Supervisor (NSW) | QBP &amp; QTP (QLD) | Electrical Nominee (WA)" />
+            <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+              <input type="checkbox" id="my-profile-sig-photo" style="width:auto;" /> Show my profile photo in my email signature
+            </label>
             <button id="my-profile-save-btn" style="margin-top:14px;">Save</button>
             <div id="my-profile-msg"></div>
+          </div>
+
+          <div class="card">
+            <h2>My email signature</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Added automatically to every email you send from the shared Inbox (sales@thomsonenergy.com.au), so clients can see who they're dealing with. Built from your name, job title, mobile and photo above plus the company logo, address and licences from Company Details. Upload a GIF as your photo (or the company logo) and it plays in Gmail and most mail apps - Outlook on desktop only shows the first frame.</p>
+            <iframe id="my-signature-preview" style="width:100%; height:380px; border:1px solid var(--border); border-radius:8px; background:#fff;"></iframe>
+            <button type="button" class="secondary" id="my-signature-refresh-btn" style="margin-top:10px;">Refresh preview</button>
           </div>
 
           <div class="card">
@@ -690,6 +714,9 @@
       document.getElementById('address').value = data.address || '';
       document.getElementById('website').value = data.website || '';
       document.getElementById('licenses').value = data.licenses || '';
+      document.getElementById('social-facebook').value = data.social_facebook || '';
+      document.getElementById('social-instagram').value = data.social_instagram || '';
+      document.getElementById('social-linkedin').value = data.social_linkedin || '';
       document.getElementById('google-maps-key').value = data.google_maps_api_key || '';
       document.getElementById('tagline').value = data.tagline || '';
       document.getElementById('default-markup').value = data.default_markup_percent ?? 45;
@@ -796,6 +823,9 @@
           address: document.getElementById('address').value.trim(),
           website: document.getElementById('website').value.trim(),
           licenses: document.getElementById('licenses').value.trim(),
+          social_facebook: document.getElementById('social-facebook').value.trim() || null,
+          social_instagram: document.getElementById('social-instagram').value.trim() || null,
+          social_linkedin: document.getElementById('social-linkedin').value.trim() || null,
           google_maps_api_key: document.getElementById('google-maps-key').value.trim(),
         })
         .eq('id', 1);
@@ -1281,13 +1311,15 @@
     async function loadMyProfile(userId) {
       myProfileUserId = userId;
       const [{ data: profile }, { data: rates }, { data: licences }] = await Promise.all([
-        supabaseClient.from('profiles').select('mobile_number, photo_url, email_signature').eq('id', userId).single(),
+        supabaseClient.from('profiles').select('mobile_number, photo_url, email_signature, email_signature_include_photo').eq('id', userId).single(),
         supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle(),
         supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date'),
       ]);
 
       document.getElementById('my-profile-mobile').value = profile?.mobile_number || '';
       document.getElementById('my-profile-signature').value = profile?.email_signature || '';
+      document.getElementById('my-profile-sig-photo').checked = profile?.email_signature_include_photo !== false;
+      refreshSignaturePreview();
       const photoPreview = document.getElementById('my-profile-photo-preview');
       if (profile?.photo_url) { photoPreview.src = profile.photo_url; photoPreview.style.display = 'block'; }
 
@@ -1368,10 +1400,29 @@
         preview.src = url;
         preview.style.display = 'block';
         msg.innerHTML = `<div class="success-box">Photo updated.</div>`;
+        refreshSignaturePreview();
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
       }
     });
+
+    // Renders the signature exactly as the server will send it (same
+    // builder as send-gmail.js) into the preview frame.
+    async function refreshSignaturePreview() {
+      const frame = document.getElementById('my-signature-preview');
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/preview-email-signature', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        frame.srcdoc = `<body style="margin:12px; font-family:Arial,sans-serif;">${data.html}</body>`;
+      } catch (err) {
+        frame.srcdoc = `<body style="font-family:Arial,sans-serif; color:#b00; padding:12px;">Couldn't load the preview: ${err.message}</body>`;
+      }
+    }
+    document.getElementById('my-signature-refresh-btn').addEventListener('click', refreshSignaturePreview);
 
     document.getElementById('my-profile-save-btn').addEventListener('click', async () => {
       const msg = document.getElementById('my-profile-msg');
@@ -1379,9 +1430,11 @@
         .update({
           mobile_number: document.getElementById('my-profile-mobile').value.trim() || null,
           email_signature: document.getElementById('my-profile-signature').value.trim() || null,
+          email_signature_include_photo: document.getElementById('my-profile-sig-photo').checked,
         })
         .eq('id', myProfileUserId);
       msg.innerHTML = error ? `<div class="error-box">${error.message}</div>` : `<div class="success-box">Saved.</div>`;
+      if (!error) refreshSignaturePreview();
     });
 
     document.getElementById('my-add-licence-btn').addEventListener('click', () => {
