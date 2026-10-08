@@ -31,9 +31,10 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=42"></script>
+  <script src="/js/supabase-client.js?v=44"></script>
   <script src="/js/template-questions.js"></script>
-  <script src="/js/feed.js?v=3"></script>
+  <script src="/js/feed.js?v=4"></script>
+  <script src="/js/assets.js?v=1"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -2631,7 +2632,7 @@
                   <h2>${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</h2>
                   ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}` : ''}
               </div>` : ''}
-              ${!editMode ? '<div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
+              ${!editMode ? '<div id="assets-card"></div><div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
                   <div class="stat"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
@@ -3241,6 +3242,7 @@
       if (document.getElementById('site-photos-list')) { loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
+      if (document.getElementById('assets-card')) loadAssetsCard(project);
       const feedTab = document.querySelector('#job-tabs .settings-tab[data-panel="feed"]');
       if (feedTab) {
         let feedLoaded = false;
@@ -4387,6 +4389,57 @@
           } catch (err) { alert(err.message); }
         });
       });
+    }
+
+    // Installed equipment for this job, recorded against the customer so
+    // servicing / warranty reminders can go out later. Jobs only.
+    function assetPrefillsForJob(project) {
+      const text = (v) => (Array.isArray(v) ? v.join('\n') : String(v || ''));
+      const base = { client_id: project.client_id || null, client_name: project.client_name, site_address: project.client_address, project_id: project.id, installed_at: assetToday() };
+      const pd = project.pylon_data || {};
+      const out = [];
+      (pd.module_types || []).forEach(m => out.push({ ...base, asset_type: 'solar', name: m.description || 'Solar panels', quantity: m.quantity || m.count || 1, serial_numbers: text(project.panel_serial_numbers) }));
+      (pd.inverter_types || []).forEach(m => out.push({ ...base, asset_type: 'inverter', name: m.description || 'Inverter', quantity: m.quantity || m.count || 1, serial_numbers: text(project.inverter_serial_numbers) }));
+      (pd.storage_types || []).forEach(m => out.push({ ...base, asset_type: 'battery', name: m.description || 'Battery', quantity: m.quantity || m.count || 1 }));
+      if (!out.length) out.push({ ...base, asset_type: project.proposal_template === 'solar' ? 'solar' : 'other', name: project.proposal_template === 'solar' ? 'Solar system' : (project.name || ''), serial_numbers: project.proposal_template === 'solar' ? text(project.panel_serial_numbers) : '' });
+      return out;
+    }
+    async function loadAssetsCard(project) {
+      const el = document.getElementById('assets-card');
+      if (!el || !project.job_number || typeof openAssetPanel !== 'function') return;
+      const { data: assets } = await supabaseClient.from('customer_assets').select('*').eq('project_id', project.id).order('created_at');
+      const finished = ['client_handover', 'ready_to_invoice', 'awaiting_payment', 'complete', 'archived'].includes(project.pipeline_stage);
+      if (!(assets || []).length && !finished) { el.innerHTML = ''; return; }
+      const refresh = () => loadAssetsCard(project);
+      const addFromJob = () => {
+        const queue = assetPrefillsForJob(project);
+        const next = () => { if (queue.length) openAssetPanel({ prefill: queue.shift(), onSaved: async () => { await refresh(); next(); } }); };
+        next();
+      };
+      el.innerHTML = `
+        <div class="card" ${!(assets || []).length ? 'style="border-color:var(--accent);"' : ''}>
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+            <h2 style="margin:0;">Installed equipment</h2>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="secondary" id="assets-add-blank" style="font-size:12px; padding:6px 10px;">+ Add</button>
+              <button type="button" id="assets-add-job" style="font-size:12px; padding:6px 10px;">${(assets || []).length ? 'Add more from this job' : 'Add installed equipment'}</button>
+            </div>
+          </div>
+          ${(assets || []).length ? `
+            <table class="responsive-stack">
+              <thead><tr><th>Asset</th><th>Warranty</th><th>Next service</th><th></th></tr></thead>
+              <tbody>${assets.map(a => `
+                <tr>
+                  <td data-label="Asset">${escapeHtml(a.name)}${a.quantity > 1 ? ' x' + a.quantity : ''}<div class="subtitle" style="font-size:12px;">${escapeHtml(assetTypeInfo(a.asset_type).label)}${a.make || a.model ? ' &middot; ' + escapeHtml([a.make, a.model].filter(Boolean).join(' ')) : ''}</div></td>
+                  <td data-label="Warranty">${assetDateBadge(a.warranty_expires, 'warranty')}</td>
+                  <td data-label="Next service">${a.service_interval_months ? assetDateBadge(a.next_service_due, 'service') : '<span class="subtitle">-</span>'}</td>
+                  <td data-label=""><button type="button" class="secondary job-asset-edit" data-id="${a.id}" style="font-size:12px; padding:5px 10px;">Edit</button></td>
+                </tr>`).join('')}</tbody>
+            </table>` : `<p class="subtitle" style="margin:0;">Nothing recorded yet. Add what was installed (with serial numbers and warranty) so we can remind ${escapeHtml(project.client_name || 'the customer')} when a service is due or the warranty is running out.</p>`}
+        </div>`;
+      document.getElementById('assets-add-blank').addEventListener('click', () => openAssetPanel({ prefill: { client_id: project.client_id || null, client_name: project.client_name, site_address: project.client_address, project_id: project.id, installed_at: assetToday() }, onSaved: refresh }));
+      document.getElementById('assets-add-job').addEventListener('click', addFromJob);
+      el.querySelectorAll('.job-asset-edit').forEach(b => b.addEventListener('click', () => openAssetPanel({ asset: assets.find(a => a.id === b.dataset.id), onSaved: refresh })));
     }
 
     // Per-job log of out-of-scope work (job_variation_entries). Anyone can

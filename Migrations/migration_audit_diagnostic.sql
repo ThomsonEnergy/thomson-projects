@@ -384,4 +384,13 @@ select '123', 'job_feed',
   case when exists (select 1 from information_schema.tables where table_name = 'feed_mentions')
     and exists (select 1 from information_schema.columns where table_name = 'feed_posts' and column_name = 'project_id')
   then 'present' else 'MISSING' end
+union all
+select '124', 'feed_comment_mentions',
+  case when exists (select 1 from information_schema.columns where table_name = 'feed_mentions' and column_name = 'comment_id')
+  then 'present' else 'MISSING' end
+union all
+select '125', 'customer_assets',
+  case when exists (select 1 from information_schema.tables where table_name = 'customer_assets')
+    and exists (select 1 from information_schema.tables where table_name = 'asset_reminder_log')
+  then 'present' else 'MISSING' end
 order by 1;

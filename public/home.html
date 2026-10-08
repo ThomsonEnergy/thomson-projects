@@ -86,8 +86,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=42"></script>
-  <script src="/js/feed.js?v=3"></script>
+  <script src="/js/supabase-client.js?v=44"></script>
+  <script src="/js/feed.js?v=4"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId, myRole, myName;
@@ -413,6 +413,25 @@
           });
         }
       } catch (err) { console.error('Timesheet check failed:', err); }
+
+      // Customer servicing / warranty reminders waiting to be reviewed and sent.
+      if (isPricing) {
+        try {
+          const { data: assets } = await supabaseClient.from('customer_assets')
+            .select('id, next_service_due, service_interval_months, warranty_expires, clients(email)')
+            .eq('status', 'active').eq('reminders_paused', false);
+          const { data: log } = await supabaseClient.from('asset_reminder_log').select('asset_id, kind, sent_at').gte('sent_at', new Date(Date.now() - 60 * 86400000).toISOString());
+          const daysTo = (iso) => Math.round((new Date(iso + 'T00:00:00') - new Date(todayStr + 'T00:00:00')) / 86400000);
+          const done = (id, kind) => (log || []).some(l => l.asset_id === id && l.kind === kind);
+          let due = 0;
+          (assets || []).forEach(a => {
+            if (!(a.clients && a.clients.email)) return;
+            if (a.service_interval_months && a.next_service_due && daysTo(a.next_service_due) <= 30 && !done(a.id, 'service')) due++;
+            if (a.warranty_expires && daysTo(a.warranty_expires) <= 90 && daysTo(a.warranty_expires) >= 0 && !done(a.id, 'warranty')) due++;
+          });
+          if (due) items.push({ group: 'job', label: `${due} customer reminder${due === 1 ? '' : 's'} due to send (servicing / warranty)`, link: '/assets.html#reminders' });
+        } catch (err) { console.error('Asset reminder check failed:', err); }
+      }
 
       // Out-of-scope work logged on jobs that nobody's billed or waived yet.
       if (isPricing) {

@@ -75,6 +75,15 @@ async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
   };
   const handoverMissing = evaluate('handover', ctx).filter((r) => !r.met);
 
+  // Everything we install gets recorded against the customer so servicing and
+  // warranty reminders can go out later (Assets page / job Summary tab).
+  rows.push({
+    project_id: job.id,
+    description: 'Record the installed equipment, serial numbers and warranty in the customer asset list',
+    task_type: 'handover',
+    required_before_scheduling: false,
+  });
+
   if (handoverMissing.length) {
     let worded;
     try {

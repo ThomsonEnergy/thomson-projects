@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Customer Assets - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=13" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .asset-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .asset-tabs button { padding:8px 14px; font-size:13px; }
+  .asset-tabs button.active { background:var(--accent-dim); color:var(--accent); border-color:var(--accent); }
+  .reminder-row { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; padding:12px 0; border-top:1px solid var(--border); }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Customer Assets</h1>
+    <p class="subtitle">What we've installed for each customer, with warranty and servicing dates - so we can remind them when a service is due or a warranty is running out, and let owners of particular equipment know about news.</p>
+
+    <div class="asset-tabs">
+      <button type="button" class="secondary active" data-tab="list">All assets</button>
+      <button type="button" class="secondary" data-tab="reminders" id="tab-reminders-btn">Reminders due</button>
+      <button type="button" class="secondary" data-tab="campaign">Email owners</button>
+    </div>
+
+    <!-- All assets -->
+    <div class="card" id="tab-list">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+        <h2 style="margin:0;">Assets</h2>
+        <button id="add-asset-btn">+ Add asset</button>
+      </div>
+      <div class="grid cols-3" style="margin-bottom:12px;">
+        <input id="asset-search" placeholder="Search customer, asset, make, serial..." autocomplete="off" />
+        <select id="asset-type-filter"><option value="">All types</option></select>
+        <select id="asset-status-filter">
+          <option value="active">Active only</option>
+          <option value="attention">Needs attention</option>
+          <option value="decommissioned">Decommissioned</option>
+          <option value="all">Everything</option>
+        </select>
+      </div>
+      <div id="asset-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <!-- Reminders due -->
+    <div class="card" id="tab-reminders" style="display:none;">
+      <h2>Reminders due</h2>
+      <p class="subtitle" style="margin-bottom:6px;">Services due within 30 days (or overdue) and warranties ending within 90 days. Nothing is emailed until you press Send - review the wording first. Anything already emailed (or skipped) in the last 60 days is hidden.</p>
+      <div id="reminder-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <!-- Campaign -->
+    <div class="card" id="tab-campaign" style="display:none;">
+      <h2>Email owners of certain equipment</h2>
+      <p class="subtitle" style="margin-bottom:12px;">For news that matters to people who have a particular thing installed - e.g. battery prices have dropped (to anyone with a hybrid inverter), or storm season is coming. One email per customer, from sales@.</p>
+      <div class="grid cols-3">
+        <div><label style="margin-top:0;">Equipment type</label><select id="camp-type"><option value="">Any type</option></select></div>
+        <div><label style="margin-top:0;">Make / model / name contains</label><input id="camp-text" placeholder="e.g. hybrid, Fronius, Tesla" /></div>
+        <div><label style="margin-top:0;">Installed before (optional)</label><input id="camp-before" type="date" /></div>
+      </div>
+      <div id="camp-match" class="subtitle" style="margin:10px 0;"></div>
+      <div id="camp-recipients" style="max-height:200px; overflow-y:auto; margin-bottom:12px;"></div>
+
+      <label>Subject</label>
+      <input id="camp-subject" placeholder="e.g. Get your {asset} ready for storm season" />
+      <label>Message <span class="subtitle" style="font-weight:400;">- use {first_name}, {asset} and {address} to personalise</span></label>
+      <textarea id="camp-body" style="min-height:160px;"></textarea>
+      <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="secondary" id="camp-tpl-storm" style="font-size:12px; padding:6px 10px;">Use: storm season</button>
+        <button type="button" class="secondary" id="camp-tpl-battery" style="font-size:12px; padding:6px 10px;">Use: battery price drop</button>
+        <button type="button" class="secondary" id="camp-preview-btn" style="font-size:12px; padding:6px 10px;">Preview first email</button>
+      </div>
+      <div id="camp-msg"></div>
+      <button type="button" id="camp-send-btn" style="margin-top:14px;">Send</button>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=44"></script>
+  <script src="/js/assets.js?v=1"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let allAssets = [];     // active + decommissioned, with the client's email joined on
+    let recentLog = [];     // emails sent/skipped in the last 90 days
+    let currentTab = 'list';
+
+    const typeLabel = (k) => assetTypeInfo(k).label;
+    function needsAttention(a) {
+      if (a.status !== 'active') return false;
+      return (a.next_service_due && assetDaysUntil(a.next_service_due) <= 30) || (a.warranty_expires && assetDaysUntil(a.warranty_expires) <= 90 && assetDaysUntil(a.warranty_expires) >= -30);
+    }
+    const clientEmail = (a) => (a.clients && a.clients.email) || '';
+    const customerName = (a) => (a.clients && a.clients.name) || a.client_name || 'Unknown';
+
+    async function loadAll() {
+      const [{ data: assets, error }, { data: log }] = await Promise.all([
+        supabaseClient.from('customer_assets').select('*, clients(name, email)').order('created_at', { ascending: false }),
+        supabaseClient.from('asset_reminder_log').select('asset_id, kind, outcome, sent_at').gte('sent_at', new Date(Date.now() - 90 * 86400000).toISOString()),
+      ]);
+      if (error) { document.getElementById('asset-list').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      allAssets = assets || [];
+      recentLog = log || [];
+      renderAssetList();
+      renderReminders();
+      renderCampaign();
+    }
+
+    // ---------- All assets ----------
+    function renderAssetList() {
+      const q = document.getElementById('asset-search').value.trim().toLowerCase();
+      const type = document.getElementById('asset-type-filter').value;
+      const status = document.getElementById('asset-status-filter').value;
+      const rows = allAssets.filter(a =>
+        (!type || a.asset_type === type) &&
+        (status === 'all' || (status === 'attention' ? needsAttention(a) : a.status === status)) &&
+        (!q || [customerName(a), a.name, a.make, a.model, a.serial_numbers, a.site_address].some(v => (v || '').toLowerCase().includes(q))));
+      const el = document.getElementById('asset-list');
+      if (!allAssets.length) { el.innerHTML = `<p class="subtitle">Nothing recorded yet. Add an asset here, or open a finished job and use "Add installed equipment" on its Summary tab.</p>`; return; }
+      if (!rows.length) { el.innerHTML = `<p class="subtitle">No matches.</p>`; return; }
+      el.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Customer</th><th>Asset</th><th>Installed</th><th>Warranty</th><th>Next service</th><th></th></tr></thead>
+          <tbody>
+            ${rows.map(a => `
+              <tr>
+                <td data-label="Customer"><strong>${escapeHtml(customerName(a))}</strong>${a.site_address ? `<div class="subtitle" style="font-size:12px;">${escapeHtml(a.site_address)}</div>` : ''}</td>
+                <td data-label="Asset">${escapeHtml(a.name)}${a.quantity > 1 ? ` x${a.quantity}` : ''}<div class="subtitle" style="font-size:12px;">${escapeHtml(typeLabel(a.asset_type))}${a.make || a.model ? ' &middot; ' + escapeHtml([a.make, a.model].filter(Boolean).join(' ')) : ''}${a.status === 'decommissioned' ? ' &middot; decommissioned' : ''}${a.reminders_paused ? ' &middot; reminders paused' : ''}</div></td>
+                <td data-label="Installed">${assetFmtDate(a.installed_at)}</td>
+                <td data-label="Warranty">${assetDateBadge(a.warranty_expires, 'warranty')}</td>
+                <td data-label="Next service">${a.service_interval_months ? assetDateBadge(a.next_service_due, 'service') : '<span class="subtitle">-</span>'}</td>
+                <td data-label=""><button type="button" class="secondary asset-edit" data-id="${a.id}" style="font-size:12px; padding:6px 10px;">Edit</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+      el.querySelectorAll('.asset-edit').forEach(b => b.addEventListener('click', () => openAssetPanel({ asset: allAssets.find(a => a.id === b.dataset.id), onSaved: loadAll })));
+    }
+
+    // ---------- Reminders due ----------
+    function dueReminders() {
+      const reminded = (assetId, kind) => recentLog.some(l => l.asset_id === assetId && l.kind === kind && (Date.now() - new Date(l.sent_at).getTime()) < 60 * 86400000);
+      const out = [];
+      allAssets.filter(a => a.status === 'active' && !a.reminders_paused).forEach(a => {
+        if (a.service_interval_months && a.next_service_due && assetDaysUntil(a.next_service_due) <= 30 && !reminded(a.id, 'service')) out.push({ kind: 'service', asset: a, date: a.next_service_due });
+        if (a.warranty_expires && assetDaysUntil(a.warranty_expires) <= 90 && assetDaysUntil(a.warranty_expires) >= 0 && !reminded(a.id, 'warranty')) out.push({ kind: 'warranty', asset: a, date: a.warranty_expires });
+      });
+      return out.sort((x, y) => x.date.localeCompare(y.date));
+    }
+    function renderReminders() {
+      const due = dueReminders();
+      document.getElementById('tab-reminders-btn').textContent = due.length ? `Reminders due (${due.length})` : 'Reminders due';
+      const el = document.getElementById('reminder-list');
+      if (!due.length) { el.innerHTML = `<p class="subtitle" style="margin-top:10px;">Nothing due - you're all caught up.</p>`; return; }
+      el.innerHTML = due.map((r, i) => {
+        const a = r.asset; const email = clientEmail(a);
+        const days = assetDaysUntil(r.date);
+        const why = r.kind === 'service'
+          ? `${typeLabel(a.asset_type)} service ${days < 0 ? 'overdue since' : 'due'} ${assetFmtDate(r.date)}`
+          : `Warranty ends ${assetFmtDate(r.date)} (${days} days)`;
+        return `
+          <div class="reminder-row">
+            <div style="min-width:0;">
+              <strong>${escapeHtml(customerName(a))}</strong> - ${escapeHtml(a.name)}
+              <div class="subtitle" style="font-size:12px; margin-top:2px;">${why}${email ? '' : ' &middot; <span style="color:var(--red);">no email on file</span>'}</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="reminder-send" data-i="${i}" ${email ? '' : 'disabled title="Add an email to this client first"'} style="font-size:12px; padding:6px 12px;">Review &amp; send</button>
+              <button type="button" class="secondary reminder-skip" data-i="${i}" style="font-size:12px; padding:6px 10px;">Skip</button>
+            </div>
+          </div>`;
+      }).join('');
+      el.querySelectorAll('.reminder-send').forEach(b => b.addEventListener('click', () => openReminderEmail(due[parseInt(b.dataset.i, 10)])));
+      el.querySelectorAll('.reminder-skip').forEach(b => b.addEventListener('click', async () => {
+        const r = due[parseInt(b.dataset.i, 10)];
+        await logAssetEmail({ asset: r.asset, kind: r.kind, outcome: 'skipped' });
+        await loadAll();
+      }));
+    }
+    function openReminderEmail(r) {
+      const a = r.asset;
+      const def = assetEmailDefaults(r.kind, a, customerName(a));
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px; overflow-y:auto;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:600px; width:100%; max-height:92vh; overflow-y:auto;">
+          <h2>${r.kind === 'service' ? 'Service reminder' : 'Warranty reminder'}</h2>
+          <p class="subtitle" style="margin-bottom:8px;">To: <strong>${escapeHtml(customerName(a))}</strong> &lt;${escapeHtml(clientEmail(a))}&gt; - sent from sales@ with your signature added.</p>
+          <label style="margin-top:0;">Subject</label>
+          <input id="re-subject" value="${escapeHtml(def.subject)}" />
+          <label>Message</label>
+          <textarea id="re-body" style="min-height:240px;">${escapeHtml(def.body)}</textarea>
+          <div id="re-msg"></div>
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <button type="button" id="re-send">Send email</button>
+            <button type="button" class="secondary" id="re-cancel">Cancel</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#re-cancel').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#re-send').addEventListener('click', async () => {
+        const btn = overlay.querySelector('#re-send');
+        const subject = overlay.querySelector('#re-subject').value.trim(), bodyText = overlay.querySelector('#re-body').value.trim();
+        if (!subject || !bodyText) { overlay.querySelector('#re-msg').innerHTML = `<div class="error-box">Subject and message are needed.</div>`; return; }
+        btn.disabled = true; btn.textContent = 'Sending...';
+        try {
+          await sendCustomerEmail({ to: clientEmail(a), subject, bodyText });
+          await logAssetEmail({ asset: a, kind: r.kind, subject, sentTo: clientEmail(a) });
+          overlay.remove();
+          await loadAll();
+        } catch (err) {
+          overlay.querySelector('#re-msg').innerHTML = `<div class="error-box">${err.message}</div>`;
+          btn.disabled = false; btn.textContent = 'Send email';
+        }
+      });
+    }
+
+    // ---------- Campaign ----------
+    function campaignMatches() {
+      const type = document.getElementById('camp-type').value;
+      const text = document.getElementById('camp-text').value.trim().toLowerCase();
+      const before = document.getElementById('camp-before').value;
+      const matched = allAssets.filter(a =>
+        a.status === 'active' && !a.reminders_paused &&
+        (!type || a.asset_type === type) &&
+        (!text || [a.name, a.make, a.model].some(v => (v || '').toLowerCase().includes(text))) &&
+        (!before || (a.installed_at && a.installed_at < before)));
+      const byClient = new Map();
+      matched.forEach(a => {
+        const key = a.client_id || ('name:' + customerName(a));
+        if (!byClient.has(key)) byClient.set(key, { name: customerName(a), email: clientEmail(a), address: a.site_address, assets: [] });
+        byClient.get(key).assets.push(a);
+      });
+      return [...byClient.values()];
+    }
+    function campaignContext(c) {
+      const names = c.assets.map(a => a.name);
+      return { first_name: assetFirstName(c.name), asset: names.slice(0, 3).join(', ') + (names.length > 3 ? ` and ${names.length - 3} more` : ''), address: c.address || 'your property' };
+    }
+    function renderCampaign() {
+      const customers = campaignMatches();
+      const withEmail = customers.filter(c => c.email);
+      document.getElementById('camp-match').innerHTML = customers.length
+        ? `<strong>${withEmail.length}</strong> customer${withEmail.length === 1 ? '' : 's'} will get this${customers.length > withEmail.length ? ` (${customers.length - withEmail.length} more match but have no email on file)` : ''}.`
+        : 'No active assets match yet - adjust the filters above.';
+      document.getElementById('camp-recipients').innerHTML = customers.map(c => `
+        <div style="display:flex; justify-content:space-between; gap:10px; padding:4px 0; border-bottom:1px solid var(--border); font-size:13px;">
+          <span>${escapeHtml(c.name)} <span class="subtitle">${escapeHtml(c.assets.map(a => a.name).join(', '))}</span></span>
+          <span class="subtitle">${c.email ? escapeHtml(c.email) : '<span style="color:var(--red);">no email</span>'}</span>
+        </div>`).join('');
+      document.getElementById('camp-send-btn').textContent = withEmail.length ? `Send to ${withEmail.length} customer${withEmail.length === 1 ? '' : 's'}` : 'Send';
+    }
+    ['camp-type', 'camp-text', 'camp-before'].forEach(id => document.getElementById(id).addEventListener('input', renderCampaign));
+
+    document.getElementById('camp-tpl-storm').addEventListener('click', () => {
+      document.getElementById('camp-subject').value = 'Get your {asset} ready for storm season';
+      document.getElementById('camp-body').value = `Hi {first_name},\n\nStorm season is just around the corner. Now's a great time for a quick check of your {asset} at {address} - we can look over the isolators, connections and mounting and make sure everything is secure and performing as it should.\n\nJust reply to this email or give us a call and we'll find a time that suits you.\n\nThanks,`;
+    });
+    document.getElementById('camp-tpl-battery').addEventListener('click', () => {
+      document.getElementById('camp-subject').value = 'Battery prices have dropped';
+      document.getElementById('camp-body').value = `Hi {first_name},\n\nGood news - battery prices have come down recently. As the owner of {asset} at {address}, you may be able to add storage and make much more of your own solar.\n\nIf you'd like a no-obligation quote, just reply to this email or give us a call.\n\nThanks,`;
+    });
+    document.getElementById('camp-preview-btn').addEventListener('click', () => {
+      const withEmail = campaignMatches().filter(c => c.email);
+      const msgEl = document.getElementById('camp-msg');
+      if (!withEmail.length) { msgEl.innerHTML = `<div class="error-box">No recipients match yet.</div>`; return; }
+      const ctx = campaignContext(withEmail[0]);
+      const subject = assetMerge(document.getElementById('camp-subject').value, ctx), body = assetMerge(document.getElementById('camp-body').value, ctx);
+      msgEl.innerHTML = `<div class="card" style="margin-top:10px; background:var(--surface-2);"><p class="subtitle" style="margin:0 0 6px;">Preview for ${escapeHtml(withEmail[0].name)} (${escapeHtml(withEmail[0].email)})</p><p style="font-weight:600; margin:0 0 8px;">${escapeHtml(subject)}</p><div style="white-space:pre-wrap;">${escapeHtml(body)}</div></div>`;
+    });
+    document.getElementById('camp-send-btn').addEventListener('click', async () => {
+      const msgEl = document.getElementById('camp-msg');
+      const subjectT = document.getElementById('camp-subject').value.trim(), bodyT = document.getElementById('camp-body').value.trim();
+      const recipients = campaignMatches().filter(c => c.email);
+      if (!subjectT || !bodyT) { msgEl.innerHTML = `<div class="error-box">Write a subject and message first.</div>`; return; }
+      if (!recipients.length) { msgEl.innerHTML = `<div class="error-box">No recipients match.</div>`; return; }
+      if (!confirm(`Send this email to ${recipients.length} customer${recipients.length === 1 ? '' : 's'} from sales@thomsonenergy.com.au?\n\nSubject: ${subjectT}`)) return;
+      const btn = document.getElementById('camp-send-btn');
+      btn.disabled = true;
+      let sent = 0; const failed = [];
+      for (const c of recipients) {
+        btn.textContent = `Sending ${sent + failed.length + 1} of ${recipients.length}...`;
+        const ctx = campaignContext(c);
+        const subject = assetMerge(subjectT, ctx), bodyText = assetMerge(bodyT, ctx);
+        try {
+          await sendCustomerEmail({ to: c.email, subject, bodyText });
+          sent++;
+          for (const a of c.assets) await logAssetEmail({ asset: a, kind: 'campaign', campaignName: subjectT, subject, sentTo: c.email });
+        } catch (err) { failed.push(`${c.name}: ${err.message}`); }
+        await new Promise(r => setTimeout(r, 400));
+      }
+      btn.disabled = false;
+      msgEl.innerHTML = `<div class="${failed.length ? 'error-box' : 'success-box'}">Sent ${sent} of ${recipients.length}.${failed.length ? '<br>Failed: ' + failed.map(escapeHtml).join('<br>') : ''}</div>`;
+      await loadAll();
+    });
+
+    // ---------- tabs + wiring ----------
+    function showTab(tab) {
+      currentTab = tab;
+      ['list', 'reminders', 'campaign'].forEach(t => { document.getElementById('tab-' + t).style.display = t === tab ? '' : 'none'; });
+      document.querySelectorAll('.asset-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    }
+    document.querySelectorAll('.asset-tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+    document.getElementById('add-asset-btn').addEventListener('click', () => openAssetPanel({ onSaved: loadAll }));
+    document.getElementById('asset-search').addEventListener('input', renderAssetList);
+    document.getElementById('asset-type-filter').addEventListener('change', renderAssetList);
+    document.getElementById('asset-status-filter').addEventListener('change', renderAssetList);
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('assets');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      const typeOpts = ASSET_TYPES.map(t => `<option value="${t.key}">${t.label}</option>`).join('');
+      document.getElementById('asset-type-filter').insertAdjacentHTML('beforeend', typeOpts);
+      document.getElementById('camp-type').insertAdjacentHTML('beforeend', typeOpts);
+      await loadAll();
+      if (window.location.hash === '#reminders') showTab('reminders');
+    })();
+  </script>
+</body>
+</html>
