@@ -109,6 +109,72 @@ async function renderPdfThumbnail(url, longEdge = 360) {
   return dataUrl;
 }
 
+// Draws markup-editor shapes (pen, arrow, box, text - coordinates in the
+// editor's own image pixels, y down) onto a PDF page as real vector
+// graphics. Throws if anything can't be drawn (e.g. text pdf-lib can't
+// encode) so the caller can fall back to flattening that page.
+function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
+  const { rgb, LineCapStyle } = PDFLib;
+  const { width: pw, height: ph } = page.getSize();
+  const k = pw / W;
+  const X = (x) => x * k;
+  const Y = (y) => ph - y * k;
+  const col = (hex) => rgb(parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255);
+
+  for (const s of shapes) {
+    const c = col(s.colour);
+    const lw = s.width * k;
+    if (s.type === 'pen') {
+      const pts = s.points.length === 1 ? [s.points[0], [s.points[0][0] + 0.01, s.points[0][1]]] : s.points;
+      for (let i = 1; i < pts.length; i++) {
+        page.drawLine({
+          start: { x: X(pts[i - 1][0]), y: Y(pts[i - 1][1]) }, end: { x: X(pts[i][0]), y: Y(pts[i][1]) },
+          thickness: lw, color: c, lineCap: LineCapStyle.Round,
+        });
+      }
+    } else if (s.type === 'box') {
+      const rect = {
+        x: X(Math.min(s.x1, s.x2)), y: Y(Math.max(s.y1, s.y2)),
+        width: Math.abs(s.x2 - s.x1) * k, height: Math.abs(s.y2 - s.y1) * k,
+      };
+      if (s.fill === 1) page.drawRectangle({ ...rect, color: c });
+      else if (s.fill === 2) page.drawRectangle({ ...rect, color: c, opacity: 0.35, borderColor: c, borderWidth: lw, borderOpacity: 1 });
+      else page.drawRectangle({ ...rect, borderColor: c, borderWidth: lw });
+    } else if (s.type === 'arrow') {
+      const angle = Math.atan2(s.y2 - s.y1, s.x2 - s.x1);
+      const head = s.width * 5;
+      page.drawLine({ start: { x: X(s.x1), y: Y(s.y1) }, end: { x: X(s.x2), y: Y(s.y2) }, thickness: lw, color: c, lineCap: LineCapStyle.Round });
+      const ax = s.x2 - head * Math.cos(angle - 0.45), ay = s.y2 - head * Math.sin(angle - 0.45);
+      const bx = s.x2 - head * Math.cos(angle + 0.45), by = s.y2 - head * Math.sin(angle + 0.45);
+      // SVG paths are drawn from the top-left and y-down, same as the editor.
+      page.drawSvgPath(`M ${s.x2} ${s.y2} L ${ax} ${ay} L ${bx} ${by} Z`, { x: 0, y: ph, scale: k, color: c, borderWidth: 0 });
+    } else if (s.type === 'text') {
+      const text = String(s.text).replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
+      const size = Math.round(s.width * 6) * k;
+      const baseX = X(s.x1);
+      const baseY = Y(s.y1) - size * 0.82;
+      // Same contrasting outline the editor draws, so it stays readable on
+      // any background.
+      const outline = s.colour === '#000000' ? rgb(1, 1, 1) : rgb(0, 0, 0);
+      // One piece of text drawn "fill and outline" (a PDF text render mode),
+      // not several offset copies - so searching/selecting the PDF finds the
+      // words once.
+      if (PDFLib.TextRenderingMode && PDFLib.setTextRenderingMode && PDFLib.setStrokingColor && PDFLib.setLineWidth) {
+        page.pushOperators(
+          PDFLib.pushGraphicsState(),
+          PDFLib.setTextRenderingMode(PDFLib.TextRenderingMode.FillAndOutline),
+          PDFLib.setLineWidth(size * 0.07),
+          PDFLib.setStrokingColor(outline),
+        );
+        page.drawText(text, { x: baseX, y: baseY, size, font, color: c });
+        page.pushOperators(PDFLib.popGraphicsState());
+      } else {
+        page.drawText(text, { x: baseX, y: baseY, size, font, color: c });
+      }
+    }
+  }
+}
+
 // Shared in-app PDF viewer - one place quotes, invoices, documents and signed
 // onboarding documents all show up. Pages are rendered to images (pdf.js)
 // so a PDF looks and behaves like a photo: click through the pages, and -
@@ -157,14 +223,13 @@ async function openPdfViewer(path, title, opts = {}) {
   const pageCount = pdf.numPages;
   const canMarkup = !!opts.projectId;
   const rendered = {};            // pageIndex -> { dataUrl, width, height }
-  const annotated = new Map();    // pageIndex -> marked-up JPEG blob
-  const annotatedUrls = new Map(); // pageIndex -> object URL of that blob
+  const annotated = new Map();    // pageIndex -> { blob (flattened JPEG), shapes, width, height }
+  const annotatedUrls = new Map(); // pageIndex -> object URL of that blob (for display only)
   let index = 0;
 
   async function pageImage(i) {
-    if (annotatedUrls.has(i)) return { url: annotatedUrls.get(i) };
     if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
-    return { url: rendered[i].dataUrl };
+    return { url: annotatedUrls.has(i) ? annotatedUrls.get(i) : rendered[i].dataUrl };
   }
 
   async function render() {
@@ -195,12 +260,16 @@ async function openPdfViewer(path, title, opts = {}) {
     const markupBtn = overlay.querySelector('#pv-markup');
     if (markupBtn) {
       markupBtn.addEventListener('click', () => {
-        openPhotoMarkup(img.url, async (blob) => {
-          if (annotatedUrls.has(index)) URL.revokeObjectURL(annotatedUrls.get(index));
-          annotated.set(index, blob);
-          annotatedUrls.set(index, URL.createObjectURL(blob));
+        // Always starts from the clean page with any earlier shapes reloaded,
+        // so a page can be edited again rather than drawn over a flattened copy.
+        const pageIndex = index;
+        const prev = annotated.get(pageIndex);
+        openPhotoMarkup(rendered[pageIndex].dataUrl, async (blob, shapes, size) => {
+          if (annotatedUrls.has(pageIndex)) URL.revokeObjectURL(annotatedUrls.get(pageIndex));
+          annotated.set(pageIndex, { blob, shapes, width: size.width, height: size.height });
+          annotatedUrls.set(pageIndex, URL.createObjectURL(blob));
           render();
-        });
+        }, prev ? prev.shapes : null);
       });
     }
     const saveBtn = overlay.querySelector('#pv-save');
@@ -210,14 +279,28 @@ async function openPdfViewer(path, title, opts = {}) {
       try {
         const PDFLib = await loadPdfLib();
         const doc = await PDFLib.PDFDocument.load(bytes);
-        for (const [i, blob] of annotated) {
+        const font = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+        for (const [i, a] of annotated) {
           if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
           const { width, height } = rendered[i];
-          const jpg = await doc.embedJpg(await blob.arrayBuffer());
-          // Swap the page for a fresh one the size pdf.js showed it at
-          // (rotation included) with the marked-up picture filling it.
-          doc.insertPage(i, [width, height]).drawImage(jpg, { x: 0, y: 0, width, height });
-          doc.removePage(i + 1);
+          const page = doc.getPage(i);
+          const size = page.getSize();
+          // Normal case: lay the drawings over the ORIGINAL page as vector
+          // shapes, so its text stays selectable and the file stays small.
+          // Only when the page is rotated or cropped in a way the shapes
+          // wouldn't line up with does it fall back to swapping in the
+          // flattened picture of the page.
+          const lineUp = page.getRotation().angle === 0 && Math.abs(size.width - width) < 1.5 && Math.abs(size.height - height) < 1.5;
+          let drawn = false;
+          if (lineUp) {
+            try { drawShapesOnPdfPage(PDFLib, page, font, a.shapes, a.width, a.height); drawn = true; }
+            catch (shapeErr) { console.warn('Could not draw markup as vectors, flattening this page instead:', shapeErr.message); }
+          }
+          if (!drawn) {
+            const jpg = await doc.embedJpg(await a.blob.arrayBuffer());
+            doc.insertPage(i, [width, height]).drawImage(jpg, { x: 0, y: 0, width, height });
+            doc.removePage(i + 1);
+          }
         }
         const outBytes = await doc.save();
         const { data: { user } } = await supabaseClient.auth.getUser();
@@ -403,7 +486,7 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
 // colours/sizes, with undo. Hands the finished picture to `onSave(blob)` as
 // a JPEG - the caller decides where it goes (the original is never touched
 // here). Output is capped at 1920px on the long edge, same as uploads.
-async function openPhotoMarkup(url, onSave) {
+async function openPhotoMarkup(url, onSave, initialShapes = null) {
   const overlay = document.createElement('div');
   overlay.className = 'photo-markup-overlay';
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.96); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:12px;';
@@ -429,7 +512,9 @@ async function openPhotoMarkup(url, onSave) {
   let tool = 'pen', colour = COLOURS[0], sizeIdx = 1;
   let fillMode = 0; // boxes only: 0 outline, 1 solid fill, 2 see-through highlight
   const FILL_LABELS = ['Outline', 'Solid fill', 'Highlight'];
-  const shapes = [];
+  // initialShapes lets a caller reopen earlier work (the PDF viewer does, so
+  // a marked-up page can be edited again as shapes, not as a flattened picture).
+  const shapes = initialShapes ? JSON.parse(JSON.stringify(initialShapes)) : [];
   let current = null;
   let dragging = null; // { shape, x, y } while the Move tool is dragging a shape
 
@@ -612,7 +697,9 @@ async function openPhotoMarkup(url, onSave) {
     try {
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
       if (!blob) throw new Error('Could not export the picture');
-      await onSave(blob);
+      // Second/third arguments are for callers that want the drawings as data
+      // (shapes in image-pixel coordinates) as well as the flattened picture.
+      await onSave(blob, JSON.parse(JSON.stringify(shapes)), { width: W, height: H });
       overlay.remove();
     } catch (err) {
       msgEl.textContent = err.message;
