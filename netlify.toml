@@ -25,6 +25,11 @@
 [functions.sync-gmail]
   schedule = "*/5 * * * *"
 
+# Every minute: turns due meeting-action reminders into notifications and sends
+# new notifications to people's phones (web push) - see send-notifications.js.
+[functions.send-notifications]
+  schedule = "* * * * *"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

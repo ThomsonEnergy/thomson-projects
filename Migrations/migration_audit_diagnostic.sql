@@ -421,4 +421,10 @@ select '131', 'email_signature_html',
   case when exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'email_signature_include_photo')
     and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'social_facebook')
   then 'present' else 'MISSING' end
+union all
+select '132', 'notifications + push_subscriptions',
+  case when exists (select 1 from information_schema.tables where table_name = 'notifications')
+    and exists (select 1 from information_schema.tables where table_name = 'push_subscriptions')
+    and exists (select 1 from pg_trigger where tgname = 'notify_task')
+  then 'present' else 'MISSING' end
 order by 1;

@@ -1625,6 +1625,17 @@ async function renderMainNav(activeKey) {
     }
   };
   renderAIChatWidget();
+  loadNotificationBell();
+}
+
+// The notification bell + phone push setup live in their own file, loaded once
+// on any page that shows the top bar.
+function loadNotificationBell() {
+  if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
+  window.__notifLoaded = true;
+  const s = document.createElement('script');
+  s.src = '/js/notifications.js?v=1';
+  document.head.appendChild(s);
 }
 
 // Floating "Ask AI" widget - piggybacks on renderMainNav() so it shows up
