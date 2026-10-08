@@ -371,4 +371,12 @@ union all
 select '120', 'timesheet_category_no_job',
   case when exists (select 1 from pg_trigger where tgname = 'time_entries_category_fix')
   then 'present' else 'MISSING' end
+union all
+select '121', 'tech_support_contacts',
+  case when exists (select 1 from information_schema.tables where table_name = 'tech_support_contacts')
+  then 'present' else 'MISSING' end
+union all
+select '122', 'job_variation_entries',
+  case when exists (select 1 from information_schema.tables where table_name = 'job_variation_entries')
+  then 'present' else 'MISSING' end
 order by 1;

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Tech Support - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=13" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .support-card { border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px; }
+  .support-card .call-btn { display:inline-block; padding:10px 16px; border-radius:8px; background:var(--accent); color:var(--accent-contrast); font-weight:700; text-decoration:none; font-size:15px; margin:4px 8px 4px 0; }
+  .support-card .call-btn.alt { background:var(--surface-2); color:var(--text); font-weight:600; }
+  .support-meta { font-size:13px; color:var(--muted); margin:4px 0 0; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Tech Support</h1>
+    <p class="subtitle">Phone numbers for manufacturer and software tech support - tap a number to call. Anyone can add or fix an entry, so keep it current.</p>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+        <h2 style="margin:0;">Support numbers</h2>
+        <button id="add-support-btn">+ Add number</button>
+      </div>
+      <div class="grid cols-2" style="margin-bottom:12px;">
+        <input id="support-search" placeholder="Search by name, product, category or notes..." autocomplete="off" />
+        <select id="support-category-filter"><option value="">All categories</option></select>
+      </div>
+      <div id="support-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=41"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    const CATEGORY_SUGGESTIONS = ['Inverters', 'Batteries', 'Solar panels', 'Monitoring', 'EV chargers', 'Switchgear', 'Generators', 'Networks / DNSP', 'Software', 'Suppliers', 'Other'];
+    let allContacts = [];
+
+    // tel: links only want digits and a leading +
+    const telHref = (p) => 'tel:' + String(p || '').replace(/[^\d+]/g, '');
+
+    function renderList() {
+      const q = document.getElementById('support-search').value.trim().toLowerCase();
+      const cat = document.getElementById('support-category-filter').value;
+      const rows = allContacts.filter(c =>
+        (!cat || c.category === cat) &&
+        (!q || [c.name, c.category, c.notes, c.phone, c.hours].some(v => (v || '').toLowerCase().includes(q))));
+      const el = document.getElementById('support-list');
+      if (!allContacts.length) { el.innerHTML = `<p class="subtitle">Nothing here yet - add the first number with "+ Add number".</p>`; return; }
+      if (!rows.length) { el.innerHTML = `<p class="subtitle">No matches.</p>`; return; }
+      el.innerHTML = rows.map(c => `
+        <div class="support-card">
+          <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; flex-wrap:wrap;">
+            <div>
+              <strong style="font-size:16px;">${escapeHtml(c.name)}</strong>
+              ${c.category ? `<span class="badge draft" style="margin-left:8px;">${escapeHtml(c.category)}</span>` : ''}
+            </div>
+            <div style="white-space:nowrap;">
+              <button type="button" class="secondary support-edit" data-id="${c.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
+              <button type="button" class="secondary support-delete" data-id="${c.id}" style="font-size:12px; padding:6px 10px;">Delete</button>
+            </div>
+          </div>
+          <div style="margin-top:8px;">
+            ${c.phone ? `<a class="call-btn" href="${telHref(c.phone)}">&#128222; ${escapeHtml(c.phone)}</a>` : ''}
+            ${c.phone_alt ? `<a class="call-btn alt" href="${telHref(c.phone_alt)}">${escapeHtml(c.phone_alt)}</a>` : ''}
+          </div>
+          ${c.hours ? `<p class="support-meta">Hours: ${escapeHtml(c.hours)}</p>` : ''}
+          ${c.email ? `<p class="support-meta">Email: <a class="link-quiet" href="mailto:${escapeHtml(c.email)}">${escapeHtml(c.email)}</a></p>` : ''}
+          ${c.website ? `<p class="support-meta"><a class="link-quiet" href="${/^https?:/i.test(c.website) ? escapeHtml(c.website) : 'https://' + escapeHtml(c.website)}" target="_blank" rel="noopener">${escapeHtml(c.website)}</a></p>` : ''}
+          ${c.notes ? `<p style="margin:8px 0 0; white-space:pre-wrap;">${escapeHtml(c.notes)}</p>` : ''}
+        </div>`).join('');
+
+      el.querySelectorAll('.support-edit').forEach(b => b.addEventListener('click', () => openSupportPanel(allContacts.find(c => c.id === b.dataset.id))));
+      el.querySelectorAll('.support-delete').forEach(b => b.addEventListener('click', async () => {
+        const c = allContacts.find(x => x.id === b.dataset.id);
+        if (!confirm(`Delete "${c.name}"? This cannot be undone.`)) return;
+        const { error } = await supabaseClient.from('tech_support_contacts').delete().eq('id', b.dataset.id);
+        if (error) { alert(error.message); return; }
+        await loadContacts();
+      }));
+    }
+
+    async function loadContacts() {
+      const { data, error } = await supabaseClient.from('tech_support_contacts').select('*').order('name');
+      if (error) { document.getElementById('support-list').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      allContacts = data || [];
+      const sel = document.getElementById('support-category-filter');
+      const current = sel.value;
+      const cats = [...new Set(allContacts.map(c => c.category).filter(Boolean))].sort();
+      sel.innerHTML = `<option value="">All categories</option>` + cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+      sel.value = cats.includes(current) ? current : '';
+      renderList();
+    }
+
+    function openSupportPanel(existing) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px; overflow-y:auto;';
+      const v = (k) => escapeHtml((existing && existing[k]) || '');
+      overlay.innerHTML = `
+        <div class="card" style="max-width:520px; width:100%; max-height:92vh; overflow-y:auto;">
+          <h2>${existing ? 'Edit' : 'Add'} support number</h2>
+          <label style="margin-top:0;">Name (company and product)</label>
+          <input id="sp-name" value="${v('name')}" placeholder="e.g. SolarEdge - inverter tech support" />
+          <label>Category</label>
+          <input id="sp-category" list="sp-category-list" value="${v('category')}" placeholder="e.g. Inverters" />
+          <datalist id="sp-category-list">${CATEGORY_SUGGESTIONS.map(c => `<option value="${c}">`).join('')}</datalist>
+          <div class="grid cols-2">
+            <div><label>Phone</label><input id="sp-phone" type="tel" value="${v('phone')}" placeholder="1300 000 000" /></div>
+            <div><label>Other number (optional)</label><input id="sp-phone-alt" type="tel" value="${v('phone_alt')}" /></div>
+          </div>
+          <label>Hours (optional)</label>
+          <input id="sp-hours" value="${v('hours')}" placeholder="e.g. Mon-Fri 8am-6pm AEST" />
+          <div class="grid cols-2">
+            <div><label>Email (optional)</label><input id="sp-email" type="email" value="${v('email')}" /></div>
+            <div><label>Website (optional)</label><input id="sp-website" value="${v('website')}" /></div>
+          </div>
+          <label>Notes (optional)</label>
+          <textarea id="sp-notes" style="min-height:80px;" placeholder="e.g. have the serial number ready; press 2 for installers; account no. 12345">${v('notes')}</textarea>
+          <div id="sp-msg"></div>
+          <div style="margin-top:14px; display:flex; gap:8px;">
+            <button type="button" id="sp-save">Save</button>
+            <button type="button" class="secondary" id="sp-cancel">Cancel</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#sp-cancel').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#sp-save').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#sp-msg');
+        const name = overlay.querySelector('#sp-name').value.trim();
+        const phone = overlay.querySelector('#sp-phone').value.trim();
+        if (!name) { msg.innerHTML = `<div class="error-box">Enter a name.</div>`; return; }
+        if (!phone && !overlay.querySelector('#sp-phone-alt').value.trim()) { msg.innerHTML = `<div class="error-box">Enter at least one phone number.</div>`; return; }
+        const payload = {
+          name,
+          category: overlay.querySelector('#sp-category').value.trim() || null,
+          phone: phone || null,
+          phone_alt: overlay.querySelector('#sp-phone-alt').value.trim() || null,
+          hours: overlay.querySelector('#sp-hours').value.trim() || null,
+          email: overlay.querySelector('#sp-email').value.trim() || null,
+          website: overlay.querySelector('#sp-website').value.trim() || null,
+          notes: overlay.querySelector('#sp-notes').value.trim() || null,
+        };
+        let res;
+        if (existing) res = await supabaseClient.from('tech_support_contacts').update(payload).eq('id', existing.id);
+        else {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          res = await supabaseClient.from('tech_support_contacts').insert({ ...payload, created_by: user.id });
+        }
+        if (res.error) { msg.innerHTML = `<div class="error-box">${res.error.message}</div>`; return; }
+        overlay.remove();
+        await loadContacts();
+      });
+    }
+
+    document.getElementById('add-support-btn').addEventListener('click', () => openSupportPanel(null));
+    document.getElementById('support-search').addEventListener('input', renderList);
+    document.getElementById('support-category-filter').addEventListener('change', renderList);
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('support');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      await loadContacts();
+    })();
+  </script>
+</body>
+</html>

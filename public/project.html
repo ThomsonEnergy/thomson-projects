@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=40"></script>
+  <script src="/js/supabase-client.js?v=41"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js"></script>
@@ -1838,11 +1838,13 @@
       const mode = opts.preselectCentreId ? 'stage' : 'project';
 
       const overlay = document.createElement('div');
+      setTimeout(() => fillInvoiceVariationsNote(overlay, project), 0);
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:640px; width:100%; max-height:88vh; overflow-y:auto;">
           <h2>Invoice project</h2>
           <p class="subtitle" style="margin-bottom:12px;">${money(projectRemaining)} remaining to claim across ${centres.length} stage${centres.length === 1 ? '' : 's'}.</p>
+          <div id="inv-variations-note"></div>
 
           <div style="display:flex; gap:16px; margin-bottom:14px;">
             <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="inv-mode" value="project" ${mode === 'project' ? 'checked' : ''} style="width:auto;" /> Whole project %</label>
@@ -2589,6 +2591,7 @@
         <div style="margin-bottom:20px;">
           ${pricingVisible && !editMode ? `
             ${!isFrozenQuote ? `<button id="edit-toggle-btn" class="secondary">${project.job_number ? 'Edit stages' : 'Edit quote'}</button>` : ''}
+            ${!isFrozenQuote ? `<button type="button" id="schedule-staff-btn" class="secondary">Schedule staff</button>` : ''}
             ${!project.job_number ? `<button id="duplicate-btn" class="secondary">Duplicate as new quote</button>` : ''}
             ${project.job_number && project.source_quote?.quote_token ? `<a class="btn secondary" href="/quote.html?token=${project.source_quote.quote_token}" target="_blank">Go to quote</a>` : ''}
             ${isFrozenQuote && project.resulting_job ? `<a class="btn secondary" href="/project.html?id=${project.resulting_job.id}">Go to job${project.resulting_job.job_number ? ' (J' + project.resulting_job.job_number + ')' : ''}</a>` : ''}
@@ -2606,6 +2609,7 @@
           <button class="settings-tab active" data-panel="summary">Summary</button>
           <button class="settings-tab" data-panel="costcentres">Cost Centres</button>
           ${project.job_number && !editMode ? `<button class="settings-tab" data-panel="pos">Purchase Orders</button>` : ''}
+          ${project.job_number && !editMode ? `<button class="settings-tab" data-panel="variations">Variations</button>` : ''}
           ${project.job_number && !editMode && pricingVisible ? `<button class="settings-tab" data-panel="invoices">Invoices</button>` : ''}
           <button class="settings-tab" data-panel="details">Details</button>
           ${!editMode ? `<button class="settings-tab" data-panel="documents">Documents</button>` : ''}
@@ -2625,7 +2629,7 @@
                   <h2>${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</h2>
                   ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}` : ''}
               </div>` : ''}
-              ${!editMode ? '<div id="plan-schedule-card"></div>' : ''}
+              ${!editMode ? '<div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
                   <div class="stat"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
@@ -2999,6 +3003,29 @@
             </div>
             ` : ''}
 
+            ${project.job_number && !editMode ? `
+            <div class="settings-panel" id="panel-variations">
+              <div class="card">
+                <h2>Variations - work outside the scope</h2>
+                <p class="subtitle" style="margin-bottom:12px;">If you do something that wasn't in the quote, log it here as you go - what it was, how long it took and what materials went in - so it's clear at billing and doesn't get missed.</p>
+                <label style="margin-top:0;">What was the extra work?</label>
+                <input id="var-desc" placeholder="e.g. Moved the meter box 2m left at the builder's request" />
+                <div class="grid cols-3">
+                  <div><label>Hours</label><input id="var-hours" type="number" step="0.25" min="0" placeholder="e.g. 2.5" /></div>
+                  <div><label>Date</label><input id="var-date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></div>
+                </div>
+                <label>Materials used (optional)</label>
+                <textarea id="var-materials" style="min-height:60px;" placeholder="e.g. 6m 25mm conduit, 4 saddles, 1 junction box"></textarea>
+                <button type="button" id="var-add-btn" style="margin-top:10px;">Log variation</button>
+                <div id="var-msg"></div>
+              </div>
+              <div class="card">
+                <h2>Logged variations</h2>
+                <div id="variations-list"><p class="subtitle">Loading...</p></div>
+              </div>
+            </div>
+            ` : ''}
+
             ${project.job_number && !editMode && pricingVisible ? `
             <div class="settings-panel" id="panel-invoices">
               <div class="card">
@@ -3201,6 +3228,8 @@
       wireDocumentUpload(project);
       if (document.getElementById('site-photos-list')) { loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
+      if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
+      if (document.getElementById('variations-list')) loadVariationEntries(project, pricingVisible);
       if (document.getElementById('ccew-section')) initCcewSection(project);
 
       const costAllocatedEl = document.getElementById('cost-allocated-value');
@@ -3354,6 +3383,9 @@
         render(project, pricingVisible);
         document.querySelector('#job-tabs .settings-tab[data-panel="costcentres"]').click();
       });
+
+      const scheduleStaffBtn = document.getElementById('schedule-staff-btn');
+      if (scheduleStaffBtn) scheduleStaffBtn.addEventListener('click', () => openScheduleStaffPanel(project));
 
       const markApprovedBtn = document.getElementById('mark-approved-btn');
       if (markApprovedBtn) markApprovedBtn.addEventListener('click', () => openMarkApprovedPanel(project));
@@ -4329,6 +4361,278 @@
           } catch (err) { alert(err.message); }
         });
       });
+    }
+
+    // Per-job log of out-of-scope work (job_variation_entries). Anyone can
+    // log; pricing roles mark each one billed / no charge. The invoicing
+    // panel warns about anything still "to bill".
+    async function loadVariationEntries(project, pricingVisible) {
+      const listEl = document.getElementById('variations-list');
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const { data: rows, error } = await supabaseClient
+        .from('job_variation_entries')
+        .select('*, profiles:created_by(full_name)')
+        .eq('project_id', project.id)
+        .order('work_date', { ascending: false }).order('created_at', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+
+      const toBill = (rows || []).filter(r => r.status === 'to_bill').length;
+      const tab = document.querySelector('#job-tabs .settings-tab[data-panel="variations"]');
+      if (tab) tab.textContent = toBill ? `Variations (${toBill})` : 'Variations';
+
+      const STATUS = { to_bill: ['To bill', 'draft'], billed: ['Billed', 'accepted'], no_charge: ['No charge', 'sent'] };
+      listEl.innerHTML = (rows || []).length ? rows.map(r => `
+        <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:flex-start;">
+            <div>
+              <span class="badge ${STATUS[r.status][1]}">${STATUS[r.status][0]}</span>
+              <strong style="margin-left:6px;">${escapeHtml(r.description)}</strong>
+              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${new Date(r.work_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })} &middot; ${escapeHtml((r.profiles && r.profiles.full_name) || 'Someone')}${r.hours ? ' &middot; ' + r.hours + ' hrs' : ''}</p>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              ${pricingVisible && r.status !== 'billed' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="billed" style="font-size:12px; padding:5px 10px;">Mark billed</button>` : ''}
+              ${pricingVisible && r.status !== 'no_charge' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="no_charge" style="font-size:12px; padding:5px 10px;">No charge</button>` : ''}
+              ${pricingVisible && r.status !== 'to_bill' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="to_bill" style="font-size:12px; padding:5px 10px;">Reopen</button>` : ''}
+              ${(r.created_by === user.id && r.status === 'to_bill') || pricingVisible ? `<button type="button" class="secondary var-delete" data-id="${r.id}" style="font-size:12px; padding:5px 10px;">Delete</button>` : ''}
+            </div>
+          </div>
+          ${r.materials ? `<p style="margin:8px 0 0; white-space:pre-wrap; font-size:13px;"><strong>Materials:</strong> ${escapeHtml(r.materials)}</p>` : ''}
+        </div>`).join('') : `<p class="subtitle">Nothing logged - no variations on this job so far.</p>`;
+
+      listEl.querySelectorAll('.var-status').forEach(btn => btn.addEventListener('click', async () => {
+        const { error: upErr } = await supabaseClient.from('job_variation_entries')
+          .update({ status: btn.dataset.status, status_changed_by: user.id, status_changed_at: new Date().toISOString() }).eq('id', btn.dataset.id);
+        if (upErr) { alert(upErr.message); return; }
+        await loadVariationEntries(project, pricingVisible);
+      }));
+      listEl.querySelectorAll('.var-delete').forEach(btn => btn.addEventListener('click', async () => {
+        if (!confirm('Delete this logged variation?')) return;
+        const { error: delErr } = await supabaseClient.from('job_variation_entries').delete().eq('id', btn.dataset.id);
+        if (delErr) { alert(delErr.message); return; }
+        await loadVariationEntries(project, pricingVisible);
+      }));
+
+      const addBtn = document.getElementById('var-add-btn');
+      if (addBtn && !addBtn.dataset.wired) {
+        addBtn.dataset.wired = '1';
+        addBtn.addEventListener('click', async () => {
+          const msg = document.getElementById('var-msg');
+          const description = document.getElementById('var-desc').value.trim();
+          if (!description) { msg.innerHTML = `<div class="error-box">Say what the extra work was.</div>`; return; }
+          addBtn.disabled = true;
+          const { error: insErr } = await supabaseClient.from('job_variation_entries').insert({
+            project_id: project.id, description, created_by: user.id,
+            hours: parseFloat(document.getElementById('var-hours').value) || null,
+            work_date: document.getElementById('var-date').value || new Date().toISOString().slice(0, 10),
+            materials: document.getElementById('var-materials').value.trim() || null,
+          });
+          addBtn.disabled = false;
+          if (insErr) { msg.innerHTML = `<div class="error-box">${insErr.message}</div>`; return; }
+          ['var-desc', 'var-hours', 'var-materials'].forEach(id => { document.getElementById(id).value = ''; });
+          msg.innerHTML = `<div class="success-box">Logged.</div>`;
+          await logActivity('project', project.id, 'variation_logged', `Variation logged: ${description}`);
+          await loadVariationEntries(project, pricingVisible);
+        });
+      }
+    }
+
+    // Warns in the invoice panel about logged variations nobody has billed or
+    // waived yet.
+    async function fillInvoiceVariationsNote(overlay, project) {
+      const el = overlay.querySelector('#inv-variations-note');
+      if (!el) return;
+      const { data: rows } = await supabaseClient.from('job_variation_entries').select('description, hours').eq('project_id', project.id).eq('status', 'to_bill');
+      if (!rows || !rows.length) return;
+      el.innerHTML = `
+        <div class="error-box" style="margin-bottom:12px;">
+          <strong>${rows.length} logged variation${rows.length === 1 ? '' : 's'} not billed yet:</strong>
+          <ul style="margin:6px 0 0 18px; padding:0;">${rows.map(r => `<li>${escapeHtml(r.description)}${r.hours ? ' (' + r.hours + ' hrs)' : ''}</li>`).join('')}</ul>
+          <p style="margin:6px 0 0; font-size:12px;">Add them to this claim, or mark them billed / no charge on the Variations tab.</p>
+        </div>`;
+    }
+
+    // Other jobs and quotes for the same client (same-site first), so when
+    // there's more than one job on a site it's one tap to jump between them -
+    // or to clock into another without going back to search. If you're
+    // clocked in somewhere it switches (the usual clock-out confirmation
+    // still happens); if not, it opens My Day with that job selected.
+    async function loadRelatedJobsCard(project) {
+      const el = document.getElementById('related-jobs-card');
+      if (!el) return;
+      let q = supabaseClient.from('projects')
+        .select('id, name, job_number, quote_number, client_address, pipeline_stage, status, created_at')
+        .neq('id', project.id).neq('pipeline_stage', 'archived').order('created_at', { ascending: false }).limit(25);
+      q = project.client_id ? q.eq('client_id', project.client_id) : (project.client_name ? q.eq('client_name', project.client_name) : null);
+      if (!q) { el.innerHTML = ''; return; }
+      const { data: related } = await q;
+      if (!related || !related.length) { el.innerHTML = ''; return; }
+
+      const sameSite = (r) => project.client_address && r.client_address && r.client_address.trim().toLowerCase() === project.client_address.trim().toLowerCase();
+      const sorted = related.slice().sort((a, b) => Number(sameSite(b)) - Number(sameSite(a)) || new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const { data: active } = await supabaseClient.from('time_entries').select('*').eq('staff_id', user.id).is('clock_out', null).order('clock_in', { ascending: false }).limit(1).maybeSingle();
+
+      el.innerHTML = `
+        <div class="card">
+          <h2>Other jobs for ${escapeHtml(project.client_name || 'this client')}</h2>
+          <p class="subtitle" style="margin-bottom:8px;">Jump between jobs on the same site, or clock into another one.</p>
+          ${sorted.map(r => `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 0; border-top:1px solid var(--border);">
+              <div style="min-width:0;">
+                <a class="link-quiet" href="/project.html?id=${r.id}" style="font-weight:600;">${escapeHtml(projectRef(r))}</a>
+                ${sameSite(r) ? '<span class="badge sent" style="margin-left:6px;">Same site</span>' : ''}
+                <span class="badge draft" style="margin-left:6px;">${escapeHtml((r.pipeline_stage || r.status || '').replace(/_/g, ' '))}</span>
+                ${r.client_address ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${escapeHtml(r.client_address)}</p>` : ''}
+              </div>
+              <div style="display:flex; gap:6px; flex-shrink:0;">
+                <a class="btn secondary" href="/project.html?id=${r.id}" style="font-size:12px; padding:6px 10px;">Open</a>
+                ${r.job_number ? `<button type="button" class="secondary related-clock-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">${active ? 'Switch to this job' : 'Clock in'}</button>` : ''}
+              </div>
+            </div>`).join('')}
+        </div>`;
+
+      el.querySelectorAll('.related-clock-btn').forEach(btn => btn.addEventListener('click', () => {
+        const target = sorted.find(r => r.id === btn.dataset.id);
+        if (active) {
+          openClockOutModal(active, () => { window.location.href = '/my-day.html'; }, { switchTo: { projectId: target.id, label: projectRef(target) } });
+        } else {
+          window.location.href = `/my-day.html?clockin_project=${target.id}`;
+        }
+      }));
+    }
+
+    // "Schedule staff" - book people onto this quote (a site visit) or job
+    // (work) from right here, for a date or a run of days, without going
+    // over to the Schedule page. Same rules as there: required pre-job tasks
+    // must be done before a job can be booked, double-bookings are flagged
+    // (not blocked), and booking a job moves it Ready to Book -> Job Booked.
+    async function openScheduleStaffPanel(project) {
+      const isJob = !!project.job_number;
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px; overflow-y:auto;';
+      overlay.innerHTML = `<div class="card" style="max-width:560px; width:100%;"><p class="subtitle">Loading...</p></div>`;
+      document.body.appendChild(overlay);
+
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const fmtDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+      const hhmm = (t) => String(t).slice(0, 5);
+      const toSec = (t) => (String(t).length === 5 ? t + ':00' : String(t));
+
+      async function render() {
+        const [{ data: staff }, { data: booked }] = await Promise.all([
+          supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
+          supabaseClient.from('schedule_assignments')
+            .select('id, staff_id, assignment_date, start_time, end_time, note, profiles(full_name)')
+            .eq('project_id', project.id).order('assignment_date').order('start_time'),
+        ]);
+        overlay.innerHTML = `
+          <div class="card" style="max-width:560px; width:100%; max-height:92vh; overflow-y:auto;">
+            <h2>${isJob ? 'Schedule staff on this job' : 'Schedule a site visit'}</h2>
+            <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))} - ${isJob ? 'books people to work on site' : 'books people to attend site for this quote'}. They'll see it on their schedule and My Day.</p>
+
+            ${(booked || []).length ? `
+              <p class="subtitle" style="margin:0 0 4px; font-weight:600;">Already booked</p>
+              <div style="margin-bottom:14px;">
+                ${booked.map(b => `
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--border); ${b.assignment_date < todayIso ? 'opacity:0.6;' : ''}">
+                    <span style="font-size:13px;">${fmtDay(b.assignment_date)}, ${hhmm(b.start_time)}-${hhmm(b.end_time)} - <strong>${escapeHtml((b.profiles && b.profiles.full_name) || 'Someone')}</strong>${b.note ? ' (' + escapeHtml(b.note) + ')' : ''}</span>
+                    <button type="button" class="secondary sched-remove" data-id="${b.id}" style="font-size:11px; padding:4px 8px; flex-shrink:0;">Remove</button>
+                  </div>`).join('')}
+              </div>` : ''}
+
+            <p class="subtitle" style="margin:0 0 4px; font-weight:600;">Who</p>
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:4px 12px; margin-bottom:12px;">
+              ${(staff || []).map(p => `<label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="checkbox" class="sched-staff" value="${p.id}" style="width:auto;" /> ${escapeHtml(p.full_name || 'Unnamed')}</label>`).join('')}
+            </div>
+
+            <div class="grid cols-2">
+              <div><label style="margin-top:0;">Date</label><input type="date" id="sched-date" value="${todayIso}" /></div>
+              <div><label style="margin-top:0;">To (optional, for several days)</label><input type="date" id="sched-end-date" /></div>
+            </div>
+            <div class="grid cols-2">
+              <div><label>Start time</label><input type="time" id="sched-start" value="${isJob ? '07:00' : '09:00'}" /></div>
+              <div><label>Finish time</label><input type="time" id="sched-end" value="${isJob ? '15:30' : '10:00'}" /></div>
+            </div>
+            <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="sched-weekdays" checked style="width:auto;" /> Skip weekends when booking several days</label>
+            <label>Note (optional)</label>
+            <input id="sched-note" placeholder="e.g. bring the ladder, meet the builder at 7" />
+
+            <div id="sched-msg"></div>
+            <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              <button type="button" id="sched-book-btn">Book</button>
+              <button type="button" class="secondary" id="sched-close-btn">Close</button>
+              <a class="link-quiet" href="/schedule.html" style="margin-left:auto; font-size:12px;">Open the full schedule &rarr;</a>
+            </div>
+          </div>`;
+
+        overlay.querySelector('#sched-close-btn').addEventListener('click', () => overlay.remove());
+        overlay.querySelectorAll('.sched-remove').forEach(btn => btn.addEventListener('click', async () => {
+          const { error } = await supabaseClient.from('schedule_assignments').delete().eq('id', btn.dataset.id);
+          if (error) { overlay.querySelector('#sched-msg').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+          await render();
+        }));
+
+        overlay.querySelector('#sched-book-btn').addEventListener('click', async () => {
+          const msg = overlay.querySelector('#sched-msg');
+          const bookBtn = overlay.querySelector('#sched-book-btn');
+          const staffIds = [...overlay.querySelectorAll('.sched-staff:checked')].map(c => c.value);
+          const startDate = overlay.querySelector('#sched-date').value;
+          const endDate = overlay.querySelector('#sched-end-date').value || startDate;
+          const start = overlay.querySelector('#sched-start').value;
+          const end = overlay.querySelector('#sched-end').value;
+          const weekdaysOnly = overlay.querySelector('#sched-weekdays').checked;
+          const note = overlay.querySelector('#sched-note').value.trim() || null;
+          if (!staffIds.length) { msg.innerHTML = `<div class="error-box">Pick at least one person.</div>`; return; }
+          if (!startDate) { msg.innerHTML = `<div class="error-box">Pick a date.</div>`; return; }
+          if (endDate < startDate) { msg.innerHTML = `<div class="error-box">The "to" date can't be before the start date.</div>`; return; }
+          if (!start || !end || end <= start) { msg.innerHTML = `<div class="error-box">Finish time must be after the start time.</div>`; return; }
+
+          const dates = [];
+          for (let d = new Date(startDate + 'T00:00:00'); d <= new Date(endDate + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+            const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+            if (weekdaysOnly && isWeekend && endDate !== startDate) continue;
+            dates.push(iso);
+          }
+          if (!dates.length) { msg.innerHTML = `<div class="error-box">No days to book in that range (weekends skipped).</div>`; return; }
+          if (dates.length * staffIds.length > 60) { msg.innerHTML = `<div class="error-box">That's ${dates.length * staffIds.length} bookings in one go - book a smaller range.</div>`; return; }
+
+          bookBtn.disabled = true; bookBtn.textContent = 'Booking...'; msg.innerHTML = '';
+          try {
+            if (isJob) {
+              const blocking = await requiredTasksBlockingSchedule(project.id);
+              if (blocking.length) throw new Error(`This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done: ${blocking.join('; ')}`);
+            }
+            const { data: existing } = await supabaseClient.from('schedule_assignments')
+              .select('staff_id, assignment_date, start_time, end_time, profiles(full_name), projects(name, job_number)')
+              .in('staff_id', staffIds).gte('assignment_date', dates[0]).lte('assignment_date', dates[dates.length - 1]);
+            const clashes = [];
+            staffIds.forEach(sid => dates.forEach(d => {
+              (existing || []).filter(e => e.staff_id === sid && e.assignment_date === d && toSec(e.start_time) < toSec(end) && toSec(start) < toSec(e.end_time))
+                .forEach(e => clashes.push(`${(e.profiles && e.profiles.full_name) || 'Someone'} on ${fmtDay(d)}: already booked ${hhmm(e.start_time)}-${hhmm(e.end_time)}${e.projects ? ' (' + (e.projects.name || 'job') + ')' : ''}`));
+            }));
+            if (clashes.length && !confirm(`Some of these are already booked:\n\n${clashes.slice(0, 8).join('\n')}${clashes.length > 8 ? '\n...' : ''}\n\nBook anyway?`)) {
+              bookBtn.disabled = false; bookBtn.textContent = 'Book';
+              return;
+            }
+            const rows = [];
+            staffIds.forEach(sid => dates.forEach(d => rows.push({
+              staff_id: sid, project_id: project.id, block_type: isJob ? 'job' : 'site_visit',
+              assignment_date: d, start_time: start, end_time: end, note,
+            })));
+            const { error } = await supabaseClient.from('schedule_assignments').insert(rows);
+            if (error) throw error;
+            if (isJob) await supabaseClient.from('projects').update({ pipeline_stage: 'job_booked' }).eq('id', project.id).eq('pipeline_stage', 'ready_to_book');
+            await logActivity('project', project.id, 'staff_scheduled', `Scheduled ${staffIds.length} ${staffIds.length === 1 ? 'person' : 'people'} for ${dates.length} day${dates.length === 1 ? '' : 's'} from ${fmtDay(dates[0])}`);
+            await render();
+            overlay.querySelector('#sched-msg').innerHTML = `<div class="success-box">Booked ${rows.length} ${rows.length === 1 ? 'slot' : 'slots'}.</div>`;
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+            bookBtn.disabled = false; bookBtn.textContent = 'Book';
+          }
+        });
+      }
+      await render();
     }
 
     // Electrical schedule card (Summary tab): totals from the latest

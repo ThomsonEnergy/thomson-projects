@@ -1510,6 +1510,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'stock', label: 'Stock', href: '/stock.html', icon: '&#128736;' },
   { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', icon: '&#129513;', pricingOnly: true },
   { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html', icon: '&#128218;' },
+  { key: 'support', label: 'Tech Support', href: '/support.html', icon: '&#128222;' },
   { key: 'team', label: 'Team', href: '/team.html', icon: '&#128101;' },
   { key: 'dnsp', label: 'DNSP', href: '/dnsp.html', icon: '&#9889;' },
   { key: 'fleet', label: 'Fleet', href: '/fleet.html', icon: '&#128666;' },

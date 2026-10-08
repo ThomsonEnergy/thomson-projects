@@ -87,7 +87,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=40"></script>
+  <script src="/js/supabase-client.js?v=41"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId, myRole, myName;
@@ -391,6 +391,18 @@
           });
         }
       } catch (err) { console.error('Timesheet check failed:', err); }
+
+      // Out-of-scope work logged on jobs that nobody's billed or waived yet.
+      if (isPricing) {
+        try {
+          const { data: toBill } = await supabaseClient.from('job_variation_entries').select('project_id, projects(id, name, job_number)').eq('status', 'to_bill');
+          const byJob = {};
+          (toBill || []).forEach(v => { if (v.projects) (byJob[v.project_id] = byJob[v.project_id] || { p: v.projects, n: 0 }).n++; });
+          Object.values(byJob).forEach(({ p, n }) => {
+            items.push({ group: 'job', label: `${n} variation${n === 1 ? '' : 's'} logged to bill on ${projectRef(p)}`, link: `/project.html?id=${p.id}` });
+          });
+        } catch (err) { console.error('Variation check failed:', err); }
+      }
 
       if (myRole === 'admin' || myRole === 'finance') {
         const { data: pendingLeave } = await supabaseClient
