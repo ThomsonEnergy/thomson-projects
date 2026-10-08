@@ -4832,7 +4832,7 @@
       if (!el) return;
       const { data: ms } = await supabaseClient.from('meetings')
         .select('id, title, meeting_date, job_tasks(id, completed, followed_up_at)')
-        .eq('project_id', project.id).order('meeting_date', { ascending: false });
+        .or(`project_id.eq.${project.id},project_ids.cs.{${project.id}}`).order('meeting_date', { ascending: false });
       if (!(ms || []).length) {
         el.innerHTML = `<div class="card"><div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0;">Meetings</h2><a href="/meetings.html?new=1&project=${project.id}"><button type="button" class="secondary" style="font-size:12px; padding:6px 10px;">+ Meeting notes</button></a></div></div>`;
         return;

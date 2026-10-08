@@ -403,4 +403,9 @@ select '127', 'job_tasks checklist columns',
   case when exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'parent_task_id')
     and exists (select 1 from information_schema.columns where table_name = 'job_tasks' and column_name = 'sort_order')
   then 'present' else 'MISSING' end
+union all
+select '128', 'meeting recording columns + bucket',
+  case when exists (select 1 from information_schema.columns where table_name = 'meetings' and column_name = 'ai_draft')
+    and exists (select 1 from storage.buckets where id = 'meeting-audio')
+  then 'present' else 'MISSING' end
 order by 1;

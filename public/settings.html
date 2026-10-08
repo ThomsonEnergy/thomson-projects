@@ -527,6 +527,9 @@
             <label>Anthropic API key <span class="key-status" data-key="anthropic"></span></label>
             <input id="key-anthropic" type="password" placeholder="sk-ant-..." autocomplete="off" />
 
+            <label>AssemblyAI API key (meeting transcription) <span class="key-status" data-key="assemblyai"></span></label>
+            <input id="key-assemblyai" type="password" placeholder="From assemblyai.com - turns meeting recordings into text" autocomplete="off" />
+
             <label>Pylon API key <span class="key-status" data-key="pylon"></span></label>
             <input id="key-pylon" type="password" placeholder="Paste key (used from Phase 5 onward)" autocomplete="off" />
 
@@ -2227,6 +2230,7 @@
       const msg = document.getElementById('apikeys-msg');
       const rows = [
         { key_name: 'anthropic', key_value: document.getElementById('key-anthropic').value.trim() },
+        { key_name: 'assemblyai', key_value: document.getElementById('key-assemblyai').value.trim() },
         { key_name: 'pylon', key_value: document.getElementById('key-pylon').value.trim() },
         { key_name: 'xero_client_id', key_value: document.getElementById('key-xero-client-id').value.trim() },
         { key_name: 'xero_client_secret', key_value: document.getElementById('key-xero-client-secret').value.trim() },

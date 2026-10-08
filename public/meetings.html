@@ -62,7 +62,10 @@
           <h1 style="margin-bottom:4px;">Meetings</h1>
           <p class="subtitle">Write up what was discussed, turn it into actions for the team, and confirm each one gets followed up.</p>
         </div>
-        <button type="button" id="new-meeting-btn">+ New meeting</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" id="quick-record-btn">&#9679; Record a meeting</button>
+          <button type="button" class="secondary" id="new-meeting-btn">+ New meeting</button>
+        </div>
       </div>
       <div class="mt-tabs">
         <button type="button" class="mt-tab active" data-tab="meetings">Meetings</button>
@@ -90,12 +93,13 @@
 
   <script src="/js/supabase-client.js?v=45"></script>
   <script src="/js/theme.js"></script>
+  <script src="/js/meeting-recorder.js?v=1"></script>
   <script>
     let me = null, myRole = 'staff', staff = [], staffById = {};
     let meetings = [];
     let currentTab = 'meetings';
 
-    const ACTION_SELECT = '*, assignee:assigned_to_user_id(full_name), confirmer:followed_up_by(full_name), meetings(id, title, meeting_date, created_by)';
+    const ACTION_SELECT = '*, assignee:assigned_to_user_id(full_name), confirmer:followed_up_by(full_name), meetings(id, title, meeting_date, created_by), projects(id, name, job_number, quote_number)';
 
     // ---------- small helpers ----------
     const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -283,6 +287,7 @@
           <div class="mt-desc ${t.completed ? 'done' : ''}">${escapeHtml(t.description)}</div>
           <div class="mt-meta">
             <span>${escapeHtml(who)}</span>
+            ${t.projects ? `<a class="link-quiet" href="/project.html?id=${t.project_id}">${escapeHtml(projectRef(t.projects))}</a>` : ''}
             ${t.due_date ? `<span>Due ${escapeHtml(fmtShortDate(t.due_date))}</span>` : ''}
             ${t.remind_at && !t.completed ? `<span>Reminder ${escapeHtml(fmtDateTime(t.remind_at))}</span>` : ''}
             ${t.schedule_assignment_id ? '<span>On the Schedule</span>' : ''}
@@ -362,6 +367,14 @@
       };
     }
 
+    // Job choices for an action: the jobs this meeting is about (when looking at
+    // one meeting), plus the action's current job if it is something else.
+    function jobOptionsHtml(selectedId, currentProject) {
+      const jobs = currentMeeting ? linkedJobs.slice() : [];
+      if (selectedId && !jobs.some(j => j.id === selectedId)) jobs.push({ id: selectedId, label: currentProject ? projectRef(currentProject) : 'Current job' });
+      return '<option value="">Not a specific job</option>' + jobs.map(j => `<option value="${j.id}" ${j.id === selectedId ? 'selected' : ''}>${escapeHtml(j.label)}</option>`).join('');
+    }
+
     // ---------- add / edit one action ----------
     function openActionPanel(meeting, task, onDone) {
       const editing = !!task;
@@ -373,6 +386,8 @@
         <select id="ap-who">${staffOptions(editing ? task.assigned_to_user_id : null, 'Nobody yet - anyone can pick it up')}</select>
         <label>Due date</label>
         <input type="date" id="ap-due" value="${editing && task.due_date ? task.due_date : ''}" />
+        <label>Job</label>
+        <select id="ap-job">${jobOptionsHtml(editing ? task.project_id : (linkedJobs.length === 1 && currentMeeting ? linkedJobs[0].id : null), editing ? task.projects : null)}</select>
         <label>Remind them</label>
         <input type="datetime-local" id="ap-remind" value="${editing ? toLocalInput(task.remind_at) : ''}" />
         <div class="mt-chips">
@@ -408,11 +423,12 @@
         const payload = {
           description, assigned_to_user_id: who, due_date: o.querySelector('#ap-due').value || null,
           remind_at: fromLocalInput(o.querySelector('#ap-remind').value),
+          project_id: o.querySelector('#ap-job').value || null,
         };
         const btn = o.querySelector('#ap-save'); btn.disabled = true;
         const res = editing
           ? await supabaseClient.from('job_tasks').update(payload).eq('id', task.id)
-          : await supabaseClient.from('job_tasks').insert({ ...payload, meeting_id: meeting.id, project_id: meeting.project_id || null, task_type: 'prejob', created_by: me });
+          : await supabaseClient.from('job_tasks').insert({ ...payload, meeting_id: meeting.id, task_type: 'prejob', created_by: me });
         if (res.error) { msg.innerHTML = `<div class="error-box">${escapeHtml(res.error.message)}</div>`; btn.disabled = false; return; }
         o.remove();
         if (onDone) await onDone();
@@ -439,6 +455,8 @@
         <select id="bk-who">${staffOptions(null, 'Nobody yet - I will assign them after')}</select>
         <label>Due date (optional)</label>
         <input type="date" id="bk-due" />
+        <label>Job</label>
+        <select id="bk-job">${jobOptionsHtml(linkedJobs.length === 1 ? linkedJobs[0].id : null, null)}</select>
         <div style="margin-top:14px;">
           <button type="button" id="bk-save">Add actions</button>
           <button type="button" class="secondary" id="bk-cancel">Cancel</button>
@@ -450,7 +468,7 @@
         if (!rows.length) { o.querySelector('#bk-msg').innerHTML = '<div class="error-box">Add at least one line.</div>'; return; }
         const who = o.querySelector('#bk-who').value || null, due = o.querySelector('#bk-due').value || null;
         const { error } = await supabaseClient.from('job_tasks').insert(rows.map(description => ({
-          description, assigned_to_user_id: who, due_date: due, meeting_id: meeting.id, project_id: meeting.project_id || null, task_type: 'prejob', created_by: me,
+          description, assigned_to_user_id: who, due_date: due, meeting_id: meeting.id, project_id: o.querySelector('#bk-job').value || null, task_type: 'prejob', created_by: me,
         })));
         if (error) { o.querySelector('#bk-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         o.remove();
@@ -460,22 +478,36 @@
 
     // ---------- meeting detail ----------
     let currentMeeting = null;
+    let linkedJobs = []; // [{ id, label }] - the jobs this meeting is about (what the AI is allowed to look at)
+
+    async function jobsByIds(ids) {
+      if (!ids || !ids.length) return [];
+      const { data } = await supabaseClient.from('projects').select('id, name, job_number, quote_number').in('id', ids);
+      return ids.map(id => (data || []).find(p => p.id === id)).filter(Boolean).map(p => ({ id: p.id, label: projectRef(p) }));
+    }
+
     async function openMeeting(id, prefill) {
       document.getElementById('mt-list-view').style.display = 'none';
       const view = document.getElementById('mt-detail-view');
       view.style.display = 'block';
       view.innerHTML = '<p class="subtitle">Loading...</p>';
+      if (typeof maiUnmount === 'function') maiUnmount();
       let m = null;
       if (id) {
-        const { data, error } = await supabaseClient.from('meetings').select('*, projects(id, name, job_number, quote_number)').eq('id', id).maybeSingle();
+        const { data, error } = await supabaseClient.from('meetings').select('*').eq('id', id).maybeSingle();
         if (error || !data) { view.innerHTML = `<div class="error-box">Could not open that meeting.</div><p><a href="/meetings.html">Back to meetings</a></p>`; return; }
         m = data;
+        linkedJobs = await jobsByIds((m.project_ids && m.project_ids.length) ? m.project_ids : (m.project_id ? [m.project_id] : []));
+      } else {
+        linkedJobs = (prefill && prefill.project) ? [{ id: prefill.project.id, label: projectRef(prefill.project) }] : [];
       }
       currentMeeting = m;
       if (!window.__mtNavigating) history.pushState({}, '', id ? `/meetings.html?id=${id}` : '/meetings.html?new=1');
       renderDetail(m, prefill || {});
     }
     function closeMeeting() {
+      if (typeof maiIsRecording === 'function' && maiIsRecording() && !confirm('A recording is in progress and would be lost. Leave anyway?')) return;
+      if (typeof maiUnmount === 'function') maiUnmount();
       document.getElementById('mt-detail-view').style.display = 'none';
       document.getElementById('mt-list-view').style.display = 'block';
       currentMeeting = null;
@@ -484,11 +516,18 @@
       if (currentTab === 'followups') loadFollowUps();
     }
 
+    // Start a recorded meeting in one click: a meeting is made straight away
+    // (title can be fixed later) and the recorder opens ready to go.
+    async function quickRecord() {
+      const stamp = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+      const { data, error } = await supabaseClient.from('meetings').insert({ title: `Meeting ${stamp}`, meeting_date: todayStr(), attendee_ids: [me], created_by: me }).select('id').single();
+      if (error) { alert('Could not start a meeting: ' + error.message); return; }
+      await openMeeting(data.id, { autoRecord: true });
+    }
+
     function renderDetail(m, prefill) {
       const view = document.getElementById('mt-detail-view');
       const isNew = !m;
-      const proj = isNew ? (prefill.project || null) : m.projects;
-      let projectId = isNew ? (prefill.project ? prefill.project.id : null) : m.project_id;
       const attendees = new Set(isNew ? [me] : (m.attendee_ids || []));
       view.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
@@ -505,10 +544,11 @@
           </div>
           <label>Where (optional)</label>
           <input id="md-location" value="${isNew ? '' : escapeHtml(m.location || '')}" placeholder="Site address, office, phone call..." />
-          <label>Job (optional)</label>
-          <input id="md-job-search" placeholder="Search job number, name, client..." autocomplete="off" value="${proj ? escapeHtml(projectRef(proj)) : ''}" />
+          <label>Jobs we talked about (optional)</label>
+          <div id="md-jobs-chips" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;"></div>
+          <input id="md-job-search" placeholder="Search job number, name, client... to add a job" autocomplete="off" />
           <div id="md-job-results"></div>
-          <p class="subtitle" id="md-job-selected" style="margin:4px 0 0;">${proj ? 'Linked to ' + escapeHtml(projectRef(proj)) + ' - <a href="#" id="md-job-clear">remove</a>' : ''}</p>
+          <p class="subtitle" style="margin:4px 0 0;">Add the 2-6 jobs you will discuss. For a recorded meeting the AI only looks at these jobs when it matches tasks to them.</p>
           <label>Who was there</label>
           <div class="mt-attendees" id="md-attendees">
             ${staff.map(s => `<label><input type="checkbox" value="${s.id}" ${attendees.has(s.id) ? 'checked' : ''} /> ${escapeHtml(s.full_name || 'Unnamed')}</label>`).join('')}
@@ -520,8 +560,9 @@
             <span id="md-msg"></span>
           </div>
         </div>
+        ${isNew ? '' : '<div id="md-ai-card"></div>'}
         <div class="card" id="md-actions-card">
-          ${isNew ? '<h2 style="margin-top:0;">Actions</h2><p class="subtitle" style="margin:0;">Save the meeting first, then add the actions that came out of it.</p>' : `
+          ${isNew ? '<h2 style="margin-top:0;">Actions</h2><p class="subtitle" style="margin:0;">Save the meeting first, then add the actions that came out of it (or record it and let the AI draft them).</p>' : `
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
               <h2 style="margin:0;">Actions</h2>
               <div style="display:flex; gap:6px;">
@@ -529,73 +570,89 @@
                 <button type="button" id="md-add" style="font-size:12px; padding:6px 10px;">+ Add action</button>
               </div>
             </div>
-            <p class="subtitle" style="margin-top:0;">Each action goes to its person's Tasks and Home page. They tick it off, then you confirm it was followed up.</p>
+            <p class="subtitle" style="margin-top:0;">Each action goes to its person's Tasks and Home page, and onto its job's task list. They tick it off, then you confirm it was followed up.</p>
             <div id="md-actions"><p class="subtitle">Loading...</p></div>`}
         </div>`;
 
       document.getElementById('mt-back').addEventListener('click', (e) => { e.preventDefault(); closeMeeting(); });
 
-      // job picker
+      // jobs picker (several jobs per meeting)
       const search = document.getElementById('md-job-search');
+      const renderChips = () => {
+        document.getElementById('md-jobs-chips').innerHTML = linkedJobs.map(j => `<span class="mt-chip" style="font-size:12px; padding:3px 10px;">${escapeHtml(j.label)} <a href="#" data-unlink="${j.id}" style="margin-left:4px;" title="Remove">&times;</a></span>`).join('') || '<span class="subtitle" style="font-size:12px;">No jobs linked yet.</span>';
+        document.querySelectorAll('[data-unlink]').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); linkedJobs = linkedJobs.filter(j => j.id !== a.dataset.unlink); renderChips(); }));
+      };
+      renderChips();
       let timer;
       search.addEventListener('input', () => {
         clearTimeout(timer);
         const q = search.value.trim(), res = document.getElementById('md-job-results');
         if (q.length < 2) { res.innerHTML = ''; return; }
         timer = setTimeout(async () => {
-          const found = await searchProjects(q);
+          const found = (await searchProjects(q)).filter(p => !linkedJobs.some(j => j.id === p.id));
           res.innerHTML = found.length ? `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">${found.map(p => `<div class="md-job-pick" data-id="${p.id}" data-label="${escapeHtml(projectRef(p))}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))} <span class="subtitle">${escapeHtml(p.client_name || '')}</span></div>`).join('')}</div>` : '<p class="subtitle" style="margin-top:4px;">No matches.</p>';
           res.querySelectorAll('.md-job-pick').forEach(r => r.addEventListener('click', () => {
-            projectId = r.dataset.id; search.value = r.dataset.label; res.innerHTML = '';
-            document.getElementById('md-job-selected').innerHTML = `Linked to ${r.dataset.label} - <a href="#" id="md-job-clear">remove</a>`;
-            bindClear();
+            linkedJobs.push({ id: r.dataset.id, label: r.dataset.label });
+            search.value = ''; res.innerHTML = ''; renderChips();
           }));
         }, 250);
       });
-      function bindClear() {
-        const c = document.getElementById('md-job-clear');
-        if (c) c.addEventListener('click', (e) => { e.preventDefault(); projectId = null; search.value = ''; document.getElementById('md-job-selected').innerHTML = ''; });
-      }
-      bindClear();
 
-      document.getElementById('md-save').addEventListener('click', async () => {
-        const msg = document.getElementById('md-msg');
+      // Saves the form (used by the Save button and, quietly, before a recording starts).
+      async function doSave() {
         const title = document.getElementById('md-title').value.trim();
-        if (!title) { msg.innerHTML = '<span style="color:var(--red);">Give the meeting a title.</span>'; return; }
+        if (!title) throw new Error('Give the meeting a title first.');
         const payload = {
           title, meeting_date: document.getElementById('md-date').value || todayStr(),
           meeting_time: document.getElementById('md-time').value || null,
           location: document.getElementById('md-location').value.trim() || null,
-          project_id: projectId || null,
+          project_id: linkedJobs.length ? linkedJobs[0].id : null,
+          project_ids: linkedJobs.map(j => j.id),
           attendee_ids: [...document.querySelectorAll('#md-attendees input:checked')].map(i => i.value),
           notes: document.getElementById('md-notes').value,
         };
-        const btn = document.getElementById('md-save'); btn.disabled = true;
-        let res;
-        if (isNew) res = await supabaseClient.from('meetings').insert({ ...payload, created_by: me }).select('id').single();
-        else res = await supabaseClient.from('meetings').update(payload).eq('id', m.id).select('id').single();
-        btn.disabled = false;
-        if (res.error) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(res.error.message)}</span>`; return; }
-        if (isNew) { await openMeeting(res.data.id); showToast('Meeting saved. Now add the actions.'); }
-        else {
-          // keep actions' job in step with the meeting's job
-          await supabaseClient.from('job_tasks').update({ project_id: payload.project_id }).eq('meeting_id', m.id);
-          msg.innerHTML = '<span style="color:#3fb97a;">Saved</span>';
-          currentMeeting = { ...m, ...payload };
-          setTimeout(() => { msg.innerHTML = ''; }, 2000);
+        if (isNew) {
+          const { data, error } = await supabaseClient.from('meetings').insert({ ...payload, created_by: me }).select('id').single();
+          if (error) throw error;
+          return { id: data.id, created: true };
         }
+        const { error } = await supabaseClient.from('meetings').update(payload).eq('id', m.id);
+        if (error) throw error;
+        Object.assign(m, payload);
+        currentMeeting = m;
+        return m;
+      }
+
+      document.getElementById('md-save').addEventListener('click', async () => {
+        const msg = document.getElementById('md-msg');
+        const btn = document.getElementById('md-save'); btn.disabled = true;
+        try {
+          const saved = await doSave();
+          if (saved.created) { await openMeeting(saved.id); showToast('Meeting saved. Now record it or add the actions.'); return; }
+          msg.innerHTML = '<span style="color:#3fb97a;">Saved</span>';
+          setTimeout(() => { msg.innerHTML = ''; }, 2000);
+          if (document.getElementById('md-ai-card') && typeof maiAlive === 'function' && maiAlive()) maiRender();
+        } catch (err) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+        btn.disabled = false;
       });
 
       if (!isNew) {
         document.getElementById('mt-delete').addEventListener('click', async () => {
-          if (!confirm('Delete this meeting and all of its actions?')) return;
+          if (!confirm('Delete this meeting and all of its actions' + (m.audio_path ? ', and its recording' : '') + '?')) return;
+          if (m.audio_path) await supabaseClient.storage.from('meeting-audio').remove([m.audio_path]);
           await supabaseClient.from('meetings').delete().eq('id', m.id);
           closeMeeting();
         });
-        document.getElementById('mt-cal').addEventListener('click', () => openCalendarPanel(meetingEvent(currentMeeting || m), {}));
-        document.getElementById('md-add').addEventListener('click', () => openActionPanel(currentMeeting || m, null, () => renderActions(currentMeeting || m)));
-        document.getElementById('md-bulk').addEventListener('click', () => openBulkPanel(currentMeeting || m, document.getElementById('md-notes').value, () => renderActions(currentMeeting || m)));
+        document.getElementById('mt-cal').addEventListener('click', () => openCalendarPanel(meetingEvent(m), {}));
+        document.getElementById('md-add').addEventListener('click', () => openActionPanel(m, null, () => renderActions(m)));
+        document.getElementById('md-bulk').addEventListener('click', () => openBulkPanel(m, document.getElementById('md-notes').value, () => renderActions(m)));
         renderActions(m);
+        mountMeetingAi(document.getElementById('md-ai-card'), m, {
+          getLinkedJobs: () => linkedJobs,
+          saveMeeting: doSave,
+          autoRecord: !!prefill.autoRecord,
+          onApproved: (mm) => { document.getElementById('md-notes').value = mm.notes || ''; renderActions(m); },
+        });
       }
     }
 
@@ -635,6 +692,7 @@
           }
           await openMeeting(null, { project });
         } else {
+          if (typeof maiUnmount === 'function') maiUnmount();
           document.getElementById('mt-detail-view').style.display = 'none';
           document.getElementById('mt-list-view').style.display = 'block';
           await loadMeetings();
@@ -659,6 +717,7 @@
       staff.forEach(s => { staffById[s.id] = s; });
 
       document.getElementById('new-meeting-btn').addEventListener('click', () => openMeeting(null));
+      document.getElementById('quick-record-btn').addEventListener('click', quickRecord);
       document.querySelectorAll('.mt-tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
       document.getElementById('mt-search').addEventListener('input', renderMeetingList);
       document.getElementById('mt-fu-filter').addEventListener('change', loadFollowUps);
