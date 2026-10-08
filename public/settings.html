@@ -1855,6 +1855,13 @@
           employment_type: overlay.querySelector('#profile-employment-type').value,
           pay_type: overlay.querySelector('#profile-pay-type').value,
           annual_salary: parseFloat(overlay.querySelector('#profile-annual-salary').value) || null,
+          // the four pay rates and the start date as they are in the form right now,
+          // so a contract can be generated straight after typing them in (before Save)
+          ordinary_rate: parseFloat(overlay.querySelector('#profile-rate-ordinary').value) || null,
+          rate_1_5x: parseFloat(overlay.querySelector('#profile-rate-1-5x').value) || null,
+          rate_2x: parseFloat(overlay.querySelector('#profile-rate-2x').value) || null,
+          rate_2_5x: parseFloat(overlay.querySelector('#profile-rate-2-5x').value) || null,
+          employment_start_date: overlay.querySelector('#profile-start-date').value || null,
           salary_includes_super: overlay.querySelector('#profile-salary-inc-super').checked,
           has_company_vehicle: overlay.querySelector('#profile-has-vehicle').checked,
           has_probationary_period: overlay.querySelector('#profile-has-probation').checked,
