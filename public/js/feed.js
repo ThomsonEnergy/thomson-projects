@@ -26,6 +26,7 @@ function ensureFeedStyles() {
     .fd-head { display:flex; gap:12px; align-items:flex-start; }
     .fd-avatar { width:38px; height:38px; flex:none; border-radius:50%; color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; }
     .fd-avatar.sm { width:30px; height:30px; font-size:12px; margin-top:2px; }
+    img.fd-avatar { display:block; object-fit:cover; background:var(--surface-2); }
     .fd-who { flex:1; min-width:0; }
     .fd-name { font-weight:700; font-size:14px; color:var(--text); }
     .fd-time { font-size:12px; color:var(--muted); }
@@ -57,8 +58,14 @@ function feedAvatarColour(name) {
   String(name || '').split('').forEach(ch => { h = (h * 31 + ch.charCodeAt(0)) % 360; });
   return `hsl(${h}, 45%, 42%)`;
 }
-function feedAvatar(name, small) {
-  return `<div class="fd-avatar${small ? ' sm' : ''}" style="background:${feedAvatarColour(name)};" aria-hidden="true">${escapeHtml(feedInitials(name))}</div>`;
+// The person's profile photo when they have one, otherwise a coloured circle
+// with their initials (also what shows if the photo fails to load).
+function feedAvatar(name, small, photoUrl) {
+  const cls = `fd-avatar${small ? ' sm' : ''}`;
+  const initials = `<div class="${cls}" style="background:${feedAvatarColour(name)};${photoUrl ? 'display:none;' : ''}" aria-hidden="true">${escapeHtml(feedInitials(name))}</div>`;
+  if (!photoUrl) return initials;
+  const src = typeof supaImageVariant === 'function' ? supaImageVariant(photoUrl, 120, 80) : photoUrl;
+  return `<img class="${cls}" src="${escapeHtml(src)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />${initials}`;
 }
 
 function feedWhen(iso) {
@@ -134,7 +141,7 @@ async function mountFeedComposer(el, opts) {
 async function renderFeedList(el, opts) {
   ensureFeedStyles();
   let q = supabaseClient.from('feed_posts')
-    .select('*, profiles(full_name), projects(id, name, job_number, quote_number)')
+    .select('*, profiles(full_name, photo_url), projects(id, name, job_number, quote_number)')
     .order('created_at', { ascending: false }).limit(opts.limit || 30);
   q = opts.projectId ? q.eq('project_id', opts.projectId) : q.or('project_id.is.null,show_on_home.eq.true');
   const { data: posts, error } = await q;
@@ -145,7 +152,7 @@ async function renderFeedList(el, opts) {
   const postIds = posts.map(p => p.id);
   const [{ data: likes }, { data: comments }, { data: mentions }] = await Promise.all([
     supabaseClient.from('feed_likes').select('post_id, author_id').in('post_id', postIds),
-    supabaseClient.from('feed_comments').select('*, profiles(full_name)').in('post_id', postIds).order('created_at'),
+    supabaseClient.from('feed_comments').select('*, profiles(full_name, photo_url)').in('post_id', postIds).order('created_at'),
     supabaseClient.from('feed_mentions').select('post_id, comment_id, profile_id, profiles(full_name)').in('post_id', postIds),
   ]);
 
@@ -162,7 +169,7 @@ async function renderFeedList(el, opts) {
     return `
       <article class="fd-card feed-post" data-post-id="${post.id}">
         <header class="fd-head">
-          ${feedAvatar(author)}
+          ${feedAvatar(author, false, post.profiles && post.profiles.photo_url)}
           <div class="fd-who">
             <div class="fd-name">${escapeHtml(author)}${post.projects && !opts.projectId ? ` <a href="/project.html?id=${post.projects.id}&tab=feed" class="fd-pill" style="margin-left:6px;">${escapeHtml(projectRefOf(post.projects))}</a>` : ''}</div>
             <div class="fd-time">${feedWhen(post.created_at)}${post.projects && opts.projectId && post.show_on_home ? ' &middot; also on Home' : ''}</div>
@@ -182,7 +189,7 @@ async function renderFeedList(el, opts) {
             const cName = c.profiles ? c.profiles.full_name : 'Someone';
             return `
             <div class="fd-comment feed-comment">
-              ${feedAvatar(cName, true)}
+              ${feedAvatar(cName, true, c.profiles && c.profiles.photo_url)}
               <div class="fd-bubble">
                 <div class="fd-bubble-head"><span class="fd-name">${escapeHtml(cName)}</span><span class="fd-time">${feedWhen(c.created_at)}</span></div>
                 <div class="fd-bubble-text">${escapeHtml(c.message)}</div>
