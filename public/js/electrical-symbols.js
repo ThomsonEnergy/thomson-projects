@@ -58,7 +58,7 @@ const ELECTRICAL_SYMBOLS = [
 const ELECTRICAL_SYMBOL_BY_ID = {};
 ELECTRICAL_SYMBOLS.forEach(s => { ELECTRICAL_SYMBOL_BY_ID[s.id] = s; });
 
-const CABLE_TYPES = ['Power 2.5mm TPS', 'Lighting 1.5mm TPS', 'Data Cat6', 'Solar DC 6mm', 'Mains 16mm'];
+const CABLE_TYPES = ['Power 2.5mm TPS', 'Lighting 1.5mm TPS', 'Data Cat6', 'Solar DC 4mm2', 'Mains 16mm'];
 
 // ---------- counting ----------
 
@@ -79,10 +79,14 @@ function scalePxPerMetre(shapes) {
 
 // What's on one marked-up page: symbols by id, and cable runs/metres by type.
 function summariseMarkup(shapes) {
-  const out = { symbols: {}, cables: {} };
+  const out = { symbols: {}, cables: {}, circuits: {} };
   const ppm = scalePxPerMetre(shapes);
   shapes.forEach(s => {
-    if (s.type === 'symbol') out.symbols[s.symbolId] = (out.symbols[s.symbolId] || 0) + 1;
+    if (s.type === 'symbol') {
+      out.symbols[s.symbolId] = (out.symbols[s.symbolId] || 0) + 1;
+      const label = (s.label || '').trim();
+      if (label) out.circuits[label] = (out.circuits[label] || 0) + 1;
+    }
     else if (s.type === 'cable') {
       const c = out.cables[s.cable] || (out.cables[s.cable] = { runs: 0, metres: 0 });
       c.runs += 1;
@@ -98,6 +102,7 @@ function buildSchedule(shapes, otherSummaries, allowancePercent) {
   const total = summariseMarkup(shapes);
   (otherSummaries || []).forEach(o => {
     Object.entries(o.symbols || {}).forEach(([id, n]) => { total.symbols[id] = (total.symbols[id] || 0) + n; });
+    Object.entries(o.circuits || {}).forEach(([label, n]) => { total.circuits[label] = (total.circuits[label] || 0) + n; });
     Object.entries(o.cables || {}).forEach(([name, c]) => {
       const t = total.cables[name] || (total.cables[name] = { runs: 0, metres: 0 });
       t.runs += c.runs; t.metres += c.metres;
@@ -108,6 +113,7 @@ function buildSchedule(shapes, otherSummaries, allowancePercent) {
     allowance: Number(allowancePercent) || 0,
     symbols: ELECTRICAL_SYMBOLS.filter(s => total.symbols[s.id]).map(s => ({ id: s.id, name: s.name, count: total.symbols[s.id] })),
     cables: Object.entries(total.cables).map(([name, c]) => ({ name, runs: c.runs, metres: c.metres, orderMetres: c.metres * f })),
+    circuits: Object.entries(total.circuits).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([label, count]) => ({ label, count })),
   };
 }
 
@@ -121,7 +127,8 @@ function scheduleItems(shape, sched) {
   const width = u * 13.5;
   const symRows = Math.max(sched.symbols.length, 1);
   const hasCables = sched.cables.length > 0;
-  const height = titleH + rowH * symRows + (hasCables ? secH + rowH * sched.cables.length : 0) + p * 0.6;
+  const circuits = sched.circuits || [];
+  const height = titleH + rowH * symRows + (hasCables ? secH + rowH * sched.cables.length : 0) + (circuits.length ? secH + rowH * circuits.length : 0) + p * 0.6;
   const x = shape.x1, y = shape.y1;
   const items = [];
   items.push({ k: 'rect', x, y, w: width, h: height, bg: true });
@@ -145,6 +152,16 @@ function scheduleItems(shape, sched) {
       items.push({ k: 'cablesample', x1: x + p, x2: x + p + u * 1.1, y: ry + rowH / 2 });
       items.push({ k: 'text', x: x + p + u * 1.4, y: ry + rowH / 2, size: u * 0.5, text: r.runs > 1 ? `${r.name}  x${r.runs}` : r.name });
       items.push({ k: 'text', x: x + width - p, y: ry + rowH / 2, size: u * 0.5, bold: true, align: 'right', text: `${r.metres.toFixed(1)} m (${r.orderMetres.toFixed(1)} m)` });
+    });
+  }
+  if (circuits.length) {
+    const cy0 = y + titleH + rowH * symRows + (hasCables ? secH + rowH * sched.cables.length : 0);
+    items.push({ k: 'line', x1: x, y1: cy0, x2: x + width, y2: cy0 });
+    items.push({ k: 'text', x: x + p, y: cy0 + secH / 2, size: u * 0.5, bold: true, text: 'Circuits' });
+    circuits.forEach((r, i) => {
+      const ry = cy0 + secH + i * rowH;
+      items.push({ k: 'text', x: x + p, y: ry + rowH / 2, size: u * 0.55, bold: true, text: r.label });
+      items.push({ k: 'text', x: x + width - p, y: ry + rowH / 2, size: u * 0.5, align: 'right', text: `${r.count} item${r.count === 1 ? '' : 's'}` });
     });
   }
   return { items, width, height };

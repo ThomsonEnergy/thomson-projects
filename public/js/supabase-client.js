@@ -211,6 +211,7 @@ function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
       outlinedText(s.text, X(s.x1), Y(s.y1) - size * 0.82, size, s.colour);
     } else if (s.type === 'symbol' && planLoaded) {
       drawSymbolPdf(PDFLib, page, font, s.symbolId, s.x1, s.y1, s.side, s.colour, Math.max(1.5, s.side * 0.06), map);
+      if (s.label) { const fs = Math.max(11, s.side * 0.42); centredLabel(s.label, s.x1 + s.side / 2, s.y1 + s.side + fs * 0.7, fs, s.colour); }
     } else if (s.type === 'schedule' && planLoaded && s.rows) {
       drawSchedulePdf(PDFLib, page, font, s, s.rows, map);
     } else if ((s.type === 'scale' || s.type === 'measure') && planLoaded) {
@@ -736,6 +737,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   let resizing = null; // { shape, orig, handle, anchor, handleOrig } while a handle is dragged
   let cableDraft = null; // a cable path being clicked out, point by point
   let currentSymbol = plan ? ELECTRICAL_SYMBOLS[0].id : null;
+  let circuit = ''; // label given to each symbol as it's placed (e.g. "C1")
   let cableType = plan ? CABLE_TYPES[0] : '';
   let allowance = 10;
   let scheduleScope = 'page';
@@ -763,6 +765,8 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     ${plan ? `
     <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
       ${toolBtn('symbol', 'Symbols', 'mk-symbols-btn')}
+      <span style="color:#fff; font-size:12px;">Circuit</span><input id="mk-circuit" placeholder="e.g. C1" maxlength="20" style="${smallInput} width:70px;" />
+      ${toolBtn('label', 'Label')}
       ${toolBtn('scale', 'Set scale')}${toolBtn('measure', 'Measure')}${toolBtn('cable', 'Cable path')}
       <select id="mk-cable-type" style="${smallInput}">${CABLE_TYPES.map(t => `<option>${t}</option>`).join('')}<option value="__custom">Other...</option></select>
       <button type="button" id="mk-finish-cable" style="padding:6px 12px; font-size:13px; display:none;">Finish cable</button>
@@ -839,6 +843,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     });
   }
 
+  const labelSize = (s) => Math.max(11, s.side * 0.42);
   function drawShape(s) {
     ctx.save();
     ctx.strokeStyle = s.colour; ctx.fillStyle = s.colour; ctx.lineWidth = s.width;
@@ -875,6 +880,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       ctx.fillText(s.text, s.x1, s.y1);
     } else if (s.type === 'symbol') {
       drawSymbolCanvas(ctx, s.symbolId, s.x1, s.y1, s.side, s.colour, Math.max(1.5, s.side * 0.06));
+      if (s.label) outlinedLabel(s.label, s.x1 + s.side / 2, s.y1 + s.side + labelSize(s) * 0.7, labelSize(s), s.colour);
     } else if (s.type === 'schedule') {
       drawScheduleCanvas(ctx, s, scheduleRows(s));
     } else if (s.type === 'scale' || s.type === 'measure') {
@@ -914,7 +920,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       ctx.font = `bold ${Math.round(s.width * 6)}px sans-serif`;
       x1 = s.x1; y1 = s.y1; x2 = s.x1 + ctx.measureText(s.text).width; y2 = s.y1 + s.width * 6;
     } else if (s.type === 'symbol') {
-      x1 = s.x1; y1 = s.y1; x2 = s.x1 + s.side; y2 = s.y1 + s.side;
+      x1 = s.x1; y1 = s.y1; x2 = s.x1 + s.side; y2 = s.y1 + s.side + (s.label ? labelSize(s) * 1.4 : 0);
     } else if (s.type === 'schedule') {
       const { width, height } = scheduleItems(s, scheduleRows(s));
       x1 = s.x1; y1 = s.y1; x2 = s.x1 + width; y2 = s.y1 + height;
@@ -982,6 +988,8 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     const el = overlay.querySelector('#mk-counts');
     const sum = summariseMarkup(shapes);
     const parts = ELECTRICAL_SYMBOLS.filter(s => sum.symbols[s.id]).map(s => `${s.name} x${sum.symbols[s.id]}`);
+    const circuitParts = Object.entries(sum.circuits).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([l, n]) => `${l} x${n}`);
+    if (circuitParts.length) parts.push(`Circuits: ${circuitParts.join(', ')}`);
     Object.entries(sum.cables).forEach(([name, c]) => {
       parts.push(ppm() ? `${name}: ${c.runs} run${c.runs === 1 ? '' : 's'}, ${c.metres.toFixed(1)} m` : `${name}: ${c.runs} run${c.runs === 1 ? '' : 's'} (set the scale for lengths)`);
     });
@@ -1068,6 +1076,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       } else cableType = e.target.value;
       if (cableDraft) cableDraft.cable = cableType;
     });
+    overlay.querySelector('#mk-circuit').addEventListener('input', (e) => { circuit = e.target.value.trim(); });
     overlay.querySelector('#mk-grid').addEventListener('change', (e) => { gridMode = parseInt(e.target.value, 10) || 0; redraw(); });
     overlay.querySelector('#mk-allow').addEventListener('input', (e) => {
       allowance = Math.max(0, parseFloat(e.target.value) || 0);
@@ -1124,7 +1133,15 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   canvas.addEventListener('pointerdown', (e) => {
     const [rx, ry] = pos(e);
     // Everything except freehand drawing and picking/dragging snaps to the grid.
-    const [x, y] = (tool === 'pen' || tool === 'move' || tool === 'erase') ? [rx, ry] : snapPt(rx, ry);
+    const [x, y] = (tool === 'pen' || tool === 'move' || tool === 'erase' || tool === 'label') ? [rx, ry] : snapPt(rx, ry);
+    if (tool === 'label') {
+      const hit = shapeAt(x, y);
+      if (hit && hit.type === 'symbol') {
+        const text = window.prompt('Circuit / label for this symbol (blank to remove):', hit.label || circuit);
+        if (text !== null) { if (text.trim()) hit.label = text.trim(); else delete hit.label; redraw(); }
+      }
+      return;
+    }
     if (tool === 'move') {
       // A corner/end handle of the selected shape resizes it...
       if (selected) {
@@ -1165,7 +1182,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     }
     if (tool === 'symbol') {
       const side = symbolSide();
-      shapes.push({ type: 'symbol', symbolId: currentSymbol, colour, side, width: Math.max(1.5, side * 0.06), x1: x - side / 2, y1: y - side / 2 });
+      shapes.push({ type: 'symbol', symbolId: currentSymbol, colour, side, width: Math.max(1.5, side * 0.06), x1: x - side / 2, y1: y - side / 2, ...(circuit ? { label: circuit } : {}) });
       redraw();
       return;
     }
@@ -1215,6 +1232,9 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       const text = window.prompt('Edit text:', hit.text);
       if (text && text.trim()) hit.text = text.trim();
       redraw();
+    } else if (hit && hit.type === 'symbol') {
+      const text = window.prompt('Circuit / label for this symbol (blank to remove):', hit.label || '');
+      if (text !== null) { if (text.trim()) hit.label = text.trim(); else delete hit.label; redraw(); }
     }
   });
   const finish = () => {
