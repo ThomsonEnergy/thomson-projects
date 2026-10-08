@@ -2607,6 +2607,12 @@
           <div id="edit-msg"></div>
         </div>
 
+        ${!editMode ? `
+        <div id="job-search-wrap">
+          <input id="job-search-input" type="search" placeholder="Search this job - documents, photos, tasks, notes, quote items..." autocomplete="off" />
+          <button type="button" id="job-search-clear" title="Clear search">&times;</button>
+          <div id="job-search-results"></div>
+        </div>` : ''}
         <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
           <button class="settings-tab active" data-panel="summary">Summary</button>
           <button class="settings-tab" data-panel="costcentres">Cost Centres</button>
@@ -3207,6 +3213,7 @@
       if (document.getElementById('job-invoices-list')) loadJobInvoices(project);
       if (document.getElementById('variations-list')) loadVariations(project.id);
       loadJobTasks(project.id);
+      initJobSearch(project, pricingVisible);
 
       const hdSaveBtn = document.getElementById('hd-save-btn');
       if (hdSaveBtn) hdSaveBtn.addEventListener('click', async () => {
@@ -3790,6 +3797,215 @@
       }
 
       renderChecklist();
+    }
+
+    // ---------- Search within a job ----------
+    // One search box above the job's tabs. It looks through everything on the
+    // job (documents and plan pages, photos, tasks, feed, meetings, notes,
+    // equipment, and - for pricing roles - line items, POs, invoices and
+    // variations) and jumps straight to whatever you pick. Everything is
+    // fetched once when you first type, then filtered in the browser.
+    function ensureJobSearchStyles() {
+      if (document.getElementById('js-styles')) return;
+      const st = document.createElement('style');
+      st.id = 'js-styles';
+      st.textContent = `
+        #job-search-wrap { position:relative; margin-bottom:14px; }
+        #job-search-input { padding-right:36px; }
+        #job-search-clear { position:absolute; right:6px; top:6px; background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer; display:none; padding:0 6px; line-height:1.4; }
+        #job-search-results { margin-top:8px; border:1px solid var(--border); border-radius:10px; background:var(--surface); max-height:70vh; overflow-y:auto; display:none; }
+        .js-group-title { font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); padding:10px 14px 4px; }
+        .js-result { padding:8px 14px; cursor:pointer; border-top:1px solid var(--border); }
+        .js-result:hover, .js-result:focus { background:var(--surface-2); outline:none; }
+        .js-result-title { font-size:14px; color:var(--text); word-break:break-word; }
+        .js-result-snippet { font-size:12px; color:var(--muted); margin-top:2px; word-break:break-word; }
+        #job-search-results mark { background:rgba(224,160,48,.35); color:inherit; border-radius:2px; padding:0 1px; }
+        .js-more { display:block; padding:6px 14px 10px; font-size:12px; color:var(--accent); cursor:pointer; background:none; border:none; }
+        .js-flash { animation: js-flash 1.6s ease-out; }
+        @keyframes js-flash { 0% { box-shadow:0 0 0 3px var(--accent); } 100% { box-shadow:0 0 0 3px transparent; } }
+      `;
+      document.head.appendChild(st);
+    }
+
+    function jsCollectStrings(v, out = []) {
+      if (v == null) return out;
+      if (typeof v === 'string') out.push(v);
+      else if (typeof v === 'number') out.push(String(v));
+      else if (Array.isArray(v)) v.forEach(x => jsCollectStrings(x, out));
+      else if (typeof v === 'object') Object.values(v).forEach(x => jsCollectStrings(x, out));
+      return out;
+    }
+
+    function initJobSearch(project, pricingVisible) {
+      const wrap = document.getElementById('job-search-wrap');
+      if (!wrap) return;
+      ensureJobSearchStyles();
+      const input = document.getElementById('job-search-input');
+      const clearBtn = document.getElementById('job-search-clear');
+      const resultsEl = document.getElementById('job-search-results');
+      const pid = project.id;
+      let cache = null;      // { at, items }
+      let loading = null;
+      let expanded = new Set();
+
+      const goTab = (panel) => { const t = document.querySelector(`#job-tabs .settings-tab[data-panel="${panel}"]`); if (t) t.click(); };
+      const flash = (el) => { if (!el) return; el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.remove('js-flash'); void el.offsetWidth; el.classList.add('js-flash'); };
+      const textModal = (title, text) => {
+        const o = document.createElement('div');
+        o.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+        o.innerHTML = `<div class="card" style="max-width:560px; width:100%; max-height:85vh; overflow-y:auto;"><h2 style="margin-top:0;">${escapeHtml(title)}</h2><p style="white-space:pre-wrap;">${escapeHtml(text)}</p><button type="button" class="secondary">Close</button></div>`;
+        o.addEventListener('click', (e) => { if (e.target === o || e.target.tagName === 'BUTTON') o.remove(); });
+        document.body.appendChild(o);
+      };
+
+      async function build() {
+        const q = (p) => Promise.resolve(p).then(r => r.data || []).catch(() => []);
+        const sb = supabaseClient;
+        const [docs, photos, tasks, posts, comments, meetings, fieldNotes, assets, pos, varEntries] = await Promise.all([
+          q(sb.from('project_documents').select('id, folder, file_path, file_name, mime_type, page_names, plan_summary').eq('project_id', pid)),
+          q(sb.from('project_photos').select('id, url, caption, created_at').eq('project_id', pid).order('created_at', { ascending: false })),
+          q(sb.from('job_tasks').select('id, description, notes, parent_task_id, completed').eq('project_id', pid)),
+          q(sb.from('feed_posts').select('id, message').eq('project_id', pid)),
+          q(sb.from('feed_comments').select('id, post_id, message, feed_posts!inner(project_id)').eq('feed_posts.project_id', pid)),
+          q(sb.from('meetings').select('id, title, notes, location').eq('project_id', pid)),
+          q(sb.from('project_field_notes').select('id, note, signed_by_name, created_at').eq('project_id', pid)),
+          q(sb.from('customer_assets').select('id, name, make, model, serial_numbers, notes').eq('project_id', pid)),
+          q(sb.from('purchase_orders').select('id, supplier_name, po_number, description, file_name').eq('project_id', pid)),
+          q(sb.from('job_variation_entries').select('id, description, materials').eq('project_id', pid)),
+        ]);
+        let centres = [], lines = [], invoices = [], variations = [];
+        if (pricingVisible) {
+          [centres, invoices, variations] = await Promise.all([
+            q(sb.from('cost_centres').select('id, name, description').eq('project_id', pid)),
+            q(sb.from('invoices').select('id, invoice_number, description').eq('project_id', pid)),
+            q(sb.from('variations').select('id, description').eq('project_id', pid)),
+          ]);
+          if (centres.length) lines = await q(sb.from('cost_centre_line_items').select('id, cost_centre_id, description').in('cost_centre_id', centres.map(c => c.id)));
+        }
+
+        const items = [];
+        const add = (group, title, fields, open) => items.push({ group, title, fields: fields.filter(Boolean).map(String), open });
+
+        docs.forEach(d => add('Documents', d.file_name, [d.file_name, d.folder, ...jsCollectStrings(d.page_names), ...jsCollectStrings(d.plan_summary)], async () => {
+          goTab('documents'); selectedDocFolder = d.folder; await loadDocuments(pid);
+          const link = [...document.querySelectorAll('#documents-list .doc-view-link')].find(a => a.dataset.path === d.file_path);
+          if (link) { flash(link.closest('.doc-tile')); link.click(); }
+        }));
+        photos.forEach((p, i) => {
+          const fileName = decodeURIComponent((p.url || '').split('?')[0].split('/').pop() || '');
+          add('Photos', p.caption || fileName || 'Site photo', [p.caption, fileName.replace(/[-_.]+/g, ' ')], async () => {
+            goTab('photos');
+            await loadSitePhotos(pid);
+            const img = document.querySelector(`#site-photos-list .site-photo-view[data-i="${i}"]`);
+            if (img) { flash(img); img.click(); }
+          });
+        });
+        const taskById = Object.fromEntries(tasks.map(t => [t.id, t]));
+        tasks.forEach(t => add('Tasks', t.description, [t.description, t.notes], () => {
+          goTab('summary');
+          const topId = t.parent_task_id && taskById[t.parent_task_id] ? t.parent_task_id : t.id;
+          jtExpanded.add(topId); if (t.parent_task_id) jtExpanded.add(t.id);
+          const listEl = document.getElementById('job-tasks-list');
+          if (listEl && listEl._jt) renderJobTasks(listEl);
+          flash(document.querySelector(`#job-tasks-list .jt-item[data-id="${t.id}"]`) || document.getElementById('job-tasks-list'));
+        }));
+        posts.forEach(p => add('Feed', p.message.length > 70 ? p.message.slice(0, 70) + '...' : p.message, [p.message], () => goTab('feed')));
+        comments.forEach(c => add('Feed', 'Comment: ' + (c.message.length > 60 ? c.message.slice(0, 60) + '...' : c.message), [c.message], () => goTab('feed')));
+        meetings.forEach(m => add('Meetings', m.title, [m.title, m.notes, m.location], () => { window.location.href = `/meetings.html?id=${m.id}`; }));
+
+        if (project.notes) add('Notes', 'Job notes', [project.notes], () => { goTab('summary'); flash(document.querySelector('#panel-summary .card')); });
+        if (project.template_answers) { const t = jsCollectStrings(project.template_answers); if (t.length) add('Notes', 'Job questions and answers', t, () => { goTab('summary'); flash(document.querySelector('#panel-summary .card')); }); }
+        if (project.installer_summary) add('Notes', 'Installer summary', [project.installer_summary], () => { goTab('summary'); flash(document.getElementById('installer-summary-text')); });
+        if (project.sow_text) add('Notes', 'Scope of work', [project.sow_text], () => textModal('Scope of work', project.sow_text));
+        add('Notes', 'Job details', [project.name, project.client_name, project.client_address, project.client_email, project.client_phone, project.nmi, project.panel_serial_numbers, project.inverter_serial_numbers], () => goTab('details'));
+        fieldNotes.forEach(n => add('Notes', 'Site visit note ' + new Date(n.created_at).toLocaleDateString('en-AU'), [n.note, n.signed_by_name], () => textModal('Site visit note ' + new Date(n.created_at).toLocaleDateString('en-AU'), n.note)));
+
+        assets.forEach(a => add('Equipment', a.name, [a.name, a.make, a.model, a.serial_numbers, a.notes], () => { goTab('summary'); flash(document.getElementById('assets-card')); }));
+        pos.forEach(p => add('Purchase orders', [p.po_number, p.supplier_name].filter(Boolean).join(' - ') || 'Purchase order', [p.po_number, p.supplier_name, p.description, p.file_name], () => goTab('pos')));
+        const centreById = Object.fromEntries(centres.map(c => [c.id, c]));
+        centres.forEach(c => add('Quote items', c.name, [c.name, c.description], () => goTab('costcentres')));
+        lines.forEach(l => add('Quote items', l.description, [l.description, centreById[l.cost_centre_id] && centreById[l.cost_centre_id].name], () => goTab('costcentres')));
+        invoices.forEach(i => add('Invoices', i.invoice_number || 'Invoice', [i.invoice_number, i.description], () => goTab('invoices')));
+        variations.forEach(v => add('Variations', v.description || 'Variation', [v.description], () => goTab('variations')));
+        varEntries.forEach(v => add('Variations', v.description, [v.description, v.materials], () => goTab('variations')));
+        return items;
+      }
+
+      async function getItems() {
+        if (cache && Date.now() - cache.at < 60000) return cache.items;
+        if (!loading) loading = build().then(items => { cache = { at: Date.now(), items }; loading = null; return items; }).catch(err => { loading = null; throw err; });
+        return loading;
+      }
+
+      const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      function highlight(raw, re) {
+        return String(raw).split(re).map((part, i) => i % 2 ? `<mark>${escapeHtml(part)}</mark>` : escapeHtml(part)).join('');
+      }
+
+      const GROUP_ORDER = ['Documents', 'Photos', 'Tasks', 'Feed', 'Meetings', 'Notes', 'Equipment', 'Quote items', 'Purchase orders', 'Invoices', 'Variations'];
+      const GROUP_LIMIT = 5;
+      let shown = [];
+
+      async function run() {
+        const raw = input.value.trim();
+        clearBtn.style.display = input.value ? 'block' : 'none';
+        if (raw.length < 2) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; return; }
+        resultsEl.style.display = 'block';
+        if (!cache) resultsEl.innerHTML = '<p class="subtitle" style="padding:12px 14px; margin:0;">Searching this job...</p>';
+        let items;
+        try { items = await getItems(); } catch (err) { resultsEl.innerHTML = `<div class="error-box" style="margin:10px;">${escapeHtml(err.message)}</div>`; return; }
+        if (input.value.trim() !== raw) return; // typed on while loading
+        const tokens = raw.toLowerCase().split(/\s+/).filter(Boolean);
+        const re = new RegExp('(' + tokens.map(reEsc).join('|') + ')', 'i');
+        shown = [];
+        const matches = items.map(it => {
+          const hay = it.fields.join(' \n ').toLowerCase();
+          if (!tokens.every(t => hay.includes(t))) return null;
+          // snippet: the first field that contains any of the words
+          const field = it.fields.find(f => tokens.some(t => f.toLowerCase().includes(t))) || '';
+          const at = field.toLowerCase().indexOf(tokens.find(t => field.toLowerCase().includes(t)) || '');
+          let snippet = field.replace(/\s+/g, ' ');
+          if (snippet.length > 110) { const from = Math.max(0, at - 40); snippet = (from ? '...' : '') + snippet.slice(from, from + 110) + '...'; }
+          return { ...it, snippet };
+        }).filter(Boolean);
+        if (!matches.length) { resultsEl.innerHTML = `<p class="subtitle" style="padding:12px 14px; margin:0;">Nothing on this job matches "${escapeHtml(raw)}".</p>`; return; }
+        resultsEl.innerHTML = GROUP_ORDER.map(g => {
+          const rows = matches.filter(m => m.group === g);
+          if (!rows.length) return '';
+          const open = expanded.has(g);
+          const visible = open ? rows : rows.slice(0, GROUP_LIMIT);
+          return `<div class="js-group-title">${g} (${rows.length})</div>` + visible.map(m => {
+            shown.push(m);
+            const showSnippet = m.snippet && m.snippet.toLowerCase() !== String(m.title).toLowerCase();
+            return `<div class="js-result" tabindex="0" data-i="${shown.length - 1}">
+              <div class="js-result-title">${highlight(m.title, re)}</div>
+              ${showSnippet ? `<div class="js-result-snippet">${highlight(m.snippet, re)}</div>` : ''}
+            </div>`;
+          }).join('') + (rows.length > GROUP_LIMIT && !open ? `<button type="button" class="js-more" data-group="${g}">Show all ${rows.length}</button>` : '');
+        }).join('');
+      }
+
+      resultsEl.addEventListener('click', async (e) => {
+        const more = e.target.closest('.js-more');
+        if (more) { expanded.add(more.dataset.group); run(); return; }
+        const row = e.target.closest('.js-result');
+        if (!row) return;
+        const m = shown[Number(row.dataset.i)];
+        if (!m) return;
+        resultsEl.style.display = 'none';
+        try { await m.open(); } catch (err) { alert(err.message); }
+      });
+      resultsEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList.contains('js-result')) e.target.click(); });
+
+      let timer;
+      input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 150); });
+      input.addEventListener('focus', () => { if (input.value.trim().length >= 2) run(); else getItems().catch(() => {}); });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { input.value = ''; run(); }
+        if (e.key === 'ArrowDown') { const first = resultsEl.querySelector('.js-result'); if (first) { e.preventDefault(); first.focus(); } }
+      });
+      clearBtn.addEventListener('click', () => { input.value = ''; expanded = new Set(); run(); input.focus(); });
+      document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) resultsEl.style.display = 'none'; });
     }
 
     // ---------- Job card checklist (Google Tasks style) ----------
