@@ -329,7 +329,7 @@
         .eq('staff_id', myUserId)
         .eq('assignment_date', todayStr);
       (mySchedule || []).forEach(a => {
-        items.push({ label: `You're scheduled today: ${a.projects ? projectRef(a.projects) : 'General / Office'}`, link: a.project_id ? `/project.html?id=${a.project_id}` : null });
+        items.push({ group: 'job', label: `You're scheduled today: ${a.projects ? projectRef(a.projects) : 'General / Office'}`, link: a.project_id ? `/project.html?id=${a.project_id}` : null });
       });
 
       // Tasks assigned to you or your role
@@ -339,7 +339,7 @@
         .eq('completed', false)
         .or(`assigned_to_user_id.eq.${myUserId},assigned_to_role.eq.${myRole}`);
       if (myTasks && myTasks.length) {
-        items.push({ label: `${myTasks.length} task${myTasks.length === 1 ? '' : 's'} assigned to you`, link: '/tasks.html' });
+        items.push({ group: 'job', label: `${myTasks.length} task${myTasks.length === 1 ? '' : 's'} assigned to you`, link: '/tasks.html' });
       }
 
       // Jobs flagged Not Complete - relevant to everyone, no $ involved
@@ -348,7 +348,7 @@
         .select('id, name, job_number')
         .eq('pipeline_stage', 'job_not_complete');
       (notComplete || []).forEach(p => {
-        items.push({ label: `Job flagged not complete: #${p.job_number || '-'} ${p.name}`, link: `/project.html?id=${p.id}` });
+        items.push({ group: 'job', label: `Job flagged not complete: #${p.job_number || '-'} ${p.name}`, link: `/project.html?id=${p.id}` });
       });
 
       const isPricing = ['admin', 'finance', 'sales'].includes(myRole);
@@ -358,7 +358,7 @@
           .select('id, name, quote_number')
           .eq('pipeline_stage', 'draft_quote');
         (draftQuotes || []).forEach(p => {
-          items.push({ label: `Draft quote needs finishing: ${projectRef(p)}`, link: `/new-project.html?id=${p.id}` });
+          items.push({ group: 'quotes', label: `Draft quote needs finishing: ${projectRef(p)}`, link: `/new-project.html?id=${p.id}` });
         });
 
         const { data: invoices } = await supabaseClient
@@ -368,7 +368,7 @@
         (invoices || []).forEach(inv => {
           const daysSince = (today - new Date(inv.sent_at)) / 86400000;
           if (daysSince > 14) {
-            items.push({ label: `Overdue: invoice ${inv.invoice_number} (${Math.floor(daysSince)} days)`, link: '/invoices.html' });
+            items.push({ group: 'admin', label: `Overdue: invoice ${inv.invoice_number} (${Math.floor(daysSince)} days)`, link: '/invoices.html' });
           }
         });
       }
@@ -379,7 +379,7 @@
           .select('id, profiles(full_name)')
           .eq('status', 'pending');
         (pendingLeave || []).forEach(lr => {
-          items.push({ label: `Leave request pending: ${lr.profiles ? lr.profiles.full_name : 'a staff member'}`, link: '/timesheets.html' });
+          items.push({ group: 'admin', label: `Leave request pending: ${lr.profiles ? lr.profiles.full_name : 'a staff member'}`, link: '/timesheets.html' });
         });
 
         // Onboarding no longer blocks on a pending employment contract (an
@@ -394,7 +394,7 @@
         (activeStaff || []).forEach(s => {
           const c = (allContracts || []).find(x => x.profile_id === s.id);
           if (!c || c.status !== 'signed') {
-            items.push({ label: `Employment contract not completed: ${s.full_name || 'a staff member'}${c ? ` (${c.status.replace(/_/g, ' ')})` : ' (not started)'}`, link: '/settings.html' });
+            items.push({ group: 'admin', label: `Employment contract not completed: ${s.full_name || 'a staff member'}${c ? ` (${c.status.replace(/_/g, ' ')})` : ' (not started)'}`, link: '/settings.html' });
           }
         });
       }
@@ -404,6 +404,7 @@
       const { data: myContract } = await supabaseClient.from('employee_contracts').select('status').eq('profile_id', myUserId).maybeSingle();
       if (!myContract || myContract.status !== 'signed') {
         items.push({
+          group: 'admin',
           label: `Your employment contract isn't completed yet${myContract?.status === 'ready_to_sign' ? " - it's ready for you to sign" : ' - still being prepared'}`,
           link: '/onboarding.html',
         });
@@ -420,7 +421,7 @@
           .lte('expiry_date', in30Str);
         (credentials || []).forEach(c => {
           const isExpired = c.expiry_date < todayStr;
-          items.push({ label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${c.name} (${new Date(c.expiry_date).toLocaleDateString('en-AU')})`, link: '/settings.html' });
+          items.push({ group: 'licences', label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${c.name} (${new Date(c.expiry_date).toLocaleDateString('en-AU')})`, link: '/settings.html' });
         });
 
         const [{ data: expiringLicences }, { data: staffForLicences }] = await Promise.all([
@@ -430,7 +431,7 @@
         (expiringLicences || []).forEach(l => {
           const isExpired = l.expiry_date < todayStr;
           const who = (staffForLicences || []).find(s => s.id === l.profile_id)?.full_name || 'a staff member';
-          items.push({ label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${who}'s ${l.licence_name} (${new Date(l.expiry_date).toLocaleDateString('en-AU')})`, link: '/settings.html' });
+          items.push({ group: 'licences', label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${who}'s ${l.licence_name} (${new Date(l.expiry_date).toLocaleDateString('en-AU')})`, link: '/settings.html' });
         });
       }
 
@@ -438,11 +439,23 @@
         el.innerHTML = `<p class="subtitle">Nothing needs your attention right now.</p>`;
         return;
       }
-      el.innerHTML = items.map(i => `
-        <div class="action-item">
-          <span>${i.label}</span>
-          ${i.link ? `<a class="link-quiet" href="${i.link}" style="font-size:12px;">View</a>` : ''}
-        </div>`).join('');
+      const GROUPS = [
+        { key: 'job', title: 'Job specific' },
+        { key: 'quotes', title: 'Quotes' },
+        { key: 'admin', title: 'Admin' },
+        { key: 'licences', title: 'Licences' },
+      ];
+      el.innerHTML = GROUPS.map(g => {
+        const groupItems = items.filter(i => i.group === g.key);
+        if (!groupItems.length) return '';
+        return `
+          <h3 style="font-size:13px; margin:16px 0 4px; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">${g.title} (${groupItems.length})</h3>
+          ${groupItems.map(i => `
+            <div class="action-item">
+              <span>${i.label}</span>
+              ${i.link ? `<a class="link-quiet" href="${i.link}" style="font-size:12px;">View</a>` : ''}
+            </div>`).join('')}`;
+      }).join('');
     }
 
     // Real, verified quotes only - an AI-generated "famous quote" risks
