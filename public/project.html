@@ -1296,14 +1296,10 @@
       }
 
       if (!isJob) {
-        // ---------- Quote path: unchanged - nothing real is attached yet,
-        // so a full delete-and-reinsert is simplest and safe. ----------
-        const reasons = await checkProjectHasActivity(project);
-        if (reasons.length) {
-          msg.innerHTML = `<div class="error-box">Can't save stage changes - this quote already ${reasons.join(', ')}. Editing here would delete and re-create every stage, which isn't safe once real activity is attached.</div>`;
-          return;
-        }
-
+        // ---------- Quote path: saves the project fields + milestones
+        // here, then falls through to the same non-destructive stage save
+        // a job uses below (stages updated in place), so prices stay
+        // editable at any time - even once time is logged/allocated. ----------
         const name = document.getElementById('p-name').value.trim();
         const client_name = document.getElementById('p-client').value.trim();
         const client_email = document.getElementById('p-email').value.trim();
@@ -1365,49 +1361,21 @@
             if (msErr) throw msErr;
           }
 
-          const { error: delErr } = await supabaseClient.from('cost_centres').delete().eq('project_id', project.id);
-          if (delErr) throw delErr;
-
-          const { data: insertedStages, error: ccErr } = await supabaseClient
-            .from('cost_centres')
-            .insert(stagesPayload.map(({ id, lineItems, photoGroups, ...s }) => ({ ...s, project_id: project.id })))
-            .select();
-          if (ccErr) throw ccErr;
-
-          const allLineItems = [];
-          const allPhotoGroups = [];
-          insertedStages.forEach((stage, i) => {
-            stagesPayload[i].lineItems.forEach(li => allLineItems.push({ ...li, cost_centre_id: stage.id }));
-            stagesPayload[i].photoGroups.forEach(pg => allPhotoGroups.push({ ...pg, cost_centre_id: stage.id }));
-          });
-          if (allLineItems.length) {
-            const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(allLineItems);
-            if (liErr) throw liErr;
-          }
-          if (allPhotoGroups.length) {
-            const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(allPhotoGroups);
-            if (pgErr) throw pgErr;
-          }
-
-          await logStageChanges(project.id, project.cost_centres || [], stagesPayload);
-
-          editMode = false;
-          const refreshed = await loadProject();
-          const myRole = await getMyRole();
-          if (refreshed) render(refreshed, isPricingRole(myRole));
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${err.message}</div>`;
           saveBtn.disabled = false;
           saveBtn.textContent = 'Save changes';
+          return;
         }
-        return;
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save changes';
       }
 
-      // ---------- Job path: non-destructive. Existing stages are UPDATEd
-      // in place (preserving the id every invoice/PO/timesheet entry
-      // downstream might reference), only genuinely new stages get
-      // inserted, and a stage can only be removed if nothing real is
-      // attached to it specifically. Line items/photo groups within a
+      // ---------- Stage save (quotes and jobs): non-destructive. Existing
+      // stages are UPDATEd in place (preserving the id every invoice/PO/
+      // timesheet entry downstream might reference), only genuinely new
+      // stages get inserted, and a stage can only be removed if nothing real
+      // is attached to it specifically. Line items/photo groups within a
       // surviving stage are still delete-and-reinsert - nothing else
       // references their ids directly, so that stays simple. ----------
       const existingCentres = project.cost_centres || [];
@@ -1439,8 +1407,10 @@
         changes.push({ cost_centre_id: c.id, cost_centre_name: c.name, old_amount: Number(c.quoted_amount) || 0, new_amount: 0 });
       });
 
+      // A variation (signed price-change record) only applies once a quote
+      // has become a job - a quote's prices just change.
       let pendingVariation = null;
-      if (changes.length) {
+      if (isJob && changes.length) {
         pendingVariation = await openVariationChoiceModal(changes);
         if (pendingVariation === undefined) return; // backed out of the whole save
       }
