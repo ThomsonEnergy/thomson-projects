@@ -255,13 +255,17 @@ async function openPhotoMarkup(url, onSave) {
   const COLOURS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#ffffff', '#000000'];
   const SIZES = [1, 2, 3.5];
   let tool = 'pen', colour = COLOURS[0], sizeIdx = 1;
+  let fillMode = 0; // boxes only: 0 outline, 1 solid fill, 2 see-through highlight
+  const FILL_LABELS = ['Outline', 'Solid fill', 'Highlight'];
   const shapes = [];
   let current = null;
+  let dragging = null; // { shape, x, y } while the Move tool is dragging a shape
 
   const toolBtn = (id, label) => `<button type="button" class="secondary mk-tool" data-tool="${id}" style="padding:6px 12px; font-size:13px;">${label}</button>`;
   overlay.innerHTML = `
     <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
-      ${toolBtn('pen', 'Pen')}${toolBtn('arrow', 'Arrow')}${toolBtn('box', 'Box')}${toolBtn('text', 'Text')}
+      ${toolBtn('pen', 'Pen')}${toolBtn('arrow', 'Arrow')}${toolBtn('box', 'Box')}${toolBtn('text', 'Text')}${toolBtn('move', 'Move')}
+      <button type="button" class="secondary" id="mk-fill" style="padding:6px 12px; font-size:13px;">Outline</button>
       <span style="width:8px;"></span>
       ${COLOURS.map(c => `<button type="button" class="mk-colour" data-c="${c}" style="width:26px; height:26px; padding:0; border-radius:50%; background:${c}; border:2px solid #fff;"></button>`).join('')}
       <span style="width:8px;"></span>
@@ -289,7 +293,13 @@ async function openPhotoMarkup(url, onSave) {
       if (s.points.length === 1) ctx.lineTo(s.points[0][0] + 0.01, s.points[0][1]);
       ctx.stroke();
     } else if (s.type === 'box') {
-      ctx.strokeRect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1);
+      if (s.fill) {
+        ctx.save();
+        ctx.globalAlpha = s.fill === 2 ? 0.35 : 1;
+        ctx.fillRect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1);
+        ctx.restore();
+      }
+      if (s.fill !== 1) ctx.strokeRect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1);
     } else if (s.type === 'arrow') {
       const angle = Math.atan2(s.y2 - s.y1, s.x2 - s.x1);
       const head = s.width * 5;
@@ -309,12 +319,49 @@ async function openPhotoMarkup(url, onSave) {
       ctx.fillText(s.text, s.x1, s.y1);
     }
   }
+  function shapeBounds(s) {
+    let x1, y1, x2, y2;
+    if (s.type === 'pen') {
+      const xs = s.points.map(p => p[0]), ys = s.points.map(p => p[1]);
+      x1 = Math.min(...xs); x2 = Math.max(...xs); y1 = Math.min(...ys); y2 = Math.max(...ys);
+    } else if (s.type === 'text') {
+      ctx.font = `bold ${Math.round(s.width * 6)}px sans-serif`;
+      x1 = s.x1; y1 = s.y1; x2 = s.x1 + ctx.measureText(s.text).width; y2 = s.y1 + s.width * 6;
+    } else {
+      x1 = Math.min(s.x1, s.x2); x2 = Math.max(s.x1, s.x2); y1 = Math.min(s.y1, s.y2); y2 = Math.max(s.y1, s.y2);
+    }
+    const pad = Math.max(s.width * 2, 14);
+    return { x1: x1 - pad, y1: y1 - pad, x2: x2 + pad, y2: y2 + pad };
+  }
+  function moveShape(s, dx, dy) {
+    if (s.type === 'pen') s.points = s.points.map(([x, y]) => [x + dx, y + dy]);
+    else {
+      s.x1 += dx; s.y1 += dy;
+      if (s.x2 !== undefined) { s.x2 += dx; s.y2 += dy; }
+    }
+  }
+  function shapeAt(x, y) {
+    for (let i = shapes.length - 1; i >= 0; i--) {
+      const b = shapeBounds(shapes[i]);
+      if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return shapes[i];
+    }
+    return null;
+  }
   function redraw() {
     ctx.drawImage(bitmap, 0, 0, W, H);
     shapes.forEach(drawShape);
     if (current) drawShape(current);
+    if (dragging) {
+      const b = shapeBounds(dragging.shape);
+      ctx.save();
+      ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = Math.max(2, W / 600); ctx.setLineDash([8, 6]);
+      ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+      ctx.restore();
+    }
   }
   function refreshControls() {
+    canvas.style.cursor = tool === 'move' ? 'move' : 'crosshair';
+    overlay.querySelector('#mk-fill').textContent = FILL_LABELS[fillMode];
     overlay.querySelectorAll('.mk-tool').forEach(b => { b.style.outline = b.dataset.tool === tool ? '2px solid #fff' : 'none'; });
     overlay.querySelectorAll('.mk-colour').forEach(b => { b.style.outline = b.dataset.c === colour ? '2px solid #38bdf8' : 'none'; b.style.outlineOffset = '2px'; });
     overlay.querySelectorAll('.mk-size').forEach(b => { b.style.outline = parseInt(b.dataset.i) === sizeIdx ? '2px solid #fff' : 'none'; });
@@ -329,27 +376,60 @@ async function openPhotoMarkup(url, onSave) {
     const r = canvas.getBoundingClientRect();
     return [(e.clientX - r.left) * (W / r.width), (e.clientY - r.top) * (H / r.height)];
   };
+  overlay.querySelector('#mk-fill').addEventListener('click', () => { fillMode = (fillMode + 1) % 3; tool = 'box'; refreshControls(); });
   canvas.addEventListener('pointerdown', (e) => {
     const [x, y] = pos(e);
+    if (tool === 'move') {
+      const hit = shapeAt(x, y);
+      if (!hit) return;
+      canvas.setPointerCapture(e.pointerId);
+      dragging = { shape: hit, x, y };
+      redraw();
+      return;
+    }
     if (tool === 'text') {
       const text = window.prompt('Text to add:');
-      if (text && text.trim()) { shapes.push({ type: 'text', colour, width: baseWidth(), x1: x, y1: y, text: text.trim() }); redraw(); }
+      if (text && text.trim()) {
+        shapes.push({ type: 'text', colour, width: baseWidth(), x1: x, y1: y, text: text.trim() });
+        // Straight into Move so the text can be dragged to the right spot.
+        tool = 'move'; refreshControls(); redraw();
+      }
       return;
     }
     canvas.setPointerCapture(e.pointerId);
     current = tool === 'pen'
       ? { type: 'pen', colour, width: baseWidth(), points: [[x, y]] }
-      : { type: tool, colour, width: baseWidth(), x1: x, y1: y, x2: x, y2: y };
+      : { type: tool, colour, width: baseWidth(), x1: x, y1: y, x2: x, y2: y, ...(tool === 'box' ? { fill: fillMode } : {}) };
     redraw();
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (!current) return;
     const [x, y] = pos(e);
+    if (dragging) {
+      moveShape(dragging.shape, x - dragging.x, y - dragging.y);
+      dragging.x = x; dragging.y = y;
+      redraw();
+      return;
+    }
+    if (!current) return;
     if (current.type === 'pen') current.points.push([x, y]);
     else { current.x2 = x; current.y2 = y; }
     redraw();
   });
-  const finish = () => { if (current) { shapes.push(current); current = null; redraw(); } };
+  // Double-click a piece of text (Move tool) to change what it says.
+  canvas.addEventListener('dblclick', (e) => {
+    if (tool !== 'move') return;
+    const [x, y] = pos(e);
+    const hit = shapeAt(x, y);
+    if (hit && hit.type === 'text') {
+      const text = window.prompt('Edit text:', hit.text);
+      if (text && text.trim()) hit.text = text.trim();
+      redraw();
+    }
+  });
+  const finish = () => {
+    if (dragging) { dragging = null; redraw(); return; }
+    if (current) { shapes.push(current); current = null; redraw(); }
+  };
   canvas.addEventListener('pointerup', finish);
   canvas.addEventListener('pointercancel', finish);
 
@@ -895,7 +975,13 @@ function sydneyDateKey(date) {
 }
 function sydneyMidnightUtc(dateKey) {
   const naive = new Date(`${dateKey}T00:00:00Z`);
-  return new Date(naive.getTime() - sydneyOffsetMinutesAt(naive) * 60000);
+  // The offset has to be the one in force AT Sydney's midnight, not at
+  // 00:00 UTC of the same date - on the day daylight saving changes those
+  // differ, and using the UTC-midnight offset put the answer an hour early,
+  // so splitAtSydneyMidnight below stopped advancing and froze the page
+  // (any shift crossing the changeover, e.g. a clock-out left open for days).
+  const guess = new Date(naive.getTime() - sydneyOffsetMinutesAt(naive) * 60000);
+  return new Date(naive.getTime() - sydneyOffsetMinutesAt(guess) * 60000);
 }
 function splitAtSydneyMidnight(clockInIso, clockOutIso) {
   const segments = [];
@@ -907,6 +993,7 @@ function splitAtSydneyMidnight(clockInIso, clockOutIso) {
     nextDateKey.setUTCDate(nextDateKey.getUTCDate() + 1);
     const nextMidnight = sydneyMidnightUtc(nextDateKey.toISOString().slice(0, 10));
     const segEnd = nextMidnight < end ? nextMidnight : end;
+    if (segEnd <= cursor) break; // never loop forever if a boundary ever fails to advance
     segments.push({ clock_in: cursor.toISOString(), clock_out: segEnd.toISOString() });
     cursor = segEnd;
   }
