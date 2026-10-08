@@ -804,6 +804,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   const toolBtn = (id, label, extraId = '') => `<button type="button" class="secondary mk-tool" data-tool="${id}" ${extraId ? `id="${extraId}"` : ''} style="padding:6px 12px; font-size:13px;">${label}</button>`;
   const smallInput = 'padding:5px 8px; font-size:12px; margin:0; width:auto;';
   overlay.innerHTML = `
+    <div id="mk-tools" style="display:flex; flex-direction:column; gap:8px; align-items:center; width:100%;">
     <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
       ${toolBtn('pen', 'Pen')}${toolBtn('arrow', 'Arrow')}${toolBtn('box', 'Box')}${toolBtn('text', 'Text')}${toolBtn('move', 'Move')}${toolBtn('erase', 'Delete')}
       <button type="button" class="secondary" id="mk-fill" style="padding:6px 12px; font-size:13px;">Outline</button>
@@ -817,24 +818,44 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     ${plan ? `
     <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
       ${toolBtn('symbol', 'Symbols', 'mk-symbols-btn')}
-      <span style="color:#fff; font-size:12px;">Circuit</span><input id="mk-circuit" placeholder="e.g. C1" maxlength="20" style="${smallInput} width:70px;" />
       ${toolBtn('label', 'Label')}
       ${toolBtn('scale', 'Set scale')}${toolBtn('measure', 'Measure')}${toolBtn('cable', 'Cable path')}
+      <button type="button" class="secondary" id="mk-more-btn" style="padding:6px 12px; font-size:13px;">More &#9662;</button>
+    </div>
+    <div id="mk-ctx-symbol" style="display:none; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
+      <span id="mk-symbol-chip" style="color:#fff; font-size:13px;"></span>
+      <button type="button" class="secondary" id="mk-change-symbol" style="padding:6px 12px; font-size:13px;">Change symbol</button>
+      <span style="color:#fff; font-size:12px;">Circuit</span><input id="mk-circuit" placeholder="e.g. C1" maxlength="20" style="${smallInput} width:70px;" />
+    </div>
+    <div id="mk-ctx-cable" style="display:none; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
       <select id="mk-cable-kind" style="${smallInput}">${CABLE_KINDS.map(c => `<option>${c.kind}</option>`).join('')}<option value="__custom">Other...</option></select>
       <select id="mk-cable-size" style="${smallInput}"></select>
       <button type="button" id="mk-finish-cable" style="padding:6px 12px; font-size:13px; display:none;">Finish cable</button>
+    </div>
+    <div id="mk-more" style="display:none; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;">
       <span style="color:#fff; font-size:12px;">Grid snap</span><select id="mk-grid" style="${smallInput}"><option value="0">Off</option><option value="1">Fine</option><option value="2">Medium</option><option value="3">Coarse</option></select>
       <span style="color:#fff; font-size:12px;">Allowance</span><input id="mk-allow" type="number" min="0" max="100" value="${allowance}" style="${smallInput} width:60px;" /><span style="color:#fff; font-size:12px;">%</span>
       <select id="mk-scope" style="${smallInput}"><option value="page">Schedule: this page</option><option value="all">Schedule: all pages</option></select>
       <button type="button" class="secondary" id="mk-schedule" style="padding:6px 12px; font-size:13px;">Add schedule</button>
     </div>
-    <div id="mk-palette" style="display:none; max-height:22vh; overflow:auto; background:#fff; border-radius:8px; padding:8px; max-width:94vw;">
-      <div style="display:flex; flex-wrap:wrap; gap:6px;">
-        ${ELECTRICAL_SYMBOLS.map(s => `<button type="button" class="mk-sym" data-id="${s.id}" title="${s.name}" style="width:84px; padding:4px; background:#fff; color:#000; border:1px solid #ccc; border-radius:6px; font-size:10px; line-height:1.15;"><canvas width="44" height="44" data-id="${s.id}" style="display:block; margin:0 auto 2px;"></canvas>${s.name}</button>`).join('')}
-      </div>
-    </div>
     <div id="mk-counts" style="color:#cbd5e1; font-size:12px; max-width:94vw; text-align:center;"></div>` : ''}
-    <canvas id="mk-canvas" width="${W}" height="${H}" style="max-width:94vw; max-height:${plan ? '56vh' : '70vh'}; touch-action:none; border-radius:6px; cursor:crosshair; flex-shrink:0;"></canvas>
+    </div>
+    ${plan ? `
+    <div id="mk-palette" style="display:none; position:fixed; left:0; right:0; bottom:0; max-height:62vh; overflow:auto; background:#fff; border-radius:16px 16px 0 0; padding:12px; z-index:420; box-shadow:0 -6px 24px rgba(0,0,0,0.5);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <strong style="color:#000; font-size:15px;">Pick a symbol</strong>
+        <button type="button" id="mk-palette-close" style="padding:6px 14px; font-size:13px;">Done</button>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:8px;">
+        ${ELECTRICAL_SYMBOLS.map(s => `<button type="button" class="mk-sym" data-id="${s.id}" title="${s.name}" style="padding:8px 4px; background:#fff; color:#000; border:1px solid #ccc; border-radius:8px; font-size:12px; line-height:1.2;"><canvas width="96" height="96" data-id="${s.id}" style="display:block; margin:0 auto 4px; width:56px; height:56px;"></canvas>${s.name}</button>`).join('')}
+      </div>
+    </div>` : ''}
+    <div id="mk-bar" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap;">
+      <button type="button" class="secondary" id="mk-toggle-tools" style="padding:6px 12px; font-size:13px;">Hide tools</button>
+      <span id="mk-summary" style="color:#fff; font-size:13px; display:none;"></span>
+      <button type="button" class="secondary" id="mk-undo2" style="padding:6px 12px; font-size:13px; display:none;">Undo</button>
+    </div>
+    <canvas id="mk-canvas" width="${W}" height="${H}" style="max-width:94vw; max-height:${plan ? '52vh' : '62vh'}; touch-action:none; border-radius:6px; cursor:crosshair; flex-shrink:0;"></canvas>
     <div id="mk-msg" style="color:#fca5a5; font-size:12px;"></div>
     <div style="display:flex; gap:8px;">
       <button type="button" id="mk-save">Save marked-up copy</button>
@@ -859,7 +880,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
 
   if (plan) {
     overlay.querySelectorAll('#mk-palette canvas').forEach(cv => {
-      drawSymbolCanvas(cv.getContext('2d'), cv.dataset.id, 4, 4, 36, '#000000', 2);
+      drawSymbolCanvas(cv.getContext('2d'), cv.dataset.id, 8, 8, 80, '#000000', 4);
     });
   }
 
@@ -1093,19 +1114,48 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     if (plan) {
       overlay.querySelectorAll('.mk-sym').forEach(b => { b.style.outline = b.dataset.id === currentSymbol ? '3px solid #38bdf8' : 'none'; });
       overlay.querySelector('#mk-finish-cable').style.display = cableDraft ? '' : 'none';
+      // Only the options for the tool in hand are shown, so the bar stays short.
+      overlay.querySelector('#mk-ctx-symbol').style.display = tool === 'symbol' ? 'flex' : 'none';
+      overlay.querySelector('#mk-ctx-cable').style.display = tool === 'cable' ? 'flex' : 'none';
+      const sym = ELECTRICAL_SYMBOLS.find(s => s.id === currentSymbol);
+      overlay.querySelector('#mk-symbol-chip').textContent = sym ? `Placing: ${sym.name}` : 'No symbol picked';
     }
+    refreshSummary();
   }
+  // Collapse the toolbars while drawing so the picture gets the screen; a
+  // one-line summary of the current tool/colour stays visible, plus Undo.
+  const TOOL_LABELS = { pen: 'Pen', arrow: 'Arrow', box: 'Box', text: 'Text', move: 'Move', erase: 'Delete', symbol: 'Symbol', label: 'Label', scale: 'Set scale', measure: 'Measure', cable: 'Cable path' };
+  let toolsHidden = false;
+  function sizeCanvas() {
+    canvas.style.maxHeight = toolsHidden ? '74vh' : (plan ? '52vh' : '62vh');
+  }
+  function refreshSummary() {
+    const s = overlay.querySelector('#mk-summary');
+    if (!s) return;
+    s.innerHTML = `${TOOL_LABELS[tool] || tool} <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${colour}; border:1px solid #fff; vertical-align:middle;"></span> ${['S', 'M', 'L'][sizeIdx]}`;
+  }
+  overlay.querySelector('#mk-toggle-tools').addEventListener('click', () => {
+    toolsHidden = !toolsHidden;
+    overlay.querySelector('#mk-tools').style.display = toolsHidden ? 'none' : 'flex';
+    overlay.querySelector('#mk-toggle-tools').textContent = toolsHidden ? 'Show tools' : 'Hide tools';
+    overlay.querySelector('#mk-summary').style.display = toolsHidden ? '' : 'none';
+    overlay.querySelector('#mk-undo2').style.display = toolsHidden ? '' : 'none';
+    sizeCanvas();
+  });
+  overlay.querySelector('#mk-undo2').addEventListener('click', () => overlay.querySelector('#mk-undo').click());
   function setTool(t) {
     if (cableDraft && t !== 'cable') cableDraft = null;
     if (t !== 'move') selected = null;
     tool = t;
     refreshControls(); redraw();
   }
+  // The symbol library is a bottom sheet over the picture rather than a strip
+  // above it: big enough to read on a phone, and it closes on a pick so the
+  // picture is clear again while placing.
+  const openPalette = () => { overlay.querySelector('#mk-palette').style.display = 'block'; };
+  const closePalette = () => { const p = overlay.querySelector('#mk-palette'); if (p) p.style.display = 'none'; };
   overlay.querySelectorAll('.mk-tool').forEach(b => b.addEventListener('click', () => {
-    if (b.dataset.tool === 'symbol') {
-      const pal = overlay.querySelector('#mk-palette');
-      pal.style.display = pal.style.display === 'none' ? 'block' : 'none';
-    }
+    if (b.dataset.tool === 'symbol') openPalette(); else closePalette();
     setTool(b.dataset.tool);
   }));
   overlay.querySelectorAll('.mk-colour').forEach(b => b.addEventListener('click', () => { colour = b.dataset.c; refreshControls(); }));
@@ -1117,7 +1167,15 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   overlay.querySelector('#mk-cancel').addEventListener('click', () => overlay.remove());
 
   if (plan) {
-    overlay.querySelectorAll('.mk-sym').forEach(b => b.addEventListener('click', () => { currentSymbol = b.dataset.id; setTool('symbol'); }));
+    overlay.querySelectorAll('.mk-sym').forEach(b => b.addEventListener('click', () => { currentSymbol = b.dataset.id; setTool('symbol'); closePalette(); }));
+    overlay.querySelector('#mk-palette-close').addEventListener('click', closePalette);
+    overlay.querySelector('#mk-change-symbol').addEventListener('click', openPalette);
+    overlay.querySelector('#mk-more-btn').addEventListener('click', () => {
+      const more = overlay.querySelector('#mk-more');
+      const show = more.style.display === 'none';
+      more.style.display = show ? 'flex' : 'none';
+      overlay.querySelector('#mk-more-btn').innerHTML = show ? 'More &#9652;' : 'More &#9662;';
+    });
     // Cable: pick a kind, then one of that kind's sizes.
     const kindSel = overlay.querySelector('#mk-cable-kind');
     const sizeSel = overlay.querySelector('#mk-cable-size');
