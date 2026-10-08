@@ -408,4 +408,8 @@ select '128', 'meeting recording columns + bucket',
   case when exists (select 1 from information_schema.columns where table_name = 'meetings' and column_name = 'ai_draft')
     and exists (select 1 from storage.buckets where id = 'meeting-audio')
   then 'present' else 'MISSING' end
+union all
+select '129', 'licence_shares',
+  case when exists (select 1 from information_schema.tables where table_name = 'licence_shares')
+  then 'present' else 'MISSING' end
 order by 1;

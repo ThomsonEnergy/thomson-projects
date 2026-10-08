@@ -59,11 +59,30 @@
         <p class="subtitle" style="margin-bottom:14px;">Also shown on each person's card above and in their profile under Settings &gt; Users &amp; Roles - it's the same record either way.</p>
         <div id="employee-licences-list"><p class="subtitle">Loading...</p></div>
       </div>
+
+      <div class="card" id="share-card">
+        <h2>Share licences &amp; insurance</h2>
+        <p class="subtitle" style="margin-bottom:14px;">Tick the company insurance and licences, and the employee licences, you want to send (for a tender, a site induction or a client). Then download them as a zip, or make a link that always shows the latest versions and can be switched off.</p>
+        <div id="share-picker"><p class="subtitle">Loading...</p></div>
+        <div class="grid cols-2" style="margin-top:14px;">
+          <div><label style="margin-top:0;">Who is it for? (optional, shown on the page)</label><input id="share-label" placeholder="e.g. Acme Builders site induction" /></div>
+          <div><label style="margin-top:0;">Live link works for</label>
+            <select id="share-expiry"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="">No expiry</option></select></div>
+        </div>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" id="share-zip-btn" class="secondary">Download as zip</button>
+          <button type="button" id="share-link-btn">Create live link</button>
+        </div>
+        <div id="share-msg" style="margin-top:10px;"></div>
+        <h3 style="margin:20px 0 8px; font-size:15px;">Live links</h3>
+        <div id="share-links"><p class="subtitle">Loading...</p></div>
+      </div>
     </div>
   </div>
 
   <script src="/js/supabase-client.js?v=45"></script>
   <script src="/js/theme.js"></script>
+  <script src="/js/licence-share.js?v=1"></script>
   <script>
     let teamCanEditTitles = false;
 
@@ -189,6 +208,177 @@
     }
 
     document.getElementById('add-credential-btn').addEventListener('click', () => openCredentialPanel(null));
+
+    // ---------- Share licences & insurance ----------
+    // Pick company and employee records, then either download them as a zip or
+    // make a live link (share-licences.html) that always shows the current files.
+    let shareSel = new Set();      // 'c:<id>' for company records, 'l:<id>' for employee licences
+    let sharePickerData = null;
+
+    async function loadSharePicker() {
+      const el = document.getElementById('share-picker');
+      const [{ data: creds }, { data: staff }, { data: licences }] = await Promise.all([
+        supabaseClient.from('company_credentials').select('*').order('credential_type').order('name'),
+        supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
+        supabaseClient.from('profile_licences').select('*').order('licence_name'),
+      ]);
+      sharePickerData = { creds: creds || [], staff: staff || [], licences: licences || [] };
+      const noFile = (r) => (r.file_path ? '' : ' <span class="subtitle" style="font-size:12px;">(no file uploaded)</span>');
+      const row = (key, label, sub, rec) => `
+        <label style="display:flex; align-items:flex-start; gap:8px; margin:0 0 6px; font-weight:400;">
+          <input type="checkbox" class="share-check" data-key="${key}" ${shareSel.has(key) ? 'checked' : ''} style="width:auto; margin-top:3px;" />
+          <span>${escapeHtml(label)}${noFile(rec)}<span class="subtitle" style="display:block; font-size:12px;">${sub} ${expiryBadge(rec.expiry_date)}</span></span>
+        </label>`;
+      const people = sharePickerData.staff.map(s => ({ s, ls: sharePickerData.licences.filter(l => l.profile_id === s.id) })).filter(p => p.ls.length);
+      el.innerHTML = `
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+          <button type="button" class="secondary" id="share-all" style="font-size:12px; padding:5px 10px;">Select everything</button>
+          <button type="button" class="secondary" id="share-none" style="font-size:12px; padding:5px 10px;">Clear</button>
+          <span id="share-count" class="subtitle" style="align-self:center;"></span>
+        </div>
+        <div class="grid cols-2" style="align-items:start;">
+          <div>
+            <h3 style="margin:0 0 8px; font-size:14px;">Company</h3>
+            ${sharePickerData.creds.map(c => row('c:' + c.id, c.name, `${c.credential_type === 'insurance' ? 'Insurance' : 'Licence'}${c.reference_number ? ' &middot; ' + escapeHtml(c.reference_number) : ''}`, c)).join('') || '<p class="subtitle">None recorded.</p>'}
+          </div>
+          <div>
+            <h3 style="margin:0 0 8px; font-size:14px;">Employees</h3>
+            ${people.map(p => `
+              <div style="margin-bottom:10px;">
+                <label style="display:flex; align-items:center; gap:8px; margin:0 0 4px; font-weight:600;"><input type="checkbox" class="share-person" data-person="${p.s.id}" style="width:auto;" /> ${escapeHtml(p.s.full_name)}</label>
+                <div style="margin-left:22px;">${p.ls.map(l => row('l:' + l.id, l.licence_name, l.licence_number ? escapeHtml(l.licence_number) : '', l)).join('')}</div>
+              </div>`).join('') || '<p class="subtitle">No employee licences recorded.</p>'}
+          </div>
+        </div>`;
+      const refresh = () => {
+        document.getElementById('share-count').textContent = shareSel.size ? `${shareSel.size} selected` : 'Nothing selected yet';
+        people.forEach(p => {
+          const box = el.querySelector(`.share-person[data-person="${p.s.id}"]`);
+          const n = p.ls.filter(l => shareSel.has('l:' + l.id)).length;
+          box.checked = n === p.ls.length; box.indeterminate = n > 0 && n < p.ls.length;
+        });
+      };
+      el.querySelectorAll('.share-check').forEach(b => b.addEventListener('change', () => { b.checked ? shareSel.add(b.dataset.key) : shareSel.delete(b.dataset.key); refresh(); }));
+      el.querySelectorAll('.share-person').forEach(b => b.addEventListener('change', () => {
+        const p = people.find(x => x.s.id === b.dataset.person);
+        p.ls.forEach(l => { b.checked ? shareSel.add('l:' + l.id) : shareSel.delete('l:' + l.id); });
+        el.querySelectorAll('.share-check').forEach(c => { c.checked = shareSel.has(c.dataset.key); });
+        refresh();
+      }));
+      document.getElementById('share-all').addEventListener('click', () => {
+        sharePickerData.creds.forEach(c => shareSel.add('c:' + c.id)); sharePickerData.licences.forEach(l => shareSel.add('l:' + l.id));
+        el.querySelectorAll('.share-check').forEach(c => { c.checked = true; }); refresh();
+      });
+      document.getElementById('share-none').addEventListener('click', () => { shareSel.clear(); el.querySelectorAll('.share-check').forEach(c => { c.checked = false; }); refresh(); });
+      refresh();
+    }
+
+    const shareIds = () => ({
+      company: [...shareSel].filter(k => k.startsWith('c:')).map(k => k.slice(2)).filter(id => sharePickerData.creds.some(c => c.id === id)),
+      licences: [...shareSel].filter(k => k.startsWith('l:')).map(k => k.slice(2)).filter(id => sharePickerData.licences.some(l => l.id === id)),
+    });
+    const shareUrl = (token) => `${location.origin}/share-licences.html?token=${token}`;
+
+    async function shareDownloadZip() {
+      const msg = document.getElementById('share-msg'), btn = document.getElementById('share-zip-btn');
+      const ids = shareIds();
+      if (!ids.company.length && !ids.licences.length) { msg.innerHTML = '<div class="error-box">Tick at least one item first.</div>'; return; }
+      btn.disabled = true; msg.innerHTML = '<p class="subtitle">Preparing the zip...</p>';
+      try {
+        const ext = (r) => (r.file_name || r.file_path || '').split('.').pop().toLowerCase();
+        const items = [];
+        for (const id of ids.company) {
+          const c = sharePickerData.creds.find(x => x.id === id);
+          items.push({ group: 'Company', name: c.name, kind: c.credential_type, number: c.reference_number, provider: c.provider, expiry: c.expiry_date, ext: ext(c), url: c.file_path ? await getSignedDocUrl(c.file_path) : null });
+        }
+        for (const id of ids.licences) {
+          const l = sharePickerData.licences.find(x => x.id === id);
+          const who = (sharePickerData.staff.find(s => s.id === l.profile_id) || {}).full_name || 'Employee';
+          items.push({ group: who, name: l.licence_name, kind: 'licence', number: l.licence_number, expiry: l.expiry_date, ext: ext(l), url: l.file_path ? await getSignedDocUrl(l.file_path) : null });
+        }
+        const label = document.getElementById('share-label').value.trim();
+        await downloadLicenceZip(items, label ? `Licences and insurance - ${label}` : 'Licences and insurance', (n, total) => { msg.innerHTML = `<p class="subtitle">Adding file ${n} of ${total}...</p>`; });
+        const missing = items.filter(i => !i.url).length;
+        msg.innerHTML = `<div class="success-box">Zip downloaded.${missing ? ` ${missing} item${missing === 1 ? ' has' : 's have'} no file uploaded, so ${missing === 1 ? 'it is' : 'they are'} only listed in Index.csv.` : ''}</div>`;
+      } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+      btn.disabled = false;
+    }
+
+    const shareEmailSubject = () => 'Thomson Energy licences and insurance';
+    const shareEmailBody = (url, days) => `Hi,\n\nHere are our current licences and insurance certificates:\n${url}\n\nThe page always shows the latest versions${days ? ` and is available for ${days} days` : ''}. You can view each document or download them all as a zip.\n\nKind regards,\nThomson Energy`;
+    async function shareCopy(url) {
+      try { await navigator.clipboard.writeText(url); showShareToast('Link copied'); }
+      catch (e) { window.prompt('Copy this link:', url); }
+    }
+    function showShareToast(text) {
+      const t = document.createElement('div');
+      t.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--surface-2); color:var(--text); border:1px solid var(--border); padding:10px 16px; border-radius:8px; z-index:300;';
+      t.textContent = text; document.body.appendChild(t); setTimeout(() => t.remove(), 2200);
+    }
+
+    async function shareCreateLink() {
+      const msg = document.getElementById('share-msg'), btn = document.getElementById('share-link-btn');
+      const ids = shareIds();
+      if (!ids.company.length && !ids.licences.length) { msg.innerHTML = '<div class="error-box">Tick at least one item first.</div>'; return; }
+      const days = document.getElementById('share-expiry').value;
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      btn.disabled = true;
+      const { data, error } = await supabaseClient.from('licence_shares').insert({
+        label: document.getElementById('share-label').value.trim() || null,
+        company_credential_ids: ids.company, employee_licence_ids: ids.licences,
+        expires_at: days ? new Date(Date.now() + Number(days) * 86400000).toISOString() : null,
+        created_by: user.id,
+      }).select('token').single();
+      btn.disabled = false;
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const url = shareUrl(data.token);
+      msg.innerHTML = `<div class="success-box">Link created. Anyone with it can view these documents until it expires or you switch it off.<br>
+        <input readonly value="${escapeHtml(url)}" onclick="this.select()" style="margin:8px 0;" />
+        <button type="button" id="share-new-copy" style="font-size:12px; padding:6px 10px;">Copy link</button>
+        <a class="btn secondary" target="_blank" rel="noopener" href="${escapeHtml(gmailComposeUrl({ subject: shareEmailSubject(), body: shareEmailBody(url, days) }))}" style="font-size:12px; padding:6px 10px;">Email it</a></div>`;
+      document.getElementById('share-new-copy').addEventListener('click', () => shareCopy(url));
+      await loadShareLinks();
+    }
+
+    async function loadShareLinks() {
+      const el = document.getElementById('share-links');
+      const { data, error } = await supabaseClient.from('licence_shares').select('*').order('created_at', { ascending: false });
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      if (!(data || []).length) { el.innerHTML = '<p class="subtitle">No live links yet.</p>'; return; }
+      const now = new Date();
+      el.innerHTML = `<table class="responsive-stack"><thead><tr><th>Link</th><th>Contains</th><th>Status</th><th>Views</th><th></th></tr></thead><tbody>${data.map(s => {
+        const expired = s.expires_at && new Date(s.expires_at) < now;
+        const status = s.revoked ? '<span style="color:var(--muted);">Switched off</span>' : expired ? '<span style="color:var(--red);">Expired</span>' : `<span style="color:#3fb97a;">Active</span>${s.expires_at ? '<span class="subtitle" style="display:block; font-size:12px;">until ' + new Date(s.expires_at).toLocaleDateString('en-AU') + '</span>' : '<span class="subtitle" style="display:block; font-size:12px;">no expiry</span>'}`;
+        const n = s.company_credential_ids.length + s.employee_licence_ids.length;
+        return `<tr>
+          <td data-label="Link">${escapeHtml(s.label || 'Untitled')}<span class="subtitle" style="display:block; font-size:12px;">Made ${new Date(s.created_at).toLocaleDateString('en-AU')}</span></td>
+          <td data-label="Contains">${n} item${n === 1 ? '' : 's'}</td>
+          <td data-label="Status">${status}</td>
+          <td data-label="Views">${s.view_count}${s.last_viewed_at ? '<span class="subtitle" style="display:block; font-size:12px;">last ' + new Date(s.last_viewed_at).toLocaleDateString('en-AU') + '</span>' : ''}</td>
+          <td data-label="">
+            <button type="button" class="secondary share-copy" data-token="${s.token}" style="font-size:12px; padding:5px 10px;">Copy</button>
+            <a class="btn secondary" target="_blank" rel="noopener" href="${escapeHtml(shareUrl(s.token))}" style="font-size:12px; padding:5px 10px;">Open</a>
+            <a class="btn secondary" target="_blank" rel="noopener" href="${escapeHtml(gmailComposeUrl({ subject: shareEmailSubject(), body: shareEmailBody(shareUrl(s.token), null) }))}" style="font-size:12px; padding:5px 10px;">Email</a>
+            <button type="button" class="secondary share-toggle" data-id="${s.id}" data-revoked="${s.revoked}" style="font-size:12px; padding:5px 10px;">${s.revoked ? 'Switch on' : 'Switch off'}</button>
+            <button type="button" class="secondary share-del" data-id="${s.id}" style="font-size:12px; padding:5px 10px;">Delete</button>
+          </td></tr>`;
+      }).join('')}</tbody></table>`;
+      el.querySelectorAll('.share-copy').forEach(b => b.addEventListener('click', () => shareCopy(shareUrl(b.dataset.token))));
+      el.querySelectorAll('.share-toggle').forEach(b => b.addEventListener('click', async () => {
+        await supabaseClient.from('licence_shares').update({ revoked: b.dataset.revoked !== 'true' }).eq('id', b.dataset.id); await loadShareLinks();
+      }));
+      el.querySelectorAll('.share-del').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Delete this link? Anyone using it will get a "no longer available" message.')) return;
+        await supabaseClient.from('licence_shares').delete().eq('id', b.dataset.id); await loadShareLinks();
+      }));
+    }
+
+    async function initShareSection() {
+      document.getElementById('share-zip-btn').addEventListener('click', shareDownloadZip);
+      document.getElementById('share-link-btn').addEventListener('click', shareCreateLink);
+      await loadSharePicker();
+      await loadShareLinks();
+    }
 
     async function loadEmployeeLicencesSummary() {
       const el = document.getElementById('employee-licences-list');
@@ -403,6 +593,7 @@
         document.getElementById('insurance-section').style.display = '';
         await loadCompanyCredentials();
         await loadEmployeeLicencesSummary();
+        await initShareSection();
       }
     })();
   </script>
