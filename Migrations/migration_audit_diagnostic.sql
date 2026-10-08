@@ -359,4 +359,8 @@ union all
 select '117', 'photo_names_markup',
   case when exists (select 1 from pg_policies where tablename = 'project_photos' and cmd = 'UPDATE')
   then 'present' else 'MISSING' end
+union all
+select '118', 'document_page_names',
+  case when exists (select 1 from information_schema.columns where table_name = 'project_documents' and column_name = 'page_names')
+  then 'present' else 'MISSING' end
 order by 1;

@@ -284,6 +284,16 @@ async function openPdfViewer(path, title, opts = {}) {
 
   const pageCount = pdf.numPages;
   const canMarkup = !!opts.projectId;
+  // Page names (Lighting plan, Power plan...) live on the document's row in
+  // project_documents. A PDF with no row there (a generated quote/invoice)
+  // simply has no names and can't be renamed.
+  let docRowId = null;
+  let pageNames = [];
+  try {
+    const { data: docRow } = await supabaseClient.from('project_documents').select('id, page_names').eq('file_path', path).maybeSingle();
+    if (docRow) { docRowId = docRow.id; pageNames = Array.isArray(docRow.page_names) ? docRow.page_names.slice() : []; }
+  } catch { /* names are a nicety - the viewer works without them */ }
+  const pageLabel = (i) => pageNames[i] || `Page ${i + 1}`;
   const rendered = {};            // pageIndex -> { dataUrl, width, height }
   const annotated = new Map();    // pageIndex -> { blob (flattened JPEG), shapes, width, height }
   const annotatedUrls = new Map(); // pageIndex -> object URL of that blob (for display only)
@@ -361,6 +371,7 @@ async function openPdfViewer(path, title, opts = {}) {
         const fileName = `${saveName.replace(/\.pdf$/i, '')}.pdf`;
         const { error: insErr } = await supabaseClient.from('project_documents').insert({
           project_id: opts.projectId, folder: 'Plans', file_path: outPath, file_name: fileName, mime_type: 'application/pdf', uploaded_by: user.id,
+          page_names: names,
         });
         if (insErr) throw insErr;
         dlg.remove();
@@ -379,13 +390,15 @@ async function openPdfViewer(path, title, opts = {}) {
     overlay.innerHTML = `
       <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center; color:#fff; width:100%;">
         <strong style="margin-right:8px;">${escapeHtml(title || 'Document')}</strong>
-        ${pageCount > 1 ? `<button type="button" class="secondary" id="pv-prev" style="padding:6px 12px;">&larr;</button><span>Page ${index + 1} / ${pageCount}</span><button type="button" class="secondary" id="pv-next" style="padding:6px 12px;">&rarr;</button>` : ''}
+        ${pageCount > 1 ? `<button type="button" class="secondary" id="pv-prev" style="padding:6px 12px;">&larr;</button><span>${escapeHtml(pageLabel(index))} (${index + 1} / ${pageCount})</span><button type="button" class="secondary" id="pv-next" style="padding:6px 12px;">&rarr;</button>` : `<span>${escapeHtml(pageLabel(index))}</span>`}
+        ${docRowId ? `<button type="button" class="secondary" id="pv-rename" style="padding:6px 12px;">Rename page</button>` : ''}
         ${canMarkup ? `<button type="button" id="pv-markup" style="padding:6px 12px;">Mark up this page</button>` : ''}
         ${canMarkup ? `<button type="button" class="secondary" id="pv-planpages" style="padding:6px 12px;">Copy page into plan pages</button>` : ''}
         ${canMarkup && annotated.size ? `<button type="button" id="pv-save" style="padding:6px 12px;">Save marked-up copy (${annotated.size} page${annotated.size === 1 ? '' : 's'})</button>` : ''}
         <a id="pv-download" class="link-quiet" href="${signedUrl}" target="_blank" style="color:#fff; font-size:13px;">Download original</a>
         <button type="button" class="secondary" id="pv-close" style="padding:6px 12px;">Close</button>
       </div>
+      ${pageCount > 1 && pageNames.some(Boolean) ? `<div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;">${Array.from({ length: pageCount }, (_, i) => `<button type="button" class="secondary pv-tab" data-i="${i}" style="padding:5px 12px; font-size:12px; ${i === index ? 'outline:2px solid #fff;' : ''}">${escapeHtml(pageLabel(i))}</button>`).join('')}</div>` : ''}
       <div id="pv-msg" style="color:#fca5a5; font-size:12px; min-height:14px;"></div>
       <div style="flex:1; min-height:0; width:100%; overflow:auto; display:flex; justify-content:center;">
         <p id="pv-loading" style="color:#fff;">Rendering page...</p>
@@ -401,6 +414,18 @@ async function openPdfViewer(path, title, opts = {}) {
     if (!holder) return; // navigated away / closed while rendering
     holder.innerHTML = `<img src="${img.url}" style="max-width:100%; max-height:100%; object-fit:contain; background:#fff; border-radius:4px; align-self:flex-start;" />`;
 
+    overlay.querySelectorAll('.pv-tab').forEach(b => b.addEventListener('click', () => { index = parseInt(b.dataset.i, 10); render(); }));
+    const renameBtn = overlay.querySelector('#pv-rename');
+    if (renameBtn) renameBtn.addEventListener('click', async () => {
+      const name = window.prompt('Name for this page (e.g. Lighting plan):', pageNames[index] || '');
+      if (name === null) return;
+      const next = Array.from({ length: pageCount }, (_, i) => pageNames[i] || '');
+      next[index] = name.trim();
+      const { error: renameErr } = await supabaseClient.from('project_documents').update({ page_names: next.some(Boolean) ? next : null }).eq('id', docRowId);
+      if (renameErr) { overlay.querySelector('#pv-msg').textContent = `Could not save the name: ${renameErr.message}`; return; }
+      pageNames = next;
+      render();
+    });
     const planBtn = overlay.querySelector('#pv-planpages');
     if (planBtn) planBtn.addEventListener('click', openPlanPagesDialog);
     const markupBtn = overlay.querySelector('#pv-markup');
@@ -465,6 +490,7 @@ async function openPdfViewer(path, title, opts = {}) {
         const { error: insErr } = await supabaseClient.from('project_documents').insert({
           project_id: opts.projectId, folder: opts.folder || 'Marked up', file_path: outPath,
           file_name: `${baseName} (marked up).pdf`, mime_type: 'application/pdf', uploaded_by: user.id,
+          page_names: pageNames.some(Boolean) ? pageNames : null,
         });
         if (insErr) throw insErr;
         annotatedUrls.forEach(u => URL.revokeObjectURL(u));
