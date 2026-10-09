@@ -211,3 +211,130 @@ function openTagEmailModal({ threadId, projectId, onSaved }) {
     if (onSaved) await onSaved();
   });
 }
+
+// ---------- Create a quote or a job from a conversation ----------
+// The AI reads the whole conversation and finds the client, the site address and the work
+// required (extract-email-job). The person checks and edits it here, then either:
+//  - Quote: carried to the new-quote form (via sessionStorage, no URL size limit), or
+//  - Job (no quote): created straight away like "+ New job (no quote)".
+// Either way the conversation is tagged to the new job so it shows on its Emails tab.
+const EMAIL_QUOTE_HANDOFF_KEY = 'te_email_quote_handoff';
+const EMAIL_TEMPLATES = { service_work: 'Service work', new_build: 'New build', renovation: 'Renovation', solar: 'Solar proposal', quick_estimate: 'Quick estimate' };
+
+function openCreateFromEmailModal(threadId) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:120; padding:16px;';
+  overlay.innerHTML = `
+    <div class="card" style="max-width:640px; width:100%; max-height:92vh; overflow-y:auto;">
+      <h2 style="margin-top:0;">Create a quote or job from this email</h2>
+      <div id="cf-body"><p class="subtitle">Reading the email to find the client, the site and the work required...</p></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const bodyEl = overlay.querySelector('#cf-body');
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  (async () => {
+    let result;
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/extract-email-job', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ thread_id: threadId }),
+      });
+      const text = await res.text();
+      try { result = JSON.parse(text); } catch (e) { throw new Error('Could not read the email (status ' + res.status + '). Try again.'); }
+      if (!result.ok) throw new Error(result.error || 'Could not read the email.');
+    } catch (err) {
+      bodyEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="cf-close" style="margin-top:10px;">Close</button>`;
+      bodyEl.querySelector('#cf-close').addEventListener('click', () => overlay.remove());
+      return;
+    }
+    const x = result.extracted, existing = result.client;
+    const v = (s) => escapeHtml(s || '');
+    bodyEl.innerHTML = `
+      <p class="subtitle" style="margin:0 0 6px;">Filled in from the email. Check it over and fix anything that is wrong.</p>
+      ${existing ? `<div class="success-box" style="margin:8px 0;">Matches existing client <strong>${v(existing.name)}</strong>. <label style="display:inline-flex; gap:6px; align-items:center; margin:0 0 0 8px;"><input type="checkbox" id="cf-use-existing" checked style="width:auto;" /> Link to them</label></div>` : ''}
+      ${x.missing.length ? `<div class="error-box" style="margin:8px 0; background:transparent;">Not in the email, worth asking: ${x.missing.map(v).join('; ')}</div>` : ''}
+      <label>Create a</label>
+      <div style="display:flex; gap:16px; flex-wrap:wrap;">
+        <label style="display:inline-flex; gap:6px; align-items:center; margin:0;"><input type="radio" name="cf-kind" value="quote" checked style="width:auto;" /> Quote</label>
+        <label style="display:inline-flex; gap:6px; align-items:center; margin:0;"><input type="radio" name="cf-kind" value="job" style="width:auto;" /> Job (no quote)</label>
+      </div>
+      <div id="cf-template-wrap"><label>Quote template</label>
+        <select id="cf-template">${Object.entries(EMAIL_TEMPLATES).map(([k, l]) => `<option value="${k}"${k === x.suggested_template ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+      <label>Job name</label><input id="cf-title" value="${v(x.job_title || result.subject)}" />
+      <div class="grid cols-2">
+        <div><label>Client</label><input id="cf-client" value="${v(x.client_name)}" /></div>
+        <div><label>Client email</label><input id="cf-email" type="email" value="${v(x.client_email)}" /></div>
+        <div><label>Client phone</label><input id="cf-phone" value="${v(x.client_phone)}" /></div>
+        <div><label>Site address</label><input id="cf-site" value="${v(x.site_address || x.client_address)}" /></div>
+      </div>
+      <label>What needs to be done at the site</label>
+      <textarea id="cf-work" style="min-height:130px;">${v(x.work_required)}</textarea>
+      ${x.urgency || x.other_contact ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">${[x.urgency && 'Timing: ' + x.urgency, x.other_contact && 'Other contact: ' + x.other_contact].filter(Boolean).map(v).join(' &middot; ')} (added to the notes)</p>` : ''}
+      <div style="margin-top:14px; display:flex; gap:8px;"><button type="button" id="cf-go">Create quote</button><button type="button" class="secondary" id="cf-cancel">Cancel</button></div>
+      <div id="cf-msg" style="margin-top:8px;"></div>`;
+    const q = (id) => bodyEl.querySelector(id);
+    const kind = () => bodyEl.querySelector('input[name="cf-kind"]:checked').value;
+    bodyEl.querySelectorAll('input[name="cf-kind"]').forEach(r => r.addEventListener('change', () => {
+      q('#cf-template-wrap').style.display = kind() === 'quote' ? '' : 'none';
+      q('#cf-go').textContent = kind() === 'quote' ? 'Create quote' : 'Create job';
+    }));
+    q('#cf-cancel').addEventListener('click', () => overlay.remove());
+
+    q('#cf-go').addEventListener('click', async () => {
+      const msg = q('#cf-msg'), btn = q('#cf-go');
+      const form = { name: q('#cf-title').value.trim(), client_name: q('#cf-client').value.trim(), client_email: q('#cf-email').value.trim(), client_phone: q('#cf-phone').value.trim(), address: q('#cf-site').value.trim(), work: q('#cf-work').value.trim() };
+      if (!form.client_name) { msg.innerHTML = '<div class="error-box">Client name is required.</div>'; return; }
+      if (!form.name) { msg.innerHTML = '<div class="error-box">Give the job a name.</div>'; return; }
+      const useExisting = !!existing && q('#cf-use-existing') && q('#cf-use-existing').checked;
+      const extraNotes = [x.urgency && `Timing: ${x.urgency}`, x.other_contact && `Other contact: ${x.other_contact}`, x.client_address && x.site_address && x.client_address !== x.site_address && `Client's own address: ${x.client_address}`].filter(Boolean);
+      const notes = [`Created from email "${result.subject || '(no subject)'}".`, ...extraNotes].join('\n');
+      btn.disabled = true;
+      try {
+        if (kind() === 'quote') {
+          sessionStorage.setItem(EMAIL_QUOTE_HANDOFF_KEY, JSON.stringify({ threadId, ...form, notes, clientId: useExisting ? existing.id : null, attachments: result.attachments || [] }));
+          window.location.href = `/new-project.html?from_email=${encodeURIComponent(threadId)}&template=${encodeURIComponent(q('#cf-template').value)}`;
+          return;
+        }
+        btn.textContent = 'Creating...';
+        let clientId = useExisting ? existing.id : null;
+        if (!clientId) {
+          const { data: nc, error: ce } = await supabaseClient.from('clients').insert({ name: form.client_name, email: form.client_email || null, phone: form.client_phone || null, address: form.address || null }).select('id').single();
+          if (ce) throw ce;
+          clientId = nc.id;
+        }
+        const { data: project, error } = await supabaseClient.from('projects').insert({
+          name: form.name, sow_text: form.work || null, notes, client_id: clientId, client_name: form.client_name,
+          client_email: form.client_email || null, client_phone: form.client_phone || null, client_address: form.address || null,
+          proposal_template: 'direct_job', pipeline_stage: 'job_booked', status: 'in_progress',
+        }).select('id').single();
+        if (error) throw error;
+        const { error: ccErr } = await supabaseClient.from('cost_centres').insert({ project_id: project.id, name: 'Labour & Materials', sort_order: 0, markup_percent: 45 });
+        if (ccErr) throw ccErr;
+        await emailTagThreadToProject(threadId, project.id, 'client', 'Job created from this email');
+        window.location.href = `/project.html?id=${project.id}&tab=emails`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        btn.disabled = false; btn.textContent = kind() === 'quote' ? 'Create quote' : 'Create job';
+      }
+    });
+  })();
+}
+
+// Tags a conversation to a job (idempotent).
+async function emailTagThreadToProject(threadId, projectId, kind, note) {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  await supabaseClient.from('email_job_links').upsert({ thread_id: threadId, project_id: projectId, kind: kind || 'client', note: note || null, created_by: user ? user.id : null }, { onConflict: 'thread_id,project_id' });
+}
+
+// For new-project.html: the details handed over from the inbox for this conversation.
+function emailQuoteHandoffRead(threadId) {
+  try {
+    const raw = sessionStorage.getItem(EMAIL_QUOTE_HANDOFF_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    return d && d.threadId === threadId ? d : null;
+  } catch (e) { return null; }
+}
+function emailQuoteHandoffClear() { try { sessionStorage.removeItem(EMAIL_QUOTE_HANDOFF_KEY); } catch (e) { /* fine */ } }

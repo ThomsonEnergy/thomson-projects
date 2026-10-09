@@ -76,7 +76,7 @@
   <script src="/js/supabase-client.js?v=57"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/email-view.js?v=2"></script>
-  <script src="/js/email-compose.js?v=1"></script>
+  <script src="/js/email-compose.js?v=2"></script>
   <script>
     function timeAgo(dateStr) {
       if (!dateStr) return '';
@@ -99,6 +99,22 @@
     function addrName(raw) {
       const m = String(raw || '').match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
       return m ? (m[1].trim() || m[2]) : String(raw || '').trim();
+    }
+
+    // "Bob Jones <bob@x.com>" -> "Bob Jones <bob@x.com>" with a bare address kept as is, for the message header
+    function addrFull(raw) {
+      const m = String(raw || '').match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+      if (!m) return String(raw || '').trim();
+      const name = m[1].trim();
+      return name && name.toLowerCase() !== m[2].toLowerCase() ? name + ' <' + m[2].trim() + '>' : m[2].trim();
+    }
+    // Short form for the list: the name, plus the sender's domain so "admin" says who it is from
+    function addrShort(raw) {
+      const m = String(raw || '').match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+      const name = addrName(raw);
+      if (!m || !m[1].trim()) return name;
+      const dom = (m[2].split('@')[1] || '').trim();
+      return dom && !/^(gmail|hotmail|outlook|yahoo|bigpond|icloud)\./i.test(dom) && !name.toLowerCase().includes(dom.split('.')[0].toLowerCase()) ? name + ' (' + dom + ')' : name;
     }
 
     async function loadThreadList() {
@@ -151,7 +167,7 @@
           const out = !!l && l.direction === 'outbound';
           const who = !l ? '' : out
             ? '<span class="dir-badge outbound">Sent</span>To ' + escapeHtml(addrName((l.to_addresses || [])[0]) || 'unknown')
-            : '<span class="dir-badge inbound">Received</span>From ' + escapeHtml(addrName(l.from_address) || 'unknown');
+            : '<span class="dir-badge inbound">Received</span>From ' + escapeHtml(addrShort(l.from_address) || 'unknown');
           return '<a class="inbox-thread-item ' + (t.id === activeThreadId ? 'active' : '') + ' ' + (!t.is_read ? 'unread' : '') + ' ' + (l ? (out ? 'sent-last' : 'recv-last') : '') + '" data-id="' + t.id + '">'
             + '<div class="inbox-subject">' + escapeHtml(t.subject || '(no subject)') + '</div>'
             + '<div class="inbox-who">' + who + '</div>' + sub(t, timeAgo(t.last_message_at)) + '</a>';
@@ -169,15 +185,18 @@
       });
     }
 
+    const addrOnlyOf = (full) => { const m = String(full).match(/<([^>]+)>/); return m ? m[1] : full; };
+
     function messageHtml(m, myUserId, staffName) {
       const out = m.direction === 'outbound';
       const senderLabel = out
         ? (m.created_by ? (m.created_by === myUserId ? 'You' : staffName(m.created_by)) + ' (as sales@)' : 'sales@ (sent from Gmail)')
         : (addrName(m.from_address) || 'Client');
+      const fromFull = out ? '' : addrFull(m.from_address);
       const toLine = (m.to_addresses || []).map(addrName).filter(Boolean).join(', ');
       return `
         <div class="inbox-message ${m.direction}">
-          <p class="subtitle" style="margin:0 0 8px; font-size:12px;"><span class="dir-badge ${m.direction}">${out ? 'Sent' : 'Received'}</span><strong style="color:var(--text);">${escapeHtml(senderLabel)}</strong>${toLine ? ' to ' + escapeHtml(toLine) : ''} &middot; ${new Date(m.sent_at).toLocaleString('en-AU')}</p>
+          <p class="subtitle" style="margin:0 0 8px; font-size:12px;"><span class="dir-badge ${m.direction}">${out ? 'Sent' : 'Received'}</span><strong style="color:var(--text);">${escapeHtml(senderLabel)}</strong>${fromFull && fromFull !== senderLabel ? ' <span title="Sent from this address">&lt;' + escapeHtml(addrOnlyOf(fromFull)) + '&gt;</span>' : ''}${toLine ? ' to ' + escapeHtml(toLine) : ''} &middot; ${new Date(m.sent_at).toLocaleString('en-AU')}</p>
           <div class="email-body" data-email-id="${m.id}"></div>
         </div>`;
     }
@@ -191,13 +210,15 @@
       el.innerHTML = (links || []).map(l => `<span style="font-size:12px; padding:3px 10px; border:1px solid var(--accent); border-radius:20px; display:inline-flex; gap:6px; align-items:center;">
           <a href="/project.html?id=${l.projects.id}&tab=emails" class="link-quiet" title="${escapeHtml(l.note || '')}">${escapeHtml(projectRef(l.projects))} &middot; ${EMAIL_KINDS[l.kind] || 'Other'}</a>
           <a href="#" data-untag="${l.id}" title="Remove this tag">&times;</a></span>`).join('')
-        + '<button type="button" class="secondary" id="tag-email-btn" style="font-size:12px; padding:4px 10px;">+ Tag to a job</button>';
+        + '<button type="button" class="secondary" id="tag-email-btn" style="font-size:12px; padding:4px 10px;">+ Tag to a job</button>'
+        + '<button type="button" id="create-from-email-btn" style="font-size:12px; padding:4px 10px;">Create quote / job from this email</button>';
       el.querySelectorAll('[data-untag]').forEach(a => a.addEventListener('click', async (e) => {
         e.preventDefault();
         if (!confirm('Remove this tag? The email itself is not deleted.')) return;
         await supabaseClient.from('email_job_links').delete().eq('id', a.dataset.untag);
         loadThreadTags(threadId);
       }));
+      document.getElementById('create-from-email-btn').addEventListener('click', () => openCreateFromEmailModal(threadId));
       document.getElementById('tag-email-btn').addEventListener('click', () => openTagEmailModal({ threadId, onSaved: () => loadThreadTags(threadId) }));
     }
 

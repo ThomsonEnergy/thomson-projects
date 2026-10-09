@@ -252,10 +252,12 @@
 
   <script src="/js/supabase-client.js?v=57"></script>
   <script src="/js/template-questions.js"></script>
+  <script src="/js/email-compose.js?v=2"></script>
   <script src="/js/theme.js"></script>
   <script>
     const editId = new URLSearchParams(window.location.search).get('id');
     let prefillLeadId = null;
+    let prefillEmailThreadId = null; // quote started from an inbox conversation
     let referencePhotos = [];
     let rowCount = 0;
     let currentTemplate = 'new_build';
@@ -1212,6 +1214,7 @@
         if (projErr) { msg.innerHTML = `<div class="error-box">${projErr.message}</div>`; return; }
         projectId = project.id;
         if (prefillLeadId) await supabaseClient.from('leads').update({ status: 'converted' }).eq('id', prefillLeadId);
+        if (prefillEmailThreadId) { try { await emailTagThreadToProject(prefillEmailThreadId, projectId, 'client', 'Quote created from this email'); } catch (e) { console.error('Could not tag the email to the quote:', e); } }
       }
 
       // Replace-all, same approach as stages just below - simplest way to
@@ -1287,6 +1290,40 @@
         } catch (err) {
           container.innerHTML = `<div class="error-box">${err.message}</div>`;
         }
+      });
+    }
+
+    // Photos and bills attached to the email the quote was started from, offered to the AI helper
+    // the same way a website enquiry's files are.
+    function offerEmailAttachmentImport(files) {
+      const usable = (files || []).filter(a => /^(application\/pdf|image\/(jpeg|png|webp))$/i.test(a.mime || '') && (!a.size || a.size <= 4 * 1024 * 1024));
+      if (!usable.length) return;
+      const container = document.getElementById('lead-attachments-import');
+      container.innerHTML = `
+        <div class="success-box" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <span>${usable.length} file${usable.length === 1 ? '' : 's'} attached to the email (photos/bills/plans) - import into the AI helper?</span>
+          <button type="button" class="secondary" id="import-email-files-btn" style="flex-shrink:0;">Import</button>
+        </div>`;
+      document.getElementById('import-email-files-btn').addEventListener('click', async (e) => {
+        const btn = e.target;
+        btn.disabled = true; btn.textContent = 'Importing...';
+        let done = 0;
+        for (const att of usable) {
+          try {
+            const f = await fetchEmailAttachment(att.email_id, att.part_id);
+            const bin = atob(String(f.data).replace(/-/g, '+').replace(/_/g, '/'));
+            const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const newPath = `sow-source/${Date.now()}-${(att.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(newPath, new Blob([bytes], { type: f.mime || att.mime }));
+            if (upErr) continue;
+            sowDocs.push({ path: newPath, name: att.name, mime: f.mime || att.mime });
+            done++;
+          } catch (err) { console.error('Could not import', att.name, err); }
+        }
+        renderSowDocList();
+        container.innerHTML = done
+          ? `<div class="success-box">Imported ${done} file${done === 1 ? '' : 's'}. They'll be used next time you generate the scope of works.</div>`
+          : `<div class="error-box">Could not import the files. You can still add them with the file box below.</div>`;
       });
     }
 
@@ -1474,6 +1511,33 @@
 
             offerLeadAttachmentImport(prefillLeadId);
           }
+        }
+
+        // Started from an inbox conversation (Create quote / job from this email): the AI already
+        // read the email and the person checked it, so fill in the client, site and the work required.
+        const fromEmailThread = params.get('from_email');
+        const emailPf = fromEmailThread ? emailQuoteHandoffRead(fromEmailThread) : null;
+        if (emailPf) {
+          prefillEmailThreadId = fromEmailThread;
+          const setV = (id, v) => { if (v) document.getElementById(id).value = v; };
+          if (emailPf.clientId) {
+            const { data: client } = await supabaseClient.from('clients').select('*').eq('id', emailPf.clientId).maybeSingle();
+            if (client) {
+              document.getElementById('client-search-input').value = client.name;
+              setSelectedClient(client);
+              loadJobContactPickers(client.id);
+            }
+          }
+          setV('p-name', emailPf.name); setV('p-client', emailPf.client_name); setV('p-email', emailPf.client_email);
+          setV('p-phone', emailPf.client_phone); setV('p-address', emailPf.address);
+          setV('p-brief', emailPf.work); setV('p-notes', emailPf.notes);
+          const banner = document.createElement('div');
+          banner.className = 'success-box';
+          banner.style.cssText = 'margin-bottom:14px;';
+          banner.textContent = 'Filled in from the email. Add the stages and prices, then save. Nothing is saved yet, and the email conversation will be tagged to this quote when you save.';
+          document.getElementById('page-title').insertAdjacentElement('afterend', banner);
+          offerEmailAttachmentImport(emailPf.attachments);
+          emailQuoteHandoffClear();
         }
 
         // Filled in by the AI assistant from the chat: put what it knows into the form for
