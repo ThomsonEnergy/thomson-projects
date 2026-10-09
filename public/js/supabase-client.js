@@ -1775,23 +1775,34 @@ function _aiChatLoadHistory() {
 function _aiChatSaveHistory() {
   try { sessionStorage.setItem('te-ai-chat-history', JSON.stringify(_aiChatHistory.slice(-30))); } catch (e) { /* private browsing etc - chat still works, just won't persist */ }
 }
-// The assistant's mascot: a little robot with hands, feet and a lightning bolt
-// in its raised hand. Pure SVG, so it stays sharp at any size.
+// The assistant's mascot: a tough little tradie robot in a hard hat and a company
+// shirt, with fists, steel-cap boots and a lightning bolt held up. Pure SVG, so it
+// stays sharp at any size.
 function aiRobotSvg(size) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
-<rect x="18.2" y="37" width="4" height="5" rx="1" fill="#c9d1dd"/><rect x="25.8" y="37" width="4" height="5" rx="1" fill="#c9d1dd"/>
-<rect x="15.5" y="41.6" width="9.4" height="4.4" rx="2.2" fill="#dfe5ee"/><rect x="23.1" y="41.6" width="9.4" height="4.4" rx="2.2" fill="#dfe5ee"/>
-<path d="M15.3 28.5 L9.2 34" stroke-width="4.6" fill="none"/><path d="M15.3 28.5 L9.2 34" stroke="#c9d1dd" stroke-width="2.2" fill="none"/>
-<path d="M32.7 28.5 L38.2 23" stroke-width="4.6" fill="none"/><path d="M32.7 28.5 L38.2 23" stroke="#c9d1dd" stroke-width="2.2" fill="none"/>
-<rect x="15" y="24.6" width="18" height="13.6" rx="4.2" fill="#f4f6fa"/><circle cx="24" cy="31.2" r="2.6" fill="#FFCC33"/>
-<rect x="21.2" y="22.4" width="5.6" height="2.8" rx="1" fill="#c9d1dd"/>
-<rect x="9.6" y="12.6" width="2.8" height="5.6" rx="1.2" fill="#c9d1dd"/><rect x="35.6" y="12.6" width="2.8" height="5.6" rx="1.2" fill="#c9d1dd"/>
-<rect x="11.8" y="7.8" width="24.4" height="15.4" rx="5.4" fill="#f4f6fa"/><line x1="24" y1="7.8" x2="24" y2="4.2"/><circle cx="24" cy="3" r="1.9" fill="#FFCC33"/>
-<circle cx="18.6" cy="14.6" r="2.5" fill="#1a1a1a" stroke="none"/><circle cx="29.4" cy="14.6" r="2.5" fill="#1a1a1a" stroke="none"/>
-<circle cx="19.4" cy="13.7" r="0.8" fill="#fff" stroke="none"/><circle cx="30.2" cy="13.7" r="0.8" fill="#fff" stroke="none"/>
-<path d="M20.4 19 Q24 21.6 27.6 19" fill="none" stroke-width="1.4"/>
-<circle cx="8.3" cy="35.2" r="2.7" fill="#dfe5ee"/><circle cx="39.3" cy="21.8" r="2.7" fill="#dfe5ee"/>
-<path d="M43.4 4.4 L37.6 13.6 H41.2 L39.6 20.2 L46 11.2 H42.2 Z" fill="#FFCC33" stroke-width="1.2"/></g></svg>`;
+<rect x="17.4" y="36.4" width="5" height="5" rx="1" fill="#8a96a8"/><rect x="25.6" y="36.4" width="5" height="5" rx="1" fill="#8a96a8"/>
+<path d="M14.4 41.2 H24.2 V45.6 H13.6 Z" fill="#4a4f5c"/><path d="M23.8 41.2 H33.6 L34.4 45.6 H23.8 Z" fill="#4a4f5c"/>
+<path d="M13.6 44.2 H24.2 M23.8 44.2 H34.4" stroke="#FFCC33" stroke-width="1.4" fill="none"/>
+<path d="M14.6 28 L8.6 34.2" stroke-width="5.8" fill="none"/><path d="M14.6 28 L8.6 34.2" stroke="#aab4c4" stroke-width="3.2" fill="none"/>
+<path d="M33.4 28 L38.6 22.8" stroke-width="5.8" fill="none"/><path d="M33.4 28 L38.6 22.8" stroke="#aab4c4" stroke-width="3.2" fill="none"/>
+<rect x="13.4" y="23.6" width="21.2" height="14.6" rx="3.2" fill="#1f6fc2"/>
+<path d="M19.6 23.6 L24 28 L20.6 28.6 Z" fill="#4aa0ec" stroke-width="1.1"/><path d="M28.4 23.6 L24 28 L27.4 28.6 Z" fill="#4aa0ec" stroke-width="1.1"/><text x="24" y="32.4" font-size="4.6" font-weight="900" fill="#fff" stroke="none" text-anchor="middle" font-family="Arial Black, Arial, sans-serif">TE</text>
+<rect x="13.4" y="34" width="21.2" height="3" fill="#2b2f38" stroke-width="1.1"/><rect x="22.2" y="33.6" width="3.6" height="3.8" rx="0.6" fill="#FFCC33" stroke-width="1"/>
+<rect x="20.4" y="21" width="7.2" height="3" rx="1" fill="#8a96a8"/>
+<rect x="8.4" y="12.6" width="2.8" height="5.4" rx="1" fill="#8a96a8"/><rect x="36.8" y="12.6" width="2.8" height="5.4" rx="1" fill="#8a96a8"/>
+<rect x="10.8" y="8.6" width="26.4" height="14" rx="3" fill="#f4f6fa"/>
+<rect x="12.8" y="12" width="22.4" height="6" rx="1.4" fill="#1a1a1a" stroke="none"/>
+<path d="M14.6 13.2 L21.8 15.6 V17.2 H14.6 Z" fill="#FF9A1F" stroke="none"/><path d="M33.4 13.2 L26.2 15.6 V17.2 H33.4 Z" fill="#FF9A1F" stroke="none"/>
+<rect x="16.6" y="19.4" width="14.8" height="2.6" rx="0.8" fill="#fff" stroke-width="1.1"/>
+<path d="M20.3 19.4 V22 M24 19.4 V22 M27.7 19.4 V22" stroke-width="0.9" fill="none"/>
+<path d="M11.4 9.4 Q11.4 1.8 24 1.8 Q36.6 1.8 36.6 9.4 Z" fill="#FFCC33"/>
+<rect x="22.4" y="1.8" width="3.2" height="7.6" rx="0.8" fill="#F0B400" stroke-width="1.1"/>
+<rect x="8" y="8" width="32" height="3" rx="1.5" fill="#FFCC33"/>
+<path d="M14.8 27.6 L11.8 30.8" stroke-width="7.4" fill="none"/><path d="M14.8 27.6 L11.8 30.8" stroke="#1f6fc2" stroke-width="5.4" fill="none"/>
+<path d="M33.2 27.6 L36 24.8" stroke-width="7.4" fill="none"/><path d="M33.2 27.6 L36 24.8" stroke="#1f6fc2" stroke-width="5.4" fill="none"/>
+<circle cx="7.6" cy="36.2" r="3.5" fill="#c9d1dd"/><circle cx="40" cy="21" r="3.5" fill="#c9d1dd"/>
+<path d="M5.4 35.4 H9.8 M38 20.2 H42.2" stroke-width="0.8" fill="none"/>
+<path d="M44 3.2 L37.4 13 H41.4 L39.4 19.6 L46.4 10.6 H42.4 Z" fill="#FFCC33" stroke-width="1.2"/></g></svg>`;
 }
 
 // What the assistant is called (Settings > Company). Remembered for the browser
