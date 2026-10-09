@@ -16,7 +16,7 @@ const { drawCoverPage } = require('./_shared/pdf-cover-page');
 // the problem, so there was never a need to background it in the first
 // place - the browser just awaits this directly.
 
-async function renderPageToPdf(url) {
+async function renderPageToPdf(url, pdfOptions) {
   // Known puppeteer-core/Chromium failure mode with pipe:true (the
   // transport this uses - see below): if the Chromium process dies
   // unexpectedly mid-render, the next CDP command's pipe write throws
@@ -47,14 +47,14 @@ async function renderPageToPdf(url) {
     process.once('uncaughtException', onFatal);
     process.once('unhandledRejection', onFatal);
 
-    renderPageToPdfUnsafe(url).then(
+    renderPageToPdfUnsafe(url, pdfOptions).then(
       (buf) => { if (!settled) { settled = true; cleanupListeners(); resolve(buf); } },
       (err) => { if (!settled) { settled = true; cleanupListeners(); reject(err); } }
     );
   });
 }
 
-async function renderPageToPdfUnsafe(url) {
+async function renderPageToPdfUnsafe(url, pdfOptions) {
   // Required lazily, inside the function, rather than at module top level -
   // requiring puppeteer-core at module load time meant simply IMPORTING
   // this file (which Netlify's function bundler/router does for every
@@ -108,7 +108,7 @@ async function renderPageToPdfUnsafe(url) {
     // the real signal to wait for anyway.
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
     await page.waitForSelector('body[data-print-ready="true"]', { timeout: 20000 });
-    const pdfBytes = await page.pdf({ format: 'a4', printBackground: true, margin: { top: '20px', bottom: '20px' } });
+    const pdfBytes = await page.pdf(pdfOptions || { format: 'a4', printBackground: true, margin: { top: '20px', bottom: '20px' } });
     return Buffer.from(pdfBytes);
   } finally {
     // If Chromium already crashed, this itself throws on the same dead
@@ -154,21 +154,15 @@ exports.handler = async (event) => {
         .single();
       if (error || !project || !project.quote_token) throw new Error(error?.message || 'Quote not found or has no link yet');
 
-      // hidecover=1 - this function already prepends its own title page
-      // (drawCoverPage below), so quote.html's own built-in cover banner
-      // (and its own cover_photos) would otherwise print a second,
-      // redundant title page - see the hideCoverBanner comment in
-      // quote.html. Never set on the plain "Download PDF" link a person
-      // might click themselves, which still wants that banner as its one
-      // and only cover.
-      const contentPdfBytes = await renderPageToPdf(`${siteUrl}/quote.html?token=${project.quote_token}&print=1&hidecover=1`);
-      const docLabel = { quick_estimate: 'Estimate', service_work: 'Service Quote' }[project.proposal_template] || 'Proposal';
-      const finalPdf = await buildFinalPdf(contentPdfBytes, supabaseAdmin, {
-        docTitle: `${docLabel}${project.quote_number ? ` Q${project.quote_number}` : ''}`,
-        preparedFor: project.client_name,
-        subtitle: project.name,
-        dateLabel: new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }),
-        showCoverPhoto: true,
+      // quote.html is now a set of full-bleed A4 pages with its own black
+      // cover page (logo, title, prepared for, date), so the PDF is just
+      // that page printed as-is - no separate title page is prepended any
+      // more. preferCSSPageSize + zero margins let each .pg fill one sheet
+      // edge to edge (the black pages bleed to the paper's edge).
+      const finalPdf = await renderPageToPdf(`${siteUrl}/quote.html?token=${project.quote_token}&print=1`, {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
       });
 
       path = `client-documents/quotes/${project.id}.pdf`;

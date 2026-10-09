@@ -9,74 +9,162 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/css/style.css?v=13" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  @media print {
-    .topbar, #accept-section { display: none; }
-    body { background: white; color: black; }
-    .card { border: 1px solid #ccc; background: white; page-break-inside: avoid; }
+  /* The proposal is a set of A4 "pages" (black cover, white content pages
+     with blue diagonal accents), styled after the Canva proposal template
+     the company picked. On screen they stack as cards; when printed (and
+     when generate-client-document-pdf.js renders the PDF) each one is
+     exactly one A4 sheet, so the web quote and the PDF are the same
+     document. Everything is sized for a 794px (A4 at 96dpi) page. */
+  @page { size: A4; margin: 0; }
 
-    /* The cover is an intentional dark branded photo banner - force it
-       to actually print with its real colors, rather than being
-       flattened to black-on-white like the rest of the page. Without
-       this, the dark background gets stripped (browsers default to not
-       printing background colors/images to save ink) but the light
-       text colors don't, leaving white text invisible against
-       unprinted white space - what looked like faint "ghost" text. */
-    .cover-banner, .cover-scrim, .cover-photo-grid img, .cover-details, .cover-logo-badge {
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-      color-adjust: exact !important;
-    }
-    .cover-banner {
-      background: #1a1f27 !important;
-      color: #fff !important;
-      page-break-inside: avoid;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
-    .cover-title, .cover-eyebrow { color: #fff !important; }
-    .cover-subtitle, .cover-tagline { color: #cfd6e2 !important; }
-    .cover-details { background: rgba(0,0,0,0.35) !important; color: #cfd6e2 !important; }
+  body { background: #e6e9ef; }
+  .qdoc {
+    --q-blue: #1a6be6;
+    --q-ink: #0a0a0a;
+    --q-grey: #5b6472;
+    font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif;
+    color: var(--q-ink);
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
-  .cover-banner {
+  .qdoc * { box-sizing: border-box; }
+  .qdoc h1, .qdoc h2, .qdoc h3, .qdoc h4 { font-family: 'Archivo', 'Segoe UI', Arial, sans-serif; text-transform: uppercase; margin: 0; }
+  .qdoc p { margin: 0; }
+
+  .pg {
     position: relative;
-    border-radius: 12px;
+    width: 100%; max-width: 794px; margin: 0 auto 24px;
+    min-height: 1123px;
+    background: #fff; color: var(--q-ink);
     overflow: hidden;
-    min-height: 380px;
-    background: #1a1f27;
-    color: #fff;
-    margin-bottom: 20px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
+    box-shadow: 0 6px 28px rgba(15, 23, 42, 0.18);
+    padding: 64px 64px 72px;
   }
-  .cover-photo-grid {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    z-index: 0;
+  .pg.dark { background: #000; color: #fff; }
+  .pg.fixed { height: 1123px; }
+  .pg-body { position: relative; z-index: 2; }
+
+  .pg-head { position: relative; z-index: 2; display: flex; justify-content: space-between; align-items: center; margin-bottom: 64px; }
+  .logo-pill { display: inline-flex; align-items: center; background: #fff; border-radius: 6px; padding: 5px 9px; }
+  .logo-pill img { display: block; max-height: 38px; max-width: 190px; }
+  .pg-brand-name { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 20px; text-transform: uppercase; }
+  .pg-date { font-size: 14px; font-weight: 500; }
+
+  .qdoc .pg-title { font-weight: 500; font-size: 66px; line-height: 0.98; letter-spacing: -0.02em; margin-bottom: 40px; }
+  .qdoc .pg.cover .pg-title { font-size: 92px; margin: 70px 0 56px; }
+  .pg-sub { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 17px; text-transform: uppercase; margin: 0 0 14px; letter-spacing: 0; }
+  .qdoc .pg-lead { font-size: 13.5px; line-height: 1.62; text-align: justify; margin-bottom: 14px; }
+
+  .cover-tag { border-left: 4px solid var(--q-blue); padding-left: 14px; font-family: 'Archivo', sans-serif; font-size: 19px; line-height: 1.35; text-transform: uppercase; max-width: 430px; }
+  .cover-tag small { display: block; font-family: 'Instrument Sans', sans-serif; font-size: 13px; text-transform: none; opacity: 0.8; margin-top: 4px; }
+  .cover-meta { position: absolute; left: 64px; bottom: 80px; z-index: 2; font-size: 14px; }
+  .cover-meta div { margin-bottom: 16px; }
+  .cover-meta b { display: block; font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 17px; text-transform: uppercase; margin-top: 2px; }
+
+  .dots { position: absolute; z-index: 1; width: 86px; height: 52px; background-image: radial-gradient(circle, #8a93a2 1px, transparent 1.6px); background-size: 17px 17px; }
+  .pg.dark .dots { background-image: radial-gradient(circle, #cfd6e2 1px, transparent 1.6px); }
+  .slabs { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+  .slabs.corner { inset: auto; right: 0; bottom: 0; width: 30%; height: auto; aspect-ratio: 554 / 710; }
+  .band-panel .slabs.corner { width: 250px; z-index: 1; }
+  .pg > .slabs.corner { opacity: 0.4; }
+
+  /* Intro page: a photo with a black panel overlapping its lower right. */
+  .band-photo { position: absolute; left: 0; right: 9%; top: 45.6%; bottom: 0; z-index: 1; }
+  .band-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .band-panel { position: absolute; left: 9%; right: 0; top: 53%; bottom: 0; z-index: 2; background: #000; color: #fff; padding: 44px 40px 40px 40px; overflow: hidden; }
+  .band-panel .txt { position: relative; z-index: 3; max-width: 56%; }
+  .band-panel h3 { font-weight: 500; font-size: 21px; margin-bottom: 14px; }
+  .band-panel p { font-size: 14px; line-height: 1.6; margin-bottom: 10px; }
+  .band-panel .det { margin-top: 18px; font-size: 14px; line-height: 1.7; opacity: 0.95; }
+  .intro-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 28px; margin: 4px 0 26px; }
+  .intro-facts .k { font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--q-grey); margin-bottom: 3px; }
+  .intro-facts .v { font-size: 15px; font-weight: 600; line-height: 1.35; }
+  .intro-facts a { color: inherit; }
+
+  /* Ruled rows with a blue cross, as on the Objectives page of the template. */
+  .rows { margin: 8px 0 0; }
+  .row-x { display: grid; grid-template-columns: 22px 1fr; gap: 0 4px; padding: 14px 0 15px; border-bottom: 1px solid var(--q-ink); break-inside: avoid; page-break-inside: avoid; }
+  .row-x:first-child { border-top: 1px solid var(--q-ink); }
+  .row-x .x { color: var(--q-blue); font-size: 19px; line-height: 1.1; font-weight: 500; }
+  .row-x .h { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 15px; text-transform: uppercase; margin-bottom: 4px; }
+  .row-x .b { font-size: 13px; line-height: 1.58; color: #2b303a; }
+  .row-x .b p + p { margin-top: 6px; }
+  .row-x ul { margin: 4px 0 0; padding-left: 18px; }
+  .photo-row { display: grid; gap: 14px; margin: 22px 0 26px; grid-template-columns: repeat(2, 1fr); }
+  .photo-row img { width: 100%; height: 250px; object-fit: cover; display: block; }
+  .design-box { margin-top: 26px; padding: 18px 20px; background: #f1f5fd; border-left: 4px solid var(--q-blue); }
+  .design-box p { font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+  .q-btn { display: inline-block; background: var(--q-blue); color: #fff !important; text-decoration: none; padding: 10px 18px; font-weight: 600; font-size: 13px; }
+
+  /* Tables in the template style: blue header text, thin rules. */
+  .qtable { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  .qtable th { text-align: left; font-weight: 500; font-size: 15px; color: var(--q-blue); padding: 8px 8px 10px 0; border-bottom: 1px solid var(--q-blue); }
+  .qtable td { padding: 13px 8px 13px 0; border-bottom: 1px solid var(--q-ink); font-size: 13.5px; vertical-align: top; }
+  .qtable .num { text-align: right; white-space: nowrap; padding-right: 0; }
+  .qtable th.num { text-align: right; padding-right: 0; }
+  .qtable .muted { color: var(--q-grey); }
+  .qtable .stage-detail td { border-bottom: none; padding: 5px 8px 5px 0; font-size: 12.5px; color: var(--q-grey); }
+  .qtable .stage-detail .sub td { border-top: 1px solid #c9ced8; color: var(--q-ink); font-weight: 600; padding-top: 8px; }
+  .qtable .stage-detail-row > td { padding: 0 0 8px 18px; border-bottom: 1px solid var(--q-ink); background: #f6f8fc; }
+  .qtable .stage-summary-row { cursor: pointer; }
+  .totals { text-align: right; margin-top: 22px; }
+  .totals .l { font-size: 13px; color: var(--q-grey); margin-top: 3px; }
+  .totals .big { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 26px; margin-top: 14px; }
+  .totals .stc { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 20px; color: #15803d; margin-top: 12px; }
+  .note-line { font-size: 12px; color: var(--q-grey); line-height: 1.55; margin-top: 12px; }
+  .sec-title { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 19px; text-transform: uppercase; margin: 36px 0 6px; }
+  .est-note { border: 1px solid var(--q-blue); padding: 12px 16px; font-weight: 600; font-size: 13px; margin-bottom: 22px; }
+
+  .pg.invest { padding-top: 0; }
+  .invest-top { background: #000; color: #fff; margin: 0 -64px 34px; padding: 48px 64px 44px; position: relative; }
+  .invest-top .pg-head { margin-bottom: 44px; }
+  .invest-top .pg-title { margin-bottom: 0; }
+  .invest-top .dots { right: 90px; bottom: 58px; }
+
+  .terms-cols { column-count: 2; column-gap: 28px; font-size: 9.6px; line-height: 1.5; color: #2b303a; }
+  .terms-cols h4 { font-size: 10.5px; font-weight: 600; margin: 12px 0 3px; color: var(--q-ink); break-after: avoid; }
+  .terms-cols p { margin-bottom: 5px; white-space: pre-wrap; }
+  .accepted-box { margin-top: 26px; display: inline-block; background: #e8f6ec; color: #14532d; padding: 12px 18px; font-weight: 600; font-size: 14px; }
+
+  .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .gallery img { width: 100%; height: 150px; object-fit: cover; display: block; }
+
+  @media (max-width: 700px) {
+    .pg { padding: 28px 22px 48px; min-height: 0; margin-bottom: 14px; box-shadow: none; }
+    .pg.fixed { height: auto; min-height: 640px; }
+    .pg-head { margin-bottom: 30px; }
+    .qdoc .pg-title, .qdoc .pg.cover .pg-title { font-size: 44px; margin-bottom: 26px; }
+    .qdoc .pg.cover .pg-title { margin-top: 36px; }
+    .cover-meta { position: relative; left: auto; bottom: auto; margin-top: 40px; }
+    .pg.cover.fixed { min-height: 860px; }
+    .pg.cover .slabs { top: auto; bottom: 0; height: 36%; }
+    .pg.cover .dots { display: none; }
+    .terms-cols h4:first-child { margin-top: 0; }
+    .band-photo { position: static; height: 240px; }
+    .band-panel { position: static; padding: 26px 22px 120px; margin: 0 -22px -48px; }
+    .band-panel .txt { max-width: 100%; }
+    .intro-facts { grid-template-columns: 1fr; }
+    .photo-row { grid-template-columns: 1fr; }
+    .photo-row img { height: 200px; }
+    .invest-top { margin: 0 -22px 28px; padding: 28px 22px 30px; }
+    .terms-cols { column-count: 1; font-size: 11px; }
+    .gallery { grid-template-columns: repeat(2, 1fr); }
   }
-  .cover-photo-grid img { width: 100%; height: 100%; object-fit: cover; }
-  .cover-scrim {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, rgba(10,12,16,0.82) 0%, rgba(10,12,16,0.55) 45%, rgba(10,12,16,0.2) 100%);
-    z-index: 1;
-  }
-  .cover-content { position: relative; z-index: 2; padding: 36px 36px 28px; }
-  .cover-logo-badge { display: inline-block; background: #fff; border-radius: 8px; padding: 8px 14px; margin-bottom: 12px; }
-  .cover-logo { max-height: 40px; max-width: 200px; display: block; }
-  .cover-tagline { font-size: 12px; letter-spacing: 0.12em; color: #cfd6e2; text-transform: uppercase; margin: 0 0 40px; }
-  .cover-eyebrow { font-size: 13px; letter-spacing: 0.14em; color: var(--accent); text-transform: uppercase; margin: 0 0 8px; }
-  .cover-title { font-size: 32px; font-weight: 700; margin: 0 0 6px; max-width: 520px; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
-  .cover-subtitle { font-size: 15px; color: #cfd6e2; margin: 0; text-shadow: 0 1px 8px rgba(0,0,0,0.6); }
-  .cover-details {
-    position: relative; z-index: 2;
-    padding: 16px 36px; background: rgba(0,0,0,0.35);
-    font-size: 12px; color: #cfd6e2; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+
+  @media print {
+    .topbar, #accept-error { display: none !important; }
+    html, body { background: #fff !important; }
+    .wrap { max-width: none !important; width: 210mm !important; margin: 0 !important; padding: 0 !important; }
+    .pg { width: 210mm; max-width: none; margin: 0; box-shadow: none; min-height: 297mm; page-break-after: always; break-after: page; }
+    .pg.fixed { height: 297mm; }
+    .pg:last-child { page-break-after: auto; break-after: auto; }
+    .qdoc, .qdoc * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    .stage-toggle-arrow { display: none; }
   }
 </style>
 </head>
@@ -90,14 +178,26 @@
     </div>
   </div>
 
-  <div class="wrap" style="max-width:800px;">
+  <div class="wrap" style="max-width:860px;">
     <div id="accept-error"></div>
-    <div id="content"><p class="subtitle">Loading your proposal...</p></div>
+    <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading your proposal...</p></div>
   </div>
 
   <script src="/js/supabase-client.js?v=57"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
+
+    // Company showcase photos, shipped with the site. A job's own cover
+    // photos (chosen when quoting) are used first; these fill in the rest.
+    const SHOWCASE_PHOTOS = [
+      '/img/showcase/campus-solar.jpg',
+      '/img/showcase/school-roof.jpg',
+      '/img/showcase/shed-solar.jpg',
+      '/img/showcase/mobile-solar.jpg',
+      '/img/showcase/battery.jpg',
+      '/img/showcase/led-lighting.jpg',
+      '/img/showcase/shed-ridge.jpg',
+    ];
 
     // Labour shows as hours worked; everything else (materials, and a
     // collapsed prebuild's own instance count - see get_quote_by_token)
@@ -108,6 +208,102 @@
       return item_type === 'labour' ? `${n} hrs` : `&times;${n}`;
     }
 
+    // Same quote always gets the same photos (seeded by its token), but
+    // different quotes get a different mix.
+    function seededShuffle(list, seed) {
+      let h = 2166136261;
+      for (const ch of String(seed || 'x')) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+      const out = list.slice();
+      for (let i = out.length - 1; i > 0; i--) {
+        h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0;
+        const j = h % (i + 1);
+        [out[i], out[j]] = [out[j], out[i]];
+      }
+      return out;
+    }
+
+    // The scope of works is free text: a title line, a lead paragraph, then
+    // short heading lines each followed by their paragraph. Pull that apart
+    // so it can be laid out as ruled rows; anything unstructured still
+    // comes out as plain paragraphs.
+    function parseScope(text) {
+      const blocks = [];
+      let cur = [];
+      String(text || '').replace(/\r/g, '').split('\n').forEach((l) => {
+        if (!l.trim()) { if (cur.length) blocks.push(cur); cur = []; } else cur.push(l.trim());
+      });
+      if (cur.length) blocks.push(cur);
+      if (blocks.length && blocks[0].length === 1 && /^scope of works?\b/i.test(blocks[0][0])) blocks.shift();
+
+      const isHeading = (line) => line.length <= 70 && !/[.!?]$/.test(line) && !/^[-*•]/.test(line);
+      const intro = [];
+      const rows = [];
+      blocks.forEach((b) => {
+        if (b.length > 1 && isHeading(b[0])) {
+          rows.push({ h: b[0], body: b.slice(1) });
+        } else if (b.length === 1 && isHeading(b[0]) && b[0].split(' ').length <= 8) {
+          rows.push({ h: b[0], body: [] });
+        } else if (rows.length) {
+          rows[rows.length - 1].body.push(...b);
+        } else {
+          intro.push(b.join(' '));
+        }
+      });
+      return { intro, rows };
+    }
+
+    function bodyHtml(lines) {
+      const out = [];
+      let list = [];
+      const flush = () => { if (list.length) { out.push(`<ul>${list.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`); list = []; } };
+      lines.forEach((l) => {
+        if (/^[-*•]\s+/.test(l)) list.push(l.replace(/^[-*•]\s+/, ''));
+        else { flush(); out.push(`<p>${escapeHtml(l)}</p>`); }
+      });
+      flush();
+      return out.join('');
+    }
+
+    function termsHtml(text) {
+      const out = [];
+      String(text || '').replace(/\r/g, '').split('\n').forEach((l) => {
+        const t = l.trim();
+        if (!t) return;
+        if (/^\d+(\.\d+)*\.?\s+\S/.test(t) && t.length <= 90 && !/[.;,]$/.test(t.replace(/^\d+(\.\d+)*\.?\s+/, ''))) out.push(`<h4>${escapeHtml(t)}</h4>`);
+        else out.push(`<p>${escapeHtml(t)}</p>`);
+      });
+      return out.join('');
+    }
+
+    // Blue diagonal slabs, drawn the same way on screen and in the PDF.
+    // kind: 'cover' (three big slabs), 'dark' / 'light' (two small ones).
+    let slabSeq = 0;
+    function slabsSvg(kind) {
+      const n = ++slabSeq;
+      const g = (id, stops) => `<linearGradient id="${id}${n}" x1="0" y1="0" x2="1" y2="0">${stops.map(([o, c]) => `<stop offset="${o}" stop-color="${c}"/>`).join('')}</linearGradient>`;
+      if (kind === 'cover') {
+        return `<svg class="slabs" viewBox="0 0 1414 2000" preserveAspectRatio="none" aria-hidden="true"><defs>
+          ${g('a', [[0, '#1a6be6'], [0.5, '#46577a'], [1, '#15181d']])}
+          ${g('b', [[0, '#3d69b3'], [0.28, '#12151a'], [0.62, '#46557a'], [1, '#1a6be6']])}
+          ${g('c', [[0, '#3f4f70'], [1, '#1a6be6']])}
+        </defs>
+          <polygon points="704,1146 1414,615 1414,975 704,1500" fill="url(#a${n})"/>
+          <polygon points="130,2000 1414,1037 1414,1395 600,2000" fill="url(#b${n})"/>
+          <polygon points="1355,1503 1355,1858 1165,2000 690,2000" fill="url(#c${n})"/>
+        </svg>`;
+      }
+      const dark = kind === 'dark';
+      const top = dark ? [[0, '#1a6be6'], [0.6, '#46577a'], [1, '#15181d']] : [[0, '#1a6be6'], [0.55, '#8fb6f0'], [1, '#ffffff']];
+      const low = dark ? [[0, '#4a5b80'], [1, '#1a6be6']] : [[0, '#ffffff'], [1, '#1a6be6']];
+      return `<svg class="slabs corner" viewBox="860 1290 554 710" preserveAspectRatio="xMaxYMax meet" aria-hidden="true"><defs>
+          ${g('d', top)}${g('e', low)}${g('f', [[0, '#1a6be6'], [1, '#2a74e8']])}
+        </defs>
+          <polygon points="930,1655 1414,1290 1414,1540 930,1896" fill="url(#f${n})" opacity="${dark ? 1 : 0.9}"/>
+          <polygon points="1366,1622 1366,1862 1190,2000 860,2000" fill="url(#e${n})"/>
+          <polygon points="1140,2000 1414,1790 1414,2000" fill="url(#d${n})" opacity="0.55"/>
+        </svg>`;
+    }
+
     async function load() {
       const [{ data, error }, { data: settings }] = await Promise.all([
         supabaseClient.rpc('get_quote_by_token', { p_token: token }),
@@ -115,7 +311,7 @@
       ]);
       const content = document.getElementById('content');
       if (error || !data) {
-        content.innerHTML = `<div class="error-box">This quote link isn't valid. Please check the link or contact us.</div>`;
+        content.innerHTML = `<div class="error-box" style="margin:24px;">This quote link isn't valid. Please check the link or contact us.</div>`;
         return;
       }
 
@@ -135,170 +331,190 @@
       const totalIncGst = total + gstAmount;
       const totalAfterStc = totalIncGst - stcTotal;
       const isAccepted = ['accepted', 'approved', 'in_progress', 'complete'].includes(project.status);
-      const coverPhotos = (project.cover_photos || []).map(p => p.url || p).slice(0, 3);
+      const ownPhotos = (project.cover_photos || []).map(p => p.url || p).filter(Boolean);
       const referencePhotos = (project.reference_photos || []).map(p => p.url || p);
       const depositPercent = Number(project.deposit_percent) || 0;
       const depositAmount = total * (depositPercent / 100);
+      const esc = escapeHtml;
 
-      const detailParts = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
+      const docLabel = { quick_estimate: 'Estimate', service_work: 'Service quote' }[template] || 'Proposal';
+      const qNum = project.quote_number ? `Q${project.quote_number}` : '';
+      const docDate = new Date(project.sent_at || project.created_at || Date.now())
+        .toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+
+      // Photo mix for this quote: the job's own photos first, then showcase.
+      const pool = ownPhotos.concat(seededShuffle(SHOWCASE_PHOTOS, token));
+      const photo = (i, w) => supaImageVariant(pool[i % pool.length], w || 1100, 72);
+
+      const logoHtml = s.logo_url
+        ? `<span class="logo-pill"><img src="${s.logo_url}" alt="${esc(s.company_name || '')}" /></span>`
+        : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`;
+      const headHtml = `<div class="pg-head"><div>${logoHtml}</div><div class="pg-date">${esc(docDate)}</div></div>`;
+
+      const detailLines = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
       const licenseParts = (s.licenses || '').trim();
 
-      // generate-client-document-pdf.js prepends its own dedicated title
-      // page (logo, "Proposal Q1042", prepared for, date, company
-      // letterhead) ahead of this whole page - this banner is the same
-      // information a second time, which is what "2 proposal pages"
-      // looked like, and its own cover_photos add real weight to a
-      // document that already carries a title-page photo. &hidecover=1
-      // (set only by that function, never by a person's own "Download
-      // PDF" link, which still prints this banner as the page's one and
-      // only cover) skips it entirely rather than just hiding it, so its
-      // images never even load.
-      const hideCoverBanner = new URLSearchParams(window.location.search).get('hidecover') === '1';
-      const bannerHtml = `
-        <div class="cover-banner">
-          ${coverPhotos.length ? `<div class="cover-photo-grid">${coverPhotos.map(url => `<img src="${supaImageVariant(url, 1000, 70)}" />`).join('')}</div>` : ''}
-          <div class="cover-scrim"></div>
-          <div class="cover-content">
-            ${s.logo_url ? `<div class="cover-logo-badge"><img src="${s.logo_url}" class="cover-logo" /></div>` : `<p style="font-size:22px; font-weight:700; margin:0 0 8px;">${s.company_name || ''}</p>`}
-            ${s.tagline ? `<p class="cover-tagline">${s.tagline}</p>` : '<div style="margin-bottom:40px;"></div>'}
-            <p class="cover-eyebrow">${{ quick_estimate: 'Estimate', service_work: 'Service Quote' }[template] || 'Proposal'}</p>
-            <h1 class="cover-title">${project.name}</h1>
-            <p class="cover-subtitle">${project.proposal_subtitle || ('Prepared for ' + project.client_name)}</p>
-          </div>
-          ${(detailParts.length || licenseParts) ? `
-            <div class="cover-details">
-              <span>${s.company_name || ''}${detailParts.length ? ' &middot; ' + detailParts.join(' &middot; ') : ''}</span>
-              ${licenseParts ? `<span>${licenseParts}</span>` : ''}
-            </div>` : ''}
-        </div>`;
+      // 1. Cover
       const coverHtml = `
-        ${hideCoverBanner ? '' : bannerHtml}
-        <p class="subtitle" style="margin:0 0 24px;">Prepared for ${project.client_name}${project.client_address ? ' &middot; ' + mapsLink(project.client_address) : ''}</p>
-        ${template === 'quick_estimate' ? `<div class="card" style="border-color:var(--accent); margin-bottom:24px;"><p style="margin:0; font-weight:600;">${project.estimate_disclaimer_text || 'Estimate only - final invoice based on actual hours and materials used.'}</p></div>` : ''}
-      `;
+        <section class="pg dark cover fixed">
+          ${slabsSvg('cover')}
+          <div class="dots" style="left:64px; top:600px;"></div>
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">${esc(docLabel)}${qNum ? `<br><span style="font-size:0.42em; letter-spacing:0; opacity:0.9;">${esc(qNum)}</span>` : ''}</h1>
+            <div class="cover-tag">${esc(project.name)}<small>Prepared for ${esc(project.client_name)}${project.client_address ? ' &middot; ' + esc(project.client_address) : ''}</small></div>
+          </div>
+          <div class="cover-meta">
+            <div>Prepared by:<b>${esc(s.company_name || '')}</b></div>
+            ${s.tagline ? `<div>${esc(s.tagline)}</div>` : ''}
+          </div>
+        </section>`;
 
-      const stagePhotosHtml = centres.some(c => (c.photo_groups || []).length) ? `
-        <div class="card">
-          <h2>Stage photos</h2>
-          ${centres.filter(c => (c.photo_groups || []).length).map(c => `
-            <p style="font-weight:600; margin:16px 0 8px;">${c.name}</p>
-            ${c.photo_groups.map(g => `
-              <p class="subtitle" style="margin:0 0 6px;">${g.description || ''}</p>
-              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:14px;">
-                ${(g.photos || []).map(p => `<img src="${supaImageVariant(p.url || p, 500, 70)}" style="width:100%; height:130px; object-fit:cover; border-radius:8px;" />`).join('')}
-              </div>
-            `).join('')}
-          `).join('')}
+      // 2. Introduction: who it is for, what the system is, who we are.
+      const pylonSummary = pylonSystemSummary(project.pylon_data);
+      const introText = project.proposal_subtitle || '';
+      const introHtml = `
+        <section class="pg fixed">
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">The<br>project</h1>
+            <div class="intro-facts">
+              <div><div class="k">Prepared for</div><div class="v">${esc(project.client_name)}</div></div>
+              <div><div class="k">Site</div><div class="v">${project.client_address ? mapsLink(project.client_address) : '&nbsp;'}</div></div>
+              <div><div class="k">Job</div><div class="v">${esc(project.name)}</div></div>
+              <div><div class="k">${qNum ? 'Quote number' : 'Date'}</div><div class="v">${esc(qNum || docDate)}</div></div>
+            </div>
+            ${introText ? `<p class="pg-lead">${esc(introText)}</p>` : ''}
+            ${pylonSummary ? `<p class="pg-lead">${esc(pylonSummary)}</p>` : ''}
+          </div>
+          <div class="band-photo"><img src="${photo(0, 1300)}" alt="" /></div>
+          <div class="band-panel">
+            ${slabsSvg('dark')}
+            <div class="txt">
+              <h3>About ${esc(s.company_name || 'us')}</h3>
+              ${s.tagline ? `<p>${esc(s.tagline)}</p>` : ''}
+              ${licenseParts ? `<p>${esc(licenseParts)}</p>` : ''}
+              <div class="det">${detailLines.map(esc).join('<br>')}</div>
+            </div>
+          </div>
+        </section>`;
+
+      // 3. Scope of works
+      const scope = parseScope(project.sow_text);
+      const scopeRowsHtml = scope.rows.map(r => `
+        <div class="row-x"><span class="x">&times;</span><div><div class="h">${esc(r.h)}</div>${r.body.length ? `<div class="b">${bodyHtml(r.body)}</div>` : ''}</div></div>`).join('');
+      const designHtml = (template === 'solar' && project.pylon_link) ? `
+        <div class="design-box">
+          <div class="sec-title" style="margin:0 0 8px;">System design</div>
+          <p>${pylonSummary ? esc(pylonSummary) : 'See the full interactive design, panel layout, and return-on-investment calculation online.'}</p>
+          <a class="q-btn" href="${project.pylon_link}" target="_blank" rel="noopener">View interactive design &amp; ROI &rarr;</a>
         </div>` : '';
+      const scopeHtml = (project.sow_text || designHtml) ? `
+        <section class="pg">
+          ${slabsSvg('light')}
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">Scope<br>of works</h1>
+            ${scope.intro.map(t => `<p class="pg-lead">${esc(t)}</p>`).join('')}
+            <div class="photo-row"><img src="${photo(1, 800)}" alt="" /><img src="${photo(2, 800)}" alt="" /></div>
+            <div class="rows">${scopeRowsHtml}</div>
+            ${designHtml}
+          </div>
+        </section>` : '';
 
+      // 4. Investment and payment schedule
       const milestones = data.payment_milestones || [];
       const milestoneRowsHtml = milestones.length
-        ? milestones.map(m => `<tr><td>${m.label}</td><td class="num">${money(total * (Number(m.percent) / 100))}</td></tr>`).join('')
+        ? milestones.map(m => `<tr><td>${esc(m.label)}</td><td class="num">${money(total * (Number(m.percent) / 100))}</td></tr>`).join('')
         : `
           <tr><td>Deposit (${depositPercent}%), due on acceptance</td><td class="num">${money(depositAmount)}</td></tr>
-          ${centres.map(c => `<tr><td>${c.name}, due on completion</td><td class="num">${money(c.quoted_amount * (1 - depositPercent / 100))}</td></tr>`).join('')}
+          ${centres.map(c => `<tr><td>${esc(c.name)}, due on completion</td><td class="num">${money(c.quoted_amount * (1 - depositPercent / 100))}</td></tr>`).join('')}
         `;
-
       const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials') ? '' : `
-        <div class="card">
-          <h2>Payment schedule</h2>
-          <table>
-            <thead><tr><th>Milestone</th><th class="num">Amount</th></tr></thead>
-            <tbody>${milestoneRowsHtml}</tbody>
-          </table>
-          <p class="subtitle" style="margin-top:14px;">For projects that span multiple months, we reserve the right to invoice each milestone in part at the end of the month, based on the percentage of that stage completed at the time, rather than waiting until it is fully finished.</p>
-        </div>`;
+        <div class="sec-title">Payment schedule</div>
+        <table class="qtable">
+          <thead><tr><th>Milestone</th><th class="num">Amount</th></tr></thead>
+          <tbody>${milestoneRowsHtml}</tbody>
+        </table>
+        <p class="note-line">For projects that span multiple months, we reserve the right to invoice each milestone in part at the end of the month, based on the percentage of that stage completed at the time, rather than waiting until it is fully finished.</p>`;
 
-      const sowHtml = project.sow_text ? `
-        <div class="card">
-          <h2>Scope of works</h2>
-          <p style="white-space:pre-wrap; line-height:1.7;">${project.sow_text}</p>
-        </div>` : '';
+      const stageRowsHtml = centres.map((c, i) => {
+        const hasItems = (c.line_items || []).length > 0;
+        return `
+          <tr class="${hasItems ? 'stage-summary-row' : ''}" data-idx="${i}">
+            <td>${esc(c.name)}${hasItems ? ` <span class="stage-toggle-arrow" style="font-size:11px; color:var(--q-grey);">&#9656;</span>` : ''}</td>
+            <td class="muted">${esc(c.description || '')}</td>
+            <td class="num">${money(c.quoted_amount)}</td>
+          </tr>
+          ${hasItems ? `
+          <tr class="stage-detail-row" data-idx="${i}" style="display:none;">
+            <td colspan="3">
+              <table class="qtable" style="margin:0;"><tbody class="stage-detail">
+                ${c.line_items.map(li => `
+                  <tr><td>${esc(li.description)}</td><td class="num">${fmtQty(li.quantity, li.item_type)}</td><td class="num">${money(li.amount)}</td></tr>`).join('')}
+                <tr class="sub"><td>Stage subtotal</td><td></td><td class="num">${money(c.quoted_amount)}</td></tr>
+              </tbody></table>
+            </td>
+          </tr>` : ''}`;
+      }).join('');
 
-      const pylonSummary = pylonSystemSummary(project.pylon_data);
-      const pylonHtml = (template === 'solar' && project.pylon_link) ? `
-        <div class="card">
-          <h2>System design</h2>
-          ${pylonSummary
-            ? `<p style="margin:0 0 14px; line-height:1.7;">${pylonSummary}</p>`
-            : `<p class="subtitle" style="margin:0 0 14px;">See the full interactive design, panel layout, and return-on-investment calculation below.</p>`}
-          <a class="btn" href="${project.pylon_link}" target="_blank" rel="noopener">View interactive design &amp; ROI &rarr;</a>
-        </div>` : '';
+      const investHtml = `
+        <section class="pg invest">
+          <div class="invest-top dark-block">
+            ${headHtml}
+            <div class="dots"></div>
+            <h1 class="pg-title">Investment<br>summary</h1>
+          </div>
+          <div class="pg-body">
+            ${template === 'quick_estimate' ? `<div class="est-note">${esc(project.estimate_disclaimer_text || 'Estimate only - final invoice based on actual hours and materials used.')}</div>` : ''}
+            <table class="qtable">
+              <thead><tr><th>Stage</th><th>Description</th><th class="num">Price (ex GST)</th></tr></thead>
+              <tbody>${stageRowsHtml}</tbody>
+            </table>
+            <div class="totals">
+              <div class="l">Subtotal (ex GST): ${money(total)}</div>
+              <div class="l">GST (10%): ${money(gstAmount)}</div>
+              ${stcTotal > 0 ? `<div class="stc">STC credit: -${money(stcTotal)}</div>` : ''}
+              <div class="big">Total${stcTotal > 0 ? ' after STC credit' : ' inc GST'}: ${money(stcTotal > 0 ? totalAfterStc : totalIncGst)}</div>
+              ${stcTotal > 0 ? `<div class="note-line">The STC credit is applied against your invoice once the system is installed and registered - not a separate payment.</div>` : ''}
+            </div>
+            ${paymentScheduleHtml}
+          </div>
+        </section>`;
 
+      // 5. Photos (only when the quote has its own)
+      const stagePhotosHtml = centres.some(c => (c.photo_groups || []).length) ? centres.filter(c => (c.photo_groups || []).length).map(c => `
+        <div class="sec-title" style="margin-top:22px;">${esc(c.name)}</div>
+        ${c.photo_groups.map(g => `
+          <p class="note-line" style="margin:0 0 6px;">${esc(g.description || '')}</p>
+          <div class="gallery">${(g.photos || []).map(p => `<img src="${supaImageVariant(p.url || p, 500, 70)}" alt="" />`).join('')}</div>`).join('')}`).join('') : '';
       const referenceHtml = referencePhotos.length ? `
-        <div class="card">
-          <h2>What it will look like</h2>
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px;">
-            ${referencePhotos.map(url => `<img src="${supaImageVariant(url, 500, 70)}" style="width:100%; height:150px; object-fit:cover; border-radius:8px;" />`).join('')}
+        <div class="sec-title" style="margin-top:0;">What it will look like</div>
+        <div class="gallery">${referencePhotos.map(url => `<img src="${supaImageVariant(url, 500, 70)}" alt="" />`).join('')}</div>` : '';
+      const photosPageHtml = (referenceHtml || stagePhotosHtml) ? `
+        <section class="pg">
+          ${slabsSvg('light')}
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">Photos</h1>
+            ${referenceHtml}
+            ${stagePhotosHtml}
           </div>
-        </div>` : '';
+        </section>` : '';
 
-      const termsHtml = project.terms_text ? `
-        <div class="card">
-          <h2>Terms and conditions</h2>
-          <p class="subtitle" style="white-space:pre-wrap; line-height:1.6;">${project.terms_text}</p>
-        </div>` : '';
-
-      content.innerHTML = `
-        ${coverHtml}
-        ${sowHtml}
-        ${pylonHtml}
-
-        <div class="card">
-          <h2>Investment summary</h2>
-          <table>
-            <thead><tr><th>Stage</th><th>Description</th><th class="num">Price (ex GST)</th></tr></thead>
-            <tbody>
-              ${centres.map((c, i) => {
-                const hasItems = (c.line_items || []).length > 0;
-                return `
-                <tr class="${hasItems ? 'stage-summary-row' : ''}" data-idx="${i}" style="${hasItems ? 'cursor:pointer;' : ''}">
-                  <td>${c.name}${hasItems ? ` <span class="stage-toggle-arrow" style="font-size:11px; color:var(--muted);">&#9656;</span>` : ''}</td>
-                  <td style="color:var(--muted)">${c.description || ''}</td>
-                  <td class="num">${money(c.quoted_amount)}</td>
-                </tr>
-                ${hasItems ? `
-                <tr class="stage-detail-row" data-idx="${i}" style="display:none;">
-                  <td colspan="3" style="padding:0 0 0 20px; background:var(--surface-2);">
-                    <table style="width:100%; margin:0;">
-                      <tbody>
-                        ${c.line_items.map(li => `
-                          <tr>
-                            <td style="color:var(--muted); font-size:13px; border:none;">${li.description}</td>
-                            <td class="num" style="color:var(--muted); font-size:13px; border:none;">${fmtQty(li.quantity, li.item_type)}</td>
-                            <td class="num" style="font-size:13px; border:none;">${money(li.amount)}</td>
-                          </tr>`).join('')}
-                        <tr>
-                          <td style="font-weight:600; font-size:13px; border-top:0.5px solid var(--border);">Stage subtotal</td>
-                          <td style="border-top:0.5px solid var(--border);"></td>
-                          <td class="num" style="font-weight:600; font-size:13px; border-top:0.5px solid var(--border);">${money(c.quoted_amount)}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </td>
-                </tr>` : ''}`;
-              }).join('')}
-            </tbody>
-          </table>
-          <div style="text-align:right; margin-top:16px;">
-            <p class="subtitle" style="margin:0;">Subtotal (ex GST): ${money(total)}</p>
-            <p class="subtitle" style="margin:2px 0 0;">GST (10%): ${money(gstAmount)}</p>
-            ${stcTotal > 0 ? `<p style="margin:12px 0 0; font-size:22px; font-weight:700; color:var(--green);">STC Credit: -${money(stcTotal)}</p>` : ''}
-            <p style="margin:${stcTotal > 0 ? '10px' : '16px'} 0 0; font-size:24px; font-weight:700;">Total${stcTotal > 0 ? ' after STC credit' : ' inc GST'}: ${money(stcTotal > 0 ? totalAfterStc : totalIncGst)}</p>
+      // 6. Terms and acceptance
+      const termsPageHtml = (project.terms_text || isAccepted) ? `
+        <section class="pg">
+          ${slabsSvg('light')}
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">Terms &amp;<br>conditions</h1>
+            ${project.terms_text ? `<div class="terms-cols">${termsHtml(project.terms_text)}</div>` : ''}
+            ${isAccepted ? `<div class="accepted-box" id="accept-section">${template === 'quick_estimate' ? 'Estimate accepted, thank you.' : 'Quote accepted, thank you.'} Work will begin as scheduled.</div>` : ''}
           </div>
-          ${stcTotal > 0 ? `<p class="subtitle" style="text-align:right; margin-top:8px;">The STC credit is applied against your invoice once the system is installed and registered - not a separate payment.</p>` : ''}
-        </div>
+        </section>` : '';
 
-        ${referenceHtml}
-        ${stagePhotosHtml}
-        ${paymentScheduleHtml}
-        ${termsHtml}
-
-        ${isAccepted ? `
-        <div class="card" id="accept-section">
-          <p class="success-box" style="display:inline-block">${template === 'quick_estimate' ? 'Estimate accepted, thank you.' : 'Quote accepted, thank you.'} Work will begin as scheduled.</p>
-        </div>` : ''}
-      `;
+      content.innerHTML = coverHtml + introHtml + scopeHtml + investHtml + photosPageHtml + termsPageHtml;
 
       content.querySelectorAll('.stage-summary-row').forEach(row => {
         row.addEventListener('click', () => {
@@ -350,16 +566,16 @@
     }
 
     load().then(async () => {
-      // Wait for every image actually in the DOM (cover photos, the logo,
-      // stage/reference photos) to finish loading before signalling done -
-      // a fixed setTimeout guessed at "probably rendered by now," which
-      // raced real image loads on a slow connection. generate-
-      // client-document-pdf.js (headless Chromium) polls for
-      // data-print-ready instead of guessing a delay of its own; ?print=1
-      // keeps triggering the browser's own print dialog for a person
-      // following the existing "Download PDF" link.
+      // Wait for every image actually in the DOM (the logo and photos) and
+      // the web fonts to finish loading before signalling done - a fixed
+      // setTimeout guessed at "probably rendered by now," which raced real
+      // loads on a slow connection. generate-client-document-pdf.js
+      // (headless Chromium) polls for data-print-ready instead of guessing
+      // a delay of its own; ?print=1 keeps triggering the browser's own
+      // print dialog for a person following the existing "Download PDF" link.
       const images = [...document.querySelectorAll('img')];
       await Promise.all(images.map((img) => img.complete ? Promise.resolve() : new Promise((res) => { img.onload = img.onerror = res; })));
+      try { await Promise.race([document.fonts.ready, new Promise((res) => setTimeout(res, 4000))]); } catch (e) { /* fonts are cosmetic */ }
       document.body.dataset.printReady = 'true';
       if (new URLSearchParams(window.location.search).get('print') === '1') {
         window.print();
