@@ -38,6 +38,21 @@ const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Au
 const addMinutes = (hhmmStr, mins) => { const [h, m] = hhmmStr.split(':').map(Number); const t = h * 60 + m + mins; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
 const minutesBetween = (a, b) => { const [h1, m1] = a.split(':').map(Number), [h2, m2] = b.split(':').map(Number); return (h2 * 60 + m2) - (h1 * 60 + m1); };
 const hoursText = (mins) => { const h = Math.floor(mins / 60), m = mins % 60; return m ? `${h}h ${m}m` : `${h}h`; };
+// "Open it prefilled" links. The details ride in the URL (base64url JSON); the page reads
+// them with aiPrefillRead() in supabase-client.js and only ever puts them into form fields.
+const FORM_PAGES = { new_quote: '/new-project.html', timesheet: '/timesheets.html', task: '/tasks.html' };
+function prefillLink(form, data) {
+  const payload = { form, ...data };
+  let enc = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  // keep the URL a sensible length: trim the long free-text fields until it fits
+  for (let i = 0; i < 8 && enc.length > 6000; i++) {
+    ['notes', 'brief'].forEach(k => { if (payload[k]) payload[k] = payload[k].slice(0, Math.floor(payload[k].length * 0.6)); });
+    enc = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  }
+  return `${FORM_PAGES[form]}?ai_prefill=${enc}`;
+}
+const QUOTE_TEMPLATES = { new_build: 'New Build', solar: 'Solar Proposal', quick_estimate: 'Quick Estimate', renovation: 'Renovation', service_work: 'Service Work' };
+const clip = (v, n) => (v === undefined || v === null || v === '' ? undefined : String(v).trim().slice(0, n));
 const jobLabel = (p) => (p.job_number ? `J${p.job_number}` : p.quote_number ? `Q${p.quote_number}` : '') + (p.name ? ` - ${p.name}` : '');
 
 // ---------- lookups ----------
@@ -114,6 +129,7 @@ async function prepare(client, type, input, ctx = {}) {
       if (recurrence) warnings.push(`It repeats ${recurrence}: the next one is created when this one is ticked off.`);
       return {
         ok: true, type,
+        edit_link: prefillLink('task', { description, assignee_id: assignee && assignee.id, project_id: project && project.id, project_label: project && jobLabel(project), due_date: input.due_date || undefined, recurrence: recurrence || undefined, task_type: taskType }),
         params: { description, assignee_id: assignee && assignee.id, assignee_name: assignee && assignee.name, project_id: project && project.id, due_date: input.due_date || null, recurrence, task_type: taskType },
         summary: `Create the task "${description}"${assignee ? ` for ${assignee.name}` : ' (unassigned, anyone can pick it up)'}${project ? ` on ${jobLabel(project)}` : ''}${input.due_date ? `, due ${fmtDay(input.due_date)}` : ''}${recurrence ? `, repeating ${recurrence}` : ''}`,
         warnings,
@@ -158,6 +174,43 @@ async function prepare(client, type, input, ctx = {}) {
       };
     }
 
+    if (type === 'prefill_form') {
+      const form = input.form;
+      if (form === 'new_quote') {
+        const template = QUOTE_TEMPLATES[input.template] ? input.template : undefined;
+        let email = clip(input.client_email, 120);
+        if (email && !/^\S+@\S+\.\S+$/.test(email)) { warnings.push(`"${email}" does not look like an email address, so it was left out.`); email = undefined; }
+        const data = { template, name: clip(input.name, 150), client_name: clip(input.client_name, 120), client_email: email, client_phone: clip(input.client_phone, 40), client_address: clip(input.client_address, 200), notes: clip(input.notes, 1500), brief: clip(input.scope_brief, 1500) };
+        if (!Object.values(data).some(Boolean)) return { ok: false, error: 'Nothing to prefill. Give at least a client or a job name.' };
+        warnings.push('Nothing is saved yet. Open it, check it, add the stages and prices, then save.');
+        return { ok: true, type: 'open_form', form, link: prefillLink('new_quote', data), params: {}, warnings,
+          summary: `Start a new ${template ? QUOTE_TEMPLATES[template] + ' ' : ''}quote${data.name ? ` "${data.name}"` : ''}${data.client_name ? ` for ${data.client_name}` : ''}, with the details filled in` };
+      }
+      if (form === 'task') {
+        let assignee = null, project = null;
+        if (input.assignee_id || input.assignee_name) { assignee = await resolveStaff(client, { id: input.assignee_id, name: input.assignee_name }, 'assignee'); if (assignee.error) return { ok: false, error: assignee.error }; }
+        if (input.project_id || input.job) { const r = await resolveJob(client, { id: input.project_id, text: input.job }); if (r.error) return { ok: false, error: r.error }; project = r.project; }
+        if (input.due_date && !isDate(input.due_date)) return { ok: false, error: 'due_date must be a real date like 2026-10-15.' };
+        if (input.recurrence && !['daily', 'weekly', 'monthly'].includes(input.recurrence)) return { ok: false, error: 'recurrence must be daily, weekly or monthly.' };
+        const data = { description: clip(input.description, 200), assignee_id: assignee && assignee.id, project_id: project && project.id, project_label: project && jobLabel(project), due_date: input.due_date || undefined, recurrence: input.recurrence || undefined, task_type: TASK_TYPES.includes(input.task_type) ? input.task_type : undefined };
+        if (!Object.values(data).some(Boolean)) return { ok: false, error: 'Nothing to prefill.' };
+        return { ok: true, type: 'open_form', form, link: prefillLink('task', data), params: {}, warnings,
+          summary: `Open the new task form${data.description ? ` with "${data.description}"` : ''}${assignee ? ` for ${assignee.name}` : ''}${project ? ` on ${jobLabel(project)}` : ''}${data.due_date ? `, due ${fmtDay(data.due_date)}` : ''}` };
+      }
+      if (form === 'timesheet') {
+        if (input.date && !isDate(input.date)) return { ok: false, error: 'date must be a real date like 2026-10-14.' };
+        for (const k of ['start_time', 'end_time', 'break_start']) if (input[k] && !isTime(input[k])) return { ok: false, error: `${k} must be like 07:00.` };
+        let project = null;
+        if (input.project_id || input.job) { const r = await resolveJob(client, { id: input.project_id, text: input.job }); if (r.error) return { ok: false, error: r.error }; project = r.project; }
+        const category = input.category && TIME_CATEGORIES.includes(input.category) ? input.category : (project ? 'job' : undefined);
+        const date = input.date || sydneyToday();
+        const data = { date, start_time: input.start_time || undefined, end_time: input.end_time || undefined, category, project_id: project && project.id, project_label: project && jobLabel(project), break_minutes: input.unpaid_break_minutes ? Number(input.unpaid_break_minutes) : undefined, break_start: input.break_start || undefined };
+        return { ok: true, type: 'open_form', form, link: prefillLink('timesheet', data), params: {}, warnings,
+          summary: `Open your timesheet for ${fmtDay(date)}${data.start_time && data.end_time ? ` with ${data.start_time} to ${data.end_time}` : ''}${project ? ` on ${jobLabel(project)}` : category ? ` as ${CATEGORY_LABEL[category]} time` : ''}` };
+      }
+      return { ok: false, error: 'form must be new_quote, task or timesheet.' };
+    }
+
     if (type === 'add_timesheet') {
       const who = (input.staff_id || input.staff_name)
         ? await resolveStaff(client, { id: input.staff_id, name: input.staff_name }, 'person')
@@ -194,6 +247,7 @@ async function prepare(client, type, input, ctx = {}) {
       const note = input.note ? String(input.note).trim().slice(0, 150) : null;
       return {
         ok: true, type,
+        edit_link: forSomeoneElse ? undefined : prefillLink('timesheet', { date: input.date, start_time: input.start_time, end_time: input.end_time, category, project_id: project && project.id, project_label: project && jobLabel(project), break_minutes: breakMins || undefined, break_start: breakStart || undefined }),
         params: { staff_id: who.id, staff_name: who.name, date: input.date, start_time: input.start_time, end_time: input.end_time, category, project_id: project && project.id, break_minutes: breakMins, break_start: breakStart, note },
         summary: `Add a timesheet for ${who.name}: ${fmtDay(input.date)}, ${input.start_time} to ${input.end_time}, ${hoursText(worked)} worked${breakMins ? ` (${breakMins} min unpaid break at ${breakStart})` : ''}, ${project ? 'on ' + jobLabel(project) : CATEGORY_LABEL[category] + ' time'}`,
         warnings,
@@ -238,6 +292,7 @@ async function execute(client, userId, type, params) {
   const input = { ...(params || {}) };
   // A proposal's params hold the resolved ids; map them back onto what prepare()
   // takes so everything is checked again, by id, at the moment it is confirmed.
+  if (type === 'prefill_form') return { ok: false, error: 'That one is opened as a form, not run.' };
   let again;
   if (type === 'book_staff') again = { staff_id: input.staff_id, project_id: input.project_id, date: input.date, start_time: input.start_time, end_time: input.end_time, kind: input.kind, note: input.note };
   else if (type === 'create_task') again = { description: input.description, assignee_id: input.assignee_id, project_id: input.project_id, due_date: input.due_date, recurrence: input.recurrence, task_type: input.task_type };
@@ -370,6 +425,21 @@ const ACTION_TOOLS = [
       unpaid_break_minutes: { type: 'number' }, break_start: { type: 'string', description: 'HH:MM, default 12:00' },
       staff_name: { type: 'string', description: 'Only when adding for someone other than the person asking.' }, note: { type: 'string' },
     }, required: ['date', 'start_time', 'end_time'] },
+  },
+  {
+    name: 'prefill_form',
+    description: 'Prefill a form for the person to open and finish themselves. Use it for things you cannot create directly (a NEW QUOTE or job: form new_quote) and whenever they say they want to fill the rest in themselves (form task or timesheet). Put in everything you know and leave out what you do not. Nothing is saved: they get a button that opens the page with the details filled in. For a quote you can set the client, site address, job name, template, internal notes and a short scope brief; you cannot set stages or prices.',
+    input_schema: { type: 'object', properties: {
+      form: { type: 'string', enum: ['new_quote', 'task', 'timesheet'] },
+      name: { type: 'string', description: 'new_quote: the job / quote name, e.g. "14 Miller St - Switchboard upgrade".' },
+      template: { type: 'string', enum: Object.keys(QUOTE_TEMPLATES), description: 'new_quote: new_build, solar, quick_estimate, renovation or service_work.' },
+      client_name: { type: 'string' }, client_email: { type: 'string' }, client_phone: { type: 'string' }, client_address: { type: 'string' },
+      notes: { type: 'string', description: 'new_quote: internal notes.' }, scope_brief: { type: 'string', description: 'new_quote: a short description of the work, used to draft the scope of works.' },
+      description: { type: 'string', description: 'task: what needs doing.' }, assignee_name: { type: 'string' }, job: { type: 'string', description: 'task / timesheet: job number or words from its name/client.' },
+      due_date: { type: 'string' }, recurrence: { type: 'string', enum: ['daily', 'weekly', 'monthly'] }, task_type: { type: 'string', enum: ['prejob', 'onsite', 'handover'] },
+      date: { type: 'string', description: 'timesheet: YYYY-MM-DD' }, start_time: { type: 'string' }, end_time: { type: 'string' },
+      category: { type: 'string', enum: TIME_CATEGORIES }, unpaid_break_minutes: { type: 'number' }, break_start: { type: 'string' },
+    }, required: ['form'] },
   },
   {
     name: 'remove_booking',

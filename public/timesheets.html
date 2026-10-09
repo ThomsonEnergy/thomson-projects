@@ -154,7 +154,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=56"></script>
+  <script src="/js/supabase-client.js?v=57"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId = null;
@@ -608,7 +608,7 @@
 
     let dayBreak = { taken: null, start: '', minutes: 30, skipReason: '' };
 
-    async function openDayEditPanel(dateStr, staffId = myUserId, staffName = myProfileName) {
+    async function openDayEditPanel(dateStr, staffId = myUserId, staffName = myProfileName, prefill = null) {
       const windowStart = combineDateTime(dateStr, '00:00');
       const windowEnd = new Date(windowStart); windowEnd.setDate(windowEnd.getDate() + 1);
       const { data: existing, error } = await supabaseClient
@@ -625,6 +625,24 @@
       if (!dayBlocks.length) dayBlocks.push(blankDayBlock());
       dayRemovedBlocks = [];
 
+      // From the AI assistant: fill a block with what it knew. The person checks it and saves.
+      let prefillBreak = null;
+      if (prefill && staffId === myUserId) {
+        const isTime = (t) => typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+        const free = dayBlocks.find(b => !b.id && !b.clockInTime && !b.clockOutTime);
+        const blk = free || blankDayBlock();
+        if (!free) dayBlocks.push(blk);
+        if (isTime(prefill.start_time)) blk.clockInTime = prefill.start_time;
+        if (isTime(prefill.end_time)) blk.clockOutTime = prefill.end_time;
+        if (typeof prefill.project_id === 'string' && /^[0-9a-f-]{36}$/i.test(prefill.project_id)) {
+          blk.projectId = prefill.project_id; blk.projectLabel = String(prefill.project_label || '').slice(0, 120);
+        } else if (['quoting', 'admin', 'maintenance', 'tafe', 'training', 'other'].includes(prefill.category)) {
+          blk.timeCategory = prefill.category;
+        }
+        const bm = Number(prefill.break_minutes);
+        if (Number.isInteger(bm) && bm > 0 && bm <= 120) prefillBreak = { taken: true, start: isTime(prefill.break_start) ? prefill.break_start : '12:00', minutes: bm, skipReason: '' };
+      }
+
       // Break is a once-per-day question (same as clock-out) - pick up
       // whichever entry already carries an answer, if any.
       const breakSource = (existing || []).find(e => e.break_taken !== null && e.break_taken !== undefined);
@@ -632,6 +650,7 @@
         ? { taken: breakSource.break_taken, start: isoToTimePart(breakSource.break_start), minutes: breakSource.break_minutes || 30, skipReason: breakSource.break_skip_reason || '' }
         : { taken: null, start: '', minutes: 30, skipReason: '' };
 
+      if (prefillBreak) dayBreak = prefillBreak;
       const isSelf = staffId === myUserId;
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px; overflow-y:auto;';
@@ -1316,6 +1335,12 @@
       initDevModeEntriesCard(myRole);
       await refreshWeekViews();
       await loadTimesheetIssues();
+      const aiPf = aiPrefillRead('timesheet');
+      if (aiPf) {
+        aiPrefillClear();
+        const day = /^\d{4}-\d{2}-\d{2}$/.test(aiPf.date || '') ? aiPf.date : localDateStr(new Date());
+        openDayEditPanel(day, myUserId, myProfileName, aiPf);
+      }
       const fixParams = new URLSearchParams(window.location.search);
       if (fixParams.get('fix')) {
         const fixStaff = fixParams.get('staff') || myUserId;

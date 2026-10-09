@@ -3,6 +3,18 @@ const fetch = require('node-fetch');
 const { createClient } = require('@supabase/supabase-js');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { prepare, ACTION_TOOLS, ACTION_TOOL_NAMES } = require('./_shared/ai-actions');
+const { evaluate } = require('./_shared/calc');
+
+// Maths the model should not do in its head. Parsed by our own small calculator (no eval).
+const CALC_TOOL = {
+  name: 'calculate',
+  description: 'Calculate a maths expression exactly. Use it for any arithmetic that matters (quote totals, margins, GST, percentages, cable lengths, voltage drop, kW and kWh, STC numbers) instead of working it out yourself. Supports + - * / ^ ( ), postfix %, pi, e, and sqrt abs round(x,places) ceil floor min max pow mod ln log10 exp sin cos tan (radians, use rad(degrees)). Use * to multiply and write numbers without commas.',
+  input_schema: { type: 'object', properties: { expression: { type: 'string', description: 'e.g. 3 * 230 * sqrt(3)  or  (12500 + 4200) * 1.1' } }, required: ['expression'] },
+};
+
+// Anthropic's own web search, run on their side. Not available on every account, so a
+// request that is refused for it is retried without it (see the loop below).
+const WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: 4, user_location: { type: 'approximate', country: 'AU', region: 'New South Wales', city: 'Sydney', timezone: 'Australia/Sydney' } };
 
 // The actual "Ask AI" tool-calling loop, run as a Netlify background
 // function (up to 15 minutes) instead of inline in the request the
@@ -211,7 +223,9 @@ exports.handler = async (event) => {
 
 Use the query_database tool to look up real data - jobs/quotes, cost centres, invoices, purchase orders, stock/materials, prebuilds, clients, suppliers, timesheets, tasks, and more - rather than guessing or estimating numbers. Use search_knowledge_base for install guides, best practices, AUS standards, and other reference material staff have added - a big document (a full AUS standard can run hundreds of pages) only comes back as short excerpts around your search words, not the whole thing, so if the first search finds the right document but not the exact clause/detail you need, call read_knowledge_entry with that entry's id and a more specific search_term to dig further into it, rather than answering from the short excerpt alone or falling back to general knowledge. If a query or search comes back empty or errors, say so plainly instead of making something up - and for anything safety- or compliance-critical (clearances, ratings, labelling requirements), don't state a figure from general knowledge as if it were the standard's actual wording unless you've actually found and read it in the knowledge base.
 
-You can look things up (the tools above) and you can PROPOSE a small set of changes: create or change a task, book, move or remove someone on the Schedule, and add a timesheet entry (tools create_task, update_task, book_staff, move_booking, remove_booking, add_timesheet). Proposing is all you ever do: the person sees what you lined up with a Confirm button, and nothing happens until they press it, so never say a change is done, and say in one short line what you have lined up and that they need to confirm it. You cannot create or edit jobs, quotes, invoices, purchase orders, pay, or change or delete an existing timesheet, and you cannot delete anything except a Schedule booking: for those, point to the right page.
+You can look things up (the tools above), search the web (tool web_search) and do maths (tool calculate) and you can PROPOSE a small set of changes: create or change a task, book, move or remove someone on the Schedule, and add a timesheet entry (tools create_task, update_task, book_staff, move_booking, remove_booking, add_timesheet). You can also PREFILL a form for the person to open and finish themselves (tool prefill_form): a new quote or job (client, address, name, template, notes, a scope brief), a task, or a timesheet. Use it for a new quote, or when they say they want to finish it themselves. Fill in everything you know from the chat and leave out what you do not; never invent contact details. Proposing is all you ever do: the person sees what you lined up with a Confirm button, and nothing happens until they press it, so never say a change is done, and say in one short line what you have lined up and that they need to confirm it. You cannot create or edit jobs, quotes, invoices, purchase orders, pay, or change or delete an existing timesheet, and you cannot delete anything except a Schedule booking: for those, point to the right page.
+- Web search is for things outside the app: product specs and datasheets, suppliers and current prices, regulation or standards changes, how-tos, and recommendations or comparisons. Check the Knowledge Base first for AUS standards and install guides. When you recommend something, give a short reason and say where it came from (the site names). Prices and stock from the web are indicative, say so. Never put a client's name, address, job details or any prices or pay from the app into a web search.
+- Maths: use the calculate tool for any arithmetic that matters rather than doing it in your head, and show the working in one line with the answer. For electrical design numbers (voltage drop, cable sizing, load), say they are a quick check and the licensed electrician signs off the final design.
 - Only propose what the person actually asked for. If the request is unclear (which Casey? which job? what day?), ask one short question instead of guessing.
 - Timesheets feed payroll: only add time for days that have already happened, and always have the date, the start and finish times, and the job or kind of time (and any unpaid break) from the person. Never guess any of them: ask one short question. "Add" means add; if the day already has time that overlaps, tell them it has to be changed in Timesheets.
 - Work out dates yourself from today's date above ("next Wednesday", "every Wednesday" means the first upcoming Wednesday with recurrence weekly). Look up the ids you need (a task in job_tasks, a booking in schedule_assignments) with query_database first, and check you have the right one.
@@ -231,24 +245,30 @@ Personality: you are a tough, cheeky tradie robot in a hard hat and a black-and-
 
     let finalText = '';
     const proposals = [];
-    for (let i = 0; i < 12 && !finalText; i++) {
+    let useWebSearch = true;
+    for (let i = 0; i < 14 && !finalText; i++) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
         body: JSON.stringify({
           model: 'claude-sonnet-5',
-          max_tokens: 1024,
+          max_tokens: 2048,
           system: systemPrompt,
-          tools: [QUERY_TOOL, KB_TOOL, READ_ENTRY_TOOL, ...ACTION_TOOLS],
+          tools: [QUERY_TOOL, KB_TOOL, READ_ENTRY_TOOL, CALC_TOOL, ...ACTION_TOOLS, ...(useWebSearch ? [WEB_SEARCH_TOOL] : [])],
           messages: anthropicMessages,
         }),
       });
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
+        // web search not switched on for this account: carry on without it rather than fail the chat
+        if (useWebSearch && res.status >= 400 && res.status < 500 && /web_search|web search|tool/i.test(errText)) { useWebSearch = false; i--; continue; }
         throw new Error(`Anthropic API error: ${res.status} ${errText}`);
       }
       const data = await res.json();
       anthropicMessages.push({ role: 'assistant', content: data.content });
+
+      // a long web search can hand the turn back half way: send it straight back to carry on
+      if (data.stop_reason === 'pause_turn') continue;
 
       const toolUses = data.content.filter((b) => b.type === 'tool_use');
       if (!toolUses.length) {
@@ -259,6 +279,12 @@ Personality: you are a tough, cheeky tradie robot in a hard hat and a black-and-
       const toolResults = [];
       for (const tu of toolUses) {
         let resultContent;
+        if (tu.name === 'calculate') {
+          let r;
+          try { r = 'Result: ' + evaluate(tu.input && tu.input.expression); } catch (err) { r = 'Error: ' + err.message; }
+          toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: r });
+          continue;
+        }
         if (ACTION_TOOL_NAMES.includes(tu.name)) {
           // Prepared and described here, but never carried out: the person confirms it in the chat.
           if (proposals.length >= 5) {
@@ -267,8 +293,10 @@ Personality: you are a tough, cheeky tradie robot in a hard hat and a black-and-
             const prepared = await prepare(userClient, tu.name, tu.input, { userId: userData.user.id });
             if (!prepared.ok) resultContent = 'Could not prepare that change: ' + prepared.error;
             else {
-              proposals.push({ id: require('crypto').randomUUID(), type: prepared.type, params: prepared.params, summary: prepared.summary, warnings: prepared.warnings || [], destructive: !!prepared.destructive });
-              resultContent = 'Proposed. The person will see: "' + prepared.summary + '"' + ((prepared.warnings || []).length ? ' (warnings: ' + prepared.warnings.join(' ') + ')' : '') + ' with a Confirm button. Nothing has been done yet.';
+              proposals.push({ id: require('crypto').randomUUID(), type: prepared.type, form: prepared.form, params: prepared.params, summary: prepared.summary, warnings: prepared.warnings || [], destructive: !!prepared.destructive, link: prepared.link, edit_link: prepared.edit_link });
+              resultContent = prepared.type === 'open_form'
+                ? 'Prepared. The person will see: "' + prepared.summary + '" with an Open button that opens the form with those details filled in. Nothing has been saved. Tell them in one short line what you filled in and what is left for them.'
+                : 'Proposed. The person will see: "' + prepared.summary + '"' + ((prepared.warnings || []).length ? ' (warnings: ' + prepared.warnings.join(' ') + ')' : '') + ' with a Confirm button. Nothing has been done yet.';
             }
           }
           toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: resultContent });

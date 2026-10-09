@@ -1856,7 +1856,7 @@ function renderAIChatWidget() {
 
   function renderMessages() {
     if (!_aiChatHistory.length) {
-      messagesEl.innerHTML = `<p class="subtitle" style="margin:0;">Hi, I'm ${escapeHtml(aiAssistantName())}. Ask me about a job, a quote, stock levels, what's overdue - anything in the app. I can also line up small changes for you to OK, like a task, a schedule booking or a timesheet.</p>`;
+      messagesEl.innerHTML = `<p class="subtitle" style="margin:0;">Hi, I'm ${escapeHtml(aiAssistantName())}. Ask me about a job, a quote, stock levels, what's overdue - anything in the app. I can also line up small changes for you to OK (a task, a schedule booking, a timesheet), fill in a new quote for you to finish, search the web and do the sums.</p>`;
       return;
     }
     messagesEl.innerHTML = _aiChatHistory.map((m, mi) => `
@@ -1962,12 +1962,42 @@ function aiProposalCardHtml(p, mi, pi) {
   if (p.state === 'done') foot = `<div style="color:#3fb97a; font-size:12px; margin-top:6px;">${escapeHtml(p.result || 'Done.')}</div>`;
   else if (p.state === 'failed') foot = `<div style="color:var(--red); font-size:12px; margin-top:6px;">${escapeHtml(p.result || 'That did not work.')}</div>`;
   else if (p.state === 'skipped') foot = `<div class="subtitle" style="font-size:12px; margin-top:6px;">Skipped, nothing was changed.</div>`;
-  else foot = `<div style="display:flex; gap:6px; margin-top:8px;">
+  else if (p.type === 'open_form') foot = aiSafeLink(p.link)
+    ? `<div style="margin-top:8px;"><a class="btn" href="${escapeHtml(p.link)}" style="font-size:12px; padding:6px 14px; display:inline-block; text-decoration:none;">Open it to finish</a></div>` : '';
+  else foot = `<div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; align-items:center;">
       <button type="button" data-ai-act="do" data-m="${mi}" data-p="${pi}" style="font-size:12px; padding:5px 12px;">${p.destructive ? 'Yes, remove it' : 'Do it'}</button>
-      <button type="button" class="secondary" data-ai-act="skip" data-m="${mi}" data-p="${pi}" style="font-size:12px; padding:5px 12px;">Skip</button></div>`;
+      <button type="button" class="secondary" data-ai-act="skip" data-m="${mi}" data-p="${pi}" style="font-size:12px; padding:5px 12px;">Skip</button>
+      ${aiSafeLink(p.edit_link) ? `<a href="${escapeHtml(p.edit_link)}" class="link-quiet" style="font-size:12px; margin-left:4px;">Edit it first</a>` : ''}</div>`;
   return `<div style="max-width:85%; margin:-2px 0 10px; padding:9px 11px; border-radius:10px; border:1px dashed var(--accent); background:var(--surface);">
-    <div style="font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted);">${p.state === 'pending' ? 'Waiting for your OK' : 'Change'}</div>
+    <div style="font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted);">${p.type === 'open_form' ? 'Filled in for you' : p.state === 'pending' ? 'Waiting for your OK' : 'Change'}</div>
     <div style="font-size:13px; margin-top:2px;">${escapeHtml(p.summary || '')}</div>${warn}${foot}</div>`;
+}
+
+// Only links to our own form pages carrying a prefill are ever shown as buttons.
+function aiSafeLink(link) {
+  return typeof link === 'string' && /^\/[a-z-]+\.html\?ai_prefill=[A-Za-z0-9_-]+$/.test(link);
+}
+
+// The details an assistant card passed to a page (?ai_prefill=...), or null. Pages
+// only ever put these into form fields (never into HTML), and the person still
+// has to finish and save the form themselves.
+function aiPrefillRead(expectedForm) {
+  try {
+    const raw = new URLSearchParams(window.location.search).get('ai_prefill');
+    if (!raw) return null;
+    const b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)), c => c.charCodeAt(0));
+    const data = JSON.parse(new TextDecoder().decode(bytes));
+    if (!data || typeof data !== 'object' || (expectedForm && data.form !== expectedForm)) return null;
+    return data;
+  } catch (e) { return null; }
+}
+// Takes the prefill out of the address bar so a reload does not redo it.
+function aiPrefillClear() {
+  try {
+    const u = new URL(window.location.href); u.searchParams.delete('ai_prefill');
+    window.history.replaceState({}, '', u.pathname + (u.search || '') + u.hash);
+  } catch (e) { /* not important */ }
 }
 
 // What the model is told about an earlier turn: its words, plus how each change it
@@ -1976,7 +2006,9 @@ function aiMessageForApi(m) {
   let content = m.content;
   if (m.proposals && m.proposals.length) {
     const outcome = { done: 'DONE', failed: 'FAILED', skipped: 'SKIPPED by the user', pending: 'NOT confirmed yet, nothing has been changed' };
-    content += '\n[' + m.proposals.map(p => `Proposed: ${p.summary} -> ${outcome[p.state] || p.state}${p.state === 'failed' && p.result ? ' (' + p.result + ')' : ''}`).join('; ') + ']';
+    content += '\n[' + m.proposals.map(p => p.type === 'open_form'
+      ? `Prefilled form offered: ${p.summary} (nothing saved; they finish it themselves)`
+      : `Proposed: ${p.summary} -> ${outcome[p.state] || p.state}${p.state === 'failed' && p.result ? ' (' + p.result + ')' : ''}`).join('; ') + ']';
   }
   return { role: m.role, content };
 }

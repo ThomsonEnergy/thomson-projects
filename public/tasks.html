@@ -52,7 +52,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=56"></script>
+  <script src="/js/supabase-client.js?v=57"></script>
   <script src="/js/theme.js"></script>
   <script>
     function taskRow(task, showPickUp) {
@@ -126,7 +126,7 @@
     // Job is optional here (unlike the "+ Add task" on a project's own
     // page) - leave it blank for an office/general task like "take the
     // bins out" that isn't tied to any job.
-    async function openAddTaskPanel() {
+    async function openAddTaskPanel(prefill) {
       const { data: { user } } = await supabaseClient.auth.getUser();
       const { data: staff } = await supabaseClient.from('profiles').select('id, full_name').order('full_name');
       const overlay = document.createElement('div');
@@ -200,6 +200,28 @@
 
       let selectedJobId = null;
       let jobSearchTimeout;
+      if (prefill) {
+        // from the AI assistant: fill in what it knew, the person finishes and adds it
+        if (typeof prefill.description === 'string') overlay.querySelector('#at-desc').value = prefill.description;
+        if (['prejob', 'onsite'].includes(prefill.task_type)) overlay.querySelector('#at-task-type').value = prefill.task_type;
+        if (prefill.assignee_id && (staff || []).some(s => s.id === prefill.assignee_id)) {
+          overlay.querySelector('#at-assign-type').value = 'person';
+          overlay.querySelector('#at-assign-type').dispatchEvent(new Event('change'));
+          overlay.querySelector('#at-person').value = prefill.assignee_id;
+        }
+        if (typeof prefill.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(prefill.due_date)) overlay.querySelector('#at-due-date').value = prefill.due_date;
+        if (['daily', 'weekly', 'monthly'].includes(prefill.recurrence)) {
+          overlay.querySelector('#at-recurring').checked = true;
+          overlay.querySelector('#at-recurring').dispatchEvent(new Event('change'));
+          overlay.querySelector('#at-recurrence').value = prefill.recurrence;
+        }
+        if (typeof prefill.project_id === 'string' && /^[0-9a-f-]{36}$/i.test(prefill.project_id)) {
+          selectedJobId = prefill.project_id;
+          overlay.querySelector('#at-job-search').value = String(prefill.project_label || '').slice(0, 120);
+          overlay.querySelector('#at-job-selected').textContent = prefill.project_label ? 'Selected: ' + String(prefill.project_label).slice(0, 120) : '';
+          overlay.querySelector('#at-required-row').style.display = 'flex';
+        }
+      }
       overlay.querySelector('#at-job-search').addEventListener('input', (e) => {
         clearTimeout(jobSearchTimeout);
         selectedJobId = null;
@@ -276,8 +298,10 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
-      document.getElementById('add-task-btn').addEventListener('click', openAddTaskPanel);
+      document.getElementById('add-task-btn').addEventListener('click', () => openAddTaskPanel());
       await loadTasks();
+      const aiPf = aiPrefillRead('task');
+      if (aiPf) { aiPrefillClear(); openAddTaskPanel(aiPf); }
     })();
   </script>
 </body>

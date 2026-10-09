@@ -250,7 +250,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=56"></script>
+  <script src="/js/supabase-client.js?v=57"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -1439,7 +1439,8 @@
         await loadForEdit();
       } else {
         const params = new URLSearchParams(window.location.search);
-        const requestedTemplate = params.get('template') || 'new_build';
+        const aiPf = aiPrefillRead('new_quote');
+        const requestedTemplate = (aiPf && TEMPLATE_INFO[aiPf.template] ? aiPf.template : null) || params.get('template') || 'new_build';
         applyTemplate(requestedTemplate, true);
         document.getElementById('p-terms').value = companySettings.default_terms || '';
         ['Site Power', 'Rough In', 'Fit Off', 'Finishing Touches'].forEach(n => addRow({ name: n }));
@@ -1473,6 +1474,21 @@
 
             offerLeadAttachmentImport(prefillLeadId);
           }
+        }
+
+        // Filled in by the AI assistant from the chat: put what it knows into the form for
+        // the person to check and finish. Nothing is saved until they save the quote.
+        if (aiPf) {
+          const setIf = (id, v) => { if (typeof v === 'string' && v) document.getElementById(id).value = v; };
+          setIf('p-name', aiPf.name); setIf('p-client', aiPf.client_name); setIf('p-email', aiPf.client_email);
+          setIf('p-phone', aiPf.client_phone); setIf('p-address', aiPf.client_address); setIf('p-notes', aiPf.notes); setIf('p-brief', aiPf.brief);
+          const banner = document.createElement('div');
+          banner.className = 'success-box';
+          banner.style.cssText = 'margin-bottom:14px;';
+          banner.textContent = 'Filled in from your chat with the assistant. Check it over, add the stages and prices, then save. Nothing is saved yet.';
+          const pageTitle = document.getElementById('page-title');
+          pageTitle.insertAdjacentElement('afterend', banner);
+          aiPrefillClear();
         }
       }
     })();
