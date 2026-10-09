@@ -11,6 +11,8 @@
 // Table-based inline-styled HTML on purpose: email clients ignore most
 // modern CSS.
 
+const fetch = require('node-fetch');
+
 const NAVY = '#0b0b6b';
 const BADGE = '#4a6285';
 
@@ -92,6 +94,27 @@ function plainTextToHtml(text) {
   return `<div style="font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:1.5; color:#222222;">${esc(text).replace(/\r?\n/g, '<br/>')}</div>`;
 }
 
+// Gmail fetches signature images through its own proxy, which gives up on
+// big files (a 5MB, 20000px logo shows as a broken image in Gmail while
+// Outlook copes). So the uploaded logo is only used when it is small enough;
+// otherwise the app's own small wordmark is used instead.
+const MAX_EMAIL_LOGO_BYTES = 1024 * 1024;
+
+function fallbackLogoUrl() {
+  const base = (process.env.URL || 'https://thomsonprojects.netlify.app').replace(/\/+$/, '');
+  return `${base}/icons/logo-wordmark-full.png`;
+}
+
+async function emailSafeLogoUrl(url) {
+  if (!url) return '';
+  try {
+    const res = await fetch(url, { method: 'HEAD', timeout: 4000 });
+    const len = Number(res.headers.get('content-length'));
+    if (res.ok && len > 0 && len <= MAX_EMAIL_LOGO_BYTES) return url;
+  } catch (e) { /* fall through to the small logo */ }
+  return fallbackLogoUrl();
+}
+
 // Loads the signed-in staff member's profile plus company details and
 // builds their signature - shared by the send path and the Settings preview
 // so what's previewed is exactly what gets sent.
@@ -104,6 +127,7 @@ async function signatureForUser(supabaseAdmin, user) {
       .select('company_name, phone, address, website, licenses, logo_url, social_facebook, social_instagram, social_linkedin')
       .eq('id', 1).single(),
   ]);
+  const logo_url = await emailSafeLogoUrl(company?.logo_url);
   const sig = buildSignature({
     fullName: profile?.full_name || 'Thomson Energy Sales',
     jobTitle: profile?.job_title,
@@ -112,8 +136,8 @@ async function signatureForUser(supabaseAdmin, user) {
     email: user.email,
     photoUrl: profile?.photo_url,
     includePhoto: profile?.email_signature_include_photo,
-  }, company || {});
+  }, { ...(company || {}), logo_url });
   return { ...sig, fullName: profile?.full_name };
 }
 
-module.exports = { buildSignature, plainTextToHtml, signatureForUser };
+module.exports = { buildSignature, plainTextToHtml, signatureForUser, emailSafeLogoUrl };
