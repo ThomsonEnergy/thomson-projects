@@ -1856,13 +1856,14 @@ function renderAIChatWidget() {
 
   function renderMessages() {
     if (!_aiChatHistory.length) {
-      messagesEl.innerHTML = `<p class="subtitle" style="margin:0;">Hi, I'm ${escapeHtml(aiAssistantName())}. Ask me about a job, a quote, stock levels, what's overdue - anything in the app. I'm read-only, so I can't make changes for you.</p>`;
+      messagesEl.innerHTML = `<p class="subtitle" style="margin:0;">Hi, I'm ${escapeHtml(aiAssistantName())}. Ask me about a job, a quote, stock levels, what's overdue - anything in the app. I can also line up small changes for you to OK, like a task or a schedule booking.</p>`;
       return;
     }
-    messagesEl.innerHTML = _aiChatHistory.map(m => `
+    messagesEl.innerHTML = _aiChatHistory.map((m, mi) => `
       <div style="display:flex; ${m.role === 'user' ? 'justify-content:flex-end;' : 'justify-content:flex-start;'} margin-bottom:8px;">
         <div style="max-width:85%; padding:8px 11px; border-radius:10px; white-space:pre-wrap; ${m.role === 'user' ? 'background:var(--accent); color:#fff;' : 'background:var(--surface-2); border:1px solid var(--border);'}">${escapeHtml(m.content)}</div>
-      </div>`).join('');
+      </div>
+      ${(m.proposals || []).map((p, pi) => aiProposalCardHtml(p, mi, pi)).join('')}`).join('');
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
   renderMessages();
@@ -1895,7 +1896,7 @@ function renderAIChatWidget() {
       const startRes = await fetch('/.netlify/functions/ai-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ messages: _aiChatHistory.slice(-20) }),
+        body: JSON.stringify({ messages: _aiChatHistory.slice(-20).map(aiMessageForApi) }),
       });
       const startData = await startRes.json();
       if (!startRes.ok || !startData.ok) throw new Error(startData.error || 'Something went wrong.');
@@ -1904,7 +1905,7 @@ function renderAIChatWidget() {
       // knowledge base, dig into a specific document, maybe check live
       // data too) is several chained calls and was timing out held open as
       // one request. Poll for the result instead.
-      let answer = null;
+      let answer = null, proposals = [];
       for (let i = 0; i < 60 && answer === null; i++) {
         await new Promise((r) => setTimeout(r, 1500));
         const pollRes = await fetch('/.netlify/functions/ai-chat-status', {
@@ -1914,11 +1915,11 @@ function renderAIChatWidget() {
         });
         const pollData = await pollRes.json();
         if (!pollRes.ok || !pollData.ok) throw new Error(pollData.error || 'Lost track of that answer.');
-        if (pollData.status === 'done') answer = pollData.answer;
+        if (pollData.status === 'done') { answer = pollData.answer; proposals = (pollData.proposals || []).map(p => ({ ...p, state: 'pending' })); }
         else if (pollData.status === 'error') throw new Error(pollData.error || 'Something went wrong.');
       }
       if (answer === null) throw new Error("This one's taking a while - try asking again in a moment.");
-      _aiChatHistory.push({ role: 'assistant', content: answer });
+      _aiChatHistory.push({ role: 'assistant', content: answer, ...(proposals.length ? { proposals } : {}) });
     } catch (err) {
       _aiChatHistory.push({ role: 'assistant', content: `Sorry, couldn't get an answer - ${err.message}` });
     }
@@ -1929,6 +1930,55 @@ function renderAIChatWidget() {
   }
   sendBtn.addEventListener('click', send);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+
+  // Confirm / Skip on a change the assistant has lined up. Nothing is changed
+  // until Confirm is pressed; it then runs as you, under your own permissions.
+  messagesEl.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-ai-act]');
+    if (!btn) return;
+    const p = ((_aiChatHistory[Number(btn.dataset.m)] || {}).proposals || [])[Number(btn.dataset.p)];
+    if (!p || p.state !== 'pending') return;
+    if (btn.dataset.aiAct === 'skip') { p.state = 'skipped'; _aiChatSaveHistory(); renderMessages(); return; }
+    btn.disabled = true; btn.textContent = 'Doing it...';
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/ai-run-action', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ type: p.type, params: p.params }),
+      });
+      const data = await res.json().catch(() => ({ ok: false, error: 'Unexpected reply from the server.' }));
+      if (res.ok && data.ok) { p.state = 'done'; p.result = data.message || 'Done.'; }
+      else { p.state = 'failed'; p.result = data.error || 'That did not work.'; }
+    } catch (err) { p.state = 'failed'; p.result = err.message; }
+    _aiChatSaveHistory();
+    renderMessages();
+  });
+}
+
+// A change the assistant has proposed, shown as a card with Confirm / Skip.
+function aiProposalCardHtml(p, mi, pi) {
+  const warn = (p.warnings || []).map(w => `<div style="color:#d9a23b; font-size:12px; margin-top:4px;">Heads up: ${escapeHtml(w)}</div>`).join('');
+  let foot;
+  if (p.state === 'done') foot = `<div style="color:#3fb97a; font-size:12px; margin-top:6px;">${escapeHtml(p.result || 'Done.')}</div>`;
+  else if (p.state === 'failed') foot = `<div style="color:var(--red); font-size:12px; margin-top:6px;">${escapeHtml(p.result || 'That did not work.')}</div>`;
+  else if (p.state === 'skipped') foot = `<div class="subtitle" style="font-size:12px; margin-top:6px;">Skipped, nothing was changed.</div>`;
+  else foot = `<div style="display:flex; gap:6px; margin-top:8px;">
+      <button type="button" data-ai-act="do" data-m="${mi}" data-p="${pi}" style="font-size:12px; padding:5px 12px;">${p.destructive ? 'Yes, remove it' : 'Do it'}</button>
+      <button type="button" class="secondary" data-ai-act="skip" data-m="${mi}" data-p="${pi}" style="font-size:12px; padding:5px 12px;">Skip</button></div>`;
+  return `<div style="max-width:85%; margin:-2px 0 10px; padding:9px 11px; border-radius:10px; border:1px dashed var(--accent); background:var(--surface);">
+    <div style="font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted);">${p.state === 'pending' ? 'Waiting for your OK' : 'Change'}</div>
+    <div style="font-size:13px; margin-top:2px;">${escapeHtml(p.summary || '')}</div>${warn}${foot}</div>`;
+}
+
+// What the model is told about an earlier turn: its words, plus how each change it
+// proposed turned out (so it knows what really happened and what is still waiting).
+function aiMessageForApi(m) {
+  let content = m.content;
+  if (m.proposals && m.proposals.length) {
+    const outcome = { done: 'DONE', failed: 'FAILED', skipped: 'SKIPPED by the user', pending: 'NOT confirmed yet, nothing has been changed' };
+    content += '\n[' + m.proposals.map(p => `Proposed: ${p.summary} -> ${outcome[p.state] || p.state}${p.state === 'failed' && p.result ? ' (' + p.result + ')' : ''}`).join('; ') + ']';
+  }
+  return { role: m.role, content };
 }
 
 // Shared job search - by job number, name, client name, or site address.

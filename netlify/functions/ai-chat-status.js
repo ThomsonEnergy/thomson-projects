@@ -27,7 +27,7 @@ exports.handler = async (event) => {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
 
-    const { data, error } = await userClient.from('ai_chat_jobs').select('status, answer, error').eq('id', job_id).maybeSingle();
+    const { data, error } = await userClient.from('ai_chat_jobs').select('status, answer, error, proposals').eq('id', job_id).maybeSingle();
     if (error) throw error;
     if (!data) return { statusCode: 404, body: JSON.stringify({ ok: false, error: 'Job not found.' }) };
 
