@@ -1785,8 +1785,8 @@ function aiRobotSvg(size) {
 <path d="M13.6 44.2 H24.2 M23.8 44.2 H34.4" stroke="#FFCC33" stroke-width="1.4" fill="none"/>
 <path d="M14.6 28 L8.6 34.2" stroke-width="5.8" fill="none"/><path d="M14.6 28 L8.6 34.2" stroke="#aab4c4" stroke-width="3.2" fill="none"/>
 <path d="M33.4 28 L38.6 22.8" stroke-width="5.8" fill="none"/><path d="M33.4 28 L38.6 22.8" stroke="#aab4c4" stroke-width="3.2" fill="none"/>
-<rect x="13.4" y="23.6" width="21.2" height="14.6" rx="3.2" fill="#1f6fc2"/>
-<path d="M19.6 23.6 L24 28 L20.6 28.6 Z" fill="#4aa0ec" stroke-width="1.1"/><path d="M28.4 23.6 L24 28 L27.4 28.6 Z" fill="#4aa0ec" stroke-width="1.1"/><text x="24" y="32.4" font-size="4.6" font-weight="900" fill="#fff" stroke="none" text-anchor="middle" font-family="Arial Black, Arial, sans-serif">TE</text>
+<rect x="13.4" y="23.6" width="21.2" height="14.6" rx="3.2" fill="#2a2a31"/><rect x="15" y="24.6" width="1.5" height="9.4" fill="#FFCC33" stroke="none"/><rect x="31.5" y="24.6" width="1.5" height="9.4" fill="#FFCC33" stroke="none"/>
+<path d="M19.6 23.6 L24 28 L20.6 28.6 Z" fill="#4a4a55" stroke-width="1.1"/><path d="M28.4 23.6 L24 28 L27.4 28.6 Z" fill="#4a4a55" stroke-width="1.1"/><text x="24" y="32.4" font-size="4.6" font-weight="900" fill="#FFCC33" stroke="none" text-anchor="middle" font-family="Arial Black, Arial, sans-serif">TE</text>
 <rect x="13.4" y="34" width="21.2" height="3" fill="#2b2f38" stroke-width="1.1"/><rect x="22.2" y="33.6" width="3.6" height="3.8" rx="0.6" fill="#FFCC33" stroke-width="1"/>
 <rect x="20.4" y="21" width="7.2" height="3" rx="1" fill="#8a96a8"/>
 <rect x="8.4" y="12.6" width="2.8" height="5.4" rx="1" fill="#8a96a8"/><rect x="36.8" y="12.6" width="2.8" height="5.4" rx="1" fill="#8a96a8"/>
@@ -1798,8 +1798,8 @@ function aiRobotSvg(size) {
 <path d="M11.4 9.4 Q11.4 1.8 24 1.8 Q36.6 1.8 36.6 9.4 Z" fill="#FFCC33"/>
 <rect x="22.4" y="1.8" width="3.2" height="7.6" rx="0.8" fill="#F0B400" stroke-width="1.1"/>
 <rect x="8" y="8" width="32" height="3" rx="1.5" fill="#FFCC33"/>
-<path d="M14.8 27.6 L11.8 30.8" stroke-width="7.4" fill="none"/><path d="M14.8 27.6 L11.8 30.8" stroke="#1f6fc2" stroke-width="5.4" fill="none"/>
-<path d="M33.2 27.6 L36 24.8" stroke-width="7.4" fill="none"/><path d="M33.2 27.6 L36 24.8" stroke="#1f6fc2" stroke-width="5.4" fill="none"/>
+<path d="M14.8 27.6 L11.8 30.8" stroke-width="7.4" fill="none"/><path d="M14.8 27.6 L11.8 30.8" stroke="#2a2a31" stroke-width="5.4" fill="none"/>
+<path d="M33.2 27.6 L36 24.8" stroke-width="7.4" fill="none"/><path d="M33.2 27.6 L36 24.8" stroke="#2a2a31" stroke-width="5.4" fill="none"/><path d="M10.4 28.4 L14.4 32" stroke="#FFCC33" stroke-width="1.4" fill="none"/><path d="M33.4 24.2 L36.6 27.4" stroke="#FFCC33" stroke-width="1.4" fill="none"/>
 <circle cx="7.6" cy="36.2" r="3.5" fill="#c9d1dd"/><circle cx="40" cy="21" r="3.5" fill="#c9d1dd"/>
 <path d="M5.4 35.4 H9.8 M38 20.2 H42.2" stroke-width="0.8" fill="none"/>
 <path d="M44 3.2 L37.4 13 H41.4 L39.4 19.6 L46.4 10.6 H42.4 Z" fill="#FFCC33" stroke-width="1.2"/></g></svg>`;
