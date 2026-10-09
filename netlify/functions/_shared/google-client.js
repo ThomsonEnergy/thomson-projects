@@ -66,4 +66,29 @@ async function gmailRequest(path, { method = 'GET', body = null } = {}) {
   return json;
 }
 
-module.exports = { getGoogleAccessToken, gmailRequest, GMAIL_MAILBOX };
+// Sends a finished RFC 822 message (a string or Buffer) through Gmail's upload endpoint,
+// which takes messages up to 35 MB (the plain JSON endpoint is far smaller) - used when
+// there are attachments. Pass threadId to keep a reply in its conversation.
+async function gmailUploadSend(rfc822, threadId) {
+  const token = await getGoogleAccessToken();
+  const boundary = `te_up_${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(threadId ? { threadId } : {})}\r\n--${boundary}\r\nContent-Type: message/rfc822\r\n\r\n`, 'utf-8'),
+    Buffer.isBuffer(rfc822) ? rfc822 : Buffer.from(rfc822, 'utf-8'),
+    Buffer.from(`\r\n--${boundary}--`, 'utf-8'),
+  ]);
+  const res = await fetch(`https://gmail.googleapis.com/upload/gmail/v1/users/${encodeURIComponent(GMAIL_MAILBOX)}/messages/send?uploadType=multipart`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  const text = await res.text();
+  let json; try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+  if (!res.ok) {
+    console.error('Gmail upload send error, full response:', JSON.stringify(json));
+    throw new Error(json?.error?.message || `Gmail API error ${res.status}`);
+  }
+  return json;
+}
+
+module.exports = { getGoogleAccessToken, gmailRequest, gmailUploadSend, GMAIL_MAILBOX };

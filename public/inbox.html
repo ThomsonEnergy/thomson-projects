@@ -15,7 +15,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   .inbox-layout { display:flex; gap:16px; align-items:flex-start; }
-  .inbox-thread-list { width:340px; flex-shrink:0; max-height:calc(100vh - 220px); overflow-y:auto; }
+  .inbox-thread-list { width:400px; flex-shrink:0; max-height:calc(100vh - 220px); overflow-y:auto; }
   .inbox-thread-item { display:block; padding:12px; border-bottom:1px solid var(--border); cursor:pointer; }
   .inbox-thread-item:hover { background:var(--surface-2); }
   .inbox-thread-item.active { background:var(--surface-2); border-left:3px solid var(--accent); }
@@ -53,7 +53,7 @@
     </div>
   </div>
 
-  <div class="wrap">
+  <div class="wrap wide">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
       <h1 style="margin:0;">Inbox</h1>
       <div>
@@ -75,7 +75,8 @@
 
   <script src="/js/supabase-client.js?v=57"></script>
   <script src="/js/theme.js"></script>
-  <script src="/js/email-view.js?v=1"></script>
+  <script src="/js/email-view.js?v=2"></script>
+  <script src="/js/email-compose.js?v=1"></script>
   <script>
     function timeAgo(dateStr) {
       if (!dateStr) return '';
@@ -181,17 +182,23 @@
         </div>`;
     }
 
-    // One attachment (or inline picture) of an email, fetched from Gmail when asked for.
-    async function fetchEmailAttachment(emailId, partId) {
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      const res = await fetch('/.netlify/functions/get-email-attachment', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ email_id: emailId, part_id: partId }),
-      });
-      const text = await res.text();
-      let data; try { data = JSON.parse(text); } catch (e) { throw new Error('Could not get that file (status ' + res.status + '). Try again.'); }
-      if (!data.ok) throw new Error(data.error || 'Could not get that file.');
-      return data;
+    // The jobs this conversation is tagged to, as chips, plus "Tag to a job".
+    async function loadThreadTags(threadId) {
+      const el = document.getElementById('thread-tags');
+      if (!el) return;
+      const { data: links } = await supabaseClient.from('email_job_links')
+        .select('id, kind, note, projects(id, name, job_number, quote_number)').eq('thread_id', threadId);
+      el.innerHTML = (links || []).map(l => `<span style="font-size:12px; padding:3px 10px; border:1px solid var(--accent); border-radius:20px; display:inline-flex; gap:6px; align-items:center;">
+          <a href="/project.html?id=${l.projects.id}&tab=emails" class="link-quiet" title="${escapeHtml(l.note || '')}">${escapeHtml(projectRef(l.projects))} &middot; ${EMAIL_KINDS[l.kind] || 'Other'}</a>
+          <a href="#" data-untag="${l.id}" title="Remove this tag">&times;</a></span>`).join('')
+        + '<button type="button" class="secondary" id="tag-email-btn" style="font-size:12px; padding:4px 10px;">+ Tag to a job</button>';
+      el.querySelectorAll('[data-untag]').forEach(a => a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        if (!confirm('Remove this tag? The email itself is not deleted.')) return;
+        await supabaseClient.from('email_job_links').delete().eq('id', a.dataset.untag);
+        loadThreadTags(threadId);
+      }));
+      document.getElementById('tag-email-btn').addEventListener('click', () => openTagEmailModal({ threadId, onSaved: () => loadThreadTags(threadId) }));
     }
 
     async function openThread(threadId) {
@@ -211,16 +218,20 @@
 
       detailEl.innerHTML = `
         <h2 style="margin:0 0 4px;">${escapeHtml(thread.subject || '(no subject)')}</h2>
-        ${thread.clients?.name ? `<p class="subtitle" style="margin:0 0 14px;">${escapeHtml(thread.clients.name)}</p>` : ''}
+        ${thread.clients?.name ? `<p class="subtitle" style="margin:0 0 6px;">${escapeHtml(thread.clients.name)}</p>` : ''}
+        <div id="thread-tags" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 14px;"></div>
         <div id="thread-messages">${(emails || []).map(m => messageHtml(m, user.id, staffName)).join('')}</div>
         <div class="card" style="margin-top:16px;">
           <label style="margin-top:0">Reply</label>
           <textarea id="reply-body" style="min-height:120px;" placeholder="Type your reply..."></textarea>
+          <div id="reply-attach" style="margin-top:8px;"></div>
           <button type="button" id="reply-send-btn" style="margin-top:10px;">Send reply</button>
           <div id="reply-msg"></div>
         </div>`;
 
-      (emails || []).forEach(m => mountEmailBody(detailEl.querySelector(`.email-body[data-email-id="${m.id}"]`), m, { fetchAttachment: fetchEmailAttachment }));
+      const replyPicker = emailLocalFilePicker(document.getElementById('reply-attach'));
+      loadThreadTags(threadId);
+      (emails || []).forEach(m => mountEmailBody(detailEl.querySelector(`.email-body[data-email-id="${m.id}"]`), m, { fetchAttachment: fetchEmailAttachment, fetchStored: fetchStoredAttachment }));
 
       if (!thread.is_read) {
         await supabaseClient.from('email_threads').update({ is_read: true }).eq('id', threadId);
@@ -239,16 +250,11 @@
         if (!toAddress) { msg.innerHTML = `<div class="error-box">Couldn't work out who to reply to.</div>`; return; }
 
         btn.disabled = true;
-        btn.textContent = 'Sending...';
+        btn.textContent = replyPicker.files().length ? 'Uploading...' : 'Sending...';
         try {
-          const { data: { session } } = await supabaseClient.auth.getSession();
-          const res = await fetch('/.netlify/functions/send-gmail', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-            body: JSON.stringify({ to: toAddress, subject: thread.subject || '', bodyText, replyToThreadId: threadId }),
-          });
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.error);
+          const uploaded = await emailUploadFiles(replyPicker.files());
+          btn.textContent = 'Sending...';
+          await emailSendNow({ to: emailAddressOnly(toAddress), subject: thread.subject || '', bodyText, replyToThreadId: threadId, attachments: uploaded.map(u => ({ bucket: u.bucket, path: u.path, name: u.name })) });
           await loadThreadList();
           await openThread(threadId);
         } catch (err) {
@@ -308,7 +314,10 @@
       });
     }
 
-    document.getElementById('compose-btn').addEventListener('click', openComposePanel);
+    document.getElementById('compose-btn').addEventListener('click', () => openEmailComposer({
+      title: 'New email',
+      onSent: async (threadId) => { await loadThreadList(); await openThread(threadId); },
+    }));
 
     document.getElementById('sync-now-btn').addEventListener('click', async () => {
       const btn = document.getElementById('sync-now-btn');
@@ -344,6 +353,8 @@
         window.location.href = '/login.html';
       });
       await loadThreadList();
+      const deepThread = new URLSearchParams(window.location.search).get('thread');
+      if (deepThread) openThread(deepThread);
     })();
   </script>
 </body>

@@ -65,7 +65,24 @@ function emailFrameDoc({ html, styles }, allowImages) {
 
 const emailFileSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 
-// ctx.fetchAttachment(emailId, partId) -> { name, mime, data(base64) }
+// Opens one attachment: pictures in the photo viewer, PDFs in a new tab, anything else downloads.
+async function emailOpenAttachment(emailId, att, ctx) {
+  try {
+    const f = att.storage ? await ctx.fetchStored(att) : await ctx.fetchAttachment(emailId, att.part_id);
+    const bytes = Uint8Array.from(atob(f.data), c => c.charCodeAt(0));
+    if (/^image\//i.test(f.mime) && typeof openPhotoLightbox === 'function') {
+      openPhotoLightbox([`data:${f.mime};base64,${f.data}`], 0);
+    } else {
+      const url = URL.createObjectURL(new Blob([bytes], { type: f.mime }));
+      if (/pdf/i.test(f.mime)) window.open(url, '_blank');
+      else { const a = document.createElement('a'); a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+  } catch (err) { alert(err.message); }
+}
+
+// ctx.fetchAttachment(emailId, partId) -> { name, mime, data(base64) }   (received mail, from Gmail)
+// ctx.fetchStored(attachment)          -> { name, mime, data(base64) }   (mail we sent, from storage)
 async function mountEmailBody(el, email, ctx) {
   if (!el) return;
   const attachments = Array.isArray(email.attachments) ? email.attachments : [];
@@ -117,22 +134,11 @@ async function mountEmailBody(el, email, ctx) {
   if (files.length) {
     const box = document.createElement('div');
     box.style.cssText = 'margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;';
-    box.innerHTML = files.map(a => `<button type="button" class="secondary email-att" data-part="${escapeHtml(String(a.part_id))}" style="font-size:12px; padding:6px 10px; max-width:100%;">&#128206; ${escapeHtml(a.name)} <span style="color:var(--muted);">(${emailFileSize(a.size || 0)})</span></button>`).join('');
+    box.innerHTML = files.map(a => `<button type="button" class="secondary email-att" data-idx="${attachments.indexOf(a)}" style="font-size:12px; padding:6px 10px; max-width:100%;">&#128206; ${escapeHtml(a.name)} <span style="color:var(--muted);">(${emailFileSize(a.size || 0)})</span></button>`).join('');
     el.appendChild(box);
     box.querySelectorAll('.email-att').forEach(btn => btn.addEventListener('click', async () => {
       const original = btn.innerHTML; btn.disabled = true; btn.textContent = 'Opening...';
-      try {
-        const f = await ctx.fetchAttachment(email.id, btn.dataset.part);
-        const bytes = Uint8Array.from(atob(f.data), c => c.charCodeAt(0));
-        if (/^image\//i.test(f.mime) && typeof openPhotoLightbox === 'function') {
-          openPhotoLightbox([`data:${f.mime};base64,${f.data}`], 0);
-        } else {
-          const url = URL.createObjectURL(new Blob([bytes], { type: f.mime }));
-          if (/pdf/i.test(f.mime)) window.open(url, '_blank');
-          else { const a = document.createElement('a'); a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); }
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-        }
-      } catch (err) { alert(err.message); }
+      await emailOpenAttachment(email.id, attachments[Number(btn.dataset.idx)], ctx);
       btn.disabled = false; btn.innerHTML = original;
     }));
   }
