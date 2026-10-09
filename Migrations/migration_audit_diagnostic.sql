@@ -431,4 +431,8 @@ union all
 select '133', 'company_settings.ai_assistant_name',
   case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'ai_assistant_name')
   then 'present' else 'MISSING' end
+union all
+select '134', 'time_categories_quoting_admin_maintenance_tafe',
+  case when exists (select 1 from information_schema.check_constraints where constraint_name = 'time_entries_category_check' and check_clause like '%maintenance%' and check_clause like '%tafe%')
+  then 'present' else 'MISSING' end
 order by 1;
