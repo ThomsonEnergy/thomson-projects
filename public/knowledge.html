@@ -289,10 +289,12 @@
             <div style="white-space:nowrap;">
               ${e.source_url ? `<a class="link-quiet" href="${e.source_url}" target="_blank" style="font-size:12px; margin-right:10px;">Open link</a>` : ''}
               ${e.file_path ? `<button type="button" class="secondary kb-open-file" style="font-size:12px; padding:4px 8px;">Open file</button>` : ''}
+              ${e.file_path && /\.pdf$/i.test(e.file_name || '') ? `<button type="button" class="secondary kb-ocr" style="font-size:12px; padding:4px 8px;">Read with OCR</button>` : ''}
               <button type="button" class="secondary kb-edit" style="font-size:12px; padding:4px 8px;">Edit</button>
               <button type="button" class="secondary kb-delete" style="font-size:12px; padding:4px 8px;">Delete</button>
             </div>
           </div>
+          ${e.content && e.extraction_error ? `<p style="margin:6px 0 0; font-size:12px; color:var(--red);">${e.extraction_error}</p>` : ''}
           <p class="kb-preview" style="margin:6px 0 0; font-size:13px; ${e.content ? 'cursor:pointer;' : 'font-style:italic; color:var(--muted);'} white-space:pre-wrap;" data-expanded="false">${entryStatusPreview(e)}</p>
         </div>`).join('');
 
@@ -311,6 +313,8 @@
             if (!error) window.open(data.signedUrl, '_blank');
           });
         }
+        const ocrBtn = row.querySelector('.kb-ocr');
+        if (ocrBtn) ocrBtn.addEventListener('click', () => openOcrPanel(entry));
         row.querySelector('.kb-edit').addEventListener('click', () => startEdit(entry));
         row.querySelector('.kb-delete').addEventListener('click', async () => {
           if (!confirm(`Delete "${entry.title}"?`)) return;
@@ -320,6 +324,127 @@
           await logActivity('knowledge_entry', entry.id, 'deleted', `Deleted "${entry.title}" from the Knowledge Base`);
           await loadEntries();
         });
+      });
+    }
+
+    // "Read with OCR": for a PDF whose normal text read came up short (some
+    // PDFs have pages with no extractable text - the AS/NZS 3008 standard's
+    // tables, for one). Pages are rendered here in the browser, uploaded as
+    // images, and transcribed by Claude in batches of a few pages, three
+    // batches at a time; each batch writes a row to knowledge_ocr_parts and
+    // this stitches them together in page order when they're all in.
+    const OCR_BATCH_PAGES = 4;
+    const OCR_PARALLEL = 3;
+    async function openOcrPanel(entry) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.innerHTML = `<div class="card" style="max-width:480px; width:100%;"><h2 style="margin-top:0;">Read with OCR</h2><p class="subtitle">Opening the PDF...</p></div>`;
+      document.body.appendChild(overlay);
+      const card = overlay.querySelector('.card');
+      let cancelled = false;
+
+      let pdf, numPages;
+      try {
+        const { data, error } = await supabaseClient.storage.from('knowledge-files').createSignedUrl(entry.file_path, 3600);
+        if (error) throw error;
+        const pdfjs = await loadPdfJs();
+        pdf = await pdfjs.getDocument({ url: data.signedUrl }).promise;
+        numPages = pdf.numPages;
+      } catch (err) {
+        card.innerHTML = `<h2 style="margin-top:0;">Read with OCR</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="ocr-close" style="margin-top:10px;">Close</button>`;
+        card.querySelector('#ocr-close').addEventListener('click', () => overlay.remove());
+        return;
+      }
+
+      card.innerHTML = `
+        <h2 style="margin-top:0;">Read with OCR</h2>
+        <p class="subtitle" style="margin-bottom:10px;">${entry.title} has ${numPages} pages. This has Claude read the pages as pictures, so it can pick up tables and anything the normal text read missed. Takes a few minutes per 10 pages and costs a little in AI usage - keep this window open until it finishes. Anything safety-critical should still be checked against the actual standard.</p>
+        <div class="grid cols-2">
+          <div><label style="margin-top:0">From page</label><input type="number" id="ocr-from" min="1" max="${numPages}" value="1" /></div>
+          <div><label style="margin-top:0">To page</label><input type="number" id="ocr-to" min="1" max="${numPages}" value="${numPages}" /></div>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="ocr-replace" style="width:auto;" checked /> Replace the existing text (untick to add to it - e.g. when only re-reading a few pages)</label>
+        <div style="margin-top:14px;">
+          <button type="button" id="ocr-start">Start</button>
+          <button type="button" class="secondary" id="ocr-cancel">Close</button>
+        </div>
+        <div id="ocr-status" style="margin-top:12px;"></div>`;
+      card.querySelector('#ocr-cancel').addEventListener('click', () => { cancelled = true; overlay.remove(); });
+
+      card.querySelector('#ocr-start').addEventListener('click', async () => {
+        const from = Math.max(1, parseInt(card.querySelector('#ocr-from').value, 10) || 1);
+        const to = Math.min(numPages, parseInt(card.querySelector('#ocr-to').value, 10) || numPages);
+        const replace = card.querySelector('#ocr-replace').checked;
+        const statusEl = card.querySelector('#ocr-status');
+        if (to < from) { statusEl.innerHTML = `<div class="error-box">"To" can't be before "From".</div>`; return; }
+        card.querySelector('#ocr-start').disabled = true;
+
+        const batches = [];
+        for (let s = from; s <= to; s += OCR_BATCH_PAGES) batches.push([s, Math.min(s + OCR_BATCH_PAGES - 1, to)]);
+        let doneCount = 0;
+        const failures = [];
+        const showProgress = () => { statusEl.innerHTML = `<p class="subtitle">Read ${doneCount} of ${batches.length} batches (${Math.min(doneCount * OCR_BATCH_PAGES, to - from + 1)} of ${to - from + 1} pages)...${failures.length ? ` ${failures.length} failed.` : ''}</p>`; };
+        showProgress();
+
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const runId = Date.now();
+          await supabaseClient.from('knowledge_ocr_parts').delete().eq('entry_id', entry.id);
+
+          let next = 0;
+          async function worker() {
+            while (!cancelled && next < batches.length) {
+              const [bStart, bEnd] = batches[next++];
+              try {
+                const pages = [];
+                for (let n = bStart; n <= bEnd; n++) {
+                  const { dataUrl } = await renderPdfPageToDataUrl(pdf, n, 1800);
+                  const blob = await (await fetch(dataUrl)).blob();
+                  const path = `ocr-tmp/${entry.id}/${runId}-${n}.jpg`;
+                  const { error: upErr } = await supabaseClient.storage.from('knowledge-files').upload(path, blob, { contentType: 'image/jpeg' });
+                  if (upErr) throw upErr;
+                  pages.push({ n, path });
+                }
+                await fetch('/.netlify/functions/ocr-knowledge-pages-background', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+                  body: JSON.stringify({ entry_id: entry.id, pages }),
+                });
+                // Wait for this batch's row to show up (up to 6 minutes).
+                let part = null;
+                for (let i = 0; i < 90 && !part && !cancelled; i++) {
+                  await new Promise(r => setTimeout(r, 4000));
+                  const { data } = await supabaseClient.from('knowledge_ocr_parts').select('id, error').eq('entry_id', entry.id).eq('start_page', bStart).maybeSingle();
+                  part = data;
+                }
+                if (!part) throw new Error('timed out waiting for the read');
+                if (part.error) throw new Error(part.error);
+              } catch (err) {
+                failures.push(`pages ${bStart}-${bEnd}: ${err.message}`);
+              }
+              doneCount++;
+              showProgress();
+            }
+          }
+          await Promise.all(Array.from({ length: Math.min(OCR_PARALLEL, batches.length) }, worker));
+          if (cancelled) return;
+
+          const { data: parts, error: partsErr } = await supabaseClient.from('knowledge_ocr_parts').select('start_page, end_page, text, error').eq('entry_id', entry.id).order('start_page');
+          if (partsErr) throw partsErr;
+          const stitched = (parts || []).map(p => p.text || `--- Pages ${p.start_page}-${p.end_page} ---\n[These pages could not be read: ${p.error}]`).join('\n\n');
+          const newContent = replace || !entry.content ? stitched : `${entry.content}\n\n${stitched}`;
+          const { error: saveErr } = await supabaseClient.from('knowledge_entries').update({ content: newContent, extraction_error: null }).eq('id', entry.id);
+          if (saveErr) throw saveErr;
+          await supabaseClient.from('knowledge_ocr_parts').delete().eq('entry_id', entry.id);
+
+          statusEl.innerHTML = failures.length
+            ? `<div class="error-box">Saved, but some batches failed - the entry has a note where they are, and you can re-run just those pages:<br>${failures.join('<br>')}</div>`
+            : `<div class="success-box">Done - ${to - from + 1} pages read and saved.</div>`;
+          await loadEntries();
+        } catch (err) {
+          statusEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+          card.querySelector('#ocr-start').disabled = false;
+        }
       });
     }
 

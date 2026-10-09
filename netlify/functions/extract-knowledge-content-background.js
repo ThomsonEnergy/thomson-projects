@@ -139,7 +139,7 @@ async function transcribeScannedPdf(buffer, apiKey, onProgress) {
 // transparently, where pdf-lib does not. Only fall back to Claude vision
 // transcription for a genuinely scanned/image-only PDF with no usable
 // text layer.
-async function handlePdf(buffer, apiKey, onProgress) {
+async function handlePdf(buffer, apiKey, onProgress, meta = {}) {
   let parsed = null;
   try {
     parsed = await pdfParse(buffer);
@@ -151,6 +151,8 @@ async function handlePdf(buffer, apiKey, onProgress) {
   const text = (parsed?.text || '').trim();
   const pageCount = parsed?.numpages || 1;
   const looksLikeRealText = text.length > Math.max(200, pageCount * 10);
+  meta.pageCount = pageCount;
+  meta.textChars = text.length;
   if (looksLikeRealText) return text;
 
   return transcribeScannedPdf(buffer, apiKey, onProgress);
@@ -186,6 +188,7 @@ function extractSpreadsheet(buffer) {
 exports.handler = async (event) => {
   const supabaseAdmin = getAdminClient();
   let entryId;
+  let readWarning = null;
   const saveProgress = async (partialContent) => {
     await supabaseAdmin.from('knowledge_entries').update({ content: partialContent }).eq('id', entryId);
   };
@@ -210,7 +213,14 @@ exports.handler = async (event) => {
         content = buffer.toString('utf-8');
       } else if (ext === 'pdf') {
         const apiKey = await getIntegrationKey('anthropic');
-        content = await handlePdf(buffer, apiKey, saveProgress);
+        const meta = {};
+        content = await handlePdf(buffer, apiKey, saveProgress, meta);
+        // A real standard runs thousands of characters a page. Far less means
+        // only some pages had readable text (e.g. tables in fonts with no text
+        // mapping) - say so rather than quietly storing a fraction of it.
+        if (meta.pageCount > 5 && meta.textChars / meta.pageCount < 400) {
+          readWarning = `Only ${meta.textChars} characters were readable across ${meta.pageCount} pages - some pages (often tables) probably couldn't be read. Use "Read with OCR" to read them.`;
+        }
       } else {
         const mediaType = mimeFor(file_name);
         if (!mediaType) throw new Error(`Don't know how to read a .${ext} file.`);
@@ -221,7 +231,7 @@ exports.handler = async (event) => {
       return { statusCode: 202, body: '' };
     }
 
-    await supabaseAdmin.from('knowledge_entries').update({ content, extraction_error: null }).eq('id', entryId);
+    await supabaseAdmin.from('knowledge_entries').update({ content, extraction_error: readWarning }).eq('id', entryId);
   } catch (err) {
     console.error('background extraction failed:', err);
     if (entryId) {
