@@ -583,7 +583,7 @@
       return {
         key: dayBlockKeySeq++, id: null, projectId: null, projectLabel: '', projectLahaApproved: false, ccIds: [],
         clockInTime: '', clockOutTime: '', xeroPushed: false, centres: [], splitPercentages: [],
-        origClockIn: null, origClockOut: null, origProjectId: null, timeCategory: 'office', stayedOvernight: null,
+        origClockIn: null, origClockOut: null, origProjectId: null, timeCategory: 'admin', stayedOvernight: null,
       };
     }
     function dayBlockFromEntry(e) {
@@ -595,7 +595,7 @@
         clockInTime: isoToTimePart(e.clock_in), clockOutTime: isoToTimePart(e.clock_out),
         xeroPushed: !!e.xero_pushed_at, centres: [], splitPercentages: [],
         origClockIn: e.clock_in, origClockOut: e.clock_out, origProjectId: e.project_id,
-        timeCategory: (e.time_category && e.time_category !== 'job') ? e.time_category : 'office',
+        timeCategory: (e.time_category && e.time_category !== 'job') ? e.time_category : 'admin',
         stayedOvernight: e.stayed_overnight !== null && e.stayed_overnight !== undefined ? e.stayed_overnight : null,
       };
     }
@@ -725,11 +725,8 @@
           </div>
           <div class="day-block-category-row" style="${block.projectId ? 'display:none;' : ''} margin-top:8px;">
             <label style="margin-top:0">What's this time for</label>
-            <select class="day-block-category">
-              <option value="office" ${block.timeCategory === 'office' ? 'selected' : ''}>Office / admin</option>
-              <option value="training" ${block.timeCategory === 'training' ? 'selected' : ''}>Training</option>
-              <option value="other" ${block.timeCategory === 'other' ? 'selected' : ''}>Other</option>
-            </select>
+            <select class="day-block-category">${timeCategoryOptionsHtml(block.timeCategory)}</select>
+            ${block.timeCategory === 'tafe' ? `<p class="subtitle" style="margin:4px 0 0; font-size:12px;">TAFE is a fixed 8 hour day (7:00am to 3:30pm, 30 minute unpaid break) - no clocking in and out.</p>` : ''}
           </div>
           <div class="day-block-laha-row" style="${block.projectLahaApproved ? '' : 'display:none;'} margin-top:8px; padding:10px; background:var(--surface-2); border-radius:8px;">
             <label style="margin-top:0">This job is LAHA-approved - stayed overnight?</label>
@@ -748,11 +745,11 @@
           <div style="display:flex; gap:10px; margin-top:8px;">
             <div style="flex:1;">
               <label>Start time</label>
-              <input type="time" class="day-block-start" value="${block.clockInTime}" ${block.xeroPushed ? 'disabled' : ''} />
+              <input type="time" class="day-block-start" value="${block.clockInTime}" ${(block.xeroPushed || block.timeCategory === 'tafe') ? 'disabled' : ''} />
             </div>
             <div style="flex:1;">
               <label>Finish time</label>
-              <input type="time" class="day-block-end" value="${block.clockOutTime}" ${block.xeroPushed ? 'disabled' : ''} />
+              <input type="time" class="day-block-end" value="${block.clockOutTime}" ${(block.xeroPushed || block.timeCategory === 'tafe') ? 'disabled' : ''} />
             </div>
           </div>
           <div class="day-block-split" style="display:none; margin-top:10px;"></div>`;
@@ -806,7 +803,18 @@
             renderJobResults(matches);
           }, 250);
         });
-        el.querySelector('.day-block-category')?.addEventListener('change', (e) => { block.timeCategory = e.target.value; });
+        el.querySelector('.day-block-category')?.addEventListener('change', (e) => {
+          block.timeCategory = e.target.value;
+          // TAFE is always the same 8 paid hours, not clocked in/out: fill the
+          // day in as 7:00-3:30 with the 30 minute break at 12:00.
+          if (block.timeCategory === 'tafe') {
+            block.clockInTime = TAFE_DAY.start;
+            block.clockOutTime = TAFE_DAY.end;
+            dayBreak = { taken: true, start: TAFE_DAY.breakStart, minutes: 30, skipReason: '' };
+            renderBreakSection();
+          }
+          renderBlock(block, el);
+        });
         el.querySelector('.day-block-laha-yes')?.addEventListener('click', () => { block.stayedOvernight = true; renderBlock(block, el); });
         el.querySelector('.day-block-laha-no')?.addEventListener('click', () => { block.stayedOvernight = false; renderBlock(block, el); });
         el.querySelectorAll('.day-block-cc-chips .cc-chip').forEach(chip => {
@@ -1080,18 +1088,13 @@
       openDayEditPanel(localDateStr(new Date()));
     });
 
-    // One click for a TAFE day: 8 paid hours as Training time, with a 30 minute
-    // unpaid lunch. Entered as two blocks (7:00-12:00 and 12:30-15:30) so the
-    // gap IS the unpaid break and the day adds up to exactly 8 hours, which
-    // is what payroll counts. Training time goes to Xero as "Training (TAFE)".
-    const TAFE_DAY = { start: '07:00', breakStart: '12:00', breakEnd: '12:30', end: '15:30' };
     document.getElementById('add-tafe-day-btn').addEventListener('click', () => {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:380px; width:100%;">
           <h2 style="margin-top:0;">TAFE day</h2>
-          <p class="subtitle" style="margin-top:0;">Adds an 8 hour Training (TAFE) timesheet: 7:00am to 3:30pm with a 30 minute unpaid break at 12:00.</p>
+          <p class="subtitle" style="margin-top:0;">Adds an 8 hour TAFE timesheet: 7:00am to 3:30pm with a 30 minute unpaid break at 12:00.</p>
           <label>Which day?</label>
           <input type="date" id="tafe-date" value="${localDateStr(new Date())}" />
           <div style="margin-top:14px; display:flex; gap:8px;">
@@ -1109,19 +1112,7 @@
         if (!dateStr) { msg.innerHTML = '<div class="error-box">Pick a day.</div>'; return; }
         btn.disabled = true;
         try {
-          const t = (hhmm) => combineDateTime(dateStr, hhmm);
-          // refuse to double up on time already logged that day
-          const { data: clash, error: clashErr } = await supabaseClient.from('time_entries').select('id')
-            .eq('staff_id', myUserId).lt('clock_in', t(TAFE_DAY.end).toISOString()).or(`clock_out.is.null,clock_out.gt.${t(TAFE_DAY.start).toISOString()}`);
-          if (clashErr) throw clashErr;
-          if (clash && clash.length) throw new Error('You already have time logged during that day. Open the day from your week list to change it, or remove it first.');
-          const base = { staff_id: myUserId, project_id: null, time_category: 'training', notes: 'TAFE' };
-          const { error } = await supabaseClient.from('time_entries').insert([
-            { ...base, clock_in: t(TAFE_DAY.start).toISOString(), clock_out: t(TAFE_DAY.breakStart).toISOString(),
-              break_taken: true, break_start: t(TAFE_DAY.breakStart).toISOString(), break_minutes: 30, break_skip_reason: null },
-            { ...base, clock_in: t(TAFE_DAY.breakEnd).toISOString(), clock_out: t(TAFE_DAY.end).toISOString() },
-          ]);
-          if (error) throw error;
+          await createTafeDay(myUserId, dateStr);
           overlay.remove();
           await refreshWeekViews();
           await loadTimesheetIssues();
@@ -1198,10 +1189,15 @@
       const { data, error } = await supabaseClient.rpc('get_nonbillable_cost_by_category', { p_start: start, p_end: end });
       if (error) { resultsEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
-      const labels = { training: 'Training', office: 'Office / admin', other: 'Other' };
-      const rows = ['training', 'office', 'other'].map(cat => {
-        const row = (data || []).find(d => d.category === cat);
-        return { category: cat, hours: row ? Number(row.total_hours) : 0, cost: row ? Number(row.total_cost) : 0 };
+      const labels = { quoting: 'Quoting', admin: 'Admin', maintenance: 'Maintenance', tafe: 'TAFE', training: 'Training', other: 'Other' };
+      // Old 'office' entries count as Admin.
+      const rows = Object.keys(labels).map(cat => {
+        const matching = (data || []).filter(d => d.category === cat || (cat === 'admin' && d.category === 'office'));
+        return {
+          category: cat,
+          hours: matching.reduce((s, d) => s + Number(d.total_hours), 0),
+          cost: matching.reduce((s, d) => s + Number(d.total_cost), 0),
+        };
       });
       const totalHours = rows.reduce((s, r) => s + r.hours, 0);
       const totalCost = rows.reduce((s, r) => s + r.cost, 0);

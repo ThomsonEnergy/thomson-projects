@@ -8,13 +8,16 @@
 // award rates payroll costing already uses (ordinary/OT1 1.5x/OT2 2x/
 // public holiday 2.5x - see dayBands in compute-labour-cost.js) banded
 // across the employee's WHOLE day (every job), same as a real payslip.
-// Hours are also split by time_entries.time_category into 3 fixed Xero
-// tracking options - Billable (Jobs) / Non-billable (Office) / Training
-// (TAFE) - NOT one option per job number. A per-job tracking option was
-// tried first but Xero caps a Tracking Category at 100 options, and this
-// company's job numbering would blow through that within a year; the
-// per-job cost/revenue breakdown already lives properly in Thomson
-// Projects' own job costing, so Xero only needs the coarse 3-way split.
+// Hours are also split by time_entries.time_category into a small fixed set
+// of Xero tracking options - Billable (Jobs), Quoting, Admin, Maintenance,
+// TAFE, Training (see trackingLabelFor) - NOT one option per job number. A
+// per-job tracking option was tried first but Xero caps a Tracking Category
+// at 100 options, and this company's job numbering would blow through that
+// within a year; the per-job cost/revenue breakdown already lives properly
+// in Thomson Projects' own job costing, so Xero only needs the coarse
+// split. (The old combined "Training (TAFE)" and "Non-billable (Office)"
+// options are no longer used - anything already in Xero under them stays
+// there; new hours post to the new names, created on first use.)
 // One TimesheetLine per (tracking option, band) combination that has
 // hours, each tagged with the earnings rate mapped to that band in
 // Settings > Xero Mapping - so OT hours can post to a different Xero
@@ -41,9 +44,14 @@ function dateOnly(iso) {
 }
 
 function trackingLabelFor(entry) {
-  if (entry.time_category === 'training') return 'Training (TAFE)';
-  if (entry.time_category === 'job') return 'Billable (Jobs)';
-  return 'Non-billable (Office)'; // 'office' or 'other'
+  switch (entry.time_category) {
+    case 'job': return 'Billable (Jobs)';
+    case 'quoting': return 'Quoting';
+    case 'maintenance': return 'Maintenance';
+    case 'tafe': return 'TAFE';
+    case 'training': return 'Training';
+    default: return 'Admin'; // 'admin', plus legacy 'office' / 'other'
+  }
 }
 
 exports.handler = async (event) => {

@@ -4515,6 +4515,49 @@ async function setWarehouseStock(materialId, absoluteQuantity) {
 // one exists (an approved job), falling back to the quote number
 // before it's approved, matching the same numbering-over-naming
 // convention already used for POs (PO2000) and invoices (SI3000).
+// Timesheet time that isn't on a job. Each is its own cost in Xero (see
+// push-timesheets-to-xero.js). TAFE is the odd one out: not clocked in and
+// out, it's a fixed 8 hour day (createTafeDay below). 'office' and 'other'
+// are old values kept readable but no longer offered.
+const NONJOB_TIME_CATEGORIES = [
+  { value: 'quoting', label: 'Quoting' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'maintenance', label: 'Maintenance' },
+  { value: 'tafe', label: 'TAFE (fixed 8 hours)' },
+  { value: 'training', label: 'Training' },
+];
+function timeCategoryLabel(cat) {
+  if (cat === 'office') return 'Admin';
+  if (cat === 'other') return 'Other';
+  if (cat === 'job') return 'Job';
+  const found = NONJOB_TIME_CATEGORIES.find(c => c.value === cat);
+  return found ? found.label.replace(' (fixed 8 hours)', '') : (cat || '');
+}
+function timeCategoryOptionsHtml(selected) {
+  const sel = selected === 'office' || selected === 'other' ? 'admin' : selected;
+  return NONJOB_TIME_CATEGORIES.map(c => `<option value="${c.value}" ${c.value === sel ? 'selected' : ''}>${c.label}</option>`).join('');
+}
+
+// A TAFE day is always 8 paid hours: 7:00am to 3:30pm with a 30 minute unpaid
+// break at 12:00, saved as two entries so the gap IS the break and the day
+// adds up to exactly 8 hours, which is what payroll counts. Refuses to
+// double up on time already logged that day. Throws on any problem.
+const TAFE_DAY = { start: '07:00', breakStart: '12:00', breakEnd: '12:30', end: '15:30' };
+async function createTafeDay(staffId, dateStr) {
+  const t = (hhmm) => new Date(`${dateStr}T${hhmm}:00`);
+  const { data: clash, error: clashErr } = await supabaseClient.from('time_entries').select('id')
+    .eq('staff_id', staffId).lt('clock_in', t(TAFE_DAY.end).toISOString()).or(`clock_out.is.null,clock_out.gt.${t(TAFE_DAY.start).toISOString()}`);
+  if (clashErr) throw clashErr;
+  if (clash && clash.length) throw new Error('You already have time logged during that day. Open the day from your week list to change it, or remove it first.');
+  const base = { staff_id: staffId, project_id: null, time_category: 'tafe', notes: 'TAFE' };
+  const { error } = await supabaseClient.from('time_entries').insert([
+    { ...base, clock_in: t(TAFE_DAY.start).toISOString(), clock_out: t(TAFE_DAY.breakStart).toISOString(),
+      break_taken: true, break_start: t(TAFE_DAY.breakStart).toISOString(), break_minutes: 30, break_skip_reason: null },
+    { ...base, clock_in: t(TAFE_DAY.breakEnd).toISOString(), clock_out: t(TAFE_DAY.end).toISOString() },
+  ]);
+  if (error) throw error;
+}
+
 function projectRef(project) {
   if (!project) return '';
   if (project.job_number) return `J${project.job_number} - ${project.name}`;

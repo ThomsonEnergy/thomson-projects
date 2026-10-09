@@ -53,11 +53,12 @@
         </div>
         <div id="clock-category-row" style="margin-top:10px;">
           <label style="margin-top:0">What's this time for</label>
-          <select id="clock-category">
-            <option value="office">Office / admin</option>
-            <option value="training">Training</option>
-            <option value="other">Other</option>
-          </select>
+          <select id="clock-category"></select>
+          <div id="clock-tafe-row" style="display:none; margin-top:8px;">
+            <p class="subtitle" style="margin:0 0 6px;">TAFE is a fixed 8 hour day (7:00am to 3:30pm, 30 minute unpaid break) - no clocking in and out.</p>
+            <label style="margin-top:0">Which day?</label>
+            <input type="date" id="clock-tafe-date" />
+          </div>
         </div>
         <div id="clock-cost-centres" style="display:none; margin-top:10px;">
           <label style="margin-top:0">Which stage(s) are you working on?</label>
@@ -429,9 +430,39 @@
       });
     });
 
+    // Non-job time: Quoting / Admin / Maintenance / TAFE / Training. TAFE
+    // isn't clocked in and out - picking it swaps the button for logging a
+    // fixed 8 hour day on a chosen date.
+    const clockCategoryEl = document.getElementById('clock-category');
+    clockCategoryEl.innerHTML = timeCategoryOptionsHtml('admin');
+    document.getElementById('clock-tafe-date').value = new Date().toLocaleDateString('en-CA');
+    function refreshClockCategoryUi() {
+      const isTafe = clockCategoryEl.value === 'tafe' && !selectedClockJobId;
+      document.getElementById('clock-tafe-row').style.display = isTafe ? 'block' : 'none';
+      document.getElementById('clock-in-btn').textContent = isTafe ? 'Log TAFE day (8 hours)' : 'Clock in';
+    }
+    clockCategoryEl.addEventListener('change', refreshClockCategoryUi);
+    // Picking or clearing a job changes whether the category applies at all.
+    new MutationObserver(refreshClockCategoryUi).observe(document.getElementById('clock-category-row'), { attributes: true, attributeFilter: ['style'] });
+
     document.getElementById('clock-in-btn').addEventListener('click', async () => {
       const projectId = selectedClockJobId;
       const msg = document.getElementById('clock-msg');
+
+      if (!projectId && clockCategoryEl.value === 'tafe') {
+        const dateStr = document.getElementById('clock-tafe-date').value;
+        if (!dateStr) { msg.innerHTML = `<div class="error-box">Pick a day.</div>`; return; }
+        const btn = document.getElementById('clock-in-btn');
+        btn.disabled = true;
+        try {
+          await createTafeDay(myUserId, dateStr);
+          msg.innerHTML = `<div class="success-box">TAFE day logged for ${new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' })} (8 hours).</div>`;
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        }
+        btn.disabled = false;
+        return;
+      }
 
       const wrap = document.getElementById('clock-cost-centres');
       if (wrap.style.display !== 'none' && selectedClockCostCentres.length === 0) {

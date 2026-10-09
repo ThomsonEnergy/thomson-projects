@@ -4504,7 +4504,7 @@
       const centreName = (id) => centres.find(c => c.id === id)?.name || 'Unknown stage';
       const stageLabel = (entry) => {
         if (entry.time_category && entry.time_category !== 'job') {
-          return entry.time_category.charAt(0).toUpperCase() + entry.time_category.slice(1);
+          return timeCategoryLabel(entry.time_category);
         }
         const ids = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
           ? entry.selected_cost_centre_ids
@@ -4629,9 +4629,7 @@
             <label style="margin-top:0;">Category</label>
             <select class="td-category">
               <option value="job" ${category === 'job' ? 'selected' : ''}>Job - split across stage(s) below</option>
-              <option value="office" ${category === 'office' ? 'selected' : ''}>Office / admin</option>
-              <option value="training" ${category === 'training' ? 'selected' : ''}>Training</option>
-              <option value="other" ${category === 'other' ? 'selected' : ''}>Other</option>
+              ${timeCategoryOptionsHtml(category)}
             </select>
             <div class="td-stage-section" style="margin-top:8px; ${category === 'job' ? '' : 'display:none;'}">
               <label>Stage(s) - tick every stage this entry's hours count against</label>

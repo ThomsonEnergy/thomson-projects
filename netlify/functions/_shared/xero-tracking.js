@@ -1,8 +1,8 @@
 // Finds (or creates) a Tracking Option under the company's configured
 // Xero tracking category (Settings > Xero connection > Xero Tracking
 // Category ID), by exact name. Used by push-timesheets-to-xero.js for its
-// 3 fixed options - Billable (Jobs) / Non-billable (Office) / Training
-// (TAFE) - deliberately NOT one option per job number, since Xero caps a
+// fixed options - Billable (Jobs), Quoting, Admin, Maintenance, TAFE, Training
+// - deliberately NOT one option per job number, since Xero caps a
 // Tracking Category at 100 options and this company's job numbering would
 // blow through that; per-job cost/revenue detail already lives properly
 // in Thomson Projects' own job costing.

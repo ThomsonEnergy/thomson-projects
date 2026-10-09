@@ -281,7 +281,7 @@
     }
 
     let dayViewDate; // Date - the single day currently shown in Day view
-    const CATEGORY_LABELS = { training: 'Training', office: 'Office / admin', other: 'Other' };
+    const CATEGORY_LABELS = { quoting: 'Quoting', admin: 'Admin', maintenance: 'Maintenance', tafe: 'TAFE', training: 'Training', office: 'Admin', other: 'Other' };
 
     const DAY_START_HOUR = 5;
     const DAY_END_HOUR = 20;
@@ -383,7 +383,7 @@
             ? `${displayStart} - Inspection${a.projects?.name ? ': ' + a.projects.name : ''}`
             : a.project_id
               ? `${displayStart} - ${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
-              : `${CATEGORY_LABELS[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
+              : `${CATEGORY_LABELS[a.block_type] || 'Admin'}${a.note ? ' - ' + a.note : ''}`;
           const isNote = !a.project_id && a.block_type !== 'site_inspection';
           const noteStyle = isNote && !reconciled ? 'background:var(--surface-1); color:var(--muted); border-color:var(--border);' : '';
           const siteVisitClass = (a.block_type === 'site_visit' || a.block_type === 'site_inspection') && !reconciled ? 'site-visit' : '';
@@ -435,7 +435,7 @@
             ? `Inspection${a.projects?.name ? ': ' + a.projects.name : ''}`
             : a.project_id
               ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
-              : `${CATEGORY_LABELS[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
+              : `${CATEGORY_LABELS[a.block_type] || 'Admin'}${a.note ? ' - ' + a.note : ''}`;
           const cls = reconciled ? 'reconciled' : ((a.block_type === 'site_visit' || a.block_type === 'site_inspection') ? 'site-visit' : '');
           entriesHtml += `
             <div class="mobile-entry ${cls}" data-id="${a.id}">
@@ -500,9 +500,7 @@
           <div id="mobile-add-category-row" style="margin-top:10px;">
             <label style="margin-top:0">Category</label>
             <select id="mobile-add-category">
-              <option value="office">Office / admin</option>
-              <option value="training">Training</option>
-              <option value="other">Other</option>
+              ${timeCategoryOptionsHtml('admin')}
             </select>
           </div>
           <div class="grid cols-2" style="margin-top:10px;">
@@ -688,9 +686,7 @@
             <h2>Block type</h2>
             <label style="margin-top:0">Category</label>
             <select id="category-select">
-              <option value="training">Training</option>
-              <option value="office">Office / admin</option>
-              <option value="other">Other</option>
+              ${timeCategoryOptionsHtml('admin')}
             </select>
             <label>Note (optional)</label>
             <input id="category-note" placeholder="e.g. TAFE - Cert III" />
