@@ -1775,6 +1775,25 @@ function _aiChatLoadHistory() {
 function _aiChatSaveHistory() {
   try { sessionStorage.setItem('te-ai-chat-history', JSON.stringify(_aiChatHistory.slice(-30))); } catch (e) { /* private browsing etc - chat still works, just won't persist */ }
 }
+// The assistant's mascot: a little robot with hands, feet and a lightning bolt
+// in its raised hand. Pure SVG, so it stays sharp at any size.
+function aiRobotSvg(size) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+<rect x="18.2" y="37" width="4" height="5" rx="1" fill="#c9d1dd"/><rect x="25.8" y="37" width="4" height="5" rx="1" fill="#c9d1dd"/>
+<rect x="15.5" y="41.6" width="9.4" height="4.4" rx="2.2" fill="#dfe5ee"/><rect x="23.1" y="41.6" width="9.4" height="4.4" rx="2.2" fill="#dfe5ee"/>
+<path d="M15.3 28.5 L9.2 34" stroke-width="4.6" fill="none"/><path d="M15.3 28.5 L9.2 34" stroke="#c9d1dd" stroke-width="2.2" fill="none"/>
+<path d="M32.7 28.5 L38.2 23" stroke-width="4.6" fill="none"/><path d="M32.7 28.5 L38.2 23" stroke="#c9d1dd" stroke-width="2.2" fill="none"/>
+<rect x="15" y="24.6" width="18" height="13.6" rx="4.2" fill="#f4f6fa"/><circle cx="24" cy="31.2" r="2.6" fill="#FFCC33"/>
+<rect x="21.2" y="22.4" width="5.6" height="2.8" rx="1" fill="#c9d1dd"/>
+<rect x="9.6" y="12.6" width="2.8" height="5.6" rx="1.2" fill="#c9d1dd"/><rect x="35.6" y="12.6" width="2.8" height="5.6" rx="1.2" fill="#c9d1dd"/>
+<rect x="11.8" y="7.8" width="24.4" height="15.4" rx="5.4" fill="#f4f6fa"/><line x1="24" y1="7.8" x2="24" y2="4.2"/><circle cx="24" cy="3" r="1.9" fill="#FFCC33"/>
+<circle cx="18.6" cy="14.6" r="2.5" fill="#1a1a1a" stroke="none"/><circle cx="29.4" cy="14.6" r="2.5" fill="#1a1a1a" stroke="none"/>
+<circle cx="19.4" cy="13.7" r="0.8" fill="#fff" stroke="none"/><circle cx="30.2" cy="13.7" r="0.8" fill="#fff" stroke="none"/>
+<path d="M20.4 19 Q24 21.6 27.6 19" fill="none" stroke-width="1.4"/>
+<circle cx="8.3" cy="35.2" r="2.7" fill="#dfe5ee"/><circle cx="39.3" cy="21.8" r="2.7" fill="#dfe5ee"/>
+<path d="M43.4 4.4 L37.6 13.6 H41.2 L39.6 20.2 L46 11.2 H42.2 Z" fill="#FFCC33" stroke-width="1.2"/></g></svg>`;
+}
+
 // What the assistant is called (Settings > Company). Remembered for the browser
 // session so the button never flashes the wrong name, then refreshed from the
 // database in the background.
@@ -1795,13 +1814,13 @@ function renderAIChatWidget() {
   const wrap = document.createElement('div');
   wrap.id = 'ai-chat-widget';
   wrap.innerHTML = `
-    <button type="button" id="ai-chat-toggle" title="Ask AI"><svg width="30" height="30" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 1.5 2.5 14.5h7.2l-1.2 8 11.5-14h-7.4l1.4-7z" fill="#FFCC33" stroke="#1a1a1a" stroke-width="1.1" stroke-linejoin="round"/><circle cx="9" cy="10.6" r="0.95" fill="#1a1a1a"/><circle cx="13.4" cy="9.6" r="0.95" fill="#1a1a1a"/><path d="M9.3 13.2q1.8 1.5 3.6 0.1" stroke="#1a1a1a" stroke-width="1.1" fill="none" stroke-linecap="round"/></svg></button>
+    <button type="button" id="ai-chat-toggle" title="Ask AI">${aiRobotSvg(44)}</button>
     <div id="ai-chat-panel">
       <div id="ai-chat-panel-header">
-        <strong style="font-size:14px;">Ask AI</strong>
+        <span style="display:flex; align-items:center; gap:8px;">${aiRobotSvg(26)}<strong style="font-size:14px;">Ask AI</strong></span>
         <div>
           <button type="button" id="ai-chat-clear" title="Clear conversation" style="background:none; border:none; cursor:pointer; font-size:12px; color:var(--muted); margin-right:10px;">Clear</button>
-          <button type="button" id="ai-chat-close" title="Close" style="background:none; border:none; cursor:pointer; font-size:18px; line-height:1;">&times;</button>
+          <button type="button" id="ai-chat-close" title="Close" style="background:none; border:none; cursor:pointer; font-size:18px; line-height:1; color:var(--text);">&times;</button>
         </div>
       </div>
       <div id="ai-chat-messages"></div>
