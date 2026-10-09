@@ -77,11 +77,12 @@
   .pg > .slabs.corner { opacity: 0.4; }
 
   /* Intro page: a photo with a black panel overlapping its lower right. */
-  .band-photo { position: absolute; left: 0; right: 9%; top: 45.6%; bottom: 0; z-index: 1; }
+  .band-photo { position: absolute; left: 0; right: 0; top: 45.6%; bottom: 0; z-index: 1; }
   .band-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .band-panel { position: absolute; left: 9%; right: 0; top: 53%; bottom: 0; z-index: 2; background: #000; color: #fff; padding: 44px 40px 40px 40px; overflow: hidden; }
+  .band-panel { position: absolute; left: 9%; right: 0; top: 53%; bottom: 0; z-index: 2; background: rgba(0, 0, 0, 0.58); color: #fff; padding: 44px 40px 40px 40px; overflow: hidden; }
   .band-panel .txt { position: relative; z-index: 3; max-width: 56%; }
   .band-panel h3 { font-weight: 500; font-size: 21px; margin-bottom: 14px; }
+  .band-panel h3, .band-panel p, .band-panel .det { text-shadow: 0 1px 6px rgba(0,0,0,0.55); }
   .band-panel p { font-size: 14px; line-height: 1.6; margin-bottom: 10px; }
   .band-panel .det { margin-top: 18px; font-size: 14px; line-height: 1.7; opacity: 0.95; }
   .intro-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 28px; margin: 4px 0 26px; }
@@ -149,7 +150,7 @@
     .pg.cover .dots { display: none; }
     .terms-cols h4:first-child { margin-top: 0; }
     .band-photo { position: static; height: 240px; }
-    .band-panel { position: static; padding: 26px 22px 120px; margin: 0 -22px -48px; }
+    .band-panel { position: static; background: #000; padding: 26px 22px 120px; margin: 0 -22px -48px; }
     .band-panel .txt { max-width: 100%; }
     .intro-facts { grid-template-columns: 1fr; }
     .photo-row { grid-template-columns: 1fr; }
@@ -348,8 +349,11 @@
         .toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
 
       // Photo mix for this quote: the job's own photos first, then showcase.
-      const pool = ownPhotos.concat(seededShuffle(SHOWCASE_PHOTOS, token));
-      const photo = (i, w) => supaImageVariant(pool[i % pool.length], w || 1100, 72);
+      const showcaseMix = seededShuffle(SHOWCASE_PHOTOS, token);
+      // The intro page photo is always a showcase one (the job's own photos already feature elsewhere).
+      const introPhoto = supaImageVariant(showcaseMix[0], 1300, 72);
+      const scopePool = ownPhotos.concat(showcaseMix.slice(1));
+      const photo = (i, w) => supaImageVariant(scopePool[i % scopePool.length], w || 1100, 72);
 
       const logoHtml = s.logo_url
         ? `<span class="logo-pill"><img src="${s.logo_url}" alt="${esc(s.company_name || '')}" /></span>`
@@ -393,7 +397,7 @@
             ${introText ? `<p class="pg-lead">${esc(introText)}</p>` : ''}
             ${pylonSummary ? `<p class="pg-lead">${esc(pylonSummary)}</p>` : ''}
           </div>
-          <div class="band-photo"><img src="${photo(0, 1300)}" alt="" /></div>
+          <div class="band-photo"><img src="${introPhoto}" alt="" /></div>
           <div class="band-panel">
             ${slabsSvg('dark')}
             <div class="txt">
@@ -422,7 +426,7 @@
           <div class="pg-body">
             <h1 class="pg-title">Scope<br>of works</h1>
             ${scope.intro.map(t => `<p class="pg-lead">${esc(t)}</p>`).join('')}
-            <div class="photo-row"><img src="${photo(1, 800)}" alt="" /><img src="${photo(2, 800)}" alt="" /></div>
+            <div class="photo-row"><img src="${photo(0, 800)}" alt="" /><img src="${photo(1, 800)}" alt="" /></div>
             <div class="rows">${scopeRowsHtml}</div>
             ${designHtml}
           </div>
