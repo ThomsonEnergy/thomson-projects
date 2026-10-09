@@ -193,6 +193,10 @@
 
     // Company showcase photos, shipped with the site. A job's own cover
     // photos (chosen when quoting) are used first; these fill in the rest.
+    // Shown in the About panel on the intro page. A company_settings.about_text,
+    // if one is ever added, would take priority over this.
+    const ABOUT_TEXT = 'We are renewable energy specialists. We design and install solar, battery storage and off-grid power systems, along with the electrical work that goes with them, for homes, farms, businesses and schools. Our licensed electricians look after your job from the first design through to commissioning and handover, so you deal with one team the whole way.';
+
     // The cover page background (the black shed with the panels on it).
     const COVER_PHOTO = '/img/showcase/shed-solar.jpg';
 
@@ -402,7 +406,7 @@
             ${slabsSvg('dark')}
             <div class="txt">
               <h3>About ${esc(s.company_name || 'us')}</h3>
-              ${s.tagline ? `<p>${esc(s.tagline)}</p>` : ''}
+              <p>${esc(s.about_text || ABOUT_TEXT)}</p>
               ${licenseParts ? `<p>${esc(licenseParts)}</p>` : ''}
               <div class="det">${detailLines.map(esc).join('<br>')}</div>
             </div>
