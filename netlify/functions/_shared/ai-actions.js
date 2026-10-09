@@ -10,8 +10,10 @@
 // can make tasks, only admin / finance / sales can change the Schedule).
 
 const TASK_TYPES = ['prejob', 'onsite', 'handover', 'quote'];
-const BLOCK_KINDS = ['job', 'site_visit', 'office', 'training', 'other'];
-const KIND_LABEL = { job: 'on the job', site_visit: 'for a site visit', office: 'office / admin', training: 'training', other: 'other' };
+const BLOCK_KINDS = ['job', 'site_visit', 'quoting', 'admin', 'maintenance', 'tafe', 'training', 'other'];
+const KIND_LABEL = { job: 'on the job', site_visit: 'for a site visit', quoting: 'quoting', admin: 'office / admin', office: 'office / admin', maintenance: 'maintenance', tafe: 'TAFE', training: 'training', other: 'other' };
+const TIME_CATEGORIES = ['job', 'quoting', 'admin', 'maintenance', 'tafe', 'training', 'other'];
+const CATEGORY_LABEL = { job: 'job time', quoting: 'Quoting', admin: 'Admin', maintenance: 'Maintenance', tafe: 'TAFE', training: 'Training', other: 'Other' };
 
 const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s;
 const isTime = (s) => typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
@@ -19,6 +21,23 @@ const isUuid = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f
 const fmtDay = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 const hhmm = (t) => String(t || '').slice(0, 5);
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+// Sydney wall-clock time -> a real UTC instant (handles daylight saving).
+function sydneyToUtc(dateStr, time) {
+  const [y, m, d] = dateStr.split('-').map(Number), [hh, mm] = time.split(':').map(Number);
+  const asUtc = Date.UTC(y, m - 1, d, hh, mm);
+  const offsetAt = (ms) => {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Australia/Sydney', hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }).formatToParts(new Date(ms));
+    const g = (t) => Number(parts.find(p => p.type === t).value);
+    return Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute')) - ms;
+  };
+  let guess = asUtc - offsetAt(asUtc);
+  guess = asUtc - offsetAt(guess);
+  return new Date(guess);
+}
+const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+const addMinutes = (hhmmStr, mins) => { const [h, m] = hhmmStr.split(':').map(Number); const t = h * 60 + m + mins; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
+const minutesBetween = (a, b) => { const [h1, m1] = a.split(':').map(Number), [h2, m2] = b.split(':').map(Number); return (h2 * 60 + m2) - (h1 * 60 + m1); };
+const hoursText = (mins) => { const h = Math.floor(mins / 60), m = mins % 60; return m ? `${h}h ${m}m` : `${h}h`; };
 const jobLabel = (p) => (p.job_number ? `J${p.job_number}` : p.quote_number ? `Q${p.quote_number}` : '') + (p.name ? ` - ${p.name}` : '');
 
 // ---------- lookups ----------
@@ -75,7 +94,7 @@ const overlaps = (a, b) => hhmm(a.start_time) < hhmm(b.end_time) && hhmm(b.start
 const describeBooking = (a) => `${hhmm(a.start_time)}-${hhmm(a.end_time)} ${a.projects ? jobLabel(a.projects) : (a.note || KIND_LABEL[a.block_type] || 'booking')}`;
 
 // ---------- prepare: check + describe one action (no changes made) ----------
-async function prepare(client, type, input) {
+async function prepare(client, type, input, ctx = {}) {
   input = input || {};
   const warnings = [];
   try {
@@ -122,7 +141,7 @@ async function prepare(client, type, input) {
       if (!isTime(start) || !isTime(end) || start >= end) return { ok: false, error: 'start_time and end_time must be like 07:00 and 15:30, with the end after the start.' };
       let project = null;
       if (input.project_id || input.job) { const r = await resolveJob(client, { id: input.project_id, text: input.job }); if (r.error) return { ok: false, error: r.error }; project = r.project; }
-      const kind = input.kind && BLOCK_KINDS.includes(input.kind) ? input.kind : (project ? 'job' : 'office');
+      const kind = input.kind && BLOCK_KINDS.includes(input.kind) ? input.kind : (project ? 'job' : 'admin');
       if ((kind === 'job' || kind === 'site_visit') && !project) return { ok: false, error: `A ${kind === 'job' ? 'job booking' : 'site visit'} needs a job. Which job?` };
       if (kind === 'job' && project) {
         const { data: blockers } = await client.from('job_tasks').select('description').eq('project_id', project.id).eq('required_before_scheduling', true).eq('completed', false);
@@ -135,6 +154,48 @@ async function prepare(client, type, input) {
         ok: true, type,
         params: { staff_id: staff.id, staff_name: staff.name, project_id: project && project.id, date: input.date, start_time: start, end_time: end, kind, note },
         summary: `Book ${staff.name} ${project ? `${KIND_LABEL[kind] === 'on the job' ? 'on' : 'for'} ${jobLabel(project)}` : KIND_LABEL[kind]} on ${fmtDay(input.date)}, ${start} to ${end}${!project && note ? ` (${note})` : ''}`,
+        warnings,
+      };
+    }
+
+    if (type === 'add_timesheet') {
+      const who = (input.staff_id || input.staff_name)
+        ? await resolveStaff(client, { id: input.staff_id, name: input.staff_name }, 'person')
+        : await resolveStaff(client, { id: ctx.userId }, 'person');
+      if (who.error) return { ok: false, error: who.error };
+      const forSomeoneElse = !!ctx.userId && who.id !== ctx.userId;
+      if (!isDate(input.date)) return { ok: false, error: 'date must be a real date like 2026-10-14.' };
+      if (input.date > sydneyToday()) return { ok: false, error: 'That day has not happened yet. Timesheets are for time already worked.' };
+      if (!isTime(input.start_time) || !isTime(input.end_time)) return { ok: false, error: 'Both the start time and the finish time are needed, like 07:00 and 15:30. Ask for them, do not guess.' };
+      if (input.start_time >= input.end_time) return { ok: false, error: 'The finish time must be after the start time (a shift over midnight has to be entered as two days).' };
+      const spanMins = minutesBetween(input.start_time, input.end_time);
+      if (spanMins > 16 * 60) return { ok: false, error: 'That is more than 16 hours in one go. Check the times.' };
+      let project = null;
+      if (input.project_id || input.job) { const r = await resolveJob(client, { id: input.project_id, text: input.job }); if (r.error) return { ok: false, error: r.error }; project = r.project; }
+      const category = input.category && TIME_CATEGORIES.includes(input.category) ? input.category : (project ? 'job' : null);
+      if (!category) return { ok: false, error: 'Which job, or which kind of time is it (Quoting, Admin, Maintenance, TAFE, Training or Other)? Ask.' };
+      if (category === 'job' && !project) return { ok: false, error: 'Job time needs a job. Which job?' };
+      if (category !== 'job' && project) return { ok: false, error: 'Time on a job should use the job category.' };
+      const breakMins = input.unpaid_break_minutes === undefined || input.unpaid_break_minutes === null ? 0 : Number(input.unpaid_break_minutes);
+      if (!Number.isInteger(breakMins) || breakMins < 0 || breakMins > 120) return { ok: false, error: 'unpaid_break_minutes must be a whole number from 0 to 120.' };
+      let breakStart = null;
+      if (breakMins) {
+        breakStart = input.break_start || '12:00';
+        if (!isTime(breakStart) || breakStart <= input.start_time || addMinutes(breakStart, breakMins) >= input.end_time) return { ok: false, error: 'The unpaid break has to fall inside the shift (default start 12:00). Ask when it was taken.' };
+      }
+      // never double up on time already logged
+      const startUtc = sydneyToUtc(input.date, input.start_time), endUtc = sydneyToUtc(input.date, input.end_time);
+      const { data: existing } = await client.from('time_entries').select('id, clock_in, clock_out').eq('staff_id', who.id)
+        .lt('clock_in', endUtc.toISOString()).or(`clock_out.is.null,clock_out.gt.${startUtc.toISOString()}`);
+      if ((existing || []).length) return { ok: false, error: `${who.name} already has time logged that overlaps ${input.start_time} to ${input.end_time} on ${fmtDay(input.date)}. It has to be changed in Timesheets, not added again.` };
+      const worked = spanMins - breakMins;
+      if (forSomeoneElse) warnings.push(`This goes straight onto ${who.name}'s timesheet. Only admin and finance can add time for other people.`);
+      if (category === 'job') warnings.push('No stage is set on it. Choose one in Timesheets if the hours should count against a stage.');
+      const note = input.note ? String(input.note).trim().slice(0, 150) : null;
+      return {
+        ok: true, type,
+        params: { staff_id: who.id, staff_name: who.name, date: input.date, start_time: input.start_time, end_time: input.end_time, category, project_id: project && project.id, break_minutes: breakMins, break_start: breakStart, note },
+        summary: `Add a timesheet for ${who.name}: ${fmtDay(input.date)}, ${input.start_time} to ${input.end_time}, ${hoursText(worked)} worked${breakMins ? ` (${breakMins} min unpaid break at ${breakStart})` : ''}, ${project ? 'on ' + jobLabel(project) : CATEGORY_LABEL[category] + ' time'}`,
         warnings,
       };
     }
@@ -169,8 +230,8 @@ async function prepare(client, type, input) {
 }
 
 // ---------- execute: do it (re-checks first) ----------
-const permissionMessage = (err) => (err && (err.code === '42501' || /row-level security|permission denied/i.test(err.message || ''))
-  ? 'You do not have permission to do that. Changing the Schedule is for admin, finance and sales.'
+const permissionMessage = (err, what = 'schedule') => (err && (err.code === '42501' || /row-level security|permission denied/i.test(err.message || ''))
+  ? (what === 'timesheet' ? 'You do not have permission to do that. You can add your own time, and only admin and finance can add time for other people.' : 'You do not have permission to do that. Changing the Schedule is for admin, finance and sales.')
   : (err && err.message) || 'Something went wrong.');
 
 async function execute(client, userId, type, params) {
@@ -192,8 +253,10 @@ async function execute(client, userId, type, params) {
     if ('assignment_date' in input) again.date = input.assignment_date;
     if ('start_time' in input) again.start_time = input.start_time;
     if ('end_time' in input) again.end_time = input.end_time;
+  } else if (type === 'add_timesheet') {
+    again = { staff_id: input.staff_id, date: input.date, start_time: input.start_time, end_time: input.end_time, category: input.category, project_id: input.project_id, unpaid_break_minutes: input.break_minutes, break_start: input.break_start, note: input.note };
   } else again = { assignment_id: input.assignment_id };
-  const prepared = await prepare(client, type, again);
+  const prepared = await prepare(client, type, again, { userId });
   if (!prepared.ok) return { ok: false, error: prepared.error };
   const p = prepared.params;
 
@@ -210,6 +273,20 @@ async function execute(client, userId, type, params) {
     if (error) return { ok: false, error: permissionMessage(error) };
     await logActivity(p.project_id, 'task_added', `Task added: ${p.description}${p.assignee_name ? ` (assigned to ${p.assignee_name})` : ''}`);
     return { ok: true, message: `Done. Task created${p.assignee_name ? ` for ${p.assignee_name}` : ''}.` };
+  }
+
+  if (type === 'add_timesheet') {
+    const at = (t) => sydneyToUtc(p.date, t).toISOString();
+    const base = { staff_id: p.staff_id, project_id: p.project_id || null, time_category: p.category, notes: (p.note ? p.note + ' - ' : '') + 'added with the AI assistant' };
+    const rows = p.break_minutes
+      ? [
+        { ...base, clock_in: at(p.start_time), clock_out: at(p.break_start), break_taken: true, break_start: at(p.break_start), break_minutes: p.break_minutes, break_skip_reason: null },
+        { ...base, clock_in: at(addMinutes(p.break_start, p.break_minutes)), clock_out: at(p.end_time) },
+      ]
+      : [{ ...base, clock_in: at(p.start_time), clock_out: at(p.end_time) }];
+    const { error } = await client.from('time_entries').insert(rows);
+    if (error) return { ok: false, error: permissionMessage(error, 'timesheet') };
+    return { ok: true, message: `Done. Timesheet added for ${p.staff_name} on ${fmtDay(p.date)}.` };
   }
 
   if (type === 'update_task') {
@@ -283,6 +360,16 @@ const ACTION_TOOLS = [
     input_schema: { type: 'object', properties: {
       assignment_id: { type: 'string' }, date: { type: 'string' }, start_time: { type: 'string' }, end_time: { type: 'string' }, staff_name: { type: 'string' },
     }, required: ['assignment_id'] },
+  },
+  {
+    name: 'add_timesheet',
+    description: 'Propose adding a timesheet entry for time already worked (yours by default; only admin and finance can add time for someone else). Needs the date, start and finish times, and either a job or a kind of time (quoting, admin, maintenance, tafe, training, other). If there was an unpaid break, give unpaid_break_minutes (and break_start if not 12:00): the shift is then entered as two blocks so the unpaid time is not paid. Timesheets feed payroll, so never guess times or days: ask.' + PROPOSE_NOTE,
+    input_schema: { type: 'object', properties: {
+      date: { type: 'string', description: 'YYYY-MM-DD, a day that has already happened.' }, start_time: { type: 'string', description: 'HH:MM 24 hour' }, end_time: { type: 'string', description: 'HH:MM 24 hour' },
+      category: { type: 'string', enum: TIME_CATEGORIES }, job: { type: 'string', description: 'Job number or words from its name/client, for job time.' },
+      unpaid_break_minutes: { type: 'number' }, break_start: { type: 'string', description: 'HH:MM, default 12:00' },
+      staff_name: { type: 'string', description: 'Only when adding for someone other than the person asking.' }, note: { type: 'string' },
+    }, required: ['date', 'start_time', 'end_time'] },
   },
   {
     name: 'remove_booking',

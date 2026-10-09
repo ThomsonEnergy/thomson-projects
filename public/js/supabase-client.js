@@ -1856,7 +1856,7 @@ function renderAIChatWidget() {
 
   function renderMessages() {
     if (!_aiChatHistory.length) {
-      messagesEl.innerHTML = `<p class="subtitle" style="margin:0;">Hi, I'm ${escapeHtml(aiAssistantName())}. Ask me about a job, a quote, stock levels, what's overdue - anything in the app. I can also line up small changes for you to OK, like a task or a schedule booking.</p>`;
+      messagesEl.innerHTML = `<p class="subtitle" style="margin:0;">Hi, I'm ${escapeHtml(aiAssistantName())}. Ask me about a job, a quote, stock levels, what's overdue - anything in the app. I can also line up small changes for you to OK, like a task, a schedule booking or a timesheet.</p>`;
       return;
     }
     messagesEl.innerHTML = _aiChatHistory.map((m, mi) => `
