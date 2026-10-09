@@ -22,7 +22,17 @@
   .inbox-thread-item.unread .inbox-subject { font-weight:700; }
   .inbox-detail { flex:1; min-width:0; }
   .inbox-message { border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px; white-space:pre-wrap; }
-  .inbox-message.outbound { background:var(--accent-dim, var(--surface-2)); }
+  .inbox-message.inbound { margin-right:48px; border-left:4px solid #3fb97a; }
+  .inbox-message.outbound { margin-left:48px; border-right:4px solid var(--accent); background:var(--accent-dim, var(--surface-2)); }
+  .dir-badge { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:1px 7px; border-radius:20px; margin-right:6px; vertical-align:1px; }
+  .dir-badge.inbound { color:#3fb97a; border:1px solid #3fb97a; }
+  .dir-badge.outbound { color:var(--accent); border:1px solid var(--accent); }
+  .inbox-filters { display:flex; gap:6px; flex-wrap:wrap; align-items:center; padding:8px 4px 10px; position:sticky; top:0; background:var(--surface); z-index:1; }
+  .inbox-filters button { font-size:12px; padding:5px 12px; }
+  .inbox-filters button.on { background:var(--accent); color:var(--accent-contrast, #fff); border-color:var(--accent); }
+  .inbox-thread-item.sent-last { border-right:3px solid var(--accent); }
+  .inbox-thread-item.recv-last { border-right:3px solid #3fb97a; }
+  .inbox-who { font-size:12px; color:var(--text); margin:3px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .email-body { white-space:normal; }
   @media (max-width: 800px) {
     .inbox-layout { flex-direction:column; }
@@ -80,6 +90,15 @@
     }
 
     let activeThreadId = null;
+    let inboxBox = 'inbox';   // inbox | sent | all
+    let unreadOnly = false;
+    let loadedThreads = [], loadedLatest = {}, loadedRecent = [];
+
+    // "Bob Jones <bob@x.com>" -> "Bob Jones"; a bare address stays as it is
+    function addrName(raw) {
+      const m = String(raw || '').match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+      return m ? (m[1].trim() || m[2]) : String(raw || '').trim();
+    }
 
     async function loadThreadList() {
       const listEl = document.getElementById('thread-list');
@@ -95,24 +114,69 @@
         return;
       }
 
-      listEl.innerHTML = threads.map(t => `
-        <a class="inbox-thread-item ${t.id === activeThreadId ? 'active' : ''} ${!t.is_read ? 'unread' : ''}" data-id="${t.id}">
-          <div class="inbox-subject">${escapeHtml(t.subject || '(no subject)')}</div>
-          <p class="subtitle" style="margin:2px 0 0; font-size:12px;">${t.clients?.name ? escapeHtml(t.clients.name) + ' &middot; ' : ''}${timeAgo(t.last_message_at)}</p>
-        </a>`).join('');
+      // each conversation's messages tell us what we sent and what we received
+      const { data: recent } = await supabaseClient.from('emails')
+        .select('thread_id, direction, from_address, to_addresses, sent_at')
+        .in('thread_id', threads.map(t => t.id)).order('sent_at', { ascending: false }).limit(1500);
+      const latest = {};
+      (recent || []).forEach(e => { if (!latest[e.thread_id]) latest[e.thread_id] = e; });
+      loadedThreads = threads; loadedLatest = latest; loadedRecent = recent || [];
+      renderThreadList();
+    }
 
+    // Three boxes: Inbox (conversations with mail we have received), Sent (every email we
+    // sent) and All. Each row says whether it was sent or received, and to / from whom.
+    function renderThreadList() {
+      const listEl = document.getElementById('thread-list');
+      const threads = loadedThreads, latest = loadedLatest;
+      const byId = Object.fromEntries(threads.map(t => [t.id, t]));
+      const hasInbound = new Set(loadedRecent.filter(e => e.direction === 'inbound').map(e => e.thread_id));
+      const unreadCount = threads.filter(t => !t.is_read && hasInbound.has(t.id)).length;
+      const tab = (key, label, extra) => '<button type="button" class="secondary ' + (inboxBox === key ? 'on' : '') + '" data-box="' + key + '">' + label + (extra || '') + '</button>';
+      const sub = (t, when) => '<p class="subtitle" style="margin:2px 0 0; font-size:12px;">' + (t.clients?.name ? escapeHtml(t.clients.name) + ' &middot; ' : '') + when + '</p>';
+
+      let body;
+      if (inboxBox === 'sent') {
+        body = loadedRecent.filter(e => e.direction === 'outbound' && byId[e.thread_id]).map(e => {
+          const t = byId[e.thread_id];
+          return '<a class="inbox-thread-item sent-last ' + (t.id === activeThreadId ? 'active' : '') + '" data-id="' + t.id + '">'
+            + '<div class="inbox-subject">' + escapeHtml(t.subject || '(no subject)') + '</div>'
+            + '<div class="inbox-who"><span class="dir-badge outbound">Sent</span>To ' + escapeHtml(addrName((e.to_addresses || [])[0]) || 'unknown') + '</div>'
+            + sub(t, timeAgo(e.sent_at)) + '</a>';
+        }).join('') || '<p class="subtitle" style="padding:8px 4px;">Nothing sent yet.</p>';
+      } else {
+        body = threads.filter(t => (inboxBox === 'all' || hasInbound.has(t.id)) && (!unreadOnly || !t.is_read)).map(t => {
+          const l = latest[t.id];
+          const out = !!l && l.direction === 'outbound';
+          const who = !l ? '' : out
+            ? '<span class="dir-badge outbound">Sent</span>To ' + escapeHtml(addrName((l.to_addresses || [])[0]) || 'unknown')
+            : '<span class="dir-badge inbound">Received</span>From ' + escapeHtml(addrName(l.from_address) || 'unknown');
+          return '<a class="inbox-thread-item ' + (t.id === activeThreadId ? 'active' : '') + ' ' + (!t.is_read ? 'unread' : '') + ' ' + (l ? (out ? 'sent-last' : 'recv-last') : '') + '" data-id="' + t.id + '">'
+            + '<div class="inbox-subject">' + escapeHtml(t.subject || '(no subject)') + '</div>'
+            + '<div class="inbox-who">' + who + '</div>' + sub(t, timeAgo(t.last_message_at)) + '</a>';
+        }).join('') || '<p class="subtitle" style="padding:8px 4px;">Nothing here.</p>';
+      }
+      listEl.innerHTML = '<div class="inbox-filters">' + tab('inbox', 'Inbox', unreadCount ? ' (' + unreadCount + ')' : '') + tab('sent', 'Sent') + tab('all', 'All')
+        + (inboxBox === 'sent' ? '' : '<label style="margin:0 0 0 auto; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="unread-only" style="width:auto;" ' + (unreadOnly ? 'checked' : '') + ' /> Unread only</label>')
+        + '</div>' + body;
+
+      listEl.querySelectorAll('[data-box]').forEach(b => b.addEventListener('click', () => { inboxBox = b.dataset.box; renderThreadList(); }));
+      const uo = document.getElementById('unread-only');
+      if (uo) uo.addEventListener('change', () => { unreadOnly = uo.checked; renderThreadList(); });
       listEl.querySelectorAll('.inbox-thread-item').forEach(el => {
         el.addEventListener('click', () => openThread(el.dataset.id));
       });
     }
 
     function messageHtml(m, myUserId, staffName) {
-      const senderLabel = m.direction === 'outbound'
-        ? (m.created_by === myUserId ? 'You' : staffName(m.created_by))
-        : (m.from_address || 'Client');
+      const out = m.direction === 'outbound';
+      const senderLabel = out
+        ? (m.created_by ? (m.created_by === myUserId ? 'You' : staffName(m.created_by)) + ' (as sales@)' : 'sales@ (sent from Gmail)')
+        : (addrName(m.from_address) || 'Client');
+      const toLine = (m.to_addresses || []).map(addrName).filter(Boolean).join(', ');
       return `
         <div class="inbox-message ${m.direction}">
-          <p class="subtitle" style="margin:0 0 8px; font-size:12px;"><strong style="color:var(--text);">${escapeHtml(senderLabel)}</strong> &middot; ${new Date(m.sent_at).toLocaleString('en-AU')}</p>
+          <p class="subtitle" style="margin:0 0 8px; font-size:12px;"><span class="dir-badge ${m.direction}">${out ? 'Sent' : 'Received'}</span><strong style="color:var(--text);">${escapeHtml(senderLabel)}</strong>${toLine ? ' to ' + escapeHtml(toLine) : ''} &middot; ${new Date(m.sent_at).toLocaleString('en-AU')}</p>
           <div class="email-body" data-email-id="${m.id}"></div>
         </div>`;
     }
@@ -185,6 +249,7 @@
           });
           const data = await res.json();
           if (!data.ok) throw new Error(data.error);
+          await loadThreadList();
           await openThread(threadId);
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${err.message}</div>`;
