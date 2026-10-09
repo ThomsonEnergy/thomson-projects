@@ -1775,6 +1775,19 @@ function _aiChatLoadHistory() {
 function _aiChatSaveHistory() {
   try { sessionStorage.setItem('te-ai-chat-history', JSON.stringify(_aiChatHistory.slice(-30))); } catch (e) { /* private browsing etc - chat still works, just won't persist */ }
 }
+// What the assistant is called (Settings > Company). Remembered for the browser
+// session so the button never flashes the wrong name, then refreshed from the
+// database in the background.
+const AI_DEFAULT_NAME = 'Sparky';
+function aiAssistantName() {
+  try { return sessionStorage.getItem('te-ai-name') || AI_DEFAULT_NAME; } catch (e) { return AI_DEFAULT_NAME; }
+}
+function applyAiName(wrap, name) {
+  const toggle = wrap.querySelector('#ai-chat-toggle'); if (toggle) toggle.title = `Ask ${name}`;
+  const head = wrap.querySelector('#ai-chat-panel-header strong'); if (head) head.textContent = `Ask ${name}`;
+  const input = wrap.querySelector('#ai-chat-input'); if (input) input.placeholder = `Ask ${name} about a job, quote, stock...`;
+}
+
 function renderAIChatWidget() {
   if (document.getElementById('ai-chat-widget')) return;
   _aiChatHistory = _aiChatLoadHistory();
@@ -1798,6 +1811,13 @@ function renderAIChatWidget() {
       </div>
     </div>`;
   document.body.appendChild(wrap);
+  applyAiName(wrap, aiAssistantName());
+  supabaseClient.from('company_settings').select('ai_assistant_name').eq('id', 1).maybeSingle().then(({ data }) => {
+    const name = (data && data.ai_assistant_name && data.ai_assistant_name.trim()) || AI_DEFAULT_NAME;
+    try { sessionStorage.setItem('te-ai-name', name); } catch (e) { /* fine */ }
+    applyAiName(wrap, name);
+    renderMessages();
+  }, () => {});
 
   const panel = wrap.querySelector('#ai-chat-panel');
   const messagesEl = wrap.querySelector('#ai-chat-messages');
@@ -1806,7 +1826,7 @@ function renderAIChatWidget() {
 
   function renderMessages() {
     if (!_aiChatHistory.length) {
-      messagesEl.innerHTML = `<p class="subtitle" style="margin:0;">Ask about a job, a quote, stock levels, what's overdue - anything in the app. Read-only, can't make changes for you.</p>`;
+      messagesEl.innerHTML = `<p class="subtitle" style="margin:0;">Hi, I'm ${escapeHtml(aiAssistantName())}. Ask me about a job, a quote, stock levels, what's overdue - anything in the app. I'm read-only, so I can't make changes for you.</p>`;
       return;
     }
     messagesEl.innerHTML = _aiChatHistory.map(m => `

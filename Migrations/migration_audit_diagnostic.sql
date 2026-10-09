@@ -427,4 +427,8 @@ select '132', 'notifications + push_subscriptions',
     and exists (select 1 from information_schema.tables where table_name = 'push_subscriptions')
     and exists (select 1 from pg_trigger where tgname = 'notify_task')
   then 'present' else 'MISSING' end
+union all
+select '133', 'company_settings.ai_assistant_name',
+  case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'ai_assistant_name')
+  then 'present' else 'MISSING' end
 order by 1;

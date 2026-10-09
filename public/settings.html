@@ -88,6 +88,10 @@
                 <input id="company-name" placeholder="Thomson Energy Australia Pty Ltd" />
               </div>
               <div>
+                <label>AI assistant's name</label>
+                <input id="ai-assistant-name" placeholder="Sparky" />
+              </div>
+              <div>
                 <label>ABN</label>
                 <input id="abn" placeholder="88 689 985 831" />
               </div>
@@ -644,7 +648,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=50"></script>
+  <script src="/js/supabase-client.js?v=51"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -709,6 +713,7 @@
       document.getElementById('bank-bsb').value = data.bank_bsb || '';
       document.getElementById('bank-account-number').value = data.bank_account_number || '';
       document.getElementById('company-name').value = data.company_name || '';
+      document.getElementById('ai-assistant-name').value = data.ai_assistant_name || '';
       document.getElementById('abn').value = data.abn || '';
       document.getElementById('phone').value = data.phone || '';
       document.getElementById('address').value = data.address || '';
@@ -818,6 +823,7 @@
           cover_photo_url: coverPhotoUrl,
           tagline: document.getElementById('tagline').value.trim(),
           company_name: document.getElementById('company-name').value.trim(),
+          ai_assistant_name: document.getElementById('ai-assistant-name').value.trim() || null,
           abn: document.getElementById('abn').value.trim(),
           phone: document.getElementById('phone').value.trim(),
           address: document.getElementById('address').value.trim(),
