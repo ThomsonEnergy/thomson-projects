@@ -20,8 +20,8 @@
   schedule = "@daily"
 
 # Polls sales@thomsonenergy.com.au for new mail every 5 minutes - see
-# sync-gmail.js. Also directly callable (Settings > Sync now, or the
-# Inbox page) for an immediate check instead of waiting for the next tick.
+# sync-gmail.js. The Sync now buttons (Settings, Inbox) call sync-gmail-now.js
+# instead: Netlify does not allow a scheduled function to be called over HTTP.
 [functions.sync-gmail]
   schedule = "*/5 * * * *"
 
