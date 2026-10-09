@@ -79,12 +79,12 @@
   /* Intro page: a photo with a black panel overlapping its lower right. */
   .band-photo { position: absolute; left: 0; right: 0; top: 45.6%; bottom: 0; z-index: 1; }
   .band-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .band-panel { position: absolute; left: 9%; right: 0; top: 53%; bottom: 0; z-index: 2; background: rgba(0, 0, 0, 0.58); color: #fff; padding: 44px 40px 40px 40px; overflow: hidden; }
-  .band-panel .txt { position: relative; z-index: 3; max-width: 56%; }
+  .band-panel { position: absolute; left: 9%; right: 0; top: 53%; bottom: 0; z-index: 2; background: rgba(0, 0, 0, 0.58); color: #fff; padding: 38px 40px 34px 40px; overflow: hidden; }
+  .band-panel .txt { position: relative; z-index: 3; max-width: 64%; }
   .band-panel h3 { font-weight: 500; font-size: 21px; margin-bottom: 14px; }
   .band-panel h3, .band-panel p, .band-panel .det { text-shadow: 0 1px 6px rgba(0,0,0,0.55); }
-  .band-panel p { font-size: 14px; line-height: 1.6; margin-bottom: 10px; }
-  .band-panel .det { margin-top: 18px; font-size: 14px; line-height: 1.7; opacity: 0.95; }
+  .band-panel p { font-size: 13px; line-height: 1.55; margin-bottom: 9px; }
+  .band-panel .det { margin-top: 14px; font-size: 13px; line-height: 1.6; opacity: 0.95; }
   .intro-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 28px; margin: 4px 0 26px; }
   .intro-facts .k { font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--q-grey); margin-bottom: 3px; }
   .intro-facts .v { font-size: 15px; font-weight: 600; line-height: 1.35; }
@@ -195,7 +195,10 @@
     // photos (chosen when quoting) are used first; these fill in the rest.
     // Shown in the About panel on the intro page. A company_settings.about_text,
     // if one is ever added, would take priority over this.
-    const ABOUT_TEXT = 'We are renewable energy specialists. We design and install solar, battery storage and off-grid power systems, along with the electrical work that goes with them, for homes, farms, businesses and schools. Our licensed electricians look after your job from the first design through to commissioning and handover, so you deal with one team the whole way.';
+    const ABOUT_TEXT = [
+      'At Thomson Energy, we specialise in off-grid and commercial solar solutions built to last and tailored to each site. Based in the Northern Rivers and working Australia-wide, we design and install solar, battery and electrical systems for remote properties, farms, businesses and independent households, and we also take on commercial electrical work.',
+      'We are electricians first: experienced, licensed and committed to doing things properly. You get honest communication, quality workmanship and support well beyond the install. No sales pressure, just smart advice, reliable power and a team you can count on.',
+    ];
 
     // The cover page background (the black shed with the panels on it).
     const COVER_PHOTO = '/img/showcase/shed-solar.jpg';
@@ -406,7 +409,7 @@
             ${slabsSvg('dark')}
             <div class="txt">
               <h3>About ${esc(s.company_name || 'us')}</h3>
-              <p>${esc(s.about_text || ABOUT_TEXT)}</p>
+              ${(s.about_text ? String(s.about_text).split(/\n\s*\n/) : ABOUT_TEXT).map(t => `<p>${esc(t)}</p>`).join('')}
               ${licenseParts ? `<p>${esc(licenseParts)}</p>` : ''}
               <div class="det">${detailLines.map(esc).join('<br>')}</div>
             </div>
