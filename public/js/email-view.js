@@ -1,6 +1,7 @@
 // Shows an email from the shared inbox the way it was meant to look: the formatted
 // (HTML) version in a locked-down box, inline pictures filled in, remote pictures
-// hidden until you ask, and attachments listed to open or download.
+// hidden until you ask (or "Always show pictures"), photos attached to the email shown
+// straight away as thumbnails, and other attachments listed to open or download.
 //
 // Safety, in layers: the HTML is cleaned (scripts, forms, event handlers removed); it is
 // shown inside an iframe with no script permission; and that iframe has its own content
@@ -9,6 +10,15 @@
 // unless you choose to load them.
 //
 // Needs supabase-client.js (escapeHtml, openPhotoLightbox).
+
+// "Always show pictures" is a per-browser preference
+function emailAlwaysShowPictures(set) {
+  try {
+    if (set === undefined) return localStorage.getItem('te_email_show_pictures') === '1';
+    localStorage.setItem('te_email_show_pictures', set ? '1' : '0');
+  } catch (e) { /* storage blocked: just not remembered */ }
+  return !!set;
+}
 
 function emailLinkify(escaped) {
   return escaped.replace(/(https?:\/\/[^\s<>"')]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
@@ -93,7 +103,7 @@ async function mountEmailBody(el, email, ctx) {
   } else {
     el.innerHTML = `<div class="email-images-bar" style="display:none; margin-bottom:6px; font-size:12px;"></div><iframe class="email-frame" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" style="width:100%; height:80px; border:0; border-radius:8px; background:#fff; display:block;"></iframe>`;
     const frame = el.querySelector('iframe'), bar = el.querySelector('.email-images-bar');
-    let allow = false;
+    let allow = emailAlwaysShowPictures();
     const cidMap = {};
 
     // inline pictures that sit inside the email itself
@@ -112,8 +122,11 @@ async function mountEmailBody(el, email, ctx) {
       frame.srcdoc = emailFrameDoc(clean, allow);
       if (clean.blocked && !allow) {
         bar.style.display = 'block';
-        bar.innerHTML = `<span style="color:var(--muted);">Pictures from the internet are hidden.</span> <button type="button" class="secondary" style="font-size:12px; padding:3px 10px;">Show pictures</button>`;
-        bar.querySelector('button').addEventListener('click', () => { allow = true; bar.style.display = 'none'; render(); });
+        bar.innerHTML = `<span style="color:var(--muted);">Pictures from the internet are hidden.</span> <button type="button" class="secondary" style="font-size:12px; padding:3px 10px;">Show pictures</button> <label style="display:inline-flex; gap:4px; align-items:center; margin:0 0 0 8px; font-weight:normal;"><input type="checkbox" style="width:auto;" /> always</label>`;
+        bar.querySelector('button').addEventListener('click', () => {
+          if (bar.querySelector('input').checked) emailAlwaysShowPictures(true);
+          allow = true; bar.style.display = 'none'; render();
+        });
       }
     };
     frame.addEventListener('load', () => {
@@ -131,10 +144,40 @@ async function mountEmailBody(el, email, ctx) {
 
   // attachments to open or download (not the pictures already shown inside the email)
   const files = attachments.filter(a => !referenced.has(a.part_id) && !(a.inline && a.cid && String(email.body_html || '').toLowerCase().includes('cid:' + String(a.cid).toLowerCase())));
-  if (files.length) {
+  const isPhoto = (a) => /^image\/(jpeg|jpg|png|gif|webp)$/i.test(a.mime || '') && (a.size || 0) <= 4 * 1024 * 1024 && (a.size || 0) > 3000;
+  const photos = (ctx && (ctx.fetchAttachment || ctx.fetchStored) ? files.filter(isPhoto) : []).slice(0, 12);
+  const chips = files.filter(a => !photos.includes(a));
+  if (photos.length) {
+    const grid = document.createElement('div');
+    grid.style.cssText = 'margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;';
+    grid.innerHTML = photos.map(a => `<div class="email-photo" style="width:150px; height:112px; border:1px solid var(--border); border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--muted); text-align:center; padding:4px; cursor:pointer;" title="${escapeHtml(a.name)}">Loading ${escapeHtml(a.name)}...</div>`).join('');
+    el.appendChild(grid);
+    const urls = new Array(photos.length).fill(null);
+    const cells = [...grid.querySelectorAll('.email-photo')];
+    const load = async (i) => {
+      const a = photos[i];
+      try {
+        const f = a.storage ? await ctx.fetchStored(a) : await ctx.fetchAttachment(email.id, a.part_id);
+        urls[i] = `data:${f.mime};base64,${f.data}`;
+        cells[i].style.padding = '0';
+        cells[i].innerHTML = `<img src="${urls[i]}" alt="${escapeHtml(a.name)}" style="width:100%; height:100%; object-fit:cover; display:block;" />`;
+      } catch (e) {
+        cells[i].textContent = a.name + ' (could not load - click to retry)';
+        cells[i].dataset.failed = '1';
+      }
+    };
+    cells.forEach((cell, i) => cell.addEventListener('click', async () => {
+      if (cell.dataset.failed) { cell.dataset.failed = ''; cell.textContent = 'Loading...'; await load(i); return; }
+      const ready = urls.map((u, k) => ({ u, k })).filter(x => x.u);
+      const at = ready.findIndex(x => x.k === i);
+      if (at >= 0 && typeof openPhotoLightbox === 'function') openPhotoLightbox(ready.map(x => x.u), at);
+    }));
+    (async () => { for (let i = 0; i < photos.length; i += 3) await Promise.all(photos.slice(i, i + 3).map((_, j) => load(i + j))); })();
+  }
+  if (chips.length) {
     const box = document.createElement('div');
     box.style.cssText = 'margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;';
-    box.innerHTML = files.map(a => `<button type="button" class="secondary email-att" data-idx="${attachments.indexOf(a)}" style="font-size:12px; padding:6px 10px; max-width:100%;">&#128206; ${escapeHtml(a.name)} <span style="color:var(--muted);">(${emailFileSize(a.size || 0)})</span></button>`).join('');
+    box.innerHTML = chips.map(a => `<button type="button" class="secondary email-att" data-idx="${attachments.indexOf(a)}" style="font-size:12px; padding:6px 10px; max-width:100%;">&#128206; ${escapeHtml(a.name)} <span style="color:var(--muted);">(${emailFileSize(a.size || 0)})</span></button>`).join('');
     el.appendChild(box);
     box.querySelectorAll('.email-att').forEach(btn => btn.addEventListener('click', async () => {
       const original = btn.innerHTML; btn.disabled = true; btn.textContent = 'Opening...';
