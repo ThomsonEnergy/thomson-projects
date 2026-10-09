@@ -443,4 +443,9 @@ union all
 select '136', 'knowledge_ocr_parts',
   case when exists (select 1 from information_schema.tables where table_name = 'knowledge_ocr_parts')
   then 'present' else 'MISSING' end
+union all
+select '137', 'emails.body_html + attachments',
+  case when exists (select 1 from information_schema.columns where table_name = 'emails' and column_name = 'body_html')
+    and exists (select 1 from information_schema.columns where table_name = 'emails' and column_name = 'attachments')
+  then 'present' else 'MISSING' end
 order by 1;

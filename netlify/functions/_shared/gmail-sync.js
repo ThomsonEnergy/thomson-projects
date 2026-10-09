@@ -41,6 +41,43 @@ function extractPlainText(payload) {
   return '';
 }
 
+// The formatted (HTML) version of the message, if it has one.
+function extractHtml(payload) {
+  if (!payload) return '';
+  if (payload.mimeType === 'text/html' && payload.body?.data) return decodeBase64Url(payload.body.data);
+  for (const part of payload.parts || []) {
+    const found = extractHtml(part);
+    if (found) return found;
+  }
+  return '';
+}
+
+// Attachments and inline images (the ones a formatted email points at with cid:).
+// Only describes them: the files themselves are fetched from Gmail when someone opens one.
+function extractAttachments(payload) {
+  const out = [];
+  (function walk(part) {
+    if (!part) return;
+    const mime = part.mimeType || '';
+    const headers = part.headers || [];
+    const cidRaw = headerValue(headers, 'Content-ID');
+    const disposition = (headerValue(headers, 'Content-Disposition') || '').toLowerCase();
+    const isBodyText = (mime === 'text/plain' || mime === 'text/html') && !part.filename;
+    if (!mime.startsWith('multipart/') && !isBodyText && (part.filename || cidRaw) && (part.body?.attachmentId || part.body?.data)) {
+      out.push({
+        part_id: part.partId || null,
+        name: part.filename || (cidRaw ? 'inline-' + cidRaw.replace(/[<>]/g, '').split('@')[0] : 'attachment'),
+        mime,
+        size: part.body?.size || 0,
+        cid: cidRaw ? cidRaw.replace(/[<>\s]/g, '') : null,
+        inline: !!cidRaw && !disposition.startsWith('attachment'),
+      });
+    }
+    (part.parts || []).forEach(walk);
+  })(payload);
+  return out;
+}
+
 function parseAddressList(headerVal) {
   if (!headerVal) return [];
   return headerVal.split(',').map(s => s.trim()).filter(Boolean);
@@ -70,6 +107,8 @@ async function processMessageId(supabaseAdmin, messageId) {
   const subject = headerValue(headers, 'Subject');
   const sentAt = headerValue(headers, 'Date');
   const bodyText = extractPlainText(msg.payload);
+  const bodyHtml = extractHtml(msg.payload) || null;
+  const attachments = extractAttachments(msg.payload);
 
   let { data: thread } = await supabaseAdmin.from('email_threads').select('*').eq('gmail_thread_id', msg.threadId).maybeSingle();
   if (!thread) {
@@ -92,6 +131,8 @@ async function processMessageId(supabaseAdmin, messageId) {
     cc_addresses: parseAddressList(headerValue(headers, 'Cc')),
     subject,
     body_text: bodyText,
+    body_html: bodyHtml,
+    attachments,
     message_id_header: headerValue(headers, 'Message-ID') || headerValue(headers, 'Message-Id'),
     sent_at: sentAt ? new Date(sentAt).toISOString() : new Date().toISOString(),
   });
@@ -104,6 +145,26 @@ async function processMessageId(supabaseAdmin, messageId) {
   }).eq('id', thread.id);
 }
 
+
+// Mail synced before the formatted version and attachment list were kept has
+// attachments = null: fill those in, newest first, with whatever time is left.
+async function backfillEmails(supabaseAdmin, startedAt, budgetMs) {
+  const { data: pending } = await supabaseAdmin.from('emails').select('id, gmail_message_id').is('attachments', null).order('sent_at', { ascending: false }).limit(30);
+  let filled = 0;
+  for (const e of (pending || [])) {
+    if (Date.now() - startedAt > budgetMs) break;
+    try {
+      const msg = await gmailRequest(`messages/${e.gmail_message_id}?format=full`);
+      await supabaseAdmin.from('emails').update({ body_html: extractHtml(msg.payload) || null, attachments: extractAttachments(msg.payload) }).eq('id', e.id);
+      filled += 1;
+    } catch (err) {
+      // a message deleted from Gmail can never be filled in: mark it done so it is not retried forever
+      if (/404|not found/i.test(err.message || '')) await supabaseAdmin.from('emails').update({ attachments: [] }).eq('id', e.id);
+      else console.error('backfill failed for', e.gmail_message_id, err.message);
+    }
+  }
+  return filled;
+}
 
 // Returns { synced, done }. done=false means time ran out before every message was handled.
 async function runSync({ budgetMs = 8000 } = {}) {
@@ -145,8 +206,10 @@ async function runSync({ budgetMs = 8000 } = {}) {
   if (done && newHistoryId) {
     await supabaseAdmin.from('api_keys').upsert({ key_name: 'google_history_id', key_value: String(newHistoryId) });
   }
-  console.log(`sync-gmail: processed ${synced} of ${messageIds.length} message(s)${done ? '' : ' (out of time, will carry on next run)'}.`);
-  return { synced, done, total: messageIds.length };
+  let backfilled = 0;
+  if (done) backfilled = await backfillEmails(supabaseAdmin, startedAt, budgetMs);
+  console.log(`sync-gmail: processed ${synced} of ${messageIds.length} message(s)${done ? '' : ' (out of time, will carry on next run)'}, filled in ${backfilled} older email(s).`);
+  return { synced, done, total: messageIds.length, backfilled };
 }
 
-module.exports = { runSync };
+module.exports = { runSync, extractHtml, extractAttachments, extractPlainText };
