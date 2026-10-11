@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Reviews - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=13" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .rv-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+  .rv-filters button { font-size:13px; padding:6px 14px; border-radius:20px; }
+  .rv-filters button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .rv-stars { color:#f5b301; font-size:20px; letter-spacing:1px; white-space:nowrap; }
+  .rv-stars .off { color:var(--muted); }
+  .rv-item { padding:14px 0; border-top:1px solid var(--border); }
+  .rv-item:first-child { border-top:none; }
+  .rv-quote { margin:6px 0 0; white-space:pre-wrap; word-wrap:break-word; }
+  .rv-meta { font-size:12px; color:var(--muted); margin-top:6px; }
+  .rv-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .rv-actions button, .rv-actions a { font-size:12px; padding:5px 10px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Reviews</h1>
+    <p class="subtitle">Reviews clients left through the "Ask for a review" link in job emails. Reviews posted straight on Google are on Google, not here.</p>
+
+    <div class="grid cols-4" id="rv-stats" style="margin-bottom:14px;"></div>
+
+    <div class="card">
+      <div class="rv-filters" id="rv-filters">
+        <button type="button" class="secondary active" data-f="answered">Answered</button>
+        <button type="button" class="secondary" data-f="waiting">Waiting for an answer</button>
+        <button type="button" class="secondary" data-f="low">3 stars or less</button>
+        <button type="button" class="secondary" data-f="all">All requests</button>
+      </div>
+      <div id="rv-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=59"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let all = [], filter = 'answered';
+    const stars = (n) => `<span class="rv-stars">${'&#9733;'.repeat(n)}<span class="off">${'&#9733;'.repeat(5 - n)}</span></span>`;
+    const dateText = (iso) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+    // "Bob Jones" -> "Bob J." for putting a review on a website
+    const shortName = (n) => { const p = String(n || '').trim().split(/\s+/).filter(Boolean); return p.length > 1 ? `${p[0]} ${p[p.length - 1][0]}.` : (p[0] || 'A customer'); };
+
+    function renderStats() {
+      const answered = all.filter(r => r.submitted_at);
+      const avg = answered.length ? answered.reduce((n, r) => n + r.rating, 0) / answered.length : null;
+      const went = answered.filter(r => r.google_clicked_at).length;
+      const card = (label, value, note) => `<div class="stat"><div class="label">${label}</div><div class="value">${value}</div>${note ? `<div class="subtitle" style="margin:2px 0 0; font-size:12px;">${note}</div>` : ''}</div>`;
+      document.getElementById('rv-stats').innerHTML =
+        card('Average rating', avg === null ? '-' : avg.toFixed(1) + ' / 5', answered.length ? `from ${answered.length} review${answered.length === 1 ? '' : 's'}` : 'no reviews yet')
+        + card('Requests sent', all.length, '')
+        + card('Answered', answered.length, all.length ? Math.round(answered.length / all.length * 100) + '% of requests' : '')
+        + card('Went on to Google', went, answered.length ? `${went} of ${answered.length} answered` : '');
+    }
+
+    function visible() {
+      if (filter === 'answered') return all.filter(r => r.submitted_at).sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
+      if (filter === 'waiting') return all.filter(r => !r.submitted_at);
+      if (filter === 'low') return all.filter(r => r.submitted_at && r.rating <= 3).sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
+      return all;
+    }
+
+    function render() {
+      const el = document.getElementById('rv-list');
+      const rows = visible();
+      if (!rows.length) {
+        el.innerHTML = `<p class="subtitle">${all.length ? 'Nothing in this view.' : 'No review requests yet. Open a job, click "Email the client" and tick "Ask for a review".'}</p>`;
+        return;
+      }
+      el.innerHTML = rows.map(r => {
+        const job = r.projects ? projectRef(r.projects) : null;
+        return `<div class="rv-item" data-id="${r.id}">
+          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
+            <div><strong>${escapeHtml(r.client_name || 'Client')}</strong>${job ? ` <span class="subtitle" style="font-size:12px;">${escapeHtml(job)}</span>` : ''}</div>
+            ${r.submitted_at ? stars(r.rating) : '<span class="subtitle" style="margin:0;">Waiting for their answer</span>'}
+          </div>
+          ${r.submitted_at && r.comment ? `<p class="rv-quote">${escapeHtml(r.comment)}</p>` : (r.submitted_at ? '<p class="rv-quote subtitle">No comment, stars only.</p>' : '')}
+          <div class="rv-meta">${r.submitted_at ? `Answered ${dateText(r.submitted_at)}${r.google_clicked_at ? ' &middot; went on to the Google review page' : ' &middot; has not gone to Google'}` : `Sent ${dateText(r.created_at)}`}${r.client_email ? ' &middot; ' + escapeHtml(r.client_email) : ''}</div>
+          <div class="rv-actions">
+            ${r.submitted_at ? `<button type="button" class="secondary rv-copy">Copy for website / Google reply</button>` : `<button type="button" class="secondary rv-copylink">Copy their review link</button>`}
+            ${r.projects ? `<a class="btn secondary" href="/project.html?id=${r.projects.id}&tab=emails">Open job</a>` : ''}
+            <button type="button" class="secondary rv-delete">Delete</button>
+          </div></div>`;
+      }).join('');
+
+      const flash = (btn, text) => { const o = btn.textContent; btn.textContent = text; setTimeout(() => { btn.textContent = o; }, 1500); };
+      const copy = async (btn, text) => {
+        try { await navigator.clipboard.writeText(text); flash(btn, 'Copied'); }
+        catch (e) { window.prompt('Copy this:', text); }
+      };
+      el.querySelectorAll('.rv-item').forEach(item => {
+        const r = all.find(x => x.id === item.dataset.id);
+        const c = item.querySelector('.rv-copy'); if (c) c.addEventListener('click', () => copy(c, `${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}${r.comment ? `\n"${r.comment}"` : ''}\n- ${shortName(r.client_name)}`));
+        const l = item.querySelector('.rv-copylink'); if (l) l.addEventListener('click', () => copy(l, `${window.location.origin}/review.html?t=${r.token}`));
+        item.querySelector('.rv-delete').addEventListener('click', async () => {
+          if (!confirm(r.submitted_at ? 'Delete this review from the list? This cannot be undone.' : 'Delete this request? Its link will stop working.')) return;
+          const { error } = await supabaseClient.from('review_requests').delete().eq('id', r.id);
+          if (error) { alert(error.message); return; }
+          all = all.filter(x => x.id !== r.id); renderStats(); render();
+        });
+      });
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('reviews');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      document.querySelectorAll('#rv-filters button').forEach(b => b.addEventListener('click', () => {
+        filter = b.dataset.f;
+        document.querySelectorAll('#rv-filters button').forEach(x => x.classList.toggle('active', x === b));
+        render();
+      }));
+      const { data, error } = await supabaseClient.from('review_requests')
+        .select('id, token, client_name, client_email, rating, comment, submitted_at, google_clicked_at, created_at, projects(id, name, job_number, quote_number)')
+        .order('created_at', { ascending: false }).limit(500);
+      if (error) { document.getElementById('rv-list').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      all = data || [];
+      if (!all.some(r => r.submitted_at) && all.length) { filter = 'all'; document.querySelectorAll('#rv-filters button').forEach(x => x.classList.toggle('active', x.dataset.f === 'all')); }
+      renderStats(); render();
+    })();
+  </script>
+</body>
+</html>

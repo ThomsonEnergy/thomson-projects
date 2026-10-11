@@ -1598,6 +1598,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;' },
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;' },
   { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;' },
+  { key: 'reviews', label: 'Reviews', href: '/reviews.html', icon: '&#11088;' },
   { key: 'assets', label: 'Assets', href: '/assets.html', icon: '&#128295;' },
   { key: 'stock', label: 'Stock', href: '/stock.html', icon: '&#128736;' },
   { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', icon: '&#129513;', pricingOnly: true },
