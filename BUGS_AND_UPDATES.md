@@ -20,6 +20,10 @@ guessing, and skip it until it's answered.
 
 ## In Progress
 
+None.
+
+## Resolved
+
 ### Update idea: Credit notes
 - **Reported:** 4 Sept 2026, 04:40 am by Nathan Hicks
 - **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
@@ -37,7 +41,3 @@ guessing, and skip it until it's answered.
 - **Record id:** 0207bcdc-1208-46e5-ade6-7468d1a5aeb9
 - **Comments:**
   - *Claude, 14 Sept 2026, 05:32 am:* Checking before marking this resolved: My Day already has a "Switch job" button + search bar while clocked in (never returns you to the idle "Clock in" screen in between - you go straight from job A to job B). It does still show a "Confirm clock-out" step first (clock-out time, and which stage(s) the time counts against) before starting the new job, since that's needed for accurate payroll/Xero reporting on the job you're leaving. Is that what you had in mind, or were you after something with no confirmation step at all in between? Leaving this open until you confirm.
-
-## Resolved
-
-None.
