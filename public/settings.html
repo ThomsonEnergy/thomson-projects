@@ -77,6 +77,9 @@
             <div id="logo-msg"></div>
             <label>Tagline (optional, shown under your logo on the cover page)</label>
             <input id="tagline" placeholder="e.g. Renewable Energy Specialists" />
+            <label>Google review link</label>
+            <input id="google-review-url" placeholder="https://g.page/r/.../review" />
+            <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Used when you tick "Ask for a review" in a client email. In Google Business Profile choose "Ask for reviews" and copy the link.</p>
           </div>
 
           <div class="card">
@@ -648,7 +651,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=57"></script>
+  <script src="/js/supabase-client.js?v=58"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -724,6 +727,7 @@
       document.getElementById('social-linkedin').value = data.social_linkedin || '';
       document.getElementById('google-maps-key').value = data.google_maps_api_key || '';
       document.getElementById('tagline').value = data.tagline || '';
+      document.getElementById('google-review-url').value = data.google_review_url || '';
       document.getElementById('default-markup').value = data.default_markup_percent ?? 45;
       document.getElementById('default-deposit').value = data.default_deposit_percent ?? 10;
       document.getElementById('next-quote-number').value = data.next_quote_number ?? 1000;
@@ -822,6 +826,7 @@
           logo_url: logoUrl,
           cover_photo_url: coverPhotoUrl,
           tagline: document.getElementById('tagline').value.trim(),
+          google_review_url: document.getElementById('google-review-url').value.trim() || null,
           company_name: document.getElementById('company-name').value.trim(),
           ai_assistant_name: document.getElementById('ai-assistant-name').value.trim() || null,
           abn: document.getElementById('abn').value.trim(),

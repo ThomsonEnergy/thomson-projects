@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="robots" content="noindex, nofollow" />
+<script>document.documentElement.setAttribute('data-theme', 'navy');</script>
+<title>How did we do? - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=13" />
+<style>
+  body { padding-top: 0; }
+  .rv-head { display:flex; align-items:center; gap:14px; padding:18px 16px; border-bottom:1px solid var(--border); }
+  .rv-head img { height:34px; }
+  .rv-wrap { max-width:520px; margin:0 auto; padding:20px 16px 60px; }
+  .rv-stars { display:flex; gap:6px; margin:14px 0 6px; }
+  .rv-star { background:none; border:none; font-size:44px; line-height:1; cursor:pointer; padding:0 2px; color:var(--muted); }
+  .rv-star.on { color:#f5b301; }
+  .rv-star:focus-visible { outline:2px solid var(--accent); border-radius:6px; }
+  a.rv-google { display:inline-block; margin-top:12px; padding:12px 18px; border-radius:8px; background:#fff; color:#1a1a1a; font-weight:700; text-decoration:none; }
+</style>
+</head>
+<body>
+  <div class="rv-head"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></div>
+  <div class="rv-wrap"><div id="rv-root"><p class="subtitle">Loading...</p></div></div>
+
+  <script>
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const token = new URLSearchParams(location.search).get('t') || '';
+    const root = document.getElementById('rv-root');
+    let info = null, rating = 0, comment = '';
+
+    async function api(method, path, body) {
+      const res = await fetch('/.netlify/functions/' + path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      const text = await res.text();
+      try { return JSON.parse(text); } catch (e) { return { ok: false, error: 'Could not reach the server. Check your connection and try again.' }; }
+    }
+
+    function googleBlock() {
+      return info.google_url
+        ? `<p style="margin:18px 0 0;">If you have a Google account, it would also help us a lot if you posted this on Google.</p>
+           <a class="rv-google" id="rv-google" href="${esc(info.google_url)}" target="_blank" rel="noopener">Post it on Google</a>`
+        : '';
+    }
+
+    function renderThanks() {
+      root.innerHTML = `<div class="card"><h2 style="margin-top:0;">Thank you${info.first_name ? ', ' + esc(info.first_name) : ''}!</h2>
+        <p>Your feedback has been sent to the ${esc(info.company_name)} team. We really appreciate it.</p>
+        <p style="margin:6px 0 0; font-size:22px; color:#f5b301;">${'&#9733;'.repeat(rating)}<span style="color:var(--muted);">${'&#9733;'.repeat(5 - rating)}</span></p>
+        ${googleBlock()}
+        <p class="subtitle" style="margin-top:18px;">Need to change what you wrote? <a href="#" id="rv-edit" class="link-quiet">Edit your review</a></p></div>`;
+      const g = document.getElementById('rv-google');
+      if (g) g.addEventListener('click', () => { api('POST', 'submit-review', { t: token, google_clicked: true }); });
+      document.getElementById('rv-edit').addEventListener('click', (e) => { e.preventDefault(); renderForm(); });
+    }
+
+    function renderForm() {
+      const labels = ['', 'Poor', 'Fair', 'Good', 'Very good', 'Excellent'];
+      root.innerHTML = `<div class="card">
+        <h2 style="margin-top:0;">How did we do${info.first_name ? ', ' + esc(info.first_name) : ''}?</h2>
+        <p class="subtitle" style="margin:0;">Thanks for choosing ${esc(info.company_name)}. Tap a star to rate your experience.</p>
+        <div class="rv-stars" id="rv-stars" role="radiogroup" aria-label="Star rating">${[1, 2, 3, 4, 5].map(n => `<button type="button" class="rv-star" data-n="${n}" role="radio" aria-label="${n} star${n > 1 ? 's' : ''}">&#9733;</button>`).join('')}</div>
+        <p class="subtitle" id="rv-label" style="margin:0 0 12px; min-height:18px;"></p>
+        <label>Tell us about it (optional)</label>
+        <textarea id="rv-comment" style="min-height:120px;" placeholder="What went well? Is there anything we could do better?"></textarea>
+        <button type="button" id="rv-submit" style="margin-top:14px; width:100%;">Send my review</button>
+        <div id="rv-msg" style="margin-top:10px;"></div></div>`;
+      const stars = [...root.querySelectorAll('.rv-star')];
+      const paint = (n) => { stars.forEach((s, i) => s.classList.toggle('on', i < n)); document.getElementById('rv-label').textContent = labels[n] || ''; };
+      stars.forEach(s => {
+        s.addEventListener('click', () => { rating = Number(s.dataset.n); paint(rating); });
+        s.addEventListener('mouseenter', () => paint(Number(s.dataset.n)));
+      });
+      document.getElementById('rv-stars').addEventListener('mouseleave', () => paint(rating));
+      const box = document.getElementById('rv-comment');
+      box.value = comment;
+      paint(rating);
+      document.getElementById('rv-submit').addEventListener('click', async () => {
+        const msg = document.getElementById('rv-msg'), btn = document.getElementById('rv-submit');
+        if (!rating) { msg.innerHTML = '<div class="error-box">Please tap a star rating first.</div>'; return; }
+        comment = box.value.trim();
+        btn.disabled = true; btn.textContent = 'Sending...';
+        const r = await api('POST', 'submit-review', { t: token, rating, comment });
+        if (!r.ok) { msg.innerHTML = `<div class="error-box">${esc(r.error || 'Something went wrong.')}</div>`; btn.disabled = false; btn.textContent = 'Send my review'; return; }
+        info.submitted = true;
+        renderThanks();
+      });
+    }
+
+    (async function () {
+      info = await api('GET', 'get-review-request?t=' + encodeURIComponent(token));
+      if (!info.ok) { root.innerHTML = `<div class="card"><h2 style="margin-top:0;">Not available</h2><p>${esc(info.error || 'This link is not valid.')}</p></div>`; return; }
+      document.title = `How did we do? - ${info.company_name}`;
+      if (info.submitted && info.rating) { rating = info.rating; comment = info.comment || ''; renderThanks(); } else renderForm();
+    })();
+  </script>
+</body>
+</html>

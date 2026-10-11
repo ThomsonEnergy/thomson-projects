@@ -15,7 +15,7 @@
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { gmailRequest, gmailUploadSend, GMAIL_MAILBOX } = require('./_shared/google-client');
 const { buildMimeMessage, buildRfc822 } = require('./_shared/build-mime-message');
-const { signatureForUser, plainTextToHtml } = require('./_shared/build-email-signature');
+const { signatureForUser, plainTextToHtml, plainTextWithoutButtons } = require('./_shared/build-email-signature');
 
 const ALLOWED_BUCKETS = ['email-attachments', 'project-documents'];
 const MAX_FILES = 10;
@@ -61,7 +61,7 @@ exports.handler = async (event) => {
     const { supabaseAdmin, user } = auth;
     const { data: profile } = await supabaseAdmin.from('profiles').select('full_name').eq('id', user.id).single();
     const signature = await signatureForUser(supabaseAdmin, user);
-    const fullBody = `${bodyText}\n\n${signature.text}`;
+    const fullBody = `${plainTextWithoutButtons(bodyText)}\n\n${signature.text}`;
     const fullHtml = `${plainTextToHtml(bodyText)}${signature.html}`;
     const attachments = await loadAttachments(supabaseAdmin, attachmentRefs);
 

@@ -11,6 +11,7 @@ const NOTIF_KINDS = [
   ['followup_done', 'Meeting follow-ups finished (for meetings I ran)'],
   ['scheduled', 'Booked onto the schedule'],
   ['email', 'New emails in the shared inbox (admin and sales)'],
+  ['review', 'Client reviews received'],
 ];
 
 (function () {

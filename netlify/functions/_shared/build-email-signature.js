@@ -13,6 +13,10 @@
 
 const fetch = require('node-fetch');
 
+// Every signature shows the shared sales contact details, never the sender's own.
+const SIGNATURE_EMAIL = 'sales@thomsonenergy.com.au';
+const SIGNATURE_PHONE = '0455 415 464';
+
 const NAVY = '#0b0b6b';
 const BADGE = '#4a6285';
 
@@ -63,7 +67,7 @@ function buildSignature(person, company) {
   <table cellpadding="0" cellspacing="0" border="0" style="margin-top:20px;"><tr>
     ${company.logo_url ? `<td valign="bottom" style="padding-right:30px;"><img src="${esc(company.logo_url)}" width="240" alt="${esc(company.company_name || 'Logo')}" style="display:block; width:240px; height:auto;" /></td>` : ''}
     <td valign="bottom" style="font:12px Arial,sans-serif; color:#222222; line-height:1.5;">
-      ${mobile ? `<div><b style="color:${NAVY};">Mobile:</b> ${esc(mobile)}</div>` : ''}
+      ${mobile ? `<div><b style="color:${NAVY};">Phone:</b> ${esc(mobile)}</div>` : ''}
       ${person.email ? `<div><b style="color:${NAVY};">Email:</b> <a href="mailto:${esc(person.email)}" style="color:#0b3d91;">${esc(person.email)}</a></div>` : ''}
       ${company.address ? `<div style="margin-top:4px;"><a href="${esc(mapsUrl)}" style="color:#0b3d91;">${esc(company.address)}</a></div>` : ''}
       ${company.website ? `<div style="margin-top:8px;"><a href="${esc(withScheme(company.website))}" style="color:#0b3d91;">${esc(company.website)}</a></div>` : ''}
@@ -80,7 +84,7 @@ function buildSignature(person, company) {
     person.jobTitle,
     person.credentials,
     '',
-    mobile && `Mobile: ${mobile}`,
+    mobile && `Phone: ${mobile}`,
     person.email && `Email: ${person.email}`,
     company.address,
     company.website,
@@ -90,8 +94,30 @@ function buildSignature(person, company) {
   return { html, text };
 }
 
+// A line like  [[button: Click to view your quote online | https://...]]  is shown as a button in
+// the email (and as "Label: link" in the plain-text copy). Only web links are accepted.
+const BUTTON_LINE = /^\s*\[\[button:\s*(.+?)\s*\|\s*(https?:\/\/[^\s\]|]+)\s*\]\]\s*$/i;
+
+function buttonHtml(label, url) {
+  return `<table cellpadding="0" cellspacing="0" border="0" style="margin:14px 0;"><tr><td bgcolor="${NAVY}" style="background:${NAVY}; border-radius:6px;"><a href="${esc(url)}" target="_blank" style="display:inline-block; padding:12px 22px; font:bold 14px Arial,Helvetica,sans-serif; color:#ffffff; text-decoration:none;">${esc(label)}</a></td></tr></table>`;
+}
+
 function plainTextToHtml(text) {
-  return `<div style="font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:1.5; color:#222222;">${esc(text).replace(/\r?\n/g, '<br/>')}</div>`;
+  const lines = String(text || '').split(/\r?\n/);
+  const parts = [];
+  let run = [];
+  const flush = () => { if (run.length) { parts.push(esc(run.join('\n')).replace(/\n/g, '<br/>')); run = []; } };
+  for (const line of lines) {
+    const m = line.match(BUTTON_LINE);
+    if (m) { flush(); parts.push(buttonHtml(m[1], m[2])); } else run.push(line);
+  }
+  flush();
+  return `<div style="font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:1.5; color:#222222;">${parts.join('')}</div>`;
+}
+
+// The same text for plain-text readers: buttons become "Label: link".
+function plainTextWithoutButtons(text) {
+  return String(text || '').split(/\r?\n/).map(l => { const m = l.match(BUTTON_LINE); return m ? `${m[1]}: ${m[2]}` : l; }).join('\n');
 }
 
 // Gmail fetches signature images through its own proxy, which gives up on
@@ -121,7 +147,7 @@ async function emailSafeLogoUrl(url) {
 async function signatureForUser(supabaseAdmin, user) {
   const [{ data: profile }, { data: company }] = await Promise.all([
     supabaseAdmin.from('profiles')
-      .select('full_name, job_title, mobile_number, photo_url, email_signature, email_signature_include_photo')
+      .select('full_name, job_title, photo_url, email_signature, email_signature_include_photo')
       .eq('id', user.id).single(),
     supabaseAdmin.from('company_settings')
       .select('company_name, phone, address, website, licenses, logo_url, social_facebook, social_instagram, social_linkedin')
@@ -132,12 +158,12 @@ async function signatureForUser(supabaseAdmin, user) {
     fullName: profile?.full_name || 'Thomson Energy Sales',
     jobTitle: profile?.job_title,
     credentials: profile?.email_signature,
-    mobile: profile?.mobile_number,
-    email: user.email,
+    mobile: SIGNATURE_PHONE,
+    email: SIGNATURE_EMAIL,
     photoUrl: profile?.photo_url,
     includePhoto: profile?.email_signature_include_photo,
   }, { ...(company || {}), logo_url });
   return { ...sig, fullName: profile?.full_name };
 }
 
-module.exports = { buildSignature, plainTextToHtml, signatureForUser, emailSafeLogoUrl };
+module.exports = { buildSignature, plainTextToHtml, plainTextWithoutButtons, signatureForUser, emailSafeLogoUrl, SIGNATURE_EMAIL, SIGNATURE_PHONE };

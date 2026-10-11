@@ -31,11 +31,11 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=57"></script>
+  <script src="/js/supabase-client.js?v=58"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=7"></script>
   <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=2"></script>
+  <script src="/js/email-compose.js?v=3"></script>
   <script src="/js/assets.js?v=1"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js"></script>
@@ -3841,7 +3841,8 @@
         body: reply ? '' : (isQuote ? `Hi ${first},\n\nPlease find the quote for ${project.name} attached.\n\nLet me know if you have any questions.` : `Hi ${first},\n\n`),
         replyToThreadId: reply ? reply.threadId : undefined,
         projectId: project.id, tagKind: 'client',
-        quoteLink: (isQuote && project.quote_token) ? { url: `${window.location.origin}/quote.html?token=${project.quote_token}`, label: 'Include a link to view and accept the quote online' } : undefined,
+        reviewRequest: (!isQuote && !reply) ? { projectId: project.id, clientName: project.client_name, clientEmail: project.client_email } : undefined,
+        quoteLink: (isQuote && project.quote_token) ? { url: `${window.location.origin}/quote.html?token=${project.quote_token}`, label: 'Include a button to view and accept the quote online' } : undefined,
         attachOptions: await jobEmailAttachOptions(project),
         onSent: async () => { await loadJobEmails(project); },
       });
@@ -3858,9 +3859,19 @@
       if (ids.length) ({ data: msgs } = await supabaseClient.from('emails').select('id, thread_id, direction, from_address, to_addresses, body_text, attachments, sent_at').in('thread_id', ids).order('sent_at', { ascending: false }));
       const byThread = {}; (msgs || []).forEach(m => { (byThread[m.thread_id] ||= []).push(m); });
       const sorted = (links || []).slice().sort((a, b) => String(b.email_threads?.last_message_at).localeCompare(String(a.email_threads?.last_message_at)));
-      if (!sorted.length) { el.innerHTML = '<p class="subtitle">No emails on this job yet. Use "Email the client" or tag one from the Inbox.</p>'; return; }
+      // review requests sent from this job, and what came back
+      const { data: reviews } = await supabaseClient.from('review_requests').select('id, client_name, rating, comment, submitted_at, google_clicked_at, created_at').eq('project_id', project.id).order('created_at', { ascending: false });
+      const reviewsHtml = (reviews || []).map(r => `<div class="card" style="margin:0 0 10px; border-color:${r.submitted_at ? '#f5b301' : 'var(--border)'};">
+          <strong>Review request</strong> <span class="subtitle" style="font-size:12px;">sent ${new Date(r.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span>
+          ${r.submitted_at
+            ? `<div style="font-size:20px; color:#f5b301; margin-top:4px;">${'&#9733;'.repeat(r.rating)}<span style="color:var(--muted);">${'&#9733;'.repeat(5 - r.rating)}</span></div>
+               ${r.comment ? `<p style="margin:4px 0 0; white-space:pre-wrap;">${escapeHtml(r.comment)}</p>` : ''}
+               <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Answered ${new Date(r.submitted_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}${r.google_clicked_at ? ' - went on to the Google review page' : ''}</p>`
+            : '<p class="subtitle" style="margin:4px 0 0;">Waiting for their answer.</p>'}
+        </div>`).join('');
+      if (!sorted.length) { el.innerHTML = reviewsHtml + '<p class="subtitle">No emails on this job yet. Use "Email the client" or tag one from the Inbox.</p>'; return; }
       const ctx = { fetchAttachment: fetchEmailAttachment, fetchStored: fetchStoredAttachment };
-      el.innerHTML = sorted.map(l => {
+      el.innerHTML = reviewsHtml + sorted.map(l => {
         const thread = l.email_threads || {}; const list = byThread[l.thread_id] || [];
         const last = list[0];
         const atts = list.flatMap(m => (m.attachments || []).filter(a => !(a.inline && a.cid)).map(a => ({ m, a })));

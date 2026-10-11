@@ -453,4 +453,9 @@ select '138', 'email_job_links + email-attachments bucket',
   case when exists (select 1 from information_schema.tables where table_name = 'email_job_links')
     and exists (select 1 from storage.buckets where id = 'email-attachments')
   then 'present' else 'MISSING' end
+union all
+select '139', 'review_requests + google_review_url',
+  case when exists (select 1 from information_schema.tables where table_name = 'review_requests')
+    and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'google_review_url')
+  then 'present' else 'MISSING' end
 order by 1;

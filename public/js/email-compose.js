@@ -88,6 +88,7 @@ async function emailSendNow(payload) {
 }
 
 // opts: { title, to, cc, subject, body, replyToThreadId, projectId, tagKind, quoteLink: {url, label},
+//         reviewRequest: {projectId, clientName, clientEmail} (shows "Ask for a review"),
 //         attachOptions: [{ group, label, bucket, path, name, size, checked }], onSent(threadId) }
 function openEmailComposer(opts) {
   const overlay = document.createElement('div');
@@ -107,6 +108,7 @@ function openEmailComposer(opts) {
       <label>Message</label>
       <textarea id="ec-body" style="min-height:170px;">${escapeHtml(opts.body || '')}</textarea>
       ${opts.quoteLink ? `<label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:10px;"><input type="checkbox" id="ec-quote-link" style="width:auto;" /> ${escapeHtml(opts.quoteLink.label || 'Include a link to view and accept the quote online')}</label>` : ''}
+      ${opts.reviewRequest ? `<label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:6px;"><input type="checkbox" id="ec-review" style="width:auto;" /> Ask for a review (a button to a page where they pick stars and write a comment, no Google account needed, with the option to post on Google too)</label>` : ''}
       <label>Attachments</label>
       ${options.length ? groups.map(g => `
         <div style="margin-bottom:8px;">
@@ -133,10 +135,18 @@ function openEmailComposer(opts) {
     if (chosen.length + picker.files().length > EMAIL_MAX_FILES) { msg.innerHTML = `<div class="error-box">Attach up to ${EMAIL_MAX_FILES} files.</div>`; return; }
     if (totalGuess > EMAIL_MAX_TOTAL) { msg.innerHTML = '<div class="error-box">The attachments add up to more than 20 MB. Send them in more than one email.</div>'; return; }
     const ql = overlay.querySelector('#ec-quote-link');
-    if (ql && ql.checked && opts.quoteLink) bodyText += `\n\n${opts.quoteLink.url}`;
+    if (ql && ql.checked && opts.quoteLink) bodyText += `\n\n[[button: Click to view your quote online | ${opts.quoteLink.url}]]`;
+    const wantsReview = !!(opts.reviewRequest && overlay.querySelector('#ec-review') && overlay.querySelector('#ec-review').checked);
+    let reviewRow = null;
     btn.disabled = true; btn.textContent = picker.files().length ? 'Uploading...' : 'Sending...';
     try {
       const uploaded = await emailUploadFiles(picker.files());
+      if (wantsReview) {
+        // the row is made first so the link already works when the email arrives
+        const r = await emailCreateReviewRequest(opts.reviewRequest);
+        reviewRow = r;
+        bodyText += `\n\nIf you were happy with our work, we would really appreciate a quick review. It only takes a minute:\n[[button: Leave us a review | ${r.url}]]`;
+      }
       btn.textContent = 'Sending...';
       const data = await emailSendNow({
         to, cc: overlay.querySelector('#ec-cc').value.trim() || undefined, subject, bodyText,
@@ -147,11 +157,22 @@ function openEmailComposer(opts) {
       overlay.remove();
       if (opts.onSent) await opts.onSent(data.threadId);
     } catch (err) {
+      if (reviewRow) { try { await supabaseClient.from('review_requests').delete().eq('id', reviewRow.id); } catch (e) { /* leftover unused link is harmless */ } }
       msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       btn.disabled = false; btn.textContent = 'Send';
     }
   });
   setTimeout(() => overlay.querySelector(opts.to ? '#ec-body' : '#ec-to').focus(), 30);
+}
+
+// Makes a review request (and its unguessable link) for a client.
+async function emailCreateReviewRequest({ projectId, clientName, clientEmail }) {
+  const bytes = crypto.getRandomValues(new Uint8Array(18));
+  const token = btoa(String.fromCharCode.apply(null, bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { data, error } = await supabaseClient.from('review_requests').insert({ token, project_id: projectId || null, client_name: clientName || null, client_email: clientEmail || null, created_by: user ? user.id : null }).select('id').single();
+  if (error) throw new Error('Could not set up the review link: ' + error.message);
+  return { id: data.id, token, url: `${window.location.origin}/review.html?t=${token}` };
 }
 
 // Tag a conversation to a job. Give threadId (pick the job) or projectId (pick the conversation).
