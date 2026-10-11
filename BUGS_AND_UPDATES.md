@@ -10,6 +10,14 @@ guessing, and skip it until it's answered.
 
 ## Open
 
+None.
+
+## In Progress
+
+None.
+
+## Resolved
+
 ### Bug: Calender isnt putting jobs on
 - **Reported:** 4 Sept 2026, 05:12 am by Nathan Hicks
 - **Approved:** 7 Sept 2026, 10:58 am by Jasper Thomson
@@ -17,12 +25,6 @@ guessing, and skip it until it's answered.
 - **Record id:** 70b1f34a-ffcd-4684-98f7-19ada1d6aa69
 - **Comments:**
   - *Claude, 14 Sept 2026, 05:33 am:* Pushed a likely fix: native HTML5 drag-and-drop never works on touch input at all (no error, it just silently does nothing), and the schedule page was only switching to its tap-based mobile view below 700px screen width - so a touch device with a wider screen (a tablet in landscape, or a touchscreen laptop) would land on the drag-only desktop layout with no way to actually drag. It now switches to the tap-based view for any touch/coarse-pointer device regardless of width. Also tightened up the drag data format for better cross-browser support on genuine desktop/mouse use. Can you confirm what device/browser this was on, and try again? If it still doesn't work, let us know the device and we'll keep digging.
-
-## In Progress
-
-None.
-
-## Resolved
 
 ### Update idea: Credit notes
 - **Reported:** 4 Sept 2026, 04:40 am by Nathan Hicks
