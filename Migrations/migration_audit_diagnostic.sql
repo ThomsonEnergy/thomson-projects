@@ -458,4 +458,10 @@ select '139', 'review_requests + google_review_url',
   case when exists (select 1 from information_schema.tables where table_name = 'review_requests')
     and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'google_review_url')
   then 'present' else 'MISSING' end
+union all
+select '140', 'get_quote_by_token returns prepared_by',
+  case when pg_get_functiondef((select oid from pg_proc where proname = 'get_quote_by_token' limit 1)) like '%prepared_by%' then 'present' else 'MISSING' end
+union all
+select '141', 'projects.created_by defaults to auth.uid()',
+  case when (select column_default from information_schema.columns where table_name = 'projects' and column_name = 'created_by') like '%auth.uid%' then 'present' else 'MISSING' end
 order by 1;

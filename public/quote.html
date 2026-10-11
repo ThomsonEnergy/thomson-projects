@@ -65,9 +65,15 @@
   .pg.cover .slabs { opacity: 0.62; }
   .cover-tag { border-left: 4px solid var(--q-blue); padding-left: 14px; font-family: 'Archivo', sans-serif; font-size: 19px; line-height: 1.35; text-transform: uppercase; max-width: 430px; }
   .cover-tag small { display: block; font-family: 'Instrument Sans', sans-serif; font-size: 13px; text-transform: none; opacity: 0.8; margin-top: 4px; }
-  .cover-meta { position: absolute; left: 64px; bottom: 80px; z-index: 2; font-size: 14px; }
-  .cover-meta div { margin-bottom: 16px; }
-  .cover-meta b { display: block; font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 17px; text-transform: uppercase; margin-top: 2px; }
+  .cover-meta { position: absolute; left: 64px; bottom: 64px; z-index: 2; font-size: 13px; line-height: 1.55; max-width: 330px; text-shadow: 0 1px 8px rgba(0,0,0,0.6); }
+  .cover-meta .lbl { font-size: 14px; opacity: 0.9; }
+  .cover-meta b { display: block; font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 20px; text-transform: uppercase; margin: 2px 0 6px; }
+  .cover-meta .co { opacity: 0.95; }
+  .logo-light { display: block; width: auto; }
+  .logo-light.logo-cover, .logo-pill.logo-cover img { height: 108px; max-height: none; max-width: none; }
+  .logo-light.logo-invest, .logo-pill.logo-invest img { height: 56px; max-height: none; max-width: none; }
+  .co-block { position: absolute; right: 64px; bottom: 40px; z-index: 2; text-align: right; font-size: 11.5px; line-height: 1.55; max-width: 290px; color: #e6eaf2; }
+  .co-block b { font-weight: 700; color: #fff; }
 
   .dots { position: absolute; z-index: 1; width: 86px; height: 52px; background-image: radial-gradient(circle, #8a93a2 1px, transparent 1.6px); background-size: 17px 17px; }
   .pg.dark .dots { background-image: radial-gradient(circle, #cfd6e2 1px, transparent 1.6px); }
@@ -128,7 +134,6 @@
   .invest-top { background: #000; color: #fff; margin: 0 -64px 34px; padding: 48px 64px 44px; position: relative; }
   .invest-top .pg-head { margin-bottom: 44px; }
   .invest-top .pg-title { margin-bottom: 0; }
-  .invest-top .dots { right: 90px; bottom: 58px; }
 
   .terms-cols { column-count: 2; column-gap: 28px; font-size: 9.6px; line-height: 1.5; color: #2b303a; }
   .terms-cols h4 { font-size: 10.5px; font-weight: 600; margin: 12px 0 3px; color: var(--q-ink); break-after: avoid; }
@@ -199,6 +204,45 @@
       'At Thomson Energy, we specialise in off-grid and commercial solar solutions built to last and tailored to each site. Based in the Northern Rivers and working Australia-wide, we design and install solar, battery and electrical systems for remote properties, farms, businesses and independent households, and we also take on commercial electrical work.',
       'We are electricians first: experienced, licensed and committed to doing things properly. You get honest communication, quality workmanship and support well beyond the install. No sales pressure, just smart advice, reliable power and a team you can count on.',
     ];
+
+    // Trading entity shown with the ABN and licence numbers on the cover and
+    // the investment summary page.
+    const LEGAL_NAME = 'Thomson Energy Australia Pty. Ltd.';
+
+    // The logo is a JPG on a white background. For the black pages, redraw it
+    // as a white logo on a transparent background so it sits straight on the
+    // page (no white box). Returns a PNG data URL, or null if the image can't
+    // be read (then the caller falls back to the plain logo).
+    function makeLightLogo(url) {
+      return new Promise((resolve) => {
+        if (!url) return resolve(null);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            const scale = Math.min(1, 900 / img.naturalWidth);
+            const c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+            c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0, c.width, c.height);
+            const px = ctx.getImageData(0, 0, c.width, c.height);
+            const d = px.data;
+            for (let i = 0; i < d.length; i += 4) {
+              // The darker a pixel is, the more of the logo it is.
+              const ink = 255 - Math.min(d[i], d[i + 1], d[i + 2]);
+              const a = Math.max(0, Math.min(1, (ink - 14) * 1.7 / 255));
+              d[i] = d[i + 1] = d[i + 2] = 255;
+              d[i + 3] = Math.round(a * 255);
+            }
+            ctx.putImageData(px, 0, 0);
+            resolve(c.toDataURL('image/png'));
+          } catch (e) { resolve(null); }
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+      });
+    }
 
     // The cover page background (the black shed with the panels on it).
     const COVER_PHOTO = '/img/showcase/shed-solar.jpg';
@@ -362,13 +406,24 @@
       const scopePool = ownPhotos.concat(showcaseMix.slice(1));
       const photo = (i, w) => supaImageVariant(scopePool[i % scopePool.length], w || 1100, 72);
 
+      const lightLogo = await makeLightLogo(s.logo_url);
       const logoHtml = s.logo_url
-        ? `<span class="logo-pill"><img src="${s.logo_url}" alt="${esc(s.company_name || '')}" /></span>`
+        ?`<span class="logo-pill"><img src="${s.logo_url}" alt="${esc(s.company_name || '')}" /></span>`
         : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`;
       const headHtml = `<div class="pg-head"><div>${logoHtml}</div><div class="pg-date">${esc(docDate)}</div></div>`;
+      // On the black pages (cover, investment header) the logo is drawn as a
+      // white silhouette straight on the page, with no white box behind it.
+      const darkLogoHtml = (cls) => lightLogo
+        ? `<img class="logo-light ${cls}" src="${lightLogo}" alt="${esc(s.company_name || '')}" />`
+        : `<span class="logo-pill ${cls}"><img src="${s.logo_url}" alt="" /></span>`;
+      const darkHeadHtml = (cls) => `<div class="pg-head"><div>${s.logo_url ? darkLogoHtml(cls) : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`}</div><div class="pg-date">${esc(docDate)}</div></div>`;
 
       const detailLines = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
       const licenseParts = (s.licenses || '').trim();
+      // Company block shown on the cover (with who prepared it) and again in the
+      // investment summary header: legal name, ABN, address and licence numbers.
+      const companyLines = [LEGAL_NAME, s.abn ? `ABN ${s.abn}` : '', s.address, licenseParts].filter(Boolean);
+      const preparedBy = data.prepared_by ? String(data.prepared_by).trim() : '';
 
       // 1. Cover
       const coverHtml = `
@@ -376,14 +431,15 @@
           <img class="cover-photo" src="${COVER_PHOTO}" alt="" />
           <div class="cover-scrim"></div>
           ${slabsSvg('cover')}
-          ${headHtml}
+          ${darkHeadHtml('logo-cover')}
           <div class="pg-body">
             <h1 class="pg-title">${esc(docLabel)}${qNum ? `<br><span style="font-size:0.42em; letter-spacing:0; opacity:0.9;">${esc(qNum)}</span>` : ''}</h1>
             <div class="cover-tag">${esc(project.name)}<small>Prepared for ${esc(project.client_name)}${project.client_address ? ' &middot; ' + esc(project.client_address) : ''}</small></div>
           </div>
           <div class="cover-meta">
-            <div>Prepared by:<b>${esc(s.company_name || '')}</b></div>
-            ${s.tagline ? `<div>${esc(s.tagline)}</div>` : ''}
+            <div class="lbl">Prepared by:</div>
+            ${preparedBy ? `<b>${esc(preparedBy)}</b>` : ''}
+            <div class="co">${companyLines.map(esc).join('<br>')}</div>
           </div>
         </section>`;
 
@@ -478,8 +534,8 @@
       const investHtml = `
         <section class="pg invest">
           <div class="invest-top dark-block">
-            ${headHtml}
-            <div class="dots"></div>
+            ${darkHeadHtml('logo-invest')}
+            <div class="co-block">${preparedBy ? `<span class="lbl">Prepared by:</span> <b>${esc(preparedBy)}</b><br>` : ''}${companyLines.map(esc).join('<br>')}</div>
             <h1 class="pg-title">Investment<br>summary</h1>
           </div>
           <div class="pg-body">
