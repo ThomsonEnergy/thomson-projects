@@ -194,7 +194,10 @@ async function renderOnce(url, pdfOptions) {
     try { if (page) await withTimeout(page.close(), 3000, 'closing the page'); } catch (closeErr) { console.error('page.close() failed (Chromium likely already exited):', closeErr.message); if (cachedBrowser) { killBrowser(cachedBrowser); cachedBrowser = null; } }
     if (!KEEP_BROWSER) {
       // close it properly so nothing is left running when the function returns
+      let proc = null;
+      try { proc = browser.process && browser.process(); } catch (e) { /* none */ }
       try { await withTimeout(browser.close(), 5000, 'closing the browser'); } catch (closeErr) { console.error('browser.close() failed:', closeErr.message); killBrowser(browser); }
+      try { if (proc && proc.exitCode === null && !proc.killed) proc.kill('SIGKILL'); } catch (e) { /* already gone */ }
       if (cachedBrowser === browser) cachedBrowser = null;
     }
   }
@@ -217,7 +220,14 @@ exports.handler = async (event) => {
   const deadline = new Promise((resolve) => {
     timer = setTimeout(() => resolve({ statusCode: 504, body: JSON.stringify({ ok: false, error: `The PDF took too long (stuck at: ${stage}). Please try again.` }) }), 55000);
   });
-  try { return await Promise.race([handle(event), deadline]); } finally { clearTimeout(timer); }
+  try { return await Promise.race([handle(event), deadline]); } finally {
+    clearTimeout(timer);
+    try {
+      const handles = (process._getActiveHandles ? process._getActiveHandles() : []).map((h) => (h && h.constructor && h.constructor.name) || typeof h);
+      const children = (() => { try { return require('child_process').execSync('ps -eo pid,etimes,rss,comm | head -20').toString().trim().split('\n').slice(1).map((l) => l.trim()).join(' | '); } catch (e) { return 'ps unavailable'; } })();
+      console.log('PDF function finishing. Live handles:', JSON.stringify(handles.reduce((o, n) => { o[n] = (o[n] || 0) + 1; return o; }, {})), 'processes:', children);
+    } catch (e) { /* diagnostics only */ }
+  }
 };
 
 async function handle(event) {
