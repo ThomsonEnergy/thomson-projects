@@ -9,39 +9,95 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Arimo:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/css/style.css?v=13" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
+  /* The invoice is laid out as A4 sheets (794 x 1123 px at 96 dpi), the same on screen and in the PDF.
+     Each sheet repeats the letterhead and invoice number; a long list of items continues on the next
+     sheet, and the totals and "How to pay" block close the last sheet. */
+  @page { size: A4; margin: 0; }
+  body { background: #e6e9ef; }
+  .inv-sheets { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .inv-sheet {
+    position: relative; width: 794px; height: 1123px; margin: 0 auto 22px; overflow: hidden;
+    background: #fff; color: #000; box-shadow: 0 6px 28px rgba(15, 23, 42, 0.18);
+    font-family: 'Arimo', Arial, Helvetica, sans-serif; font-size: 13px; line-height: 1.3;
+    padding: 34px 38px 0;
+  }
+  .inv-sheet * { box-sizing: border-box; }
+  .inv-head { display: flex; justify-content: space-between; align-items: flex-start; }
+  .inv-logo { display: block; height: 112px; width: auto; max-width: 300px; }
+  .inv-web { font-size: 12px; margin-top: 8px; }
+  .inv-contact { font-size: 13.5px; line-height: 1.38; margin-top: 2px; }
+  .inv-meta-row { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 52px; }
+  .inv-bill { font-size: 13px; line-height: 1.38; padding: 10px 0 0 8px; max-width: 330px; }
+  .inv-right { width: 340px; }
+  .inv-strip { display: flex; border: 1px solid #6b6b6b; border-radius: 6px; overflow: hidden; }
+  .inv-strip > div { flex: 1; text-align: center; padding: 8px 4px 9px; border-right: 1px solid #6b6b6b; }
+  .inv-strip > div:last-child { border-right: none; }
+  .inv-strip .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.02em; }
+  .inv-strip .v { font-size: 14px; font-weight: 700; margin-top: 8px; white-space: nowrap; }
+  .inv-strip .amt { background: #98989d; color: #fff; }
+  .inv-title { text-align: right; font-size: 20px; font-weight: 700; margin: 14px 0 0; letter-spacing: 0.01em; }
+  .inv-details { background: #ececec; border-radius: 6px; padding: 12px 14px 10px; margin-top: 14px; font-size: 12px; line-height: 1.5; }
+  .inv-details div { display: flex; gap: 10px; }
+  .inv-details .k { font-weight: 700; width: 78px; flex: none; }
+  .inv-details .v { overflow-wrap: anywhere; }
+  .inv-body { margin-top: 20px; }
+  .inv-sec { margin-bottom: 18px; }
+  .inv-sec h3 { margin: 0 0 4px; font-size: 13px; font-weight: 700; }
+  .inv-sheet table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; border: none; margin: 0; }
+  .inv-sheet th { background: #98989d; color: #fff; font-weight: 700; font-size: 13px; padding: 2px 6px; text-align: center; border: none; text-transform: none; letter-spacing: 0; }
+  .inv-sheet th:first-child { border-top-left-radius: 6px; }
+  .inv-sheet th:last-child { border-top-right-radius: 6px; }
+  .inv-sheet td { border: 1px solid #8e8e93; border-top: none; padding: 2px 6px; font-size: 13px; background: #fff; color: #000; vertical-align: top; }
+  .inv-sheet td + td { border-left: none; }
+  .inv-sheet td.num, .inv-sheet th.num { text-align: right; }
+  .inv-sheet td.ctr { text-align: center; }
+  .inv-sheet tr:last-child td:first-child { border-bottom-left-radius: 4px; }
+  .inv-sheet tr:last-child td:last-child { border-bottom-right-radius: 4px; }
+  .inv-foot { position: absolute; left: 38px; right: 38px; bottom: 26px; text-align: center; font-size: 11px; font-weight: 700; }
+  .inv-final { margin-top: 10px; }
+  .inv-final-top { display: flex; justify-content: space-between; gap: 24px; border-bottom: 1px solid #000; padding-bottom: 12px; }
+  .inv-terms { font-size: 15.5px; line-height: 1.5; max-width: 440px; }
+  .inv-totals { font-size: 12px; line-height: 1.55; }
+  .inv-totals div { display: flex; justify-content: flex-end; gap: 22px; }
+  .inv-totals .k { font-weight: 700; text-align: right; }
+  .inv-totals .v { min-width: 84px; text-align: right; }
+  .inv-howto { border-top: 1.5px dashed #555; margin-top: 12px; padding-top: 8px; }
+  .inv-howto-head { display: flex; justify-content: space-between; align-items: center; }
+  .inv-howto-head h4 { margin: 0; font-size: 18px; font-weight: 700; text-transform: none; }
+  .inv-howto-head .tag { background: #98989d; color: #fff; font-weight: 700; font-size: 11px; padding: 9px 26px; border-radius: 5px; text-transform: uppercase; }
+  .inv-howto-cols { display: flex; gap: 40px; margin-top: 12px; font-size: 11px; }
+  .inv-howto-cols h5 { margin: 0 0 6px; font-size: 11px; font-weight: 700; text-transform: none; }
+  .inv-howto-cols .row { display: flex; gap: 14px; margin-bottom: 1px; }
+  .inv-howto-cols .row .k { width: 62px; flex: none; }
+  .inv-howto-cols .row .v { font-weight: 700; }
+  .inv-pay-btn { display: inline-block; margin-top: 8px; padding: 9px 18px; border-radius: 6px; border: none; background: #0b3d91; color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .inv-paylink { display: none; }
+  .inv-stamp { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 150px; font-weight: 700; letter-spacing: 0.04em; color: transparent; -webkit-text-stroke: 4px rgba(120, 120, 120, 0.42); pointer-events: none; z-index: 5; white-space: nowrap; }
+  .inv-stamp.paid { -webkit-text-stroke-color: rgba(34, 139, 70, 0.4); }
+  .inv-deposit { display: inline-block; margin-top: 4px; padding: 2px 10px; border-radius: 4px; background: #ececec; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
+
   @media print {
-    .topbar { display: none; }
-    body { background: white; color: black; }
-    .card { border: 1px solid #ccc; background: white; }
-    .page-break { page-break-before: always; }
+    .topbar { display: none !important; }
+    html, body { background: #fff !important; }
+    .wrap { max-width: none !important; width: 210mm !important; margin: 0 !important; padding: 0 !important; }
+    .inv-sheets { zoom: 1 !important; }
+    .inv-sheet { margin: 0; box-shadow: none; page-break-after: always; break-after: page; }
+    .inv-sheet:last-child { page-break-after: auto; break-after: auto; }
+    .inv-pay-btn, #pay-online-msg { display: none !important; }
+    .inv-paylink { display: inline-block !important; }
   }
-  .inv-header-bar { display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; margin-bottom:20px; }
-  .inv-header-bar div { flex:1; padding:12px 16px; text-align:center; border-right:1px solid var(--border); }
-  .inv-header-bar div:last-child { border-right:none; }
-  .inv-header-bar .label { font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); margin-bottom:4px; }
-  .inv-header-bar .val { font-weight:700; font-size:15px; }
-  .inv-header-bar .amount { background:var(--accent-dim); }
-  .meta-box { background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:14px 16px; font-size:13px; }
-  .meta-box div { margin-bottom:4px; }
-  .meta-box span.k { color:var(--muted); display:inline-block; width:110px; }
-  .deposit-pill { display:inline-block; margin-top:6px; padding:3px 10px; border-radius:999px; background:var(--accent-dim); color:var(--accent); font-size:12px; font-weight:700; letter-spacing:0.08em; }
-  /* Phone layout: stack the header and bill-to blocks, let the summary bar
-     wrap, and scroll wide tables sideways instead of letting words run off
-     the page. Not applied to the server-rendered PDF (it renders wider). */
-  @media (max-width: 640px) {
-    .inv-top { flex-direction:column; gap:14px; }
-    .inv-top > div:last-child { text-align:left !important; }
-    .inv-bill { grid-template-columns:1fr !important; }
-    .inv-bill > div { grid-column:auto !important; }
-    .inv-header-bar { flex-wrap:wrap; }
-    .inv-header-bar div { flex:1 1 45%; border-bottom:1px solid var(--border); }
-    .card table { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
-    .meta-box span.k { width:90px; }
-    .card { overflow-wrap:anywhere; }
-  }
+  /* When the PDF is made (?print=1) the page is laid out at true sheet width whatever the window size. */
+  .as-paper .topbar { display: none !important; }
+  .as-paper .wrap { max-width: none !important; width: 794px !important; margin: 0 !important; padding: 0 !important; }
+  .as-paper .inv-sheet { margin: 0; box-shadow: none; }
+  .as-paper .inv-pay-btn { display: none !important; }
+  .as-paper .inv-paylink { display: inline-block !important; }
 </style>
 </head>
 <body>
@@ -50,13 +106,21 @@
     <button class="secondary" onclick="window.print()">Print / Save as PDF</button>
   </div>
 
-  <div class="wrap" style="max-width:750px;">
+  <div class="wrap" style="max-width:860px;">
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
   <script src="/js/supabase-client.js?v=61"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
+    const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
+    if (isPrint) document.documentElement.classList.add('as-paper');
+
+    const INVOICE_EMAIL = 'admin@thomsonenergy.com.au';
+    const PAGE_H = 1123, FOOT_RESERVE = 60;
+    const TERMS_TEXT = 'Kindly ensure that payment is made before the due date specified on the invoice. In the event that payment is not received by the due date and an overdue notice is served, please note that an interest rate of 9% pa will be added to the outstanding amount. Thank you for your prompt payment.';
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const dateText = (d) => d.toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
     async function load() {
       const { data, error } = await supabaseClient.rpc('get_invoice_by_token_v3', { p_token: token });
@@ -74,11 +138,9 @@
       const previousInvoices = data.previous_invoices || [];
       const isStandalone = !!data.is_standalone;
 
-      if (s.logo_url) {
-        document.getElementById('brand-mark').innerHTML = `<img src="${s.logo_url}" style="max-height:28px;" />`;
-      } else if (s.company_name) {
-        document.getElementById('brand-mark').textContent = s.company_name;
-      }
+      if (s.logo_url) document.getElementById('brand-mark').innerHTML = `<img src="${s.logo_url}" style="max-height:28px;" />`;
+      else if (s.company_name) document.getElementById('brand-mark').textContent = s.company_name;
+      document.title = `Tax invoice ${inv.invoice_number} - ${s.company_name || 'Thomson Energy'}`;
 
       const labourAmount = Number(inv.labour_amount) || 0;
       const materialAmount = Number(inv.material_amount) || 0;
@@ -86,156 +148,202 @@
       const subtotal = labourAmount + materialAmount;
       const gst = Math.round(subtotal * 0.10 * 100) / 100;
       const totalIncGst = subtotal + gst;
-      // Balance due comes straight from the server (get_invoice_balance_due,
-      // via the RPC) rather than being recalculated here - this is the
-      // exact same number Airwallex charges, computed in exactly one
-      // place, specifically so the two can never drift apart again.
+      // Balance due comes straight from the server (the same number the card payment charges),
+      // never recalculated here, so the two can never drift apart.
       const balanceDue = Number(inv.balance_due);
+      const amountApplied = Math.max(0, Math.round((totalIncGst - stcAmount - balanceDue) * 100) / 100);
       const isPaid = !!inv.paid_at;
-      const isMultiStage = claims.length > 1;
+      const isDeposit = !!(inv.is_deposit || /^deposit$/i.test(inv.description || ''));
+      const dueDate = inv.due_date ? new Date(inv.due_date + 'T00:00:00') : null;
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const isOverdue = !isPaid && dueDate && dueDate < today;
 
-      const detailParts = [s.abn ? `ABN ${s.abn}` : '', mapsLink(s.address), s.phone, s.website].filter(Boolean);
-      const stageLabel = isStandalone ? '' : (isMultiStage ? claims.map(c => c.cost_centre_name).join(', ') : (claims[0]?.cost_centre_name || ''));
+      // ---- sections of items (each becomes a headed table that can continue on the next sheet) ----
+      const itemRow = (name, amount) => ({ cells: [esc(name), '1.00', money(amount), money(amount)], cls: ['', 'ctr', 'num', 'num'] });
+      const sections = [];
+      if (isStandalone || !claims.length) {
+        const rows = [];
+        if (labourAmount > 0) rows.push(itemRow('Labour', labourAmount));
+        if (materialAmount > 0) rows.push(itemRow('Materials', materialAmount));
+        if (!rows.length) rows.push(itemRow(inv.description || 'Invoice', subtotal));
+        sections.push({ title: inv.description || 'Invoice', rows });
+      } else {
+        claims.forEach((c) => {
+          const lab = Number(c.labour_amount) || 0, mat = Number(c.material_amount) || 0;
+          const quoted = Number(c.quoted_amount) || 0;
+          const pct = quoted > 0 ? Math.round(((lab + mat) / quoted) * 100) : 0;
+          const partial = quoted > 0 && pct < 99 && !isDeposit;
+          const rows = [];
+          if (isDeposit) rows.push(itemRow('Deposit', lab + mat)); // a deposit is one line, not a labour / materials split
+          else {
+            if (lab > 0) rows.push(itemRow('Labour', lab));
+            if (mat > 0) rows.push(itemRow('Materials', mat));
+            if (!rows.length) rows.push(itemRow(c.cost_centre_name, 0));
+          }
+          sections.push({ title: `${c.cost_centre_name}${partial ? ` - progress claim (${pct}% of this stage)` : ''}`, rows });
+        });
+      }
+      // what each stage has been claimed to date, so a progress claim still tells the whole story
+      if (!isStandalone && claims.length) {
+        const rows = claims.map((c) => {
+          const thisClaim = Number(c.labour_amount) + Number(c.material_amount);
+          const quoted = Number(c.quoted_amount) || 0;
+          const toDate = (Number(c.claimed_before) || 0) + thisClaim;
+          return { cells: [esc(c.cost_centre_name), money(quoted), `${money(toDate)} (${quoted ? Math.round((toDate / quoted) * 100) : 0}%)`, money(Math.max(0, quoted - toDate))], cls: ['', 'num', 'num', 'num'] };
+        });
+        sections.push({ title: 'Claim summary', head: ['Stage', 'Stage value', 'Claimed to date', 'Remaining'], rows, headCls: ['', 'num', 'num', 'num'], widths: ['34%', '20%', '28%', '18%'] });
+      }
+      if (previousInvoices.length) {
+        sections.push({ title: 'Previous invoices on this job', head: ['Invoice', 'Date', 'Amount'], headCls: ['', 'ctr', 'num'], widths: ['44%', '28%', '28%'],
+          rows: previousInvoices.map((p) => ({ cells: [esc(p.invoice_number), p.sent_at ? dateText(new Date(p.sent_at)) : '', money(p.amount)], cls: ['', 'ctr', 'num'] })) });
+      }
 
-      content.innerHTML = `
-        <div class="card">
-          <div class="inv-top" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
+      // ---- pieces of the sheet ----
+      // contact details are real links, so they stay clickable in the PDF
+      const link = (href, text) => `<a href="${esc(href)}" style="color:inherit; text-decoration:none;">${esc(text)}</a>`;
+      const addressParts = String(s.address || '').split(/,\s*|\n/).filter(Boolean).slice(0, 3);
+      const contactLines = [
+        link('mailto:' + INVOICE_EMAIL, INVOICE_EMAIL),
+        s.phone ? `Tel. ${link('tel:' + String(s.phone).replace(/[^+\d]/g, ''), s.phone)}` : '',
+        addressParts.length ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}" style="color:inherit; text-decoration:none;">${addressParts.map(esc).join('<br>')}</a>` : '',
+        s.abn ? esc(`ABN ${s.abn}`) : '',
+        s.licenses ? esc(`Licence # ${String(s.licenses).split('|').map((x) => x.trim()).filter(Boolean).join(', ')}`) : '',
+      ].filter(Boolean);
+      const sentOn = inv.sent_at ? new Date(inv.sent_at) : new Date();
+      const detailRows = [
+        !isStandalone && project.job_number ? ['Job No.', `J${project.job_number}`] : null,
+        !isStandalone && project.quote_number ? ['Quote No.', `Q${project.quote_number}`] : null,
+        project.client_address ? ['Site', project.client_address] : null,
+        !isStandalone && project.name ? ['Job Name', project.name] : null,
+      ].filter(Boolean);
+
+      const sheetHtml = (first) => `
+        <section class="inv-sheet">
+          ${isOverdue ? '<div class="inv-stamp">OVERDUE</div>' : (isPaid ? '<div class="inv-stamp paid">PAID</div>' : '')}
+          <div class="inv-head">
             <div>
-              ${s.logo_url ? `<img src="${s.logo_url}" style="max-height:48px;" />` : `<h1 style="margin:0;">${s.company_name || ''}</h1>`}
-              <p class="subtitle" style="margin:10px 0 0;">${detailParts.join(' &middot; ')}</p>
+              ${s.logo_url ? `<img class="inv-logo" src="${s.logo_url}" alt="${esc(s.company_name || '')}" />` : `<div style="font-size:26px; font-weight:700;">${esc(s.company_name || '')}</div>`}
+              ${s.website ? (() => { const u = /^https?:/i.test(s.website) ? s.website : 'https://' + s.website; return `<div class="inv-web"><a href="${esc(u)}" style="color:inherit; text-decoration:none;">${esc(u)}</a></div>`; })() : ''}
             </div>
-            <div style="text-align:right;">
-              <h1 style="margin:0;">Tax Invoice</h1>
-              ${(inv.is_deposit || /^deposit$/i.test(inv.description || '')) ? `<span class="deposit-pill">DEPOSIT INVOICE</span>` : ''}
-              <p class="subtitle" style="margin:2px 0 0;">${inv.invoice_number}</p>
-              ${!isStandalone && inv.description && !(/^deposit$/i.test(inv.description)) ? `<p style="margin:4px 0 0; font-weight:600;">${inv.description}</p>` : ''}
-            </div>
+            <div class="inv-contact">${contactLines.join('<br>')}</div>
           </div>
-
-          <div class="grid cols-3 inv-bill" style="margin-bottom:20px;">
-            <div style="grid-column: span 2;">
-              <p class="subtitle" style="margin:0 0 4px; text-transform:uppercase; font-size:11px;">Bill to</p>
-              <p style="margin:0; font-weight:600;">${project.client_name || ''}</p>
-              ${project.client_address ? `<p class="subtitle" style="margin:2px 0 0;">${mapsLink(project.client_address)}</p>` : ''}
-            </div>
-            <div class="meta-box">
-              ${!isStandalone && project.job_number ? `<div><span class="k">Job No.</span>J${project.job_number}</div>` : ''}
-              <div><span class="k">${isStandalone ? 'For' : (isMultiStage ? 'Stages' : 'Stage')}</span>${isStandalone ? (inv.description || 'Invoice') : stageLabel}</div>
+          <div class="inv-meta-row">
+            <div class="inv-bill">${first ? `${esc(project.client_name || '')}${project.client_address ? '<br>' + esc(project.client_address).replace(/,\s*/g, '<br>') : ''}` : ''}</div>
+            <div class="inv-right">
+              <div class="inv-strip">
+                <div><div class="k">Please pay by</div><div class="v">${dueDate ? dateText(dueDate) : 'On receipt'}</div></div>
+                <div class="amt"><div class="k">Amount</div><div class="v">${money(balanceDue)}</div></div>
+                <div><div class="k">Invoice date</div><div class="v">${dateText(sentOn)}</div></div>
+              </div>
+              <div class="inv-title">TAX INVOICE NO. ${esc(String(inv.invoice_number).replace(/^INV-?/i, ''))}</div>
+              ${isDeposit ? '<div style="text-align:right;"><span class="inv-deposit">DEPOSIT INVOICE</span></div>' : ''}
+              ${first && detailRows.length ? `<div class="inv-details">${detailRows.map(([k, v]) => `<div><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>` : ''}
             </div>
           </div>
+          <div class="inv-body"></div>
+          <div class="inv-foot"></div>
+        </section>`;
 
-          <div class="inv-header-bar">
-            <div><div class="label">Invoice date</div><div class="val">${new Date(inv.sent_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
-            ${inv.due_date ? `<div><div class="label">Due date</div><div class="val">${new Date(inv.due_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>` : ''}
-            <div class="amount"><div class="label">Amount due</div><div class="val">${money(balanceDue)}</div></div>
-            <div>${isPaid ? '<div class="label">Status</div><div class="val" style="color:var(--green);">Paid</div>' : '<div class="label">Status</div><div class="val">Awaiting payment</div>'}</div>
+      const finalHtml = `
+        <div class="inv-final">
+          <div class="inv-final-top">
+            <div class="inv-terms">${esc(TERMS_TEXT)}</div>
+            <div class="inv-totals">
+              <div><span class="k">Sub-Total ex GST</span><span class="v">${money(subtotal)}</span></div>
+              <div><span class="k">GST</span><span class="v">${money(gst)}</span></div>
+              <div><span class="k">Total inc GST</span><span class="v">${money(totalIncGst)}</span></div>
+              ${stcAmount > 0 ? `<div><span class="k">STC Credit</span><span class="v">-${money(stcAmount)}</span></div>` : ''}
+              <div><span class="k">Amount Applied</span><span class="v">${money(amountApplied)}</span></div>
+              <div><span class="k">Balance Due</span><span class="v">${money(balanceDue)}</span></div>
+            </div>
           </div>
-
-          ${isStandalone ? `
-            <h2 style="margin-bottom:10px;">${inv.description || 'Invoice'}</h2>
-            <p class="subtitle">Labour and materials as invoiced.</p>
-          ` : `
-            <h2 style="margin-bottom:10px;">Invoice summary</h2>
-            <table>
-              <thead><tr><th>Stage</th><th class="num">Amount</th></tr></thead>
-              <tbody>
-                ${claims.map(c => `<tr><td>${c.cost_centre_name}</td><td class="num">${money(Number(c.labour_amount) + Number(c.material_amount) - Number(c.stc_amount || 0))}</td></tr>`).join('')}
-              </tbody>
-            </table>
-          `}
-
-          <div style="text-align:right; margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
-            <p class="subtitle" style="margin:0;">Subtotal: ${money(subtotal)}</p>
-            <p class="subtitle" style="margin:2px 0 0;">GST (10%): ${money(gst)}</p>
-            <p class="subtitle" style="margin:2px 0 0;">Total inc GST: ${money(totalIncGst)}</p>
-            ${stcAmount > 0 ? `<p style="margin:6px 0 0; color:var(--green); font-weight:600;">STC Credit: -${money(stcAmount)}</p>` : ''}
-            <p style="font-size:20px; font-weight:700; margin:6px 0 0;">Balance Due: ${money(balanceDue)}</p>
+          <div class="inv-howto">
+            <div class="inv-howto-head"><h4>How To Pay</h4><span class="tag">Invoice No. ${esc(String(inv.invoice_number).replace(/^INV-?/i, ''))}</span></div>
+            ${isPaid ? `<p style="margin:12px 0 0; font-size:13px;">This invoice has been paid in full. Thank you.</p>` : `
+            <div class="inv-howto-cols">
+              <div>
+                <h5>Direct Deposit</h5>
+                ${s.bank_name ? `<div class="row"><span class="k">Bank</span><span class="v">${esc(s.bank_name)}</span></div>` : ''}
+                ${s.bank_account_name ? `<div class="row"><span class="k">Acc. Name</span><span class="v">${esc(s.bank_account_name)}</span></div>` : ''}
+                ${s.bank_bsb ? `<div class="row"><span class="k">BSB</span><span class="v">${esc(s.bank_bsb)}</span></div>` : ''}
+                ${s.bank_account_number ? `<div class="row"><span class="k">Acc. No.</span><span class="v">${esc(s.bank_account_number)}</span></div>` : ''}
+                <div class="row"><span class="k">Reference</span><span class="v">${esc(inv.invoice_number)}</span></div>
+                ${s.payment_details_text ? `<div style="margin-top:4px; white-space:pre-wrap;">${esc(s.payment_details_text)}</div>` : ''}
+                ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? '<div>Contact us for payment details.</div>' : ''}
+              </div>
+              <div>
+                <h5>Credit Card (MasterCard or Visa)</h5>
+                <div style="font-style:italic;">Please call &nbsp; ${esc(s.phone || '')} &nbsp; to pay over the phone,</div>
+                <div style="font-style:italic;">or pay online:</div>
+                <button type="button" id="pay-online-btn" class="inv-pay-btn" data-token="${esc(token)}">Pay online now</button>
+                <a class="inv-paylink" href="${esc(window.location.origin + '/invoice.html?token=' + token + '&pay=1')}" style="margin-top:8px; padding:9px 18px; border-radius:6px; background:#0b3d91; color:#fff; font-weight:700; text-decoration:none;">Pay online now</a>
+                <div id="pay-online-msg"></div>
+              </div>
+            </div>`}
           </div>
-        </div>
+        </div>`;
 
-        ${!isPaid ? `
-        <div class="card">
-          <h2>Payment details</h2>
-          <button id="pay-online-btn" data-token="${token}" style="background:var(--accent); color:var(--accent-contrast); padding:12px 24px; border-radius:8px; border:none; font-weight:600; font-size:15px; cursor:pointer; margin-bottom:16px;">Pay online now</button>
-          <div id="pay-online-msg"></div>
-          <p class="subtitle" style="margin-bottom:16px;">Or pay by direct deposit using the details below.</p>
-          ${s.bank_name || s.bank_account_number ? `
-            <table>
-              <tbody>
-                ${s.bank_account_name ? `<tr><td>Account name</td><td>${s.bank_account_name}</td></tr>` : ''}
-                ${s.bank_name ? `<tr><td>Bank</td><td>${s.bank_name}</td></tr>` : ''}
-                ${s.bank_bsb ? `<tr><td>BSB</td><td>${s.bank_bsb}</td></tr>` : ''}
-                ${s.bank_account_number ? `<tr><td>Account number</td><td>${s.bank_account_number}</td></tr>` : ''}
-                <tr><td>Reference</td><td><strong>${inv.invoice_number}</strong></td></tr>
-              </tbody>
-            </table>
-          ` : ''}
-          ${s.payment_details_text ? `<p class="subtitle" style="white-space:pre-wrap; margin-top:10px;">${s.payment_details_text}</p>` : ''}
-          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? `<p class="subtitle">Contact us for payment details.</p>` : ''}
-        </div>` : ''}
+      // ---- build the sheets, moving rows onto a new sheet whenever one fills up ----
+      content.innerHTML = '<div class="inv-sheets" id="inv-sheets"></div>';
+      const host = document.getElementById('inv-sheets');
+      const sheets = [];
+      const addSheet = () => {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = sheetHtml(sheets.length === 0).trim();
+        const el = wrap.firstElementChild;
+        host.appendChild(el); sheets.push(el);
+        return el;
+      };
+      // room left on a sheet, measured from the sheet's top
+      const bottomOf = (sheet, el) => el.getBoundingClientRect().bottom - sheet.getBoundingClientRect().top;
+      const limit = PAGE_H - FOOT_RESERVE;
+      const makeSection = (sec, continued) => {
+        const box = document.createElement('div'); box.className = 'inv-sec';
+        const head = sec.head || ['Item', 'Quantity', 'Unit Price', 'Total'];
+        const hcls = sec.headCls || ['', 'ctr', 'num', 'num'];
+        const widths = sec.widths || ['52%', '14%', '17%', '17%'];
+        box.innerHTML = `<h3>${esc(sec.title)}</h3><table><colgroup>${widths.map((w) => `<col style="width:${w}">`).join('')}</colgroup><thead><tr>${head.map((h, i) => `<th class="${hcls[i] || ''}">${esc(h)}</th>`).join('')}</tr></thead><tbody></tbody></table>`;
+        return box;
+      };
+      let sheet = addSheet();
+      sections.forEach((sec) => {
+        let body = sheet.querySelector('.inv-body');
+        // a heading and its first row are kept together: start a new sheet if there's no room for both
+        const probe = makeSection(sec); body.appendChild(probe);
+        const probeRow = document.createElement('tr'); probeRow.innerHTML = '<td>x</td>'; probe.querySelector('tbody').appendChild(probeRow);
+        const roomForStart = bottomOf(sheet, probe) <= limit;
+        probe.remove();
+        if (!roomForStart) { sheet = addSheet(); body = sheet.querySelector('.inv-body'); }
+        let box = makeSection(sec); body.appendChild(box);
+        let tbody = box.querySelector('tbody');
+        sec.rows.forEach((r) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = r.cells.map((cell, i) => `<td class="${(r.cls && r.cls[i]) || ''}">${cell}</td>`).join('');
+          tbody.appendChild(tr);
+          if (bottomOf(sheet, box) > limit && tbody.children.length > 1) {
+            tbody.removeChild(tr);
+            sheet = addSheet(); body = sheet.querySelector('.inv-body');
+            box = makeSection(sec, true); body.appendChild(box);
+            tbody = box.querySelector('tbody'); tbody.appendChild(tr);
+          }
+        });
+      });
+      // totals, terms and how to pay close the last sheet (on a new one if they do not fit)
+      const finalWrap = document.createElement('div'); finalWrap.innerHTML = finalHtml.trim();
+      const finalEl = finalWrap.firstElementChild;
+      sheet.querySelector('.inv-body').appendChild(finalEl);
+      if (bottomOf(sheet, finalEl) > PAGE_H - 30) {
+        finalEl.remove();
+        sheet = addSheet(); sheet.querySelector('.inv-body').appendChild(finalEl);
+      }
+      sheets.forEach((el, i) => { el.querySelector('.inv-foot').textContent = `Page ${i + 1}/${sheets.length}`; });
 
-        ${!isStandalone ? `
-        <div class="card page-break">
-          <h2 style="margin-bottom:2px;">Claim breakdown</h2>
-          <p class="subtitle" style="margin-bottom:16px;">Which section this invoice covers, and how much of each.${project.job_number ? ` J${project.job_number}` : ''}</p>
-          ${claims.map(c => {
-            const claimedBefore = Number(c.claimed_before) || 0;
-            const thisClaim = Number(c.labour_amount) + Number(c.material_amount);
-            const quotedAmount = Number(c.quoted_amount) || 0;
-            const claimedToDate = claimedBefore + thisClaim;
-            const remaining = Math.max(0, quotedAmount - claimedToDate);
-            const stcTotal = Number(c.stc_total) || 0;
-            const stcAmt = Number(c.stc_amount) || 0;
-            const lineItems = c.line_items || [];
-            return `
-            <div style="margin-bottom:22px; padding-bottom:18px; border-bottom:1px solid var(--border);">
-              <h3 style="margin-bottom:8px;">${c.cost_centre_name}</h3>
-              ${lineItems.length ? `
-                <table style="margin-bottom:10px;">
-                  <thead><tr><th>Item</th><th class="num">Quantity</th><th class="num">Unit Price</th><th class="num">Total</th></tr></thead>
-                  <tbody>
-                    ${lineItems.map(li => `<tr><td>${li.description}</td><td class="num">${li.quantity}</td><td class="num">${money(li.unit_cost)}</td><td class="num">${money(li.quantity * li.unit_cost)}</td></tr>`).join('')}
-                  </tbody>
-                </table>
-              ` : `<p class="subtitle" style="margin-bottom:10px;">Labour and materials as quoted.</p>`}
-              <table>
-                <thead><tr><th></th><th class="num">Total</th><th class="num">Claimed to date</th><th class="num">This claim</th><th class="num">Remaining</th></tr></thead>
-                <tbody>
-                  <tr>
-                    <td>Stage value</td>
-                    <td class="num">${money(quotedAmount)}</td>
-                    <td class="num">${money(claimedToDate)} (${quotedAmount ? Math.round((claimedToDate / quotedAmount) * 100) : 0}%)</td>
-                    <td class="num">${money(thisClaim)}</td>
-                    <td class="num">${money(remaining)}</td>
-                  </tr>
-                  ${stcTotal > 0 ? `
-                  <tr>
-                    <td>STC credit</td>
-                    <td class="num">${money(stcTotal)}</td>
-                    <td class="num">-</td>
-                    <td class="num">${money(stcAmt)}</td>
-                    <td class="num">${money(Math.max(0, stcTotal - stcAmt))}</td>
-                  </tr>` : ''}
-                </tbody>
-              </table>
-            </div>`;
-          }).join('')}
-        </div>
-        ` : ''}
-
-        ${previousInvoices.length ? `
-        <div class="card">
-          <h2>Previous claims</h2>
-          <table>
-            <thead><tr><th>Invoice</th><th class="num">Amount</th><th>Date</th></tr></thead>
-            <tbody>
-              ${previousInvoices.map(p => `<tr><td>${p.invoice_number}</td><td class="num">${money(p.amount)}</td><td>${new Date(p.sent_at).toLocaleDateString('en-AU')}</td></tr>`).join('')}
-            </tbody>
-          </table>
-        </div>` : ''}
-      `;
+      // a phone is narrower than a sheet: shrink the sheets to fit rather than reflowing them
+      if (!isPrint && window.innerWidth < 840) host.style.zoom = String(Math.max(0.3, (window.innerWidth - 16) / 794));
 
       const payBtn = document.getElementById('pay-online-btn');
+      // opened from the "Pay online now" link in the PDF: go straight to the card payment
+      if (payBtn && !isPrint && new URLSearchParams(window.location.search).get('pay') === '1') setTimeout(() => payBtn.click(), 300);
       if (payBtn) {
         payBtn.addEventListener('click', async () => {
           const msgEl = document.getElementById('pay-online-msg');
@@ -252,7 +360,7 @@
             if (!res.ok || !result.ok) throw new Error(result.error || 'Could not start payment');
             window.location.href = result.url;
           } catch (err) {
-            msgEl.innerHTML = `<p class="subtitle" style="color:var(--red, #e05252);">${err.message}</p>`;
+            msgEl.innerHTML = `<p style="color:#c0392b; margin:6px 0 0;">${esc(err.message)}</p>`;
             payBtn.disabled = false;
             payBtn.textContent = 'Pay online now';
           }
@@ -261,19 +369,14 @@
     }
 
     load().then(async () => {
-      // Wait for every image actually in the DOM (the logo, any photos) to
-      // finish loading before signalling done - a fixed setTimeout guessed
-      // at "probably rendered by now," which raced real image loads on a
-      // slow connection. generate-client-document-pdf.js (headless
-      // Chromium) polls for data-print-ready instead of guessing a delay
-      // of its own; ?print=1 keeps triggering the browser's own print
-      // dialog for a person following the existing "Download PDF" link.
+      // Wait for every image (the logo) and the fonts to finish before the sheets are measured and
+      // the page is marked ready: generate-client-document-pdf.js (headless Chromium) polls for
+      // data-print-ready; ?print=1 also opens the browser's own print dialog for a person following
+      // the "Download PDF" link.
       const images = [...document.querySelectorAll('img')];
       await Promise.all(images.map((img) => img.complete ? Promise.resolve() : new Promise((res) => { img.onload = img.onerror = res; })));
       document.body.dataset.printReady = 'true';
-      if (new URLSearchParams(window.location.search).get('print') === '1') {
-        window.print();
-      }
+      if (isPrint) window.print();
     });
   </script>
 </body>

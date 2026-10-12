@@ -1,20 +1,11 @@
-const { PDFDocument } = require('pdf-lib');
 const { getAdminClient } = require('./_shared/require-admin');
-const { drawCoverPage } = require('./_shared/pdf-cover-page');
 
-// Renders the actual client-facing quote.html/invoice.html page (via
-// headless Chromium - the same rich, styled page a client already sees
-// through their link, stage tables/claim-remaining/payment link and all)
-// into a real PDF, with a shared title/cover page (pdf-cover-page.js)
-// prepended so it matches the same letterhead treatment as a signed
-// onboarding document. A regular (synchronous) function, not a
-// background one - Netlify's background functions get a noticeably
-// smaller memory ceiling, which OOM-killed Chromium on a real,
-// photo-heavy quote with no error ever surfaced (an OOM-killed container
-// never gets to run a catch block). The render itself comfortably
-// finishes well inside a normal function's time budget once memory isn't
-// the problem, so there was never a need to background it in the first
-// place - the browser just awaits this directly.
+// Renders the actual client-facing quote.html / invoice.html page (via headless Chromium) into a
+// real PDF. Both pages are laid out as A4 sheets with their own letterhead, so the PDF is the page
+// printed as it is, and links on it (website, email, phone, Pay online now, Approve online) stay
+// clickable. A regular (synchronous) function, not a background one: Netlify's background functions
+// get a smaller memory ceiling, which OOM-killed Chromium on a photo-heavy quote with no error ever
+// surfaced (an OOM-killed container never gets to run a catch block).
 
 async function renderPageToPdf(url, pdfOptions) {
   // Known puppeteer-core/Chromium failure mode with pipe:true (the
@@ -203,17 +194,6 @@ async function renderOnce(url, pdfOptions) {
   }
 }
 
-async function buildFinalPdf(contentPdfBytes, supabaseAdmin, coverInfo) {
-  const finalDoc = await PDFDocument.create();
-  await drawCoverPage(finalDoc, supabaseAdmin, coverInfo);
-
-  const contentDoc = await PDFDocument.load(contentPdfBytes);
-  const copiedPages = await finalDoc.copyPages(contentDoc, contentDoc.getPageIndices());
-  copiedPages.forEach((p) => finalDoc.addPage(p));
-
-  return Buffer.from(await finalDoc.save());
-}
-
 exports.handler = async (event) => {
   stage = 'starting';
   let timer;
@@ -267,18 +247,18 @@ async function handle(event) {
     } else if (doc_type === 'invoice') {
       const { data: invoice, error } = await supabaseAdmin
         .from('invoices')
-        .select('id, invoice_number, invoice_token, project_id, projects(name, client_name)')
+        .select('id, invoice_number, invoice_token, project_id')
         .eq('id', record_id)
         .single();
       if (error || !invoice || !invoice.invoice_token) throw new Error(error?.message || 'Invoice not found or has no link yet');
 
-      const contentPdfBytes = await renderPageToPdf(`${siteUrl}/invoice.html?token=${invoice.invoice_token}&print=1`);
-      const finalPdf = await buildFinalPdf(contentPdfBytes, supabaseAdmin, {
-        docTitle: `Tax Invoice ${invoice.invoice_number}`,
-        preparedFor: invoice.projects?.client_name || null,
-        subtitle: invoice.projects?.name || null,
-        dateLabel: new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }),
-        showCoverPhoto: true,
+      // invoice.html is laid out as A4 sheets with its own letterhead (logo, contact details,
+      // invoice number on every sheet), so the PDF is that page printed as it is: no cover page is
+      // added. Links on it (website, email, phone, the Pay online now button) stay clickable.
+      const finalPdf = await renderPageToPdf(`${siteUrl}/invoice.html?token=${invoice.invoice_token}&print=1`, {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
       });
 
       path = `client-documents/invoices/${invoice.id}.pdf`;

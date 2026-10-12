@@ -90,6 +90,7 @@
   .band-panel h3 { font-weight: 500; font-size: 21px; margin-bottom: 14px; }
   .band-panel h3, .band-panel p, .band-panel .det { text-shadow: 0 1px 6px rgba(0,0,0,0.55); }
   .band-panel p { font-size: 13px; line-height: 1.55; margin-bottom: 9px; }
+  .band-panel .det a { color: inherit; text-decoration: none; }
   .band-panel .det { margin-top: 14px; font-size: 13px; line-height: 1.6; opacity: 0.95; }
   /* the intro page has a fixed amount of room above its photo: keep the summary inside it */
   .pg.intro .pg-head { margin-bottom: 40px; }
@@ -463,6 +464,13 @@
       const darkHeadHtml = (cls) => `<div class="pg-head"><div>${s.logo_url ? darkLogoHtml(cls) : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`}</div><div class="pg-date">${esc(docDate)}</div></div>`;
 
       const detailLines = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
+      // the contact details on the intro page are links (they stay clickable in the PDF)
+      const detailLinesHtml = [
+        s.abn ? esc(`ABN ${s.abn}`) : '',
+        s.address ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}">${esc(s.address)}</a>` : '',
+        s.phone ? `<a href="tel:${esc(String(s.phone).replace(/[^+\d]/g, ''))}">${esc(s.phone)}</a>` : '',
+        s.website ? `<a href="${esc(/^https?:/i.test(s.website) ? s.website : 'https://' + s.website)}">${esc(s.website)}</a>` : '',
+      ].filter(Boolean).join('<br>');
       const licenseParts = (s.licenses || '').trim();
       // Company block shown on the cover (with who prepared it) and again in the
       // investment summary header: legal name, ABN, address and licence numbers.
@@ -513,7 +521,7 @@
               <h3>About ${esc(s.company_name || 'us')}</h3>
               ${(s.about_text ? String(s.about_text).split(/\n\s*\n/) : ABOUT_TEXT).map(t => `<p>${esc(t)}</p>`).join('')}
               ${licenseParts ? `<p>${esc(licenseParts)}</p>` : ''}
-              <div class="det">${detailLines.map(esc).join('<br>')}</div>
+              <div class="det">${detailLinesHtml}</div>
             </div>
           </div>
         </section>`;
@@ -598,6 +606,7 @@
               ${stcTotal > 0 ? `<div class="note-line">The STC credit is applied against your invoice once the system is installed and registered - not a separate payment.</div>` : ''}
             </div>
             ${paymentScheduleHtml}
+            ${isAccepted ? '' : `<p style="margin-top:24px;"><a class="q-btn" href="${window.location.origin}/quote.html?token=${encodeURIComponent(token)}">View and approve this quote online &rarr;</a></p>`}
           </div>
         </section>`;
 
