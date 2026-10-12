@@ -70,7 +70,7 @@
   .cover-meta b { display: block; font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 20px; text-transform: uppercase; margin: 2px 0 6px; }
   .cover-meta .co { opacity: 0.95; }
   .logo-light { display: block; width: auto; }
-  .logo-light.logo-cover, .logo-pill.logo-cover img { height: 108px; max-height: none; max-width: none; }
+  .logo-light.logo-cover, .logo-pill.logo-cover img { height: 124px; max-height: none; max-width: none; }
   .logo-light.logo-invest, .logo-pill.logo-invest img { height: 56px; max-height: none; max-width: none; }
   .co-block { position: absolute; right: 64px; bottom: 40px; z-index: 2; text-align: right; font-size: 11.5px; line-height: 1.55; max-width: 290px; color: #e6eaf2; }
   .co-block b { font-weight: 700; color: #fff; }
@@ -91,6 +91,11 @@
   .band-panel h3, .band-panel p, .band-panel .det { text-shadow: 0 1px 6px rgba(0,0,0,0.55); }
   .band-panel p { font-size: 13px; line-height: 1.55; margin-bottom: 9px; }
   .band-panel .det { margin-top: 14px; font-size: 13px; line-height: 1.6; opacity: 0.95; }
+  /* the intro page has a fixed amount of room above its photo: keep the summary inside it */
+  .pg.intro .pg-head { margin-bottom: 40px; }
+  .qdoc .pg.intro .pg-title { margin-bottom: 24px; }
+  .pg.intro .intro-facts { gap: 14px 28px; margin: 0 0 16px; }
+  .pg.intro .pg-lead { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 8px; }
   .intro-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 28px; margin: 4px 0 26px; }
   .intro-facts .k { font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--q-grey); margin-bottom: 3px; }
   .intro-facts .v { font-size: 15px; font-weight: 600; line-height: 1.35; }
@@ -165,6 +170,12 @@
     .gallery { grid-template-columns: repeat(2, 1fr); }
   }
 
+  /* When the PDF is made (?print=1) the page is laid out at true sheet width before it is cut into
+     sheets, so what is measured is exactly what is printed, whatever size the window is. */
+  .as-paper .topbar, .as-paper #accept-error { display: none !important; }
+  .as-paper .wrap { max-width: none !important; width: 794px !important; margin: 0 !important; padding: 0 !important; }
+  .as-paper .pg { width: 794px; max-width: none; margin: 0; box-shadow: none; }
+
   @media print {
     .topbar, #accept-error { display: none !important; }
     html, body { background: #fff !important; }
@@ -195,6 +206,7 @@
   <script src="/js/supabase-client.js?v=61"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
+    if (new URLSearchParams(window.location.search).get('print') === '1') document.documentElement.classList.add('as-paper');
 
     // Company showcase photos, shipped with the site. A job's own cover
     // photos (chosen when quoting) are used first; these fill in the rest.
@@ -209,10 +221,34 @@
     // the investment summary page.
     const LEGAL_NAME = 'Thomson Energy Australia Pty. Ltd.';
 
-    // The logo is a JPG on a white background. For the black pages, redraw it
-    // as a white logo on a transparent background so it sits straight on the
-    // page (no white box). Returns a PNG data URL, or null if the image can't
-    // be read (then the caller falls back to the plain logo).
+    // The logo for the black pages: its own full colours with no background box. A logo that
+    // already has a see-through background (a PNG) keeps it. One on a plain white
+    // background (a JPG) has the white taken out: each pixel keeps its colour and becomes more see-through
+    // the closer it is to white. Returns a PNG data URL, the original address, or null if the image
+    // can't be read (then the caller falls back to the plain logo).
+    // The logo's darker colours (navy, purple) vanish on a black page, so it gets a thin white
+    // keyline traced round its shape. The logo itself stays in full colour on top of it.
+    function withKeyline(c, ctx) {
+      const r = Math.max(2, Math.round(c.width * 0.0045));
+      const pad = r + 2;
+      const out = document.createElement('canvas');
+      out.width = c.width + pad * 2; out.height = c.height + pad * 2;
+      const octx = out.getContext('2d');
+      const sil = document.createElement('canvas');
+      sil.width = c.width; sil.height = c.height;
+      const sctx = sil.getContext('2d');
+      sctx.drawImage(c, 0, 0);
+      sctx.globalCompositeOperation = 'source-in';
+      sctx.fillStyle = '#ffffff';
+      sctx.fillRect(0, 0, sil.width, sil.height);
+      for (let k = 0; k < 24; k++) {
+        const ang = (k / 24) * Math.PI * 2;
+        octx.drawImage(sil, pad + Math.cos(ang) * r, pad + Math.sin(ang) * r);
+      }
+      octx.drawImage(c, pad, pad);
+      return out.toDataURL('image/png');
+    }
+
     function makeLightLogo(url) {
       return new Promise((resolve) => {
         if (!url) return resolve(null);
@@ -228,20 +264,22 @@
             ctx.drawImage(img, 0, 0, c.width, c.height);
             const px = ctx.getImageData(0, 0, c.width, c.height);
             const d = px.data;
-            // A logo that already has a see-through background (a PNG) keeps its own outline;
-            // a JPG on white is read by darkness instead.
             let hasAlpha = false;
             for (let i = 3; i < d.length; i += 4) { if (d[i] < 250) { hasAlpha = true; break; } }
+            if (hasAlpha) return resolve(withKeyline(c));
             for (let i = 0; i < d.length; i += 4) {
-              if (hasAlpha) { d[i] = d[i + 1] = d[i + 2] = 255; continue; }
-              // The darker a pixel is, the more of the logo it is.
               const ink = 255 - Math.min(d[i], d[i + 1], d[i + 2]);
-              const a = Math.max(0, Math.min(1, (ink - 14) * 1.7 / 255));
-              d[i] = d[i + 1] = d[i + 2] = 255;
+              const a = Math.max(0, Math.min(1, (ink - 10) * 1.5 / 255));
+              if (a > 0) {
+                // undo the white the colour was mixed with
+                d[i] = Math.max(0, Math.min(255, Math.round(255 - (255 - d[i]) / a)));
+                d[i + 1] = Math.max(0, Math.min(255, Math.round(255 - (255 - d[i + 1]) / a)));
+                d[i + 2] = Math.max(0, Math.min(255, Math.round(255 - (255 - d[i + 2]) / a)));
+              }
               d[i + 3] = Math.round(a * 255);
             }
             ctx.putImageData(px, 0, 0);
-            resolve(c.toDataURL('image/png'));
+            resolve(withKeyline(c));
           } catch (e) { resolve(null); }
         };
         img.onerror = () => resolve(null);
@@ -417,8 +455,8 @@
         ?`<span class="logo-pill"><img src="${s.logo_url}" alt="${esc(s.company_name || '')}" /></span>`
         : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`;
       const headHtml = `<div class="pg-head"><div>${logoHtml}</div><div class="pg-date">${esc(docDate)}</div></div>`;
-      // On the black pages (cover, investment header) the logo is drawn as a
-      // white silhouette straight on the page, with no white box behind it.
+      // On the black pages (cover, investment header) the logo is drawn in its own
+      // colours straight on the page, with no white box behind it.
       const darkLogoHtml = (cls) => lightLogo
         ? `<img class="logo-light ${cls}" src="${lightLogo}" alt="${esc(s.company_name || '')}" />`
         : `<span class="logo-pill ${cls}"><img src="${s.logo_url}" alt="" /></span>`;
@@ -451,9 +489,11 @@
 
       // 2. Introduction: who it is for, what the system is, who we are.
       const pylonSummary = pylonSystemSummary(project.pylon_data);
-      const introText = project.proposal_subtitle || '';
+      // What the page says about the project: the quote's own summary line, otherwise the opening
+      // paragraph of its scope of works, so the page is never just facts and a gap.
+      const introText = project.proposal_subtitle || (parseScope(project.sow_text).intro || [])[0] || '';
       const introHtml = `
-        <section class="pg fixed">
+        <section class="pg fixed intro">
           ${headHtml}
           <div class="pg-body">
             <h1 class="pg-title">The<br>project</h1>
@@ -644,6 +684,66 @@
       }
     }
 
+    // Makes every page of the proposal exactly one A4 sheet (794 x 1123 px at 96 dpi). A page whose
+    // content runs past the bottom (a long scope, the terms) has its overflow moved onto a new sheet with
+    // the same header, instead of spilling over the page edge or leaving a sliver on an extra sheet.
+    const A4_HEIGHT = 1123, A4_BOTTOM_PAD = 72;
+    function paginateToA4() {
+      const content = document.getElementById('content');
+      const spill = (pg) => { const body = pg.querySelector('.pg-body'); return body ? body.offsetTop + body.offsetHeight + A4_BOTTOM_PAD > A4_HEIGHT : false; };
+      // takes the last block off the end of a page body (looking inside lists of rows / photos / terms);
+      // returns { wrapper class, element } or null when only the title is left
+      const takeLast = (body) => {
+        const last = body.lastElementChild;
+        if (!last || last.tagName === 'H1' || body.children.length < 2 && !/\b(rows|gallery|terms-cols|photo-row)\b/.test(last.className)) return null;
+        if (/\b(rows|gallery|terms-cols)\b/.test(last.className) && last.children.length > 1) {
+          return { wrap: last.className, wrapTag: last.tagName, el: last.lastElementChild };
+        }
+        if (/\b(rows|gallery|terms-cols)\b/.test(last.className) && last.children.length === 1) {
+          const only = last.lastElementChild;
+          return { wrap: last.className, wrapTag: last.tagName, el: only, removeWrap: last };
+        }
+        return { wrap: null, el: last };
+      };
+      [...content.querySelectorAll('.pg')].forEach((first) => {
+        if (first.classList.contains('cover') || first.classList.contains('invest') || first.querySelector('.band-panel')) return;
+        let cur = first;
+        let guard = 0;
+        while (spill(cur) && guard++ < 12) {
+          const moved = [];
+          const body = cur.querySelector('.pg-body');
+          let more = true;
+          while (spill(cur) && more) {
+            const t = takeLast(body);
+            if (!t) { more = false; break; }
+            t.el.remove(); if (t.removeWrap) t.removeWrap.remove();
+            moved.unshift(t);
+            // a heading left stranded at the bottom goes with what follows it
+            const nowLast = body.lastElementChild;
+            if (nowLast && /\bsec-title\b/.test(nowLast.className) && !spill(cur)) { moved.unshift({ wrap: null, el: nowLast }); nowLast.remove(); }
+          }
+          if (!moved.length) break;
+          const cont = document.createElement('section');
+          cont.className = 'pg fixed cont';
+          const head = first.querySelector('.pg-head');
+          const slabs = first.querySelector(':scope > .slabs');
+          cont.innerHTML = (slabs ? slabs.outerHTML : '') + (head ? head.outerHTML : '') + '<div class="pg-body"></div>';
+          const nbody = cont.querySelector('.pg-body');
+          let open = null;
+          moved.forEach((m) => {
+            if (m.wrap) {
+              if (!open || open.className !== m.wrap) { open = document.createElement(m.wrapTag || 'div'); open.className = m.wrap; nbody.appendChild(open); }
+              open.appendChild(m.el);
+            } else { open = null; nbody.appendChild(m.el); }
+          });
+          cur.after(cont);
+          cur.classList.add('fixed');
+          cur = cont;
+        }
+      });
+      content.querySelectorAll('.pg').forEach(p => p.classList.add('fixed'));
+    }
+
     load().then(async () => {
       // Wait for every image actually in the DOM (the logo and photos) and
       // the web fonts to finish loading before signalling done - a fixed
@@ -655,6 +755,8 @@
       const images = [...document.querySelectorAll('img')];
       await Promise.all(images.map((img) => img.complete ? Promise.resolve() : new Promise((res) => { img.onload = img.onerror = res; })));
       try { await Promise.race([document.fonts.ready, new Promise((res) => setTimeout(res, 4000))]); } catch (e) { /* fonts are cosmetic */ }
+      // sheets are only cut to A4 at a sheet-sized width (the PDF, or a desktop screen); a phone keeps its flowing layout
+      if (new URLSearchParams(window.location.search).get('print') === '1' || window.innerWidth >= 860) { try { paginateToA4(); } catch (e) { console.error('A4 pagination failed:', e); } }
       document.body.dataset.printReady = 'true';
       if (new URLSearchParams(window.location.search).get('print') === '1') {
         window.print();
