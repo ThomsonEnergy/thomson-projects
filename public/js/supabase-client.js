@@ -577,8 +577,52 @@ async function smallLogoUrl(url) {
   return SMALL_LOGO_FALLBACK;
 }
 
+// Makes a quote or invoice PDF and finishes as soon as it is saved. The PDF function sometimes
+// sits on its answer for a minute after the file already exists, so instead of only waiting for that
+// answer this also watches the record for the new "generated at" time and finishes on whichever
+// comes first. Rejects with the function's own error message if it fails.
+async function generateClientPdf(docType, recordId) {
+  const isQuote = docType === 'quote';
+  const table = isQuote ? 'projects' : 'invoices';
+  const genKey = isQuote ? 'quote_pdf_generated_at' : 'pdf_generated_at';
+  const errKey = isQuote ? 'quote_pdf_error' : 'pdf_error';
+  const { data: before } = await supabaseClient.from(table).select(`${genKey}, ${errKey}`).eq('id', recordId).single();
+  const startedAt = Date.now();
+  const lastGenerated = before ? before[genKey] : null;
+  return new Promise((resolve, reject) => {
+    let finished = false, timer = null;
+    const finish = (fn, value) => { if (finished) return; finished = true; clearInterval(timer); fn(value); };
+    fetch('/.netlify/functions/generate-client-document-pdf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc_type: docType, record_id: recordId }),
+    }).then(async (res) => {
+      let body = null; try { body = await res.json(); } catch (e) { /* not JSON: keep watching the record */ }
+      if (res.ok && body && body.ok) finish(resolve, body);
+      else if (body && body.error) finish(reject, new Error(body.error));
+    }).catch(() => { /* keep watching the record */ });
+    timer = setInterval(async () => {
+      if (Date.now() - startedAt > 110000) return finish(reject, new Error('The PDF is taking too long. Wait a moment and check again, or press the button to retry.'));
+      try {
+        const { data } = await supabaseClient.from(table).select(`${genKey}, ${errKey}`).eq('id', recordId).single();
+        if (!data) return;
+        if (data[genKey] && data[genKey] !== lastGenerated) finish(resolve, { ok: true });
+        else if (data[errKey] && Date.now() - startedAt > 4000) finish(reject, new Error(data[errKey])); // the function clears the old error first, so wait a moment before trusting one
+      } catch (e) { /* try again next tick */ }
+    }, 1500);
+  });
+}
+
 // Starts making a quote's PDF in the background (nobody waits for it), so it is already there when
 // the quote is emailed. keepalive lets the request finish even as the page moves on.
+function autoGenerateInvoicePdf(invoiceId) {
+  try {
+    if (!invoiceId) return;
+    fetch('/.netlify/functions/generate-client-document-pdf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+      body: JSON.stringify({ doc_type: 'invoice', record_id: invoiceId }),
+    }).catch(() => {});
+  } catch (e) { /* the Generate PDF button is still there */ }
+}
+
 function autoGenerateQuotePdf(project) {
   try {
     if (!project || !project.id || !project.quote_token || project.proposal_template === 'direct_job') return;

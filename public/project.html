@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=60"></script>
+  <script src="/js/supabase-client.js?v=61"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=7"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -1647,6 +1647,7 @@
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
           await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (actual costs)`);
+          autoGenerateInvoicePdf(data.invoiceId);
 
           const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
           msg.innerHTML = `
@@ -2020,6 +2021,7 @@
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
           await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (${claims.length} stage${claims.length === 1 ? '' : 's'} claimed)`);
+          autoGenerateInvoicePdf(data.invoiceId);
 
           const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
           panelMsg.innerHTML = `
@@ -2150,12 +2152,7 @@
           btn.textContent = 'Generating...';
           msgEl.innerHTML = '';
           try {
-            const res = await fetch('/.netlify/functions/generate-client-document-pdf', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ doc_type: 'invoice', record_id: inv.id }),
-            });
-            const data = await res.json();
-            if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate the PDF');
+            await generateClientPdf('invoice', inv.id);
             loadJobInvoices(project);
           } catch (err) {
             msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
@@ -3410,12 +3407,7 @@
         generateQuotePdfBtn.textContent = 'Generating...';
         msgEl.innerHTML = '';
         try {
-          const res = await fetch('/.netlify/functions/generate-client-document-pdf', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ doc_type: 'quote', record_id: project.id }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate the PDF');
+          await generateClientPdf('quote', project.id);
           loadProject();
         } catch (err) {
           msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
