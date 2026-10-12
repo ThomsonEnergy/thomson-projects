@@ -57,6 +57,11 @@ async function renderPageToPdf(url, pdfOptions) {
 // Starting Chromium is a big part of the wait (unpacking the binary, launching it). A warm
 // function instance keeps its browser between requests, so the second PDF in a few minutes
 // skips all of that. If the kept browser has died, it is dropped and a fresh one started.
+// Keeping the browser between requests made a warm PDF take ~8s instead of ~13s, but about one
+// request in five then sat for over a minute before answering (a live test: 68s, 68s, 180s with no
+// response). A steady 13s beats that, so the browser is closed after each PDF unless
+// PDF_KEEP_BROWSER=1 is set in the site's environment.
+const KEEP_BROWSER = process.env.PDF_KEEP_BROWSER === '1';
 let cachedBrowser = null;
 let lastBrowserWasReused = false;
 let stage = 'starting';
@@ -187,6 +192,11 @@ async function renderOnce(url, pdfOptions) {
     // Only the page is closed: the browser stays for the next request. If Chromium already
     // crashed this throws on the dead pipe - swallow it, the real error is already on its way out.
     try { if (page) await withTimeout(page.close(), 3000, 'closing the page'); } catch (closeErr) { console.error('page.close() failed (Chromium likely already exited):', closeErr.message); if (cachedBrowser) { killBrowser(cachedBrowser); cachedBrowser = null; } }
+    if (!KEEP_BROWSER) {
+      // close it properly so nothing is left running when the function returns
+      try { await withTimeout(browser.close(), 5000, 'closing the browser'); } catch (closeErr) { console.error('browser.close() failed:', closeErr.message); killBrowser(browser); }
+      if (cachedBrowser === browser) cachedBrowser = null;
+    }
   }
 }
 
