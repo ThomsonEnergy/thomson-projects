@@ -2660,12 +2660,6 @@
                   <div class="stat"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
                   <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
                 </div>
-
-                <div class="card" style="margin-top:20px;">
-                  <h2>Invoice actual costs</h2>
-                  <p class="subtitle" style="margin-bottom:10px;">No quote behind this job - invoice for whatever's actually been logged so far (labour at each person's charge-out rate, materials at cost plus markup), not a % of an estimate.</p>
-                  <button class="secondary" id="invoice-actual-btn">Invoice actual costs...</button>
-                </div>
               ` : `
                 <div class="grid cols-${project.job_number ? '4' : '3'}">
                   <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
@@ -2686,7 +2680,6 @@
                   <h2>Progress</h2>
                   <div class="progress-track"><div class="progress-fill" style="width:${pctComplete}%"></div></div>
                   <p class="subtitle" style="margin:8px 0 0;">${pctComplete}% invoiced (${money(invoiced)} of ${money(quoted)})</p>
-                  ${remaining > 0 ? `<button class="secondary" id="invoice-project-btn" style="margin-top:12px;">Invoice project...</button>` : ''}
                 </div>
 
                 <div class="card" style="margin-top:20px;">
@@ -3041,6 +3034,18 @@
 
             ${project.job_number && !editMode && pricingVisible ? `
             <div class="settings-panel" id="panel-invoices">
+              ${isQuoteFree ? `
+              <div class="card">
+                <h2>Invoice actual costs</h2>
+                <p class="subtitle" style="margin-bottom:10px;">No quote behind this job - invoice for whatever's actually been logged so far (labour at each person's charge-out rate, materials at cost plus markup), not a % of an estimate.</p>
+                <button class="secondary" id="invoice-actual-btn">Invoice actual costs...</button>
+              </div>` : `
+              <div class="card">
+                <h2>Progress</h2>
+                <div class="progress-track"><div class="progress-fill" style="width:${pctComplete}%"></div></div>
+                <p class="subtitle" style="margin:8px 0 0;">${pctComplete}% invoiced (${money(invoiced)} of ${money(quoted)})</p>
+                ${remaining > 0 ? `<button class="secondary" id="invoice-project-btn" style="margin-top:12px;">Invoice project...</button>` : ''}
+              </div>`}
               <div class="card">
                 <h2>Invoices</h2>
                 <p class="subtitle" style="margin-bottom:14px;">How each invoice is coded to post to Xero - materials, labour, and STC credit as their own lines, per the mapping in Settings &gt; Xero Mapping. Each invoice pushes to Xero on its own, never bundled with others.</p>
