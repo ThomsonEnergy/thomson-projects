@@ -651,7 +651,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=59"></script>
+  <script src="/js/supabase-client.js?v=60"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -775,11 +775,15 @@
       if (!fileInput.files.length) return;
       msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
       try {
+        const picked = fileInput.files[0];
         const [url] = await uploadPhotos(fileInput.files, 'logo');
         logoUrl = url;
         renderLogoPreview();
         fileInput.value = '';
-        msg.innerHTML = `<div class="success-box">Uploaded. Click "Save company details" below to keep this.</div>`;
+        const tooBig = (await smallLogoUrl(url)) !== url;
+        msg.innerHTML = tooBig
+          ? `<div class="error-box">Uploaded, but this logo file is very large (${(picked.size / 1048576).toFixed(1)} MB). Quotes, invoices and emails will use the standard Thomson Energy logo instead, because a file this big makes quote PDFs slow and shows as a broken picture in Gmail. Upload a smaller copy (under 1 MB) to use your own.</div>`
+          : `<div class="success-box">Uploaded. Click "Save company details" below to keep this.</div>`;
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
       }

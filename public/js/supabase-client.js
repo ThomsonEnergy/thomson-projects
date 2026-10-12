@@ -563,6 +563,32 @@ async function openPdfViewer(path, title, opts = {}) {
 // printed PDF, so this is a size win with no perceptible quality loss.
 // Falls back to the original file untouched if the browser can't decode it
 // (e.g. some HEIC variants) rather than blocking the upload.
+// A very large logo file (say a 5MB, 20000px upload) makes the quote and invoice pages, and so
+// the PDF, slow to draw, and shows as a broken picture in Gmail. This returns the uploaded logo
+// when it is small enough, otherwise the app's own small wordmark.
+const SMALL_LOGO_FALLBACK = '/icons/logo-wordmark-full.png';
+async function smallLogoUrl(url) {
+  if (!url) return '';
+  try {
+    const res = await fetch(url, { method: 'HEAD' });
+    const len = Number(res.headers.get('content-length'));
+    if (res.ok && len > 0 && len <= 1024 * 1024) return url;
+  } catch (e) { /* cannot tell: use the small one */ }
+  return SMALL_LOGO_FALLBACK;
+}
+
+// Starts making a quote's PDF in the background (nobody waits for it), so it is already there when
+// the quote is emailed. keepalive lets the request finish even as the page moves on.
+function autoGenerateQuotePdf(project) {
+  try {
+    if (!project || !project.id || !project.quote_token || project.proposal_template === 'direct_job') return;
+    fetch('/.netlify/functions/generate-client-document-pdf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+      body: JSON.stringify({ doc_type: 'quote', record_id: project.id }),
+    }).catch(() => {});
+  } catch (e) { /* the Generate PDF button is still there */ }
+}
+
 async function compressImage(file, maxDimension = 1920, quality = 0.82) {
   if (!file.type.startsWith('image/')) return file;
   // Re-drawing on a canvas flattens a GIF to its first frame - leave

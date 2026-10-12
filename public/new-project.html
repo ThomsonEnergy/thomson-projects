@@ -250,7 +250,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=59"></script>
+  <script src="/js/supabase-client.js?v=60"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/email-compose.js?v=3"></script>
   <script src="/js/theme.js"></script>
@@ -1253,6 +1253,7 @@
       // it is waiting on the job card by the time the work is booked.
       if (sow_text && sow_text.trim()) { try { await requestInstallerSummary(projectId, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
 
+      try { const { data: tk } = await supabaseClient.from('projects').select('quote_token').eq('id', projectId).single(); autoGenerateQuotePdf({ id: projectId, quote_token: tk && tk.quote_token, proposal_template: currentTemplate }); } catch (e) { /* the Generate PDF button is still there */ }
       window.location.href = `/project.html?id=${projectId}`;
     });
 

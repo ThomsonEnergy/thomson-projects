@@ -54,7 +54,23 @@ async function renderPageToPdf(url, pdfOptions) {
   });
 }
 
-async function renderPageToPdfUnsafe(url, pdfOptions) {
+// Starting Chromium is a big part of the wait (unpacking the binary, launching it). A warm
+// function instance keeps its browser between requests, so the second PDF in a few minutes
+// skips all of that. If the kept browser has died, it is dropped and a fresh one started.
+let cachedBrowser = null;
+let lastBrowserWasReused = false;
+
+async function getBrowser() {
+  if (cachedBrowser && cachedBrowser.isConnected()) { lastBrowserWasReused = true; return cachedBrowser; }
+  lastBrowserWasReused = false;
+  cachedBrowser = null;
+  const browser = await launchBrowser();
+  cachedBrowser = browser;
+  browser.on('disconnected', () => { if (cachedBrowser === browser) cachedBrowser = null; });
+  return browser;
+}
+
+async function launchBrowser() {
   // Required lazily, inside the function, rather than at module top level -
   // requiring puppeteer-core at module load time meant simply IMPORTING
   // this file (which Netlify's function bundler/router does for every
@@ -77,7 +93,7 @@ async function renderPageToPdfUnsafe(url, pdfOptions) {
   // CSS to a PDF - this alone was plausibly enough to tip a tightly
   // memory-constrained Lambda container into an OOM kill.
   chromium.setGraphicsMode = false;
-  const browser = await puppeteer.launch({
+  return puppeteer.launch({
     // @sparticuz/chromium's own default args do NOT include this - and
     // Lambda's /dev/shm is tiny (often 64MB) compared to a real machine's.
     // Chromium's renderer normally uses /dev/shm for compositing buffers,
@@ -98,8 +114,26 @@ async function renderPageToPdfUnsafe(url, pdfOptions) {
     protocol: 'cdp',
     pipe: true,
   });
+}
+
+async function renderPageToPdfUnsafe(url, pdfOptions) {
   try {
-    const page = await browser.newPage();
+    return await renderOnce(url, pdfOptions);
+  } catch (err) {
+    // a browser kept from an earlier request may have been frozen or killed: try once on a new one
+    if (!lastBrowserWasReused || !/Target closed|Session closed|Protocol error|Connection closed|disconnected|EPIPE|detached/i.test(String(err && err.message))) throw err; // a slow page is not a dead browser: do not retry that
+    console.warn('PDF render on the kept browser failed, retrying on a fresh one:', err.message);
+    try { if (cachedBrowser) await cachedBrowser.close(); } catch (e) { /* already gone */ }
+    cachedBrowser = null;
+    return renderOnce(url, pdfOptions);
+  }
+}
+
+async function renderOnce(url, pdfOptions) {
+  const browser = await getBrowser();
+  let page;
+  try {
+    page = await browser.newPage();
     await page.setViewport({ width: 800, height: 1200 });
     // domcontentloaded rather than networkidle0 - waiting for every image
     // to settle via Puppeteer's own network-idle heuristic held them all
@@ -111,11 +145,9 @@ async function renderPageToPdfUnsafe(url, pdfOptions) {
     const pdfBytes = await page.pdf(pdfOptions || { format: 'a4', printBackground: true, margin: { top: '20px', bottom: '20px' } });
     return Buffer.from(pdfBytes);
   } finally {
-    // If Chromium already crashed, this itself throws on the same dead
-    // pipe - swallow that specifically (the real error from above is
-    // what actually matters and is already on its way out), don't let
-    // cleanup mask or replace it.
-    try { await browser.close(); } catch (closeErr) { console.error('browser.close() failed (Chromium likely already exited):', closeErr.message); }
+    // Only the page is closed: the browser stays for the next request. If Chromium already
+    // crashed this throws on the dead pipe - swallow it, the real error is already on its way out.
+    try { if (page) await page.close(); } catch (closeErr) { console.error('page.close() failed (Chromium likely already exited):', closeErr.message); }
   }
 }
 

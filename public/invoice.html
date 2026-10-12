@@ -54,7 +54,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=59"></script>
+  <script src="/js/supabase-client.js?v=60"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
 
@@ -69,6 +69,7 @@
       const inv = data.invoice;
       const project = data.project || {};
       const s = data.company || {};
+      s.logo_url = await smallLogoUrl(s.logo_url);
       const claims = data.claims || [];
       const previousInvoices = data.previous_invoices || [];
       const isStandalone = !!data.is_standalone;

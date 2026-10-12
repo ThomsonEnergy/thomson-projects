@@ -192,7 +192,7 @@
     <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading your proposal...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=59"></script>
+  <script src="/js/supabase-client.js?v=60"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
 
@@ -373,6 +373,7 @@
       }
 
       const s = settings || {};
+      s.logo_url = await smallLogoUrl(s.logo_url);
       if (s.logo_url) {
         document.getElementById('brand-mark').innerHTML = `<img src="${s.logo_url}" style="max-height:28px;" />`;
       } else if (s.company_name) {
