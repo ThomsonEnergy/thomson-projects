@@ -228,7 +228,12 @@
             ctx.drawImage(img, 0, 0, c.width, c.height);
             const px = ctx.getImageData(0, 0, c.width, c.height);
             const d = px.data;
+            // A logo that already has a see-through background (a PNG) keeps its own outline;
+            // a JPG on white is read by darkness instead.
+            let hasAlpha = false;
+            for (let i = 3; i < d.length; i += 4) { if (d[i] < 250) { hasAlpha = true; break; } }
             for (let i = 0; i < d.length; i += 4) {
+              if (hasAlpha) { d[i] = d[i + 1] = d[i + 2] = 255; continue; }
               // The darker a pixel is, the more of the logo it is.
               const ink = 255 - Math.min(d[i], d[i + 1], d[i + 2]);
               const a = Math.max(0, Math.min(1, (ink - 14) * 1.7 / 255));
