@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const { getAdminClient } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { xeroRequest } = require('./_shared/xero-client');
+const { regenerateInvoicePdf } = require('./_shared/regenerate-invoice-pdf');
 const { advanceToActionOrReady, checkAndAdvanceComplete } = require('./_shared/advance-job-stage');
 
 exports.handler = async (event) => {
@@ -85,6 +86,8 @@ exports.handler = async (event) => {
       // sitting at quote_approved, so a redelivered/duplicate webhook
       // (or a deposit paid well after the job moved on for some other
       // reason) can't push it backwards.
+      if (justPaid) await regenerateInvoicePdf(invoiceRow.id, 1200); // short wait: Xero wants its answer within 5 seconds // remake the PDF so it carries the PAID stamp
+
       if (justPaid && invoiceRow.project_id) {
         if (invoiceRow.is_deposit) {
           const { data: project } = await supabaseAdmin.from('projects').select('pipeline_stage').eq('id', invoiceRow.project_id).maybeSingle();

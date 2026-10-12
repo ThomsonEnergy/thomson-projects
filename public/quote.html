@@ -49,7 +49,14 @@
   .pg.fixed { height: 1123px; }
   .pg-body { position: relative; z-index: 2; }
 
-  .pg-head { position: relative; z-index: 2; display: flex; justify-content: space-between; align-items: center; margin-bottom: 64px; }
+  .pg-head { position: relative; z-index: 2; display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
+  /* Every page but the title page carries the logo and the company details at the top. */
+  .pg-logo { display: block; height: 84px; width: auto; max-width: 280px; }
+  .pg-contact { text-align: right; font-size: 12.5px; line-height: 1.45; }
+  .pg-contact a { color: inherit; text-decoration: none; }
+  .pg-contact .pg-date { display: block; margin-top: 5px; font-size: 12.5px; font-weight: 700; }
+  .invest-top .pg-contact, .pg.dark .pg-contact { color: #e6eaf2; }
+  .invest-top .pg-contact .pg-date { color: #fff; }
   .logo-pill { display: inline-flex; align-items: center; background: #fff; border-radius: 6px; padding: 5px 9px; }
   .logo-pill img { display: block; max-height: 38px; max-width: 190px; }
   .pg-brand-name { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 20px; text-transform: uppercase; }
@@ -71,9 +78,7 @@
   .cover-meta .co { opacity: 0.95; }
   .logo-light { display: block; width: auto; }
   .logo-light.logo-cover, .logo-pill.logo-cover img { height: 150px; max-height: none; max-width: none; }
-  .logo-light.logo-invest, .logo-pill.logo-invest img { height: 56px; max-height: none; max-width: none; }
-  .co-block { position: absolute; right: 64px; bottom: 40px; z-index: 2; text-align: right; font-size: 11.5px; line-height: 1.55; max-width: 290px; color: #e6eaf2; }
-  .co-block b { font-weight: 700; color: #fff; }
+  .logo-light.logo-invest, .logo-pill.logo-invest img { height: 84px; max-height: none; max-width: none; }
 
   .dots { position: absolute; z-index: 1; width: 86px; height: 52px; background-image: radial-gradient(circle, #8a93a2 1px, transparent 1.6px); background-size: 17px 17px; }
   .pg.dark .dots { background-image: radial-gradient(circle, #cfd6e2 1px, transparent 1.6px); }
@@ -83,9 +88,9 @@
   .pg > .slabs.corner { opacity: 0.4; }
 
   /* Intro page: a photo with a black panel overlapping its lower right. */
-  .band-photo { position: absolute; left: 0; right: 0; top: 45.6%; bottom: 0; z-index: 1; }
+  .band-photo { position: absolute; left: 0; right: 0; top: 52%; bottom: 0; z-index: 1; }
   .band-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .band-panel { position: absolute; left: 9%; right: 0; top: 53%; bottom: 0; z-index: 2; background: rgba(0, 0, 0, 0.58); color: #fff; padding: 38px 40px 34px 40px; overflow: hidden; }
+  .band-panel { position: absolute; left: 9%; right: 0; top: 58.5%; bottom: 0; z-index: 2; background: rgba(0, 0, 0, 0.58); color: #fff; padding: 38px 40px 34px 40px; overflow: hidden; }
   .band-panel .txt { position: relative; z-index: 3; max-width: 64%; }
   .band-panel h3 { font-weight: 500; font-size: 21px; margin-bottom: 14px; }
   .band-panel h3, .band-panel p, .band-panel .det { text-shadow: 0 1px 6px rgba(0,0,0,0.55); }
@@ -93,7 +98,7 @@
   .band-panel .det a { color: inherit; text-decoration: none; }
   .band-panel .det { margin-top: 14px; font-size: 13px; line-height: 1.6; opacity: 0.95; }
   /* the intro page has a fixed amount of room above its photo: keep the summary inside it */
-  .pg.intro .pg-head { margin-bottom: 40px; }
+  .pg.intro .pg-head { margin-bottom: 26px; }
   .qdoc .pg.intro .pg-title { margin-bottom: 24px; }
   .pg.intro .intro-facts { gap: 14px 28px; margin: 0 0 16px; }
   .pg.intro .pg-lead { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 8px; }
@@ -112,7 +117,7 @@
   .row-x .b p + p { margin-top: 6px; }
   .row-x ul { margin: 4px 0 0; padding-left: 18px; }
   .photo-row { display: grid; gap: 14px; margin: 22px 0 26px; grid-template-columns: repeat(2, 1fr); }
-  .photo-row img { width: 100%; height: 250px; object-fit: cover; display: block; }
+  .photo-row img { width: 100%; height: 200px; object-fit: cover; display: block; }
   .design-box { margin-top: 26px; padding: 18px 20px; background: #f1f5fd; border-left: 4px solid var(--q-blue); }
   .design-box p { font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
   .q-btn { display: inline-block; background: var(--q-blue); color: #fff !important; text-decoration: none; padding: 10px 18px; font-weight: 600; font-size: 13px; }
@@ -138,7 +143,7 @@
 
   .pg.invest { padding-top: 0; }
   .invest-top { background: #000; color: #fff; margin: 0 -64px 34px; padding: 48px 64px 44px; position: relative; }
-  .invest-top .pg-head { margin-bottom: 44px; }
+  .invest-top .pg-head { margin-bottom: 36px; }
   .invest-top .pg-title { margin-bottom: 0; }
 
   .terms-cols { column-count: 2; column-gap: 28px; font-size: 9.6px; line-height: 1.5; color: #2b303a; }
@@ -152,7 +157,9 @@
   @media (max-width: 700px) {
     .pg { padding: 28px 22px 48px; min-height: 0; margin-bottom: 14px; box-shadow: none; }
     .pg.fixed { height: auto; min-height: 640px; }
-    .pg-head { margin-bottom: 30px; }
+    .pg-head { margin-bottom: 30px; flex-wrap: wrap; gap: 12px; }
+    .pg-logo { height: 64px; }
+    .pg-contact { text-align: left; }
     .qdoc .pg-title, .qdoc .pg.cover .pg-title { font-size: 44px; margin-bottom: 26px; }
     .qdoc .pg.cover .pg-title { margin-top: 36px; }
     .cover-meta { position: relative; left: auto; bottom: auto; margin-top: 40px; }
@@ -455,12 +462,28 @@
       const logoHtml = s.logo_url
         ?`<span class="logo-pill"><img src="${s.logo_url}" alt="${esc(s.company_name || '')}" /></span>`
         : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`;
-      const headHtml = `<div class="pg-head"><div>${logoHtml}</div><div class="pg-date">${esc(docDate)}</div></div>`;
+      // company details for the top of every page except the title page
+      const QUOTE_EMAIL = 'sales@thomsonenergy.com.au';
+      const licenceText = (s.licenses || '').split('|').map(x => x.trim()).filter(Boolean).join(' | ');
+      const contactHtml = `<div class="pg-contact">
+        <a href="mailto:${QUOTE_EMAIL}">${QUOTE_EMAIL}</a><br>
+        ${s.phone ? `Tel. <a href="tel:${esc(String(s.phone).replace(/[^+\d]/g, ''))}">${esc(s.phone)}</a><br>` : ''}
+        ${s.address ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}">${esc(s.address)}</a><br>` : ''}
+        ${s.abn ? `ABN ${esc(s.abn)}<br>` : ''}
+        ${licenceText ? `${esc(licenceText)}<br>` : ''}
+        <span class="pg-date">${esc(docDate)}</span></div>`;
+      const siteLink = s.website ? (/^https?:/i.test(s.website) ? s.website : 'https://' + s.website) : '';
+      const lightLogoImg = s.logo_url
+        ? `<img class="pg-logo" src="${s.logo_url}" alt="${esc(s.company_name || '')}" />`
+        : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`;
+      const headHtml = `<div class="pg-head"><div>${siteLink ? `<a href="${esc(siteLink)}">${lightLogoImg}</a>` : lightLogoImg}</div>${contactHtml}</div>`;
       // On the black pages (cover, investment header) the logo is drawn in its own
       // colours straight on the page, with no white box behind it.
       const darkLogoHtml = (cls) => lightLogo
         ? `<img class="logo-light ${cls}" src="${lightLogo}" alt="${esc(s.company_name || '')}" />`
         : `<span class="logo-pill ${cls}"><img src="${s.logo_url}" alt="" /></span>`;
+      // the same header on the black investment block: logo in its own colours, details in white
+      const darkContactHeadHtml = () => `<div class="pg-head"><div>${s.logo_url ? darkLogoHtml('logo-invest') : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`}</div>${contactHtml}</div>`;
       const darkHeadHtml = (cls) => `<div class="pg-head"><div>${s.logo_url ? darkLogoHtml(cls) : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`}</div><div class="pg-date">${esc(docDate)}</div></div>`;
 
       const detailLines = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
@@ -520,8 +543,6 @@
             <div class="txt">
               <h3>About ${esc(s.company_name || 'us')}</h3>
               ${(s.about_text ? String(s.about_text).split(/\n\s*\n/) : ABOUT_TEXT).map(t => `<p>${esc(t)}</p>`).join('')}
-              ${licenseParts ? `<p>${esc(licenseParts)}</p>` : ''}
-              <div class="det">${detailLinesHtml}</div>
             </div>
           </div>
         </section>`;
@@ -588,8 +609,7 @@
       const investHtml = `
         <section class="pg invest">
           <div class="invest-top dark-block">
-            ${darkHeadHtml('logo-invest')}
-            <div class="co-block">${preparedBy ? `<span class="lbl">Prepared by:</span> <b>${esc(preparedBy)}</b><br>` : ''}${companyLines.map(esc).join('<br>')}</div>
+            ${darkContactHeadHtml()}
             <h1 class="pg-title">Investment<br>summary</h1>
           </div>
           <div class="pg-body">
