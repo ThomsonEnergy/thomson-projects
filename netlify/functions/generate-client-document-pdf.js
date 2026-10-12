@@ -59,6 +59,7 @@ async function renderPageToPdf(url, pdfOptions) {
 // skips all of that. If the kept browser has died, it is dropped and a fresh one started.
 let cachedBrowser = null;
 let lastBrowserWasReused = false;
+let stage = 'starting';
 
 // A kept browser can be frozen or half dead after the function sat idle, and then calls to it
 // hang instead of failing (a live test took 3 minutes once). So every use of a kept browser is
@@ -89,7 +90,12 @@ async function getBrowser() {
   }
   lastBrowserWasReused = false;
   cachedBrowser = null;
-  const browser = await launchBrowser();
+  stage = 'starting Chromium';
+  const launching = launchBrowser();
+  const browser = await withTimeout(launching, 25000, 'Chromium starting').catch((err) => {
+    launching.then((late) => killBrowser(late), () => {}); // do not leave a late starter running
+    throw err;
+  });
   cachedBrowser = browser;
   browser.on('disconnected', () => { if (cachedBrowser === browser) cachedBrowser = null; });
   return browser;
@@ -146,7 +152,10 @@ async function renderPageToPdfUnsafe(url, pdfOptions) {
     return await renderOnce(url, pdfOptions);
   } catch (err) {
     // a browser kept from an earlier request may have been frozen or killed: try once on a new one
-    if (!lastBrowserWasReused || !/Target closed|Session closed|Protocol error|Connection closed|disconnected|EPIPE|detached/i.test(String(err && err.message))) throw err; // a slow page is not a dead browser: do not retry that
+    const msg = String(err && err.message);
+    const deadKept = lastBrowserWasReused && /Target closed|Session closed|Protocol error|Connection closed|disconnected|EPIPE|detached/i.test(msg);
+    const stalledStart = /did not answer/.test(msg); // a slow page is not a dead browser: do not retry that
+    if (!deadKept && !stalledStart) throw err;
     console.warn('PDF render on the kept browser failed, retrying on a fresh one:', err.message);
     if (cachedBrowser) killBrowser(cachedBrowser);
     cachedBrowser = null;
@@ -158,6 +167,7 @@ async function renderOnce(url, pdfOptions) {
   const browser = await getBrowser();
   let page;
   try {
+    stage = 'opening a page';
     page = await withTimeout(browser.newPage(), 8000, 'opening a page');
     await page.setViewport({ width: 800, height: 1200 });
     // domcontentloaded rather than networkidle0 - waiting for every image
@@ -165,9 +175,13 @@ async function renderOnce(url, pdfOptions) {
     // in memory at once; the page's own data-print-ready flag (set only
     // once it has explicitly confirmed each image finished loading) is
     // the real signal to wait for anyway.
+    stage = 'loading the page';
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    stage = 'waiting for the page to finish drawing';
     await page.waitForSelector('body[data-print-ready="true"]', { timeout: 20000 });
-    const pdfBytes = await page.pdf(pdfOptions || { format: 'a4', printBackground: true, margin: { top: '20px', bottom: '20px' } });
+    stage = 'printing to PDF';
+    const pdfBytes = await page.pdf({ timeout: 25000, ...(pdfOptions || { format: 'a4', printBackground: true, margin: { top: '20px', bottom: '20px' } }) });
+    stage = 'saving the PDF';
     return Buffer.from(pdfBytes);
   } finally {
     // Only the page is closed: the browser stays for the next request. If Chromium already
@@ -188,6 +202,15 @@ async function buildFinalPdf(contentPdfBytes, supabaseAdmin, coverInfo) {
 }
 
 exports.handler = async (event) => {
+  stage = 'starting';
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ statusCode: 504, body: JSON.stringify({ ok: false, error: `The PDF took too long (stuck at: ${stage}). Please try again.` }) }), 55000);
+  });
+  try { return await Promise.race([handle(event), deadline]); } finally { clearTimeout(timer); }
+};
+
+async function handle(event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
   }
@@ -260,4 +283,4 @@ exports.handler = async (event) => {
     }
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
   }
-};
+}
