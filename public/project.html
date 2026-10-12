@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=61"></script>
+  <script src="/js/supabase-client.js?v=62"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=7"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -1842,19 +1842,21 @@
     // point from a single stage's own "Create & send next claim" button.
     function openInvoiceProjectPanel(project, pricingVisible, opts = {}) {
       const centres = (project.cost_centres || []).map(c => ({ centre: c, ...stageClaimSummary(c) })).filter(x => x.remaining > 0.004);
-      if (!centres.length) return;
+      // opts.variationsOnly (from the Variations tab) opens the panel even when no stage
+      // has anything left to claim, and starts it claiming 0% of the quote so only
+      // the logged variations go on the invoice unless you change that.
+      if (!centres.length && !opts.variationsOnly) return;
       const projectRemaining = centres.reduce((s, x) => s + x.remaining, 0);
       const mode = opts.preselectCentreId ? 'stage' : 'project';
 
       const overlay = document.createElement('div');
-      setTimeout(() => fillInvoiceVariationsNote(overlay, project), 0);
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:640px; width:100%; max-height:88vh; overflow-y:auto;">
           <h2>Invoice project</h2>
-          <p class="subtitle" style="margin-bottom:12px;">${money(projectRemaining)} remaining to claim across ${centres.length} stage${centres.length === 1 ? '' : 's'}.</p>
-          <div id="inv-variations-note"></div>
+          <p class="subtitle" style="margin-bottom:12px;">${centres.length ? `${money(projectRemaining)} remaining to claim across ${centres.length} stage${centres.length === 1 ? '' : 's'}.` : 'No quoted stages left to claim.'}</p>
 
+          <div id="inv-stage-part" style="${centres.length ? '' : 'display:none;'}">
           <div style="display:flex; gap:16px; margin-bottom:14px;">
             <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="inv-mode" value="project" ${mode === 'project' ? 'checked' : ''} style="width:auto;" /> Whole project %</label>
             <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="inv-mode" value="stage" ${mode === 'stage' ? 'checked' : ''} style="width:auto;" /> Choose per stage</label>
@@ -1862,7 +1864,7 @@
 
           <div id="inv-mode-project" style="${mode === 'project' ? '' : 'display:none;'}">
             <label style="margin-top:0">Claim this % of the total contract value</label>
-            <input type="number" id="inv-project-pct" min="0" max="100" step="1" value="100" />
+            <input type="number" id="inv-project-pct" min="0" max="100" step="1" value="${opts.variationsOnly ? 0 : 100}" />
             <p class="subtitle" id="inv-project-preview" style="margin-top:8px;"></p>
           </div>
 
@@ -1881,6 +1883,9 @@
               </tbody>
             </table>
           </div>
+          </div>
+
+          <div id="inv-variations-section"></div>
 
           <div class="grid cols-2" style="margin-top:14px;">
             <div>
@@ -1975,9 +1980,69 @@
       }
       centres.forEach(x => refreshStageDollarFromPct(x.centre.id));
 
+      // Logged variations still to bill (hours + Stock materials), priced by
+      // price-variations.js. Ticked ones are turned into their own stages and
+      // claimed on this invoice by bill-variations.js when you confirm.
+      let varItems = [];
+      const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+      function varTotals(item) {
+        const f = 1 + (Number(item.markup) || 0) / 100;
+        let labour = 0, material = 0, missing = 0;
+        item.lines.forEach((l) => {
+          if (l.input === '' || l.input == null || Number.isNaN(Number(l.input))) { missing++; return; }
+          if (l.itemType === 'labour') labour += r2(l.quantity * Number(l.input));
+          else material += r2(l.quantity * Number(l.input) * f);
+        });
+        return { labour: r2(labour), material: r2(material), total: r2(labour + material), missing };
+      }
+      function renderVarSection() {
+        const sec = overlay.querySelector('#inv-variations-section');
+        if (!varItems.length) {
+          sec.innerHTML = opts.variationsOnly ? `<p class="subtitle" style="margin-top:14px;">No logged variations waiting to be billed.</p>` : '';
+          return;
+        }
+        sec.innerHTML = `
+          <div style="margin-top:16px;">
+            <p style="margin:0 0 4px; font-weight:600;">Logged variations</p>
+            <p class="subtitle" style="margin:0 0 6px; font-size:12px;">Tick the ones to add to this invoice. Each becomes its own line on it, priced from the hours and materials logged.</p>
+            ${varItems.map((it) => `
+              <div class="inv-var" data-id="${it.id}" style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-top:8px;">
+                <label style="display:flex; gap:8px; align-items:center; margin:0;">
+                  <input type="checkbox" class="inv-var-check" ${it.checked ? 'checked' : ''} ${it.lines.length ? '' : 'disabled'} style="width:auto;" />
+                  <strong style="flex:1;">${escapeHtml(it.description)}</strong>
+                  <span class="inv-var-total" style="font-weight:600;"></span>
+                </label>
+                <div class="subtitle" style="font-size:12px; margin:2px 0 6px;">${new Date(it.workDate + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                ${it.lines.length ? it.lines.map((l) => `
+                  <div style="display:flex; gap:8px; align-items:center; font-size:13px; margin-top:4px;">
+                    <span style="flex:1;">${r2(l.quantity)}${l.itemType === 'labour' ? ' hrs' : ' &times;'} ${escapeHtml(l.description)}</span>
+                    <span class="subtitle" style="font-size:11px;">${l.itemType === 'labour' ? '$/hr' : 'cost $'}</span>
+                    <input type="number" class="inv-var-line" data-key="${escapeHtml(l.key)}" step="0.01" min="0" value="${escapeHtml(l.input)}" placeholder="set" style="width:90px; margin:0;" />
+                  </div>`).join('') + `
+                  <div style="display:flex; gap:8px; align-items:center; font-size:12px; margin-top:6px;">
+                    <span class="subtitle" style="flex:1;">Markup on materials</span>
+                    <input type="number" class="inv-var-markup" min="0" step="1" value="${it.markup}" style="width:70px; margin:0;" /> <span class="subtitle">%</span>
+                  </div>` : `<p class="subtitle" style="margin:0; font-size:12px;">Nothing logged on this yet - add hours or materials to it on the Variations tab, or mark it No charge.</p>`}
+              </div>`).join('')}
+          </div>`;
+        sec.querySelectorAll('.inv-var').forEach((el) => {
+          const it = varItems.find(v => v.id === el.dataset.id);
+          el.querySelector('.inv-var-check').addEventListener('change', (e) => { it.checked = e.target.checked; refresh(); });
+          el.querySelectorAll('.inv-var-line').forEach(inp => inp.addEventListener('input', () => { it.lines.find(l => l.key === inp.dataset.key).input = inp.value; refresh(); }));
+          const mk = el.querySelector('.inv-var-markup');
+          if (mk) mk.addEventListener('input', () => { it.markup = mk.value; refresh(); });
+        });
+      }
+
       function refresh() {
         const claims = computeClaims();
-        const total = claims.reduce((s, c) => s + c.labourAmount + c.materialAmount + c.stcAmount, 0);
+        let total = claims.reduce((s, c) => s + c.labourAmount + c.materialAmount + c.stcAmount, 0);
+        varItems.forEach((it) => {
+          const t = varTotals(it);
+          const el = overlay.querySelector(`.inv-var[data-id="${it.id}"] .inv-var-total`);
+          if (el) el.textContent = t.missing ? 'set a price' : money(t.total);
+          if (it.checked && !t.missing) total += t.total;
+        });
         overlay.querySelector('#inv-total-display').textContent = money(total);
         const pctPreview = overlay.querySelector('#inv-project-preview');
         if (pctPreview) {
@@ -2002,25 +2067,55 @@
         const confirmBtn = overlay.querySelector('#inv-confirm-btn');
         const panelMsg = overlay.querySelector('#inv-panel-msg');
         const claims = computeClaims();
-        if (!claims.length) { panelMsg.innerHTML = `<div class="error-box">Select at least one stage with a non-zero claim.</div>`; return; }
+        const chosenVars = varItems.filter(i => i.checked);
+        if (!claims.length && !chosenVars.length) { panelMsg.innerHTML = `<div class="error-box">Select at least one stage with a non-zero claim, or tick a logged variation.</div>`; return; }
+        const unpriced = chosenVars.find(i => varTotals(i).missing);
+        if (unpriced) { panelMsg.innerHTML = `<div class="error-box">Set a price for every line of "${escapeHtml(unpriced.description)}", or untick it.</div>`; return; }
 
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Creating...';
         try {
           const { data: { session } } = await supabaseClient.auth.getSession();
+          const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` };
+
+          // A variation stage that was set up earlier but never invoiced shows as a
+          // normal stage above; claiming the lot of it also marks that variation billed.
+          const variationEntryIds = [];
+          claims.forEach((c) => {
+            const x = centres.find(k => k.centre.id === c.costCentreId);
+            if (x && x.centre.variation_entry_id && c.labourAmount + c.materialAmount >= x.remaining - 0.01) variationEntryIds.push(x.centre.variation_entry_id);
+          });
+
+          if (chosenVars.length) {
+            const bres = await fetch('/.netlify/functions/bill-variations', {
+              method: 'POST', headers: authHeaders,
+              body: JSON.stringify({
+                projectId: project.id,
+                items: chosenVars.map(i => ({ id: i.id, markupPercent: i.markup, overrides: Object.fromEntries(i.lines.map(l => [l.key, l.input])) })),
+              }),
+            });
+            const bdata = await bres.json();
+            if (!bres.ok || !bdata.ok) throw new Error(bdata.error || 'Could not price the variations');
+            bdata.claims.forEach((c) => {
+              claims.push({ costCentreId: c.costCentreId, labourAmount: c.labourAmount, materialAmount: c.materialAmount, stcAmount: 0, claimPercent: c.claimPercent });
+              variationEntryIds.push(c.variationId);
+            });
+          }
+
           const res = await fetch('/.netlify/functions/create-invoice', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            headers: authHeaders,
             body: JSON.stringify({
               projectId: project.id,
               claims,
+              variationEntryIds,
               sentAt: overlay.querySelector('#inv-date').value || null,
               dueDate: overlay.querySelector('#inv-due-date').value || null,
             }),
           });
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
-          await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (${claims.length} stage${claims.length === 1 ? '' : 's'} claimed)`);
+          await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (${claims.length} stage${claims.length === 1 ? '' : 's'} claimed${chosenVars.length ? `, ${chosenVars.length} variation${chosenVars.length === 1 ? '' : 's'} included` : ''})`);
           autoGenerateInvoicePdf(data.invoiceId);
 
           const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
@@ -2047,6 +2142,30 @@
 
       document.body.appendChild(overlay);
       refresh();
+
+      // Price the logged variations (server side - it needs each person's sell rate).
+      (async () => {
+        const sec = overlay.querySelector('#inv-variations-section');
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/price-variations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ projectId: project.id }),
+          });
+          const d = await res.json();
+          if (!res.ok || !d.ok) throw new Error(d.error || 'Could not price them');
+          varItems = (d.variations || []).map(v => ({
+            id: v.id, description: v.description, workDate: v.workDate, markup: d.defaultMarkup,
+            checked: v.lines.length > 0,
+            lines: v.lines.map(l => ({ ...l, input: l.unitCost == null ? '' : String(l.unitCost) })),
+          }));
+          renderVarSection();
+        } catch (err) {
+          sec.innerHTML = `<div class="error-box" style="margin-top:12px;">Couldn't price the logged variations: ${escapeHtml(err.message)}</div>`;
+        }
+        refresh();
+      })();
     }
 
     async function pushExistingInvoiceToXero(btn, msgElId = 'push-xero-msg') {
@@ -3013,21 +3132,24 @@
             <div class="settings-panel" id="panel-variations">
               <div class="card">
                 <h2>Variations - work outside the scope</h2>
-                <p class="subtitle" style="margin-bottom:12px;">If you do something that wasn't in the quote, log it here as you go - what it was, how long it took and what materials went in - so it's clear at billing and doesn't get missed.</p>
+                <p class="subtitle" style="margin-bottom:12px;">If you do something that wasn't in the quote, log it here as you go. Then add your hours and the materials from Stock to it, so it's all on record and goes onto the invoice.</p>
                 <label style="margin-top:0;">What was the extra work?</label>
                 <input id="var-desc" placeholder="e.g. Moved the meter box 2m left at the builder's request" />
                 <div class="grid cols-3">
-                  <div><label>Hours</label><input id="var-hours" type="number" step="0.25" min="0" placeholder="e.g. 2.5" /></div>
+                  <div><label>Hours so far (optional)</label><input id="var-hours" type="number" step="0.25" min="0" placeholder="e.g. 2.5" /></div>
                   <div><label>Date</label><input id="var-date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></div>
                 </div>
-                <label>Materials used (optional)</label>
-                <textarea id="var-materials" style="min-height:60px;" placeholder="e.g. 6m 25mm conduit, 4 saddles, 1 junction box"></textarea>
+                <label>Notes (optional)</label>
+                <textarea id="var-materials" style="min-height:60px;" placeholder="Anything else worth knowing. Add materials from Stock after you've logged it."></textarea>
                 <button type="button" id="var-add-btn" style="margin-top:10px;">Log variation</button>
                 <div id="var-msg"></div>
               </div>
               <div class="card">
-                <h2>Logged variations</h2>
-                <div id="variations-list"><p class="subtitle">Loading...</p></div>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+                  <h2 style="margin:0;">Logged variations</h2>
+                  <span id="var-invoice-wrap"></span>
+                </div>
+                <div id="variations-list" style="margin-top:12px;"><p class="subtitle">Loading...</p></div>
               </div>
             </div>
             ` : ''}
@@ -5025,9 +5147,12 @@
       el.querySelectorAll('.job-asset-edit').forEach(b => b.addEventListener('click', () => openAssetPanel({ asset: assets.find(a => a.id === b.dataset.id), onSaved: refresh })));
     }
 
-    // Per-job log of out-of-scope work (job_variation_entries). Anyone can
-    // log; pricing roles mark each one billed / no charge. The invoicing
-    // panel warns about anything still "to bill".
+    // Per-job log of out-of-scope work (job_variation_entries). Anyone can log
+    // one, add the hours worked on it and the materials taken from Stock.
+    // Pricing roles then add it to an invoice - the "Invoice project" panel
+    // turns it into its own stage and claims it (bill-variations.js) - or mark
+    // it No charge. No dollar amounts show on this tab: prices are only worked
+    // out at billing, so staff see what was done, not what it costs.
     async function loadVariationEntries(project, pricingVisible) {
       const listEl = document.getElementById('variations-list');
       const { data: { user } } = await supabaseClient.auth.getUser();
@@ -5038,40 +5163,170 @@
         .order('work_date', { ascending: false }).order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
+      const ids = (rows || []).map(r => r.id);
+      const [{ data: hourRows }, { data: matRows }, { data: staffRows }] = await Promise.all([
+        ids.length ? supabaseClient.from('job_variation_hours').select('*, profiles:staff_id(full_name)').in('variation_id', ids).order('work_date').order('created_at') : Promise.resolve({ data: [] }),
+        ids.length ? supabaseClient.from('job_variation_materials').select('*').in('variation_id', ids).order('created_at') : Promise.resolve({ data: [] }),
+        pricingVisible ? supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name') : Promise.resolve({ data: [] }),
+      ]);
+
       const toBill = (rows || []).filter(r => r.status === 'to_bill').length;
       const tab = document.querySelector('#job-tabs .settings-tab[data-panel="variations"]');
       if (tab) tab.textContent = toBill ? `Variations (${toBill})` : 'Variations';
 
+      const wrap = document.getElementById('var-invoice-wrap');
+      if (wrap) {
+        wrap.innerHTML = pricingVisible && toBill ? `<button type="button" id="var-invoice-btn" class="secondary" style="font-size:13px; padding:7px 12px;">Add variations to an invoice...</button>` : '';
+        const invBtn = document.getElementById('var-invoice-btn');
+        if (invBtn) invBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible, { variationsOnly: true }));
+      }
+
+      const fmtDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      const today = new Date().toISOString().slice(0, 10);
       const STATUS = { to_bill: ['To bill', 'draft'], billed: ['Billed', 'accepted'], no_charge: ['No charge', 'sent'] };
-      listEl.innerHTML = (rows || []).length ? rows.map(r => `
-        <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+      const qtyText = (n) => String(Math.round((Number(n) || 0) * 100) / 100);
+      const btnStyle = 'font-size:12px; padding:5px 10px;';
+
+      listEl.innerHTML = (rows || []).length ? rows.map(r => {
+        const hrs = (hourRows || []).filter(h => h.variation_id === r.id);
+        const mats = (matRows || []).filter(m => m.variation_id === r.id);
+        const hoursTotal = hrs.reduce((s, h) => s + Number(h.hours), 0);
+        const open = r.status === 'to_bill' && !r.cost_centre_id; // hours / materials can still change
+        const mine = r.created_by === user.id;
+        const canRemove = (h) => open && (pricingVisible || h.created_by === user.id);
+        return `
+        <div class="var-card" data-id="${r.id}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px;">
           <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:flex-start;">
             <div>
               <span class="badge ${STATUS[r.status][1]}">${STATUS[r.status][0]}</span>
               <strong style="margin-left:6px;">${escapeHtml(r.description)}</strong>
-              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${new Date(r.work_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })} &middot; ${escapeHtml((r.profiles && r.profiles.full_name) || 'Someone')}${r.hours ? ' &middot; ' + r.hours + ' hrs' : ''}</p>
+              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${fmtDate(r.work_date)} &middot; ${escapeHtml((r.profiles && r.profiles.full_name) || 'Someone')}${hoursTotal ? ' &middot; ' + qtyText(hoursTotal) + ' hrs' : (r.hours ? ' &middot; ' + r.hours + ' hrs' : '')}</p>
+              ${r.cost_centre_id && r.status === 'to_bill' ? `<p class="subtitle" style="margin:4px 0 0; font-size:12px;">Priced and added to the job as a stage - invoice it from Invoice project.</p>` : ''}
             </div>
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
-              ${pricingVisible && r.status !== 'billed' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="billed" style="font-size:12px; padding:5px 10px;">Mark billed</button>` : ''}
-              ${pricingVisible && r.status !== 'no_charge' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="no_charge" style="font-size:12px; padding:5px 10px;">No charge</button>` : ''}
-              ${pricingVisible && r.status !== 'to_bill' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="to_bill" style="font-size:12px; padding:5px 10px;">Reopen</button>` : ''}
-              ${(r.created_by === user.id && r.status === 'to_bill') || pricingVisible ? `<button type="button" class="secondary var-delete" data-id="${r.id}" style="font-size:12px; padding:5px 10px;">Delete</button>` : ''}
+              ${pricingVisible && r.status !== 'billed' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="billed" style="${btnStyle}">Mark billed</button>` : ''}
+              ${pricingVisible && r.status !== 'no_charge' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="no_charge" style="${btnStyle}">No charge</button>` : ''}
+              ${pricingVisible && r.status !== 'to_bill' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="to_bill" style="${btnStyle}">Reopen</button>` : ''}
+              ${(mine && r.status === 'to_bill') || pricingVisible ? `<button type="button" class="secondary var-delete" data-id="${r.id}" style="${btnStyle}">Delete</button>` : ''}
             </div>
           </div>
-          ${r.materials ? `<p style="margin:8px 0 0; white-space:pre-wrap; font-size:13px;"><strong>Materials:</strong> ${escapeHtml(r.materials)}</p>` : ''}
-        </div>`).join('') : `<p class="subtitle">Nothing logged - no variations on this job so far.</p>`;
+          ${r.materials ? `<p style="margin:8px 0 0; white-space:pre-wrap; font-size:13px;"><strong>Notes:</strong> ${escapeHtml(r.materials)}</p>` : ''}
+
+          <div style="margin-top:12px; padding-top:10px; border-top:0.5px solid var(--border);">
+            <div style="font-weight:600; font-size:13px; margin-bottom:6px;">Hours${hoursTotal ? ` <span class="subtitle" style="font-weight:400;">(${qtyText(hoursTotal)} total)</span>` : ''}</div>
+            ${hrs.length ? hrs.map(h => `
+              <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:3px 0;">
+                <span>${fmtDate(h.work_date)} &middot; ${escapeHtml((h.profiles && h.profiles.full_name) || 'Someone')} &middot; ${qtyText(h.hours)} hrs${h.note ? ' &middot; ' + escapeHtml(h.note) : ''}</span>
+                ${canRemove(h) ? `<button type="button" class="secondary var-hours-del" data-id="${h.id}" style="font-size:11px; padding:2px 8px;">&times;</button>` : ''}
+              </div>`).join('') : `<p class="subtitle" style="margin:0; font-size:12px;">${r.hours ? r.hours + ' hrs noted when this was logged.' : 'No hours logged yet.'}</p>`}
+            ${open ? `
+              <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:flex-end; margin-top:8px;">
+                <div><label style="margin:0; font-size:11px;">Hours</label><input type="number" class="var-h-hours" step="0.25" min="0" placeholder="2.5" style="width:90px; margin:0;" /></div>
+                <div><label style="margin:0; font-size:11px;">Date</label><input type="date" class="var-h-date" value="${today}" style="margin:0;" /></div>
+                ${pricingVisible && (staffRows || []).length ? `<div><label style="margin:0; font-size:11px;">Who</label><select class="var-h-staff" style="margin:0;">${staffRows.map(s => `<option value="${s.id}" ${s.id === user.id ? 'selected' : ''}>${escapeHtml(s.full_name)}</option>`).join('')}</select></div>` : ''}
+                <button type="button" class="var-hours-add" data-id="${r.id}" style="${btnStyle}">Log hours</button>
+              </div>` : ''}
+          </div>
+
+          <div style="margin-top:12px; padding-top:10px; border-top:0.5px solid var(--border);">
+            <div style="font-weight:600; font-size:13px; margin-bottom:6px;">Materials</div>
+            ${mats.length ? mats.map(m => `
+              <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:3px 0;">
+                <span>${qtyText(m.quantity)} &times; ${escapeHtml(m.description)}${m.kind === 'prebuild' ? ' <span class="subtitle">(prebuild)</span>' : ''}${m.kind === 'other' ? ' <span class="subtitle">(not from Stock)</span>' : ''}</span>
+                ${open && (pricingVisible || m.created_by === user.id) ? `<button type="button" class="secondary var-mat-del" data-id="${m.id}" style="font-size:11px; padding:2px 8px;">&times;</button>` : ''}
+              </div>`).join('') : `<p class="subtitle" style="margin:0; font-size:12px;">None added yet.</p>`}
+            ${open ? `
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+                <button type="button" class="secondary var-mat-add" data-id="${r.id}" style="${btnStyle}">+ Material or prebuild from Stock</button>
+                ${pricingVisible ? `<button type="button" class="secondary var-other-add" data-id="${r.id}" style="${btnStyle}">+ Other item (not in Stock)</button>` : ''}
+              </div>` : ''}
+          </div>
+        </div>`;
+      }).join('') : `<p class="subtitle">Nothing logged - no variations on this job so far.</p>`;
+
+      const reload = () => loadVariationEntries(project, pricingVisible);
+      const rowById = (id) => (rows || []).find(r => r.id === id);
 
       listEl.querySelectorAll('.var-status').forEach(btn => btn.addEventListener('click', async () => {
         const { error: upErr } = await supabaseClient.from('job_variation_entries')
           .update({ status: btn.dataset.status, status_changed_by: user.id, status_changed_at: new Date().toISOString() }).eq('id', btn.dataset.id);
         if (upErr) { alert(upErr.message); return; }
-        await loadVariationEntries(project, pricingVisible);
+        await reload();
       }));
+
       listEl.querySelectorAll('.var-delete').forEach(btn => btn.addEventListener('click', async () => {
-        if (!confirm('Delete this logged variation?')) return;
+        if (!confirm('Delete this logged variation? Any Stock materials added to it go back into stock.')) return;
+        const mats = (matRows || []).filter(m => m.variation_id === btn.dataset.id && m.stock_deducted && m.material_id);
+        for (const m of mats) { try { await adjustWarehouseStock(m.material_id, Number(m.quantity)); } catch (e) { console.error('Could not put stock back:', e); } }
         const { error: delErr } = await supabaseClient.from('job_variation_entries').delete().eq('id', btn.dataset.id);
         if (delErr) { alert(delErr.message); return; }
-        await loadVariationEntries(project, pricingVisible);
+        await reload();
+      }));
+
+      listEl.querySelectorAll('.var-hours-add').forEach(btn => btn.addEventListener('click', async () => {
+        const card = btn.closest('.var-card');
+        const hours = parseFloat(card.querySelector('.var-h-hours').value);
+        if (!(hours > 0)) { alert('Enter the hours worked.'); return; }
+        const staffSel = card.querySelector('.var-h-staff');
+        btn.disabled = true;
+        const { error: hErr } = await supabaseClient.from('job_variation_hours').insert({
+          variation_id: btn.dataset.id, project_id: project.id, staff_id: staffSel ? staffSel.value : user.id,
+          work_date: card.querySelector('.var-h-date').value || today, hours, created_by: user.id,
+        });
+        if (hErr) { alert(hErr.message); btn.disabled = false; return; }
+        await logActivity('project', project.id, 'variation_hours_logged', `${hours} hrs logged on variation: ${rowById(btn.dataset.id)?.description || ''}`);
+        await reload();
+      }));
+      listEl.querySelectorAll('.var-hours-del').forEach(btn => btn.addEventListener('click', async () => {
+        const { error: dErr } = await supabaseClient.from('job_variation_hours').delete().eq('id', btn.dataset.id);
+        if (dErr) { alert(dErr.message); return; }
+        await reload();
+      }));
+
+      listEl.querySelectorAll('.var-mat-add').forEach(btn => btn.addEventListener('click', async () => {
+        const picked = await openVariationStockPicker(pricingVisible);
+        if (!picked) return;
+        btn.disabled = true;
+        try {
+          const { data: ins, error: mErr } = await supabaseClient.from('job_variation_materials').insert({
+            variation_id: btn.dataset.id, project_id: project.id, kind: picked.kind,
+            material_id: picked.kind === 'material' ? picked.id : null,
+            prebuild_id: picked.kind === 'prebuild' ? picked.id : null,
+            description: picked.name, quantity: picked.quantity, created_by: user.id,
+          }).select('id').single();
+          if (mErr) throw mErr;
+          // Stock materials come off the warehouse shelf straight away; a prebuild is a
+          // bundle of work and parts that isn't tracked as one Stock item, so it doesn't.
+          if (picked.kind === 'material') {
+            await adjustWarehouseStock(picked.id, -picked.quantity);
+            await supabaseClient.from('job_variation_materials').update({ stock_deducted: true }).eq('id', ins.id);
+          }
+          await logActivity('project', project.id, 'variation_materials_added', `${picked.quantity} x ${picked.name} added to variation: ${rowById(btn.dataset.id)?.description || ''}`);
+        } catch (err) {
+          alert(err.message);
+        }
+        await reload();
+      }));
+
+      listEl.querySelectorAll('.var-mat-del').forEach(btn => btn.addEventListener('click', async () => {
+        const m = (matRows || []).find(x => x.id === btn.dataset.id);
+        if (m && m.stock_deducted && m.material_id) {
+          try { await adjustWarehouseStock(m.material_id, Number(m.quantity)); } catch (e) { console.error('Could not put stock back:', e); }
+        }
+        const { error: dErr } = await supabaseClient.from('job_variation_materials').delete().eq('id', btn.dataset.id);
+        if (dErr) { alert(dErr.message); return; }
+        await reload();
+      }));
+
+      listEl.querySelectorAll('.var-other-add').forEach(btn => btn.addEventListener('click', async () => {
+        const item = await openVariationOtherItemPrompt();
+        if (!item) return;
+        const { error: oErr } = await supabaseClient.from('job_variation_materials').insert({
+          variation_id: btn.dataset.id, project_id: project.id, kind: 'other',
+          description: item.description, quantity: item.quantity, other_unit_cost: item.unitCost, created_by: user.id,
+        });
+        if (oErr) { alert(oErr.message); return; }
+        await reload();
       }));
 
       const addBtn = document.getElementById('var-add-btn');
@@ -5082,35 +5337,115 @@
           const description = document.getElementById('var-desc').value.trim();
           if (!description) { msg.innerHTML = `<div class="error-box">Say what the extra work was.</div>`; return; }
           addBtn.disabled = true;
-          const { error: insErr } = await supabaseClient.from('job_variation_entries').insert({
-            project_id: project.id, description, created_by: user.id,
-            hours: parseFloat(document.getElementById('var-hours').value) || null,
-            work_date: document.getElementById('var-date').value || new Date().toISOString().slice(0, 10),
+          const workDate = document.getElementById('var-date').value || new Date().toISOString().slice(0, 10);
+          const { data: created, error: insErr } = await supabaseClient.from('job_variation_entries').insert({
+            project_id: project.id, description, created_by: user.id, work_date: workDate,
             materials: document.getElementById('var-materials').value.trim() || null,
-          });
+          }).select('id').single();
+          if (insErr) { addBtn.disabled = false; msg.innerHTML = `<div class="error-box">${insErr.message}</div>`; return; }
+          const startHours = parseFloat(document.getElementById('var-hours').value);
+          if (startHours > 0) {
+            const { error: hErr } = await supabaseClient.from('job_variation_hours').insert({
+              variation_id: created.id, project_id: project.id, staff_id: user.id, work_date: workDate, hours: startHours, created_by: user.id,
+            });
+            if (hErr) console.error('Could not log the starting hours:', hErr);
+          }
           addBtn.disabled = false;
-          if (insErr) { msg.innerHTML = `<div class="error-box">${insErr.message}</div>`; return; }
           ['var-desc', 'var-hours', 'var-materials'].forEach(id => { document.getElementById(id).value = ''; });
-          msg.innerHTML = `<div class="success-box">Logged.</div>`;
+          msg.innerHTML = `<div class="success-box">Logged. Add materials from Stock to it below.</div>`;
           await logActivity('project', project.id, 'variation_logged', `Variation logged: ${description}`);
-          await loadVariationEntries(project, pricingVisible);
+          await reload();
         });
       }
     }
 
-    // Warns in the invoice panel about logged variations nobody has billed or
-    // waived yet.
-    async function fillInvoiceVariationsNote(overlay, project) {
-      const el = overlay.querySelector('#inv-variations-note');
-      if (!el) return;
-      const { data: rows } = await supabaseClient.from('job_variation_entries').select('description, hours').eq('project_id', project.id).eq('status', 'to_bill');
-      if (!rows || !rows.length) return;
-      el.innerHTML = `
-        <div class="error-box" style="margin-bottom:12px;">
-          <strong>${rows.length} logged variation${rows.length === 1 ? '' : 's'} not billed yet:</strong>
-          <ul style="margin:6px 0 0 18px; padding:0;">${rows.map(r => `<li>${escapeHtml(r.description)}${r.hours ? ' (' + r.hours + ' hrs)' : ''}</li>`).join('')}</ul>
-          <p style="margin:6px 0 0; font-size:12px;">Add them to this claim, or mark them billed / no charge on the Variations tab.</p>
-        </div>`;
+    // Picks a Stock material or a prebuild for a variation. Resolves to
+    // { kind: 'material' | 'prebuild', id, name, quantity }, or null if cancelled.
+    // Costs only show to pricing roles.
+    async function openVariationStockPicker(pricingVisible) {
+      const [{ data: materialsData }, prebuilds] = await Promise.all([
+        supabaseClient.from('materials').select('id, name, category, cost_price, quantity_on_hand').order('name'),
+        getPrebuilds(),
+      ]);
+      const materials = materialsData || [];
+      if (!materials.length && !prebuilds.length) { alert('No materials or prebuilds set up yet. Add stock under the Stock tab.'); return null; }
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
+        overlay.innerHTML = `
+          <div class="card" style="max-width:480px; width:100%; max-height:80vh; overflow-y:auto;">
+            <h2>Add from Stock</h2>
+            <label style="margin-top:0">Quantity</label>
+            <input id="vsp-qty" type="number" value="1" min="0.01" step="0.01" style="margin-bottom:12px;" />
+            <label>Search</label>
+            <input id="vsp-search" placeholder="Name, category..." autocomplete="off" />
+            <div id="vsp-results" style="margin-top:8px;"></div>
+            <div style="margin-top:16px; text-align:right;"><button type="button" class="secondary" id="vsp-cancel">Cancel</button></div>
+          </div>`;
+        document.body.appendChild(overlay);
+        const done = (val) => { overlay.remove(); resolve(val); };
+        overlay.querySelector('#vsp-cancel').addEventListener('click', () => done(null));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+        const resultsEl = overlay.querySelector('#vsp-results');
+        const render = () => {
+          const q = overlay.querySelector('#vsp-search').value.trim();
+          const pbs = (q ? prebuilds.filter(p => matchesAllWords(`${p.name} ${p.category} ${p.subcategory || ''}`, q)) : prebuilds).slice(0, 25);
+          const mts = (q ? materials.filter(m => matchesAllWords(`${m.name} ${m.category || ''}`, q)) : materials).slice(0, 25);
+          if (!pbs.length && !mts.length) { resultsEl.innerHTML = `<p class="subtitle">No matches.</p>`; return; }
+          resultsEl.innerHTML = [
+            ...pbs.map(p => `<div class="vsp-row" data-kind="prebuild" data-id="${p.id}" style="padding:10px; cursor:pointer; border-bottom:0.5px solid var(--border);">
+              <div style="font-weight:600;">${escapeHtml(p.name)} <span class="subtitle" style="font-weight:400;">Prebuild</span></div>
+              <div class="subtitle" style="font-size:12px;">${escapeHtml(p.category || '')}${p.subcategory ? ' / ' + escapeHtml(p.subcategory) : ''}</div></div>`),
+            ...mts.map(m => `<div class="vsp-row" data-kind="material" data-id="${m.id}" style="padding:10px; cursor:pointer; border-bottom:0.5px solid var(--border);">
+              <div style="font-weight:600;">${escapeHtml(m.name)} <span class="subtitle" style="font-weight:400;">${pricingVisible ? money(m.cost_price) + ' - ' : ''}${qtyOnHand(m)} in stock</span></div>
+              <div class="subtitle" style="font-size:12px;">${escapeHtml(m.category || '')}</div></div>`),
+          ].join('');
+          resultsEl.querySelectorAll('.vsp-row').forEach(row => row.addEventListener('click', () => {
+            const qty = parseFloat(overlay.querySelector('#vsp-qty').value) || 0;
+            if (!(qty > 0)) { alert('Enter a quantity first.'); return; }
+            if (row.dataset.kind === 'material') {
+              const m = materials.find(x => x.id === row.dataset.id);
+              if (Number(m.quantity_on_hand) < qty && !confirm(`Only ${qtyOnHand(m)} of ${m.name} in stock. Add ${qty} anyway? Stock will go to zero.`)) return;
+              done({ kind: 'material', id: m.id, name: m.name, quantity: qty });
+            } else {
+              const p = prebuilds.find(x => x.id === row.dataset.id);
+              done({ kind: 'prebuild', id: p.id, name: p.name, quantity: qty });
+            }
+          }));
+        };
+        const qtyOnHand = (m) => Math.round((Number(m.quantity_on_hand) || 0) * 100) / 100;
+        overlay.querySelector('#vsp-search').addEventListener('input', render);
+        render();
+      });
+    }
+
+    // Pricing roles only: an item that isn't in Stock (bought in for the job), with
+    // its cost. Resolves to { description, quantity, unitCost } or null.
+    function openVariationOtherItemPrompt() {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
+        overlay.innerHTML = `
+          <div class="card" style="max-width:420px; width:100%;">
+            <h2>Other item</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Something bought in for this variation that isn't in Stock. Enter what it cost you; the markup is added when it's billed.</p>
+            <label style="margin-top:0;">Description</label><input id="voi-desc" placeholder="e.g. 2m galvanised cable tray" />
+            <div class="grid cols-2"><div><label>Quantity</label><input id="voi-qty" type="number" value="1" min="0.01" step="0.01" /></div>
+            <div><label>Cost each (ex GST)</label><input id="voi-cost" type="number" min="0" step="0.01" /></div></div>
+            <div id="voi-msg"></div>
+            <div style="margin-top:12px;"><button type="button" id="voi-ok">Add</button> <button type="button" class="secondary" id="voi-cancel">Cancel</button></div>
+          </div>`;
+        document.body.appendChild(overlay);
+        const done = (val) => { overlay.remove(); resolve(val); };
+        overlay.querySelector('#voi-cancel').addEventListener('click', () => done(null));
+        overlay.querySelector('#voi-ok').addEventListener('click', () => {
+          const description = overlay.querySelector('#voi-desc').value.trim();
+          const quantity = parseFloat(overlay.querySelector('#voi-qty').value);
+          const unitCost = parseFloat(overlay.querySelector('#voi-cost').value);
+          if (!description || !(quantity > 0) || !(unitCost >= 0)) { overlay.querySelector('#voi-msg').innerHTML = `<div class="error-box">Fill in the description, quantity and cost.</div>`; return; }
+          done({ description, quantity, unitCost });
+        });
+      });
     }
 
     // Other jobs and quotes for the same client (same-site first), so when

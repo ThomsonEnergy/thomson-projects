@@ -464,4 +464,10 @@ select '140', 'get_quote_by_token returns prepared_by',
 union all
 select '141', 'projects.created_by defaults to auth.uid()',
   case when (select column_default from information_schema.columns where table_name = 'projects' and column_name = 'created_by') like '%auth.uid%' then 'present' else 'MISSING' end
+union all
+select '142', 'variation hours, materials and billing columns',
+  case when exists (select 1 from information_schema.tables where table_name = 'job_variation_hours')
+    and exists (select 1 from information_schema.tables where table_name = 'job_variation_materials')
+    and exists (select 1 from information_schema.columns where table_name = 'cost_centres' and column_name = 'variation_entry_id')
+  then 'present' else 'MISSING' end
 order by 1;

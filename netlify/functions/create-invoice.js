@@ -1,5 +1,6 @@
 // POST /api/create-invoice
-// Body: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent }] }
+// Body: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent }],
+//         variationEntryIds? (logged variations being billed on this invoice) }
 // One invoice, one row per cost centre included (a single-stage claim is
 // just claims.length === 1) - either a % of that stage's quote (the
 // normal claim panel) or, for a no-quote job (proposal_template
@@ -27,7 +28,7 @@ exports.handler = async (event) => {
   const { supabaseAdmin, user } = auth;
 
   try {
-    const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId } = JSON.parse(event.body || '{}');
+    const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId, variationEntryIds } = JSON.parse(event.body || '{}');
 
     if (!projectId || !Array.isArray(claims) || !claims.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectId and at least one claim are required' }) };
@@ -139,6 +140,14 @@ exports.handler = async (event) => {
       const before = Number((centresBefore || []).find(cc => cc.id === c.cost_centre_id)?.invoiced_amount) || 0;
       return supabaseAdmin.from('cost_centres').update({ invoiced_amount: before + c.labour_amount + c.material_amount }).eq('id', c.cost_centre_id);
     }));
+
+    // Logged variations (bill-variations.js made each one a stage, claimed above)
+    // are now billed on this invoice.
+    if (Array.isArray(variationEntryIds) && variationEntryIds.length) {
+      await supabaseAdmin.from('job_variation_entries').update({
+        status: 'billed', invoice_id: insertedInvoice.id, status_changed_by: user.id, status_changed_at: new Date().toISOString(),
+      }).in('id', variationEntryIds).eq('project_id', projectId);
+    }
 
     // The final claim landing while the job's sitting at Ready to Invoice
     // (reached once client handover is done) is exactly the "invoice
