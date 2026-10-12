@@ -222,13 +222,21 @@ exports.handler = async (event) => {
   });
   try { return await Promise.race([handle(event), deadline]); } finally {
     clearTimeout(timer);
-    try {
-      const handles = (process._getActiveHandles ? process._getActiveHandles() : []).map((h) => (h && h.constructor && h.constructor.name) || typeof h);
-      const children = (() => { try { return require('child_process').execSync('ps -eo pid,etimes,rss,comm | head -20').toString().trim().split('\n').slice(1).map((l) => l.trim()).join(' | '); } catch (e) { return 'ps unavailable'; } })();
-      console.log('PDF function finishing. Live handles:', JSON.stringify(handles.reduce((o, n) => { o[n] = (o[n] || 0) + 1; return o; }, {})), 'processes:', children);
-    } catch (e) { /* diagnostics only */ }
+    closeIdleConnections();
   }
 };
+
+// Netlify answers the caller only once the function's event loop is empty. Idle keep-alive
+// connections (to Supabase) left open after the work keep it busy, and a live test showed the
+// answer then arriving about a minute after the PDF was already made. Closing them as the
+// function finishes releases the answer straight away. Only the TLS sockets are closed; the
+// process's own stdout/stderr are left alone.
+function closeIdleConnections() {
+  try {
+    const handles = process._getActiveHandles ? process._getActiveHandles() : [];
+    handles.forEach((h) => { if (h && h.constructor && h.constructor.name === 'TLSSocket' && typeof h.destroy === 'function') h.destroy(); });
+  } catch (e) { /* the answer is just slower */ }
+}
 
 async function handle(event) {
   if (event.httpMethod !== 'POST') {
