@@ -60,8 +60,33 @@ async function renderPageToPdf(url, pdfOptions) {
 let cachedBrowser = null;
 let lastBrowserWasReused = false;
 
+// A kept browser can be frozen or half dead after the function sat idle, and then calls to it
+// hang instead of failing (a live test took 3 minutes once). So every use of a kept browser is
+// guarded by a short timeout, and one that does not answer is killed and replaced.
+function withTimeout(promise, ms, what) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Target closed: ${what} did not answer in ${ms}ms`)), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+function killBrowser(browser) {
+  try { const proc = browser.process && browser.process(); if (proc) proc.kill('SIGKILL'); } catch (e) { /* already gone */ }
+  browser.close().catch(() => {});
+}
+
 async function getBrowser() {
-  if (cachedBrowser && cachedBrowser.isConnected()) { lastBrowserWasReused = true; return cachedBrowser; }
+  if (cachedBrowser && cachedBrowser.isConnected()) {
+    try {
+      await withTimeout(cachedBrowser.version(), 3000, 'the kept browser');
+      lastBrowserWasReused = true;
+      return cachedBrowser;
+    } catch (e) {
+      console.warn('Kept browser did not respond, starting a new one:', e.message);
+      killBrowser(cachedBrowser);
+    }
+  }
   lastBrowserWasReused = false;
   cachedBrowser = null;
   const browser = await launchBrowser();
@@ -123,7 +148,7 @@ async function renderPageToPdfUnsafe(url, pdfOptions) {
     // a browser kept from an earlier request may have been frozen or killed: try once on a new one
     if (!lastBrowserWasReused || !/Target closed|Session closed|Protocol error|Connection closed|disconnected|EPIPE|detached/i.test(String(err && err.message))) throw err; // a slow page is not a dead browser: do not retry that
     console.warn('PDF render on the kept browser failed, retrying on a fresh one:', err.message);
-    try { if (cachedBrowser) await cachedBrowser.close(); } catch (e) { /* already gone */ }
+    if (cachedBrowser) killBrowser(cachedBrowser);
     cachedBrowser = null;
     return renderOnce(url, pdfOptions);
   }
@@ -133,7 +158,7 @@ async function renderOnce(url, pdfOptions) {
   const browser = await getBrowser();
   let page;
   try {
-    page = await browser.newPage();
+    page = await withTimeout(browser.newPage(), 8000, 'opening a page');
     await page.setViewport({ width: 800, height: 1200 });
     // domcontentloaded rather than networkidle0 - waiting for every image
     // to settle via Puppeteer's own network-idle heuristic held them all
@@ -147,7 +172,7 @@ async function renderOnce(url, pdfOptions) {
   } finally {
     // Only the page is closed: the browser stays for the next request. If Chromium already
     // crashed this throws on the dead pipe - swallow it, the real error is already on its way out.
-    try { if (page) await page.close(); } catch (closeErr) { console.error('page.close() failed (Chromium likely already exited):', closeErr.message); }
+    try { if (page) await withTimeout(page.close(), 3000, 'closing the page'); } catch (closeErr) { console.error('page.close() failed (Chromium likely already exited):', closeErr.message); if (cachedBrowser) { killBrowser(cachedBrowser); cachedBrowser = null; } }
   }
 }
 
