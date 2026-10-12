@@ -70,7 +70,7 @@
   .cover-meta b { display: block; font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 20px; text-transform: uppercase; margin: 2px 0 6px; }
   .cover-meta .co { opacity: 0.95; }
   .logo-light { display: block; width: auto; }
-  .logo-light.logo-cover, .logo-pill.logo-cover img { height: 124px; max-height: none; max-width: none; }
+  .logo-light.logo-cover, .logo-pill.logo-cover img { height: 150px; max-height: none; max-width: none; }
   .logo-light.logo-invest, .logo-pill.logo-invest img { height: 56px; max-height: none; max-width: none; }
   .co-block { position: absolute; right: 64px; bottom: 40px; z-index: 2; text-align: right; font-size: 11.5px; line-height: 1.55; max-width: 290px; color: #e6eaf2; }
   .co-block b { font-weight: 700; color: #fff; }
@@ -230,7 +230,7 @@
     // The logo's darker colours (navy, purple) vanish on a black page, so it gets a thin white
     // keyline traced round its shape. The logo itself stays in full colour on top of it.
     function withKeyline(c, ctx) {
-      const r = Math.max(2, Math.round(c.width * 0.0045));
+      const r = Math.max(2, Math.round(c.width * 0.0035));
       const pad = r + 2;
       const out = document.createElement('canvas');
       out.width = c.width + pad * 2; out.height = c.height + pad * 2;
