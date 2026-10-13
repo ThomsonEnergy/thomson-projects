@@ -18,6 +18,7 @@
 
 const { getAdminClient } = require('./_shared/require-admin');
 const { createJobFromQuote } = require('./_shared/create-job-from-quote');
+const { startFinalizeDocuments } = require('./_shared/start-finalize-documents');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -47,7 +48,10 @@ exports.handler = async (event) => {
       await supabaseAdmin.from('projects').update({ accepted_signed_by_name: signedName, accepted_signature_data_url: signature }).eq('id', quote.id);
     }
 
-    const { jobNumber, invoiceToken } = await createJobFromQuote(supabaseAdmin, { quoteId: quote.id });
+    const { jobId, jobNumber, invoiceToken } = await createJobFromQuote(supabaseAdmin, { quoteId: quote.id });
+    // The signed quote becomes the job's quote PDF (made in the background).
+    await startFinalizeDocuments({ kind: 'quote_accepted', quoteId: quote.id, jobId });
+
     return { statusCode: 200, body: JSON.stringify({ ok: true, jobNumber, invoiceToken }) };
   } catch (err) {
     console.error('accept-quote error:', err.message);

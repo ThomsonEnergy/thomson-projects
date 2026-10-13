@@ -35,3 +35,8 @@
   to = "/index.html"
   status = 404
   force = false
+
+# Keeps the PDF function warm so a quote / invoice PDF is quick even after a quiet spell - see
+# warm-pdf.js.
+[functions.warm-pdf]
+  schedule = "*/4 * * * *"

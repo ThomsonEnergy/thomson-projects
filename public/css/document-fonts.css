@@ -1,0 +1,6 @@
+/* The fonts the quote and invoice pages use, hosted here instead of on Google Fonts: one less
+   outside site to wait for when a page is drawn (and when a PDF is made from it). Latin
+   characters only, which covers everything these documents print. */
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 400 700; font-stretch: 100%; font-display: swap; src: url(/fonts/archivo-latin.woff2) format('woff2'); }
+@font-face { font-family: 'Instrument Sans'; font-style: normal; font-weight: 400 700; font-stretch: 100%; font-display: swap; src: url(/fonts/instrument-sans-latin.woff2) format('woff2'); }
+@font-face { font-family: 'Arimo'; font-style: normal; font-weight: 400 700; font-display: swap; src: url(/fonts/arimo-latin.woff2) format('woff2'); }

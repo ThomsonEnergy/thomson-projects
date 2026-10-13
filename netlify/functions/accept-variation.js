@@ -11,6 +11,7 @@
 // signed record goes into the job's variations history. Signing twice is harmless.
 
 const { getAdminClient } = require('./_shared/require-admin');
+const { startFinalizeDocuments } = require('./_shared/start-finalize-documents');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -82,6 +83,10 @@ exports.handler = async (event) => {
         p_link: `/project.html?id=${entry.project_id}`, p_actor: null, p_dedupe: `variation-approved-${entry.id}`,
       });
     }
+
+    // File the old quote PDF as a legacy document, make this variation's signed PDF and a fresh current
+    // quote PDF. Runs in the background, so the client is not kept waiting.
+    await startFinalizeDocuments({ kind: 'variation_signed', variationId: entry.id });
 
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
   } catch (err) {

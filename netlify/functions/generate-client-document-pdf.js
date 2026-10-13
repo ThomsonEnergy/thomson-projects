@@ -160,13 +160,29 @@ async function renderPageToPdfUnsafe(url, pdfOptions) {
   }
 }
 
+// Chromium takes a few seconds to start, and the database lookups that come before the render
+// take a moment too, so the browser is started first (see handle) and picked up here.
+let pendingBrowser = null;
+const timings = {};
+const markTime = (name, since) => { timings[name] = Date.now() - since; };
+
 async function renderOnce(url, pdfOptions) {
-  const browser = await getBrowser();
+  const t0 = Date.now();
+  let browser;
+  if (pendingBrowser) {
+    const started = pendingBrowser;
+    pendingBrowser = null;
+    browser = await started.catch(() => getBrowser()); // the early start failed: try once normally
+  } else {
+    browser = await getBrowser();
+  }
+  markTime('browserReadyWaitMs', t0);
   let page;
   try {
     stage = 'opening a page';
     page = await withTimeout(browser.newPage(), 8000, 'opening a page');
     await page.setViewport({ width: 800, height: 1200 });
+    const tPage = Date.now();
     // domcontentloaded rather than networkidle0 - waiting for every image
     // to settle via Puppeteer's own network-idle heuristic held them all
     // in memory at once; the page's own data-print-ready flag (set only
@@ -176,8 +192,11 @@ async function renderOnce(url, pdfOptions) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
     stage = 'waiting for the page to finish drawing';
     await page.waitForSelector('body[data-print-ready="true"]', { timeout: 20000 });
+    markTime('pageDrawMs', tPage);
     stage = 'printing to PDF';
+    const tPrint = Date.now();
     const pdfBytes = await page.pdf({ timeout: 25000, ...(pdfOptions || { format: 'a4', printBackground: true, margin: { top: '20px', bottom: '20px' } }) });
+    markTime('printMs', tPrint);
     stage = 'saving the PDF';
     return Buffer.from(pdfBytes);
   } finally {
@@ -212,9 +231,23 @@ async function handle(event) {
   }
 
   let doc_type, record_id, supabaseAdmin;
+  const tStart = Date.now();
+  Object.keys(timings).forEach(k => delete timings[k]);
   try {
     ({ doc_type, record_id } = JSON.parse(event.body || '{}'));
+
+    // warm-pdf.js pings this every few minutes so the function stays loaded and Chromium is already
+    // unpacked when someone really asks for a PDF (unpacking it is a few seconds on a cold start).
+    if (doc_type === 'warm') {
+      require('@sparticuz/chromium').executablePath().catch(() => {});
+      return { statusCode: 200, body: JSON.stringify({ ok: true, warm: true }) };
+    }
+
     if (!doc_type || !record_id) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'doc_type and record_id are required' }) };
+
+    // Start Chromium now, while the lookups below happen.
+    pendingBrowser = getBrowser();
+    pendingBrowser.catch(() => {}); // a failed early start is reported when it is picked up in renderOnce
 
     supabaseAdmin = getAdminClient();
     const siteUrl = selfBaseUrl();
@@ -266,13 +299,37 @@ async function handle(event) {
       const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
       if (upErr) throw upErr;
       await supabaseAdmin.from('invoices').update({ pdf_path: path, pdf_generated_at: new Date().toISOString() }).eq('id', invoice.id);
+    } else if (doc_type === 'variation') {
+      // A fixed-price variation: the client's original quote plus the variation and its reason
+      // (signed once they have approved it). See quote.html?variation=...
+      const { data: entry, error } = await supabaseAdmin
+        .from('job_variation_entries')
+        .select('id, variation_token, variation_type')
+        .eq('id', record_id)
+        .single();
+      if (error || !entry || entry.variation_type !== 'fixed') throw new Error(error?.message || 'Variation not found');
+
+      const finalPdf = await renderPageToPdf(`${siteUrl}/quote.html?variation=${entry.variation_token}&print=1`, {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+
+      path = `client-documents/variations/${entry.id}.pdf`;
+      const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
+      if (upErr) throw upErr;
+      await supabaseAdmin.from('job_variation_entries').update({ pdf_path: path, pdf_generated_at: new Date().toISOString() }).eq('id', entry.id);
     } else {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: `Unknown doc_type "${doc_type}"` }) };
     }
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, path }) };
+    markTime('totalMs', tStart);
+    console.log(`PDF ${doc_type} ${record_id} timings:`, JSON.stringify(timings), 'browser reused:', lastBrowserWasReused);
+    return { statusCode: 200, body: JSON.stringify({ ok: true, path, timings }) };
   } catch (err) {
     console.error('generate-client-document-pdf failed:', err);
+    // the early-started browser was never used: do not leave it running
+    if (pendingBrowser) { const unused = pendingBrowser; pendingBrowser = null; unused.then((b) => killBrowser(b), () => {}); }
     if (supabaseAdmin && record_id) {
       if (doc_type === 'quote') await supabaseAdmin.from('projects').update({ quote_pdf_error: err.message }).eq('id', record_id).then(() => {}, () => {});
       else if (doc_type === 'invoice') await supabaseAdmin.from('invoices').update({ pdf_error: err.message }).eq('id', record_id).then(() => {}, () => {});

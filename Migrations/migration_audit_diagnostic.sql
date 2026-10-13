@@ -477,4 +477,7 @@ select '143', 'fixed-price variations (type, token, signature)',
 union all
 select '144', 'quote acceptance signature columns',
   case when exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'accepted_signature_data_url') then 'present' else 'MISSING' end
+union all
+select '145', 'variation pdf columns',
+  case when exists (select 1 from information_schema.columns where table_name = 'job_variation_entries' and column_name = 'documents_finalized_at') then 'present' else 'MISSING' end
 order by 1;

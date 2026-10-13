@@ -9,11 +9,9 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Arimo:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/css/document-fonts.css?v=1" />
 <link rel="stylesheet" href="/css/style.css?v=13" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/vendor/supabase-2.js"></script>
 <style>
   /* The invoice is laid out as A4 sheets (794 x 1123 px at 96 dpi), the same on screen and in the PDF.
      Each sheet repeats the letterhead and invoice number; a long list of items continues on the next
@@ -110,7 +108,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=62"></script>
+  <script src="/js/supabase-client.js?v=63"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';

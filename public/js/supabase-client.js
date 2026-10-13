@@ -2290,10 +2290,20 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   if (entry.project_id) {
     const [{ data: proj }, { data: cc }] = await Promise.all([
       supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved, pipeline_stage').eq('id', entry.project_id).maybeSingle(),
-      supabaseClient.from('cost_centres').select('id, name').eq('project_id', entry.project_id).order('sort_order'),
+      supabaseClient.from('cost_centres').select('id, name, variation_entry_id').eq('project_id', entry.project_id).order('sort_order'),
     ]);
     project = proj;
-    centres = (cc || []).map((c, i) => ({ ...c, number: costCentreNumber(proj ? proj.job_number : null, i + 1) }));
+    // A variation is a stage here too, but only while there is still work to do on it (see My Day);
+    // a stage this shift was already ticked against always stays.
+    let usable = cc || [];
+    const variationIds = usable.map(c => c.variation_entry_id).filter(Boolean);
+    if (variationIds.length) {
+      const { data: vEntries } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
+      const open = new Set((vEntries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
+      const already = new Set([...(entry.selected_cost_centre_ids || []), entry.cost_centre_id].filter(Boolean));
+      usable = usable.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id) || already.has(c.id));
+    }
+    centres = usable.map((c, i) => ({ id: c.id, name: c.name, number: costCentreNumber(proj ? proj.job_number : null, i + 1) }));
   }
   let chosenCentres = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
     ? entry.selected_cost_centre_ids.slice()
