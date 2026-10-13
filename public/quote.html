@@ -244,27 +244,24 @@
     // background (a JPG) has the white taken out: each pixel keeps its colour and becomes more see-through
     // the closer it is to white. Returns a PNG data URL, the original address, or null if the image
     // can't be read (then the caller falls back to the plain logo).
-    // The logo's darker colours (navy, purple) vanish on a black page, so it gets a thin white
-    // keyline traced round its shape. The logo itself stays in full colour on top of it.
-    function withKeyline(c, ctx) {
-      const r = Math.max(2, Math.round(c.width * 0.0035));
-      const pad = r + 2;
-      const out = document.createElement('canvas');
-      out.width = c.width + pad * 2; out.height = c.height + pad * 2;
-      const octx = out.getContext('2d');
-      const sil = document.createElement('canvas');
-      sil.width = c.width; sil.height = c.height;
-      const sctx = sil.getContext('2d');
-      sctx.drawImage(c, 0, 0);
-      sctx.globalCompositeOperation = 'source-in';
-      sctx.fillStyle = '#ffffff';
-      sctx.fillRect(0, 0, sil.width, sil.height);
-      for (let k = 0; k < 24; k++) {
-        const ang = (k / 24) * Math.PI * 2;
-        octx.drawImage(sil, pad + Math.cos(ang) * r, pad + Math.sin(ang) * r);
+    // The logo's darkest colour (the navy of "ENERGY") nearly disappears on a black page. Rather than put
+    // an outline or a box around the logo, its dark colours are brightened a little (same hues, no
+    // outline, no background) so it stays readable straight on black.
+    function brightenForBlack(c) {
+      const ctx = c.getContext('2d');
+      const px = ctx.getImageData(0, 0, c.width, c.height);
+      const d = px.data;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] === 0) continue;
+        const luma = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        if (luma >= 110) continue;
+        const f = Math.min(2, 110 / Math.max(luma, 40));
+        d[i] = Math.min(255, Math.round(d[i] * f));
+        d[i + 1] = Math.min(255, Math.round(d[i + 1] * f));
+        d[i + 2] = Math.min(255, Math.round(d[i + 2] * f));
       }
-      octx.drawImage(c, pad, pad);
-      return out.toDataURL('image/png');
+      ctx.putImageData(px, 0, 0);
+      return c.toDataURL('image/png');
     }
 
     function makeLightLogo(url) {
@@ -284,7 +281,7 @@
             const d = px.data;
             let hasAlpha = false;
             for (let i = 3; i < d.length; i += 4) { if (d[i] < 250) { hasAlpha = true; break; } }
-            if (hasAlpha) return resolve(withKeyline(c));
+            if (hasAlpha) return resolve(brightenForBlack(c));
             for (let i = 0; i < d.length; i += 4) {
               const ink = 255 - Math.min(d[i], d[i + 1], d[i + 2]);
               const a = Math.max(0, Math.min(1, (ink - 10) * 1.5 / 255));
@@ -297,7 +294,7 @@
               d[i + 3] = Math.round(a * 255);
             }
             ctx.putImageData(px, 0, 0);
-            resolve(withKeyline(c));
+            resolve(brightenForBlack(c));
           } catch (e) { resolve(null); }
         };
         img.onerror = () => resolve(null);
