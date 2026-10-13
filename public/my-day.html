@@ -392,18 +392,29 @@
       if (!projectId) { wrap.style.display = 'none'; return; }
 
       const { data: project } = await supabaseClient.from('projects').select('job_number').eq('id', projectId).maybeSingle();
-      const { data: centres, error } = await supabaseClient
+      const { data: allCentres, error } = await supabaseClient
         .from('cost_centres')
-        .select('id, name')
+        .select('id, name, variation_entry_id')
         .eq('project_id', projectId)
         .order('sort_order');
 
-      if (error || !centres || !centres.length) { wrap.style.display = 'none'; return; }
+      // A variation shows up here like any stage, but only while there is still work to
+      // do on it: a do-and-charge one until it is billed, a fixed-price one once the
+      // client has signed it and until it is billed.
+      let centres = allCentres || [];
+      const variationIds = centres.map(c => c.variation_entry_id).filter(Boolean);
+      if (variationIds.length) {
+        const { data: entries } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
+        const open = new Set((entries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
+        centres = centres.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id));
+      }
+
+      if (error || !centres.length) { wrap.style.display = 'none'; return; }
 
       wrap.style.display = 'block';
       chipsEl.innerHTML = centres.map((c, i) => `
         <button type="button" class="cc-chip" data-id="${c.id}">
-          <span class="cc-chip-num">${costCentreNumber(project ? project.job_number : null, i + 1)}</span> ${c.name}
+          <span class="cc-chip-num">${costCentreNumber(project ? project.job_number : null, i + 1)}</span> ${escapeHtml(c.name)}
         </button>
       `).join('');
 

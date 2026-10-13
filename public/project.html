@@ -3132,7 +3132,10 @@
             <div class="settings-panel" id="panel-variations">
               <div class="card">
                 <h2>Variations - work outside the scope</h2>
-                <p class="subtitle" style="margin-bottom:12px;">If you do something that wasn't in the quote, log it here as you go. Then add your hours and the materials from Stock to it, so it's all on record and goes onto the invoice.</p>
+                <p class="subtitle" style="margin-bottom:6px;"><strong>Do and charge:</strong> log it here, then clock time to it on My Day (it shows up like a stage) and add materials from Stock as you use them. It's billed for what it took.</p>
+                ${pricingVisible ? `<p class="subtitle" style="margin-bottom:12px;"><strong>Fixed price:</strong> quote an amount up front. It's emailed to the client with the original quote, they sign it, and it's added to the job.</p>
+                <button type="button" id="var-fixed-new-btn" class="secondary" style="margin-bottom:14px;">+ Fixed-price variation (quote it)</button>` : '<div style="height:6px;"></div>'}
+                <h3 style="margin:0 0 4px; font-size:15px;">Log a do-and-charge variation</h3>
                 <label style="margin-top:0;">What was the extra work?</label>
                 <input id="var-desc" placeholder="e.g. Moved the meter box 2m left at the builder's request" />
                 <div class="grid cols-3">
@@ -3141,7 +3144,7 @@
                 </div>
                 <label>Notes (optional)</label>
                 <textarea id="var-materials" style="min-height:60px;" placeholder="Anything else worth knowing. Add materials from Stock after you've logged it."></textarea>
-                <button type="button" id="var-add-btn" style="margin-top:10px;">Log variation</button>
+                <button type="button" id="var-add-btn" style="margin-top:10px;">Log do-and-charge variation</button>
                 <div id="var-msg"></div>
               </div>
               <div class="card">
@@ -5147,12 +5150,16 @@
       el.querySelectorAll('.job-asset-edit').forEach(b => b.addEventListener('click', () => openAssetPanel({ asset: assets.find(a => a.id === b.dataset.id), onSaved: refresh })));
     }
 
-    // Per-job log of out-of-scope work (job_variation_entries). Anyone can log
-    // one, add the hours worked on it and the materials taken from Stock.
-    // Pricing roles then add it to an invoice - the "Invoice project" panel
-    // turns it into its own stage and claims it (bill-variations.js) - or mark
-    // it No charge. No dollar amounts show on this tab: prices are only worked
-    // out at billing, so staff see what was done, not what it costs.
+    // Per-job log of out-of-scope work (job_variation_entries), two kinds:
+    //  - Do and charge: logged by anyone. It has its own stage, so the team clocks
+    //    time to it on My Day; they also add Stock materials as they use them (and
+    //    can log hours by hand). Pricing roles add it to an invoice - the "Invoice
+    //    project" panel prices it (bill-variations.js) - or mark it No charge.
+    //  - Fixed price: pricing roles quote it, email it to the client with the
+    //    original quote, the client signs it online (quote.html?variation=...), and
+    //    it is then added to the job as a stage (accept-variation.js).
+    // Staff never see dollar amounts for a do-and-charge one: prices are only worked
+    // out at billing.
     async function loadVariationEntries(project, pricingVisible) {
       const listEl = document.getElementById('variations-list');
       const { data: { user } } = await supabaseClient.auth.getUser();
@@ -5164,19 +5171,23 @@
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
       const ids = (rows || []).map(r => r.id);
-      const [{ data: hourRows }, { data: matRows }, { data: staffRows }] = await Promise.all([
+      const centreIds = (rows || []).filter(r => r.variation_type !== 'fixed').map(r => r.cost_centre_id).filter(Boolean);
+      const [{ data: hourRows }, { data: matRows }, { data: staffRows }, { data: clockRows }] = await Promise.all([
         ids.length ? supabaseClient.from('job_variation_hours').select('*, profiles:staff_id(full_name)').in('variation_id', ids).order('work_date').order('created_at') : Promise.resolve({ data: [] }),
         ids.length ? supabaseClient.from('job_variation_materials').select('*').in('variation_id', ids).order('created_at') : Promise.resolve({ data: [] }),
         pricingVisible ? supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name') : Promise.resolve({ data: [] }),
+        centreIds.length ? supabaseClient.from('time_entries').select('cost_centre_id, staff_id, clock_in, clock_out, profiles(full_name)').in('cost_centre_id', centreIds).not('clock_out', 'is', null) : Promise.resolve({ data: [] }),
       ]);
 
-      const toBill = (rows || []).filter(r => r.status === 'to_bill').length;
+      const isOpenToBill = (r) => r.status === 'to_bill' && !(r.variation_type === 'fixed' && r.approval_status !== 'approved');
+      const toBill = (rows || []).filter(isOpenToBill).length;
       const tab = document.querySelector('#job-tabs .settings-tab[data-panel="variations"]');
       if (tab) tab.textContent = toBill ? `Variations (${toBill})` : 'Variations';
 
       const wrap = document.getElementById('var-invoice-wrap');
       if (wrap) {
-        wrap.innerHTML = pricingVisible && toBill ? `<button type="button" id="var-invoice-btn" class="secondary" style="font-size:13px; padding:7px 12px;">Add variations to an invoice...</button>` : '';
+        const anyDoCharge = (rows || []).some(r => r.variation_type !== 'fixed' && r.status === 'to_bill');
+        wrap.innerHTML = pricingVisible && anyDoCharge ? `<button type="button" id="var-invoice-btn" class="secondary" style="font-size:13px; padding:7px 12px;">Add variations to an invoice...</button>` : '';
         const invBtn = document.getElementById('var-invoice-btn');
         if (invBtn) invBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible, { variationsOnly: true }));
       }
@@ -5184,44 +5195,80 @@
       const fmtDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
       const today = new Date().toISOString().slice(0, 10);
       const STATUS = { to_bill: ['To bill', 'draft'], billed: ['Billed', 'accepted'], no_charge: ['No charge', 'sent'] };
+      const APPROVAL = { draft: ['Draft', 'draft'], sent: ['Sent to client', 'sent'], approved: ['Signed', 'accepted'], declined: ['Declined', 'draft'] };
       const qtyText = (n) => String(Math.round((Number(n) || 0) * 100) / 100);
       const btnStyle = 'font-size:12px; padding:5px 10px;';
+      const linkFor = (r) => `${shareOrigin()}/quote.html?variation=${r.variation_token}`;
+      const linesTotal = (r) => (r.fixed_lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
 
       listEl.innerHTML = (rows || []).length ? rows.map(r => {
+        const isFixed = r.variation_type === 'fixed';
+        const badge = isFixed && r.status === 'to_bill' ? APPROVAL[r.approval_status || 'draft'] : STATUS[r.status];
+        const kindText = `Variation ${r.variation_number || ''} &middot; ${isFixed ? 'Fixed price' : 'Do and charge'}`;
         const hrs = (hourRows || []).filter(h => h.variation_id === r.id);
         const mats = (matRows || []).filter(m => m.variation_id === r.id);
-        const hoursTotal = hrs.reduce((s, h) => s + Number(h.hours), 0);
-        const open = r.status === 'to_bill' && !r.cost_centre_id; // hours / materials can still change
+        const clocks = (clockRows || []).filter(t => t.cost_centre_id === r.cost_centre_id);
+        const clockedByStaff = {};
+        clocks.forEach(t => {
+          const name = (t.profiles && t.profiles.full_name) || 'Someone';
+          clockedByStaff[name] = (clockedByStaff[name] || 0) + (new Date(t.clock_out) - new Date(t.clock_in)) / 3600000;
+        });
+        const clockedTotal = Object.values(clockedByStaff).reduce((s, n) => s + n, 0);
+        const hoursTotal = hrs.reduce((s, h) => s + Number(h.hours), 0) + clockedTotal;
+        const open = !isFixed && r.status === 'to_bill'; // hours / materials can still be added
         const mine = r.created_by === user.id;
         const canRemove = (h) => open && (pricingVisible || h.created_by === user.id);
+        const canDelete = pricingVisible ? r.approval_status !== 'approved' : (mine && r.status === 'to_bill' && !isFixed);
         return `
         <div class="var-card" data-id="${r.id}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px;">
           <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:flex-start;">
             <div>
-              <span class="badge ${STATUS[r.status][1]}">${STATUS[r.status][0]}</span>
+              <span class="badge ${badge[1]}">${badge[0]}</span>
               <strong style="margin-left:6px;">${escapeHtml(r.description)}</strong>
-              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${fmtDate(r.work_date)} &middot; ${escapeHtml((r.profiles && r.profiles.full_name) || 'Someone')}${hoursTotal ? ' &middot; ' + qtyText(hoursTotal) + ' hrs' : (r.hours ? ' &middot; ' + r.hours + ' hrs' : '')}</p>
-              ${r.cost_centre_id && r.status === 'to_bill' ? `<p class="subtitle" style="margin:4px 0 0; font-size:12px;">Priced and added to the job as a stage - invoice it from Invoice project.</p>` : ''}
+              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${kindText} &middot; ${fmtDate(r.work_date)} &middot; ${escapeHtml((r.profiles && r.profiles.full_name) || 'Someone')}${!isFixed && hoursTotal ? ' &middot; ' + qtyText(hoursTotal) + ' hrs' : (!isFixed && r.hours ? ' &middot; ' + r.hours + ' hrs' : '')}</p>
+              ${r.cost_centre_id && !isFixed && r.status === 'to_bill' && pricingVisible ? '' : ''}
             </div>
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
-              ${pricingVisible && r.status !== 'billed' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="billed" style="${btnStyle}">Mark billed</button>` : ''}
-              ${pricingVisible && r.status !== 'no_charge' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="no_charge" style="${btnStyle}">No charge</button>` : ''}
-              ${pricingVisible && r.status !== 'to_bill' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="to_bill" style="${btnStyle}">Reopen</button>` : ''}
-              ${(mine && r.status === 'to_bill') || pricingVisible ? `<button type="button" class="secondary var-delete" data-id="${r.id}" style="${btnStyle}">Delete</button>` : ''}
+              ${!isFixed && pricingVisible && r.status !== 'billed' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="billed" style="${btnStyle}">Mark billed</button>` : ''}
+              ${!isFixed && pricingVisible && r.status !== 'no_charge' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="no_charge" style="${btnStyle}">No charge</button>` : ''}
+              ${!isFixed && pricingVisible && r.status !== 'to_bill' ? `<button type="button" class="secondary var-status" data-id="${r.id}" data-status="to_bill" style="${btnStyle}">Reopen</button>` : ''}
+              ${canDelete ? `<button type="button" class="secondary var-delete" data-id="${r.id}" style="${btnStyle}">Delete</button>` : ''}
             </div>
           </div>
           ${r.materials ? `<p style="margin:8px 0 0; white-space:pre-wrap; font-size:13px;"><strong>Notes:</strong> ${escapeHtml(r.materials)}</p>` : ''}
 
+          ${isFixed ? `
+          <div style="margin-top:12px; padding-top:10px; border-top:0.5px solid var(--border);">
+            ${r.reason ? `<p style="margin:0 0 8px; white-space:pre-wrap; font-size:13px;"><strong>Reason:</strong> ${escapeHtml(r.reason)}</p>` : ''}
+            ${pricingVisible ? `
+              ${(r.fixed_lines || []).map(l => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:2px 0;"><span>${escapeHtml(l.description)} <span class="subtitle">(${l.item_type === 'labour' ? 'labour' : 'materials'})</span></span><span>${money(l.amount)}</span></div>`).join('')}
+              <div style="display:flex; justify-content:space-between; font-weight:600; font-size:13px; padding-top:6px; margin-top:4px; border-top:0.5px solid var(--border);"><span>Total ex GST</span><span>${money(linesTotal(r))}</span></div>
+              <div class="subtitle" style="display:flex; justify-content:space-between; font-size:12px;"><span>Inc GST</span><span>${money(linesTotal(r) * 1.1)}</span></div>
+            ` : `<p class="subtitle" style="margin:0; font-size:12px;">Fixed-price variation, priced by the office.</p>`}
+            ${r.approval_status === 'approved' ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px;">Signed by ${escapeHtml(r.signed_by_name || '')} on ${new Date(r.approved_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}. It is now a stage on the job${r.status === 'billed' ? ' and has been invoiced' : ' - invoice it from Invoice project'}.</p>` : ''}
+            ${r.approval_status === 'sent' ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px;">Sent ${new Date(r.sent_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} - waiting for the client to sign.</p>` : ''}
+            ${pricingVisible ? `
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">
+                ${r.approval_status === 'draft' || !r.approval_status ? `<button type="button" class="secondary var-fixed-edit" data-id="${r.id}" style="${btnStyle}">Edit</button>` : ''}
+                ${r.approval_status !== 'approved' ? `<button type="button" class="var-fixed-send" data-id="${r.id}" style="${btnStyle}">${r.approval_status === 'sent' ? 'Resend to client...' : 'Email to client...'}</button>` : ''}
+                ${r.approval_status === 'draft' || !r.approval_status ? `<button type="button" class="secondary var-fixed-marksent" data-id="${r.id}" style="${btnStyle}">I've sent it myself</button>` : ''}
+                ${r.approval_status === 'sent' ? `<button type="button" class="secondary var-fixed-withdraw" data-id="${r.id}" style="${btnStyle}">Back to draft</button>` : ''}
+                <button type="button" class="secondary var-fixed-copy" data-link="${linkFor(r)}" style="${btnStyle}">Copy link</button>
+                <a class="btn secondary" target="_blank" href="${linkFor(r)}" style="${btnStyle}">${r.approval_status === 'approved' ? 'View signed copy' : 'Preview as client'}</a>
+              </div>` : ''}
+          </div>` : `
           <div style="margin-top:12px; padding-top:10px; border-top:0.5px solid var(--border);">
             <div style="font-weight:600; font-size:13px; margin-bottom:6px;">Hours${hoursTotal ? ` <span class="subtitle" style="font-weight:400;">(${qtyText(hoursTotal)} total)</span>` : ''}</div>
-            ${hrs.length ? hrs.map(h => `
+            ${Object.keys(clockedByStaff).length ? Object.entries(clockedByStaff).map(([name, h]) => `<div style="font-size:13px; padding:3px 0;">Clocked: ${escapeHtml(name)} &middot; ${qtyText(h)} hrs</div>`).join('') : ''}
+            ${hrs.map(h => `
               <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:3px 0;">
-                <span>${fmtDate(h.work_date)} &middot; ${escapeHtml((h.profiles && h.profiles.full_name) || 'Someone')} &middot; ${qtyText(h.hours)} hrs${h.note ? ' &middot; ' + escapeHtml(h.note) : ''}</span>
+                <span>${fmtDate(h.work_date)} &middot; ${escapeHtml((h.profiles && h.profiles.full_name) || 'Someone')} &middot; ${qtyText(h.hours)} hrs <span class="subtitle">(logged by hand)</span>${h.note ? ' &middot; ' + escapeHtml(h.note) : ''}</span>
                 ${canRemove(h) ? `<button type="button" class="secondary var-hours-del" data-id="${h.id}" style="font-size:11px; padding:2px 8px;">&times;</button>` : ''}
-              </div>`).join('') : `<p class="subtitle" style="margin:0; font-size:12px;">${r.hours ? r.hours + ' hrs noted when this was logged.' : 'No hours logged yet.'}</p>`}
+              </div>`).join('')}
+            ${!hrs.length && !Object.keys(clockedByStaff).length ? `<p class="subtitle" style="margin:0; font-size:12px;">${r.hours ? r.hours + ' hrs noted when this was logged. ' : ''}No time yet - clock in to "${escapeHtml('Variation ' + (r.variation_number || ''))}" on My Day, or log hours by hand below.</p>` : ''}
             ${open ? `
               <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:flex-end; margin-top:8px;">
-                <div><label style="margin:0; font-size:11px;">Hours</label><input type="number" class="var-h-hours" step="0.25" min="0" placeholder="2.5" style="width:90px; margin:0;" /></div>
+                <div><label style="margin:0; font-size:11px;">Hours (by hand)</label><input type="number" class="var-h-hours" step="0.25" min="0" placeholder="2.5" style="width:90px; margin:0;" /></div>
                 <div><label style="margin:0; font-size:11px;">Date</label><input type="date" class="var-h-date" value="${today}" style="margin:0;" /></div>
                 ${pricingVisible && (staffRows || []).length ? `<div><label style="margin:0; font-size:11px;">Who</label><select class="var-h-staff" style="margin:0;">${staffRows.map(s => `<option value="${s.id}" ${s.id === user.id ? 'selected' : ''}>${escapeHtml(s.full_name)}</option>`).join('')}</select></div>` : ''}
                 <button type="button" class="var-hours-add" data-id="${r.id}" style="${btnStyle}">Log hours</button>
@@ -5240,7 +5287,7 @@
                 <button type="button" class="secondary var-mat-add" data-id="${r.id}" style="${btnStyle}">+ Material or prebuild from Stock</button>
                 ${pricingVisible ? `<button type="button" class="secondary var-other-add" data-id="${r.id}" style="${btnStyle}">+ Other item (not in Stock)</button>` : ''}
               </div>` : ''}
-          </div>
+          </div>`}
         </div>`;
       }).join('') : `<p class="subtitle">Nothing logged - no variations on this job so far.</p>`;
 
@@ -5255,11 +5302,17 @@
       }));
 
       listEl.querySelectorAll('.var-delete').forEach(btn => btn.addEventListener('click', async () => {
-        if (!confirm('Delete this logged variation? Any Stock materials added to it go back into stock.')) return;
-        const mats = (matRows || []).filter(m => m.variation_id === btn.dataset.id && m.stock_deducted && m.material_id);
-        for (const m of mats) { try { await adjustWarehouseStock(m.material_id, Number(m.quantity)); } catch (e) { console.error('Could not put stock back:', e); } }
-        const { error: delErr } = await supabaseClient.from('job_variation_entries').delete().eq('id', btn.dataset.id);
-        if (delErr) { alert(delErr.message); return; }
+        if (!confirm('Delete this variation? Any Stock materials added to it go back into stock.')) return;
+        btn.disabled = true;
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/delete-variation', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ id: btn.dataset.id }),
+          });
+          const d = await res.json();
+          if (!res.ok || !d.ok) throw new Error(d.error || 'Could not delete it');
+        } catch (err) { alert(err.message); }
         await reload();
       }));
 
@@ -5329,6 +5382,31 @@
         await reload();
       }));
 
+      // ----- fixed-price variations -----
+      listEl.querySelectorAll('.var-fixed-edit').forEach(btn => btn.addEventListener('click', () => openFixedVariationEditor(project, rowById(btn.dataset.id), reload)));
+      listEl.querySelectorAll('.var-fixed-send').forEach(btn => btn.addEventListener('click', () => sendFixedVariationEmail(project, rowById(btn.dataset.id), reload)));
+      listEl.querySelectorAll('.var-fixed-marksent').forEach(btn => btn.addEventListener('click', async () => {
+        const { error: sErr } = await supabaseClient.from('job_variation_entries').update({ approval_status: 'sent', sent_at: new Date().toISOString() }).eq('id', btn.dataset.id);
+        if (sErr) { alert(sErr.message); return; }
+        await logActivity('project', project.id, 'variation_sent', `Variation sent to the client: ${rowById(btn.dataset.id)?.description || ''}`);
+        await reload();
+      }));
+      listEl.querySelectorAll('.var-fixed-withdraw').forEach(btn => btn.addEventListener('click', async () => {
+        if (!confirm('Take this back to a draft? The link the client was sent will stop working until you send it again.')) return;
+        const { error: wErr } = await supabaseClient.from('job_variation_entries').update({ approval_status: 'draft' }).eq('id', btn.dataset.id);
+        if (wErr) { alert(wErr.message); return; }
+        await reload();
+      }));
+      listEl.querySelectorAll('.var-fixed-copy').forEach(btn => btn.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(btn.dataset.link); btn.textContent = 'Copied'; } catch (e) { prompt('Copy this link:', btn.dataset.link); }
+      }));
+
+      const fixedNewBtn = document.getElementById('var-fixed-new-btn');
+      if (fixedNewBtn && !fixedNewBtn.dataset.wired) {
+        fixedNewBtn.dataset.wired = '1';
+        fixedNewBtn.addEventListener('click', () => openFixedVariationEditor(project, null, reload));
+      }
+
       const addBtn = document.getElementById('var-add-btn');
       if (addBtn && !addBtn.dataset.wired) {
         addBtn.dataset.wired = '1';
@@ -5337,26 +5415,128 @@
           const description = document.getElementById('var-desc').value.trim();
           if (!description) { msg.innerHTML = `<div class="error-box">Say what the extra work was.</div>`; return; }
           addBtn.disabled = true;
-          const workDate = document.getElementById('var-date').value || new Date().toISOString().slice(0, 10);
-          const { data: created, error: insErr } = await supabaseClient.from('job_variation_entries').insert({
-            project_id: project.id, description, created_by: user.id, work_date: workDate,
-            materials: document.getElementById('var-materials').value.trim() || null,
-          }).select('id').single();
-          if (insErr) { addBtn.disabled = false; msg.innerHTML = `<div class="error-box">${insErr.message}</div>`; return; }
-          const startHours = parseFloat(document.getElementById('var-hours').value);
-          if (startHours > 0) {
-            const { error: hErr } = await supabaseClient.from('job_variation_hours').insert({
-              variation_id: created.id, project_id: project.id, staff_id: user.id, work_date: workDate, hours: startHours, created_by: user.id,
+          try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch('/.netlify/functions/create-variation', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({
+                projectId: project.id, type: 'do_and_charge', description,
+                workDate: document.getElementById('var-date').value || undefined,
+                notes: document.getElementById('var-materials').value.trim() || undefined,
+                startHours: parseFloat(document.getElementById('var-hours').value) || undefined,
+              }),
             });
-            if (hErr) console.error('Could not log the starting hours:', hErr);
+            const d = await res.json();
+            if (!res.ok || !d.ok) throw new Error(d.error || 'Could not log it');
+            ['var-desc', 'var-hours', 'var-materials'].forEach(id => { document.getElementById(id).value = ''; });
+            msg.innerHTML = `<div class="success-box">Logged as Variation ${d.number}. You can now clock in to it on My Day, and add materials from Stock below.</div>`;
+            await logActivity('project', project.id, 'variation_logged', `Variation ${d.number} logged: ${description}`);
+            await reload();
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           }
           addBtn.disabled = false;
-          ['var-desc', 'var-hours', 'var-materials'].forEach(id => { document.getElementById(id).value = ''; });
-          msg.innerHTML = `<div class="success-box">Logged. Add materials from Stock to it below.</div>`;
-          await logActivity('project', project.id, 'variation_logged', `Variation logged: ${description}`);
-          await reload();
         });
       }
+    }
+
+    // Pricing roles: set up (or edit the draft of) a fixed-price variation - the
+    // reason the client will read and the priced lines. Saving keeps it as a draft;
+    // "Email to client..." on its card sends it for signing.
+    function openFixedVariationEditor(project, entry, onSaved) {
+      const lines = (entry && entry.fixed_lines && entry.fixed_lines.length ? entry.fixed_lines : [{ description: '', item_type: 'material', amount: '' }]).map(l => ({ ...l }));
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:600px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>${entry ? 'Edit fixed-price variation' : 'New fixed-price variation'}</h2>
+          <p class="subtitle" style="margin-bottom:10px;">The client sees this next to their original quote, then signs to approve it. Once signed it's added to the job as a stage at this price.</p>
+          <label style="margin-top:0;">What is the extra work?</label>
+          <input id="fv-desc" value="${escapeHtml(entry ? entry.description : '')}" placeholder="e.g. Move meter box and run new sub-main" />
+          <label>Reason for the variation (the client reads this)</label>
+          <textarea id="fv-reason" style="min-height:80px;" placeholder="e.g. The builder moved the meter location after the quote was accepted, which needs a longer cable run.">${escapeHtml(entry ? entry.reason || '' : '')}</textarea>
+          <label>Priced lines (ex GST)</label>
+          <div id="fv-lines"></div>
+          <button type="button" class="secondary" id="fv-add-line" style="font-size:12px; padding:6px 10px; margin-top:6px;">+ Add a line</button>
+          <p style="margin:12px 0 0; font-size:14px;">Total: <strong id="fv-total">$0.00</strong> ex GST <span class="subtitle" id="fv-total-gst"></span></p>
+          <div id="fv-msg"></div>
+          <div style="margin-top:12px;"><button type="button" id="fv-save">Save draft</button> <button type="button" class="secondary" id="fv-cancel">Cancel</button></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const linesEl = overlay.querySelector('#fv-lines');
+      const sum = () => lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+      const refreshTotal = () => {
+        overlay.querySelector('#fv-total').textContent = money(sum());
+        overlay.querySelector('#fv-total-gst').textContent = `(${money(sum() * 1.1)} inc GST)`;
+      };
+      const renderLines = () => {
+        linesEl.innerHTML = lines.map((l, i) => `
+          <div style="display:grid; grid-template-columns:1fr 110px 100px auto; gap:6px; margin-bottom:6px; align-items:center;">
+            <input class="fv-l-desc" data-i="${i}" value="${escapeHtml(l.description)}" placeholder="Description" style="margin:0;" />
+            <select class="fv-l-type" data-i="${i}" style="margin:0;"><option value="material" ${l.item_type !== 'labour' ? 'selected' : ''}>Materials</option><option value="labour" ${l.item_type === 'labour' ? 'selected' : ''}>Labour</option></select>
+            <input class="fv-l-amt" data-i="${i}" type="number" min="0" step="0.01" value="${l.amount === '' ? '' : l.amount}" placeholder="$" style="margin:0;" />
+            <button type="button" class="secondary fv-l-del" data-i="${i}" style="font-size:12px; padding:4px 9px;">&times;</button>
+          </div>`).join('');
+        linesEl.querySelectorAll('.fv-l-desc').forEach(el => el.addEventListener('input', () => { lines[el.dataset.i].description = el.value; }));
+        linesEl.querySelectorAll('.fv-l-type').forEach(el => el.addEventListener('change', () => { lines[el.dataset.i].item_type = el.value; }));
+        linesEl.querySelectorAll('.fv-l-amt').forEach(el => el.addEventListener('input', () => { lines[el.dataset.i].amount = el.value; refreshTotal(); }));
+        linesEl.querySelectorAll('.fv-l-del').forEach(el => el.addEventListener('click', () => { lines.splice(Number(el.dataset.i), 1); if (!lines.length) lines.push({ description: '', item_type: 'material', amount: '' }); renderLines(); refreshTotal(); }));
+      };
+      renderLines(); refreshTotal();
+      overlay.querySelector('#fv-add-line').addEventListener('click', () => { lines.push({ description: '', item_type: 'material', amount: '' }); renderLines(); });
+      overlay.querySelector('#fv-cancel').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#fv-save').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#fv-msg');
+        const description = overlay.querySelector('#fv-desc').value.trim();
+        const reason = overlay.querySelector('#fv-reason').value.trim();
+        const clean = lines.map(l => ({ description: String(l.description || '').trim(), item_type: l.item_type === 'labour' ? 'labour' : 'material', amount: Math.round((parseFloat(l.amount) || 0) * 100) / 100 })).filter(l => l.description && l.amount > 0);
+        if (!description) { msg.innerHTML = `<div class="error-box">Say what the extra work is.</div>`; return; }
+        if (!reason) { msg.innerHTML = `<div class="error-box">Add the reason, so the client knows why.</div>`; return; }
+        if (!clean.length) { msg.innerHTML = `<div class="error-box">Add at least one priced line.</div>`; return; }
+        const saveBtn = overlay.querySelector('#fv-save');
+        saveBtn.disabled = true;
+        try {
+          if (entry) {
+            const { error: uErr } = await supabaseClient.from('job_variation_entries').update({ description, reason, fixed_lines: clean }).eq('id', entry.id);
+            if (uErr) throw uErr;
+          } else {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch('/.netlify/functions/create-variation', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({ projectId: project.id, type: 'fixed', description, reason, lines: clean }),
+            });
+            const d = await res.json();
+            if (!res.ok || !d.ok) throw new Error(d.error || 'Could not save it');
+            await logActivity('project', project.id, 'variation_logged', `Fixed-price variation ${d.number} drafted: ${description}`);
+          }
+          overlay.remove();
+          await onSaved();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          saveBtn.disabled = false;
+        }
+      });
+    }
+
+    // Emails the client a link to the variation page (their original quote plus this
+    // variation and its reason, with a place to sign). It only becomes "Sent" once the
+    // email has actually gone.
+    function sendFixedVariationEmail(project, entry, onDone) {
+      const first = String(project.client_name || '').trim().split(/\s+/)[0] || 'there';
+      const total = (entry.fixed_lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+      openEmailComposer({
+        title: `Email variation ${entry.variation_number || ''} to the client`,
+        to: project.client_email || '',
+        subject: `Variation ${entry.variation_number || ''} for approval - ${projectRef(project)}: ${entry.description}`,
+        body: `Hi ${first},\n\nWhile working on ${project.name} some extra work has come up that wasn't in the original quote: ${entry.description}.\n\n${entry.reason ? entry.reason + '\n\n' : ''}The price for this is ${money(total)} ex GST (${money(total * 1.1)} inc GST).\n\nYou can see it alongside your original quote and approve it by signing at the link below.\n\nLet me know if you have any questions.`,
+        projectId: project.id, tagKind: 'client',
+        quoteLink: { url: `${shareOrigin()}/quote.html?variation=${entry.variation_token}`, label: 'Include a button to view and sign the variation online', buttonText: 'Click to view and sign your variation', checked: true },
+        onSent: async () => {
+          await supabaseClient.from('job_variation_entries').update({ approval_status: 'sent', sent_at: new Date().toISOString() }).eq('id', entry.id);
+          await logActivity('project', project.id, 'variation_sent', `Variation emailed to the client: ${entry.description}`);
+          await onDone();
+        },
+      });
     }
 
     // Picks a Stock material or a prebuild for a variation. Resolves to

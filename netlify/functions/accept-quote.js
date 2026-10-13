@@ -1,6 +1,7 @@
 // POST /.netlify/functions/accept-quote
-// Body: { token }  (the quote's own token, same one quote.html reads from
-// its URL)
+// Body: { token, name?, signature? }  (the quote's own token, same one quote.html reads
+// from its URL; name + signature = the client's typed name and drawn signature PNG, kept
+// on the quote as proof of who accepted it)
 //
 // Public - no staff login, called straight from the client-facing quote
 // page. Security comes from the same random token model already used to
@@ -26,7 +27,7 @@ exports.handler = async (event) => {
   const supabaseAdmin = getAdminClient();
 
   try {
-    const { token } = JSON.parse(event.body || '{}');
+    const { token, name, signature } = JSON.parse(event.body || '{}');
     if (!token) {
       return { statusCode: 400, body: JSON.stringify({ error: 'token is required' }) };
     }
@@ -38,6 +39,12 @@ exports.handler = async (event) => {
       .maybeSingle();
     if (quoteErr || !quote) {
       return { statusCode: 404, body: JSON.stringify({ error: 'Quote not found' }) };
+    }
+
+    // Keep the signature on the quote itself (the frozen approved record).
+    const signedName = String(name || '').trim();
+    if (signedName && typeof signature === 'string' && signature.startsWith('data:image/png;base64,') && signature.length <= 600000) {
+      await supabaseAdmin.from('projects').update({ accepted_signed_by_name: signedName, accepted_signature_data_url: signature }).eq('id', quote.id);
     }
 
     const { jobNumber, invoiceToken } = await createJobFromQuote(supabaseAdmin, { quoteId: quote.id });

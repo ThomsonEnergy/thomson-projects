@@ -6,7 +6,8 @@
 // can show it before anything is created. Nothing is written here - see
 // bill-variations.js for that. A variation that has already been turned into a
 // stage (but whose invoice didn't get made) isn't listed: it already shows
-// up as a normal stage with a balance to claim.
+// up as a normal stage with a balance to claim. Only do-and-charge variations
+// are priced here; a fixed-price one is already a stage once the client signs it.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { loadVariationLines, computeTotals } = require('./_shared/variation-lines');
@@ -23,7 +24,7 @@ exports.handler = async (event) => {
 
     const { defaultMarkup, variations } = await loadVariationLines(supabaseAdmin, projectId);
     const out = variations
-      .filter(v => !v.costCentreId)
+      .filter(v => !v.priced)
       .map((v) => {
         const t = computeTotals(v.lines, {}, defaultMarkup);
         return {

@@ -1,17 +1,18 @@
-// Works out what a job's logged variations are worth, line by line - shared by
-// price-variations.js (the preview in the invoice panel) and bill-variations.js
-// (which turns them into a stage on the job), so the two always agree.
+// Works out what a job's "do and charge" variations are worth, line by line -
+// shared by price-variations.js (the preview in the invoice panel) and
+// bill-variations.js (which prices the variation's stage and returns the claim),
+// so the two always agree.
 //
-// Inputs are the hours people logged against a variation (job_variation_hours),
-// the Stock materials / prebuilds / other items added to it
-// (job_variation_materials) and, for older entries, the single "hours" number
-// on the entry itself. Prices are never stored with those rows - they are
-// worked out here, at billing time:
-//   labour     hours x that person's own sell rate (their rate tier)
+// A do-and-charge variation has its own cost centre from the moment it is logged,
+// which is what the team picks when clocking in. What gets billed:
+//   labour     the hours clocked on that stage (time_entries) plus any hours logged
+//              by hand on the Variations tab, each at that person's own sell rate
+//              (their rate tier)
 //   materials  Stock cost price x (1 + the stage markup), like a quoted stage
-//   prebuilds  each component at the prebuild's own price (labour components
-//              are sell rates, material components get the markup)
-// Server side because a person's rate tier sits on their profile.
+//   prebuilds  each component at the prebuild's own price (labour components are
+//              sell rates, material components get the markup)
+// No prices are stored with those rows - they are worked out here, at billing time,
+// and server side because a person's rate tier sits on their profile.
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -21,9 +22,10 @@ async function loadVariationLines(supabaseAdmin, projectId, { ids = null } = {})
 
   let q = supabaseAdmin
     .from('job_variation_entries')
-    .select('id, description, hours, work_date, status, created_by, cost_centre_id')
+    .select('id, description, hours, work_date, status, created_by, cost_centre_id, variation_number')
     .eq('project_id', projectId)
     .eq('status', 'to_bill')
+    .eq('variation_type', 'do_and_charge')
     .order('work_date', { ascending: true })
     .order('created_at', { ascending: true });
   if (ids) q = q.in('id', ids);
@@ -31,13 +33,23 @@ async function loadVariationLines(supabaseAdmin, projectId, { ids = null } = {})
   if (entErr) throw entErr;
   if (!entries || !entries.length) return { defaultMarkup, variations: [] };
   const entryIds = entries.map(e => e.id);
+  const centreIds = entries.map(e => e.cost_centre_id).filter(Boolean);
 
-  const [{ data: hourRows }, { data: matRows }] = await Promise.all([
+  const [{ data: hourRows }, { data: matRows }, { data: clockRows }, { data: centres }] = await Promise.all([
     supabaseAdmin.from('job_variation_hours').select('variation_id, staff_id, hours').in('variation_id', entryIds),
     supabaseAdmin.from('job_variation_materials').select('*').in('variation_id', entryIds).order('created_at', { ascending: true }),
+    centreIds.length
+      ? supabaseAdmin.from('time_entries').select('staff_id, cost_centre_id, clock_in, clock_out').in('cost_centre_id', centreIds).not('clock_out', 'is', null)
+      : Promise.resolve({ data: [] }),
+    centreIds.length
+      ? supabaseAdmin.from('cost_centres').select('id, quoted_amount').in('id', centreIds)
+      : Promise.resolve({ data: [] }),
   ]);
+  const centreById = Object.fromEntries((centres || []).map(c => [c.id, c]));
 
-  const staffIds = [...new Set([...(hourRows || []).map(h => h.staff_id), ...entries.map(e => e.created_by)].filter(Boolean))];
+  const staffIds = [...new Set([
+    ...(hourRows || []).map(h => h.staff_id), ...(clockRows || []).map(t => t.staff_id), ...entries.map(e => e.created_by),
+  ].filter(Boolean))];
   const materialIds = [...new Set((matRows || []).map(m => m.material_id).filter(Boolean))];
   const prebuildIds = [...new Set((matRows || []).map(m => m.prebuild_id).filter(Boolean))];
 
@@ -59,12 +71,17 @@ async function loadVariationLines(supabaseAdmin, projectId, { ids = null } = {})
   const variations = entries.map((e) => {
     const lines = [];
 
+    // Hours per person: clocked on the stage + logged by hand.
     const hoursByStaff = {};
+    (clockRows || []).filter(t => t.cost_centre_id === e.cost_centre_id).forEach((t) => {
+      const k = t.staff_id || 'unknown';
+      hoursByStaff[k] = (hoursByStaff[k] || 0) + (new Date(t.clock_out) - new Date(t.clock_in)) / 3600000;
+    });
     (hourRows || []).filter(h => h.variation_id === e.id).forEach((h) => {
       const k = h.staff_id || 'unknown';
       hoursByStaff[k] = (hoursByStaff[k] || 0) + Number(h.hours);
     });
-    const staffKeys = Object.keys(hoursByStaff);
+    const staffKeys = Object.keys(hoursByStaff).filter(k => hoursByStaff[k] > 0);
     staffKeys.forEach((k) => {
       lines.push({
         key: `staff:${k}`, itemType: 'labour', source: 'hours',
@@ -115,9 +132,13 @@ async function loadVariationLines(supabaseAdmin, projectId, { ids = null } = {})
       }
     });
 
+    const centre = centreById[e.cost_centre_id];
     return {
-      id: e.id, description: e.description, workDate: e.work_date,
-      costCentreId: e.cost_centre_id || null, lines,
+      id: e.id, description: e.description, workDate: e.work_date, number: e.variation_number,
+      costCentreId: e.cost_centre_id || null,
+      // Already priced onto its stage (an earlier attempt priced it but the invoice didn't get made).
+      priced: !!centre && Number(centre.quoted_amount) > 0,
+      lines,
     };
   });
 

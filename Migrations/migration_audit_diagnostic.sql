@@ -470,4 +470,11 @@ select '142', 'variation hours, materials and billing columns',
     and exists (select 1 from information_schema.tables where table_name = 'job_variation_materials')
     and exists (select 1 from information_schema.columns where table_name = 'cost_centres' and column_name = 'variation_entry_id')
   then 'present' else 'MISSING' end
+union all
+select '143', 'fixed-price variations (type, token, signature)',
+  case when exists (select 1 from information_schema.columns where table_name = 'job_variation_entries' and column_name = 'variation_token')
+    and exists (select 1 from pg_proc where proname = 'get_variation_by_token') then 'present' else 'MISSING' end
+union all
+select '144', 'quote acceptance signature columns',
+  case when exists (select 1 from information_schema.columns where table_name = 'projects' and column_name = 'accepted_signature_data_url') then 'present' else 'MISSING' end
 order by 1;
