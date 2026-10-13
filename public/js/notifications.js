@@ -8,6 +8,7 @@ const NOTIF_KINDS = [
   ['comment', 'Comments on my posts'],
   ['task_assigned', 'Tasks given to me'],
   ['task_reminder', 'Task reminders'],
+  ['call_reminder', 'Call requests I have claimed (5 minutes before)'],
   ['followup_done', 'Meeting follow-ups finished (for meetings I ran)'],
   ['scheduled', 'Booked onto the schedule'],
   ['email', 'New emails in the shared inbox (admin and sales)'],
