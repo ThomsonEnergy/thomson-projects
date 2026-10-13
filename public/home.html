@@ -67,6 +67,12 @@
     </div>
     <div class="quick-nav" id="quick-nav"><p class="subtitle">Loading...</p></div>
 
+    <div class="card" id="my-calls-card" style="display:none;">
+      <h2>Your calls</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Call requests you've claimed - they stay here until you mark them done. You get a notification 5 minutes before each one.</p>
+      <div id="my-calls-list"></div>
+    </div>
+
     <div class="card" id="callback-requests-card" style="display:none;">
       <h2>Call requests - up for grabs</h2>
       <p class="subtitle" style="margin-bottom:10px;">"Book a call" requests from the website that nobody's claimed yet - grab one if you can make the time.</p>
@@ -129,6 +135,56 @@
     // roles, same "anyone can grab it" idea as job_tasks' free tasks.
     // Claiming one here removes it from this list; it still shows either
     // way on the Leads page's own Call requests card.
+    // Call requests the logged-in person has claimed. Claiming takes a request
+    // off the "up for grabs" list below, so it needs somewhere to live until the
+    // call is made: here, until they tick it Done (or Release it back).
+    async function loadMyCalls() {
+      const card = document.getElementById('my-calls-card');
+      const listEl = document.getElementById('my-calls-list');
+      const { data: calls, error } = await supabaseClient
+        .from('callback_requests')
+        .select('*')
+        .eq('claimed_by', myUserId)
+        .neq('status', 'completed')
+        .neq('status', 'cancelled')
+        .order('requested_date')
+        .order('requested_time');
+      if (error || !calls || !calls.length) { card.style.display = 'none'; return; }
+      card.style.display = 'block';
+
+      listEl.innerHTML = calls.map(r => {
+        const when = new Date(`${r.requested_date}T${r.requested_time}`);
+        const whenStr = when.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + when.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+        const phone = r.phone ? `<a href="tel:${escapeHtml(String(r.phone).replace(/[^\d+]/g, ''))}">${escapeHtml(r.phone)}</a>` : '';
+        const email = r.email ? ` - ${escapeHtml(r.email)}` : '';
+        return `
+          <div class="action-item">
+            <span><strong>${escapeHtml(r.name || '(no name given)')}</strong> - ${whenStr}${phone ? ' - ' + phone : ''}${email}</span>
+            <span style="display:flex; gap:6px; flex-shrink:0;">
+              <button type="button" class="secondary release-call-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Release</button>
+              <button type="button" class="secondary done-call-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Done</button>
+            </span>
+          </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.done-call-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          const { error: updErr } = await supabaseClient.from('callback_requests').update({ status: 'completed' }).eq('id', btn.dataset.id);
+          if (updErr) { alert(updErr.message); btn.disabled = false; return; }
+          await loadMyCalls();
+        });
+      });
+      listEl.querySelectorAll('.release-call-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          const { error: updErr } = await supabaseClient.from('callback_requests').update({ claimed_by: null, status: 'new' }).eq('id', btn.dataset.id);
+          if (updErr) { alert(updErr.message); btn.disabled = false; return; }
+          await Promise.all([loadMyCalls(), loadCallbackRequestsHome()]);
+        });
+      });
+    }
+
     async function loadCallbackRequestsHome() {
       const card = document.getElementById('callback-requests-card');
       const listEl = document.getElementById('callback-requests-home-list');
@@ -158,7 +214,7 @@
           btn.disabled = true;
           const { error: updErr } = await supabaseClient.from('callback_requests').update({ claimed_by: myUserId, status: 'scheduled' }).eq('id', btn.dataset.id);
           if (updErr) { alert(updErr.message); btn.disabled = false; return; }
-          await loadCallbackRequestsHome();
+          await Promise.all([loadCallbackRequestsHome(), loadMyCalls()]);
         });
       });
     }
@@ -803,6 +859,7 @@
 
       await refreshClockButton();
       await renderQuickNav();
+      await loadMyCalls();
       await loadCallbackRequestsHome();
       await loadActionItems();
       await mountFeedComposer(document.getElementById('feed-composer'), { myUserId, onPosted: loadFeed });
