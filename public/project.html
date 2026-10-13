@@ -2777,25 +2777,23 @@
               ${!editMode ? '<div id="meetings-card"></div><div id="assets-card"></div><div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
-                  <div class="stat"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-hours="${actualHoursTotal}" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
                   <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
                 </div>
               ` : `
                 <div class="grid cols-${project.job_number ? '4' : '3'}">
                   <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
-                  <div class="stat"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
-                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
+                  <div class="stat" data-oh-cost="${cost}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
+                  <div class="stat"><div class="label" data-oh-gross="Estimated gross profit">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
                   ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
                 </div>
 
                 ${project.job_number ? `
                 <div class="grid cols-2" style="margin-top:10px;">
-                  <div class="stat"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
-                  <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-hours="${actualHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat"><div class="label" data-oh-gross="Actual gross profit">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
                 </div>
                 ` : ''}
-
-                <div id="net-profit-card" data-quoted="${quoted}" data-est-profit="${profit}" data-quoted-hours="${quotedHoursTotal}" data-actual-profit="${project.job_number ? accruedProfit : ''}" data-actual-hours="${actualHoursTotal}"></div>
 
                 ${project.job_number ? `
                 <div class="card" style="margin-top:20px;">
@@ -3404,7 +3402,7 @@
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
       if (document.getElementById('assets-card')) loadAssetsCard(project);
       if (document.getElementById('meetings-card')) loadMeetingsCard(project);
-      if (document.getElementById('net-profit-card')) loadNetProfitCard();
+      applyOverheadsToCosts();
       const feedTab = document.querySelector('#job-tabs .settings-tab[data-panel="feed"]');
       if (feedTab) {
         let feedLoaded = false;
@@ -5074,42 +5072,42 @@
       });
     }
 
+    // Finance and Admin see the Summary cost tiles with overheads added: employee overhead (employee_rate x
+    // the hours quoted or worked) and company overhead (company_pct of the job's profit, or of its price if
+    // the Overheads page is set to price). Deliberately no "net profit" figure on the job page; that lives
+    // only on the Overheads page. get_overhead_rates returns no rows for anyone else, so their tiles stay
+    // exactly as they were.
+    let overheadRatesPromise = null;
+    async function applyOverheadsToCosts() {
+      const tiles = document.querySelectorAll('[data-oh-cost]');
+      if (!tiles.length || !isFinanceRole(await getMyRole())) return;
+      if (!overheadRatesPromise) {
+        overheadRatesPromise = supabaseClient.rpc('get_overhead_rates')
+          .then(({ data }) => (Array.isArray(data) ? data[0] : data) || null)
+          .catch(() => null);
+      }
+      const r = await overheadRatesPromise;
+      if (!r) return;
+      const emp = Number(r.employee_rate) || 0, pct = Number(r.company_pct) || 0;
+      if (!emp && !pct) return;
+      const byPrice = r.company_basis === 'revenue';
+      tiles.forEach(tile => {
+        const valueEl = tile.querySelector('.value');
+        if (!valueEl || !tile.isConnected) return;
+        const d = tile.dataset, base = Number(d.ohCost) || 0;
+        const empCost = emp * (Number(d.ohHours) || 0);
+        const coCost = (pct / 100) * Math.max(0, Number(byPrice ? d.ohPrice : d.ohProfit) || 0);
+        valueEl.textContent = money(base + empCost + coCost);
+        tile.querySelector('.oh-note')?.remove();
+        valueEl.insertAdjacentHTML('afterend', `<div class="subtitle oh-note" style="margin:2px 0 0; font-size:12px;" title="${money(base)} materials and wages + ${money(empCost)} employee overhead + ${money(coCost)} company overhead">includes overheads</div>`);
+      });
+      // The profit tiles still leave overheads out, so say so next to costs that now include them
+      document.querySelectorAll('[data-oh-gross]').forEach(label => { label.textContent = label.dataset.ohGross; });
+    }
+
     // Meetings held about this job (meetings.html), with how many of their
     // follow-up actions are still open. Hidden until there is one, but the
     // "+ Meeting" link is always reachable from the Meetings page.
-    // Net profit = gross profit less the overhead on the hours worked: employee overhead (added to each
-    // hourly rate) and company overhead (what each billable hour must earn towards running the business).
-    // The rates come from get_overhead_rates, which only Finance and Admin can read, so for everyone else
-    // this quietly shows nothing. Set up on the Overheads page.
-    async function loadNetProfitCard() {
-      const el = document.getElementById('net-profit-card');
-      if (!el) return;
-      try {
-        const { data } = await supabaseClient.rpc('get_overhead_rates');
-        const r = Array.isArray(data) ? data[0] : data;
-        if (!r) { el.remove(); return; }
-        const emp = Number(r.employee_rate) || 0, co = Number(r.company_rate) || 0;
-        if (!emp && !co) {
-          el.innerHTML = '<div class="card" style="margin-top:20px;"><h2>Net profit</h2><p class="subtitle" style="margin:0;">No overheads set up yet. Add them on the <a class="link-quiet" href="/overheads.html">Overheads</a> page and every job will show its net profit here.</p></div>';
-          return;
-        }
-        const d = el.dataset, quoted = Number(d.quoted) || 0;
-        const estHours = Number(d.quotedHours) || 0, actHours = Number(d.actualHours) || 0;
-        const estNet = (Number(d.estProfit) || 0) - (emp + co) * estHours;
-        const hasActual = d.actualProfit !== '' && actHours > 0;
-        const actNet = hasActual ? Number(d.actualProfit) - (emp + co) * actHours : null;
-        const pct = (n) => (quoted ? ' (' + (Math.round((n / quoted) * 1000) / 10) + '% of price)' : '');
-        const stat = (label, n, note) => `<div class="stat"><div class="label">${label}</div><div class="value ${n >= 0 ? 'positive' : 'negative'}">${money(n)}</div>${note ? `<div class="subtitle" style="margin:2px 0 0; font-size:12px;">${note}</div>` : ''}</div>`;
-        el.innerHTML = `<div class="card" style="margin-top:20px;">
-          <h2 style="margin-bottom:10px;">Net profit</h2>
-          <div class="grid cols-${hasActual ? '2' : '1'}">
-            ${stat('Estimated net profit', estNet, 'after overheads on ' + (Math.round(estHours * 10) / 10) + ' quoted hours' + pct(estNet))}
-            ${hasActual ? stat('Actual net profit', actNet, 'after overheads on ' + (Math.round(actHours * 10) / 10) + ' hours worked' + pct(actNet)) : ''}
-          </div>
-          <p class="subtitle" style="margin:10px 0 0; font-size:12px;">Overhead per hour: ${money(emp)} employee + ${money(co)} company = ${money(emp + co)}. <a class="link-quiet" href="/overheads.html">Change on the Overheads page</a>.</p>
-        </div>`;
-      } catch (e) { el.remove(); }
-    }
 
     async function loadMeetingsCard(project) {
       const el = document.getElementById('meetings-card');
