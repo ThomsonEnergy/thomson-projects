@@ -118,16 +118,40 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: JSON.stringify(report, null, 2) };
   }
 
-  // The OAuth2 token may belong to Formbay's newer API rather than the trading site, so try its entry point too.
+  // The OAuth2 token belongs to Formbay's newer API (api.formbay.com.au, "FB2"). It answers with links to
+  // its other resources, so follow them (GET only, read-only) and report the shape of each plus the links
+  // found, a few levels deep. Values are never returned, apart from links on api.formbay.com.au.
   if (report.loginInfo.via === 'oauth2') {
-    for (const url of ['https://api.formbay.com.au/entrypoint', 'https://api.formbay.com.au/']) {
+    const API = 'https://api.formbay.com.au';
+    const seen = new Set();
+    const queue = [`${API}/entrypoint`];
+    report.steps.api_formbay = [];
+    const linksIn = (v, out = new Set()) => {
+      if (typeof v === 'string') { if (v.startsWith(API)) out.add(v.split('#')[0]); }
+      else if (Array.isArray(v)) v.slice(0, 5).forEach(x => linksIn(x, out));
+      else if (v && typeof v === 'object') Object.values(v).forEach(x => linksIn(x, out));
+      return out;
+    };
+    // Keep only one example of each kind of link (e.g. /job/123 and /job/456 are the same kind).
+    const kind = (u) => u.replace(/\/\d+(?=\/|\?|$)/g, '/{id}');
+    const seenKinds = new Set();
+    while (queue.length && seen.size < 25) {
+      const url = queue.shift();
+      if (seen.has(url)) continue;
+      seen.add(url);
       try {
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 });
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, timeout: 20000 });
         const text = await res.text();
         let json = null; try { json = JSON.parse(text); } catch (e) { /* not JSON */ }
-        (report.steps.api_formbay ||= []).push({ url, status: res.status, shape: json ? shape(json) : text.slice(0, 300) });
+        const links = json !== null ? [...linksIn(json)] : [];
+        report.steps.api_formbay.push({
+          url: kind(url), status: res.status,
+          shape: json !== null ? (typeof json === 'string' ? 'link' : shape(json)) : `not JSON (${res.headers.get('content-type')})`,
+          links: links.map(kind).filter((v, i, a) => a.indexOf(v) === i).slice(0, 40),
+        });
+        for (const l of links) { const k = kind(l); if (!seenKinds.has(k)) { seenKinds.add(k); queue.push(l); } }
       } catch (err) {
-        (report.steps.api_formbay ||= []).push({ url, status: null, message: err.message });
+        report.steps.api_formbay.push({ url: kind(url), status: null, message: err.message });
       }
     }
   }
