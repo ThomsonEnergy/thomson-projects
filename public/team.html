@@ -80,7 +80,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=61"></script>
+  <script src="/js/supabase-client.js?v=62"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/licence-share.js?v=1"></script>
   <script>
@@ -277,7 +277,7 @@
       company: [...shareSel].filter(k => k.startsWith('c:')).map(k => k.slice(2)).filter(id => sharePickerData.creds.some(c => c.id === id)),
       licences: [...shareSel].filter(k => k.startsWith('l:')).map(k => k.slice(2)).filter(id => sharePickerData.licences.some(l => l.id === id)),
     });
-    const shareUrl = (token) => `${location.origin}/share-licences.html?token=${token}`;
+    const shareUrl = (token) => `${shareOrigin()}/share-licences.html?token=${token}`;
 
     async function shareDownloadZip() {
       const msg = document.getElementById('share-msg'), btn = document.getElementById('share-zip-btn');

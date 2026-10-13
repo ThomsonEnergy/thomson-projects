@@ -12,6 +12,7 @@
 // modern CSS.
 
 const fetch = require('node-fetch');
+const { publicBaseUrl } = require('./site-url');
 
 // Every signature shows the shared sales contact details, never the sender's own.
 const SIGNATURE_EMAIL = 'sales@thomsonenergy.com.au';
@@ -127,7 +128,7 @@ function plainTextWithoutButtons(text) {
 const MAX_EMAIL_LOGO_BYTES = 1024 * 1024;
 
 function fallbackLogoUrl() {
-  const base = (process.env.URL || 'https://thomsonprojects.netlify.app').replace(/\/+$/, '');
+  const base = publicBaseUrl();
   return `${base}/icons/logo-wordmark-full.png`;
 }
 

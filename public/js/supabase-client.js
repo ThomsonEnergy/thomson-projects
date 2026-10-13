@@ -563,6 +563,15 @@ async function openPdfViewer(path, title, opts = {}) {
 // printed PDF, so this is a size win with no perceptible quality loss.
 // Falls back to the original file untouched if the browser can't decode it
 // (e.g. some HEIC variants) rather than blocking the upload.
+// The address clients see. Links for clients (quote, invoice, review, licence sharing) always use it, even if
+// staff happen to be working on the backup address (thomsonprojects.netlify.app), which still works as a
+// fallback if the main domain ever stops resolving.
+const APP_PUBLIC_ORIGIN = 'https://projects.thomsonenergy.com.au';
+function shareOrigin() {
+  const h = window.location.hostname;
+  return (h === 'projects.thomsonenergy.com.au' || h.endsWith('.netlify.app')) ? APP_PUBLIC_ORIGIN : window.location.origin;
+}
+
 // A very large logo file (say a 5MB, 20000px upload) makes the quote and invoice pages, and so
 // the PDF, slow to draw, and shows as a broken picture in Gmail. This returns the uploaded logo
 // when it is small enough, otherwise the app's own small wordmark.

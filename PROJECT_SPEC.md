@@ -1,6 +1,6 @@
 # Thomson Projects — Build Spec
 
-Reference doc for Thomson Energy's internal project management/quoting app (thomsonprojects.netlify.app). Save this in the repo root and update as decisions change.
+Reference doc for Thomson Energy's internal project management/quoting app (projects.thomsonenergy.com.au, with thomsonprojects.netlify.app kept as a working backup). Save this in the repo root and update as decisions change.
 
 **Stack:** Netlify (Git-connected deploys, serverless functions) · Supabase (Postgres, auth, storage) · Xero (Accounting API + Payroll AU API — **live**) · Anthropic API (AI extraction/generation) · Airwallex (payment links) · Twilio (SMS/calling — future phase)
 
@@ -213,7 +213,7 @@ Reference doc for Thomson Energy's internal project management/quoting app (thom
 - 2FA still explicitly left out — not required by Xero (machine-to-machine connection, no human login involved) and adds friction that isn't currently wanted
 
 ### B5. Custom Domain — projects.thomsonenergy.com.au (not built)
-- Still on `thomsonprojects.netlify.app` — no custom domain configured in `netlify.toml` or DNS
+- Live at `projects.thomsonenergy.com.au` (Netlify primary domain; DNS is the Netlify DNS zone for thomsonenergy.com.au, the `projects` CNAME points to `thomsonprojects.netlify.app`). `thomsonprojects.netlify.app` still serves the app as a backup. Links clients see always use projects.thomsonenergy.com.au (`shareOrigin()` in supabase-client.js; `publicBaseUrl()` in functions/_shared/site-url.js); server-side self-calls (PDF rendering) use the deploy URL (`selfBaseUrl()`) so they survive a DNS problem. Supabase Auth Site URL and the Google OAuth redirect URI must list the new domain.
 - **No additional cost** — custom domains/subdomains are free on Netlify's standard hosting, and the domain itself is already owned/paid for
 - **Setup:** Netlify → Domain management → add `projects.thomsonenergy.com.au` → Netlify provides a CNAME target → add that CNAME record in the domain's existing DNS settings → Netlify auto-issues SSL
 - **Does not affect** existing email (MX records) or the main website (root domain A/CNAME records) — entirely separate DNS record

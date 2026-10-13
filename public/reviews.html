@@ -57,7 +57,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=61"></script>
+  <script src="/js/supabase-client.js?v=62"></script>
   <script src="/js/theme.js"></script>
   <script>
     let all = [], filter = 'answered';
@@ -116,7 +116,7 @@
       el.querySelectorAll('.rv-item').forEach(item => {
         const r = all.find(x => x.id === item.dataset.id);
         const c = item.querySelector('.rv-copy'); if (c) c.addEventListener('click', () => copy(c, `${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}${r.comment ? `\n"${r.comment}"` : ''}\n- ${shortName(r.client_name)}`));
-        const l = item.querySelector('.rv-copylink'); if (l) l.addEventListener('click', () => copy(l, `${window.location.origin}/review.html?t=${r.token}`));
+        const l = item.querySelector('.rv-copylink'); if (l) l.addEventListener('click', () => copy(l, `${shareOrigin()}/review.html?t=${r.token}`));
         item.querySelector('.rv-delete').addEventListener('click', async () => {
           if (!confirm(r.submitted_at ? 'Delete this review from the list? This cannot be undone.' : 'Delete this request? Its link will stop working.')) return;
           const { error } = await supabaseClient.from('review_requests').delete().eq('id', r.id);

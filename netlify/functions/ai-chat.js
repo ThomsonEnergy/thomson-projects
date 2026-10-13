@@ -1,6 +1,7 @@
 require('./_shared/polyfill-websocket');
 const fetch = require('node-fetch');
 const { createClient } = require('@supabase/supabase-js');
+const { selfBaseUrl } = require('./_shared/site-url');
 
 // Starts an "Ask AI" chat turn and returns immediately with a job id - the
 // actual tool-calling loop (often several chained Claude calls: search the
@@ -55,7 +56,7 @@ exports.handler = async (event) => {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 8000);
-      const bgRes = await fetch(`${process.env.URL || 'https://thomsonprojects.netlify.app'}/.netlify/functions/ai-chat-background`, {
+      const bgRes = await fetch(`${selfBaseUrl()}/.netlify/functions/ai-chat-background`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ job_id: job.id, token, messages }),

@@ -211,7 +211,7 @@
     <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading your proposal...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=61"></script>
+  <script src="/js/supabase-client.js?v=62"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     if (new URLSearchParams(window.location.search).get('print') === '1') document.documentElement.classList.add('as-paper');
@@ -626,7 +626,7 @@
               ${stcTotal > 0 ? `<div class="note-line">The STC credit is applied against your invoice once the system is installed and registered - not a separate payment.</div>` : ''}
             </div>
             ${paymentScheduleHtml}
-            ${isAccepted ? '' : `<p style="margin-top:24px;"><a class="q-btn" href="${window.location.origin}/quote.html?token=${encodeURIComponent(token)}">View and approve this quote online &rarr;</a></p>`}
+            ${isAccepted ? '' : `<p style="margin-top:24px;"><a class="q-btn" href="${shareOrigin()}/quote.html?token=${encodeURIComponent(token)}">View and approve this quote online &rarr;</a></p>`}
           </div>
         </section>`;
 

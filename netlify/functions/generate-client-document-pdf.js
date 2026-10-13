@@ -1,4 +1,5 @@
 const { getAdminClient } = require('./_shared/require-admin');
+const { selfBaseUrl } = require('./_shared/site-url');
 
 // Renders the actual client-facing quote.html / invoice.html page (via headless Chromium) into a
 // real PDF. Both pages are laid out as A4 sheets with their own letterhead, so the PDF is the page
@@ -216,7 +217,7 @@ async function handle(event) {
     if (!doc_type || !record_id) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'doc_type and record_id are required' }) };
 
     supabaseAdmin = getAdminClient();
-    const siteUrl = process.env.URL || 'https://thomsonprojects.netlify.app';
+    const siteUrl = selfBaseUrl();
     if (doc_type === 'quote') await supabaseAdmin.from('projects').update({ quote_pdf_error: null }).eq('id', record_id);
     else if (doc_type === 'invoice') await supabaseAdmin.from('invoices').update({ pdf_error: null }).eq('id', record_id);
 

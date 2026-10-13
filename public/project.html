@@ -35,7 +35,7 @@
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=7"></script>
   <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=3"></script>
+  <script src="/js/email-compose.js?v=4"></script>
   <script src="/js/assets.js?v=1"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js"></script>
@@ -1649,7 +1649,7 @@
           await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (actual costs)`);
           autoGenerateInvoicePdf(data.invoiceId);
 
-          const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
+          const invoiceUrl = `${shareOrigin()}/invoice.html?token=${data.invoiceToken}`;
           msg.innerHTML = `
             <div class="success-box">Created as ${data.invoiceNumber}.</div>
             <label>Invoice link</label>
@@ -2118,7 +2118,7 @@
           await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (${claims.length} stage${claims.length === 1 ? '' : 's'} claimed${chosenVars.length ? `, ${chosenVars.length} variation${chosenVars.length === 1 ? '' : 's'} included` : ''})`);
           autoGenerateInvoicePdf(data.invoiceId);
 
-          const invoiceUrl = `${window.location.origin}/invoice.html?token=${data.invoiceToken}`;
+          const invoiceUrl = `${shareOrigin()}/invoice.html?token=${data.invoiceToken}`;
           panelMsg.innerHTML = `
             <div class="success-box">Created as ${data.invoiceNumber}.</div>
             <label>Invoice link</label>
@@ -2643,7 +2643,7 @@
       const profit = quoted - cost;
       const pctComplete = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
       const remaining = Math.max(0, quoted - invoiced);
-      const quoteUrl = `${window.location.origin}/quote.html?token=${project.quote_token}`;
+      const quoteUrl = `${shareOrigin()}/quote.html?token=${project.quote_token}`;
       const actualLabourTotal = centres.reduce((s, c) => s + Number(c.actual_labour_cost || 0), 0);
       const quotedHoursTotal = centres.reduce((s, c) => s + Number(c.quoted_hours || 0), 0);
       const actualHoursTotal = centres.reduce((s, c) => s + Number(c.actual_hours || 0), 0);
@@ -3962,7 +3962,7 @@
         replyToThreadId: reply ? reply.threadId : undefined,
         projectId: project.id, tagKind: 'client',
         reviewRequest: (!isQuote && !reply) ? { projectId: project.id, clientName: project.client_name, clientEmail: project.client_email } : undefined,
-        quoteLink: (isQuote && project.quote_token) ? { url: `${window.location.origin}/quote.html?token=${project.quote_token}`, label: 'Include a button to view and accept the quote online' } : undefined,
+        quoteLink: (isQuote && project.quote_token) ? { url: `${shareOrigin()}/quote.html?token=${project.quote_token}`, label: 'Include a button to view and accept the quote online' } : undefined,
         attachOptions: await jobEmailAttachOptions(project),
         onSent: async () => { await loadJobEmails(project); },
       });

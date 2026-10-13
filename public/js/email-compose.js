@@ -172,7 +172,7 @@ async function emailCreateReviewRequest({ projectId, clientName, clientEmail }) 
   const { data: { user } } = await supabaseClient.auth.getUser();
   const { data, error } = await supabaseClient.from('review_requests').insert({ token, project_id: projectId || null, client_name: clientName || null, client_email: clientEmail || null, created_by: user ? user.id : null }).select('id').single();
   if (error) throw new Error('Could not set up the review link: ' + error.message);
-  return { id: data.id, token, url: `${window.location.origin}/review.html?t=${token}` };
+  return { id: data.id, token, url: `${shareOrigin()}/review.html?t=${token}` };
 }
 
 // Tag a conversation to a job. Give threadId (pick the job) or projectId (pick the conversation).

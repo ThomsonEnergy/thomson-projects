@@ -110,7 +110,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=61"></script>
+  <script src="/js/supabase-client.js?v=62"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -276,7 +276,7 @@
                 <div style="font-style:italic;">Please call &nbsp; ${esc(s.phone || '')} &nbsp; to pay over the phone,</div>
                 <div style="font-style:italic;">or pay online:</div>
                 <button type="button" id="pay-online-btn" class="inv-pay-btn" data-token="${esc(token)}">Pay online now</button>
-                <a class="inv-paylink" href="${esc(window.location.origin + '/invoice.html?token=' + token + '&pay=1')}" style="margin-top:8px; padding:9px 18px; border-radius:6px; background:#0b3d91; color:#fff; font-weight:700; text-decoration:none;">Pay online now</a>
+                <a class="inv-paylink" href="${esc(shareOrigin() + '/invoice.html?token=' + token + '&pay=1')}" style="margin-top:8px; padding:9px 18px; border-radius:6px; background:#0b3d91; color:#fff; font-weight:700; text-decoration:none;">Pay online now</a>
                 <div id="pay-online-msg"></div>
               </div>
             </div>`}

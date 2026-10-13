@@ -5,10 +5,11 @@
 // seconds: the PDF function carries on and finishes on its own. Never throws: a failed refresh must
 // not make a payment webhook fail (the Regenerate PDF button on the invoice still works).
 const fetch = require('node-fetch');
+const { selfBaseUrl } = require('./site-url');
 
 async function regenerateInvoicePdf(invoiceId, waitMs = 3000) {
   if (!invoiceId) return;
-  const base = process.env.URL || 'https://thomsonprojects.netlify.app';
+  const base = selfBaseUrl();
   try {
     await Promise.race([
       fetch(`${base}/.netlify/functions/generate-client-document-pdf`, {

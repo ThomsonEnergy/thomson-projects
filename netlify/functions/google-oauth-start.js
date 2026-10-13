@@ -10,6 +10,7 @@
 // than a new table, checked for a 10-minute expiry on the way back.
 
 const { requireAdmin } = require('./_shared/require-admin');
+const { publicBaseUrl } = require('./_shared/site-url');
 const crypto = require('crypto');
 
 const SCOPES = [
@@ -45,7 +46,7 @@ exports.handler = async (event) => {
     });
     if (stateErr) throw stateErr;
 
-    const siteUrl = process.env.URL || 'https://thomsonprojects.netlify.app';
+    const siteUrl = publicBaseUrl();
     const redirectUri = `${siteUrl}/.netlify/functions/google-oauth-callback`;
 
     const authorizeUrl = `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
