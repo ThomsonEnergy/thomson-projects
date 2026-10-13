@@ -1775,7 +1775,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=2';
+  s.src = '/js/notifications.js?v=3';
   document.head.appendChild(s);
 }
 
