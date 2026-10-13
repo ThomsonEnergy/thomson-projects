@@ -820,6 +820,7 @@
             stageDescriptions: updatedDescriptions,
             documentPaths: sowDocs.map(d => d.path),
             style: sowStyle,
+            template: currentTemplate,
           }),
         });
         const sowJson = await sowRes.json();

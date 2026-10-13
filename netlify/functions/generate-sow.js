@@ -25,7 +25,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { projectName, brief, stageNames = [], stageDescriptions = {}, documentPaths = [], style = 'story' } = JSON.parse(event.body);
+    const { projectName, brief, stageNames = [], stageDescriptions = {}, documentPaths = [], style = 'story', template = '' } = JSON.parse(event.body);
     if (!brief) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'A project brief is required' }) };
     }
@@ -71,6 +71,15 @@ Plain-English and direct - written for someone who isn't an electrician, explain
 3. Close with a short bulleted list of what's included overall - no wrap-up paragraph.
 No numbered sections, no formal Exclusions clause, no standards citations, no legalistic language. Direct and informative - explains what's happening and why it's built that way, without over-explaining or dressing it up.`;
 
+    // An estimate is invoiced from actual hours and materials, so what is NOT covered matters as much as what is.
+    // Estimates always list both, whatever house style was picked (this overrides the story style's "no exclusions").
+    const estimateRule = template === 'quick_estimate' ? `
+THIS DOCUMENT IS AN ESTIMATE. Whatever the style above says, it must clearly list BOTH what is included AND what is excluded:
+- A heading line "Inclusions" followed by a bulleted list (each bullet starting with "- ") of everything the estimate covers.
+- A heading line "Exclusions" followed by a bulleted list (each bullet starting with "- ") of what the estimate does NOT cover: anything specific to this job that a client might reasonably assume is included but is not (for example making good plaster or paint, non-electrical trades, permits and fees, switchboard or wiring faults found once work starts, extra work that is not listed), plus "any works not specifically listed above".
+- Put "Exclusions" after "Inclusions". Do not leave either list out.
+` : '';
+
     const promptText = `You are writing a scope-of-works document for an electrical contractor's client-facing quote.
 
 Project: ${projectName || 'This project'}
@@ -82,7 +91,7 @@ ${stageList}
 ${docBlocks.length ? 'Reference any attached plans, drawings, or electricity bills where relevant to ground the scope in what they actually show (e.g. existing switchboard capacity, circuit count, meter details).' : ''}
 
 ${styleGuide}
-
+${estimateRule}
 Write the scope of works now (plain text - no markdown headers/asterisks, use plain numbering or a heading line where the style calls for it). Do not include pricing.`;
 
     const content = [{ type: 'text', text: promptText }, ...docBlocks];

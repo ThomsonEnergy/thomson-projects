@@ -964,7 +964,7 @@
             body: JSON.stringify({
               projectName: projectName || 'This project', brief, stageNames: updatedStageNames,
               stageDescriptions: updatedDescriptions, documentPaths: sowDocs.map(d => d.path),
-              style: sowStyle,
+              style: sowStyle, template: currentTemplate,
             }),
           });
           const sowJson = await sowRes.json();
