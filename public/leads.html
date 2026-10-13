@@ -405,6 +405,15 @@
       return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
     }
 
+    // Some website bookings arrived with the last name typed into the phone box (name "don", phone
+    // "pior"). If the phone is not a phone number, it is shown as the rest of the name with no number,
+    // so the list and the details never present a name as a phone number.
+    function tidyCallback(r) {
+      const digits = String(r.phone || '').replace(/\D/g, '');
+      if (r.phone && digits.length < 8) return { ...r, name: [r.name, r.phone].filter(Boolean).join(' '), phone: null };
+      return r;
+    }
+
     // Best-effort match of a callback request to an existing lead and/or
     // existing customer jobs/quotes, by email or phone (whichever the
     // request actually has - the website's known name/phone mangling
@@ -446,7 +455,7 @@
             <button type="button" class="secondary" id="cb-close-btn" style="font-size:12px; padding:6px 10px;">Close</button>
           </div>
           <div class="grid cols-2" style="margin-top:14px;">
-            <div><label style="margin-top:0">Phone</label><p>${r.phone || '-'}</p></div>
+            <div><label style="margin-top:0">Phone</label><p>${r.phone || '<span class="subtitle">No number given</span>'}</p></div>
             <div><label style="margin-top:0">Email</label><p>${r.email || '-'}</p></div>
           </div>
           ${r.message ? `<label>Message</label><p>${escapeHtml(r.message)}</p>` : ''}
@@ -476,12 +485,13 @@
 
     async function loadCallbackRequests() {
       const listEl = document.getElementById('callback-requests-list');
-      const { data: requests, error } = await supabaseClient
+      const { data: rawRequests, error } = await supabaseClient
         .from('callback_requests')
         .select('*')
         .order('requested_date')
         .order('requested_time');
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      const requests = (rawRequests || []).map(tidyCallback);
       if (!requests || !requests.length) { listEl.innerHTML = `<p class="subtitle">No call requests yet.</p>`; return; }
 
       const matches = await Promise.all(requests.map(r => matchCallbackToRecords(r)));
