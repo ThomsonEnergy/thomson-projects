@@ -574,7 +574,13 @@
             <input id="key-xero-webhook-key" type="password" placeholder="From the Webhooks tab of your Xero app" autocomplete="off" />
 
             <label>Formbay API Key <span class="key-status" data-key="formbay"></span></label>
-            <input id="key-formbay" type="password" placeholder="From your Formbay account" autocomplete="off" />
+            <input id="key-formbay" type="password" placeholder="Formbay > Settings > API Access (the key shown there)" autocomplete="off" />
+
+            <label>Formbay username <span class="key-status" data-key="formbay_username"></span></label>
+            <input id="key-formbay-username" type="password" placeholder="The username you log in to Formbay with" autocomplete="off" />
+
+            <label>Formbay password <span class="key-status" data-key="formbay_password"></span></label>
+            <input id="key-formbay-password" type="password" placeholder="Used with the API key above to log in to Formbay's API" autocomplete="new-password" />
 
             <label>Google Client ID <span class="key-status" data-key="google_client_id"></span></label>
             <input id="key-google-client-id" type="password" placeholder="From your Google Cloud OAuth client" autocomplete="off" />
@@ -612,7 +618,7 @@
           <div class="card">
             <h2>Test Formbay trading API</h2>
             <p class="subtitle" style="margin-bottom:10px;">
-              Tries your saved key against Formbay's Server API (trading.formbay.com.au): logs in, lists your solar jobs, installers
+              Save the Formbay API key, username and password above first. Logs in to Formbay's API, lists your solar jobs, installers
               and electricians, and looks at your newest solar job to see whether it carries its STC sale details (price, count, fees
               and invoice links). Read-only: nothing is written to Formbay, and customer names and addresses are never shown here.
             </p>
@@ -2323,6 +2329,8 @@
         { key_name: 'xero_client_secret', key_value: document.getElementById('key-xero-client-secret').value.trim() },
         { key_name: 'xero_webhook_key', key_value: document.getElementById('key-xero-webhook-key').value.trim() },
         { key_name: 'formbay', key_value: document.getElementById('key-formbay').value.trim() },
+        { key_name: 'formbay_username', key_value: document.getElementById('key-formbay-username').value.trim() },
+        { key_name: 'formbay_password', key_value: document.getElementById('key-formbay-password').value },
         { key_name: 'google_client_id', key_value: document.getElementById('key-google-client-id').value.trim() },
         { key_name: 'google_client_secret', key_value: document.getElementById('key-google-client-secret').value.trim() },
         { key_name: 'airwallex_client_id', key_value: document.getElementById('key-airwallex-client-id').value.trim() },

@@ -7,12 +7,15 @@
 // Customer names, addresses and phone numbers are never returned: jobs are shown as their shape only,
 // apart from the STC "sell_info" block, which holds no personal details.
 // ?env=cert uses Formbay's test site (cert-trading.formbay.com.au) instead of the live one.
+// Login uses the Formbay API key (key "formbay") with the Formbay username and password
+// (keys "formbay_username" and "formbay_password"), all from Settings > API Keys.
 
 const fetch = require('node-fetch');
 const { requireAdmin } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 
 const BASES = { live: 'https://trading.formbay.com.au', cert: 'https://cert-trading.formbay.com.au' };
+const OAUTH_URL = 'https://oauth2.formbay.com.au/token';
 
 async function call(base, path, { method = 'GET', form = null, token = null } = {}) {
   const headers = {};
@@ -52,32 +55,81 @@ exports.handler = async (event) => {
   const env = (event.queryStringParameters && event.queryStringParameters.env) === 'cert' ? 'cert' : 'live';
   const base = BASES[env];
 
-  let credential;
-  try { credential = String(await getIntegrationKey('formbay')).trim(); } catch (err) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'No Formbay key saved in Settings > API Keys yet.' }) };
+  const optionalKey = async (name) => { try { return String(await getIntegrationKey(name)).trim(); } catch (err) { return ''; } };
+  const apiKey = await optionalKey('formbay');
+  let username = await optionalKey('formbay_username');
+  let password = await optionalKey('formbay_password');
+  // Older setup: username:password was pasted into the API key box itself.
+  if (!username && apiKey.includes(':')) { const i = apiKey.indexOf(':'); username = apiKey.slice(0, i); password = apiKey.slice(i + 1); }
+  if (!apiKey && !username) {
+    return { statusCode: 400, body: JSON.stringify({ error: 'No Formbay key or login saved in Settings > API Keys yet.' }) };
   }
 
-  const report = { environment: env, login: [], steps: {} };
+  const report = {
+    environment: env,
+    saved: { apiKey: !!apiKey && !apiKey.includes(':'), username: !!username, password: !!password },
+    login: [], steps: {},
+  };
 
-  // 1. Log in. The documented login takes username + password, or a "basic_token".
-  const attempts = [{ label: 'saved key used as basic_token', form: { basic_token: credential } }];
-  if (credential.includes(':')) {
-    const i = credential.indexOf(':');
-    attempts.push({ label: 'saved key read as username:password', form: { username: credential.slice(0, i), password: credential.slice(i + 1) } });
-    attempts.push({ label: 'username:password base64-encoded with "Basic " in front, as basic_token', form: { basic_token: 'Basic ' + Buffer.from(credential).toString('base64') } });
-  }
-  attempts.push({ label: 'saved key base64-encoded as basic_token', form: { basic_token: Buffer.from(credential).toString('base64') } });
-
+  // 1. Log in.
+  // a) Formbay's account page (API Access): OAuth2 password grant at oauth2.formbay.com.au/token, with the
+  //    account's API key as the Basic "client credentials" and the Formbay username and password in the body.
   let token = null;
-  for (const a of attempts) {
-    const r = await call(base, '/formbay/token', { method: 'POST', form: a.form });
-    const got = r.json && r.json.access_token;
-    report.login.push({ attempt: a.label, status: r.status, gotToken: !!got, message: got ? undefined : (r.json || r.text) });
-    if (got) { token = r.json.access_token; report.loginInfo = { token_type: r.json.token_type, expires_in: r.json.expires_in, scope: r.json.scope, user_id: r.json.user_id }; break; }
+  if (env === 'live' && report.saved.apiKey && username && password) {
+    const form = { grant_type: 'password', username, password, scope: 'admin' };
+    for (const [label, basic] of [['API key as given', apiKey], ['API key base64-encoded', Buffer.from(apiKey).toString('base64')]]) {
+      try {
+        const res = await fetch(OAUTH_URL, {
+          method: 'POST',
+          headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(form).toString(),
+          timeout: 20000,
+        });
+        const text = await res.text();
+        let json = null; try { json = JSON.parse(text); } catch (e) { /* not JSON */ }
+        const got = json && json.access_token;
+        report.login.push({ attempt: `oauth2.formbay.com.au, ${label}`, status: res.status, gotToken: !!got, message: got ? undefined : (json || text.slice(0, 300)) });
+        if (got) { token = json.access_token; report.loginInfo = { via: 'oauth2', token_type: json.token_type, expires_in: json.expires_in, scope: json.scope }; break; }
+      } catch (err) {
+        report.login.push({ attempt: `oauth2.formbay.com.au, ${label}`, status: null, gotToken: false, message: err.message });
+      }
+    }
+  } else if (env === 'live') {
+    report.login.push({ attempt: 'oauth2.formbay.com.au', skipped: 'Needs the Formbay API key plus the Formbay username and password, all saved in Settings > API Keys.' });
+  }
+
+  // b) The trading site's own documented login (/formbay/token, username + password or a basic_token).
+  if (!token) {
+    const attempts = [];
+    if (username && password) attempts.push({ label: 'trading site, username + password', form: { username, password } });
+    if (report.saved.apiKey) {
+      attempts.push({ label: 'trading site, API key as basic_token', form: { basic_token: apiKey } });
+      attempts.push({ label: 'trading site, API key base64-encoded as basic_token', form: { basic_token: Buffer.from(apiKey).toString('base64') } });
+    }
+    for (const a of attempts) {
+      const r = await call(base, '/formbay/token', { method: 'POST', form: a.form });
+      const got = r.json && r.json.access_token;
+      report.login.push({ attempt: a.label, status: r.status, gotToken: !!got, message: got ? undefined : (r.json || r.text) });
+      if (got) { token = r.json.access_token; report.loginInfo = { via: 'trading', token_type: r.json.token_type, expires_in: r.json.expires_in, scope: r.json.scope, user_id: r.json.user_id }; break; }
+    }
   }
   if (!token) {
-    report.summary = 'Could not log in with any of the three ways tried. Send this result to Formbay support and ask which login the API key is for.';
+    report.summary = 'Could not log in. Check the API key, username and password are all saved (the "saved" section above), then send this result to Formbay support if it still fails.';
     return { statusCode: 200, body: JSON.stringify(report, null, 2) };
+  }
+
+  // The OAuth2 token may belong to Formbay's newer API rather than the trading site, so try its entry point too.
+  if (report.loginInfo.via === 'oauth2') {
+    for (const url of ['https://api.formbay.com.au/entrypoint', 'https://api.formbay.com.au/']) {
+      try {
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 });
+        const text = await res.text();
+        let json = null; try { json = JSON.parse(text); } catch (e) { /* not JSON */ }
+        (report.steps.api_formbay ||= []).push({ url, status: res.status, shape: json ? shape(json) : text.slice(0, 300) });
+      } catch (err) {
+        (report.steps.api_formbay ||= []).push({ url, status: null, message: err.message });
+      }
+    }
   }
 
   // 2. Who is this? (account type and which modules are switched on)
