@@ -3749,6 +3749,26 @@ function wireSupplierPicker(overlay, suppliers, ids) {
 // subcategory as the user types. Calls the including page's own global
 // `addLineItem(stageRow, {...})` - both pages already define one with the
 // same signature.
+// Adds the labels that make a quote line readable on a phone (style.css turns each line into a card
+// with a label above every box; on a wide screen the labels are hidden). Called by addLineItem() on
+// project.html and new-project.html right after a line is added.
+function decorateLineItemRow(li) {
+  if (!li || li.querySelector(".li-lbl")) return;
+  const mk = (cls, text) => { const s = document.createElement("span"); s.className = "li-lbl " + cls; s.textContent = text; li.appendChild(s); return s; };
+  mk("li-lbl-desc", "Description");
+  mk("li-lbl-type", "Type");
+  const qtyLbl = mk("li-lbl-qty", "Quantity");
+  const rateLbl = mk("li-lbl-rate", "Cost each ($)");
+  const typeSel = li.querySelector(".li-type");
+  const sync = () => {
+    const labour = typeSel && typeSel.value === "labour";
+    qtyLbl.textContent = labour ? "Hours" : "Quantity";
+    rateLbl.textContent = labour ? "Labour rate (charged per hour)" : "Cost each ($, before markup)";
+  };
+  if (typeSel) typeSel.addEventListener("change", sync);
+  sync();
+}
+
 // Multi-word "contains every word, any order" matcher for the stock/
 // prebuild pickers below - a plain substring match fails on a search like
 // "90mm downlight" against "90mm LED Downlight" (the words aren't

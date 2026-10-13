@@ -680,3 +680,46 @@ html[data-theme="navy"] .success-box {
 .insp-yn-btn.selected { background: var(--accent); color: #fff; }
 .insp-photo-thumb { width: 90px; height: 90px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); margin-right: 8px; }
 .insp-child { margin-left: 20px; border-left: 2px solid var(--accent-dim); padding-left: 14px; }
+
+/* ---------------------------------------------------------------------
+   Quote / job line items on a phone. On a wide screen a line is one row
+   (description, type, qty, rate, total, remove). On a phone that was too
+   cramped to read, so each line becomes its own card with a label above
+   every box and big touch-friendly fields: description, then type and
+   quantity side by side, then the rate, then the line total.
+   The labels (.li-lbl) are added by decorateLineItemRow() in
+   supabase-client.js and are hidden on a wide screen.
+   --------------------------------------------------------------------- */
+.li-row .li-lbl { display: none; }
+@media (max-width: 720px) {
+  .li-row {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 3px 12px !important;
+    align-items: end !important;
+    padding: 14px;
+    margin-bottom: 14px !important;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface-2);
+  }
+  .li-row .li-lbl { display: block; grid-row: auto; font-size: 12px; font-weight: 600; color: var(--muted); margin: 8px 0 0; letter-spacing: 0.02em; }
+  .li-row .li-lbl-desc { grid-column: 1 / -1; grid-row: 1; margin-top: 0; }
+  .li-row .li-desc { grid-column: 1 / -1; grid-row: 2; }
+  .li-row .li-lbl-type { grid-column: 1; grid-row: 3; }
+  .li-row .li-lbl-qty { grid-column: 2; grid-row: 3; }
+  .li-row .li-type { grid-column: 1; grid-row: 4; }
+  .li-row .li-qty { grid-column: 2; grid-row: 4; }
+  .li-row .li-lbl-rate { grid-column: 1 / -1; grid-row: 5; }
+  .li-row .li-tier, .li-row .li-cost { grid-column: 1 / -1; grid-row: 6; }
+  .li-row .li-total { grid-column: 1; grid-row: 7; align-self: center; font-size: 22px !important; margin-top: 10px; }
+  .li-row .li-total::before { content: 'Line total  '; font-size: 12px; font-weight: 600; color: var(--muted); display: block; }
+  .li-row .li-remove { grid-column: 2; grid-row: 7; justify-self: end; align-self: center; margin-top: 10px; padding: 10px 16px !important; font-size: 14px !important; }
+  /* big fields: 16px stops iPhones zooming the page when one is tapped */
+  .li-row input, .li-row select { font-size: 16px !important; padding: 12px !important; min-height: 48px; }
+  .li-row .li-qty, .li-row .li-cost { text-align: right; }
+  .li-prebuild-group .li-prebuild-header { grid-template-columns: 1fr 1fr !important; }
+  .li-prebuild-group .li-prebuild-header > div:first-child { grid-column: 1 / -1; }
+  .li-prebuild-group .li-prebuild-header input { font-size: 16px !important; min-height: 44px; }
+  .li-prebuild-group .li-prebuild-header button { padding: 10px 14px !important; font-size: 14px !important; }
+  .prebuild-add, .li-add-btn { padding: 12px 16px !important; font-size: 14px !important; }
+}
