@@ -610,6 +610,18 @@
           </div>
 
           <div class="card">
+            <h2>Test Formbay trading API</h2>
+            <p class="subtitle" style="margin-bottom:10px;">
+              Tries your saved key against Formbay's Server API (trading.formbay.com.au): logs in, lists your solar jobs, installers
+              and electricians, and looks at your newest solar job to see whether it carries its STC sale details (price, count, fees
+              and invoice links). Read-only: nothing is written to Formbay, and customer names and addresses are never shown here.
+            </p>
+            <button id="test-formbay-trading-btn" class="secondary">Test live Formbay</button>
+            <button id="test-formbay-trading-cert-btn" class="secondary">Test Formbay's test site</button>
+            <pre id="test-formbay-trading-result" style="margin-top:12px; white-space:pre-wrap; font-size:12px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:12px; display:none; max-height:500px; overflow-y:auto;"></pre>
+          </div>
+
+          <div class="card">
             <h2>Google Workspace (Gmail)</h2>
             <p class="subtitle" style="margin-bottom:10px;">
               Save the Client ID/Secret above first (from a Google Cloud OAuth client - see SETUP.md for the one-time
@@ -2362,6 +2374,29 @@
       }
       btn.disabled = false;
       btn.textContent = 'Test connection';
+    });
+
+    // Formbay's Server API (trading.formbay.com.au): read-only look at the login, lists and one solar job.
+    [['test-formbay-trading-btn', 'live'], ['test-formbay-trading-cert-btn', 'cert']].forEach(([id, env]) => {
+      document.getElementById(id).addEventListener('click', async () => {
+        const btn = document.getElementById(id);
+        const label = btn.textContent;
+        const resultEl = document.getElementById('test-formbay-trading-result');
+        btn.disabled = true;
+        btn.textContent = 'Testing...';
+        resultEl.style.display = 'block';
+        resultEl.textContent = 'Logging in to Formbay and looking at a job, one moment...';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch(`/.netlify/functions/test-formbay-trading?env=${env}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
+          const data = await res.json();
+          resultEl.textContent = JSON.stringify(data, null, 2);
+        } catch (err) {
+          resultEl.textContent = `Request failed: ${err.message}`;
+        }
+        btn.disabled = false;
+        btn.textContent = label;
+      });
     });
 
     document.getElementById('google-connect-btn').addEventListener('click', async () => {
