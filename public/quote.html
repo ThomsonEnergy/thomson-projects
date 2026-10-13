@@ -140,6 +140,11 @@
   .totals .stc { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 20px; color: #15803d; margin-top: 12px; }
   .note-line { font-size: 12px; color: var(--q-grey); line-height: 1.55; margin-top: 12px; }
   .sec-title { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 19px; text-transform: uppercase; margin: 36px 0 6px; }
+  .sor .pg-title { margin-bottom: 22px; }
+  .sor .sor-h { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 14px; text-transform: uppercase; margin: 16px 0 5px; }
+  .sor p { font-size: 12.5px; line-height: 1.55; margin-bottom: 6px; }
+  .sor ul { margin: 2px 0 6px; padding-left: 18px; font-size: 12.5px; line-height: 1.55; }
+  .sor .qtable td, .sor .qtable th { padding-top: 7px; padding-bottom: 7px; font-size: 12.5px; }
   .est-note { border: 1px solid var(--q-blue); padding: 12px 16px; font-weight: 600; font-size: 13px; margin-bottom: 22px; }
 
   .pg.invest { padding-top: 0; }
@@ -745,14 +750,42 @@
         <section class="pg">
           ${slabsSvg('light')}
           ${headHtml}
-          <div class="pg-body">
+          <div class="pg-body sor">
             <h1 class="pg-title">Schedule<br>of rates</h1>
-            <p class="pg-lead">This is an estimate only. The final invoice is based on the actual hours worked and materials used. Labour is charged at the hourly rates below.</p>
+            <div class="sor-h">1. Application</div>
+            <p>This Schedule of Rates applies to all works performed by Thomson Energy where a fixed quotation has not been issued or cannot reasonably be provided. This includes but is not limited to fault-finding, investigative works, service calls, variations, urgent works, and client-requested additional works.</p>
+            <div class="sor-h">2. Labour rates</div>
             <table class="qtable">
-              <thead><tr><th>Role</th><th class="num">Rate per hour (ex GST)</th></tr></thead>
-              <tbody>${rates.map(r => `<tr><td>${esc(r.name)}</td><td class="num">${money(r.sell_rate)}</td></tr>`).join('')}</tbody>
+              <thead><tr><th>Description</th><th class="num">Unit price ex GST</th><th class="num">Unit price inc GST</th></tr></thead>
+              <tbody>${rates.map(r => `<tr><td>${esc(r.name)}</td><td class="num">${money(r.sell_rate)}</td><td class="num">${money(Math.round(Number(r.sell_rate) * 1.1))}</td></tr>`).join('')}</tbody>
             </table>
-            <p class="note-line">All rates are exclusive of GST.</p>
+            <div class="sor-h">3. Standard hours</div>
+            <p><b>Standard hours:</b> Monday to Friday, 6:30am to 4:00pm.<br><b>Minimum charge:</b> 2 hours per attendance per technician.</p>
+            <p>Personnel classification is determined solely by Thomson Energy based on licensing, experience, competency, and responsibility required for the task.</p>
+            <div class="sor-h">4. Overtime &amp; after hours multipliers</div>
+            <table class="qtable">
+              <thead><tr><th>Period</th><th class="num">Rate applied</th></tr></thead>
+              <tbody>
+                <tr><td>Outside standard hours</td><td class="num">1.5x</td></tr>
+                <tr><td>Saturday</td><td class="num">1.5x</td></tr>
+                <tr><td>Sunday</td><td class="num">2.0x</td></tr>
+                <tr><td>Public Holiday</td><td class="num">2.5x</td></tr>
+                <tr><td>Emergency Callout</td><td class="num">Minimum 3 hours</td></tr>
+              </tbody>
+            </table>
+            <p class="note-line">Multipliers apply to all labour classifications.</p>
+            <div class="sor-h">5. Do &amp; charge basis</div>
+            <p>All works performed under this Schedule are charged on a time and materials (do-and-charge) basis, meaning:</p>
+            <ul>
+              <li>Labour is charged for actual time spent.</li>
+              <li>Time includes travel where applicable, fault finding, setup, testing, documentation, compliance verification, and pack-down.</li>
+              <li>Materials are charged as supplied and installed.</li>
+              <li>Any estimate provided is indicative only and does not constitute a fixed price.</li>
+            </ul>
+            <div class="sor-h">6. Materials, equipment &amp; consumables</div>
+            <p>Materials are charged at Thomson Energy's supply rate, which includes procurement, handling, warranty risk, administration, logistics, and margin. Supply rates are confidential and not subject to disclosure.</p>
+            <p>Specialist equipment, access equipment, plant hire, test instruments, lifting equipment, or machinery will be charged at applicable daily or hourly rates.</p>
+            <p class="note-line">This document is current as at April 2026.</p>
           </div>
         </section>` : '';
 
@@ -937,14 +970,14 @@
             moved.unshift(t);
             // a heading left stranded at the bottom goes with what follows it
             const nowLast = body.lastElementChild;
-            if (nowLast && /\bsec-title\b/.test(nowLast.className) && !spill(cur)) { moved.unshift({ wrap: null, el: nowLast }); nowLast.remove(); }
+            if (nowLast && /\b(sec-title|sor-h)\b/.test(nowLast.className) && !spill(cur)) { moved.unshift({ wrap: null, el: nowLast }); nowLast.remove(); }
           }
           if (!moved.length) break;
           const cont = document.createElement('section');
           cont.className = 'pg fixed cont';
           const head = first.querySelector('.pg-head');
           const slabs = first.querySelector(':scope > .slabs');
-          cont.innerHTML = (slabs ? slabs.outerHTML : '') + (head ? head.outerHTML : '') + '<div class="pg-body"></div>';
+          cont.innerHTML = (slabs ? slabs.outerHTML : '') + (head ? head.outerHTML : '') + '<div class="' + body.className + '"></div>';
           const nbody = cont.querySelector('.pg-body');
           let open = null;
           moved.forEach((m) => {
