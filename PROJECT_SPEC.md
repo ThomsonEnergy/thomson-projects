@@ -2,7 +2,7 @@
 
 Reference doc for Thomson Energy's internal project management/quoting app (projects.thomsonenergy.com.au, with thomsonprojects.netlify.app kept as a working backup). Save this in the repo root and update as decisions change.
 
-**Stack:** Netlify (Git-connected deploys, serverless functions) · Supabase (Postgres, auth, storage) · Xero (Accounting API + Payroll AU API — **live**) · Anthropic API (AI extraction/generation) · Airwallex (payment links) · Twilio (SMS/calling — future phase)
+**Stack:** Netlify (Git-connected deploys, serverless functions) · Supabase (Postgres, auth, storage) · Xero (Accounting API + Payroll AU API - **live**) · Anthropic API (AI extraction/generation) · Airwallex (payment links) · Gmail API (shared sales@ inbox) · Web Push (phone notifications) · Twilio (SMS/calling - future phase)
 
 **Deployment workflow:** Permanent local GitHub Desktop clone as source of truth. Each build session: edit files in place in that folder, GitHub Desktop shows the diff, commit + push, Netlify auto-deploys. **Always run Supabase migrations before or alongside the Netlify deploy** — deploying first causes clean failures, not data corruption, but still causes downtime.
 
@@ -10,7 +10,61 @@ Reference doc for Thomson Energy's internal project management/quoting app (proj
 
 **TFN/super/bank: dropped from the app entirely.** New/existing employees' tax file number, superannuation details, and bank account details are no longer collected or stored anywhere in Thomson Projects. That data now goes through Xero's own native new-employee onboarding instead — the app's onboarding flow still collects date of birth, address, and emergency contact, and tells staff to expect a direct invite from Xero for the rest. All previously-stored TFN/super/bank values were cleared from the database when this changed.
 
-**Ordering note:** sections below are laid out roughly in the order work should happen — built/live items first, then near-term fixes, then features that depend on earlier ones, then longer-range/lower-priority items. Dependencies are called out inline where one item requires another to exist first.
+**Ordering note:** Part 0 (next) is the live priority order and go-live checklist. Below it, Part A is what is built, and the later parts are the plan for what is not. Dependencies are called out inline where one item requires another to exist first. *Last reviewed against the code: 14 Oct 2026.*
+
+---
+
+## PART 0 - Go-live priorities (14 Oct 2026)
+
+**The aim: the whole company working in the app from day one.** So the order below is "what staff and the office need to do their jobs this week" first, and everything clever (AI helpers, automation, dashboards) comes after. If a feature is not on the Day-one list it must not block starting.
+
+### Day-one checklist (before staff start)
+Manual steps only a person can do (code is already done and live):
+1. **Supabase → Authentication → URL Configuration:** Site URL `https://projects.thomsonenergy.com.au`; add `https://projects.thomsonenergy.com.au/**` to Redirect URLs (keep the old one). Until done, new-staff *invite emails* link to the old address.
+2. **Google Cloud:** add redirect URI `https://projects.thomsonenergy.com.au/.netlify/functions/google-oauth-callback` (keep the old one); add the new site to the Maps key's website restrictions if it has any.
+3. **Airwallex and Xero dashboards:** change the webhook URLs to `https://projects.thomsonenergy.com.au/.netlify/functions/airwallex-webhook` and `.../xero-webhook` (so a payment still marks the invoice paid).
+4. **Settings:** check Company details, Payment details (bank), the Google review link, and the Billable rates are right (they print on every quote, invoice and estimate).
+5. **Everyone:** log in once on the new address, add the app to the phone home screen again, press "Enable phone notifications".
+6. **One full dry run with a real job before staff start:** create a quote, email it to yourself, accept it from the link, check the job appears, schedule someone, clock in and out, raise an invoice, push it to Xero, pay it (test card or bank), check it flips to PAID. Fix anything that breaks before anyone depends on it.
+7. **Bookkeeper:** confirm the Employment Hero to Xero payroll cutover (H2). Do not rely on the in-app payroll push for a real pay run until this is confirmed.
+
+### Order of importance
+
+**Tier 1 - Bare bones (must work on day one). All of this is built, but it has not had one complete live walkthrough yet (checklist item 6), so the work is checking and fixing, not building.**
+1. Logins, roles and permissions (A14, B2, B3) - everyone can sign in and sees only what their role allows.
+2. Clock in/out and timesheets with job and cost-centre split (A1) - payroll depends on it.
+3. Quotes: build, send (PDF and link), client accepts, job is created (A3, A18, Part I) - this is the revenue path.
+4. Job page: tasks, documents, photos, feed, schedule (A13, A17, A19) and the Schedule / My Day screens.
+5. Invoicing and getting paid: invoice template, push to Xero, card payment, PAID stamp (C, H3, A22).
+6. Purchase orders and stock basics (A10, A12).
+7. Phone notifications and the shared sales@ inbox (A18, A20) - daily communication.
+
+**Tier 2 - First 2 to 4 weeks (real gaps staff will hit once they are using it)**
+1. Timesheet and leave approval by each person's manager; Finance and above approve all (board item).
+2. Clock-out hours slider across cost centres, so nobody fixes timesheets by hand (board item; the split exists, check it is usable at clock-out).
+3. Archive or delete duplicate signed documents per employee (board bug).
+4. Credit notes: test on a real Xero invoice (built, never tested live).
+5. Client cards: one place per client for sites, jobs, quotes, invoices (E1).
+6. Reactive jobs: formalise Quick Job into a proper small-jobs flow (Part F).
+7. Field forms: SWMS, Take 5, inspection forms with PDFs (G1) - move up to Tier 1 if the business needs digital safety paperwork from day one.
+8. Materials list export per cost centre (E3).
+9. Clean-up: categorise the 67 "Needs Review" materials; link prebuild materials to the Materials Database (A9a).
+10. Part I gaps that save office time: deposit vs pay in full on acceptance, auto PO suggestions, auto Ready to Book when POs received.
+
+**Tier 3 - Growth (after the team is settled)**
+1. Gantt-style job windows driving scheduling and material ordering (board item).
+2. Overheads calculator and net profit per job, synced with the Xero P&L (D5/H4, board item).
+3. Job page charts and flags (Part J), including PO status at a glance.
+4. Stay logged in and Face ID login (B4).
+5. Offline support (G2) - only if poor signal on site proves to be a real problem.
+6. Twilio SMS and shared-number calling (G3).
+7. In-app solar pricing tool (Part K).
+
+**Tier 4 - AI helpers and automation (deliberately last)**
+1. AI prebuild creation from a description or document (D3).
+2. Plan-reading takeoff and the wholesaler quote loop (D4).
+3. Assistant (Sparky) upgrades: recurring tasks, remembering facts about team members, more actions.
+4. Pushing supplier bills to Xero as Bills and supplier payments via Airwallex (needs live testing first, moves real money).
 
 ---
 
@@ -54,7 +108,8 @@ Reference doc for Thomson Energy's internal project management/quoting app (proj
 - Toggle in Settings → Appearance, switches instantly, no reload
 - Hamburger nav (replacing scrolling tab strip), mobile-first, Timesheets as mobile landing page
 
-### A6. Job Pipeline Board (built — 10 stages)
+### A6. Job Pipeline Board (built - now 14 stages)
+*Update 14 Oct 2026: migration 112 widened the board. The stages in the live check constraint are: lead, draft_quote, quote_sent, quote_approved, deposit_paid, awaiting_action, ready_to_book, job_booked, job_not_complete, client_handover, ready_to_invoice, awaiting_payment, complete, archived. The numbered 10-stage list below is the original design and is kept for the manual-only rules.*
 1. **Lead** — manual entry
 2. **Draft Quote** — manual
 3. **Quote Approved** — auto, client accepts on-screen
@@ -171,6 +226,46 @@ Reference doc for Thomson Energy's internal project management/quoting app (proj
 - Summary tab shows stat cards, progress/budget bars, **and two real CSS conic-gradient donut charts** — "Quoted split" (Materials/Labour/Profit from the estimate) and "Job split" (same breakdown from real accrued spend) — both already built, missed on the first audit pass which only checked for `<canvas>`/chart-library usage
 - Per-cost-centre cards now show combined labour + materials quoted-vs-actual cost and gross profit %, not labour-only (see D5)
 
+### A18. Shared Inbox - sales@ Gmail (built)
+- Gmail API connection (Settings > Google), synced every 5 minutes plus a Sync now button; formatted (HTML) emails shown in a locked-down viewer, inline pictures, attachments to open or download, photo attachments shown as thumbnails
+- Inbox / Sent / All boxes, each message marked sent or received with the sender's address; reply and compose with attachments (up to 10 files, 20 MB)
+- Tag a conversation to one or more jobs (materials quote, client, supplier, other); Emails tab on every job with "Email the client" (quote PDF, marked-up plans and job documents attachable); quote link goes out as a button
+- **Create a quote or job from an email:** AI reads the conversation for the real client, site address and work required, matches an existing client, tags the email to the new job, offers the email's photos and bills to the scope helper
+- Every signature shows sales@thomsonenergy.com.au and 0455 415 464 (not the sender's own details); big logos are swapped for a small one so they show in Gmail
+
+### A19. Feeds, Meetings & Job Extras (built)
+- Company feed and a feed per job (like, comment, tag people, post to home page)
+- Meetings: record, transcribe and analyse; follow-up tasks with owners and reminders; calendar
+- Installer summary on the job card (AI condenses the scope into included / excluded / watch-for); recent jobs for the same client; search within a job
+- Variations: tab on the job, signed on screen, locked into the running total; signed variations remake the quote documents
+
+### A20. Notifications (built)
+- Bell next to the calendar plus phone lock-screen push (Web Push, per-device subscriptions, app badge count), per-type switches
+- Types: tagged, comments, tasks assigned, task reminders, meeting follow-ups done, booked onto the schedule, new emails, reviews, and call reminders
+- Website "Book a call" requests: up for grabs on Home; claiming moves it to **Your calls** (Done / Release) and sends a reminder 5 minutes before the call
+
+### A21. Reviews (built)
+- "Ask for a review" tick-box when emailing a client from a job; the client gets a button to a page where they pick stars and write a comment (no Google account needed), with an optional button to post on Google (link in Settings)
+- Reviews page: average rating, answered vs waiting, filters, copy a review for the website; the job shows each request and its answer
+
+### A22. Quote and Invoice Documents (built)
+- Quote = A4 pages (cover, project, scope of works with lightning-bolt rows, investment summary, optional photos, schedule of rates for estimates only, terms and conditions); logo and company details in the header of every page except the cover; long pages continue on fresh A4 sheets
+- Estimates only: the AI scope lists inclusions AND exclusions, and a full Schedule of Rates (April 2026) sits between the investment summary and the terms
+- Invoice = A4 template (letterhead, pay-by / amount / date strip, grey job box, itemised stage tables repeated across sheets, totals, terms, How To Pay, OVERDUE and PAID stamps); PDF regenerated when payment is recorded
+- PDFs are the same pages printed (no cover added), links stay clickable (website, email, phone, Pay online now, Approve online); made in the background on save, buttons finish when the file is saved
+- Live at projects.thomsonenergy.com.au with thomsonprojects.netlify.app as a working backup; links clients see always use the new address
+
+### A23. AI Assistant "Sparky" (built, name changeable in Settings)
+- Chat widget on every page: searches the database, does calculations, searches the web
+- Can prepare changes (tasks, schedule, timesheets) and open pre-filled forms; every change needs the user's confirm click and runs as that user (their permissions apply)
+
+### A24. Other built features not previously listed
+- **Leads and call requests** from the website forms (leads.html), converted to quotes or jobs
+- **Customer assets** list with warranty and service reminders (assets.html)
+- **Insurance and licence sharing:** share a chosen set of company and employee licences by a link that stays current (share-licences.html)
+- **Employee onboarding:** staff enter their own details, which fill their employment contract; contract rates and start date come from Settings
+- **Knowledge base** with OCR for scanned PDFs, **Tech Support** numbers, **Team** page, **DNSP** and **Fleet** pages, **Bugs & Updates** board (synced to BUGS_AND_UPDATES.md)
+
 ---
 
 ## PART B — Near-Term Fixes & Settings/User Management
@@ -212,7 +307,7 @@ Reference doc for Thomson Energy's internal project management/quoting app (proj
 - **Face ID / biometric unlock:** not started — no WebAuthn code anywhere. Achievable in a PWA via the **WebAuthn API** (supported by iOS Safari and Android Chrome's platform authenticators), not a native-app-only feature
 - 2FA still explicitly left out — not required by Xero (machine-to-machine connection, no human login involved) and adds friction that isn't currently wanted
 
-### B5. Custom Domain — projects.thomsonenergy.com.au (not built)
+### B5. Custom Domain - projects.thomsonenergy.com.au (built)
 - Live at `projects.thomsonenergy.com.au` (Netlify primary domain; DNS is the Netlify DNS zone for thomsonenergy.com.au, the `projects` CNAME points to `thomsonprojects.netlify.app`). `thomsonprojects.netlify.app` still serves the app as a backup. Links clients see always use projects.thomsonenergy.com.au (`shareOrigin()` in supabase-client.js; `publicBaseUrl()` in functions/_shared/site-url.js); server-side self-calls (PDF rendering) use the deploy URL (`selfBaseUrl()`) so they survive a DNS problem. Supabase Auth Site URL and the Google OAuth redirect URI must list the new domain.
 - **No additional cost** — custom domains/subdomains are free on Netlify's standard hosting, and the domain itself is already owned/paid for
 - **Setup:** Netlify → Domain management → add `projects.thomsonenergy.com.au` → Netlify provides a CNAME target → add that CNAME record in the domain's existing DNS settings → Netlify auto-issues SSL
@@ -322,7 +417,9 @@ Reference doc for Thomson Energy's internal project management/quoting app (proj
 - **Calling — multi-user shared number:** simplest is Twilio `<Dial>` ringing all available staff simultaneously; fuller option is the Twilio Voice SDK as an in-app softphone
 - Suggested build order: SMS first → shared-number simultaneous ring → full in-app softphone
 
-### G4. Push Notifications & Badge Count (not built)
+### G4. Push Notifications & Badge Count (built - see A20)
+*Update 14 Oct 2026: built. Web Push with VAPID keys stored in the api_keys table, a service worker that only shows notifications (no caching), a notification bell, per-type preferences and the app badge count. Triggers cover tags, comments, tasks, schedule bookings, new emails, reviews and claimed-call reminders. New SMS and invoice-paid notifications are not wired yet (SMS does not exist; invoice paid could be added).*
+*Original plan, kept for reference:*
 - Home screen widgets ruled out for iOS PWA (WidgetKit is native-app-only)
 - **Push notifications:** iOS has supported Web Push for home-screen PWAs since iOS 16.4, Android Chrome long-standing support — needs a push subscription per device (Web Push API) and a Netlify function to send on relevant events (new SMS, lead assigned, quote approved, invoice paid, job flagged Not Complete)
 - **Badge count:** via the Badging API, ties into G3's SMS inbox once built
@@ -360,7 +457,9 @@ Reference doc for Thomson Energy's internal project management/quoting app (proj
 
 **Original vision:** once a client accepts a quote, the job progresses through the pipeline (Quote Approved → Deposit Paid → Ready to Book) largely on its own, with manual scheduling always available as an override.
 
-**What's actually built today:**
+**Update 14 Oct 2026:** pipeline automation phase 1 is built (migration 112): the board gained quote_sent, awaiting_action, ready_to_invoice and complete; invoices carry `is_deposit`; both payment webhooks (Airwallex and Xero) advance a job from quote_approved to deposit_paid and onward when the deposit invoice is paid (`_shared/advance-job-stage.js`), and check for completion on later payments. Treat the "divergence" and "not built" bullets below as the pre-migration state: re-test the whole acceptance path (Day-one checklist item 6) and then trim this section. Still not built: the pay-deposit-or-pay-in-full popup, automatic PO suggestions on a stage change, auto-advance to Ready to Book when all POs are received.
+
+**What was built at the time of the original audit:**
 - `accept-quote.js` + `create-job-from-quote.js`: accepting a quote on the client's token-based link **already auto-creates the job and auto-raises a real, token-safe deposit invoice** server-side — more automated on this specific point than the original plan assumed (which expected a new public function would still need to be built for this)
 - **Divergence:** the new job is inserted straight at **Job Booked**, skipping Quote Approved / Deposit Paid / Ready to Book entirely — those stages exist on the board but this path doesn't step through them
 - **Not built:** the "pay deposit vs pay in full" choice popup — deposit % is currently fixed from the quote, no in-the-moment choice offered
@@ -396,6 +495,16 @@ The tabbed layout, activity sidebar, role-aware display, and the Materials/Labou
 
 ---
 
+## PART M - Bugs & Updates board (open items, 14 Oct 2026)
+Raised on the in-app board. Resolved items are in BUGS_AND_UPDATES.md. All five are open and not started; their place in the priority order is in Part 0.
+1. **Timesheet approval** (Tier 2) - a manager per person approves their staff's timesheets and leave; Finance and above approve everyone's; staff under Finance need a staff member to approve at the end of the week.
+2. **Clock-in function** (Tier 2) - the cost-centre hours slider at clock-out, so timesheets do not need fixing afterwards.
+3. **Archive or delete superseded documents** (Tier 2, bug) - duplicate signed documents clutter an employee's file; archive older ones, delete exact duplicates.
+4. **Gantt chart** (Tier 3) - each job gets a scheduled window from its hours, stages and client timeline; drives scheduling and material ordering; shareable with the client or builder.
+5. **Overheads calculator** (Tier 3) - Finance-only; adds overheads to each hourly rate (employee direct costs and company direct costs) to give net profit per job; synced with the Xero P&L.
+
+---
+
 ## Explicitly Dropped
 - **ServiceM8** — dropped entirely, not just for staged jobs. All SM8 buttons/functions removed. Replaced by native Reactive Jobs workflow (Part F, still to design).
 - **Employment Hero** — dropping in favour of direct Xero Payroll AU API push, pending cutover confirmation (H2).
@@ -421,7 +530,9 @@ The tabbed layout, activity sidebar, role-aware display, and the Materials/Labou
 ---
 
 ## Open Decisions
-- [ ] **Part I automation chain:** should quote-acceptance job creation step through Quote Approved → Deposit Paid → Ready to Book as originally envisioned, or keep jumping straight to Job Booked? Blocks whether the remaining automation steps are worth building.
+- [ ] **Part I automation chain:** phase 1 now steps a job through the stages when the deposit is paid (see Part I update). Confirm with a live dry run that a quote accepted from the client link behaves the way you want, then decide whether the remaining automation steps are worth building.
+- [ ] **Day one:** is digital safety paperwork (SWMS, Take 5) needed from the first day? If yes, G1 moves from Tier 2 to Tier 1.
+- [ ] **Day one:** who is the first manager for timesheet approval, and is it acceptable to approve timesheets in Finance's dashboard for the first weeks until per-manager approval is built?
 - [ ] Reactive Jobs workflow (Part F): formalize Quick Job into it, or build separately? (Bugs & Updates board already has a related request.)
 - [ ] Inspection forms (G1): auto-generate client-facing compliance PDF, or internal-only?
 - [ ] Confirm Employment Hero → Xero Payroll cutover timing (H2) — don't drop EH until proven stable over a full pay cycle
