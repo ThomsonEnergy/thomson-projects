@@ -53,5 +53,20 @@ Recommended Xero coding (to be confirmed by the accountant):
 - Owner said not to bother with a written accountant brief for now.
 - STC tracking, the STC page and the Formbay side are handled by another chat (see `HANDOFF_formbay_stc.md`). Coordinate on the asset account and the settlement postings (Phase 3 there needs your Xero pieces).
 
+## How Formbay actually pays (from 3 real payments the owner shared, 14 Oct 2026)
+Each sale produces two PDFs with matching numbers: a **Payment Advice** (reference N) and a **Tax Invoice - Fees** (invoice FEEN). The bank deposit is the advice total less the fee invoice total.
+- **Batches:** one advice can cover several jobs (417171 paid PV 1269150, 61 STCs, and PV 1268818, 87 STCs, together). Each job is its own line with its STC count. So settlement must split one deposit across jobs.
+- **Price:** $39.25 per STC in Sept/Oct 2026 ($39.30 in Dec 2024), against the $35 booked price, so roughly $4.25 per STC variance.
+- **GST on the sale:** residential jobs show "-" for GST on units (GST-free). A job flagged "* Commercial Install" adds 10% GST on units (315309: 365 x $39.30 = $14,344.50 + $1,434.45 GST = $15,778.95). Formbay's trigger is its own "Commercial Install" flag, so the app's company/individual client type must line up with it.
+- **Fees:** not a flat amount. $0.53 STC processing + $0.47 CER registration = $1.00 per STC + GST, so $1.10 per STC inc GST, on every sale.
+- **Batteries** come through the same way (description "BSTC <form id>", 465 STCs in 64112).
+- The advice is titled "Payment Advice", not "Recipient Created Tax Invoice". **Decided by the owner (14 Oct 2026):** we do NOT issue our own tax invoice to Formbay; the advice shows the GST correctly and the BAS is done from it. The app must never create a sales invoice to Formbay for an STC sale.
+- The advices also print the owner's bank details. Do not store or log those.
+
+Worked example, 417171: gross $5,809.00, fees 148 x $1.10 = $162.80, deposit $5,646.20. Booked value at $35: $5,180.00, so the variance is $629.00. Suggested Xero posting (accountant to confirm): one Receive Money of $5,646.20 with lines STC Receivable 2003 $5,180.00 (BAS Excluded), STC Trading Variance 2003-1 $629.00, STC Trading Fees 2003-2 -$148.00 + GST, which matches the bank feed line in one go.
+
+## Real Xero accounts (created by the owner in the real company, 14 Oct 2026)
+2001 Material Sales, 2002 Labour Sales, 2003 STC Receivable (Current Asset), 2003-1 STC Trading Variance (Sales), 2003-2 STC Trading Fees (Expense). One receivable account for both client types; the tax type is set per line by the mapping (individual BAS Excluded, company GST on Income).
+
 ## Open questions for the owner / accountant
 Real account codes; whether a company's STC credit is netted on the sales invoice or treated as a separate purchase with its own tax invoice; whether Formbay's documents are recipient-created tax invoices (then the app must not issue its own for the same sale); GST timing at assignment versus sale; cash vs accrual BAS.
