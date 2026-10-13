@@ -19,6 +19,11 @@
 [functions.archive-completed-jobs]
   schedule = "@daily"
 
+# Once a day: refreshes the overhead lines from the Xero Profit and Loss report - see
+# sync-overheads-nightly.js. Does nothing until accounts are mapped on the Overheads page.
+[functions.sync-overheads-nightly]
+  schedule = "@daily"
+
 # Polls sales@thomsonenergy.com.au for new mail every 5 minutes - see
 # sync-gmail.js. The Sync now buttons (Settings, Inbox) call sync-gmail-now.js
 # instead: Netlify does not allow a scheduled function to be called over HTTP.
