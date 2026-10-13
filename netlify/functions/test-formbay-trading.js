@@ -64,6 +64,7 @@ exports.handler = async (event) => {
   if (credential.includes(':')) {
     const i = credential.indexOf(':');
     attempts.push({ label: 'saved key read as username:password', form: { username: credential.slice(0, i), password: credential.slice(i + 1) } });
+    attempts.push({ label: 'username:password base64-encoded with "Basic " in front, as basic_token', form: { basic_token: 'Basic ' + Buffer.from(credential).toString('base64') } });
   }
   attempts.push({ label: 'saved key base64-encoded as basic_token', form: { basic_token: Buffer.from(credential).toString('base64') } });
 
