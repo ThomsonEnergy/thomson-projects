@@ -480,4 +480,7 @@ select '144', 'quote acceptance signature columns',
 union all
 select '145', 'variation pdf columns',
   case when exists (select 1 from information_schema.columns where table_name = 'job_variation_entries' and column_name = 'documents_finalized_at') then 'present' else 'MISSING' end
+union all
+select '146', 'formbay_webhook_events',
+  case when exists (select 1 from information_schema.tables where table_name = 'formbay_webhook_events') then 'present' else 'MISSING' end
 order by 1;

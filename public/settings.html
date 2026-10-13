@@ -582,6 +582,9 @@
             <label>Formbay password <span class="key-status" data-key="formbay_password"></span></label>
             <input id="key-formbay-password" type="password" placeholder="Used with the API key above to log in to Formbay's API" autocomplete="new-password" />
 
+            <label>Formbay Webhook Secret <span class="key-status" data-key="formbay_webhook_secret"></span></label>
+            <input id="key-formbay-webhook-secret" type="password" placeholder="Any long random value; enter the same as the X-Webhook-Secret header in Formbay" autocomplete="off" />
+
             <label>Google Client ID <span class="key-status" data-key="google_client_id"></span></label>
             <input id="key-google-client-id" type="password" placeholder="From your Google Cloud OAuth client" autocomplete="off" />
 
@@ -2331,6 +2334,7 @@
         { key_name: 'formbay', key_value: document.getElementById('key-formbay').value.trim() },
         { key_name: 'formbay_username', key_value: document.getElementById('key-formbay-username').value.trim() },
         { key_name: 'formbay_password', key_value: document.getElementById('key-formbay-password').value },
+        { key_name: 'formbay_webhook_secret', key_value: document.getElementById('key-formbay-webhook-secret').value.trim() },
         { key_name: 'google_client_id', key_value: document.getElementById('key-google-client-id').value.trim() },
         { key_name: 'google_client_secret', key_value: document.getElementById('key-google-client-secret').value.trim() },
         { key_name: 'airwallex_client_id', key_value: document.getElementById('key-airwallex-client-id').value.trim() },
