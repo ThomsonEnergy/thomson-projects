@@ -68,5 +68,20 @@ Worked example, 417171: gross $5,809.00, fees 148 x $1.10 = $162.80, deposit $5,
 ## Real Xero accounts (created by the owner in the real company, 14 Oct 2026)
 2001 Material Sales, 2002 Labour Sales, 2003 STC Receivable (Current Asset), 2003-1 STC Trading Variance (Sales), 2003-2 STC Trading Fees (Expense). One receivable account for both client types; the tax type is set per line by the mapping (individual BAS Excluded, company GST on Income).
 
+## Division tracking category (decided 14 Oct 2026, not built yet)
+Xero allows 2 active tracking categories. Slot 1 is **Work Type** (timesheets only: Billable (Jobs), Quoting, Admin, Maintenance, TAFE, Training; must be selected under Payroll settings > Tracking > Timesheet categories). Slot 2 will be **Division**, taken automatically from the job's `projects.proposal_template`, one division per job:
+
+| proposal_template | Division option |
+|---|---|
+| solar | Solar |
+| new_build | New Build |
+| renovation | Renovation |
+| service_work | Service Work |
+| quick_estimate | Service Work |
+| direct_job | Quick Job |
+| time_and_materials | Quick Job |
+
+Tag every invoice line, credit note line and job-PO supplier bill line with the job's Division. Stock/vehicle POs, overheads and non-job hours stay untagged. Payroll timesheets only take one category, so they keep Work Type only. Gross profit by division comes from Xero; net profit per job/division (overheads allocated per hour) comes from the app's overheads work, which should group by the same division. A changed job type only affects documents pushed after the change.
+
 ## Open questions for the owner / accountant
 Real account codes; whether a company's STC credit is netted on the sales invoice or treated as a separate purchase with its own tax invoice; whether Formbay's documents are recipient-created tax invoices (then the app must not issue its own for the same sale); GST timing at assignment versus sale; cash vs accrual BAS.
