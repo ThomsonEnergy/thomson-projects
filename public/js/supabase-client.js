@@ -2883,6 +2883,157 @@ async function openJobSwitchModal(entry, onDone) {
   showRecent();
 }
 
+// ---------- who's clocked in right now ----------
+// Everyone's open time entries (no clock-out yet), via get_active_clock_ins
+// (migration 147) so field staff can see each other too - time_entries
+// itself only lets them read their own. Falls back to reading the table
+// directly if that function isn't there yet (still right for office roles,
+// who can read everyone's). Pass a project id for just that job.
+async function fetchActiveClockIns(projectId = null) {
+  const { data, error } = await supabaseClient.rpc('get_active_clock_ins', { p_project_id: projectId });
+  if (!error) return data || [];
+  let q = supabaseClient.from('time_entries')
+    .select('id, staff_id, project_id, time_category, clock_in, profiles(full_name), projects(name, job_number, quote_number)')
+    .is('clock_out', null);
+  if (projectId) q = q.eq('project_id', projectId);
+  const { data: rows } = await q;
+  return (rows || []).map(r => ({
+    entry_id: r.id, staff_id: r.staff_id, full_name: r.profiles?.full_name || '', project_id: r.project_id,
+    project_name: r.projects?.name || null, job_number: r.projects?.job_number || null, quote_number: r.projects?.quote_number || null,
+    time_category: r.time_category, clock_in: r.clock_in, stage_names: null,
+  })).sort((a, b) => a.full_name.localeCompare(b.full_name));
+}
+
+function clockElapsedText(clockInIso) {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(clockInIso).getTime()) / 60000));
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+function clockSinceText(clockInIso) {
+  const d = new Date(clockInIso);
+  const time = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+  return sydneyDateKey(d) === sydneyDateKey(new Date())
+    ? time
+    : `${time} ${d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}`;
+}
+
+// The "Clocked in now" card on Schedule and Team: one row per person with
+// the job (or non-job category) and stage(s) they're on and for how long.
+// Someone still clocked in from an earlier day is flagged - that's usually
+// a forgotten clock-out. Re-reads every 2 minutes while the page is open.
+async function renderClockedInNowCard(el) {
+  if (!el) return;
+  async function paint() {
+    const rows = await fetchActiveClockIns();
+    const todayKey = sydneyDateKey(new Date());
+    el.innerHTML = `
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px;">
+          <h2 style="margin:0;">Clocked in now</h2>
+          <span class="subtitle" style="font-size:12px;">${rows.length ? rows.length + (rows.length === 1 ? ' person' : ' people') : ''}</span>
+        </div>
+        ${rows.length ? rows.map(r => {
+          const what = r.project_id
+            ? `<a class="link-quiet" href="/project.html?id=${r.project_id}" style="font-weight:600;">${escapeHtml(projectRef({ name: r.project_name, job_number: r.job_number, quote_number: r.quote_number }))}</a>`
+            : `<strong>${escapeHtml(timeCategoryLabel(r.time_category) || 'General')}</strong>`;
+          const stale = sydneyDateKey(new Date(r.clock_in)) !== todayKey;
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 0; border-top:1px solid var(--border);">
+              <div style="min-width:0;">
+                <div><strong>${escapeHtml(r.full_name || 'Someone')}</strong> &middot; ${what}</div>
+                ${r.stage_names && r.stage_names.length ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${r.stage_names.map(escapeHtml).join(', ')}</p>` : ''}
+              </div>
+              <div class="subtitle" style="font-size:12px; text-align:right; flex-shrink:0;">
+                since ${clockSinceText(r.clock_in)} &middot; ${clockElapsedText(r.clock_in)}
+                ${stale ? '<br><span style="color:var(--red);">Still clocked in from an earlier day</span>' : ''}
+              </div>
+            </div>`;
+        }).join('') : '<p class="subtitle" style="margin:0;">Nobody is clocked in right now.</p>'}
+      </div>`;
+  }
+  await paint();
+  clearInterval(el._clockedInTimer);
+  el._clockedInTimer = setInterval(paint, 120000);
+}
+
+// Stages on a job that time can be clocked against: every stage, plus a
+// variation only while there's still work to do on it (a do-and-charge one
+// until it's billed, a fixed-price one once signed and until billed).
+// Returns [{ id, name, number }], number being the cost centre number.
+async function loadClockableCostCentres(projectId) {
+  const [{ data: project }, { data: allCentres }] = await Promise.all([
+    supabaseClient.from('projects').select('job_number').eq('id', projectId).maybeSingle(),
+    supabaseClient.from('cost_centres').select('id, name, variation_entry_id').eq('project_id', projectId).order('sort_order'),
+  ]);
+  const numbered = (allCentres || []).map((c, i) => ({ ...c, number: costCentreNumber(project ? project.job_number : null, i + 1) }));
+  const variationIds = numbered.map(c => c.variation_entry_id).filter(Boolean);
+  let open = new Set();
+  if (variationIds.length) {
+    const { data: entries } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
+    open = new Set((entries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
+  }
+  return numbered.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id)).map(c => ({ id: c.id, name: c.name, number: c.number }));
+}
+
+// Clock in to one particular job from its page: pick the stage(s) you're
+// on (same as My Day), then in. Not for switching - if you're already
+// clocked in somewhere, use openClockOutModal with switchTo instead.
+// `project` needs id/name/job_number/quote_number. Calls `onDone` once in.
+async function openJobClockInModal(project, onDone) {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const centres = await loadClockableCostCentres(project.id);
+  let chosen = centres.length === 1 ? [centres[0].id] : [];
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  overlay.innerHTML = `
+    <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
+      <h2>Clock in</h2>
+      <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))}</p>
+      ${centres.length ? `
+        <label>Which stage(s) are you working on?</label>
+        <div id="jci-chips">${centres.map(c => `
+          <button type="button" class="cc-chip ${chosen.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
+            <span class="cc-chip-num">${c.number}</span> ${escapeHtml(c.name)}
+          </button>`).join('')}</div>
+        <p class="subtitle" id="jci-hint" style="margin:6px 0 0;"></p>` : ''}
+      <div id="jci-msg"></div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button type="button" id="jci-go" style="flex:1;">Clock in</button>
+        <button type="button" class="secondary" id="jci-cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const hint = overlay.querySelector('#jci-hint');
+  overlay.querySelectorAll('.cc-chip').forEach(chip => chip.addEventListener('click', () => {
+    chip.classList.toggle('selected');
+    chosen = chip.classList.contains('selected') ? [...chosen, chip.dataset.id] : chosen.filter(x => x !== chip.dataset.id);
+    if (hint) hint.textContent = chosen.length > 1 ? `Time will be split across these ${chosen.length} stages when you clock out.` : '';
+  }));
+  overlay.querySelector('#jci-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#jci-go').addEventListener('click', async (e) => {
+    const msg = overlay.querySelector('#jci-msg');
+    if (centres.length && !chosen.length) { msg.innerHTML = `<div class="error-box">Pick at least one stage you're working on.</div>`; return; }
+    e.target.disabled = true;
+    // Clocked in somewhere else (another tab, My Day) since this page loaded? Don't double up.
+    const { data: already } = await supabaseClient.from('time_entries').select('id').eq('staff_id', user.id).is('clock_out', null).limit(1);
+    if (already && already.length) {
+      msg.innerHTML = `<div class="error-box">You're already clocked in somewhere else. Close this and use Switch to this job.</div>`;
+      e.target.disabled = false;
+      return;
+    }
+    const entry = { staff_id: user.id, project_id: project.id, time_category: 'job', clock_in: roundToQuarterHour(new Date()).toISOString() };
+    if (chosen.length === 1) entry.cost_centre_id = chosen[0];
+    else if (chosen.length > 1) entry.selected_cost_centre_ids = chosen;
+    const { error } = await supabaseClient.from('time_entries').insert(entry);
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; e.target.disabled = false; return; }
+    overlay.remove();
+    if (onDone) await onDone();
+  });
+}
+
 // Creates a job with no quote/estimate behind it - straight to Job
 // Booked (a job number is assigned immediately, no approval to wait for)
 // with one cost centre already in place so time (timesheets) and
