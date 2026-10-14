@@ -10,7 +10,7 @@
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/document-fonts.css?v=1" />
-<link rel="stylesheet" href="/css/style.css?v=14" />
+<link rel="stylesheet" href="/css/style.css?v=15" />
 <script src="/js/vendor/supabase-2.js"></script>
 <style>
   /* The invoice is laid out as A4 sheets (794 x 1123 px at 96 dpi), the same on screen and in the PDF.
@@ -108,7 +108,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=64"></script>
+  <script src="/js/supabase-client.js?v=65"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';

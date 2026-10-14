@@ -204,6 +204,31 @@ body {
 .mobile-menu-dropdown a.active { color: var(--accent); }
 .mobile-menu-dropdown a .tab-total { color: var(--muted); font-size: 12px; font-weight: 500; }
 
+/* On a computer the bar holds starred pages only; the rest sit in this
+   "More" menu (the phone dropdown, anchored under the button). */
+.nav-more-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+@media (min-width: 701px) {
+  .mobile-menu-dropdown {
+    top: 76px;
+    left: var(--more-left, 24px);
+    right: auto;
+    width: 260px;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .mobile-menu-dropdown a { padding: 11px 16px; font-size: 13px; }
+  .mobile-menu-dropdown a.nav-in-bar { display: none; }
+}
+
 @media (max-width: 700px) {
   .topbar { padding: 0 14px; gap: 10px; height: 64px; }
   .topbar-tab { padding: 0 10px; font-size: 12px; height: 64px; }
