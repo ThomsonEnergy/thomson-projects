@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Staff profile - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=14" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .staff-head { display: flex; gap: 16px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+  .staff-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: var(--surface-2); }
+  .staff-avatar-fallback { width: 72px; height: 72px; border-radius: 50%; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 22px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 800px) { .grid.cols-2 { grid-template-columns: 1fr; } }
+  .kv { display: grid; grid-template-columns: 170px 1fr; gap: 6px 12px; font-size: 14px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  @media (max-width: 520px) { .kv { grid-template-columns: 1fr; } .kv dd { margin-bottom: 6px; } }
+  .tab-count { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: var(--surface-2); font-size: 11px; text-align: center; }
+  .badge.red { background: rgba(220, 70, 70, 0.15); color: var(--red); }
+  .badge.amber { background: rgba(230, 160, 40, 0.15); color: #d99a1e; }
+  .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+  .photo-grid .ph { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--surface-2); cursor: pointer; }
+  .photo-grid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .photo-grid .ph button { position: absolute; top: 4px; right: 4px; font-size: 11px; padding: 2px 7px; }
+  .stat-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .stat-tile { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  .stat-tile .v { font-size: 22px; font-weight: 600; }
+  .stat-tile .l { font-size: 12px; color: var(--muted); }
+  .chip-check { display: inline-flex; align-items: center; gap: 5px; margin: 0 6px 6px 0; padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; cursor: pointer; color: var(--text); }
+  .chip-check input { width: auto; margin: 0; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: flex-start; justify-content: center; z-index: 100; padding: 16px; overflow-y: auto; }
+  .modal-overlay > .card { width: 100%; margin: 20px 0; }
+  .form-section { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); font-weight: 600; }
+  .row-actions button, .row-actions .btn { font-size: 12px; padding: 5px 10px; margin: 2px 0 2px 4px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <p style="margin:0 0 10px;"><a class="link-quiet" href="/team.html">&larr; Team</a></p>
+    <div id="content"><p class="subtitle">Loading...</p></div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=65"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/hr-templates.js?v=1"></script>
+  <script>
+    // Staff profile: everything about one team member in one place, laid out
+    // like a job (tabs for overview, documents, photos, warnings, incidents
+    // and KPIs). Admin and finance only - the tables behind it (migration
+    // 147) are locked to is_finance_role() at the database level too.
+    const staffId = new URLSearchParams(location.search).get('id');
+    const STAFF_BUCKET = 'staff-files';
+    const ROLE_LABELS = { admin: 'Admin', finance: 'Finance', sales: 'Sales', staff: 'Staff' };
+    const EMPLOYMENT_LABELS = { full_time: 'Full-time', part_time: 'Part-time', casual: 'Casual' };
+    const WARNING_STATUS_BADGE = { draft: 'draft', issued: 'sent', acknowledged: 'accepted', withdrawn: 'draft' };
+    const KPI_STATUS_LABELS = { active: 'In progress', met: 'Met', not_met: 'Not met', cancelled: 'Cancelled' };
+    const KPI_STATUS_BADGE = { active: 'sent', met: 'accepted', not_met: 'red', cancelled: 'draft' };
+
+    let myRole = 'staff', me = {}, company = null, person = null, staffEmail = '';
+    let warnings = [], incidents = [], kpis = [], files = [];
+
+    const fmtDate = (d) => d ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? d + 'T00:00:00' : d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+    const val = (root, sel) => { const el = root.querySelector(sel); return el ? el.value.trim() : ''; };
+    const orNull = (v) => (v === '' ? null : v);
+    const yesNoVal = (v) => (v === 'yes' ? true : v === 'no' ? false : null);
+    const yesNoSelect = (id, v) => `<select id="${id}"><option value="">-</option><option value="yes" ${v === true ? 'selected' : ''}>Yes</option><option value="no" ${v === false ? 'selected' : ''}>No</option></select>`;
+
+    function openModal(html, maxWidth = 640) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="card" style="max-width:${maxWidth}px;">${html}</div>`;
+      document.body.appendChild(overlay);
+      return overlay;
+    }
+
+    // ---------- Private files (staff-files bucket) ----------
+    async function uploadStaffFile(file, sub) {
+      const path = `${staffId}/${sub}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const { error } = await supabaseClient.storage.from(STAFF_BUCKET).upload(path, file);
+      if (error) throw error;
+      return path;
+    }
+    async function viewStaffFile(path, title) {
+      if (/\.pdf$/i.test(path)) { openPdfViewer(path, title || 'Document', { bucket: STAFF_BUCKET }); return; }
+      const url = await getSignedDocUrl(path, STAFF_BUCKET);
+      if (/\.(jpe?g|png|webp|gif)$/i.test(path)) openPhotoLightbox([url], 0);
+      else window.open(url, '_blank', 'noopener');
+    }
+
+    // ---------- Loading ----------
+    async function loadPerson() {
+      const [{ data: profile, error }, { data: sensitive }, { data: licences }, { data: contract }] = await Promise.all([
+        supabaseClient.from('profiles').select(`id, full_name, role, active, job_title, mobile_number, notes, photo_url, created_at,
+          employment_type, employment_start_date, pay_type, has_company_vehicle, has_probationary_period,
+          emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_payroll_status`)
+          .eq('id', staffId).single(),
+        supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', staffId).maybeSingle(),
+        supabaseClient.from('profile_licences').select('*').eq('profile_id', staffId).order('expiry_date'),
+        supabaseClient.from('employee_contracts').select('status, updated_at').eq('profile_id', staffId).maybeSingle(),
+      ]);
+      if (error) throw error;
+      person = Object.assign(profile, sensitive || {}, { licences: licences || [], contract });
+      person.address_full = [person.residential_address, person.residential_suburb, person.residential_state, person.residential_postcode].filter(Boolean).join(', ');
+    }
+
+    async function loadEmail() {
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/list-staff-emails', { headers: { Authorization: `Bearer ${session.access_token}` } });
+        const json = await res.json();
+        staffEmail = (res.ok && json.ok ? json.emails : []).find(e => e.id === staffId)?.email || '';
+      } catch { staffEmail = ''; }
+    }
+
+    async function loadRecords() {
+      const [w, i, k, f] = await Promise.all([
+        supabaseClient.from('staff_warnings').select('*').eq('profile_id', staffId).order('issued_date', { ascending: false }),
+        supabaseClient.from('incident_reports').select('*').eq('profile_id', staffId).order('incident_date', { ascending: false }),
+        supabaseClient.from('staff_kpis').select('*').eq('profile_id', staffId).order('created_at', { ascending: false }),
+        supabaseClient.from('staff_files').select('*').eq('profile_id', staffId).order('created_at', { ascending: false }),
+      ]);
+      const firstErr = [w, i, k, f].find(r => r.error);
+      if (firstErr) throw new Error(firstErr.error.message + ' - has migration 147 been run in Supabase?');
+      warnings = w.data || []; incidents = i.data || []; kpis = k.data || []; files = f.data || [];
+    }
+
+    // ---------- Shell ----------
+    function renderShell() {
+      const initials = (person.full_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+      document.title = `${person.full_name || 'Staff'} - Thomson Energy`;
+      document.getElementById('content').innerHTML = `
+        <div class="staff-head">
+          ${person.photo_url ? `<img class="staff-avatar" src="${escapeHtml(person.photo_url)}" alt="" />` : `<div class="staff-avatar-fallback">${escapeHtml(initials)}</div>`}
+          <div style="flex:1; min-width:200px;">
+            <h1 style="margin:0;">${escapeHtml(person.full_name || 'Unnamed')}</h1>
+            <p class="subtitle" style="margin:2px 0 0;">${escapeHtml(person.job_title || ROLE_LABELS[person.role] || person.role)}
+              &middot; <span class="badge draft">${escapeHtml(ROLE_LABELS[person.role] || person.role)}</span>
+              ${person.active ? '' : ' &middot; <span class="badge red">Inactive</span>'}</p>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="secondary" id="head-new-warning">New written warning</button>
+            <button type="button" class="secondary" id="head-new-incident">Lodge incident report</button>
+            ${myRole === 'admin' ? `<a class="btn secondary" href="/settings.html?profile=${encodeURIComponent(staffId)}">Edit profile &amp; contract</a>` : ''}
+          </div>
+        </div>
+
+        <div class="settings-tabs" id="staff-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
+          <button class="settings-tab active" data-panel="overview">Overview</button>
+          <button class="settings-tab" data-panel="documents">Documents</button>
+          <button class="settings-tab" data-panel="photos">Photos</button>
+          <button class="settings-tab" data-panel="warnings">Warnings<span class="tab-count" id="count-warnings"></span></button>
+          <button class="settings-tab" data-panel="incidents">Incidents<span class="tab-count" id="count-incidents"></span></button>
+          <button class="settings-tab" data-panel="kpis">KPIs</button>
+        </div>
+
+        <div class="settings-panel active" id="panel-overview"></div>
+        <div class="settings-panel" id="panel-documents">
+          <div class="card">
+            <h2>Employment documents</h2>
+            <p class="subtitle" style="margin-bottom:12px;">Generate a document from this person's record, or print a blank template to fill in by hand.</p>
+            <div id="employment-docs"></div>
+          </div>
+          <div class="card">
+            <h2>Signed onboarding documents</h2>
+            <div id="signed-docs-list"><p class="subtitle">Loading...</p></div>
+          </div>
+          <div class="card">
+            <h2>HR files</h2>
+            <p class="subtitle" style="margin-bottom:12px;">Certificates, references, medical certificates, signed letters, anything else for their personnel file. Only admin and finance can open these.</p>
+            <div id="doc-folder-pills" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;"></div>
+            <div id="hr-files-list"></div>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
+              <select id="doc-folder-select" style="flex:1; min-width:150px;"></select>
+              <span class="subtitle">or</span>
+              <input id="doc-new-folder" placeholder="New folder name" style="flex:1; min-width:150px;" />
+            </div>
+            <input type="file" id="doc-file-input" multiple style="margin-top:8px;" />
+            <div id="doc-upload-msg"></div>
+          </div>
+        </div>
+        <div class="settings-panel" id="panel-photos">
+          <div class="card">
+            <h2>Photos</h2>
+            <p class="subtitle" style="margin-bottom:12px;">ID photos, PPE or uniform checks, vehicle condition, incident photos. Private to admin and finance.</p>
+            <input type="file" id="photo-file-input" accept="image/*" multiple />
+            <div id="photo-upload-msg"></div>
+            <div id="photos-list" class="photo-grid" style="margin-top:14px;"></div>
+          </div>
+        </div>
+        <div class="settings-panel" id="panel-warnings">
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+              <h2 style="margin:0;">Written warnings</h2>
+              <div><button type="button" class="secondary" id="blank-warning-btn">Print blank template</button> <button type="button" id="new-warning-btn">+ New warning</button></div>
+            </div>
+            <p class="subtitle" style="margin-bottom:12px;">Draft it, meet with them (they can bring a support person), record their response, then issue and print it. Once they've signed, upload the signed copy against it.</p>
+            <div id="warnings-list"></div>
+          </div>
+        </div>
+        <div class="settings-panel" id="panel-incidents">
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+              <h2 style="margin:0;">Incident and injury reports (WHS Form 10)</h2>
+              <div><button type="button" class="secondary" id="blank-incident-btn">Print blank Form 10</button> <button type="button" id="new-incident-btn">+ Lodge incident report</button></div>
+            </div>
+            <p class="subtitle" style="margin-bottom:12px;">Serious injuries, illnesses and dangerous incidents must be reported to SafeWork NSW straight away on <a href="tel:131050">13 10 50</a>.</p>
+            <div id="incidents-list"></div>
+          </div>
+        </div>
+        <div class="settings-panel" id="panel-kpis">
+          <div class="card">
+            <h2>At a glance</h2>
+            <div id="kpi-stats" class="stat-tiles"><p class="subtitle">Loading...</p></div>
+          </div>
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <h2 style="margin:0;">KPIs</h2>
+              <button type="button" id="new-kpi-btn">+ Add KPI</button>
+            </div>
+            <div id="kpis-list"></div>
+          </div>
+        </div>`;
+
+      document.querySelectorAll('#staff-tabs .settings-tab').forEach(btn => btn.addEventListener('click', () => showTab(btn.dataset.panel)));
+      document.getElementById('head-new-warning').addEventListener('click', () => openWarningEditor(null));
+      document.getElementById('head-new-incident').addEventListener('click', () => openIncidentEditor(null));
+      document.getElementById('new-warning-btn').addEventListener('click', () => openWarningEditor(null));
+      document.getElementById('new-incident-btn').addEventListener('click', () => openIncidentEditor(null));
+      document.getElementById('blank-warning-btn').addEventListener('click', () => printHrDocument(writtenWarningHtml({}, {}, company)));
+      document.getElementById('blank-incident-btn').addEventListener('click', () => printHrDocument(incidentReportHtml({}, company)));
+      document.getElementById('new-kpi-btn').addEventListener('click', () => openKpiEditor(null));
+      document.getElementById('doc-file-input').addEventListener('change', uploadHrFiles);
+      document.getElementById('photo-file-input').addEventListener('change', uploadPhotosToProfile);
+
+      const tab = new URLSearchParams(location.search).get('tab');
+      if (tab && document.getElementById('panel-' + tab)) showTab(tab);
+    }
+
+    function showTab(panel) {
+      document.querySelectorAll('#staff-tabs .settings-tab').forEach(b => b.classList.toggle('active', b.dataset.panel === panel));
+      document.querySelectorAll('.settings-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + panel));
+      const url = new URL(location.href); url.searchParams.set('tab', panel); history.replaceState(null, '', url);
+    }
+
+    function renderCounts() {
+      const activeWarnings = warnings.filter(w => w.status !== 'withdrawn' && w.status !== 'draft').length;
+      document.getElementById('count-warnings').textContent = activeWarnings || '';
+      document.getElementById('count-warnings').style.display = activeWarnings ? '' : 'none';
+      const openIncidents = incidents.filter(i => i.status === 'open').length;
+      document.getElementById('count-incidents').textContent = incidents.length || '';
+      document.getElementById('count-incidents').style.display = incidents.length ? '' : 'none';
+      if (openIncidents) document.getElementById('count-incidents').title = `${openIncidents} open`;
+    }
+
+    // ---------- Overview ----------
+    function serviceLength(start) {
+      if (!start) return '';
+      const months = Math.floor((Date.now() - new Date(start + 'T00:00:00')) / (30.44 * 86400000));
+      if (months < 0) return 'starts soon';
+      const y = Math.floor(months / 12), m = months % 12;
+      return [y ? `${y} yr${y === 1 ? '' : 's'}` : '', m || !y ? `${m} mth${m === 1 ? '' : 's'}` : ''].filter(Boolean).join(' ');
+    }
+
+    function renderOverview() {
+      const p = person;
+      const contractBadge = p.contract ? `<span class="badge ${p.contract.status === 'signed' ? 'accepted' : p.contract.status === 'ready_to_sign' ? 'sent' : 'draft'}">${p.contract.status.replace(/_/g, ' ')}</span>` : '<span class="subtitle">Not generated</span>';
+      const activeWarnings = warnings.filter(w => w.status === 'issued' || w.status === 'acknowledged');
+      const latestWarning = activeWarnings[0];
+      document.getElementById('panel-overview').innerHTML = `
+        <div class="grid cols-2" style="align-items:start;">
+          <div class="card" style="margin:0;">
+            <h2>Contact &amp; employment</h2>
+            <dl class="kv">
+              <dt>Mobile</dt><dd>${p.mobile_number ? `<a class="link-quiet" href="tel:${escapeHtml(p.mobile_number)}">${escapeHtml(p.mobile_number)}</a>` : '-'}</dd>
+              <dt>Email</dt><dd>${staffEmail ? `<a class="link-quiet" href="mailto:${escapeHtml(staffEmail)}">${escapeHtml(staffEmail)}</a>` : '-'}</dd>
+              <dt>Position</dt><dd>${escapeHtml(p.job_title || '-')}</dd>
+              <dt>Employment type</dt><dd>${EMPLOYMENT_LABELS[p.employment_type] || '-'}</dd>
+              <dt>Start date</dt><dd>${fmtDate(p.employment_start_date)}${p.employment_start_date ? ` <span class="subtitle">(${serviceLength(p.employment_start_date)})</span>` : ''}</dd>
+              <dt>Pay type</dt><dd>${p.pay_type === 'salary' ? 'Salary' : 'Hourly'}</dd>
+              <dt>Company vehicle</dt><dd>${p.has_company_vehicle ? 'Yes' : 'No'}</dd>
+              <dt>Probation</dt><dd>${p.has_probationary_period === false ? 'No' : 'Yes'}</dd>
+            </dl>
+          </div>
+          <div class="card" style="margin:0;">
+            <h2>Personal</h2>
+            <dl class="kv">
+              <dt>Date of birth</dt><dd>${fmtDate(p.date_of_birth)}</dd>
+              <dt>Address</dt><dd>${escapeHtml(p.address_full || '-')}</dd>
+              <dt>Emergency contact</dt><dd>${escapeHtml(p.emergency_contact_name || '-')}${p.emergency_contact_relationship ? ` <span class="subtitle">(${escapeHtml(p.emergency_contact_relationship)})</span>` : ''}</dd>
+              <dt>Emergency phone</dt><dd>${p.emergency_contact_phone ? `<a class="link-quiet" href="tel:${escapeHtml(p.emergency_contact_phone)}">${escapeHtml(p.emergency_contact_phone)}</a>` : '-'}</dd>
+            </dl>
+            ${p.notes ? `<p class="subtitle" style="margin:12px 0 4px;">Notes</p><p style="white-space:pre-wrap; margin:0;">${escapeHtml(p.notes)}</p>` : ''}
+          </div>
+          <div class="card" style="margin:0;">
+            <h2>Onboarding &amp; payroll</h2>
+            <dl class="kv">
+              <dt>Onboarding</dt><dd>${p.onboarding_completed_at ? `Completed ${fmtDate(p.onboarding_completed_at)}` : '<span class="badge amber">Not finished</span>'}</dd>
+              <dt>Employment contract</dt><dd>${contractBadge}</dd>
+              <dt>Xero Payroll</dt><dd>${escapeHtml(p.xero_payroll_status || '-')}</dd>
+            </dl>
+          </div>
+          <div class="card" style="margin:0;">
+            <h2>HR summary</h2>
+            <dl class="kv">
+              <dt>Written warnings</dt><dd>${activeWarnings.length ? `${activeWarnings.length} on file &middot; latest ${escapeHtml(WARNING_LEVEL_LABELS[latestWarning.warning_level].toLowerCase())} ${fmtDate(latestWarning.issued_date)}` : 'None'}</dd>
+              <dt>Incident reports</dt><dd>${incidents.length ? `${incidents.length} (${incidents.filter(i => i.status === 'open').length} open)` : 'None'}</dd>
+              <dt>KPIs in progress</dt><dd>${kpis.filter(k => k.status === 'active').length || 'None'}</dd>
+            </dl>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Licences</h2>
+          ${p.licences.length ? `<table class="responsive-stack"><thead><tr><th>Licence</th><th>Number</th><th>Expiry</th><th></th></tr></thead><tbody>
+            ${p.licences.map(l => `<tr>
+              <td data-label="Licence">${escapeHtml(l.licence_name)}</td>
+              <td data-label="Number">${escapeHtml(l.licence_number || '-')}</td>
+              <td data-label="Expiry">${expiryBadge(l.expiry_date)}</td>
+              <td data-label="">${l.file_path ? `<button type="button" class="secondary lic-view" data-path="${escapeHtml(l.file_path)}" data-title="${escapeHtml(l.licence_name)}" style="font-size:12px; padding:4px 10px;">View file</button>` : '<span class="subtitle" style="font-size:12px;">No file</span>'}</td>
+            </tr>`).join('')}</tbody></table>` : '<p class="subtitle">No licences recorded. Add them on the Team page.</p>'}
+        </div>`;
+      document.querySelectorAll('#panel-overview .lic-view').forEach(b => b.addEventListener('click', async () => {
+        try { await viewStoredFile(b.dataset.path, b.dataset.title); } catch (err) { alert(err.message); }
+      }));
+    }
+
+    // ---------- Documents ----------
+    function renderEmploymentDocs() {
+      const p = person;
+      const contractLine = p.contract
+        ? `Employment contract: <span class="badge ${p.contract.status === 'signed' ? 'accepted' : p.contract.status === 'ready_to_sign' ? 'sent' : 'draft'}">${p.contract.status.replace(/_/g, ' ')}</span>`
+        : 'Employment contract: <span class="subtitle">not generated yet</span>';
+      document.getElementById('employment-docs').innerHTML = `
+        <div class="project-list-item">
+          <div><div class="name">${contractLine}</div><div class="meta">Generated from the contract template using their employment details, then signed by them in onboarding.</div></div>
+          <div class="row-actions" style="white-space:nowrap;">${myRole === 'admin' ? `<a class="btn secondary" href="/settings.html?profile=${encodeURIComponent(staffId)}">${p.contract ? 'Open contract' : 'Generate contract'}</a>` : '<span class="subtitle" style="font-size:12px;">Admin only</span>'}</div>
+        </div>
+        <div class="project-list-item">
+          <div><div class="name">Written warning</div><div class="meta">Letter on company letterhead with acknowledgement and witness signature blocks.</div></div>
+          <div class="row-actions" style="white-space:nowrap;"><button type="button" class="secondary" id="doc-blank-warning">Blank</button><button type="button" id="doc-new-warning">Create</button></div>
+        </div>
+        <div class="project-list-item">
+          <div><div class="name">Incident and injury report (WHS Form 10)</div><div class="meta">SafeWork NSW Form 10, prefilled with their details.</div></div>
+          <div class="row-actions" style="white-space:nowrap;"><button type="button" class="secondary" id="doc-blank-incident">Blank</button><button type="button" id="doc-new-incident">Create</button></div>
+        </div>`;
+      document.getElementById('doc-blank-warning').addEventListener('click', () => printHrDocument(writtenWarningHtml({}, {}, company)));
+      document.getElementById('doc-new-warning').addEventListener('click', () => openWarningEditor(null));
+      document.getElementById('doc-blank-incident').addEventListener('click', () => printHrDocument(incidentReportHtml({}, company)));
+      document.getElementById('doc-new-incident').addEventListener('click', () => openIncidentEditor(null));
+    }
+
+    async function loadSignedDocs() {
+      const el = document.getElementById('signed-docs-list');
+      const { data: sigs, error } = await supabaseClient.from('onboarding_document_signatures')
+        .select('id, document_title_snapshot, document_body_snapshot, signature_data_url, signed_by_name, signed_at, file_path')
+        .eq('profile_id', staffId).order('signed_at', { ascending: false });
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      if (!sigs.length) { el.innerHTML = '<p class="subtitle">Nothing signed yet.</p>'; return; }
+      el.innerHTML = sigs.map(s => `
+        <div class="project-list-item">
+          <div><div class="name">${escapeHtml(s.document_title_snapshot)}</div>
+            <div class="meta">Signed ${fmtDate(s.signed_at)} as ${escapeHtml(s.signed_by_name)}</div></div>
+          <div class="row-actions" style="white-space:nowrap;">
+            ${s.file_path ? `<button type="button" class="secondary sig-pdf" data-id="${s.id}">View PDF</button>` : ''}
+            <button type="button" class="secondary sig-view" data-id="${s.id}">View</button>
+          </div>
+        </div>`).join('');
+      el.querySelectorAll('.sig-pdf').forEach(b => b.addEventListener('click', () => {
+        const s = sigs.find(x => x.id === b.dataset.id); openPdfViewer(s.file_path, s.document_title_snapshot);
+      }));
+      el.querySelectorAll('.sig-view').forEach(b => b.addEventListener('click', () => {
+        const s = sigs.find(x => x.id === b.dataset.id);
+        const o = openModal(`
+          <h2>${escapeHtml(s.document_title_snapshot)}</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Signed ${new Date(s.signed_at).toLocaleString('en-AU')} as ${escapeHtml(s.signed_by_name)}, shown exactly as it was at the time.</p>
+          <div style="white-space:pre-wrap; line-height:1.6; max-height:50vh; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px;">${escapeHtml(s.document_body_snapshot)}</div>
+          ${s.signature_data_url ? `<img src="${s.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
+          <div style="margin-top:14px;"><button type="button" class="secondary close-btn">Close</button></div>`);
+        o.querySelector('.close-btn').addEventListener('click', () => o.remove());
+      }));
+    }
+
+    let activeFolder = 'All';
+    function renderHrFiles() {
+      const docs = files.filter(f => f.kind === 'document');
+      const folders = [...new Set(['General', ...docs.map(d => d.folder)])].sort();
+      document.getElementById('doc-folder-select').innerHTML = folders.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
+      document.getElementById('doc-folder-pills').innerHTML = ['All', ...folders.filter(f => docs.some(d => d.folder === f))].map(f =>
+        `<button type="button" class="${f === activeFolder ? '' : 'secondary'} folder-pill" data-folder="${escapeHtml(f)}" style="font-size:12px; padding:4px 10px;">${escapeHtml(f)}</button>`).join('');
+      document.querySelectorAll('.folder-pill').forEach(b => b.addEventListener('click', () => { activeFolder = b.dataset.folder; renderHrFiles(); }));
+      const shown = docs.filter(d => activeFolder === 'All' || d.folder === activeFolder);
+      const el = document.getElementById('hr-files-list');
+      el.innerHTML = shown.length ? shown.map(d => `
+        <div class="project-list-item">
+          <div><div class="name">${escapeHtml(d.title || d.file_name)}</div><div class="meta">${escapeHtml(d.folder)} &middot; added ${fmtDate(d.created_at)}</div></div>
+          <div class="row-actions" style="white-space:nowrap;">
+            <button type="button" class="secondary file-view" data-id="${d.id}">View</button>
+            <button type="button" class="secondary file-del" data-id="${d.id}">Delete</button>
+          </div>
+        </div>`).join('') : '<p class="subtitle">No files yet.</p>';
+      el.querySelectorAll('.file-view').forEach(b => b.addEventListener('click', async () => {
+        const d = files.find(x => x.id === b.dataset.id);
+        try { await viewStaffFile(d.file_path, d.title || d.file_name); } catch (err) { alert(err.message); }
+      }));
+      el.querySelectorAll('.file-del').forEach(b => b.addEventListener('click', () => deleteStaffFile(b.dataset.id)));
+    }
+
+    async function deleteStaffFile(id) {
+      const f = files.find(x => x.id === id);
+      if (!confirm(`Delete ${f.title || f.file_name}? This cannot be undone.`)) return;
+      const { error } = await supabaseClient.from('staff_files').delete().eq('id', id);
+      if (error) { alert(error.message); return; }
+      await supabaseClient.storage.from(STAFF_BUCKET).remove([f.file_path]);
+      files = files.filter(x => x.id !== id);
+      f.kind === 'photo' ? renderPhotos() : renderHrFiles();
+    }
+
+    async function uploadHrFiles(e) {
+      const list = [...e.target.files];
+      if (!list.length) return;
+      const msg = document.getElementById('doc-upload-msg');
+      const folder = document.getElementById('doc-new-folder').value.trim() || document.getElementById('doc-folder-select').value || 'General';
+      try {
+        for (let n = 0; n < list.length; n++) {
+          msg.innerHTML = `<p class="subtitle">Uploading ${n + 1} of ${list.length}...</p>`;
+          const path = await uploadStaffFile(list[n], 'documents');
+          const { data, error } = await supabaseClient.from('staff_files').insert({
+            profile_id: staffId, kind: 'document', folder, title: list[n].name, file_path: path, file_name: list[n].name, uploaded_by: me.id,
+          }).select().single();
+          if (error) throw error;
+          files.unshift(data);
+        }
+        msg.innerHTML = '<div class="success-box">Uploaded.</div>';
+        document.getElementById('doc-new-folder').value = '';
+      } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+      e.target.value = '';
+      renderHrFiles();
+    }
+
+    // ---------- Photos ----------
+    async function renderPhotos() {
+      const el = document.getElementById('photos-list');
+      const photos = files.filter(f => f.kind === 'photo');
+      if (!photos.length) { el.innerHTML = '<p class="subtitle">No photos yet.</p>'; return; }
+      const { data: signed } = await supabaseClient.storage.from(STAFF_BUCKET).createSignedUrls(photos.map(p => p.file_path), 3600);
+      const urls = photos.map(p => (signed || []).find(s => s.path === p.file_path)?.signedUrl || '');
+      el.innerHTML = photos.map((p, i) => `<div class="ph" data-i="${i}"><img src="${urls[i]}" alt="" loading="lazy" /><button type="button" class="secondary ph-del" data-id="${p.id}">&times;</button></div>`).join('');
+      el.querySelectorAll('.ph').forEach(d => d.addEventListener('click', (e) => {
+        if (e.target.closest('.ph-del')) return;
+        openPhotoLightbox(urls.filter(Boolean), Number(d.dataset.i));
+      }));
+      el.querySelectorAll('.ph-del').forEach(b => b.addEventListener('click', () => deleteStaffFile(b.dataset.id)));
+    }
+
+    async function uploadPhotosToProfile(e) {
+      const list = [...e.target.files];
+      if (!list.length) return;
+      const msg = document.getElementById('photo-upload-msg');
+      try {
+        for (let n = 0; n < list.length; n++) {
+          msg.innerHTML = `<p class="subtitle">Uploading ${n + 1} of ${list.length}...</p>`;
+          const compressed = await compressImage(list[n]);
+          const file = compressed instanceof File ? compressed : new File([compressed], list[n].name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+          const path = await uploadStaffFile(file, 'photos');
+          const { data, error } = await supabaseClient.from('staff_files').insert({
+            profile_id: staffId, kind: 'photo', folder: 'Photos', title: list[n].name, file_path: path, file_name: file.name, uploaded_by: me.id,
+          }).select().single();
+          if (error) throw error;
+          files.unshift(data);
+        }
+        msg.innerHTML = '';
+      } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+      e.target.value = '';
+      renderPhotos();
+    }
+
+    // ---------- Warnings ----------
+    function renderWarnings() {
+      const el = document.getElementById('warnings-list');
+      if (!warnings.length) { el.innerHTML = '<p class="subtitle">No written warnings on file.</p>'; return; }
+      el.innerHTML = warnings.map(w => `
+        <div class="project-list-item">
+          <div>
+            <div class="name">${escapeHtml(WARNING_LEVEL_LABELS[w.warning_level])}${w.subject ? ': ' + escapeHtml(w.subject) : ''}</div>
+            <div class="meta">${escapeHtml(WARNING_CATEGORY_LABELS[w.category])} &middot; ${fmtDate(w.issued_date)}
+              &middot; <span class="badge ${WARNING_STATUS_BADGE[w.status]}">${w.status}</span>
+              ${w.review_date ? ` &middot; review ${fmtDate(w.review_date)}` : ''}
+              ${w.refused_to_sign ? ' &middot; declined to sign' : ''}</div>
+          </div>
+          <div class="row-actions" style="white-space:nowrap;">
+            <button type="button" class="secondary w-print" data-id="${w.id}">Print / PDF</button>
+            ${w.signed_file_path ? `<button type="button" class="secondary w-signed" data-id="${w.id}">Signed copy</button>` : `<button type="button" class="secondary w-upload" data-id="${w.id}">Upload signed</button>`}
+            <button type="button" class="secondary w-edit" data-id="${w.id}">Edit</button>
+            <button type="button" class="secondary w-del" data-id="${w.id}">Delete</button>
+          </div>
+        </div>`).join('');
+      const find = (b) => warnings.find(w => w.id === b.dataset.id);
+      el.querySelectorAll('.w-print').forEach(b => b.addEventListener('click', () => printHrDocument(writtenWarningHtml(find(b), person, company))));
+      el.querySelectorAll('.w-edit').forEach(b => b.addEventListener('click', () => openWarningEditor(find(b))));
+      el.querySelectorAll('.w-signed').forEach(b => b.addEventListener('click', async () => {
+        const w = find(b); try { await viewStaffFile(w.signed_file_path, 'Signed warning'); } catch (err) { alert(err.message); }
+      }));
+      el.querySelectorAll('.w-upload').forEach(b => b.addEventListener('click', () => uploadSignedWarning(find(b))));
+      el.querySelectorAll('.w-del').forEach(b => b.addEventListener('click', async () => {
+        const w = find(b);
+        if (!confirm('Delete this warning? Usually it is better to mark it Withdrawn so the record stays. Delete anyway?')) return;
+        const { error } = await supabaseClient.from('staff_warnings').delete().eq('id', w.id);
+        if (error) { alert(error.message); return; }
+        if (w.signed_file_path) await supabaseClient.storage.from(STAFF_BUCKET).remove([w.signed_file_path]);
+        warnings = warnings.filter(x => x.id !== w.id); refreshAll();
+      }));
+    }
+
+    function uploadSignedWarning(w) {
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = '.pdf,.jpg,.jpeg,.png,.webp';
+      input.addEventListener('change', async () => {
+        const file = input.files[0]; if (!file) return;
+        try {
+          const path = await uploadStaffFile(file, 'warnings');
+          const updates = { signed_file_path: path, signed_file_name: file.name, status: 'acknowledged', acknowledged_at: w.acknowledged_at || new Date().toISOString().slice(0, 10), updated_at: new Date().toISOString() };
+          const { error } = await supabaseClient.from('staff_warnings').update(updates).eq('id', w.id);
+          if (error) throw error;
+          Object.assign(w, updates); refreshAll();
+        } catch (err) { alert(err.message); }
+      });
+      input.click();
+    }
+
+    // Suggested level from the last 12 months of issued warnings.
+    function suggestedLevel() {
+      const yearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      const recent = warnings.filter(w => (w.status === 'issued' || w.status === 'acknowledged') && w.issued_date >= yearAgo);
+      if (recent.some(w => w.warning_level === 'second' || w.warning_level === 'final')) return 'final';
+      return recent.length ? 'second' : 'first';
+    }
+
+    function openWarningEditor(existing) {
+      const w = existing || {
+        warning_level: suggestedLevel(), category: 'conduct', status: 'draft',
+        issued_date: new Date().toISOString().slice(0, 10), meeting_date: new Date().toISOString().slice(0, 10),
+        issued_by_name: me.full_name || '', issued_by_position: me.job_title || '',
+        previous_discussions: warnings.filter(x => x.status === 'issued' || x.status === 'acknowledged')
+          .map(x => `${WARNING_LEVEL_LABELS[x.warning_level]} issued ${fmtDate(x.issued_date)}${x.subject ? ' (' + x.subject + ')' : ''}.`).join('\n'),
+      };
+      const opt = (map, cur) => Object.entries(map).map(([k, v]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${v}</option>`).join('');
+      const o = openModal(`
+        <h2>${existing ? 'Edit' : 'New'} written warning - ${escapeHtml(person.full_name)}</h2>
+        ${!existing && w.warning_level !== 'first' ? `<p class="subtitle">Suggested ${escapeHtml(WARNING_LEVEL_LABELS[w.warning_level].toLowerCase())} because of earlier warnings in the last 12 months. Change it if that's not right.</p>` : ''}
+        <div class="grid cols-3">
+          <div><label style="margin-top:0">Level</label><select id="w-level">${opt(WARNING_LEVEL_LABELS, w.warning_level)}</select></div>
+          <div><label style="margin-top:0">Category</label><select id="w-category">${opt(WARNING_CATEGORY_LABELS, w.category)}</select></div>
+          <div><label style="margin-top:0">Status</label><select id="w-status">${opt({ draft: 'Draft', issued: 'Issued', acknowledged: 'Acknowledged (signed)', withdrawn: 'Withdrawn' }, w.status)}</select></div>
+        </div>
+        <label>Subject (short)</label><input id="w-subject" value="${escapeHtml(w.subject || '')}" placeholder="e.g. Not wearing required PPE on site" />
+        <div class="grid cols-3">
+          <div><label>Date of incident</label><input type="date" id="w-incident-date" value="${w.incident_date || ''}" /></div>
+          <div><label>Meeting date</label><input type="date" id="w-meeting-date" value="${w.meeting_date || ''}" /></div>
+          <div><label>Letter date</label><input type="date" id="w-issued-date" value="${w.issued_date || ''}" /></div>
+        </div>
+        <label>What happened / the concern (facts only: dates, times, places, who saw it)</label>
+        <textarea id="w-details" style="min-height:110px;">${escapeHtml(w.details || '')}</textarea>
+        <label>Policy, procedure or expectation not met</label>
+        <textarea id="w-policy" placeholder="e.g. Code of Conduct section 3, Company Property Policy, site SWMS">${escapeHtml(w.policy_breached || '')}</textarea>
+        <label>Previous discussions or warnings</label>
+        <textarea id="w-previous">${escapeHtml(w.previous_discussions || '')}</textarea>
+        <label>Their response at the meeting</label>
+        <textarea id="w-response">${escapeHtml(w.employee_response || '')}</textarea>
+        <label>What has to change</label>
+        <textarea id="w-improvement">${escapeHtml(w.expected_improvement || '')}</textarea>
+        <label>Support the company will provide</label>
+        <textarea id="w-support" placeholder="e.g. Refresher training, buddy on site, check-ins every Friday">${escapeHtml(w.support_offered || '')}</textarea>
+        <label>Consequences (leave blank for the standard wording for this level)</label>
+        <textarea id="w-consequences" placeholder="${escapeHtml(defaultWarningConsequences(w.warning_level))}">${escapeHtml(w.consequences || '')}</textarea>
+        <div class="grid cols-3">
+          <div><label>Review date</label><input type="date" id="w-review-date" value="${w.review_date || ''}" /></div>
+          <div><label>Support person / witness</label><input id="w-support-person" value="${escapeHtml(w.support_person || '')}" /></div>
+          <div><label>Date they signed</label><input type="date" id="w-ack" value="${w.acknowledged_at || ''}" /></div>
+        </div>
+        <div class="grid cols-2">
+          <div><label>Issued by</label><input id="w-by-name" value="${escapeHtml(w.issued_by_name || '')}" /></div>
+          <div><label>Their position</label><input id="w-by-position" value="${escapeHtml(w.issued_by_position || '')}" /></div>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:12px;"><input type="checkbox" id="w-refused" style="width:auto;" ${w.refused_to_sign ? 'checked' : ''} /> Employee declined to sign</label>
+        <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" id="w-save">Save</button>
+          <button type="button" class="secondary" id="w-save-print">Save &amp; print</button>
+          <button type="button" class="secondary" id="w-cancel">Cancel</button>
+        </div>
+        <div id="w-msg"></div>`, 760);
+      o.querySelector('#w-level').addEventListener('change', (e) => { o.querySelector('#w-consequences').placeholder = defaultWarningConsequences(e.target.value); });
+      o.querySelector('#w-cancel').addEventListener('click', () => o.remove());
+      const save = async (andPrint) => {
+        const payload = {
+          profile_id: staffId,
+          warning_level: val(o, '#w-level'), category: val(o, '#w-category'), status: val(o, '#w-status'),
+          subject: val(o, '#w-subject'), details: val(o, '#w-details'),
+          incident_date: orNull(val(o, '#w-incident-date')), meeting_date: orNull(val(o, '#w-meeting-date')), issued_date: val(o, '#w-issued-date') || new Date().toISOString().slice(0, 10),
+          policy_breached: orNull(val(o, '#w-policy')), previous_discussions: orNull(val(o, '#w-previous')), employee_response: orNull(val(o, '#w-response')),
+          expected_improvement: orNull(val(o, '#w-improvement')), support_offered: orNull(val(o, '#w-support')), consequences: orNull(val(o, '#w-consequences')),
+          review_date: orNull(val(o, '#w-review-date')), support_person: orNull(val(o, '#w-support-person')), acknowledged_at: orNull(val(o, '#w-ack')),
+          issued_by_name: orNull(val(o, '#w-by-name')), issued_by_position: orNull(val(o, '#w-by-position')),
+          refused_to_sign: o.querySelector('#w-refused').checked, updated_at: new Date().toISOString(),
+        };
+        if (!payload.subject && !payload.details) { o.querySelector('#w-msg').innerHTML = '<div class="error-box">Add a subject or describe the concern.</div>'; return; }
+        if (!existing) payload.issued_by = me.id;
+        const q = existing
+          ? supabaseClient.from('staff_warnings').update(payload).eq('id', existing.id).select().single()
+          : supabaseClient.from('staff_warnings').insert(payload).select().single();
+        const { data, error } = await q;
+        if (error) { o.querySelector('#w-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        warnings = existing ? warnings.map(x => (x.id === data.id ? data : x)) : [data, ...warnings];
+        warnings.sort((a, b) => (b.issued_date || '').localeCompare(a.issued_date || ''));
+        o.remove(); refreshAll(); showTab('warnings');
+        if (andPrint) printHrDocument(writtenWarningHtml(data, person, company));
+      };
+      o.querySelector('#w-save').addEventListener('click', () => save(false));
+      o.querySelector('#w-save-print').addEventListener('click', () => save(true));
+    }
+
+    // ---------- Incidents (WHS Form 10) ----------
+    function renderIncidents() {
+      const el = document.getElementById('incidents-list');
+      if (!incidents.length) { el.innerHTML = '<p class="subtitle">No incident reports on file.</p>'; return; }
+      el.innerHTML = incidents.map(r => `
+        <div class="project-list-item">
+          <div>
+            <div class="name">${escapeHtml(INCIDENT_NATURE_LABELS[r.nature])}${r.injury_nature ? ': ' + escapeHtml(r.injury_nature) : ''}</div>
+            <div class="meta">${fmtDate(r.incident_date)}${r.site_location ? ' &middot; ' + escapeHtml(r.site_location) : ''}
+              &middot; <span class="badge ${r.status === 'open' ? 'amber' : 'accepted'}">${r.status}</span>
+              ${r.injured_name && r.injured_name !== person.full_name ? ` &middot; injured: ${escapeHtml(r.injured_name)}` : ''}</div>
+          </div>
+          <div class="row-actions" style="white-space:nowrap;">
+            <button type="button" class="secondary i-print" data-id="${r.id}">Print / PDF</button>
+            <button type="button" class="secondary i-edit" data-id="${r.id}">Edit</button>
+            <button type="button" class="secondary i-del" data-id="${r.id}">Delete</button>
+          </div>
+        </div>`).join('');
+      const find = (b) => incidents.find(r => r.id === b.dataset.id);
+      el.querySelectorAll('.i-print').forEach(b => b.addEventListener('click', () => printHrDocument(incidentReportHtml(find(b), company))));
+      el.querySelectorAll('.i-edit').forEach(b => b.addEventListener('click', () => openIncidentEditor(find(b))));
+      el.querySelectorAll('.i-del').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Delete this incident report? WHS records should normally be kept for at least 5 years. Delete anyway?')) return;
+        const { error } = await supabaseClient.from('incident_reports').delete().eq('id', b.dataset.id);
+        if (error) { alert(error.message); return; }
+        incidents = incidents.filter(x => x.id !== b.dataset.id); refreshAll();
+      }));
+    }
+
+    function openIncidentEditor(existing) {
+      const now = new Date();
+      const r = existing || {
+        nature: 'near_miss', status: 'open', incident_date: now.toISOString().slice(0, 10),
+        incident_time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+        injured_name: person.full_name, injured_address: person.address_full, injured_occupation: person.job_title,
+        injured_dob: person.date_of_birth, injured_phone: person.mobile_number,
+        injured_employer: (company && company.company_name) || HR_COMPANY_FALLBACK.company_name,
+        witnesses: [], body_locations: [],
+        completed_by_name: me.full_name, completed_by_position: me.job_title, completed_date: now.toISOString().slice(0, 10),
+      };
+      const witnesses = (r.witnesses || []).length ? r.witnesses : [{ name: '', contact: '' }];
+      const input = (id, v, type = 'text', extra = '') => `<input type="${type}" id="${id}" value="${escapeHtml(v || '')}" ${extra} />`;
+      const area = (id, v, ph = '') => `<textarea id="${id}" placeholder="${escapeHtml(ph)}">${escapeHtml(v || '')}</textarea>`;
+      const o = openModal(`
+        <h2>${existing ? 'Edit' : 'Lodge'} incident report (WHS Form 10)</h2>
+        <p class="subtitle">Filed against ${escapeHtml(person.full_name)}. If someone else was hurt (a visitor or subbie), change the injured person's details below.</p>
+
+        <div class="grid cols-3">
+          <div><label>Date of incident</label>${input('i-date', r.incident_date, 'date')}</div>
+          <div><label>Time</label>${input('i-time', r.incident_time ? String(r.incident_time).slice(0, 5) : '', 'time')}</div>
+          <div><label>Nature of incident</label><select id="i-nature">${Object.entries(INCIDENT_NATURE_LABELS).map(([k, v]) => `<option value="${k}" ${k === r.nature ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+        </div>
+        <label>Job / site (optional - search by job number, client or address)</label>
+        <input id="i-job-search" placeholder="Start typing..." autocomplete="off" />
+        <div id="i-job-results"></div>
+        <input type="hidden" id="i-project-id" value="${escapeHtml(r.project_id || '')}" />
+        <label>Exact site location where it happened</label>${input('i-location', r.site_location)}
+
+        <div class="form-section">Injured person</div>
+        <div class="grid cols-2">
+          <div><label style="margin-top:6px;">Name</label>${input('i-inj-name', r.injured_name)}</div>
+          <div><label style="margin-top:6px;">Occupation</label>${input('i-inj-occupation', r.injured_occupation)}</div>
+        </div>
+        <label>Address</label>${input('i-inj-address', r.injured_address)}
+        <div class="grid cols-3">
+          <div><label>Date of birth</label>${input('i-inj-dob', r.injured_dob, 'date')}</div>
+          <div><label>Telephone</label>${input('i-inj-phone', r.injured_phone)}</div>
+          <div><label>Employer</label>${input('i-inj-employer', r.injured_employer)}</div>
+        </div>
+        <label>Activity they were doing at the time</label>${area('i-activity', r.activity)}
+        <label>Nature of injury (eg fracture, burn, sprain, foreign body in eye)</label>${input('i-injury', r.injury_nature)}
+        <label>Body location of injury</label>
+        <div id="i-body">${BODY_LOCATIONS.map(b => `<label class="chip-check"><input type="checkbox" value="${b}" ${(r.body_locations || []).includes(b) ? 'checked' : ''} /> ${b}</label>`).join('')}</div>
+        ${input('i-body-notes', r.body_location_notes, 'text', 'placeholder="More detail, e.g. back of left hand, between thumb and finger"')}
+
+        <div class="form-section">Treatment</div>
+        <div class="grid cols-2">
+          <div><label style="margin-top:6px;">Treatment given on site</label>${input('i-treatment', r.treatment_on_site)}</div>
+          <div><label style="margin-top:6px;">Name of treating person</label>${input('i-treater', r.treating_person)}</div>
+        </div>
+        <div class="grid cols-3">
+          <div><label>Referred for further treatment?</label>${yesNoSelect('i-referral', r.referral)}</div>
+          <div><label>Doctor or hospital</label>${input('i-doctor', r.doctor_or_hospital)}</div>
+          <div><label>SafeWork NSW medical certificate received?</label>${yesNoSelect('i-cert', r.medical_cert_received)}</div>
+        </div>
+        <div class="grid cols-3">
+          <div><label>Injury management required?</label>${yesNoSelect('i-injmgmt', r.injury_management)}</div>
+          <div><label>Return to work coordinator notified?</label>${yesNoSelect('i-rtw-notified', r.rtw_coordinator_notified)}</div>
+          <div><label>Return to work coordinator</label>${input('i-rtw-name', r.rtw_coordinator_name)}</div>
+        </div>
+        <p class="subtitle" style="margin-top:6px;">Upload the medical certificate under Documents &gt; HR files (it stays private to admin and finance).</p>
+
+        <div class="form-section">Witnesses</div>
+        <div id="i-witnesses">${witnesses.map(w => `<div class="grid cols-2 i-witness" style="margin-top:6px;"><input class="wn" placeholder="Witness name" value="${escapeHtml(w.name || '')}" /><input class="wc" placeholder="Witness contact" value="${escapeHtml(w.contact || '')}" /></div>`).join('')}</div>
+        <button type="button" class="secondary" id="i-add-witness" style="font-size:12px; padding:5px 10px; margin-top:8px;">+ Add witness</button>
+
+        <div class="form-section">Incident details</div>
+        <label style="margin-top:6px;">Description of incident</label>${area('i-description', r.description, 'What happened, in order, in plain words')}
+        <label>Details of damage to equipment or property</label>${area('i-damage', r.property_damage)}
+        <label>Immediate response actions (eg barricades, isolation of power) to stabilise the situation</label>${area('i-immediate', r.immediate_actions)}
+        <div class="grid cols-2">
+          <div><label>Name of person who received the report</label>${input('i-received-by', r.report_received_by)}</div>
+          <div><label>Their telephone</label>${input('i-received-phone', r.report_received_phone)}</div>
+        </div>
+
+        <div class="form-section">Reported to</div>
+        <div class="grid cols-3">
+          <div><label style="margin-top:6px;">Principal contractor?</label>${yesNoSelect('i-rep-pc', r.reported_principal_contractor)}</div>
+          <div style="grid-column: span 2;"><label style="margin-top:6px;">When, to whom, by whom</label>${input('i-rep-pc-details', r.reported_principal_contractor_details)}</div>
+          <div><label>SafeWork NSW (13 10 50)?</label>${yesNoSelect('i-rep-sw', r.reported_safework)}</div>
+          <div style="grid-column: span 2;"><label>When, to whom, by whom</label>${input('i-rep-sw-details', r.reported_safework_details)}</div>
+          <div><label>Workers compensation insurer?</label>${yesNoSelect('i-rep-ins', r.reported_insurer)}</div>
+          <div style="grid-column: span 2;"><label>Insurer and claim number</label>${input('i-rep-ins-details', r.reported_insurer_details)}</div>
+        </div>
+
+        <div class="form-section">Follow-up</div>
+        <label style="margin-top:6px;">Corrective actions (what will stop it happening again)</label>${area('i-corrective', r.corrective_actions)}
+        <label>Status</label><select id="i-status"><option value="open" ${r.status === 'open' ? 'selected' : ''}>Open</option><option value="closed" ${r.status === 'closed' ? 'selected' : ''}>Closed</option></select>
+
+        <div class="form-section">Completed by</div>
+        <div class="grid cols-3">
+          <div><label style="margin-top:6px;">Name</label>${input('i-by-name', r.completed_by_name)}</div>
+          <div><label style="margin-top:6px;">Position</label>${input('i-by-position', r.completed_by_position)}</div>
+          <div><label style="margin-top:6px;">Date</label>${input('i-by-date', r.completed_date, 'date')}</div>
+        </div>
+        <label>Signature (optional)</label>
+        ${r.completed_signature_data_url ? `<div id="i-sig-existing"><img src="${r.completed_signature_data_url}" style="max-width:220px; background:#fff; border-radius:6px; display:block;" /><button type="button" class="secondary" id="i-sig-redo" style="font-size:12px; padding:5px 10px; margin-top:6px;">Re-sign</button></div>` : ''}
+        <div id="i-sig-wrap" style="${r.completed_signature_data_url ? 'display:none;' : ''}">
+          <canvas id="i-sig" width="460" height="130" style="border:1px solid var(--border); border-radius:8px; background:#fff; touch-action:none; width:100%; max-width:460px; height:130px; display:block;"></canvas>
+          <button type="button" class="secondary" id="i-sig-clear" style="font-size:12px; padding:5px 10px; margin-top:6px;">Clear signature</button>
+        </div>
+
+        <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" id="i-save">Save</button>
+          <button type="button" class="secondary" id="i-save-print">Save &amp; print</button>
+          <button type="button" class="secondary" id="i-cancel">Cancel</button>
+        </div>
+        <div id="i-msg"></div>`, 820);
+
+      o.querySelector('#i-cancel').addEventListener('click', () => o.remove());
+      o.querySelector('#i-add-witness').addEventListener('click', () => o.querySelector('#i-witnesses').insertAdjacentHTML('beforeend',
+        '<div class="grid cols-2 i-witness" style="margin-top:6px;"><input class="wn" placeholder="Witness name" /><input class="wc" placeholder="Witness contact" /></div>'));
+
+      // Job search
+      const jobInput = o.querySelector('#i-job-search');
+      if (r.project_id) {
+        supabaseClient.from('projects').select('name, job_number').eq('id', r.project_id).maybeSingle().then(({ data }) => {
+          if (data) jobInput.value = `${data.job_number ? 'J' + data.job_number + ' - ' : ''}${data.name}`;
+        });
+      }
+      let jobTimer = null;
+      jobInput.addEventListener('input', () => {
+        clearTimeout(jobTimer);
+        if (!jobInput.value.trim()) { o.querySelector('#i-project-id').value = ''; o.querySelector('#i-job-results').innerHTML = ''; return; }
+        jobTimer = setTimeout(async () => {
+          const results = await searchProjects(jobInput.value, 8);
+          const box = o.querySelector('#i-job-results');
+          box.innerHTML = results.map(p => `<div class="project-list-item i-job-pick" data-id="${p.id}" data-addr="${escapeHtml(p.client_address || '')}" data-label="${escapeHtml((p.job_number ? 'J' + p.job_number + ' - ' : '') + p.name)}" style="cursor:pointer; padding:6px 4px;">
+            <div><div class="name" style="font-size:13px;">${p.job_number ? 'J' + p.job_number + ' - ' : ''}${escapeHtml(p.name)}</div><div class="meta">${escapeHtml(p.client_address || p.client_name || '')}</div></div></div>`).join('');
+          box.querySelectorAll('.i-job-pick').forEach(d => d.addEventListener('click', () => {
+            o.querySelector('#i-project-id').value = d.dataset.id;
+            jobInput.value = d.dataset.label;
+            if (!o.querySelector('#i-location').value && d.dataset.addr) o.querySelector('#i-location').value = d.dataset.addr;
+            box.innerHTML = '';
+          }));
+        }, 250);
+      });
+
+      // Signature pad, same pattern as onboarding.html
+      const canvas = o.querySelector('#i-sig');
+      const ctx = canvas.getContext('2d');
+      ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#111';
+      let drawing = false, hasSignature = false, keepExisting = !!r.completed_signature_data_url;
+      const pos = (e) => { const rect = canvas.getBoundingClientRect(); return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas.height / rect.height) }; };
+      canvas.addEventListener('pointerdown', (e) => { drawing = true; hasSignature = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+      canvas.addEventListener('pointermove', (e) => { if (!drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+      canvas.addEventListener('pointerup', () => { drawing = false; });
+      canvas.addEventListener('pointerleave', () => { drawing = false; });
+      o.querySelector('#i-sig-clear').addEventListener('click', () => { ctx.clearRect(0, 0, canvas.width, canvas.height); hasSignature = false; });
+      const redo = o.querySelector('#i-sig-redo');
+      if (redo) redo.addEventListener('click', () => { keepExisting = false; o.querySelector('#i-sig-existing').remove(); o.querySelector('#i-sig-wrap').style.display = ''; });
+
+      const save = async (andPrint) => {
+        const payload = {
+          profile_id: staffId,
+          project_id: orNull(val(o, '#i-project-id')),
+          incident_date: val(o, '#i-date') || new Date().toISOString().slice(0, 10),
+          incident_time: orNull(val(o, '#i-time')),
+          nature: val(o, '#i-nature'),
+          site_location: orNull(val(o, '#i-location')),
+          injured_name: orNull(val(o, '#i-inj-name')), injured_occupation: orNull(val(o, '#i-inj-occupation')),
+          injured_address: orNull(val(o, '#i-inj-address')), injured_dob: orNull(val(o, '#i-inj-dob')),
+          injured_phone: orNull(val(o, '#i-inj-phone')), injured_employer: orNull(val(o, '#i-inj-employer')),
+          activity: orNull(val(o, '#i-activity')), injury_nature: orNull(val(o, '#i-injury')),
+          body_locations: [...o.querySelectorAll('#i-body input:checked')].map(c => c.value),
+          body_location_notes: orNull(val(o, '#i-body-notes')),
+          treatment_on_site: orNull(val(o, '#i-treatment')), treating_person: orNull(val(o, '#i-treater')),
+          referral: yesNoVal(val(o, '#i-referral')), doctor_or_hospital: orNull(val(o, '#i-doctor')),
+          medical_cert_received: yesNoVal(val(o, '#i-cert')), injury_management: yesNoVal(val(o, '#i-injmgmt')),
+          rtw_coordinator_notified: yesNoVal(val(o, '#i-rtw-notified')), rtw_coordinator_name: orNull(val(o, '#i-rtw-name')),
+          witnesses: [...o.querySelectorAll('.i-witness')].map(d => ({ name: d.querySelector('.wn').value.trim(), contact: d.querySelector('.wc').value.trim() })).filter(w => w.name || w.contact),
+          description: orNull(val(o, '#i-description')), property_damage: orNull(val(o, '#i-damage')), immediate_actions: orNull(val(o, '#i-immediate')),
+          report_received_by: orNull(val(o, '#i-received-by')), report_received_phone: orNull(val(o, '#i-received-phone')),
+          reported_principal_contractor: yesNoVal(val(o, '#i-rep-pc')), reported_principal_contractor_details: orNull(val(o, '#i-rep-pc-details')),
+          reported_safework: yesNoVal(val(o, '#i-rep-sw')), reported_safework_details: orNull(val(o, '#i-rep-sw-details')),
+          reported_insurer: yesNoVal(val(o, '#i-rep-ins')), reported_insurer_details: orNull(val(o, '#i-rep-ins-details')),
+          corrective_actions: orNull(val(o, '#i-corrective')), status: val(o, '#i-status'),
+          completed_by_name: orNull(val(o, '#i-by-name')), completed_by_position: orNull(val(o, '#i-by-position')), completed_date: orNull(val(o, '#i-by-date')),
+          completed_signature_data_url: keepExisting ? r.completed_signature_data_url : (hasSignature ? canvas.toDataURL('image/png') : null),
+          updated_at: new Date().toISOString(),
+        };
+        if (!payload.description && !payload.injury_nature && !payload.property_damage) {
+          o.querySelector('#i-msg').innerHTML = '<div class="error-box">Describe the incident, the injury, or the damage before saving.</div>'; return;
+        }
+        if (!existing) payload.created_by = me.id;
+        const q = existing
+          ? supabaseClient.from('incident_reports').update(payload).eq('id', existing.id).select().single()
+          : supabaseClient.from('incident_reports').insert(payload).select().single();
+        const { data, error } = await q;
+        if (error) { o.querySelector('#i-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        incidents = existing ? incidents.map(x => (x.id === data.id ? data : x)) : [data, ...incidents];
+        incidents.sort((a, b) => (b.incident_date || '').localeCompare(a.incident_date || ''));
+        o.remove(); refreshAll(); showTab('incidents');
+        if (andPrint) printHrDocument(incidentReportHtml(data, company));
+      };
+      o.querySelector('#i-save').addEventListener('click', () => save(false));
+      o.querySelector('#i-save-print').addEventListener('click', () => save(true));
+    }
+
+    // ---------- KPIs ----------
+    async function loadKpiStats() {
+      const el = document.getElementById('kpi-stats');
+      const since90 = new Date(Date.now() - 90 * 86400000);
+      const since30 = new Date(Date.now() - 30 * 86400000);
+      const { data: entries, error } = await supabaseClient.from('time_entries')
+        .select('clock_in, clock_out, break_minutes, project_id, time_category')
+        .eq('staff_id', staffId).gte('clock_in', since90.toISOString());
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const hours = (list) => list.reduce((sum, e) => sum + (e.clock_out ? Math.max(0, (new Date(e.clock_out) - new Date(e.clock_in)) / 3600000 - (e.break_minutes || 0) / 60) : 0), 0);
+      const last30 = entries.filter(e => new Date(e.clock_in) >= since30);
+      const jobHours90 = hours(entries.filter(e => e.time_category === 'job' && e.project_id));
+      const total90 = hours(entries);
+      const daysWorked90 = new Set(entries.map(e => sydneyDateKey(new Date(e.clock_in)))).size;
+      const yearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      const tiles = [
+        [hours(last30).toFixed(1), 'Hours, last 30 days'],
+        [total90.toFixed(1), 'Hours, last 90 days'],
+        [total90 ? Math.round((jobHours90 / total90) * 100) + '%' : '-', 'On job time, last 90 days'],
+        [new Set(entries.filter(e => e.project_id).map(e => e.project_id)).size, 'Jobs worked on, last 90 days'],
+        [daysWorked90, 'Days worked, last 90 days'],
+        [warnings.filter(w => (w.status === 'issued' || w.status === 'acknowledged') && w.issued_date >= yearAgo).length, 'Warnings, last 12 months'],
+        [incidents.filter(i => i.incident_date >= yearAgo).length, 'Incidents, last 12 months'],
+        [kpis.filter(k => k.status === 'met').length + ' / ' + kpis.filter(k => k.status !== 'cancelled').length, 'KPIs met'],
+      ];
+      el.innerHTML = tiles.map(([v, l]) => `<div class="stat-tile"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+    }
+
+    function renderKpis() {
+      const el = document.getElementById('kpis-list');
+      if (!kpis.length) { el.innerHTML = '<p class="subtitle">No KPIs set yet. Add targets to review at their next catch-up, e.g. "Zero callbacks on installs this quarter".</p>'; return; }
+      el.innerHTML = kpis.map(k => `
+        <div class="project-list-item">
+          <div>
+            <div class="name">${escapeHtml(k.title)} <span class="badge ${KPI_STATUS_BADGE[k.status]}" style="font-weight:600;">${KPI_STATUS_LABELS[k.status]}</span></div>
+            <div class="meta">${k.target ? 'Target: ' + escapeHtml(k.target) : ''}${k.measure ? ' &middot; Measured by: ' + escapeHtml(k.measure) : ''}
+              ${k.period_start || k.period_end ? ` &middot; ${fmtDate(k.period_start)} to ${fmtDate(k.period_end)}` : ''}
+              ${k.result ? ` &middot; Result: ${escapeHtml(k.result)}` : ''}${k.rating ? ` &middot; ${'&#9733;'.repeat(k.rating)}${'&#9734;'.repeat(5 - k.rating)}` : ''}</div>
+            ${k.notes ? `<div class="meta" style="white-space:pre-wrap;">${escapeHtml(k.notes)}</div>` : ''}
+          </div>
+          <div class="row-actions" style="white-space:nowrap;">
+            <button type="button" class="secondary k-edit" data-id="${k.id}">Edit</button>
+            <button type="button" class="secondary k-del" data-id="${k.id}">Delete</button>
+          </div>
+        </div>`).join('');
+      el.querySelectorAll('.k-edit').forEach(b => b.addEventListener('click', () => openKpiEditor(kpis.find(k => k.id === b.dataset.id))));
+      el.querySelectorAll('.k-del').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Delete this KPI?')) return;
+        const { error } = await supabaseClient.from('staff_kpis').delete().eq('id', b.dataset.id);
+        if (error) { alert(error.message); return; }
+        kpis = kpis.filter(k => k.id !== b.dataset.id); refreshAll();
+      }));
+    }
+
+    function openKpiEditor(existing) {
+      const k = existing || { status: 'active' };
+      const o = openModal(`
+        <h2>${existing ? 'Edit' : 'Add'} KPI - ${escapeHtml(person.full_name)}</h2>
+        <label style="margin-top:0">KPI</label><input id="k-title" value="${escapeHtml(k.title || '')}" placeholder="e.g. Zero install callbacks" />
+        <div class="grid cols-2">
+          <div><label>Target</label><input id="k-target" value="${escapeHtml(k.target || '')}" placeholder="e.g. 0 callbacks" /></div>
+          <div><label>How it's measured</label><input id="k-measure" value="${escapeHtml(k.measure || '')}" placeholder="e.g. Warranty jobs raised against their installs" /></div>
+        </div>
+        <div class="grid cols-2">
+          <div><label>From</label><input type="date" id="k-start" value="${k.period_start || ''}" /></div>
+          <div><label>To</label><input type="date" id="k-end" value="${k.period_end || ''}" /></div>
+        </div>
+        <div class="grid cols-3">
+          <div><label>Status</label><select id="k-status">${Object.entries(KPI_STATUS_LABELS).map(([v, l]) => `<option value="${v}" ${v === k.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+          <div><label>Result</label><input id="k-result" value="${escapeHtml(k.result || '')}" /></div>
+          <div><label>Rating (1-5)</label><select id="k-rating"><option value="">-</option>${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${k.rating === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+        </div>
+        <label>Notes</label><textarea id="k-notes">${escapeHtml(k.notes || '')}</textarea>
+        <div style="margin-top:14px;"><button type="button" id="k-save">Save</button> <button type="button" class="secondary" id="k-cancel">Cancel</button></div>
+        <div id="k-msg"></div>`, 560);
+      o.querySelector('#k-cancel').addEventListener('click', () => o.remove());
+      o.querySelector('#k-save').addEventListener('click', async () => {
+        const payload = {
+          profile_id: staffId, title: val(o, '#k-title'), target: orNull(val(o, '#k-target')), measure: orNull(val(o, '#k-measure')),
+          period_start: orNull(val(o, '#k-start')), period_end: orNull(val(o, '#k-end')), status: val(o, '#k-status'),
+          result: orNull(val(o, '#k-result')), rating: val(o, '#k-rating') ? Number(val(o, '#k-rating')) : null,
+          notes: orNull(val(o, '#k-notes')), updated_at: new Date().toISOString(),
+        };
+        if (!payload.title) { o.querySelector('#k-msg').innerHTML = '<div class="error-box">Give the KPI a name.</div>'; return; }
+        const q = existing
+          ? supabaseClient.from('staff_kpis').update(payload).eq('id', existing.id).select().single()
+          : supabaseClient.from('staff_kpis').insert(payload).select().single();
+        const { data, error } = await q;
+        if (error) { o.querySelector('#k-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        kpis = existing ? kpis.map(x => (x.id === data.id ? data : x)) : [data, ...kpis];
+        o.remove(); refreshAll();
+      });
+    }
+
+    function refreshAll() {
+      renderCounts(); renderOverview(); renderWarnings(); renderIncidents(); renderKpis(); loadKpiStats();
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('team');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      const content = document.getElementById('content');
+      myRole = await getMyRole();
+      if (myRole !== 'admin' && myRole !== 'finance') {
+        content.innerHTML = '<div class="card"><p>Staff profiles are only available to admin and finance.</p></div>';
+        return;
+      }
+      if (!staffId) { content.innerHTML = '<div class="card"><p>No staff member selected. Open someone from the <a href="/team.html">Team</a> page.</p></div>'; return; }
+      try {
+        const [{ data: meRow }, { data: companyRow }] = await Promise.all([
+          supabaseClient.from('profiles').select('id, full_name, job_title').eq('id', session.user.id).single(),
+          supabaseClient.from('company_settings').select('company_name, abn, address, phone, logo_url').eq('id', 1).maybeSingle(),
+          loadPerson(), loadEmail(),
+        ]);
+        me = meRow || { id: session.user.id };
+        company = companyRow && companyRow.company_name ? companyRow : Object.assign({}, HR_COMPANY_FALLBACK, companyRow || {}, { company_name: HR_COMPANY_FALLBACK.company_name });
+        renderShell();
+        await loadRecords();
+        refreshAll();
+        renderEmploymentDocs();
+        renderHrFiles();
+        renderPhotos();
+        loadSignedDocs();
+      } catch (err) {
+        content.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>

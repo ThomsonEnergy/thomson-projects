@@ -2705,6 +2705,13 @@
         await loadUsers();
         await loadOnboardingDocs();
         await loadApiKeys();
+        // ?profile=<id> - linked from a staff profile page (staff.html) to
+        // jump straight to that person's contract and onboarding panel.
+        const deepLinkProfile = new URLSearchParams(location.search).get('profile');
+        if (deepLinkProfile) {
+          document.querySelector('.settings-tab[data-panel="users"]')?.click();
+          openUserProfilePanel(deepLinkProfile);
+        }
       }
       if (isPricingRoleLocal(myRole)) {
         await loadXeroMapping();
