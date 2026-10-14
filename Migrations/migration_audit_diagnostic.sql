@@ -483,4 +483,10 @@ select '145', 'variation pdf columns',
 union all
 select '146', 'formbay_webhook_events',
   case when exists (select 1 from information_schema.tables where table_name = 'formbay_webhook_events') then 'present' else 'MISSING' end
+union all
+select '147', 'job_stcs + formbay payment advices + STC settings',
+  case when exists (select 1 from information_schema.tables where table_name = 'job_stcs')
+    and exists (select 1 from information_schema.tables where table_name = 'formbay_payment_advice_lines')
+    and exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'stc_expected_sale_price')
+  then 'present' else 'MISSING' end
 order by 1;

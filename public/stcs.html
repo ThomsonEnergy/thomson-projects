@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>STCs - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=14" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .stc-filters { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+  .stc-filters button { font-size:12px; padding:5px 10px; }
+  .stc-filters button.active { background:var(--accent-dim); color:var(--accent); border-color:var(--accent); }
+  .stat .sub { font-size:12px; color:var(--muted); margin-top:4px; }
+  .gain-pos { color:var(--green); }
+  .gain-neg { color:var(--red); }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>STCs</h1>
+    <p class="subtitle">Every job's STCs, where they are up to with Formbay, and what they sold for. Customers are credited the booked price on the quote; the gain is what Formbay pays (less its fee) above that. All figures ex GST.</p>
+
+    <div class="grid cols-4">
+      <div class="stat"><div class="label">Awaiting sale</div><div class="value" id="stat-awaiting">-</div><div class="sub" id="stat-awaiting-sub"></div></div>
+      <div class="stat"><div class="label">Sold, not paid</div><div class="value" id="stat-sold">-</div><div class="sub" id="stat-sold-sub"></div></div>
+      <div class="stat"><div class="label">Expected gain (unpaid)</div><div class="value" id="stat-expected-gain">-</div><div class="sub" id="stat-expected-sub"></div></div>
+      <div class="stat"><div class="label">Received from Formbay</div><div class="value" id="stat-received">-</div><div class="sub" id="stat-received-sub"></div></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 6px;">Expected Formbay price</h2>
+      <p class="subtitle" style="margin:0 0 10px;">Used for jobs not sold yet. Formbay's price moves (usually $38.00 to $39.50).</p>
+      <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+        <div><label style="margin-top:0;">Sale price per STC ($)</label><input id="set-price" type="number" step="0.01" style="width:140px;" /></div>
+        <div><label style="margin-top:0;">Formbay fee per STC, ex GST ($)</label><input id="set-fee" type="number" step="0.01" style="width:140px;" /></div>
+        <button id="save-settings-btn" class="secondary">Save</button>
+        <span id="settings-msg" class="subtitle"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 14px;">Jobs</h2>
+      <div class="stc-filters" id="stc-filters"></div>
+      <div id="stc-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <h2 style="margin:0;">Formbay payments</h2>
+        <label class="secondary" style="margin:0; cursor:pointer; display:inline-block; padding:8px 14px; border:1px solid var(--border); border-radius:8px;">
+          Import payment advice PDFs
+          <input id="advice-files" type="file" accept="application/pdf" multiple style="display:none;" />
+        </label>
+      </div>
+      <p class="subtitle" style="margin:8px 0 12px;">Pick Formbay's Payment Advice and its fee tax invoice (FEE...) together, or several payments at once. Nothing is saved until you check the figures and press Save. Lines are matched to jobs by Formbay job ID.</p>
+      <div id="import-preview"></div>
+      <div id="advice-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=65"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/formbay-advice-parser.js"></script>
+  <script>
+    let settings = { stc_expected_sale_price: 39.25, stc_fee_per_certificate: 1 };
+    let settingsId = null;
+    let rows = [];
+    let advices = [];
+    let filter = 'open';
+
+    const FILTERS = [{ value: 'open', label: 'Not paid' }, { value: 'all', label: 'All' }, ...STC_STATUSES];
+    const gainHtml = (n) => `<span class="${n >= 0 ? 'gain-pos' : 'gain-neg'}">${money(n)}</span>`;
+
+    async function loadAll() {
+      const [s, r, a] = await Promise.all([
+        supabaseClient.from('company_settings').select('id, stc_expected_sale_price, stc_fee_per_certificate').limit(1).maybeSingle(),
+        supabaseClient.from('job_stcs').select('*, projects(id, name, job_number, client_name), formbay_payment_advice_lines(*, formbay_payment_advices(reference_no, advice_date, units, fee_ex_gst))').order('created_at', { ascending: false }),
+        supabaseClient.from('formbay_payment_advices').select('*, formbay_payment_advice_lines(id, job_stc_id)').order('advice_date', { ascending: false }),
+      ]);
+      if (s.data) { settings = s.data; settingsId = s.data.id; }
+      document.getElementById('set-price').value = Number(settings.stc_expected_sale_price).toFixed(2);
+      document.getElementById('set-fee').value = Number(settings.stc_fee_per_certificate).toFixed(2);
+      if (r.error) { document.getElementById('stc-list').innerHTML = `<div class="error-box">${escapeHtml(r.error.message)}</div>`; return; }
+      rows = r.data || [];
+      advices = a.data || [];
+      renderStats();
+      renderFilters();
+      renderList();
+      renderAdvices();
+    }
+
+    function renderStats() {
+      let awaitingCount = 0, awaitingBooked = 0, soldCount = 0, soldNet = 0, expGain = 0, expNet = 0, paidNet = 0, paidGain = 0, paidCount = 0;
+      rows.forEach(r => {
+        const f = stcFigures(r, r.formbay_payment_advice_lines, settings);
+        if (f.basis === 'paid' || r.status === 'paid') { paidNet += f.net; paidGain += f.gain; paidCount += f.units; return; }
+        expNet += f.net; expGain += f.gain;
+        if (r.status === 'sold') { soldCount += f.count; soldNet += f.net; }
+        else { awaitingCount += f.count; awaitingBooked += f.booked; }
+      });
+      document.getElementById('stat-awaiting').textContent = `${awaitingCount.toLocaleString('en-AU')} STCs`;
+      document.getElementById('stat-awaiting-sub').textContent = `${money(awaitingBooked)} credited to customers`;
+      document.getElementById('stat-sold').textContent = `${soldCount.toLocaleString('en-AU')} STCs`;
+      document.getElementById('stat-sold-sub').textContent = `${money(soldNet)} net to come`;
+      document.getElementById('stat-expected-gain').innerHTML = gainHtml(expGain);
+      document.getElementById('stat-expected-sub').textContent = `${money(expNet)} net expected from Formbay`;
+      document.getElementById('stat-received').textContent = money(paidNet);
+      document.getElementById('stat-received-sub').innerHTML = `${paidCount.toLocaleString('en-AU')} STCs, gain ${gainHtml(paidGain)}`;
+    }
+
+    function renderFilters() {
+      const el = document.getElementById('stc-filters');
+      el.innerHTML = FILTERS.map(f => {
+        const n = f.value === 'all' ? rows.length : f.value === 'open' ? rows.filter(r => r.status !== 'paid').length : rows.filter(r => r.status === f.value).length;
+        return `<button type="button" class="secondary ${filter === f.value ? 'active' : ''}" data-f="${f.value}">${f.label} (${n})</button>`;
+      }).join('');
+      el.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { filter = b.dataset.f; renderFilters(); renderList(); }));
+    }
+
+    function renderList() {
+      const el = document.getElementById('stc-list');
+      const list = rows.filter(r => filter === 'all' || (filter === 'open' ? r.status !== 'paid' : r.status === filter));
+      if (!list.length) {
+        el.innerHTML = `<p class="subtitle">${rows.length ? 'Nothing here.' : 'No STCs recorded yet. Add them from the STCs tab on a job.'}</p>`;
+        return;
+      }
+      el.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Job</th><th>Type</th><th>Formbay ID</th><th class="num">STCs</th><th class="num">Credited</th><th>Status</th><th class="num">Price</th><th class="num">Net</th><th class="num">Gain</th></tr></thead>
+          <tbody>
+            ${list.map(r => {
+              const f = stcFigures(r, r.formbay_payment_advice_lines, settings);
+              const p = r.projects;
+              const basisNote = f.basis === 'expected' ? ' <span class="subtitle" style="font-size:11px;">expected</span>' : '';
+              return `<tr>
+                <td data-label="Job">${p ? `<a class="link-quiet" href="/project.html?id=${p.id}&tab=stcs">#${escapeHtml(String(p.job_number || '-'))} ${escapeHtml(p.name || '')}</a>` : '-'}</td>
+                <td data-label="Type">${STC_TYPES[r.stc_type] || r.stc_type}${r.commercial ? ' <span class="subtitle" style="font-size:11px;">commercial</span>' : ''}</td>
+                <td data-label="Formbay ID">${escapeHtml(r.formbay_job_id || '-')}</td>
+                <td class="num" data-label="STCs">${f.count}</td>
+                <td class="num" data-label="Credited">${money(f.booked)}</td>
+                <td data-label="Status"><span class="badge ${r.status === 'paid' ? 'accepted' : r.status === 'sold' ? 'sent' : 'draft'}">${stcStatusLabel(r.status)}</span></td>
+                <td class="num" data-label="Price">${money(f.pricePer)}${basisNote}</td>
+                <td class="num" data-label="Net">${money(f.net)}</td>
+                <td class="num" data-label="Gain">${gainHtml(f.gain)}${f.basis !== 'expected' && Math.abs(f.variance) >= 0.01 ? `<div class="subtitle" style="font-size:11px;">${f.variance >= 0 ? '+' : ''}${money(f.variance)} vs expected</div>` : ''}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    function renderAdvices() {
+      const el = document.getElementById('advice-list');
+      if (!advices.length) { el.innerHTML = '<p class="subtitle">No Formbay payments imported yet.</p>'; return; }
+      el.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>Reference</th><th>Date</th><th class="num">STCs</th><th class="num">Sale total</th><th class="num">Fees (inc GST)</th><th class="num">Received</th><th>Jobs</th></tr></thead>
+          <tbody>
+            ${advices.map(a => {
+              const lines = a.formbay_payment_advice_lines || [];
+              const matched = lines.filter(l => l.job_stc_id).length;
+              return `<tr>
+                <td data-label="Reference">${escapeHtml(a.reference_no)}</td>
+                <td data-label="Date">${a.advice_date ? new Date(a.advice_date + 'T00:00:00').toLocaleDateString('en-AU') : '-'}</td>
+                <td class="num" data-label="STCs">${a.units ?? '-'}</td>
+                <td class="num" data-label="Sale total">${money(a.total)}</td>
+                <td class="num" data-label="Fees">${money(a.fee_total)}</td>
+                <td class="num" data-label="Received">${money(a.amount_received)}</td>
+                <td data-label="Jobs">${matched} of ${lines.length} matched${matched < lines.length ? ' <span class="badge draft" style="color:var(--red);">check</span>' : ''}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    // --- Import Formbay PDFs (read in the browser with pdf.js; nothing leaves the browser until Save) ---
+    let pdfjsReady = null;
+    function loadPdfJs() {
+      if (!pdfjsReady) {
+        pdfjsReady = new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+          s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; resolve(window.pdfjsLib); };
+          s.onerror = () => reject(new Error('Could not load the PDF reader.'));
+          document.head.appendChild(s);
+        });
+      }
+      return pdfjsReady;
+    }
+    async function pdfText(file) {
+      const pdfjsLib = await loadPdfJs();
+      const doc = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+      let text = '';
+      for (let i = 1; i <= doc.numPages; i++) {
+        const content = await (await doc.getPage(i)).getTextContent();
+        text += content.items.map(it => it.str).join(' ') + '\n';
+      }
+      await doc.destroy();
+      return text;
+    }
+
+    let pending = [];  // [{ reference, advice, fee, lines: [{..., job_stc_id}] }]
+
+    document.getElementById('advice-files').addEventListener('change', async (e) => {
+      const files = [...e.target.files];
+      e.target.value = '';
+      if (!files.length) return;
+      const preview = document.getElementById('import-preview');
+      preview.innerHTML = '<p class="subtitle">Reading PDFs...</p>';
+      const byRef = {};
+      const problems = [];
+      for (const file of files) {
+        try {
+          const parsed = parseFormbayPdfText(await pdfText(file));
+          if (parsed.kind === 'unknown' || !parsed.reference) { problems.push(`${file.name}: not a Formbay payment advice or fee invoice.`); continue; }
+          const g = byRef[parsed.reference] ||= { reference: parsed.reference };
+          if (parsed.kind === 'advice') g.advice = parsed; else g.fee = parsed;
+        } catch (err) {
+          problems.push(`${file.name}: ${err.message}`);
+        }
+      }
+      pending = Object.values(byRef).map(g => ({
+        ...g,
+        lines: (g.advice?.lines || []).map(l => ({ ...l, job_stc_id: (rows.find(r => r.formbay_job_id && r.formbay_job_id === l.formbay_job_id) || {}).id || '' })),
+      }));
+      renderPreview(problems);
+    });
+
+    function renderPreview(problems = []) {
+      const preview = document.getElementById('import-preview');
+      if (!pending.length) {
+        preview.innerHTML = problems.length ? `<div class="error-box">${problems.map(escapeHtml).join('<br>')}</div>` : '';
+        return;
+      }
+      const options = (sel) => `<option value="">-- Not matched --</option>` + rows
+        .filter(r => r.status !== 'paid' || r.id === sel)
+        .map(r => `<option value="${r.id}" ${r.id === sel ? 'selected' : ''}>#${escapeHtml(String(r.projects?.job_number || '-'))} ${escapeHtml(r.projects?.name || '')} - ${STC_TYPES[r.stc_type]} ${r.stc_count} STCs${r.formbay_job_id ? ` (Formbay ${escapeHtml(r.formbay_job_id)})` : ''}</option>`).join('');
+      preview.innerHTML = `
+        <div style="border:1px solid var(--accent); border-radius:10px; padding:14px; margin-bottom:16px;">
+          <h3 style="margin:0 0 8px;">Check before saving</h3>
+          ${problems.length ? `<div class="error-box" style="margin-bottom:10px;">${problems.map(escapeHtml).join('<br>')}</div>` : ''}
+          ${pending.map((g, gi) => {
+            const a = g.advice, f = g.fee;
+            const already = advices.some(x => x.reference_no === g.reference);
+            const unitsOk = !a || !f || f.fees.every(x => x.units === a.units);
+            const received = (a ? a.total : 0) - (f ? f.fee_total : 0);
+            return `<div style="margin-bottom:14px;">
+              <p style="margin:0 0 6px;"><strong>Payment ${escapeHtml(g.reference)}</strong>${a?.date ? ` - ${new Date(a.date + 'T00:00:00').toLocaleDateString('en-AU')}` : ''}
+                ${already ? ' <span class="badge draft" style="color:var(--red);">already imported, will be skipped</span>' : ''}
+                ${!a ? ' <span class="badge draft" style="color:var(--red);">payment advice missing</span>' : ''}
+                ${!f ? ' <span class="badge draft">fee invoice missing (fees taken as $0)</span>' : ''}
+                ${!unitsOk ? ' <span class="badge draft" style="color:var(--red);">fee units differ from advice</span>' : ''}</p>
+              ${a ? `<p class="subtitle" style="margin:0 0 6px;">${a.units} STCs, sale ${money(a.net_total)}${a.gst_on_units ? ` + GST ${money(a.gst_on_units)}` : ''} = ${money(a.total)}; fees ${f ? `${money(f.fee_ex_gst)} + GST ${money(f.fee_gst)} = ${money(f.fee_total)}` : '-'}; received ${money(received)}</p>
+              <table class="responsive-stack">
+                <thead><tr><th>Formbay job</th><th class="num">STCs</th><th class="num">Price</th><th class="num">Total</th><th>Our job</th></tr></thead>
+                <tbody>${g.lines.map((l, li) => `<tr>
+                  <td data-label="Formbay job">${STC_TYPES[l.stc_type]} ${escapeHtml(l.formbay_job_id)}<div class="subtitle" style="font-size:11px;">${escapeHtml(l.description)}</div></td>
+                  <td class="num" data-label="STCs">${l.units}</td>
+                  <td class="num" data-label="Price">${money(l.unit_price)}</td>
+                  <td class="num" data-label="Total">${money(l.total)}${l.gst_on_units ? `<div class="subtitle" style="font-size:11px;">+ GST ${money(l.gst_on_units)}</div>` : ''}</td>
+                  <td data-label="Our job"><select class="match-sel" data-g="${gi}" data-l="${li}">${options(l.job_stc_id)}</select></td>
+                </tr>`).join('')}</tbody>
+              </table>` : ''}
+            </div>`;
+          }).join('')}
+          <div style="display:flex; gap:8px;">
+            <button id="save-import-btn">Save</button>
+            <button id="cancel-import-btn" class="secondary">Cancel</button>
+            <span id="import-msg" class="subtitle" style="align-self:center;"></span>
+          </div>
+        </div>`;
+      preview.querySelectorAll('.match-sel').forEach(s => s.addEventListener('change', () => { pending[s.dataset.g].lines[s.dataset.l].job_stc_id = s.value; }));
+      document.getElementById('cancel-import-btn').addEventListener('click', () => { pending = []; renderPreview(); });
+      document.getElementById('save-import-btn').addEventListener('click', saveImport);
+    }
+
+    async function saveImport() {
+      const btn = document.getElementById('save-import-btn');
+      const msg = document.getElementById('import-msg');
+      btn.disabled = true;
+      msg.textContent = 'Saving...';
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      let saved = 0;
+      for (const g of pending) {
+        const a = g.advice, f = g.fee;
+        if (!a || advices.some(x => x.reference_no === g.reference)) continue;
+        const { data: adv, error } = await supabaseClient.from('formbay_payment_advices').insert({
+          reference_no: g.reference, advice_date: a.date, units: a.units, net_total: a.net_total, gst_on_units: a.gst_on_units, total: a.total,
+          fee_invoice_no: f?.invoice_no || null, fee_ex_gst: f?.fee_ex_gst || 0, fee_gst: f?.fee_gst || 0, fee_total: f?.fee_total || 0,
+          created_by: session.user.id,
+        }).select('id').single();
+        if (error) { msg.innerHTML = `<span style="color:var(--red);">Payment ${escapeHtml(g.reference)}: ${escapeHtml(error.message)}</span>`; btn.disabled = false; return; }
+        const { error: lineErr } = await supabaseClient.from('formbay_payment_advice_lines').insert(g.lines.map((l, i) => ({
+          advice_id: adv.id, job_stc_id: l.job_stc_id || null, stc_type: l.stc_type, formbay_job_id: l.formbay_job_id, description: l.description,
+          units: l.units, unit_price: l.unit_price, gst_on_units: l.gst_on_units, total: l.total, sort_order: i,
+        })));
+        if (lineErr) { msg.innerHTML = `<span style="color:var(--red);">Payment ${escapeHtml(g.reference)} lines: ${escapeHtml(lineErr.message)}</span>`; btn.disabled = false; return; }
+        for (const l of g.lines.filter(l => l.job_stc_id)) {
+          await supabaseClient.from('job_stcs').update({
+            status: 'paid', sale_price: l.unit_price, sold_on: a.date, formbay_job_id: l.formbay_job_id,
+            commercial: l.gst_on_units > 0, updated_at: new Date().toISOString(),
+          }).eq('id', l.job_stc_id);
+        }
+        saved++;
+      }
+      pending = [];
+      renderPreview();
+      await loadAll();
+      document.getElementById('import-preview').innerHTML = `<div class="success-box">Saved ${saved} payment${saved === 1 ? '' : 's'}.</div>`;
+    }
+
+    document.getElementById('save-settings-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('settings-msg');
+      const patch = { stc_expected_sale_price: parseFloat(document.getElementById('set-price').value) || 0, stc_fee_per_certificate: parseFloat(document.getElementById('set-fee').value) || 0 };
+      if (!settingsId) { msg.textContent = 'No company settings row found.'; return; }
+      const { error } = await supabaseClient.from('company_settings').update(patch).eq('id', settingsId);
+      msg.textContent = error ? error.message : 'Saved.';
+      if (!error) { settings = { ...settings, ...patch }; renderStats(); renderList(); }
+    });
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('stcs');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      const role = await getMyRole();
+      if (!isPricingRole(role)) { window.location.href = '/home.html'; return; }
+      await loadAll();
+    })();
+  </script>
+</body>
+</html>

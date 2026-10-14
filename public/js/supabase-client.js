@@ -1549,7 +1549,7 @@ function isPricingRole(role) {
 // column-level grants (see migration_007), so a role-check bug here can't
 // by itself leak pricing.
 const COST_CENTRE_COLS_BASE = 'id, project_id, name, description, sort_order';
-const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, estimated_labour_cost, estimated_material_cost, labour_cost, material_cost, invoiced_amount, stc_total, variation_entry_id';
+const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, estimated_labour_cost, estimated_material_cost, labour_cost, material_cost, invoiced_amount, stc_total, stc_system_kw, stc_zone_rating, stc_install_year, stc_price_per_certificate, variation_entry_id';
 const LINE_ITEM_COLS_BASE = 'id, cost_centre_id, description, item_type, sort_order, quantity';
 const LINE_ITEM_COLS_PRICING = 'unit_cost';
 
@@ -1676,6 +1676,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'projects', label: 'Projects', href: '/projects.html', icon: '&#128202;' },
   { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html', icon: '&#128203;' },
   { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;' },
+  { key: 'stcs', label: 'STCs', href: '/stcs.html', icon: '&#9728;', pricingOnly: true },
   { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html', icon: '&#128230;' },
   { key: 'tasks', label: 'Tasks', href: '/tasks.html', icon: '&#9989;' },
   { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;' },
@@ -3554,6 +3555,55 @@ function calculateStcQuantity({ kw, zoneRating, installYear }) {
   const deemingYears = stcDeemingYears(installYear);
   if (!kw || !zoneRating || !deemingYears) return 0;
   return Math.floor(kw * zoneRating * deemingYears);
+}
+
+// --- STC tracking (job_stcs, Formbay payment advices; migration 147) ---
+const STC_TYPES = { pv: 'Solar', bstc: 'Battery', swh: 'Hot water' };
+const STC_STATUSES = [
+  { value: 'not_lodged', label: 'Not lodged' },
+  { value: 'pending_installer_action', label: 'Pending installer' },
+  { value: 'pending_retailer_action', label: 'Pending retailer' },
+  { value: 'pending_cer_audit', label: 'Pending CER audit' },
+  { value: 'approved_for_sale', label: 'Approved for sale' },
+  { value: 'sold', label: 'Sold, not paid' },
+  { value: 'paid', label: 'Paid' },
+];
+const stcStatusLabel = (v) => (STC_STATUSES.find(s => s.value === v) || { label: v || '-' }).label;
+
+// Number of STCs a quote stage was priced on: from the calculator inputs, or the $ total / price per STC.
+function stcCountForStage(stage) {
+  const qty = calculateStcQuantity({ kw: Number(stage.stc_system_kw) || 0, zoneRating: Number(stage.stc_zone_rating) || 0, installYear: stage.stc_install_year });
+  if (qty) return qty;
+  const price = Number(stage.stc_price_per_certificate) || 35;
+  return Number(stage.stc_total) > 0 ? Math.round(Number(stage.stc_total) / price) : 0;
+}
+
+// Figures for one job_stcs row (all ex GST). `lines` are its formbay_payment_advice_lines (with their
+// advice), `settings` holds stc_expected_sale_price and stc_fee_per_certificate from company_settings.
+// basis: 'paid' (from the payment advice), 'entered' (sale price typed in) or 'expected' (settings).
+function stcFigures(row, lines, settings) {
+  const count = Number(row.stc_count) || 0;
+  const booked = count * (Number(row.booked_price) || 0);
+  const feePer = Number(settings?.stc_fee_per_certificate ?? 1);
+  const expectedPrice = Number(settings?.stc_expected_sale_price ?? 39.25);
+  const expectedNet = count * (expectedPrice - feePer);
+  let basis, units, sale, fee;
+  if (lines && lines.length) {
+    basis = 'paid';
+    units = lines.reduce((s, l) => s + (Number(l.units) || 0), 0);
+    sale = lines.reduce((s, l) => s + (Number(l.total) || 0), 0);
+    fee = lines.reduce((s, l) => {
+      const a = l.formbay_payment_advices;
+      const per = a && Number(a.units) ? Number(a.fee_ex_gst) / Number(a.units) : feePer;
+      return s + (Number(l.units) || 0) * per;
+    }, 0);
+  } else if (row.sale_price != null && row.sale_price !== '') {
+    basis = 'entered'; units = count; sale = count * Number(row.sale_price); fee = count * feePer;
+  } else {
+    basis = 'expected'; units = count; sale = count * expectedPrice; fee = count * feePer;
+  }
+  const net = sale - fee;
+  return { count, units, booked, sale, fee, net, gain: net - booked, expectedNet, variance: basis === 'expected' ? 0 : net - expectedNet, basis, pricePer: units ? sale / units : 0 };
 }
 
 // Every field the contract needs that ISN'T already a profile fact -
