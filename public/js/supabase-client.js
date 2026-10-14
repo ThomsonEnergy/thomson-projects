@@ -1741,35 +1741,54 @@ async function renderMainNav(activeKey) {
   const role = await getMyRole();
   const items = MAIN_NAV_ITEMS.filter(item =>
     (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)) && (!item.financeOnly || isFinanceRole(role)));
-  const shortcuts = await getMyHomeShortcuts();
-  const starHtml = (key) => {
-    const starred = shortcuts.includes(key);
-    return `<span class="nav-star ${starred ? 'starred' : ''}" data-key="${key}" title="${starred ? 'Remove from Home page' : 'Add to Home page'}" onclick="event.preventDefault(); event.stopPropagation(); window.__onNavStarClick(this);">${starred ? '&#9733;' : '&#9734;'}</span>`;
+  // On a computer the top bar only carries starred pages (plus the page you
+  // are on), with everything else under "More", so there is no sideways
+  // scrolling. The phone menu still lists every page. Both are painted from
+  // the same list; the "in bar" ones are just hidden from the desktop menu
+  // by CSS.
+  const paint = (shortcuts) => {
+    const inBar = (item) => shortcuts.includes(item.key) || item.key === activeKey;
+    const starHtml = (key) => {
+      const starred = shortcuts.includes(key);
+      return `<span class="nav-star ${starred ? 'starred' : ''}" data-key="${key}" title="${starred ? 'Remove from Home page and top bar' : 'Add to Home page and top bar'}" onclick="event.preventDefault(); event.stopPropagation(); window.__onNavStarClick(this);">${starred ? '&#9733;' : '&#9734;'}</span>`;
+    };
+    const linkHtml = (item, asTab) =>
+      `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''} ${!asTab && inBar(item) ? 'nav-in-bar' : ''}"><span style="display:flex; align-items:center; gap:5px;">${starHtml(item.key)}${item.label}</span></a>`;
+    const hasMore = items.some(item => !inBar(item));
+    if (tabsEl) tabsEl.innerHTML = items.filter(inBar).map(item => linkHtml(item, true)).join('') +
+      (hasMore ? `<button type="button" class="topbar-tab nav-more-btn" onclick="window.__onNavMoreClick(this)">More &#9662;</button>` : '');
+    if (dropdownEl) dropdownEl.innerHTML = items.map(item => linkHtml(item, false)).join('');
   };
-  const linksHtml = (asTab) => items.map(item =>
-    `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''}"><span style="display:flex; align-items:center; gap:5px;">${starHtml(item.key)}${item.label}</span></a>`
-  ).join('');
-  if (tabsEl) tabsEl.innerHTML = linksHtml(true);
-  if (dropdownEl) dropdownEl.innerHTML = linksHtml(false);
+  paint(await getMyHomeShortcuts());
 
-  // Delegated via a single global so the inline onclick above (needed
-  // since tabs/dropdown get fully replaced on every renderMainNav call,
-  // which would otherwise leak listeners) has one stable place to call
-  // into - toggles the star everywhere it appears (desktop + mobile both
-  // render the same key), not just the one clicked.
+  // Delegated via single globals so the inline onclicks above (needed
+  // since tabs/dropdown get fully replaced on every paint, which would
+  // otherwise leak listeners) have one stable place to call into. A star
+  // repaints the nav so the page moves between the bar and the menu.
   window.__onNavStarClick = async (el) => {
-    const key = el.dataset.key;
     try {
-      const nowStarred = await toggleHomeShortcut(key);
-      document.querySelectorAll(`.nav-star[data-key="${key}"]`).forEach(s => {
-        s.classList.toggle('starred', nowStarred);
-        s.innerHTML = nowStarred ? '&#9733;' : '&#9734;';
-        s.title = nowStarred ? 'Remove from Home page' : 'Add to Home page';
-      });
+      await toggleHomeShortcut(el.dataset.key);
+      paint(await getMyHomeShortcuts());
     } catch (err) {
       alert('Could not save that - ' + err.message);
     }
   };
+  // "More" opens the same dropdown the phone uses, lined up under the button
+  window.__onNavMoreClick = (btn) => {
+    if (!dropdownEl) return;
+    const bar = dropdownEl.parentElement.getBoundingClientRect();
+    const left = btn.getBoundingClientRect().left - bar.left;
+    dropdownEl.style.setProperty('--more-left', Math.max(8, Math.min(left, bar.width - 268)) + 'px');
+    dropdownEl.classList.toggle('open');
+  };
+  if (!window.__navOutsideClose) {
+    window.__navOutsideClose = true;
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('mobile-menu-dropdown');
+      if (menu && menu.classList.contains('open') && !menu.contains(e.target) &&
+          !e.target.closest('.nav-more-btn, #mobile-menu-btn')) menu.classList.remove('open');
+    });
+  }
   renderAIChatWidget();
   loadNotificationBell();
 }
