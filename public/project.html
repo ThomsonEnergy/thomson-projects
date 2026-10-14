@@ -4561,7 +4561,7 @@
 
     async function openAddTaskPanel(projectId) {
       const [{ data: staff }, { data: project }] = await Promise.all([
-        supabaseClient.from('profiles').select('id, full_name').order('full_name'),
+        supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
         supabaseClient.from('projects').select('job_number').eq('id', projectId).single(),
       ]);
       const overlay = document.createElement('div');

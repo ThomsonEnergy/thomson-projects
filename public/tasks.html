@@ -128,7 +128,7 @@
     // bins out" that isn't tied to any job.
     async function openAddTaskPanel(prefill) {
       const { data: { user } } = await supabaseClient.auth.getUser();
-      const { data: staff } = await supabaseClient.from('profiles').select('id, full_name').order('full_name');
+      const { data: staff } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `

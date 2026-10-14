@@ -2024,11 +2024,18 @@
           return;
         }
 
+        // Deactivated staff move to a collapsed Archived list rather than
+        // being deleted: their login is banned, but their timesheets, notes,
+        // photos and tasks keep their name everywhere else in the app.
+        const activeUsers = data.users.filter(u => u.active);
+        const archivedUsers = data.users.filter(u => !u.active);
+        const roleLabel = (r) => r ? r[0].toUpperCase() + r.slice(1) : '-';
+
         listEl.innerHTML = `
           <table class="responsive-stack">
             <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Xero Employee ID</th><th>Onboarding</th><th>Status</th><th></th></tr></thead>
             <tbody>
-              ${data.users.map(u => `
+              ${activeUsers.map(u => `
                 <tr data-id="${u.id}">
                   <td data-label="Name"><input class="user-name-input" data-id="${u.id}" value="${u.full_name || ''}" placeholder="Full name" style="font-size:13px;" /></td>
                   <td data-label="Email">${u.email}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
@@ -2046,7 +2053,29 @@
                 </tr>
               `).join('')}
             </tbody>
-          </table>`;
+          </table>
+          ${archivedUsers.length ? `
+            <details style="margin-top:18px;">
+              <summary style="cursor:pointer; font-weight:600;">Archived staff (${archivedUsers.length})</summary>
+              <p class="subtitle" style="margin:6px 0 10px;">Deactivated: they can't log in, but their timesheets, notes, photos and tasks stay in the app under their name. Reactivate to let them log in again.</p>
+              <table class="responsive-stack">
+                <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                  ${archivedUsers.map(u => `
+                    <tr data-id="${u.id}">
+                      <td data-label="Name">${escapeHtml(u.full_name || '-')}</td>
+                      <td data-label="Email">${escapeHtml(u.email || '')}</td>
+                      <td data-label="Role">${escapeHtml(roleLabel(u.role))}</td>
+                      <td data-label="Status"><span class="badge draft">Deactivated</span></td>
+                      <td data-label="" style="text-align:right;">
+                        <button class="secondary toggle-active-btn" data-id="${u.id}" data-active="false">Reactivate</button>
+                        <button class="secondary open-profile-btn" data-id="${u.id}" style="margin-top:4px;">Profile</button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </details>` : ''}`;
 
         listEl.querySelectorAll('.user-name-input').forEach(input => {
           input.addEventListener('change', async () => {
