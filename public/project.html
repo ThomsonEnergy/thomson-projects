@@ -2779,7 +2779,7 @@
               ${!editMode ? '<div id="meetings-card"></div><div id="assets-card"></div><div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
-                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-hours="${actualHoursTotal}" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-actual="1" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
                   <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
                 </div>
               ` : `
@@ -2792,7 +2792,7 @@
 
                 ${project.job_number ? `
                 <div class="grid cols-2" style="margin-top:10px;">
-                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-hours="${actualHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
                   <div class="stat"><div class="label" data-oh-gross="Actual gross profit">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
                 </div>
                 ` : ''}
@@ -3418,7 +3418,7 @@
       if (document.getElementById('clock-here-card')) loadClockHereCard(project);
       if (document.getElementById('assets-card')) loadAssetsCard(project);
       if (document.getElementById('meetings-card')) loadMeetingsCard(project);
-      applyOverheadsToCosts();
+      applyOverheadsToCosts(project);
       const feedTab = document.querySelector('#job-tabs .settings-tab[data-panel="feed"]');
       if (feedTab) {
         let feedLoaded = false;
@@ -5237,30 +5237,31 @@
       });
     }
 
-    // Finance and Admin see the Summary cost tiles with overheads added: employee overhead (employee_rate x
-    // the hours quoted or worked) and company overhead (company_pct of the job's profit, or of its price if
-    // the Overheads page is set to price). Deliberately no "net profit" figure on the job page; that lives
-    // only on the Overheads page. get_overhead_rates returns no rows for anyone else, so their tiles stay
-    // exactly as they were.
-    let overheadRatesPromise = null;
-    async function applyOverheadsToCosts() {
+    // Finance and Admin see the Summary cost tiles with overheads added: employee overhead (direct plus
+    // indirect, see the Overheads page) and company overhead (company_pct of the job's profit, or of its
+    // price if the Overheads page is set to price). The estimate uses the average employee overhead per
+    // quoted hour; the actual uses each person's own rate on the job hours they logged. Deliberately no
+    // "net profit" figure on the job page; that lives only on the Overheads page.
+    // get_project_overheads returns no rows for anyone else, so their tiles stay exactly as they were.
+    let projectOverheadsPromise = null;
+    async function applyOverheadsToCosts(project) {
       const tiles = document.querySelectorAll('[data-oh-cost]');
       if (!tiles.length || !isFinanceRole(await getMyRole())) return;
-      if (!overheadRatesPromise) {
-        overheadRatesPromise = supabaseClient.rpc('get_overhead_rates')
+      if (!projectOverheadsPromise) {
+        projectOverheadsPromise = supabaseClient.rpc('get_project_overheads', { p_project_id: project.id })
           .then(({ data }) => (Array.isArray(data) ? data[0] : data) || null)
           .catch(() => null);
       }
-      const r = await overheadRatesPromise;
+      const r = await projectOverheadsPromise;
       if (!r) return;
-      const emp = Number(r.employee_rate) || 0, pct = Number(r.company_pct) || 0;
-      if (!emp && !pct) return;
+      const est = Number(r.est_rate) || 0, actual = Number(r.actual_amount) || 0, pct = Number(r.company_pct) || 0;
+      if (!est && !pct) return;
       const byPrice = r.company_basis === 'revenue';
       tiles.forEach(tile => {
         const valueEl = tile.querySelector('.value');
         if (!valueEl || !tile.isConnected) return;
         const d = tile.dataset, base = Number(d.ohCost) || 0;
-        const empCost = emp * (Number(d.ohHours) || 0);
+        const empCost = d.ohActual ? actual : est * (Number(d.ohHours) || 0);
         const coCost = (pct / 100) * Math.max(0, Number(byPrice ? d.ohPrice : d.ohProfit) || 0);
         valueEl.textContent = money(base + empCost + coCost);
         tile.querySelector('.oh-note')?.remove();

@@ -22,8 +22,18 @@
   .oh-badge.xero { border-color:var(--accent); color:var(--accent); }
   .oh-total { display:flex; justify-content:space-between; padding-top:10px; border-top:2px solid var(--border); font-weight:700; margin-top:6px; }
   .oh-formula { background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:12px 14px; font-size:13px; line-height:1.6; }
-  .oh-acc { display:grid; grid-template-columns: 1fr 120px 150px; gap:8px; align-items:center; padding:6px 0; border-top:1px solid var(--border); font-size:13px; }
-  .oh-people input[type=number] { width:100px; margin:0; }
+  .oh-acc { display:grid; grid-template-columns: 1fr 120px 170px; gap:8px; align-items:center; padding:6px 0; border-top:1px solid var(--border); font-size:13px; }
+  .oh-fields { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px; }
+  .oh-fields label { margin-top:0; font-size:12px; }
+  .oh-fields input { width:110px; margin:0; }
+  .oh-scroll { overflow-x:auto; }
+  .oh-people { font-size:13px; min-width:1100px; }
+  .oh-people th { font-size:11px; white-space:normal; vertical-align:bottom; }
+  .oh-people td:first-child { min-width:140px; }
+  .oh-people input[type=number] { width:62px; margin:0; padding:5px 6px; }
+  .oh-people input.oh-wide { width:84px; }
+  .oh-people .oh-calc { background:var(--surface-2); }
+  .oh-warn { background:var(--surface-2); border-left:3px solid #eab308; padding:8px 12px; border-radius:6px; font-size:13px; margin-bottom:14px; }
   @media (max-width: 640px) { .oh-line { grid-template-columns: 1fr 120px auto; } .oh-acc { grid-template-columns: 1fr 100px; } .oh-acc select { grid-column: 1 / -1; } }
 </style>
 </head>
@@ -40,45 +50,72 @@
     </div>
   </div>
 
-  <div class="wrap">
+  <div class="wrap wide">
     <h1>Overheads</h1>
     <p class="subtitle">What it really costs to run the business, so job costs include their share of it and the month-by-month profit is the real figure. Finance and Admin only.</p>
     <div id="oh-msg"></div>
+    <div id="oh-warn"></div>
     <div class="oh-grid" id="oh-stats"></div>
 
     <div class="oh-formula" style="margin-bottom:14px;">
       <strong>How it works</strong><br>
-      <strong>Employee costs</strong> (super, workers comp, payroll tax, tools, vehicles...) are divided by the paid hours of the people who bill their time, and added to their hourly cost: their loaded rate.<br>
-      <strong>Company costs</strong> (rent, insurance, accounting, software, marketing, plus all non-billable wages) are shared across jobs as a <strong>percentage of each job's profit</strong>.<br>
-      <span class="subtitle" style="font-size:12px;">Job pages then show costs including these overheads. The monthly summary at the bottom is the company-level result.</span>
+      <strong>Billable hours</strong> = the hours each person is paid for, less leave, public holidays, training and their non-billable (admin) time. Overheads are recovered on billable hours only.<br>
+      <strong>Direct employee overhead</strong> is each billable person's own on-costs: super, workers comp, payroll tax, leave loading, paid leave, public holidays and training. Divided by their billable hours and added to their pay rate: their true cost per hour.<br>
+      <strong>Indirect employee overhead</strong> is all non-billable wage time: office and admin staff in full, plus everyone's non-job admin time. Spread across every billable hour.<br>
+      <strong>Company costs</strong> are non-wage costs (insurance, vehicles, rent, software...), shared across jobs as a <strong>percentage of each job's profit</strong>.<br>
+      <span class="subtitle" style="font-size:12px;">Job pages show costs including all three. Each job's labour overhead uses the true cost of whoever logged the hours.</span>
     </div>
 
     <div class="card">
       <h2>1. People and hours</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Hours a year each person is paid for. Anyone who is not billable (office or admin staff) has their whole wage counted as a company cost instead. Leave the hours blank to use the default.</p>
-      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px;">
-        <div><label style="margin-top:0;">Default hours per person per year</label><input id="oh-default-hours" type="number" min="0" step="1" style="width:140px;" /></div>
-        <label style="display:flex; gap:6px; align-items:center; font-weight:400; margin:0;"><input type="radio" name="oh-mode" value="manual" style="width:auto;" /> Use these hours</label>
-        <label style="display:flex; gap:6px; align-items:center; font-weight:400; margin:0;"><input type="radio" name="oh-mode" value="timesheets" style="width:auto;" /> Use each person's real hours from the last 12 months of timesheets</label>
-        <button type="button" class="secondary" id="oh-save-hours">Save</button>
+      <p class="subtitle" style="margin-bottom:10px;">Defaults for everyone. Leave a person's box blank to use the default; leave days are full-time days and are worked out pro rata for anyone on fewer days a week.</p>
+      <div class="oh-fields">
+        <div><label>Days a week</label><input id="oh-d-dpw" type="number" min="0" max="7" step="0.5" /></div>
+        <div><label>Hours a day</label><input id="oh-d-hpd" type="number" min="0" max="24" step="0.1" /></div>
+        <div><label>Non-billable hrs a day</label><input id="oh-d-nb" type="number" min="0" max="24" step="0.25" /></div>
+        <div><label>Public holidays a year</label><input id="oh-d-ph" type="number" min="0" step="1" /></div>
+        <div><label>Annual leave days</label><input id="oh-d-al" type="number" min="0" step="1" /></div>
+        <div><label>Sick / personal days</label><input id="oh-d-sl" type="number" min="0" step="1" /></div>
+        <div><label>Training days</label><input id="oh-d-td" type="number" min="0" step="1" /></div>
       </div>
-      <div id="oh-people"></div>
+      <div class="oh-fields">
+        <label style="display:flex; gap:6px; align-items:center; font-weight:400; margin:0; font-size:13px;"><input type="radio" name="oh-mode" value="manual" style="width:auto;" /> Use the non-billable hours above</label>
+        <label style="display:flex; gap:6px; align-items:center; font-weight:400; margin:0; font-size:13px;"><input type="radio" name="oh-mode" value="timesheets" style="width:auto;" /> Use each person's real admin and training time from timesheets (once they have 40+ hours logged)</label>
+        <button type="button" class="secondary" id="oh-save-defaults">Save defaults</button>
+      </div>
+      <div class="oh-scroll" id="oh-people"></div>
+      <p class="subtitle" style="margin:8px 0 0; font-size:12px;">Subcontractors get no leave, public holidays, training or on-costs, but their billable hours still carry the indirect and company overheads. Other costs are anything for one person only (their phone, tools, licences), per year.</p>
     </div>
 
     <div class="card">
-      <h2>2. Employee direct costs</h2>
-      <p class="subtitle" style="margin-bottom:8px;">On top of wages, per year. Divided by the paid hours above and added to each billable person's hourly cost.</p>
+      <h2>2. Employee on-costs</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Percentages of each employee's wages. Part of each billable person's direct overhead (and of the indirect overhead for office and admin staff).</p>
+      <div class="oh-fields">
+        <div><label>Super (%)</label><input id="oh-super" type="number" min="0" step="0.1" /></div>
+        <div><label>Workers comp (%)</label><input id="oh-wc" type="number" min="0" step="0.1" /></div>
+        <div><label>Payroll tax (%)</label><input id="oh-pt" type="number" min="0" step="0.01" /></div>
+        <div><label>Annual leave loading (%)</label><input id="oh-ll" type="number" min="0" step="0.5" /></div>
+        <button type="button" class="secondary" id="oh-save-oncosts">Save</button>
+      </div>
+      <h3 style="margin:14px 0 4px; font-size:15px;">Other employee costs</h3>
+      <p class="subtitle" style="margin-bottom:8px;">Per year, shared by each employee's share of wages: uniforms, PPE, staff training courses, staff amenities. Super, workers comp and payroll tax are covered by the percentages above, so do not add them here or map them from Xero.</p>
       <div id="oh-employee-lines"></div>
     </div>
 
     <div class="card">
-      <h2>3. Company direct costs</h2>
-      <p class="subtitle" style="margin-bottom:8px;">Running the business, per year. Do not add materials, or the wages of people already costed against jobs. Non-billable wages are worked out for you from timesheets and admin pay (last line), so do not add wages here or map a wages account from Xero.</p>
+      <h2>3. Indirect employee overhead</h2>
+      <p class="subtitle" style="margin-bottom:8px;">Worked out for you from section 1: every non-billable wage hour.</p>
+      <div id="oh-indirect"></div>
+    </div>
+
+    <div class="card">
+      <h2>4. Company costs</h2>
+      <p class="subtitle" style="margin-bottom:8px;">Non-wage costs of running the business, per year: insurance, vehicles and fuel, rent, accounting, software, marketing, phones and internet. No wages here (they are all in sections 1 to 3) and no job materials.</p>
       <div id="oh-company-lines"></div>
     </div>
 
     <div class="card">
-      <h2>4. How company costs are shared across jobs</h2>
+      <h2>5. How company costs are shared across jobs</h2>
       <p class="subtitle" style="margin-bottom:10px;">Each job carries a percentage of its own profit towards company costs: yearly company costs divided by the profit you expect the business to make in a year.</p>
       <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end;">
         <div><label style="margin-top:0;">Percentage of</label>
@@ -90,8 +127,8 @@
     </div>
 
     <div class="card">
-      <h2>5. Keep it live from Xero</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Pick which expense accounts on your Xero Profit and Loss are employee costs or company costs. Their yearly amounts are refreshed from Xero every night. Xero lines are read only here; change them by changing the mapping. Leave wage accounts as "Ignore".</p>
+      <h2>6. Keep it live from Xero</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Pick which expense accounts on your Xero Profit and Loss are other employee costs or company costs. Their yearly amounts are refreshed from Xero every night. Xero lines are read only here; change them by changing the mapping. Leave wages, super, workers comp and payroll tax accounts as "Ignore": they are worked out above.</p>
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <button type="button" id="oh-load-xero">Choose accounts from Xero</button>
         <button type="button" class="secondary" id="oh-sync-now">Sync now</button>
@@ -103,7 +140,7 @@
     </div>
 
     <div class="card">
-      <h2>6. Month by month</h2>
+      <h2>7. Month by month</h2>
       <p class="subtitle" style="margin-bottom:8px;">The company result each month, estimated from invoices sent, materials received, timesheets, and the yearly overhead figures divided by 12.</p>
       <div id="oh-monthly"><p class="subtitle">Loading...</p></div>
     </div>
@@ -113,7 +150,8 @@
   <script src="/js/theme.js"></script>
   <script>
     const fmt0 = (n) => new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 }).format(n || 0);
-    let rates = null, settings = null, lines = [], people = [];
+    const num = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
+    let rates = null, settings = null, lines = [], people = [], overrides = {};
     const msg = (html) => { document.getElementById('oh-msg').innerHTML = html || ''; };
     const errBox = (e) => msg(`<div class="error-box">${escapeHtml(e.message || String(e))}</div>`);
 
@@ -132,17 +170,21 @@
     function renderStats() {
       const r = rates || {};
       const card = (label, value, note) => `<div class="stat"><div class="label">${label}</div><div class="value">${value}</div>${note ? `<div class="subtitle" style="margin:2px 0 0; font-size:12px;">${note}</div>` : ''}</div>`;
+      const paid = people.reduce((n, p) => n + (p.billable ? Number(p.paid_hours) || 0 : 0), 0);
       document.getElementById('oh-stats').innerHTML =
-        card('Employee overhead', `${money(r.employee_rate)} / hr`, `${money(r.employee_total)} a year over ${fmt0(r.staff_hours)} paid hours`)
-        + card('Company overhead', `${Number(r.company_pct || 0)}%`, `of each job's ${r.company_basis === 'revenue' ? 'price' : 'profit'}`)
-        + card('Company costs a year', money(r.company_total), `includes ${money(r.nonbillable_wages)} non-billable wages`)
-        + card('Overheads a year', money((Number(r.employee_total) || 0) + (Number(r.company_total) || 0)), 'employee plus company');
+        card('Direct overhead', `${money(r.direct_rate)} / hr`, `average per billable hour; ${money(r.direct_total)} a year`)
+        + card('Indirect overhead', `${money(r.indirect_rate)} / hr`, `every billable hour; ${money(r.indirect_total)} a year`)
+        + card('Company overhead', `${Number(r.company_pct || 0)}%`, `of each job's ${r.company_basis === 'revenue' ? 'price' : 'profit'}; ${money(r.company_total)} a year`)
+        + card('Billable hours a year', fmt0(r.billable_hours), paid ? `${Math.round((Number(r.billable_hours) || 0) / paid * 100)}% of billable people's paid hours` : '');
+      const w = document.getElementById('oh-warn');
+      w.innerHTML = settings.hours_mode === 'timesheets' && Number(r.timesheet_days) < 90
+        ? `<div class="oh-warn">Only ${fmt0(r.timesheet_days)} days of timesheets so far. Aim for at least 3 months before relying on real admin and training time; anyone with under 40 hours logged uses the defaults.</div>` : '';
     }
 
     function lineHtml(l) {
       const xero = l.source === 'xero';
       return `<div class="oh-line" data-id="${l.id}">
-        <div>${xero ? `<span>${escapeHtml(l.name)}</span><span class="oh-badge xero">from Xero</span>` : `<input class="oh-name" value="${escapeHtml(l.name)}" placeholder="e.g. Workers compensation" />`}</div>
+        <div>${xero ? `<span>${escapeHtml(l.name)}</span><span class="oh-badge xero">from Xero</span>` : `<input class="oh-name" value="${escapeHtml(l.name)}" placeholder="e.g. Uniforms and PPE" />`}</div>
         <div>${xero ? `<span>${money(l.annual_amount)}</span>` : `<input class="oh-amt" type="number" step="0.01" min="0" value="${l.annual_amount}" placeholder="per year" />`}</div>
         <div>${xero ? '' : `<button type="button" class="secondary oh-del" style="padding:5px 10px; font-size:12px;">Remove</button>`}</div>
       </div>`;
@@ -151,12 +193,8 @@
     function renderLines() {
       ['employee', 'company'].forEach((bucket) => {
         const mine = lines.filter(l => l.bucket === bucket);
-        let total = mine.reduce((n, l) => n + Number(l.annual_amount || 0), 0);
-        const extra = bucket === 'company'
-          ? `<div class="oh-line"><div>Non-billable wages <span class="oh-badge">calculated</span><div class="subtitle" style="font-size:12px;">Office and admin staff pay, plus everyone's non-job time (training, quoting, admin) from timesheets.</div></div><div>${money(rates && rates.nonbillable_wages)}</div><div></div></div>` : '';
-        if (bucket === 'company') total += Number(rates && rates.nonbillable_wages) || 0;
-        const el = document.getElementById(`oh-${bucket}-lines`);
-        el.innerHTML = (mine.length ? mine.map(lineHtml).join('') : '<p class="subtitle" style="margin:0 0 6px;">Nothing added yet.</p>') + extra
+        const total = mine.reduce((n, l) => n + Number(l.annual_amount || 0), 0);
+        document.getElementById(`oh-${bucket}-lines`).innerHTML = (mine.length ? mine.map(lineHtml).join('') : '<p class="subtitle" style="margin:0 0 6px;">Nothing added yet.</p>')
           + `<div class="oh-total"><span>Total per year</span><span>${money(total)}</span></div>
              <button type="button" class="secondary oh-add" data-bucket="${bucket}" style="margin-top:10px;">+ Add a cost</button>`;
       });
@@ -185,31 +223,73 @@
       }));
     }
 
-    function renderPeople() {
-      const emp = Number(rates && rates.employee_rate) || 0;
-      document.getElementById('oh-default-hours').value = settings.default_hours_per_person;
+    // Per-person inputs are blank when the default applies; the default shows as the placeholder.
+    const PERSON_FIELDS = [
+      ['days_per_week', 'Days a week', 'default_days_per_week', '0.5'],
+      ['hours_per_day', 'Hours a day', 'default_hours_per_day', '0.1'],
+      ['nonbillable_hours_per_day', 'Non-bill hrs a day', 'default_nonbillable_hours_per_day', '0.25'],
+      ['annual_leave_days', 'Annual leave days', 'default_annual_leave_days', '1'],
+      ['sick_days', 'Sick days', 'default_sick_days', '1'],
+      ['training_days', 'Training days', 'default_training_days', '1'],
+    ];
+
+    function renderDefaults() {
+      const set = (id, v) => { document.getElementById(id).value = v ?? ''; };
+      set('oh-d-dpw', settings.default_days_per_week); set('oh-d-hpd', settings.default_hours_per_day);
+      set('oh-d-nb', settings.default_nonbillable_hours_per_day); set('oh-d-ph', settings.public_holidays_per_year);
+      set('oh-d-al', settings.default_annual_leave_days); set('oh-d-sl', settings.default_sick_days); set('oh-d-td', settings.default_training_days);
+      set('oh-super', settings.super_pct); set('oh-wc', settings.workers_comp_pct); set('oh-pt', settings.payroll_tax_pct); set('oh-ll', settings.leave_loading_pct);
       document.querySelectorAll('input[name="oh-mode"]').forEach(r => { r.checked = r.value === settings.hours_mode; });
-      document.getElementById('oh-people').innerHTML = `<table class="responsive-stack oh-people"><thead><tr><th>Person</th><th>Bills their time</th><th>Hours a year</th><th class="num">Job hrs (12 mth)</th><th class="num">Other hrs</th><th class="num">Hourly cost</th><th class="num">Loaded rate</th></tr></thead><tbody>${people.map(p => `
-        <tr data-id="${p.profile_id}">
-          <td data-label="Person">${escapeHtml(p.full_name || '')} <span class="subtitle" style="font-size:11px;">${escapeHtml(p.role)}</span></td>
-          <td data-label="Bills their time"><input type="checkbox" class="oh-bill" ${p.billable ? 'checked' : ''} style="width:auto;" /></td>
-          <td data-label="Hours a year"><input type="number" class="oh-hours" min="0" step="10" value="${p.custom_hours ? p.paid_hours : ''}" placeholder="${fmt0(settings.default_hours_per_person)}" ${settings.hours_mode === 'timesheets' ? 'title="Using real timesheet hours: ' + fmt0(p.paid_hours) + '"' : ''} /></td>
-          <td class="num" data-label="Job hrs (12 mth)">${fmt0(p.job_hours)}</td>
-          <td class="num" data-label="Other hrs">${fmt0(p.nonjob_hours)}</td>
-          <td class="num" data-label="Hourly cost">${p.hourly_cost > 0 ? money(p.hourly_cost) : '-'}</td>
-          <td class="num" data-label="Loaded rate">${p.billable && p.hourly_cost > 0 ? '<strong>' + money(Number(p.hourly_cost) + emp) + '</strong>' : '-'}</td>
-        </tr>`).join('')}</tbody></table>`;
+    }
+
+    function renderPeople() {
+      const ind = Number(rates && rates.indirect_rate) || 0;
+      const head = `<tr><th>Person</th><th>Bills time</th><th>Sub-<br>contractor</th>${PERSON_FIELDS.map(f => `<th>${f[1]}</th>`).join('')}<th>Other costs $/yr</th>
+        <th class="num oh-calc">Paid hrs</th><th class="num oh-calc">Leave + PH hrs</th><th class="num oh-calc">Training hrs</th><th class="num oh-calc">Non-bill hrs</th><th class="num oh-calc">Billable hrs</th>
+        <th class="num oh-calc">Pay rate</th><th class="num oh-calc">Direct OH / hr</th><th class="num oh-calc">True cost / hr</th><th class="num oh-calc">With indirect / hr</th></tr>`;
+      const rows = people.map(p => {
+        const o = overrides[p.profile_id] || {};
+        const inputs = PERSON_FIELDS.map(f => `<td data-label="${f[1]}"><input type="number" class="oh-f" data-f="${f[0]}" min="0" step="${f[3]}" value="${o[f[0]] ?? ''}" placeholder="${settings[f[2]]}" /></td>`).join('');
+        const billableHrs = Number(p.billable_hours) || 0;
+        return `<tr data-id="${p.profile_id}">
+          <td data-label="Person">${escapeHtml(p.full_name || '')} <span class="subtitle" style="font-size:11px;">${escapeHtml(p.role)}</span>${p.from_timesheets ? '<div class="subtitle" style="font-size:11px;">admin time from timesheets</div>' : ''}</td>
+          <td data-label="Bills time"><input type="checkbox" class="oh-bill" ${p.billable ? 'checked' : ''} style="width:auto;" /></td>
+          <td data-label="Subcontractor"><input type="checkbox" class="oh-sc" ${p.subcontractor ? 'checked' : ''} style="width:auto;" /></td>
+          ${inputs}
+          <td data-label="Other costs"><input type="number" class="oh-f oh-wide" data-f="other_costs_per_year" min="0" step="50" value="${o.other_costs_per_year ?? ''}" placeholder="0" /></td>
+          <td class="num oh-calc">${fmt0(p.paid_hours)}</td><td class="num oh-calc">${fmt0(p.leave_hours)}</td><td class="num oh-calc">${fmt0(p.training_hours)}</td>
+          <td class="num oh-calc">${fmt0(p.nonbillable_hours)}</td>
+          <td class="num oh-calc"><strong>${p.billable ? fmt0(billableHrs) : '-'}</strong>${p.billable && p.paid_hours > 0 ? `<div class="subtitle" style="font-size:11px;">${Math.round(billableHrs / p.paid_hours * 100)}%</div>` : ''}</td>
+          <td class="num oh-calc">${p.hourly_cost > 0 ? money(p.hourly_cost) : '<span class="subtitle">no rate</span>'}</td>
+          <td class="num oh-calc">${p.direct_rate != null && p.hourly_cost > 0 ? money(p.direct_rate) : '-'}</td>
+          <td class="num oh-calc">${p.cost_per_billable_hour != null && p.hourly_cost > 0 ? '<strong>' + money(p.cost_per_billable_hour) + '</strong>' : '-'}</td>
+          <td class="num oh-calc">${p.cost_per_billable_hour != null && p.hourly_cost > 0 ? money(Number(p.cost_per_billable_hour) + ind) : '-'}</td>
+        </tr>`;
+      }).join('');
+      document.getElementById('oh-people').innerHTML = `<table class="oh-people"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
       document.querySelectorAll('#oh-people tr[data-id]').forEach((row) => {
         const save = async () => {
-          const hrs = row.querySelector('.oh-hours').value;
-          const { error } = await supabaseClient.from('overhead_people').upsert({
-            profile_id: row.dataset.id, billable: row.querySelector('.oh-bill').checked, hours_per_year: hrs === '' ? null : Number(hrs), updated_at: new Date().toISOString(),
-          }, { onConflict: 'profile_id' });
+          const rec = { profile_id: row.dataset.id, billable: row.querySelector('.oh-bill').checked, subcontractor: row.querySelector('.oh-sc').checked, updated_at: new Date().toISOString() };
+          row.querySelectorAll('.oh-f').forEach(i => { rec[i.dataset.f] = num(i.value); });
+          const { error } = await supabaseClient.from('overhead_people').upsert(rec, { onConflict: 'profile_id' });
           if (error) return errBox(error);
-          msg(''); await refresh();
+          msg(''); await refresh(false);
         };
         row.querySelectorAll('input').forEach(i => i.addEventListener('change', save));
       });
+    }
+
+    function renderIndirect() {
+      const r = rates || {};
+      const office = people.filter(p => Number(p.indirect_total) > 0 && (!p.billable || !(Number(p.billable_hours) > 0)));
+      const adminTime = people.filter(p => p.billable && Number(p.billable_hours) > 0 && Number(p.indirect_total) > 0);
+      const adminTotal = adminTime.reduce((n, p) => n + Number(p.indirect_total), 0);
+      const row = (label, amt, note) => `<div class="oh-line" style="grid-template-columns: 1fr 150px;"><div>${label}${note ? `<div class="subtitle" style="font-size:12px;">${note}</div>` : ''}</div><div>${money(amt)}</div></div>`;
+      document.getElementById('oh-indirect').innerHTML =
+        office.map(p => row(`${escapeHtml(p.full_name)} <span class="oh-badge">not billable</span>`, p.indirect_total, 'Wages plus on-costs')).join('')
+        + row('Billable staff non-job admin time', adminTotal, `${fmt0(adminTime.reduce((n, p) => n + Number(p.nonbillable_hours), 0))} hours a year at each person's pay rate`)
+        + `<div class="oh-total"><span>Total per year</span><span>${money(r.indirect_total)}</span></div>`
+        + `<p class="subtitle" style="margin:8px 0 0;">${money(r.indirect_total)} &divide; ${fmt0(r.billable_hours)} billable hours = <strong>${money(r.indirect_rate)}</strong> on every billable hour.</p>`;
     }
 
     function renderBase() {
@@ -234,44 +314,48 @@
       const el = document.getElementById('oh-monthly');
       const { data, error } = await supabaseClient.rpc('get_monthly_net_summary', { p_months: 12 });
       if (error || !data) { el.innerHTML = `<div class="error-box">${escapeHtml(error ? error.message : 'No data')}</div>`; return; }
-      const cell = (n, bold) => `<td class="num">${bold ? '<strong>' : ''}${money(n)}${bold ? '</strong>' : ''}</td>`;
-      el.innerHTML = `<table><thead><tr><th>Month</th><th class="num">Invoiced</th><th class="num">Materials</th><th class="num">Job wages</th><th class="num">Gross profit</th><th class="num">Non-billable wages</th><th class="num">Employee costs</th><th class="num">Company costs</th><th class="num">Profit after overheads</th></tr></thead><tbody>${data.map(m => `
-        <tr><td>${new Date(m.month + 'T00:00:00').toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })}</td>${cell(m.revenue)}${cell(m.materials)}${cell(m.job_labour)}${cell(m.gross_profit)}${cell(m.nonbillable_wages)}${cell(m.employee_costs)}${cell(m.company_costs)}<td class="num"><strong style="color:${Number(m.net_profit) >= 0 ? 'var(--green)' : 'var(--red, #e05252)'};">${money(m.net_profit)}</strong></td></tr>`).join('')}</tbody></table>
-        <p class="subtitle" style="margin:8px 0 0; font-size:12px;">Invoiced is ex GST, by the month the invoice was sent. Materials are purchase order items received that month. Wages use each person's hourly cost.</p>`;
+      const cell = (n) => `<td class="num">${money(n)}</td>`;
+      el.innerHTML = `<div class="oh-scroll"><table><thead><tr><th>Month</th><th class="num">Invoiced</th><th class="num">Materials</th><th class="num">Job wages</th><th class="num">Gross profit</th><th class="num">Direct overhead</th><th class="num">Indirect wages</th><th class="num">Company costs</th><th class="num">Profit after overheads</th></tr></thead><tbody>${data.map(m => `
+        <tr><td>${new Date(m.month + 'T00:00:00').toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })}</td>${cell(m.revenue)}${cell(m.materials)}${cell(m.job_labour)}${cell(m.gross_profit)}${cell(m.direct_overheads)}${cell(m.indirect_wages)}${cell(m.company_costs)}<td class="num"><strong style="color:${Number(m.net_profit) >= 0 ? 'var(--green)' : 'var(--red, #e05252)'};">${money(m.net_profit)}</strong></td></tr>`).join('')}</tbody></table></div>
+        <p class="subtitle" style="margin:8px 0 0; font-size:12px;">Invoiced is ex GST, by the month the invoice was sent. Materials are purchase order items received that month. Wages use each person's hourly cost. Indirect wages are billable staff's logged admin time that month plus office and admin staff's yearly cost divided by 12.</p>`;
     }
 
     async function refresh(full = true) {
-      const [{ data: r, error: e1 }, { data: s, error: e2 }, { data: l, error: e3 }, { data: p, error: e4 }] = await Promise.all([
+      const [{ data: r, error: e1 }, { data: s, error: e2 }, { data: l, error: e3 }, { data: p, error: e4 }, { data: o, error: e5 }] = await Promise.all([
         supabaseClient.rpc('get_overhead_rates'),
         supabaseClient.from('overhead_settings').select('*').eq('id', 1).single(),
         supabaseClient.from('overhead_lines').select('*').order('sort_order').order('created_at'),
         supabaseClient.rpc('get_overhead_people'),
+        supabaseClient.from('overhead_people').select('*'),
       ]);
-      const failed = e1 || e2 || e3 || e4;
+      const failed = e1 || e2 || e3 || e4 || e5;
       if (failed) return errBox(failed);
       rates = Array.isArray(r) ? r[0] : r; settings = s; lines = l || []; people = p || [];
-      renderStats(); renderLines(); renderPeople(); renderBase();
-      if (full) { renderSync(); await renderMonthly(); }
+      overrides = Object.fromEntries((o || []).map(x => [x.profile_id, x]));
+      renderStats(); renderLines(); renderPeople(); renderIndirect(); renderBase();
+      if (full) { renderDefaults(); renderSync(); await renderMonthly(); }
     }
 
-    document.getElementById('oh-save-hours').addEventListener('click', async () => {
-      const { error } = await supabaseClient.from('overhead_settings').update({
-        hours_mode: document.querySelector('input[name="oh-mode"]:checked').value,
-        default_hours_per_person: Number(document.getElementById('oh-default-hours').value) || 0, updated_at: new Date().toISOString(),
-      }).eq('id', 1);
+    async function saveSettings(patch) {
+      const { error } = await supabaseClient.from('overhead_settings').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', 1);
       if (error) return errBox(error);
       msg('<div class="success-box">Saved.</div>'); await refresh();
-    });
+    }
+    const val = (id) => Number(document.getElementById(id).value) || 0;
+    document.getElementById('oh-save-defaults').addEventListener('click', () => saveSettings({
+      hours_mode: document.querySelector('input[name="oh-mode"]:checked').value,
+      default_days_per_week: val('oh-d-dpw'), default_hours_per_day: val('oh-d-hpd'), default_nonbillable_hours_per_day: val('oh-d-nb'),
+      public_holidays_per_year: val('oh-d-ph'), default_annual_leave_days: val('oh-d-al'), default_sick_days: val('oh-d-sl'), default_training_days: val('oh-d-td'),
+    }));
+    document.getElementById('oh-save-oncosts').addEventListener('click', () => saveSettings({
+      super_pct: val('oh-super'), workers_comp_pct: val('oh-wc'), payroll_tax_pct: val('oh-pt'), leave_loading_pct: val('oh-ll'),
+    }));
     document.getElementById('oh-basis').addEventListener('change', (e) => {
       document.getElementById('oh-base-word').textContent = e.target.value === 'revenue' ? 'job price' : 'profit';
     });
-    document.getElementById('oh-save-base').addEventListener('click', async () => {
-      const { error } = await supabaseClient.from('overhead_settings').update({
-        company_basis: document.getElementById('oh-basis').value, expected_annual_base: Number(document.getElementById('oh-expected').value) || 0, updated_at: new Date().toISOString(),
-      }).eq('id', 1);
-      if (error) return errBox(error);
-      msg('<div class="success-box">Saved.</div>'); await refresh();
-    });
+    document.getElementById('oh-save-base').addEventListener('click', () => saveSettings({
+      company_basis: document.getElementById('oh-basis').value, expected_annual_base: val('oh-expected'),
+    }));
     document.getElementById('oh-auto').addEventListener('change', async (e) => {
       await supabaseClient.from('overhead_settings').update({ auto_sync: e.target.checked }).eq('id', 1);
     });
@@ -290,7 +374,7 @@
         if (!xeroAccounts.length) { box.innerHTML = '<p class="subtitle">Xero has no expense accounts with activity in that period.</p>'; return; }
         box.innerHTML = `<p class="subtitle" style="margin:0 0 6px; font-size:12px;">Profit and Loss ${escapeHtml(data.from)} to ${escapeHtml(data.to)}. Amounts are for that period; they are scaled to a full year when synced.</p>`
           + xeroAccounts.map((a, i) => `<div class="oh-acc"><span>${escapeHtml(a.name)}</span><span>${money(a.amount)}</span>
-              <select data-i="${i}"><option value="ignore"${a.bucket === 'ignore' ? ' selected' : ''}>Ignore</option><option value="employee"${a.bucket === 'employee' ? ' selected' : ''}>Employee cost</option><option value="company"${a.bucket === 'company' ? ' selected' : ''}>Company cost</option></select></div>`).join('')
+              <select data-i="${i}"><option value="ignore"${a.bucket === 'ignore' ? ' selected' : ''}>Ignore</option><option value="employee"${a.bucket === 'employee' ? ' selected' : ''}>Other employee cost</option><option value="company"${a.bucket === 'company' ? ' selected' : ''}>Company cost</option></select></div>`).join('')
           + `<button type="button" id="oh-save-map" style="margin-top:10px;">Save and sync</button>`;
         document.getElementById('oh-save-map').addEventListener('click', async (ev) => {
           const b = ev.target; b.disabled = true; b.textContent = 'Syncing...';
