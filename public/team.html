@@ -40,6 +40,8 @@
     <h1>Team</h1>
     <p class="subtitle">Everyone at Thomson Energy. Rates and allowances are managed by an admin under Settings &gt; Users &amp; Roles. Licences are shown on each person below, and insurance and licensing (company and employee) is managed at the bottom of this page.</p>
 
+    <div id="clocked-in-now"></div>
+
     <div class="card">
       <div id="team-list" class="team-grid"><p class="subtitle">Loading...</p></div>
     </div>
@@ -586,6 +588,7 @@
       });
       const myRole = await getMyRole();
       teamCanEditTitles = myRole === 'admin' || myRole === 'finance';
+      renderClockedInNowCard(document.getElementById('clocked-in-now'));
       await loadTeam();
       // Company insurance/licences and every employee's licences: admin only,
       // same as when this lived under Settings.

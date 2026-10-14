@@ -2753,6 +2753,7 @@
           <div class="job-tab-main">
 
             <div class="settings-panel active" id="panel-summary">
+              ${!editMode ? '<div id="clock-here-card"></div>' : ''}
               ${!editMode && (project.notes || (TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length)) ? `
               <div class="card">
                 ${project.notes ? `
@@ -3400,6 +3401,7 @@
       if (document.getElementById('site-photos-list')) { loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
+      if (document.getElementById('clock-here-card')) loadClockHereCard(project);
       if (document.getElementById('assets-card')) loadAssetsCard(project);
       if (document.getElementById('meetings-card')) loadMeetingsCard(project);
       applyOverheadsToCosts();
@@ -5712,6 +5714,56 @@
           window.location.href = `/my-day.html?clockin_project=${target.id}`;
         }
       }));
+    }
+
+    // Top of Summary: who's clocked into this job right now, and your own
+    // clock in / clock out for it without going to My Day. Clocked in on
+    // another job already? The button switches you over (the usual
+    // clock-out wizard runs first). Only jobs take a clock-in here; a quote
+    // still shows anyone who happens to be clocked to it.
+    async function loadClockHereCard(project) {
+      const el = document.getElementById('clock-here-card');
+      if (!el) return;
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const [here, { data: mine }] = await Promise.all([
+        fetchActiveClockIns(project.id),
+        supabaseClient.from('time_entries').select('*, projects(name, job_number, quote_number)').eq('staff_id', user.id).is('clock_out', null).order('clock_in', { ascending: false }).limit(1).maybeSingle(),
+      ]);
+      const refresh = () => loadClockHereCard(project);
+      const mineHere = mine && mine.project_id === project.id;
+      if (!project.job_number && !here.length) { el.innerHTML = ''; return; }
+
+      let btnHtml = '';
+      if (mineHere) btnHtml = `<button type="button" class="danger" id="clock-here-btn">Clock out</button>`;
+      else if (project.job_number) btnHtml = `<button type="button" id="clock-here-btn">${mine ? 'Switch to this job' : 'Clock in'}</button>`;
+      const elsewhere = mine && !mineHere
+        ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">You're clocked in to ${mine.projects ? escapeHtml(projectRef(mine.projects)) : escapeHtml(timeCategoryLabel(mine.time_category) || 'General')} since ${clockSinceText(mine.clock_in)}.</p>`
+        : '';
+
+      el.innerHTML = `
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+            <h2 style="margin:0;">${here.length ? 'On this job now' : 'Nobody clocked in here'}</h2>
+            ${btnHtml}
+          </div>
+          ${here.map(r => `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 0; border-top:1px solid var(--border); margin-top:8px;">
+              <div style="min-width:0;">
+                <strong>${escapeHtml(r.staff_id === user.id ? 'You' : (r.full_name || 'Someone'))}</strong>
+                ${r.stage_names && r.stage_names.length ? `<span class="subtitle" style="font-size:12px;"> &middot; ${r.stage_names.map(escapeHtml).join(', ')}</span>` : ''}
+              </div>
+              <span class="subtitle" style="font-size:12px;">since ${clockSinceText(r.clock_in)} &middot; ${clockElapsedText(r.clock_in)}</span>
+            </div>`).join('')}
+          ${elsewhere}
+        </div>`;
+
+      const btn = document.getElementById('clock-here-btn');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        if (mineHere) openClockOutModal(mine, refresh);
+        else if (mine) openClockOutModal(mine, refresh, { switchTo: { projectId: project.id, label: projectRef(project) } });
+        else openJobClockInModal(project, refresh);
+      });
     }
 
     // "Schedule staff" - book people onto this quote (a site visit) or job
