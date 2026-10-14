@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Overheads - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=13" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .oh-grid { display:grid; gap:12px; grid-template-columns: repeat(4, 1fr); margin-bottom:14px; }
+  @media (max-width: 800px) { .oh-grid { grid-template-columns: 1fr 1fr; } }
+  .oh-line { display:grid; grid-template-columns: 1fr 150px auto; gap:8px; align-items:center; padding:7px 0; border-top:1px solid var(--border); }
+  .oh-line input { margin:0; }
+  .oh-badge { font-size:11px; padding:2px 8px; border-radius:20px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; margin-left:6px; }
+  .oh-badge.xero { border-color:var(--accent); color:var(--accent); }
+  .oh-total { display:flex; justify-content:space-between; padding-top:10px; border-top:2px solid var(--border); font-weight:700; margin-top:6px; }
+  .oh-formula { background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:12px 14px; font-size:13px; line-height:1.6; }
+  .oh-acc { display:grid; grid-template-columns: 1fr 120px 150px; gap:8px; align-items:center; padding:6px 0; border-top:1px solid var(--border); font-size:13px; }
+  .oh-people input[type=number] { width:100px; margin:0; }
+  @media (max-width: 640px) { .oh-line { grid-template-columns: 1fr 120px auto; } .oh-acc { grid-template-columns: 1fr 100px; } .oh-acc select { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Overheads</h1>
+    <p class="subtitle">What it really costs to run the business, so job costs include their share of it and the month-by-month profit is the real figure. Finance and Admin only.</p>
+    <div id="oh-msg"></div>
+    <div class="oh-grid" id="oh-stats"></div>
+
+    <div class="oh-formula" style="margin-bottom:14px;">
+      <strong>How it works</strong><br>
+      <strong>Employee costs</strong> (super, workers comp, payroll tax, tools, vehicles...) are divided by the paid hours of the people who bill their time, and added to their hourly cost: their loaded rate.<br>
+      <strong>Company costs</strong> (rent, insurance, accounting, software, marketing, plus all non-billable wages) are shared across jobs as a <strong>percentage of each job's profit</strong>.<br>
+      <span class="subtitle" style="font-size:12px;">Job pages then show costs including these overheads. The monthly summary at the bottom is the company-level result.</span>
+    </div>
+
+    <div class="card">
+      <h2>1. People and hours</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Hours a year each person is paid for. Anyone who is not billable (office or admin staff) has their whole wage counted as a company cost instead. Leave the hours blank to use the default.</p>
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px;">
+        <div><label style="margin-top:0;">Default hours per person per year</label><input id="oh-default-hours" type="number" min="0" step="1" style="width:140px;" /></div>
+        <label style="display:flex; gap:6px; align-items:center; font-weight:400; margin:0;"><input type="radio" name="oh-mode" value="manual" style="width:auto;" /> Use these hours</label>
+        <label style="display:flex; gap:6px; align-items:center; font-weight:400; margin:0;"><input type="radio" name="oh-mode" value="timesheets" style="width:auto;" /> Use each person's real hours from the last 12 months of timesheets</label>
+        <button type="button" class="secondary" id="oh-save-hours">Save</button>
+      </div>
+      <div id="oh-people"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Employee direct costs</h2>
+      <p class="subtitle" style="margin-bottom:8px;">On top of wages, per year. Divided by the paid hours above and added to each billable person's hourly cost.</p>
+      <div id="oh-employee-lines"></div>
+    </div>
+
+    <div class="card">
+      <h2>3. Company direct costs</h2>
+      <p class="subtitle" style="margin-bottom:8px;">Running the business, per year. Do not add materials, or the wages of people already costed against jobs. Non-billable wages are worked out for you from timesheets and admin pay (last line), so do not add wages here or map a wages account from Xero.</p>
+      <div id="oh-company-lines"></div>
+    </div>
+
+    <div class="card">
+      <h2>4. How company costs are shared across jobs</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Each job carries a percentage of its own profit towards company costs: yearly company costs divided by the profit you expect the business to make in a year.</p>
+      <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end;">
+        <div><label style="margin-top:0;">Percentage of</label>
+          <select id="oh-basis" style="width:auto;"><option value="profit">Job profit (price less materials and wages)</option><option value="revenue">Job price</option></select></div>
+        <div><label style="margin-top:0;">Expected yearly <span id="oh-base-word">profit</span> ($)</label><input id="oh-expected" type="number" min="0" step="1000" style="width:170px;" /></div>
+        <button type="button" class="secondary" id="oh-save-base">Save</button>
+      </div>
+      <p class="subtitle" id="oh-pct-line" style="margin:10px 0 0;"></p>
+    </div>
+
+    <div class="card">
+      <h2>5. Keep it live from Xero</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Pick which expense accounts on your Xero Profit and Loss are employee costs or company costs. Their yearly amounts are refreshed from Xero every night. Xero lines are read only here; change them by changing the mapping. Leave wage accounts as "Ignore".</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <button type="button" id="oh-load-xero">Choose accounts from Xero</button>
+        <button type="button" class="secondary" id="oh-sync-now">Sync now</button>
+        <label style="display:flex; gap:6px; align-items:center; font-weight:400; margin:0;"><input type="checkbox" id="oh-auto" style="width:auto;" /> Refresh every night</label>
+        <label style="margin:0 0 0 8px; font-weight:400;">Look back <select id="oh-months" style="display:inline-block; width:auto;"><option value="12">12 months</option><option value="6">6 months</option><option value="3">3 months</option></select></label>
+      </div>
+      <p class="subtitle" id="oh-sync-status" style="margin:8px 0 0; font-size:12px;"></p>
+      <div id="oh-xero-accounts" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>6. Month by month</h2>
+      <p class="subtitle" style="margin-bottom:8px;">The company result each month, estimated from invoices sent, materials received, timesheets, and the yearly overhead figures divided by 12.</p>
+      <div id="oh-monthly"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=64"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    const fmt0 = (n) => new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 }).format(n || 0);
+    let rates = null, settings = null, lines = [], people = [];
+    const msg = (html) => { document.getElementById('oh-msg').innerHTML = html || ''; };
+    const errBox = (e) => msg(`<div class="error-box">${escapeHtml(e.message || String(e))}</div>`);
+
+    async function authHeader() {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      return { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` };
+    }
+    async function callFn(name, method, body) {
+      const res = await fetch('/.netlify/functions/' + name, { method, headers: await authHeader(), body: body ? JSON.stringify(body) : undefined });
+      const text = await res.text();
+      let data; try { data = JSON.parse(text); } catch (e) { throw new Error('Could not reach the server (status ' + res.status + ').'); }
+      if (!data.ok) throw new Error(data.error || 'Something went wrong.');
+      return data;
+    }
+
+    function renderStats() {
+      const r = rates || {};
+      const card = (label, value, note) => `<div class="stat"><div class="label">${label}</div><div class="value">${value}</div>${note ? `<div class="subtitle" style="margin:2px 0 0; font-size:12px;">${note}</div>` : ''}</div>`;
+      document.getElementById('oh-stats').innerHTML =
+        card('Employee overhead', `${money(r.employee_rate)} / hr`, `${money(r.employee_total)} a year over ${fmt0(r.staff_hours)} paid hours`)
+        + card('Company overhead', `${Number(r.company_pct || 0)}%`, `of each job's ${r.company_basis === 'revenue' ? 'price' : 'profit'}`)
+        + card('Company costs a year', money(r.company_total), `includes ${money(r.nonbillable_wages)} non-billable wages`)
+        + card('Overheads a year', money((Number(r.employee_total) || 0) + (Number(r.company_total) || 0)), 'employee plus company');
+    }
+
+    function lineHtml(l) {
+      const xero = l.source === 'xero';
+      return `<div class="oh-line" data-id="${l.id}">
+        <div>${xero ? `<span>${escapeHtml(l.name)}</span><span class="oh-badge xero">from Xero</span>` : `<input class="oh-name" value="${escapeHtml(l.name)}" placeholder="e.g. Workers compensation" />`}</div>
+        <div>${xero ? `<span>${money(l.annual_amount)}</span>` : `<input class="oh-amt" type="number" step="0.01" min="0" value="${l.annual_amount}" placeholder="per year" />`}</div>
+        <div>${xero ? '' : `<button type="button" class="secondary oh-del" style="padding:5px 10px; font-size:12px;">Remove</button>`}</div>
+      </div>`;
+    }
+
+    function renderLines() {
+      ['employee', 'company'].forEach((bucket) => {
+        const mine = lines.filter(l => l.bucket === bucket);
+        let total = mine.reduce((n, l) => n + Number(l.annual_amount || 0), 0);
+        const extra = bucket === 'company'
+          ? `<div class="oh-line"><div>Non-billable wages <span class="oh-badge">calculated</span><div class="subtitle" style="font-size:12px;">Office and admin staff pay, plus everyone's non-job time (training, quoting, admin) from timesheets.</div></div><div>${money(rates && rates.nonbillable_wages)}</div><div></div></div>` : '';
+        if (bucket === 'company') total += Number(rates && rates.nonbillable_wages) || 0;
+        const el = document.getElementById(`oh-${bucket}-lines`);
+        el.innerHTML = (mine.length ? mine.map(lineHtml).join('') : '<p class="subtitle" style="margin:0 0 6px;">Nothing added yet.</p>') + extra
+          + `<div class="oh-total"><span>Total per year</span><span>${money(total)}</span></div>
+             <button type="button" class="secondary oh-add" data-bucket="${bucket}" style="margin-top:10px;">+ Add a cost</button>`;
+      });
+      document.querySelectorAll('.oh-line[data-id]').forEach((row) => {
+        const id = row.dataset.id;
+        const save = async () => {
+          const name = row.querySelector('.oh-name'), amt = row.querySelector('.oh-amt');
+          if (!name || !amt) return;
+          const { error } = await supabaseClient.from('overhead_lines').update({ name: name.value.trim() || 'Unnamed cost', annual_amount: Number(amt.value) || 0, updated_at: new Date().toISOString() }).eq('id', id);
+          if (error) return errBox(error);
+          msg(''); await refresh(false);
+        };
+        row.querySelectorAll('input').forEach(i => i.addEventListener('change', save));
+        const del = row.querySelector('.oh-del');
+        if (del) del.addEventListener('click', async () => {
+          if (!confirm('Remove this cost?')) return;
+          const { error } = await supabaseClient.from('overhead_lines').delete().eq('id', id);
+          if (error) return errBox(error);
+          await refresh();
+        });
+      });
+      document.querySelectorAll('.oh-add').forEach((btn) => btn.addEventListener('click', async () => {
+        const { error } = await supabaseClient.from('overhead_lines').insert({ bucket: btn.dataset.bucket, name: 'New cost', annual_amount: 0, source: 'manual' });
+        if (error) return errBox(error);
+        await refresh();
+      }));
+    }
+
+    function renderPeople() {
+      const emp = Number(rates && rates.employee_rate) || 0;
+      document.getElementById('oh-default-hours').value = settings.default_hours_per_person;
+      document.querySelectorAll('input[name="oh-mode"]').forEach(r => { r.checked = r.value === settings.hours_mode; });
+      document.getElementById('oh-people').innerHTML = `<table class="responsive-stack oh-people"><thead><tr><th>Person</th><th>Bills their time</th><th>Hours a year</th><th class="num">Job hrs (12 mth)</th><th class="num">Other hrs</th><th class="num">Hourly cost</th><th class="num">Loaded rate</th></tr></thead><tbody>${people.map(p => `
+        <tr data-id="${p.profile_id}">
+          <td data-label="Person">${escapeHtml(p.full_name || '')} <span class="subtitle" style="font-size:11px;">${escapeHtml(p.role)}</span></td>
+          <td data-label="Bills their time"><input type="checkbox" class="oh-bill" ${p.billable ? 'checked' : ''} style="width:auto;" /></td>
+          <td data-label="Hours a year"><input type="number" class="oh-hours" min="0" step="10" value="${p.custom_hours ? p.paid_hours : ''}" placeholder="${fmt0(settings.default_hours_per_person)}" ${settings.hours_mode === 'timesheets' ? 'title="Using real timesheet hours: ' + fmt0(p.paid_hours) + '"' : ''} /></td>
+          <td class="num" data-label="Job hrs (12 mth)">${fmt0(p.job_hours)}</td>
+          <td class="num" data-label="Other hrs">${fmt0(p.nonjob_hours)}</td>
+          <td class="num" data-label="Hourly cost">${p.hourly_cost > 0 ? money(p.hourly_cost) : '-'}</td>
+          <td class="num" data-label="Loaded rate">${p.billable && p.hourly_cost > 0 ? '<strong>' + money(Number(p.hourly_cost) + emp) + '</strong>' : '-'}</td>
+        </tr>`).join('')}</tbody></table>`;
+      document.querySelectorAll('#oh-people tr[data-id]').forEach((row) => {
+        const save = async () => {
+          const hrs = row.querySelector('.oh-hours').value;
+          const { error } = await supabaseClient.from('overhead_people').upsert({
+            profile_id: row.dataset.id, billable: row.querySelector('.oh-bill').checked, hours_per_year: hrs === '' ? null : Number(hrs), updated_at: new Date().toISOString(),
+          }, { onConflict: 'profile_id' });
+          if (error) return errBox(error);
+          msg(''); await refresh();
+        };
+        row.querySelectorAll('input').forEach(i => i.addEventListener('change', save));
+      });
+    }
+
+    function renderBase() {
+      document.getElementById('oh-basis').value = settings.company_basis;
+      document.getElementById('oh-expected').value = settings.expected_annual_base || '';
+      document.getElementById('oh-base-word').textContent = settings.company_basis === 'revenue' ? 'job price' : 'profit';
+      const r = rates || {};
+      document.getElementById('oh-pct-line').innerHTML = Number(settings.expected_annual_base) > 0
+        ? `${money(r.company_total)} of company costs &divide; ${money(settings.expected_annual_base)} = <strong>${Number(r.company_pct)}%</strong> of each job's ${settings.company_basis === 'revenue' ? 'price' : 'profit'}.`
+        : 'Enter the yearly figure to get the percentage. Until then no company overhead is added to job costs.';
+    }
+
+    function renderSync() {
+      document.getElementById('oh-auto').checked = !!settings.auto_sync;
+      document.getElementById('oh-months').value = String(settings.xero_months || 12);
+      const parts = [];
+      if (settings.last_synced_at) parts.push('Last synced ' + new Date(settings.last_synced_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) + '.');
+      document.getElementById('oh-sync-status').innerHTML = parts.join(' ') + (settings.last_sync_error ? ` <span style="color:var(--red, #e05252);">${escapeHtml(settings.last_sync_error)}</span>` : '');
+    }
+
+    async function renderMonthly() {
+      const el = document.getElementById('oh-monthly');
+      const { data, error } = await supabaseClient.rpc('get_monthly_net_summary', { p_months: 12 });
+      if (error || !data) { el.innerHTML = `<div class="error-box">${escapeHtml(error ? error.message : 'No data')}</div>`; return; }
+      const cell = (n, bold) => `<td class="num">${bold ? '<strong>' : ''}${money(n)}${bold ? '</strong>' : ''}</td>`;
+      el.innerHTML = `<table><thead><tr><th>Month</th><th class="num">Invoiced</th><th class="num">Materials</th><th class="num">Job wages</th><th class="num">Gross profit</th><th class="num">Non-billable wages</th><th class="num">Employee costs</th><th class="num">Company costs</th><th class="num">Profit after overheads</th></tr></thead><tbody>${data.map(m => `
+        <tr><td>${new Date(m.month + 'T00:00:00').toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })}</td>${cell(m.revenue)}${cell(m.materials)}${cell(m.job_labour)}${cell(m.gross_profit)}${cell(m.nonbillable_wages)}${cell(m.employee_costs)}${cell(m.company_costs)}<td class="num"><strong style="color:${Number(m.net_profit) >= 0 ? 'var(--green)' : 'var(--red, #e05252)'};">${money(m.net_profit)}</strong></td></tr>`).join('')}</tbody></table>
+        <p class="subtitle" style="margin:8px 0 0; font-size:12px;">Invoiced is ex GST, by the month the invoice was sent. Materials are purchase order items received that month. Wages use each person's hourly cost.</p>`;
+    }
+
+    async function refresh(full = true) {
+      const [{ data: r, error: e1 }, { data: s, error: e2 }, { data: l, error: e3 }, { data: p, error: e4 }] = await Promise.all([
+        supabaseClient.rpc('get_overhead_rates'),
+        supabaseClient.from('overhead_settings').select('*').eq('id', 1).single(),
+        supabaseClient.from('overhead_lines').select('*').order('sort_order').order('created_at'),
+        supabaseClient.rpc('get_overhead_people'),
+      ]);
+      const failed = e1 || e2 || e3 || e4;
+      if (failed) return errBox(failed);
+      rates = Array.isArray(r) ? r[0] : r; settings = s; lines = l || []; people = p || [];
+      renderStats(); renderLines(); renderPeople(); renderBase();
+      if (full) { renderSync(); await renderMonthly(); }
+    }
+
+    document.getElementById('oh-save-hours').addEventListener('click', async () => {
+      const { error } = await supabaseClient.from('overhead_settings').update({
+        hours_mode: document.querySelector('input[name="oh-mode"]:checked').value,
+        default_hours_per_person: Number(document.getElementById('oh-default-hours').value) || 0, updated_at: new Date().toISOString(),
+      }).eq('id', 1);
+      if (error) return errBox(error);
+      msg('<div class="success-box">Saved.</div>'); await refresh();
+    });
+    document.getElementById('oh-basis').addEventListener('change', (e) => {
+      document.getElementById('oh-base-word').textContent = e.target.value === 'revenue' ? 'job price' : 'profit';
+    });
+    document.getElementById('oh-save-base').addEventListener('click', async () => {
+      const { error } = await supabaseClient.from('overhead_settings').update({
+        company_basis: document.getElementById('oh-basis').value, expected_annual_base: Number(document.getElementById('oh-expected').value) || 0, updated_at: new Date().toISOString(),
+      }).eq('id', 1);
+      if (error) return errBox(error);
+      msg('<div class="success-box">Saved.</div>'); await refresh();
+    });
+    document.getElementById('oh-auto').addEventListener('change', async (e) => {
+      await supabaseClient.from('overhead_settings').update({ auto_sync: e.target.checked }).eq('id', 1);
+    });
+    document.getElementById('oh-months').addEventListener('change', async (e) => {
+      await supabaseClient.from('overhead_settings').update({ xero_months: Number(e.target.value) }).eq('id', 1);
+      settings.xero_months = Number(e.target.value);
+    });
+
+    let xeroAccounts = [];
+    document.getElementById('oh-load-xero').addEventListener('click', async (e) => {
+      const btn = e.target; btn.disabled = true; btn.textContent = 'Reading Xero...';
+      const box = document.getElementById('oh-xero-accounts');
+      try {
+        const data = await callFn('get-overhead-xero-accounts', 'GET');
+        xeroAccounts = data.accounts;
+        if (!xeroAccounts.length) { box.innerHTML = '<p class="subtitle">Xero has no expense accounts with activity in that period.</p>'; return; }
+        box.innerHTML = `<p class="subtitle" style="margin:0 0 6px; font-size:12px;">Profit and Loss ${escapeHtml(data.from)} to ${escapeHtml(data.to)}. Amounts are for that period; they are scaled to a full year when synced.</p>`
+          + xeroAccounts.map((a, i) => `<div class="oh-acc"><span>${escapeHtml(a.name)}</span><span>${money(a.amount)}</span>
+              <select data-i="${i}"><option value="ignore"${a.bucket === 'ignore' ? ' selected' : ''}>Ignore</option><option value="employee"${a.bucket === 'employee' ? ' selected' : ''}>Employee cost</option><option value="company"${a.bucket === 'company' ? ' selected' : ''}>Company cost</option></select></div>`).join('')
+          + `<button type="button" id="oh-save-map" style="margin-top:10px;">Save and sync</button>`;
+        document.getElementById('oh-save-map').addEventListener('click', async (ev) => {
+          const b = ev.target; b.disabled = true; b.textContent = 'Syncing...';
+          try {
+            const map = xeroAccounts.map((a, i) => ({ account_id: a.id, account_name: a.name, bucket: box.querySelector(`select[data-i="${i}"]`).value }));
+            const r = await callFn('sync-overheads', 'POST', { map });
+            msg(`<div class="success-box">Synced ${r.updated} account${r.updated === 1 ? '' : 's'} from Xero.</div>`);
+            await refresh();
+          } catch (err) { errBox(err); }
+          b.disabled = false; b.textContent = 'Save and sync';
+        });
+      } catch (err) { errBox(err); }
+      finally { btn.disabled = false; btn.textContent = 'Choose accounts from Xero'; }
+    });
+
+    document.getElementById('oh-sync-now').addEventListener('click', async (e) => {
+      const btn = e.target; btn.disabled = true; btn.textContent = 'Syncing...';
+      try {
+        const r = await callFn('sync-overheads', 'POST', {});
+        msg(`<div class="success-box">${r.updated ? `Synced ${r.updated} account${r.updated === 1 ? '' : 's'} from Xero.` : 'Nothing is mapped yet. Choose accounts from Xero first.'}</div>`);
+        await refresh();
+      } catch (err) { errBox(err); await refresh(); }
+      btn.disabled = false; btn.textContent = 'Sync now';
+    });
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('overheads');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      const role = await getMyRole();
+      if (!isFinanceRole(role)) {
+        document.querySelector('.wrap').innerHTML = '<h1>Overheads</h1><div class="card"><p>This page is for Finance and Admin only.</p></div>';
+        return;
+      }
+      await refresh();
+    })();
+  </script>
+</body>
+</html>

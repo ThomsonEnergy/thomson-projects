@@ -1535,6 +1535,10 @@ async function getMyRole() {
   return _cachedRole;
 }
 
+function isFinanceRole(role) {
+  return role === 'admin' || role === 'finance';
+}
+
 function isPricingRole(role) {
   return role === 'admin' || role === 'finance' || role === 'sales';
 }
@@ -1682,6 +1686,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'assets', label: 'Assets', href: '/assets.html', icon: '&#128295;' },
   { key: 'stock', label: 'Stock', href: '/stock.html', icon: '&#128736;' },
   { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', icon: '&#129513;', pricingOnly: true },
+  { key: 'overheads', label: 'Overheads', href: '/overheads.html', icon: '&#128178;', financeOnly: true },
   { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html', icon: '&#128218;' },
   { key: 'support', label: 'Tech Support', href: '/support.html', icon: '&#128222;' },
   { key: 'team', label: 'Team', href: '/team.html', icon: '&#128101;' },
@@ -1736,7 +1741,7 @@ async function renderMainNav(activeKey) {
   const dropdownEl = document.getElementById('mobile-menu-dropdown');
   const role = await getMyRole();
   const items = MAIN_NAV_ITEMS.filter(item =>
-    (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)));
+    (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)) && (!item.financeOnly || isFinanceRole(role)));
   const shortcuts = await getMyHomeShortcuts();
   const starHtml = (key) => {
     const starred = shortcuts.includes(key);
