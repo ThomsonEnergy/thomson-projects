@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=14" />
+<link rel="stylesheet" href="/css/style.css?v=15" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
@@ -159,6 +159,8 @@
     <h1>Schedule</h1>
     <p class="subtitle">Who's on which job, and who's on leave. Approved leave shows automatically - click a day to assign someone to a job.</p>
 
+    <div id="clocked-in-now"></div>
+
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
         <button class="secondary" id="prev-btn">&larr; Prev</button>
@@ -194,7 +196,7 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=66"></script>
+  <script src="/js/supabase-client.js?v=67"></script>
   <script src="/js/theme.js"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
@@ -1064,6 +1066,7 @@
       dayViewDate = new Date(now);
 
       renderDowRow();
+      renderClockedInNowCard(document.getElementById('clocked-in-now'));
       await loadPickerData();
       setView('day');
     })();

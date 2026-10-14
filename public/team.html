@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=14" />
+<link rel="stylesheet" href="/css/style.css?v=15" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
@@ -42,6 +42,8 @@
     <h1>Team</h1>
     <p class="subtitle">Everyone at Thomson Energy. Rates, allowances, employment details and contracts are edited on each person's profile (click their card). Licences are shown on each person below, and insurance and licensing (company and employee) is managed at the bottom of this page.</p>
     <p class="subtitle" id="hr-hint" style="display:none;">Click anyone to open their profile: documents, photos, letters, incidents and KPIs. <a href="/incidents.html">Incident register &rarr;</a></p>
+
+    <div id="clocked-in-now"></div>
 
     <div class="card">
       <div id="team-list" class="team-grid"><p class="subtitle">Loading...</p></div>
@@ -83,7 +85,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=66"></script>
+  <script src="/js/supabase-client.js?v=67"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/licence-share.js?v=1"></script>
   <script>
@@ -601,6 +603,7 @@
       const hint = document.getElementById('hr-hint');
       if (!teamCanEditTitles) hint.textContent = 'Click your own card to see your profile, documents, letters and KPIs.';
       hint.style.display = '';
+      renderClockedInNowCard(document.getElementById('clocked-in-now'));
       await loadTeam();
       // Company insurance/licences and every employee's licences: admin only,
       // same as when this lived under Settings.

@@ -2,6 +2,15 @@
 
 Handoff for another Claude chat. Repo `ThomsonEnergy/thomson-projects`, Supabase project `ziakpklnzkbbjjnqgkmz`, Netlify site `thomsonprojects` (live at projects.thomsonenergy.com.au). Written 14 Oct 2026. Rule for all text and code in this project: no em dashes.
 
+## UPDATE 14 Oct 2026: model v3 (migration 148, live) replaces the model below
+Reworked from Jasper's simPRO overhead and employment cost calculator. Where this section and the older sections disagree, this section wins.
+- **Three overheads.** Direct employee overhead (per person: super, workers comp, payroll tax as % of wages, annual leave loading, paid leave, public holidays, training, plus their share of "other employee costs" lines and their own other costs) divided by THEIR billable hours. Indirect employee overhead (all non-billable wage time: office/admin staff in full plus billable staff's non-job admin time) divided by everyone's billable hours. Company costs = non-wage costs only (insurance, vehicles, rent, software), still a % of job profit.
+- **Billable hours** per person = 52 x days a week x hours a day, less leave days, public holidays (pro rata), training days and non-billable hours a day (or the real admin/training share from timesheets in timesheets mode, for anyone with 40+ hours logged). Defaults in `overhead_settings`, per-person overrides in `overhead_people` (also `subcontractor`: no leave or on-costs, still carries indirect and company overhead).
+- **Xero:** map only other employee costs (uniforms, PPE, courses) and company costs. Wages, super, workers comp and payroll tax accounts stay "Ignore" (worked out from the percentages).
+- **Job page:** `get_project_overheads(project_id)`: estimate = (average direct + indirect rate) x quoted hours; actual = each person's own (direct + indirect) rate x the job hours they logged.
+- Functions: `overhead_people_calc` and `compute_overhead_rates` (internal), `get_overhead_rates`, `get_overhead_people`, `get_project_overheads`, `get_monthly_net_summary` (finance-only wrappers).
+- Still to do: Jasper to set per-person days and hours (Jade is part time), check the defaults (super 12%, workers comp 3%, payroll tax 0%, leave loading 17.5%, 10 public holidays, 20 annual, 10 sick, 1 non-billable hour a day), add company costs, enter expected yearly profit, map Xero. Real approved leave from `leave_requests` is not used yet (only 3 pending requests exist).
+
 ## What Jasper asked for (Bugs & Updates board item "Overheads calculator")
 "Build an overheads calculator only finance and above can see that adds the overhead cost onto our employees hourly rate. We will have 1 for employee direct costs and 1 for company direct costs. Then based on materials and labour we can figure out our net profit per job rather than gross. I'd like to be able to sync it to Xero against our p/l report so it stays live and changes as the company changes."
 

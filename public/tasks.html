@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=14" />
+<link rel="stylesheet" href="/css/style.css?v=15" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -52,7 +52,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=66"></script>
+  <script src="/js/supabase-client.js?v=67"></script>
   <script src="/js/theme.js"></script>
   <script>
     function taskRow(task, showPickUp) {
@@ -128,7 +128,7 @@
     // bins out" that isn't tied to any job.
     async function openAddTaskPanel(prefill) {
       const { data: { user } } = await supabaseClient.auth.getUser();
-      const { data: staff } = await supabaseClient.from('profiles').select('id, full_name').order('full_name');
+      const { data: staff } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `

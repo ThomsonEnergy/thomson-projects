@@ -1549,7 +1549,7 @@ function isPricingRole(role) {
 // column-level grants (see migration_007), so a role-check bug here can't
 // by itself leak pricing.
 const COST_CENTRE_COLS_BASE = 'id, project_id, name, description, sort_order';
-const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, estimated_labour_cost, estimated_material_cost, labour_cost, material_cost, invoiced_amount, stc_total, variation_entry_id';
+const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, estimated_labour_cost, estimated_material_cost, labour_cost, material_cost, invoiced_amount, stc_total, stc_system_kw, stc_zone_rating, stc_install_year, stc_price_per_certificate, variation_entry_id';
 const LINE_ITEM_COLS_BASE = 'id, cost_centre_id, description, item_type, sort_order, quantity';
 const LINE_ITEM_COLS_PRICING = 'unit_cost';
 
@@ -1676,6 +1676,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'projects', label: 'Projects', href: '/projects.html', icon: '&#128202;' },
   { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html', icon: '&#128203;' },
   { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;' },
+  { key: 'stcs', label: 'STCs', href: '/stcs.html', icon: '&#9728;', pricingOnly: true },
   { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html', icon: '&#128230;' },
   { key: 'tasks', label: 'Tasks', href: '/tasks.html', icon: '&#9989;' },
   { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;' },
@@ -1743,35 +1744,54 @@ async function renderMainNav(activeKey) {
   const role = await getMyRole();
   const items = MAIN_NAV_ITEMS.filter(item =>
     (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)) && (!item.financeOnly || isFinanceRole(role)));
-  const shortcuts = await getMyHomeShortcuts();
-  const starHtml = (key) => {
-    const starred = shortcuts.includes(key);
-    return `<span class="nav-star ${starred ? 'starred' : ''}" data-key="${key}" title="${starred ? 'Remove from Home page' : 'Add to Home page'}" onclick="event.preventDefault(); event.stopPropagation(); window.__onNavStarClick(this);">${starred ? '&#9733;' : '&#9734;'}</span>`;
+  // On a computer the top bar only carries starred pages (plus the page you
+  // are on), with everything else under "More", so there is no sideways
+  // scrolling. The phone menu still lists every page. Both are painted from
+  // the same list; the "in bar" ones are just hidden from the desktop menu
+  // by CSS.
+  const paint = (shortcuts) => {
+    const inBar = (item) => shortcuts.includes(item.key) || item.key === activeKey;
+    const starHtml = (key) => {
+      const starred = shortcuts.includes(key);
+      return `<span class="nav-star ${starred ? 'starred' : ''}" data-key="${key}" title="${starred ? 'Remove from Home page and top bar' : 'Add to Home page and top bar'}" onclick="event.preventDefault(); event.stopPropagation(); window.__onNavStarClick(this);">${starred ? '&#9733;' : '&#9734;'}</span>`;
+    };
+    const linkHtml = (item, asTab) =>
+      `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''} ${!asTab && inBar(item) ? 'nav-in-bar' : ''}"><span style="display:flex; align-items:center; gap:5px;">${starHtml(item.key)}${item.label}</span></a>`;
+    const hasMore = items.some(item => !inBar(item));
+    if (tabsEl) tabsEl.innerHTML = items.filter(inBar).map(item => linkHtml(item, true)).join('') +
+      (hasMore ? `<button type="button" class="topbar-tab nav-more-btn" onclick="window.__onNavMoreClick(this)">More &#9662;</button>` : '');
+    if (dropdownEl) dropdownEl.innerHTML = items.map(item => linkHtml(item, false)).join('');
   };
-  const linksHtml = (asTab) => items.map(item =>
-    `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''}"><span style="display:flex; align-items:center; gap:5px;">${starHtml(item.key)}${item.label}</span></a>`
-  ).join('');
-  if (tabsEl) tabsEl.innerHTML = linksHtml(true);
-  if (dropdownEl) dropdownEl.innerHTML = linksHtml(false);
+  paint(await getMyHomeShortcuts());
 
-  // Delegated via a single global so the inline onclick above (needed
-  // since tabs/dropdown get fully replaced on every renderMainNav call,
-  // which would otherwise leak listeners) has one stable place to call
-  // into - toggles the star everywhere it appears (desktop + mobile both
-  // render the same key), not just the one clicked.
+  // Delegated via single globals so the inline onclicks above (needed
+  // since tabs/dropdown get fully replaced on every paint, which would
+  // otherwise leak listeners) have one stable place to call into. A star
+  // repaints the nav so the page moves between the bar and the menu.
   window.__onNavStarClick = async (el) => {
-    const key = el.dataset.key;
     try {
-      const nowStarred = await toggleHomeShortcut(key);
-      document.querySelectorAll(`.nav-star[data-key="${key}"]`).forEach(s => {
-        s.classList.toggle('starred', nowStarred);
-        s.innerHTML = nowStarred ? '&#9733;' : '&#9734;';
-        s.title = nowStarred ? 'Remove from Home page' : 'Add to Home page';
-      });
+      await toggleHomeShortcut(el.dataset.key);
+      paint(await getMyHomeShortcuts());
     } catch (err) {
       alert('Could not save that - ' + err.message);
     }
   };
+  // "More" opens the same dropdown the phone uses, lined up under the button
+  window.__onNavMoreClick = (btn) => {
+    if (!dropdownEl) return;
+    const bar = dropdownEl.parentElement.getBoundingClientRect();
+    const left = btn.getBoundingClientRect().left - bar.left;
+    dropdownEl.style.setProperty('--more-left', Math.max(8, Math.min(left, bar.width - 268)) + 'px');
+    dropdownEl.classList.toggle('open');
+  };
+  if (!window.__navOutsideClose) {
+    window.__navOutsideClose = true;
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('mobile-menu-dropdown');
+      if (menu && menu.classList.contains('open') && !menu.contains(e.target) &&
+          !e.target.closest('.nav-more-btn, #mobile-menu-btn')) menu.classList.remove('open');
+    });
+  }
   renderAIChatWidget();
   loadNotificationBell();
 }
@@ -2890,6 +2910,157 @@ async function openJobSwitchModal(entry, onDone) {
   showRecent();
 }
 
+// ---------- who's clocked in right now ----------
+// Everyone's open time entries (no clock-out yet), via get_active_clock_ins
+// (migration 147) so field staff can see each other too - time_entries
+// itself only lets them read their own. Falls back to reading the table
+// directly if that function isn't there yet (still right for office roles,
+// who can read everyone's). Pass a project id for just that job.
+async function fetchActiveClockIns(projectId = null) {
+  const { data, error } = await supabaseClient.rpc('get_active_clock_ins', { p_project_id: projectId });
+  if (!error) return data || [];
+  let q = supabaseClient.from('time_entries')
+    .select('id, staff_id, project_id, time_category, clock_in, profiles(full_name), projects(name, job_number, quote_number)')
+    .is('clock_out', null);
+  if (projectId) q = q.eq('project_id', projectId);
+  const { data: rows } = await q;
+  return (rows || []).map(r => ({
+    entry_id: r.id, staff_id: r.staff_id, full_name: r.profiles?.full_name || '', project_id: r.project_id,
+    project_name: r.projects?.name || null, job_number: r.projects?.job_number || null, quote_number: r.projects?.quote_number || null,
+    time_category: r.time_category, clock_in: r.clock_in, stage_names: null,
+  })).sort((a, b) => a.full_name.localeCompare(b.full_name));
+}
+
+function clockElapsedText(clockInIso) {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(clockInIso).getTime()) / 60000));
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+function clockSinceText(clockInIso) {
+  const d = new Date(clockInIso);
+  const time = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+  return sydneyDateKey(d) === sydneyDateKey(new Date())
+    ? time
+    : `${time} ${d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}`;
+}
+
+// The "Clocked in now" card on Schedule and Team: one row per person with
+// the job (or non-job category) and stage(s) they're on and for how long.
+// Someone still clocked in from an earlier day is flagged - that's usually
+// a forgotten clock-out. Re-reads every 2 minutes while the page is open.
+async function renderClockedInNowCard(el) {
+  if (!el) return;
+  async function paint() {
+    const rows = await fetchActiveClockIns();
+    const todayKey = sydneyDateKey(new Date());
+    el.innerHTML = `
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px;">
+          <h2 style="margin:0;">Clocked in now</h2>
+          <span class="subtitle" style="font-size:12px;">${rows.length ? rows.length + (rows.length === 1 ? ' person' : ' people') : ''}</span>
+        </div>
+        ${rows.length ? rows.map(r => {
+          const what = r.project_id
+            ? `<a class="link-quiet" href="/project.html?id=${r.project_id}" style="font-weight:600;">${escapeHtml(projectRef({ name: r.project_name, job_number: r.job_number, quote_number: r.quote_number }))}</a>`
+            : `<strong>${escapeHtml(timeCategoryLabel(r.time_category) || 'General')}</strong>`;
+          const stale = sydneyDateKey(new Date(r.clock_in)) !== todayKey;
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 0; border-top:1px solid var(--border);">
+              <div style="min-width:0;">
+                <div><strong>${escapeHtml(r.full_name || 'Someone')}</strong> &middot; ${what}</div>
+                ${r.stage_names && r.stage_names.length ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${r.stage_names.map(escapeHtml).join(', ')}</p>` : ''}
+              </div>
+              <div class="subtitle" style="font-size:12px; text-align:right; flex-shrink:0;">
+                since ${clockSinceText(r.clock_in)} &middot; ${clockElapsedText(r.clock_in)}
+                ${stale ? '<br><span style="color:var(--red);">Still clocked in from an earlier day</span>' : ''}
+              </div>
+            </div>`;
+        }).join('') : '<p class="subtitle" style="margin:0;">Nobody is clocked in right now.</p>'}
+      </div>`;
+  }
+  await paint();
+  clearInterval(el._clockedInTimer);
+  el._clockedInTimer = setInterval(paint, 120000);
+}
+
+// Stages on a job that time can be clocked against: every stage, plus a
+// variation only while there's still work to do on it (a do-and-charge one
+// until it's billed, a fixed-price one once signed and until billed).
+// Returns [{ id, name, number }], number being the cost centre number.
+async function loadClockableCostCentres(projectId) {
+  const [{ data: project }, { data: allCentres }] = await Promise.all([
+    supabaseClient.from('projects').select('job_number').eq('id', projectId).maybeSingle(),
+    supabaseClient.from('cost_centres').select('id, name, variation_entry_id').eq('project_id', projectId).order('sort_order'),
+  ]);
+  const numbered = (allCentres || []).map((c, i) => ({ ...c, number: costCentreNumber(project ? project.job_number : null, i + 1) }));
+  const variationIds = numbered.map(c => c.variation_entry_id).filter(Boolean);
+  let open = new Set();
+  if (variationIds.length) {
+    const { data: entries } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
+    open = new Set((entries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
+  }
+  return numbered.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id)).map(c => ({ id: c.id, name: c.name, number: c.number }));
+}
+
+// Clock in to one particular job from its page: pick the stage(s) you're
+// on (same as My Day), then in. Not for switching - if you're already
+// clocked in somewhere, use openClockOutModal with switchTo instead.
+// `project` needs id/name/job_number/quote_number. Calls `onDone` once in.
+async function openJobClockInModal(project, onDone) {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const centres = await loadClockableCostCentres(project.id);
+  let chosen = centres.length === 1 ? [centres[0].id] : [];
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  overlay.innerHTML = `
+    <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
+      <h2>Clock in</h2>
+      <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))}</p>
+      ${centres.length ? `
+        <label>Which stage(s) are you working on?</label>
+        <div id="jci-chips">${centres.map(c => `
+          <button type="button" class="cc-chip ${chosen.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
+            <span class="cc-chip-num">${c.number}</span> ${escapeHtml(c.name)}
+          </button>`).join('')}</div>
+        <p class="subtitle" id="jci-hint" style="margin:6px 0 0;"></p>` : ''}
+      <div id="jci-msg"></div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button type="button" id="jci-go" style="flex:1;">Clock in</button>
+        <button type="button" class="secondary" id="jci-cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const hint = overlay.querySelector('#jci-hint');
+  overlay.querySelectorAll('.cc-chip').forEach(chip => chip.addEventListener('click', () => {
+    chip.classList.toggle('selected');
+    chosen = chip.classList.contains('selected') ? [...chosen, chip.dataset.id] : chosen.filter(x => x !== chip.dataset.id);
+    if (hint) hint.textContent = chosen.length > 1 ? `Time will be split across these ${chosen.length} stages when you clock out.` : '';
+  }));
+  overlay.querySelector('#jci-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#jci-go').addEventListener('click', async (e) => {
+    const msg = overlay.querySelector('#jci-msg');
+    if (centres.length && !chosen.length) { msg.innerHTML = `<div class="error-box">Pick at least one stage you're working on.</div>`; return; }
+    e.target.disabled = true;
+    // Clocked in somewhere else (another tab, My Day) since this page loaded? Don't double up.
+    const { data: already } = await supabaseClient.from('time_entries').select('id').eq('staff_id', user.id).is('clock_out', null).limit(1);
+    if (already && already.length) {
+      msg.innerHTML = `<div class="error-box">You're already clocked in somewhere else. Close this and use Switch to this job.</div>`;
+      e.target.disabled = false;
+      return;
+    }
+    const entry = { staff_id: user.id, project_id: project.id, time_category: 'job', clock_in: roundToQuarterHour(new Date()).toISOString() };
+    if (chosen.length === 1) entry.cost_centre_id = chosen[0];
+    else if (chosen.length > 1) entry.selected_cost_centre_ids = chosen;
+    const { error } = await supabaseClient.from('time_entries').insert(entry);
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; e.target.disabled = false; return; }
+    overlay.remove();
+    if (onDone) await onDone();
+  });
+}
+
 // Creates a job with no quote/estimate behind it - straight to Job
 // Booked (a job number is assigned immediately, no approval to wait for)
 // with one cost centre already in place so time (timesheets) and
@@ -3385,6 +3556,55 @@ function calculateStcQuantity({ kw, zoneRating, installYear }) {
   const deemingYears = stcDeemingYears(installYear);
   if (!kw || !zoneRating || !deemingYears) return 0;
   return Math.floor(kw * zoneRating * deemingYears);
+}
+
+// --- STC tracking (job_stcs, Formbay payment advices; migration 147) ---
+const STC_TYPES = { pv: 'Solar', bstc: 'Battery', swh: 'Hot water' };
+const STC_STATUSES = [
+  { value: 'not_lodged', label: 'Not lodged' },
+  { value: 'pending_installer_action', label: 'Pending installer' },
+  { value: 'pending_retailer_action', label: 'Pending retailer' },
+  { value: 'pending_cer_audit', label: 'Pending CER audit' },
+  { value: 'approved_for_sale', label: 'Approved for sale' },
+  { value: 'sold', label: 'Sold, not paid' },
+  { value: 'paid', label: 'Paid' },
+];
+const stcStatusLabel = (v) => (STC_STATUSES.find(s => s.value === v) || { label: v || '-' }).label;
+
+// Number of STCs a quote stage was priced on: from the calculator inputs, or the $ total / price per STC.
+function stcCountForStage(stage) {
+  const qty = calculateStcQuantity({ kw: Number(stage.stc_system_kw) || 0, zoneRating: Number(stage.stc_zone_rating) || 0, installYear: stage.stc_install_year });
+  if (qty) return qty;
+  const price = Number(stage.stc_price_per_certificate) || 35;
+  return Number(stage.stc_total) > 0 ? Math.round(Number(stage.stc_total) / price) : 0;
+}
+
+// Figures for one job_stcs row (all ex GST). `lines` are its formbay_payment_advice_lines (with their
+// advice), `settings` holds stc_expected_sale_price and stc_fee_per_certificate from company_settings.
+// basis: 'paid' (from the payment advice), 'entered' (sale price typed in) or 'expected' (settings).
+function stcFigures(row, lines, settings) {
+  const count = Number(row.stc_count) || 0;
+  const booked = count * (Number(row.booked_price) || 0);
+  const feePer = Number(settings?.stc_fee_per_certificate ?? 1);
+  const expectedPrice = Number(settings?.stc_expected_sale_price ?? 39.25);
+  const expectedNet = count * (expectedPrice - feePer);
+  let basis, units, sale, fee;
+  if (lines && lines.length) {
+    basis = 'paid';
+    units = lines.reduce((s, l) => s + (Number(l.units) || 0), 0);
+    sale = lines.reduce((s, l) => s + (Number(l.total) || 0), 0);
+    fee = lines.reduce((s, l) => {
+      const a = l.formbay_payment_advices;
+      const per = a && Number(a.units) ? Number(a.fee_ex_gst) / Number(a.units) : feePer;
+      return s + (Number(l.units) || 0) * per;
+    }, 0);
+  } else if (row.sale_price != null && row.sale_price !== '') {
+    basis = 'entered'; units = count; sale = count * Number(row.sale_price); fee = count * feePer;
+  } else {
+    basis = 'expected'; units = count; sale = count * expectedPrice; fee = count * feePer;
+  }
+  const net = sale - fee;
+  return { count, units, booked, sale, fee, net, gain: net - booked, expectedNet, variance: basis === 'expected' ? 0 : net - expectedNet, basis, pricePer: units ? sale / units : 0 };
 }
 
 // Every field the contract needs that ISN'T already a profile fact -
