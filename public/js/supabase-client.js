@@ -42,8 +42,9 @@ async function uploadPrivateFile(file, folder) {
 
 // Generates a short-lived link to view/download a private document. Call this
 // fresh each time, don't store the result, it expires.
-async function getSignedDocUrl(path) {
-  const { data, error } = await supabaseClient.storage.from('project-documents').createSignedUrl(path, 300);
+// Pass bucket for files kept outside project-documents (e.g. 'staff-files').
+async function getSignedDocUrl(path, bucket = 'project-documents') {
+  const { data, error } = await supabaseClient.storage.from(bucket).createSignedUrl(path, 300);
   if (error) throw error;
   return data.signedUrl;
 }
@@ -276,7 +277,7 @@ function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
 // photos use. "Save marked-up copy" writes a NEW PDF into that project's
 // Documents (the original is never changed): untouched pages are kept as
 // they were, marked-up pages are replaced with the annotated picture.
-// opts: { projectId, folder, onSaved }. Falls back to the browser's own PDF
+// opts: { projectId, folder, onSaved, bucket }. Falls back to the browser's own PDF
 // viewer in an iframe if pdf.js can't be loaded.
 async function openPdfViewer(path, title, opts = {}) {
   ensureDarkOverlayStyles();
@@ -289,7 +290,7 @@ async function openPdfViewer(path, title, opts = {}) {
 
   let signedUrl, bytes, pdf;
   try {
-    signedUrl = await getSignedDocUrl(path);
+    signedUrl = await getSignedDocUrl(path, opts.bucket);
     const [pdfjs, res] = await Promise.all([loadPdfJs(), fetch(signedUrl)]);
     if (!res.ok) throw new Error('Could not load the PDF');
     bytes = new Uint8Array(await res.arrayBuffer());

@@ -16,6 +16,8 @@
 <style>
   .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
   .team-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
+  .team-card.clickable { cursor: pointer; transition: border-color 0.15s; }
+  .team-card.clickable:hover { border-color: var(--accent); }
   .team-avatar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: var(--surface-1); margin: 0 auto 10px; display: block; }
   .team-avatar-fallback {
     width: 64px; height: 64px; border-radius: 50%; background: var(--accent-dim); color: var(--accent);
@@ -80,7 +82,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=64"></script>
+  <script src="/js/supabase-client.js?v=65"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/licence-share.js?v=1"></script>
   <script>
@@ -536,7 +538,7 @@
         const myLicences = (licences || []).filter(l => l.profile_id === p.id);
         const email = emailById[p.id];
         return `
-          <div class="team-card" data-id="${p.id}">
+          <div class="team-card${teamCanEditTitles ? ' clickable' : ''}" data-id="${p.id}" ${teamCanEditTitles ? 'title="Open profile"' : ''}>
             ${p.photo_url
               ? `<img class="team-avatar" src="${p.photo_url}" />`
               : `<div class="team-avatar-fallback">${initials}</div>`}
@@ -553,6 +555,13 @@
       }).join('');
 
       if (teamCanEditTitles) {
+        // Admin/finance: the whole card opens that person's staff profile
+        // (documents, warnings, incident reports, KPIs) - except clicks on
+        // the phone/email links or the job title editor inside it.
+        listEl.querySelectorAll('.team-card').forEach(card => card.addEventListener('click', (e) => {
+          if (e.target.closest('a, button, input')) return;
+          window.location.href = `/staff.html?id=${encodeURIComponent(card.dataset.id)}`;
+        }));
         listEl.querySelectorAll('.edit-title-btn').forEach(btn => {
           btn.addEventListener('click', () => {
             const card = btn.closest('.team-card');
