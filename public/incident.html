@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Incident - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=14" />
+<link rel="stylesheet" href="/css/hr.css?v=1" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <p style="margin:0 0 10px;"><a class="link-quiet" href="/incidents.html">&larr; Incident register</a></p>
+    <div id="content"><p class="subtitle">Loading...</p></div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=66"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/licence-share.js?v=1"></script>
+  <script src="/js/hr-templates.js?v=2"></script>
+  <script src="/js/hr-shared.js?v=1"></script>
+  <script>
+    // One incident, near miss or accident, with everything about it in one
+    // place: the Form 10 details, everyone involved (with their part, any
+    // fault, and their statement), evidence, corrective actions, reporting
+    // to SafeWork / the insurer / the principal contractor, and any letters
+    // issued because of it. Admin and finance only (migration 148).
+    const incidentId = new URLSearchParams(location.search).get('id');
+    const EVIDENCE_CATEGORIES = ['Photo', 'Medical certificate', 'Statement', 'SWMS / procedure', 'Test results', 'Invoice / quote for damage', 'Correspondence', 'Other'];
+    let inc = null, people = [], files = [], actions = [], letters = [], project = null;
+
+    const fmt = (d) => d ? hrDate(d) : '-';
+    const yn = (id, v) => `<select id="${id}"><option value="">-</option><option value="yes" ${v === true ? 'selected' : ''}>Yes</option><option value="no" ${v === false ? 'selected' : ''}>No</option></select>`;
+    const ynVal = (s) => (s === 'yes' ? true : s === 'no' ? false : null);
+    const inp = (id, v, type = 'text', extra = '') => `<input type="${type}" id="${id}" value="${escapeHtml(v == null ? '' : v)}" ${extra} />`;
+    const area = (id, v, ph = '') => `<textarea id="${id}" placeholder="${escapeHtml(ph)}">${escapeHtml(v || '')}</textarea>`;
+    const localDT = (iso) => { if (!iso) return ''; const d = new Date(iso); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+    const fromLocalDT = (s) => (s ? new Date(s).toISOString() : null);
+    const g = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const gn = (id) => g(id) || null;
+
+    async function loadAll() {
+      const [i, p, f, a, l] = await Promise.all([
+        supabaseClient.from('incident_reports').select('*').eq('id', incidentId).single(),
+        supabaseClient.from('incident_people').select('*').eq('incident_id', incidentId).order('created_at'),
+        supabaseClient.from('incident_files').select('*').eq('incident_id', incidentId).order('created_at', { ascending: false }),
+        supabaseClient.from('incident_actions').select('*').eq('incident_id', incidentId).order('created_at'),
+        supabaseClient.from('staff_warnings').select('*').eq('incident_id', incidentId).order('created_at'),
+      ]);
+      if (i.error) throw i.error;
+      inc = i.data; people = p.data || []; files = f.data || []; actions = a.data || []; letters = l.data || [];
+      project = inc.project_id ? (await supabaseClient.from('projects').select('id, name, job_number, client_address').eq('id', inc.project_id).maybeSingle()).data : null;
+    }
+
+    function renderShell() {
+      const ref = incidentRef(inc);
+      document.title = `${ref} - Thomson Energy`;
+      document.getElementById('content').innerHTML = `
+        <h1 style="margin:0;">${escapeHtml(ref)} &middot; ${escapeHtml(inc.title || INCIDENT_NATURE_LABELS[inc.nature])}</h1>
+        <p class="subtitle" id="inc-sub" style="margin:4px 0 14px;"></p>
+        <div id="inc-alerts"></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
+          <button type="button" class="secondary" id="btn-form10">Form 10</button>
+          <button type="button" class="secondary" id="btn-pack">Claim / SafeWork pack</button>
+          <button type="button" class="secondary" id="btn-internal">Internal file (with HR)</button>
+          <button type="button" class="secondary" id="btn-zip">Download everything (zip)</button>
+          <button type="button" class="secondary" id="btn-status"></button>
+          <button type="button" class="secondary" id="btn-delete">Delete</button>
+        </div>
+        <div class="settings-tabs" id="inc-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
+          <button class="settings-tab active" data-panel="details">Details</button>
+          <button class="settings-tab" data-panel="people">People<span class="tab-count" id="c-people"></span></button>
+          <button class="settings-tab" data-panel="evidence">Evidence<span class="tab-count" id="c-evidence"></span></button>
+          <button class="settings-tab" data-panel="actions">Actions<span class="tab-count" id="c-actions"></span></button>
+          <button class="settings-tab" data-panel="reporting">Reporting</button>
+          <button class="settings-tab" data-panel="letters">Letters<span class="tab-count" id="c-letters"></span></button>
+        </div>
+        <div class="settings-panel active" id="panel-details"></div>
+        <div class="settings-panel" id="panel-people"></div>
+        <div class="settings-panel" id="panel-evidence"></div>
+        <div class="settings-panel" id="panel-actions"></div>
+        <div class="settings-panel" id="panel-reporting"></div>
+        <div class="settings-panel" id="panel-letters"></div>`;
+      document.querySelectorAll('#inc-tabs .settings-tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.panel)));
+      document.getElementById('btn-form10').addEventListener('click', () => showHrDocument(incidentReportHtml(inc, HR.company, people), `${ref} Form 10`));
+      document.getElementById('btn-pack').addEventListener('click', () => openPack(false));
+      document.getElementById('btn-internal').addEventListener('click', () => openPack(true));
+      document.getElementById('btn-zip').addEventListener('click', downloadZip);
+      document.getElementById('btn-status').addEventListener('click', toggleStatus);
+      document.getElementById('btn-delete').addEventListener('click', deleteIncident);
+      const tab = new URLSearchParams(location.search).get('tab');
+      if (tab && document.getElementById('panel-' + tab)) showTab(tab);
+    }
+
+    function showTab(panel) {
+      document.querySelectorAll('#inc-tabs .settings-tab').forEach(b => b.classList.toggle('active', b.dataset.panel === panel));
+      document.querySelectorAll('.settings-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + panel));
+      const url = new URL(location.href); url.searchParams.set('tab', panel); history.replaceState(null, '', url);
+    }
+
+    function setCount(id, n) { const el = document.getElementById(id); el.textContent = n || ''; el.style.display = n ? '' : 'none'; }
+
+    function renderHeader() {
+      const t = hrTime12(inc.incident_time);
+      document.getElementById('inc-sub').innerHTML = `${escapeHtml(INCIDENT_NATURE_LABELS[inc.nature])} &middot; ${fmt(inc.incident_date)}${t.label ? ' ' + t.label + (t.am ? ' am' : ' pm') : ''}
+        ${project ? ` &middot; <a class="link-quiet" href="/project.html?id=${project.id}">${project.job_number ? 'J' + project.job_number + ' - ' : ''}${escapeHtml(project.name)}</a>` : ''}
+        &middot; <span class="badge ${inc.status === 'open' ? 'amber' : 'accepted'}">${inc.status}</span>`;
+      document.getElementById('btn-status').textContent = inc.status === 'open' ? 'Close incident' : 'Reopen';
+      // Deadlines worth shouting about.
+      const alerts = [];
+      const injured = people.some(p => p.role === 'injured') || ['first_aid', 'medical_treatment', 'lost_time'].includes(inc.nature);
+      if (inc.notifiable && !inc.safework_notified_at) alerts.push('<div class="callout red"><strong>Notifiable incident not yet reported.</strong> Call SafeWork NSW on <a href="tel:131050">13 10 50</a> straight away and leave the site undisturbed. Record it on the Reporting tab.</div>');
+      if (inc.wc_required && !inc.wc_insurer_notified_at) {
+        const due = new Date(new Date(inc.created_at).getTime() + 48 * 3600000);
+        alerts.push(`<div class="callout amber"><strong>Tell the workers comp insurer within 48 hours</strong> of finding out about the injury (by ${due.toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}). Record it on the Reporting tab.</div>`);
+      }
+      if (injured && inc.wc_required == null) alerts.push('<div class="callout">Someone was hurt. Decide on the Reporting tab whether this needs a workers comp claim.</div>');
+      if (inc.notifiable == null) alerts.push('<div class="callout">Check on the Reporting tab whether this is notifiable to SafeWork (an electric shock or an uncontrolled explosion or fire counts, even with no injury).</div>');
+      document.getElementById('inc-alerts').innerHTML = alerts.join('');
+      setCount('c-people', people.length); setCount('c-evidence', files.length); setCount('c-actions', actions.filter(a => !a.done_at).length); setCount('c-letters', letters.length);
+    }
+
+    // ---------- Details (the Form 10) ----------
+    function renderDetails() {
+      const r = inc;
+      const staffOpts = HR.staff.map(s => `<option value="${s.id}" ${s.id === r.injured_profile_id ? 'selected' : ''}>${escapeHtml(s.full_name)}</option>`).join('');
+      document.getElementById('panel-details').innerHTML = `
+        <div class="card">
+          <h2>What happened</h2>
+          <div class="grid cols-3">
+            <div><label style="margin-top:0">Type</label><select id="d-nature">${Object.entries(INCIDENT_NATURE_LABELS).map(([k, l]) => `<option value="${k}" ${k === r.nature ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            <div><label style="margin-top:0">Date</label>${inp('d-date', r.incident_date, 'date')}</div>
+            <div><label style="margin-top:0">Time</label>${inp('d-time', r.incident_time ? String(r.incident_time).slice(0, 5) : '', 'time')}</div>
+          </div>
+          <label>Summary (one line)</label>${inp('d-title', r.title)}
+          <label>Job</label>
+          <input id="d-job" value="${project ? escapeHtml((project.job_number ? 'J' + project.job_number + ' - ' : '') + project.name) : ''}" placeholder="Search job number, client or address" autocomplete="off" />
+          <div id="d-job-results"></div>
+          <label>Exact location</label>${inp('d-location', r.site_location)}
+          <label>Description of incident</label>${area('d-description', r.description, 'What happened, in order, in plain words. Who did what, when.')}
+          <label>Activity being done at the time</label>${area('d-activity', r.activity)}
+          <label>Immediate response actions (eg barricades, isolation of power) to stabilise the situation</label>${area('d-immediate', r.immediate_actions)}
+          <label>Damage to equipment or property</label>${area('d-damage', r.property_damage, 'e.g. Side cutters destroyed, cable end burnt')}
+          <div class="grid cols-2">
+            <div><label>Who received the report</label>${inp('d-recv', r.report_received_by)}</div>
+            <div><label>Their phone</label>${inp('d-recv-phone', r.report_received_phone)}</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Injury and treatment</h2>
+          <p class="subtitle">Leave blank for a near miss or damage only.</p>
+          <label>Injured staff member (fills in their details)</label>
+          <select id="d-inj-staff"><option value="">-- Not staff / nobody injured --</option>${staffOpts}</select>
+          <div class="grid cols-2">
+            <div><label>Name</label>${inp('d-inj-name', r.injured_name)}</div>
+            <div><label>Occupation</label>${inp('d-inj-occ', r.injured_occupation)}</div>
+          </div>
+          <label>Address</label>${inp('d-inj-addr', r.injured_address)}
+          <div class="grid cols-3">
+            <div><label>Date of birth</label>${inp('d-inj-dob', r.injured_dob, 'date')}</div>
+            <div><label>Phone</label>${inp('d-inj-phone', r.injured_phone)}</div>
+            <div><label>Employer</label>${inp('d-inj-emp', r.injured_employer)}</div>
+          </div>
+          <label>Nature of injury (eg fracture, burn, sprain, foreign body in eye)</label>${inp('d-injury', r.injury_nature)}
+          <label>Body location</label>
+          <div id="d-body">${BODY_LOCATIONS.map(b => `<label class="chip-check"><input type="checkbox" value="${b}" ${(r.body_locations || []).includes(b) ? 'checked' : ''} /> ${b}</label>`).join('')}</div>
+          ${inp('d-body-notes', r.body_location_notes, 'text', 'placeholder="More detail"')}
+          <div class="grid cols-2">
+            <div><label>Treatment given on site</label>${inp('d-treat', r.treatment_on_site)}</div>
+            <div><label>Treating person</label>${inp('d-treater', r.treating_person)}</div>
+          </div>
+          <div class="grid cols-3">
+            <div><label>Referred for further treatment?</label>${yn('d-referral', r.referral)}</div>
+            <div><label>Doctor or hospital</label>${inp('d-doctor', r.doctor_or_hospital)}</div>
+            <div><label>Medical certificate received?</label>${yn('d-cert', r.medical_cert_received)}</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Investigation</h2>
+          <label style="margin-top:0">Root cause</label>${area('d-root', r.root_cause, 'e.g. Circuit was energised without verifying the installation was complete and safe; cable was cut without testing for dead')}
+          <label>Findings</label>${area('d-findings', r.investigation_findings)}
+        </div>
+
+        <div class="card">
+          <h2>Completed by</h2>
+          <div class="grid cols-3">
+            <div><label style="margin-top:0">Name</label>${inp('d-by', r.completed_by_name)}</div>
+            <div><label style="margin-top:0">Position</label>${inp('d-by-pos', r.completed_by_position)}</div>
+            <div><label style="margin-top:0">Date</label>${inp('d-by-date', r.completed_date, 'date')}</div>
+          </div>
+          <label>Signature</label>
+          ${r.completed_signature_data_url ? `<div id="d-sig-existing"><img src="${r.completed_signature_data_url}" style="max-width:220px; background:#fff; border-radius:6px; display:block;" /><button type="button" class="secondary" id="d-sig-redo" style="font-size:12px; padding:5px 10px; margin-top:6px;">Sign again</button></div>` : ''}
+          <div id="d-sig" style="${r.completed_signature_data_url ? 'display:none;' : ''}"></div>
+        </div>
+        <div style="position:sticky; bottom:0; background:var(--bg); padding:10px 0; display:flex; gap:8px; align-items:center;">
+          <button type="button" id="d-save">Save details</button><span id="d-msg"></span>
+        </div>`;
+
+      const pad = createSignaturePad(document.getElementById('d-sig'), 120);
+      let keepSig = !!r.completed_signature_data_url;
+      const redo = document.getElementById('d-sig-redo');
+      if (redo) redo.addEventListener('click', () => { keepSig = false; document.getElementById('d-sig-existing').remove(); document.getElementById('d-sig').style.display = ''; });
+
+      let projectId = r.project_id, timer = null;
+      const job = document.getElementById('d-job');
+      job.addEventListener('input', () => {
+        clearTimeout(timer);
+        if (!job.value.trim()) { projectId = null; document.getElementById('d-job-results').innerHTML = ''; return; }
+        timer = setTimeout(async () => {
+          const results = await searchProjects(job.value, 8);
+          const box = document.getElementById('d-job-results');
+          box.innerHTML = results.map(p => `<div class="project-list-item d-pick" data-id="${p.id}" data-addr="${escapeHtml(p.client_address || '')}" data-label="${escapeHtml((p.job_number ? 'J' + p.job_number + ' - ' : '') + p.name)}" style="cursor:pointer; padding:6px 4px;"><div><div class="name" style="font-size:13px;">${p.job_number ? 'J' + p.job_number + ' - ' : ''}${escapeHtml(p.name)}</div><div class="meta">${escapeHtml(p.client_address || p.client_name || '')}</div></div></div>`).join('');
+          box.querySelectorAll('.d-pick').forEach(d => d.addEventListener('click', () => {
+            projectId = d.dataset.id; job.value = d.dataset.label;
+            if (!g('d-location')) document.getElementById('d-location').value = d.dataset.addr;
+            box.innerHTML = '';
+          }));
+        }, 250);
+      });
+
+      document.getElementById('d-inj-staff').addEventListener('change', async (e) => {
+        const s = HR.staff.find(x => x.id === e.target.value);
+        if (!s) return;
+        const { data: sens } = await supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', s.id).maybeSingle();
+        document.getElementById('d-inj-name').value = s.full_name || '';
+        document.getElementById('d-inj-occ').value = s.job_title || '';
+        document.getElementById('d-inj-phone').value = s.mobile_number || '';
+        document.getElementById('d-inj-emp').value = HR.company.company_name;
+        if (sens) {
+          document.getElementById('d-inj-dob').value = sens.date_of_birth || '';
+          document.getElementById('d-inj-addr').value = [sens.residential_address, sens.residential_suburb, sens.residential_state, sens.residential_postcode].filter(Boolean).join(', ');
+        }
+      });
+
+      document.getElementById('d-save').addEventListener('click', async () => {
+        const msg = document.getElementById('d-msg');
+        const updates = {
+          nature: g('d-nature'), incident_date: g('d-date') || hrToday(), incident_time: gn('d-time'), title: gn('d-title'),
+          project_id: job.value.trim() ? projectId : null, site_location: gn('d-location'),
+          description: gn('d-description'), activity: gn('d-activity'), immediate_actions: gn('d-immediate'), property_damage: gn('d-damage'),
+          report_received_by: gn('d-recv'), report_received_phone: gn('d-recv-phone'),
+          injured_profile_id: gn('d-inj-staff'), injured_name: gn('d-inj-name'), injured_occupation: gn('d-inj-occ'), injured_address: gn('d-inj-addr'),
+          injured_dob: gn('d-inj-dob'), injured_phone: gn('d-inj-phone'), injured_employer: gn('d-inj-emp'),
+          injury_nature: gn('d-injury'), body_locations: [...document.querySelectorAll('#d-body input:checked')].map(c => c.value), body_location_notes: gn('d-body-notes'),
+          treatment_on_site: gn('d-treat'), treating_person: gn('d-treater'), referral: ynVal(g('d-referral')), doctor_or_hospital: gn('d-doctor'),
+          medical_cert_received: ynVal(g('d-cert')), root_cause: gn('d-root'), investigation_findings: gn('d-findings'),
+          completed_by_name: gn('d-by'), completed_by_position: gn('d-by-pos'), completed_date: gn('d-by-date'),
+          completed_signature_data_url: keepSig ? r.completed_signature_data_url : (pad.isEmpty() ? null : pad.toDataURL()),
+        };
+        await saveIncident(updates, msg);
+        if (inc.project_id !== (project && project.id)) project = inc.project_id ? (await supabaseClient.from('projects').select('id, name, job_number, client_address').eq('id', inc.project_id).maybeSingle()).data : null;
+        renderHeader();
+      });
+    }
+
+    async function saveIncident(updates, msgEl) {
+      updates.updated_at = new Date().toISOString();
+      const { data, error } = await supabaseClient.from('incident_reports').update(updates).eq('id', incidentId).select().single();
+      if (error) { if (msgEl) msgEl.innerHTML = `<span style="color:var(--red);">${escapeHtml(error.message)}</span>`; else alert(error.message); return false; }
+      inc = data;
+      if (msgEl) { msgEl.innerHTML = '<span style="color:var(--green);">Saved</span>'; setTimeout(() => { msgEl.innerHTML = ''; }, 2500); }
+      return true;
+    }
+
+    // ---------- People ----------
+    function renderPeople() {
+      const el = document.getElementById('panel-people');
+      el.innerHTML = `
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+            <h2 style="margin:0;">People involved</h2>
+            <button type="button" id="p-add">+ Add person</button>
+          </div>
+          <p class="subtitle" style="margin-bottom:12px;">Tag everyone with a part in it, not just whoever was there on the day. If someone contributed (for example, energised a circuit weeks earlier without checking it), add them as "Contributed" and record what should have happened.</p>
+          <div id="p-list"></div>
+        </div>`;
+      document.getElementById('p-add').addEventListener('click', () => openPersonEditor(null));
+      const list = document.getElementById('p-list');
+      if (!people.length) { list.innerHTML = '<p class="subtitle">Nobody added yet.</p>'; return; }
+      list.innerHTML = people.map(p => {
+        const theirLetters = letters.filter(w => w.profile_id && w.profile_id === p.profile_id);
+        return `
+        <div class="project-list-item" data-id="${p.id}" style="align-items:flex-start;">
+          <div style="flex:1;">
+            <div class="name">${p.profile_id ? `<a class="link-quiet" href="/staff.html?id=${p.profile_id}&tab=incidents">${escapeHtml(p.name)}</a>` : escapeHtml(p.name)}
+              <span class="badge ${p.role === 'injured' ? 'red' : p.at_fault ? 'amber' : 'draft'}">${escapeHtml(INCIDENT_ROLE_LABELS[p.role])}</span>
+              ${p.at_fault ? '<span class="badge amber">Contributing fault</span>' : ''}</div>
+            <div class="meta">${p.profile_id ? 'Staff' : 'Not staff'}${p.contact ? ' &middot; ' + escapeHtml(p.contact) : ''}
+              ${p.statement ? ` &middot; statement${p.statement_signed_at ? ' signed ' + fmt(p.statement_signed_at) : ' (unsigned)'}` : ' &middot; no statement yet'}
+              ${theirLetters.length ? ' &middot; ' + theirLetters.map(w => escapeHtml(letterTitle(w).toLowerCase()) + ' (' + escapeHtml(warningDisplayStatus(w).toLowerCase()) + ')').join(', ') : ''}</div>
+            ${p.what_happened ? `<div class="meta" style="white-space:pre-wrap;"><strong>Their part:</strong> ${escapeHtml(p.what_happened)}</div>` : ''}
+            ${p.finding ? `<div class="meta" style="white-space:pre-wrap;"><strong>Finding:</strong> ${escapeHtml(p.finding)}</div>` : ''}
+            ${p.procedure_breached ? `<div class="meta"><strong>Procedure:</strong> ${escapeHtml(p.procedure_breached)}</div>` : ''}
+          </div>
+          <div class="row-actions" style="white-space:nowrap; text-align:right;">
+            <button type="button" class="secondary p-act" data-act="edit">Edit</button>
+            <button type="button" class="secondary p-act" data-act="statement">${p.statement ? 'Statement' : 'Take statement'}</button>
+            ${p.profile_id ? `<button type="button" class="${p.at_fault ? '' : 'secondary'} p-act" data-act="letter">Issue letter</button>` : ''}
+            <button type="button" class="secondary p-act" data-act="remove">Remove</button>
+          </div>
+        </div>`;
+      }).join('');
+      list.querySelectorAll('.p-act').forEach(b => b.addEventListener('click', async () => {
+        const p = people.find(x => x.id === b.closest('[data-id]').dataset.id);
+        if (b.dataset.act === 'edit') openPersonEditor(p);
+        if (b.dataset.act === 'statement') openStatement(p);
+        if (b.dataset.act === 'letter') issueLetterFor(p);
+        if (b.dataset.act === 'remove') {
+          if (!confirm(`Remove ${p.name} from this incident?`)) return;
+          const { error } = await supabaseClient.from('incident_people').delete().eq('id', p.id);
+          if (error) { alert(error.message); return; }
+          people = people.filter(x => x.id !== p.id); renderPeople(); renderHeader();
+        }
+      }));
+    }
+
+    function openPersonEditor(existing) {
+      const p = existing || { role: 'involved', at_fault: false };
+      const o = hrModal(`
+        <h2>${existing ? 'Edit' : 'Add'} person</h2>
+        <label style="margin-top:0">Staff member</label>
+        <select id="pe-staff"><option value="">-- Not staff (visitor, subbie, member of the public) --</option>${HR.staff.map(s => `<option value="${s.id}" ${s.id === p.profile_id ? 'selected' : ''}>${escapeHtml(s.full_name)}${s.active ? '' : ' (inactive)'}</option>`).join('')}</select>
+        <div class="grid cols-2">
+          <div><label>Name</label>${inp('pe-name', p.name)}</div>
+          <div><label>Contact</label>${inp('pe-contact', p.contact)}</div>
+        </div>
+        <label>Role in the incident</label>
+        <select id="pe-role">${Object.entries(INCIDENT_ROLE_LABELS).map(([k, l]) => `<option value="${k}" ${k === p.role ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <label>Their part in it</label>${area('pe-what', p.what_happened, 'e.g. Cut the cable with side cutters without testing it was dead')}
+        <label>What should have happened / finding</label>${area('pe-finding', p.finding, 'e.g. Should have tested for dead with a proven tester before touching (test before you touch)')}
+        <label>Procedure or standard not followed</label>${inp('pe-proc', p.procedure_breached, 'text', 'placeholder="e.g. AS/NZS 4836 safe work on LV installations; company isolation procedure"')}
+        <label style="display:flex; align-items:center; gap:8px; margin-top:12px;"><input type="checkbox" id="pe-fault" style="width:auto;" ${p.at_fault ? 'checked' : ''} /> Contributed to the incident (at fault)</label>
+        <div style="margin-top:14px; display:flex; gap:8px;"><button type="button" id="pe-save">Save</button><button type="button" class="secondary" id="pe-cancel">Cancel</button></div>
+        <div id="pe-msg"></div>`, 620);
+      o.querySelector('#pe-staff').addEventListener('change', (e) => {
+        const s = HR.staff.find(x => x.id === e.target.value);
+        if (s) { o.querySelector('#pe-name').value = s.full_name; if (!o.querySelector('#pe-contact').value) o.querySelector('#pe-contact').value = s.mobile_number || ''; }
+      });
+      o.querySelector('#pe-cancel').addEventListener('click', () => o.remove());
+      o.querySelector('#pe-save').addEventListener('click', async () => {
+        const v = (s) => o.querySelector(s).value.trim();
+        const payload = {
+          incident_id: incidentId, profile_id: v('#pe-staff') || null, name: v('#pe-name'), contact: v('#pe-contact') || null, role: v('#pe-role'),
+          what_happened: v('#pe-what') || null, finding: v('#pe-finding') || null, procedure_breached: v('#pe-proc') || null, at_fault: o.querySelector('#pe-fault').checked,
+        };
+        if (!payload.name) { o.querySelector('#pe-msg').innerHTML = '<div class="error-box">Enter a name.</div>'; return; }
+        const q = existing ? supabaseClient.from('incident_people').update(payload).eq('id', existing.id).select().single() : supabaseClient.from('incident_people').insert(payload).select().single();
+        const { data, error } = await q;
+        if (error) { o.querySelector('#pe-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        people = existing ? people.map(x => (x.id === data.id ? data : x)) : [...people, data];
+        o.remove(); renderPeople(); renderHeader();
+      });
+    }
+
+    function openStatement(p) {
+      const o = hrModal(`
+        <h2>Statement: ${escapeHtml(p.name)}</h2>
+        <p class="subtitle">Their own account, in their words. Write it with them (or hand them the device), then they sign it.</p>
+        ${area('st-text', p.statement, 'What I saw and did, in order...')}
+        ${p.statement_signature_data_url ? `<p class="subtitle" style="margin-top:10px;">Signed ${fmt(p.statement_signed_at)}. Changing the text clears the signature.</p><img src="${p.statement_signature_data_url}" style="max-width:220px; background:#fff; border-radius:6px;" />` : ''}
+        <label>Their signature${p.statement_signature_data_url ? ' (to sign again)' : ''}</label><div id="st-pad"></div>
+        <div style="margin-top:14px; display:flex; gap:8px;"><button type="button" id="st-save">Save</button><button type="button" class="secondary" id="st-cancel">Cancel</button></div>`, 620);
+      o.querySelector('#st-text').style.minHeight = '180px';
+      const pad = createSignaturePad(o.querySelector('#st-pad'), 120);
+      o.querySelector('#st-cancel').addEventListener('click', () => o.remove());
+      o.querySelector('#st-save').addEventListener('click', async () => {
+        const text = o.querySelector('#st-text').value.trim();
+        const changed = text !== (p.statement || '');
+        const updates = { statement: text || null };
+        if (!pad.isEmpty()) Object.assign(updates, { statement_signature_data_url: pad.toDataURL(), statement_signed_at: new Date().toISOString() });
+        else if (changed) Object.assign(updates, { statement_signature_data_url: null, statement_signed_at: null });
+        const { data, error } = await supabaseClient.from('incident_people').update(updates).eq('id', p.id).select().single();
+        if (error) { alert(error.message); return; }
+        people = people.map(x => (x.id === data.id ? data : x)); o.remove(); renderPeople();
+      });
+    }
+
+    function issueLetterFor(p) {
+      const s = HR.staff.find(x => x.id === p.profile_id) || {};
+      const ref = incidentRef(inc);
+      const details = [
+        `${ref ? ref + ': ' : ''}${inc.title || INCIDENT_NATURE_LABELS[inc.nature]} on ${hrDate(inc.incident_date)}${inc.site_location ? ' at ' + inc.site_location : ''}.`,
+        inc.description || '',
+        p.what_happened ? `Your part: ${p.what_happened}` : '',
+        p.finding ? `What should have happened: ${p.finding}` : '',
+      ].filter(Boolean).join('\n\n');
+      hrOpenLetterEditor({
+        person: { id: p.profile_id, full_name: s.full_name || p.name, job_title: s.job_title },
+        prefill: {
+          category: 'safety', incident_id: incidentId, incident_date: inc.incident_date,
+          subject: (p.what_happened || inc.title || '').slice(0, 120), details, policy_breached: p.procedure_breached || '',
+        },
+        onSaved: async () => { await reloadLetters(); showTab('letters'); },
+      });
+    }
+
+    // ---------- Evidence ----------
+    async function renderEvidence() {
+      const el = document.getElementById('panel-evidence');
+      const photos = files.filter(f => f.kind === 'photo');
+      const docs = files.filter(f => f.kind === 'document');
+      el.innerHTML = `
+        <div class="card">
+          <h2>Add evidence</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Photos of the scene and damage, medical certificates, statements, SWMS, test results. Private to admin and finance.</p>
+          <div class="grid cols-2">
+            <div><label style="margin-top:0">What is it</label><select id="ev-cat">${EVIDENCE_CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select></div>
+            <div><label style="margin-top:0">Files</label><input type="file" id="ev-files" multiple /></div>
+          </div>
+          <div id="ev-msg"></div>
+        </div>
+        <div class="card"><h2>Photos</h2><div id="ev-photos" class="photo-grid">${photos.length ? '' : '<p class="subtitle">No photos yet.</p>'}</div></div>
+        <div class="card"><h2>Documents</h2><div id="ev-docs">${docs.length ? docs.map(d => `
+          <div class="project-list-item" data-id="${d.id}"><div><div class="name">${escapeHtml(d.title || d.file_name)}</div><div class="meta">${escapeHtml(d.category)} &middot; ${fmt(d.created_at)}</div></div>
+          <div class="row-actions" style="white-space:nowrap;"><button type="button" class="secondary ev-view">View</button><button type="button" class="secondary ev-del">Delete</button></div></div>`).join('') : '<p class="subtitle">No documents yet.</p>'}</div></div>`;
+      document.getElementById('ev-files').addEventListener('change', uploadEvidence);
+      el.querySelectorAll('#ev-docs .ev-view').forEach(b => b.addEventListener('click', () => { const d = files.find(f => f.id === b.closest('[data-id]').dataset.id); hrViewFile(d.file_path, d.title).catch(e => alert(e.message)); }));
+      el.querySelectorAll('#ev-docs .ev-del').forEach(b => b.addEventListener('click', () => deleteEvidence(b.closest('[data-id]').dataset.id)));
+      if (photos.length) {
+        const urls = await signedUrls(photos);
+        const box = document.getElementById('ev-photos');
+        box.innerHTML = photos.map((p, i) => `<div class="ph" data-i="${i}"><img src="${urls[i]}" alt="" loading="lazy" /><button type="button" class="secondary ph-del" data-id="${p.id}">&times;</button></div>`).join('');
+        box.querySelectorAll('.ph').forEach(d => d.addEventListener('click', (e) => { if (!e.target.closest('.ph-del')) openPhotoLightbox(urls, Number(d.dataset.i)); }));
+        box.querySelectorAll('.ph-del').forEach(b => b.addEventListener('click', () => deleteEvidence(b.dataset.id)));
+      }
+    }
+
+    async function signedUrls(list) {
+      if (!list.length) return [];
+      const { data } = await supabaseClient.storage.from(HR_BUCKET).createSignedUrls(list.map(f => f.file_path), 3600);
+      return list.map(f => (data || []).find(s => s.path === f.file_path)?.signedUrl || '');
+    }
+
+    async function uploadEvidence(e) {
+      const list = [...e.target.files];
+      if (!list.length) return;
+      const msg = document.getElementById('ev-msg');
+      const category = document.getElementById('ev-cat').value;
+      try {
+        for (let n = 0; n < list.length; n++) {
+          msg.innerHTML = `<p class="subtitle">Uploading ${n + 1} of ${list.length}...</p>`;
+          const isImage = list[n].type.startsWith('image/');
+          const file = isImage ? await compressImage(list[n]) : list[n];
+          const path = await hrUpload(file, `incidents/${incidentId}`);
+          const { data, error } = await supabaseClient.from('incident_files').insert({
+            incident_id: incidentId, kind: isImage ? 'photo' : 'document', category: isImage && category === 'Other' ? 'Photo' : category,
+            title: list[n].name, file_path: path, file_name: file.name, uploaded_by: HR.me.id,
+          }).select().single();
+          if (error) throw error;
+          files.unshift(data);
+        }
+        msg.innerHTML = '';
+      } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+      renderEvidence(); renderHeader();
+    }
+
+    async function deleteEvidence(id) {
+      const f = files.find(x => x.id === id);
+      if (!confirm(`Delete ${f.title || f.file_name}?`)) return;
+      const { error } = await supabaseClient.from('incident_files').delete().eq('id', id);
+      if (error) { alert(error.message); return; }
+      await supabaseClient.storage.from(HR_BUCKET).remove([f.file_path]);
+      files = files.filter(x => x.id !== id); renderEvidence(); renderHeader();
+    }
+
+    // ---------- Corrective actions ----------
+    function renderActions() {
+      const el = document.getElementById('panel-actions');
+      el.innerHTML = `
+        <div class="card">
+          <h2>Corrective actions</h2>
+          <p class="subtitle" style="margin-bottom:12px;">What will stop it happening again: training, a changed procedure, new equipment, a toolbox talk. Fixing the system matters as much as any letter.</p>
+          <div id="a-list">${actions.length ? actions.map(a => `
+            <div class="project-list-item" data-id="${a.id}">
+              <label style="display:flex; gap:10px; align-items:flex-start; margin:0; flex:1; color:var(--text);">
+                <input type="checkbox" class="a-done" style="width:auto; margin-top:3px;" ${a.done_at ? 'checked' : ''} />
+                <span><span class="name" style="${a.done_at ? 'text-decoration:line-through; color:var(--muted);' : ''}">${escapeHtml(a.description)}</span>
+                <span class="meta" style="display:block;">${a.assigned_to ? escapeHtml(hrStaffName(a.assigned_to)) : 'Unassigned'}${a.due_date ? ' &middot; due ' + fmt(a.due_date) : ''}${a.done_at ? ' &middot; done ' + fmt(a.done_at) : ''}${a.notes ? ' &middot; ' + escapeHtml(a.notes) : ''}</span></span>
+              </label>
+              <div class="row-actions"><button type="button" class="secondary a-del">Delete</button></div>
+            </div>`).join('') : '<p class="subtitle">None yet.</p>'}</div>
+          <div class="form-section">Add an action</div>
+          <label style="margin-top:6px;">Action</label><input id="a-desc" placeholder="e.g. Toolbox talk on test before you touch; issue proven voltage testers to every van" />
+          <div class="grid cols-3">
+            <div><label>Who</label><select id="a-who"><option value="">--</option>${HR.staff.filter(s => s.active).map(s => `<option value="${s.id}">${escapeHtml(s.full_name)}</option>`).join('')}</select></div>
+            <div><label>Due</label><input type="date" id="a-due" /></div>
+            <div><label>Notes</label><input id="a-notes" /></div>
+          </div>
+          <button type="button" id="a-add" style="margin-top:10px;">Add action</button>
+        </div>`;
+      el.querySelectorAll('.a-done').forEach(c => c.addEventListener('change', async () => {
+        const id = c.closest('[data-id]').dataset.id;
+        const { data, error } = await supabaseClient.from('incident_actions').update({ done_at: c.checked ? hrToday() : null }).eq('id', id).select().single();
+        if (error) { alert(error.message); return; }
+        actions = actions.map(a => (a.id === id ? data : a)); renderActions(); renderHeader();
+      }));
+      el.querySelectorAll('.a-del').forEach(b => b.addEventListener('click', async () => {
+        const id = b.closest('[data-id]').dataset.id;
+        if (!confirm('Delete this action?')) return;
+        await supabaseClient.from('incident_actions').delete().eq('id', id);
+        actions = actions.filter(a => a.id !== id); renderActions(); renderHeader();
+      }));
+      document.getElementById('a-add').addEventListener('click', async () => {
+        const description = g('a-desc');
+        if (!description) return;
+        const { data, error } = await supabaseClient.from('incident_actions').insert({ incident_id: incidentId, description, assigned_to: gn('a-who'), due_date: gn('a-due'), notes: gn('a-notes') }).select().single();
+        if (error) { alert(error.message); return; }
+        actions.push(data); renderActions(); renderHeader();
+      });
+    }
+
+    // ---------- Reporting: SafeWork, principal contractor, workers comp ----------
+    async function renderReporting() {
+      const r = inc;
+      // Prefill the insurer from a Workers Compensation record on the Team page, if there is one.
+      if (!r.wc_insurer && !r.wc_policy_number) {
+        const { data: creds } = await supabaseClient.from('company_credentials').select('name, provider, reference_number').ilike('name', '%worker%');
+        if (creds && creds[0]) { r._suggestInsurer = creds[0].provider; r._suggestPolicy = creds[0].reference_number; }
+      }
+      document.getElementById('panel-reporting').innerHTML = `
+        <div class="card">
+          <h2>SafeWork NSW</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Tick anything that happened. If any apply it's a notifiable incident: call <a href="tel:131050">13 10 50</a> immediately, don't disturb the site until an inspector says so, and send written notice within 48 hours if asked.</p>
+          <div id="r-notif">${NOTIFIABLE_CATEGORIES.map(c => `<label style="display:flex; gap:8px; align-items:flex-start; margin:0 0 6px; font-weight:400; color:var(--text);"><input type="checkbox" value="${escapeHtml(c)}" style="width:auto; margin-top:3px;" ${(r.notifiable_categories || []).includes(c) ? 'checked' : ''} /> ${escapeHtml(c)}</label>`).join('')}
+            <label style="display:flex; gap:8px; align-items:center; margin:8px 0 0; font-weight:400; color:var(--text);"><input type="checkbox" id="r-none" style="width:auto;" ${r.notifiable === false ? 'checked' : ''} /> None of these: not notifiable</label></div>
+          <div class="grid cols-3">
+            <div><label>Reported to SafeWork?</label>${yn('r-sw', r.reported_safework)}</div>
+            <div><label>When</label>${inp('r-sw-at', localDT(r.safework_notified_at), 'datetime-local')}</div>
+            <div><label>SafeWork reference</label>${inp('r-sw-ref', r.safework_reference)}</div>
+          </div>
+          <label>Details (who reported it, who they spoke to)</label>${inp('r-sw-details', r.reported_safework_details)}
+        </div>
+
+        <div class="card">
+          <h2>Principal contractor / client</h2>
+          <div class="grid cols-3">
+            <div><label style="margin-top:0">Reported?</label>${yn('r-pc', r.reported_principal_contractor)}</div>
+            <div style="grid-column: span 2;"><label style="margin-top:0">Details (when, to whom, by whom)</label>${inp('r-pc-details', r.reported_principal_contractor_details)}</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Workers compensation</h2>
+          <p class="subtitle" style="margin-bottom:10px;">In NSW, tell your insurer within 48 hours of finding out about a workplace injury, even if no claim is made yet. Use the Claim / SafeWork pack button at the top to send them everything in one document.</p>
+          <div class="grid cols-3">
+            <div><label style="margin-top:0">Claim needed?</label>${yn('r-wc', r.wc_required)}</div>
+            <div><label style="margin-top:0">Insurer</label>${inp('r-wc-ins', r.wc_insurer || r._suggestInsurer)}</div>
+            <div><label style="margin-top:0">Policy number</label>${inp('r-wc-pol', r.wc_policy_number || r._suggestPolicy)}</div>
+            <div><label>Insurer told on</label>${inp('r-wc-at', localDT(r.wc_insurer_notified_at), 'datetime-local')}</div>
+            <div><label>Claim number</label>${inp('r-wc-claim', r.wc_claim_number)}</div>
+            <div><label>Claim status</label>${inp('r-wc-status', r.wc_claim_status, 'text', 'placeholder="e.g. Lodged, accepted, closed"')}</div>
+            <div><label>Days off work</label>${inp('r-wc-days', r.wc_days_off, 'number', 'step="0.5"')}</div>
+            <div><label>Back at work</label>${inp('r-wc-rtw', r.wc_return_to_work_date, 'date')}</div>
+            <div><label>Injury management needed?</label>${yn('r-im', r.injury_management)}</div>
+            <div><label>Return to work coordinator told?</label>${yn('r-rtw-told', r.rtw_coordinator_notified)}</div>
+            <div style="grid-column: span 2;"><label>Return to work coordinator</label>${inp('r-rtw-name', r.rtw_coordinator_name)}</div>
+          </div>
+          <label>Notes</label>${area('r-wc-notes', r.wc_notes)}
+        </div>
+        <div style="position:sticky; bottom:0; background:var(--bg); padding:10px 0; display:flex; gap:8px; align-items:center;">
+          <button type="button" id="r-save">Save reporting</button><span id="r-msg"></span>
+        </div>`;
+      const none = document.getElementById('r-none');
+      const cats = () => [...document.querySelectorAll('#r-notif input[type=checkbox]:not(#r-none):checked')].map(c => c.value);
+      document.querySelectorAll('#r-notif input[type=checkbox]:not(#r-none)').forEach(c => c.addEventListener('change', () => { if (c.checked) none.checked = false; }));
+      none.addEventListener('change', () => { if (none.checked) document.querySelectorAll('#r-notif input[type=checkbox]:not(#r-none)').forEach(c => { c.checked = false; }); });
+      document.getElementById('r-save').addEventListener('click', async () => {
+        const c = cats();
+        const insurer = gn('r-wc-ins'), claim = gn('r-wc-claim');
+        const ok = await saveIncident({
+          notifiable_categories: c, notifiable: c.length ? true : none.checked ? false : null,
+          reported_safework: ynVal(g('r-sw')), safework_notified_at: fromLocalDT(g('r-sw-at')), safework_reference: gn('r-sw-ref'), reported_safework_details: gn('r-sw-details'),
+          reported_principal_contractor: ynVal(g('r-pc')), reported_principal_contractor_details: gn('r-pc-details'),
+          wc_required: ynVal(g('r-wc')), wc_insurer: insurer, wc_policy_number: gn('r-wc-pol'), wc_insurer_notified_at: fromLocalDT(g('r-wc-at')),
+          wc_claim_number: claim, wc_claim_status: gn('r-wc-status'), wc_days_off: g('r-wc-days') === '' ? null : Number(g('r-wc-days')),
+          wc_return_to_work_date: gn('r-wc-rtw'), wc_notes: gn('r-wc-notes'),
+          injury_management: ynVal(g('r-im')), rtw_coordinator_notified: ynVal(g('r-rtw-told')), rtw_coordinator_name: gn('r-rtw-name'),
+          reported_insurer: g('r-wc-at') ? true : ynVal(g('r-wc')) === false ? false : null,
+          reported_insurer_details: [insurer, claim && 'claim ' + claim].filter(Boolean).join(', ') || null,
+        }, document.getElementById('r-msg'));
+        if (ok) renderHeader();
+      });
+    }
+
+    // ---------- Letters ----------
+    async function reloadLetters() {
+      letters = (await supabaseClient.from('staff_warnings').select('*').eq('incident_id', incidentId).order('created_at')).data || [];
+      renderLetters(); renderPeople(); renderHeader();
+    }
+    function renderLetters() {
+      const el = document.getElementById('panel-letters');
+      el.innerHTML = `<div class="card"><h2>Letters issued from this incident</h2>
+        <p class="subtitle" style="margin-bottom:12px;">Issue one from the People tab, against the person it's for. Each one also shows on that person's profile.</p>
+        <div id="l-list"></div></div>`;
+      hrRenderLetterList(document.getElementById('l-list'), letters,
+        (w) => { const s = HR.staff.find(x => x.id === w.profile_id) || {}; return { id: w.profile_id, full_name: s.full_name || 'Staff member', job_title: s.job_title }; },
+        reloadLetters, { showPerson: true, hideIncidentLink: true, emptyText: 'No letters issued from this incident.' });
+    }
+
+    // ---------- Pack, zip, status ----------
+    async function packHtml(includeHr) {
+      const urls = await signedUrls(files.filter(f => f.kind === 'photo'));
+      const photos = files.filter(f => f.kind === 'photo');
+      const withUrls = files.map(f => (f.kind === 'photo' ? Object.assign({}, f, { url: urls[photos.indexOf(f)] }) : f));
+      const staffById = Object.fromEntries(HR.staff.map(s => [s.id, s.full_name]));
+      return incidentPackHtml({ r: inc, people, actions, files: withUrls, warnings: letters, staffById, project, company: HR.company, includeHr });
+    }
+    async function openPack(includeHr) {
+      showHrDocument(await packHtml(includeHr), `${incidentRef(inc)} ${includeHr ? 'internal file' : 'claim / SafeWork pack'}`);
+    }
+
+    async function downloadZip() {
+      const btn = document.getElementById('btn-zip');
+      btn.disabled = true; btn.textContent = 'Preparing...';
+      try {
+        const JSZip = await loadJsZip();
+        const zip = new JSZip();
+        const ref = incidentRef(inc);
+        zip.file(`${ref} incident file.html`, await packHtml(false));
+        zip.file(`${ref} Form 10.html`, incidentReportHtml(inc, HR.company, people));
+        const used = new Set();
+        for (let n = 0; n < files.length; n++) {
+          btn.textContent = `Adding ${n + 1} of ${files.length}...`;
+          const f = files[n];
+          const url = await getSignedDocUrl(f.file_path, HR_BUCKET);
+          const res = await fetch(url);
+          if (!res.ok) continue;
+          const ext = (f.file_name || f.file_path).split('.').pop();
+          let name = `${f.category}/${licSafeName((f.title || f.file_name || 'file').replace(/\.[^.]+$/, ''))}`, k = 2;
+          while (used.has(name)) name = `${name} (${k++})`;
+          used.add(name);
+          zip.file(`${name}.${ext}`, await res.blob());
+        }
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = `${ref} ${licSafeName(inc.title || 'incident')}.zip`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      } catch (err) { alert(err.message); }
+      btn.disabled = false; btn.textContent = 'Download everything (zip)';
+    }
+
+    async function toggleStatus() {
+      const closing = inc.status === 'open';
+      if (closing) {
+        const open = actions.filter(a => !a.done_at).length;
+        if (open && !confirm(`${open} corrective action${open === 1 ? ' is' : 's are'} still open. Close the incident anyway?`)) return;
+      }
+      if (await saveIncident({ status: closing ? 'closed' : 'open' })) renderHeader();
+    }
+
+    async function deleteIncident() {
+      if (!confirm('Delete this incident, its people, evidence and actions? WHS records should normally be kept for at least 5 years. Letters issued from it are kept. Delete anyway?')) return;
+      const paths = files.map(f => f.file_path);
+      const { error } = await supabaseClient.from('incident_reports').delete().eq('id', incidentId);
+      if (error) { alert(error.message); return; }
+      if (paths.length) await supabaseClient.storage.from(HR_BUCKET).remove(paths);
+      window.location.href = '/incidents.html';
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('incidents');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault(); await supabaseClient.auth.signOut(); window.location.href = '/login.html';
+      });
+      const content = document.getElementById('content');
+      try {
+        await hrInit(session);
+        if (!hrIsFinance()) { content.innerHTML = '<div class="card"><p>Incident records are only available to admin and finance.</p></div>'; return; }
+        if (!incidentId) { window.location.href = '/incidents.html'; return; }
+        await loadAll();
+        renderShell(); renderHeader(); renderDetails(); renderPeople(); renderEvidence(); renderActions(); renderReporting(); renderLetters();
+      } catch (err) {
+        content.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>

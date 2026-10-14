@@ -40,7 +40,8 @@
 
   <div class="wrap wide">
     <h1>Team</h1>
-    <p class="subtitle">Everyone at Thomson Energy. Rates and allowances are managed by an admin under Settings &gt; Users &amp; Roles. Licences are shown on each person below, and insurance and licensing (company and employee) is managed at the bottom of this page.</p>
+    <p class="subtitle">Everyone at Thomson Energy. Rates, allowances, employment details and contracts are edited on each person's profile (click their card). Licences are shown on each person below, and insurance and licensing (company and employee) is managed at the bottom of this page.</p>
+    <p class="subtitle" id="hr-hint" style="display:none;">Click anyone to open their profile: documents, photos, letters, incidents and KPIs. <a href="/incidents.html">Incident register &rarr;</a></p>
 
     <div class="card">
       <div id="team-list" class="team-grid"><p class="subtitle">Loading...</p></div>
@@ -58,7 +59,7 @@
 
       <div class="card">
         <h2>Employee licences</h2>
-        <p class="subtitle" style="margin-bottom:14px;">Also shown on each person's card above and in their profile under Settings &gt; Users &amp; Roles - it's the same record either way.</p>
+        <p class="subtitle" style="margin-bottom:14px;">Also shown on each person's card above and on their profile - it's the same record either way.</p>
         <div id="employee-licences-list"><p class="subtitle">Loading...</p></div>
       </div>
 
@@ -82,11 +83,12 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=65"></script>
+  <script src="/js/supabase-client.js?v=66"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/licence-share.js?v=1"></script>
   <script>
     let teamCanEditTitles = false;
+    let teamMyId = null;
 
     async function loadCompanyCredentials() {
       const el = document.getElementById('credentials-list');
@@ -538,7 +540,7 @@
         const myLicences = (licences || []).filter(l => l.profile_id === p.id);
         const email = emailById[p.id];
         return `
-          <div class="team-card${teamCanEditTitles ? ' clickable' : ''}" data-id="${p.id}" ${teamCanEditTitles ? 'title="Open profile"' : ''}>
+          <div class="team-card${teamCanEditTitles || p.id === teamMyId ? ' clickable' : ''}" data-id="${p.id}" ${teamCanEditTitles || p.id === teamMyId ? 'title="Open profile"' : ''}>
             ${p.photo_url
               ? `<img class="team-avatar" src="${p.photo_url}" />`
               : `<div class="team-avatar-fallback">${initials}</div>`}
@@ -554,14 +556,14 @@
           </div>`;
       }).join('');
 
+      // A card opens that person's staff profile: admin/finance can open
+      // anyone's, everyone else only their own. Clicks on the phone/email
+      // links or the job title editor inside a card don't count.
+      listEl.querySelectorAll('.team-card.clickable').forEach(card => card.addEventListener('click', (e) => {
+        if (e.target.closest('a, button, input')) return;
+        window.location.href = `/staff.html?id=${encodeURIComponent(card.dataset.id)}`;
+      }));
       if (teamCanEditTitles) {
-        // Admin/finance: the whole card opens that person's staff profile
-        // (documents, warnings, incident reports, KPIs) - except clicks on
-        // the phone/email links or the job title editor inside it.
-        listEl.querySelectorAll('.team-card').forEach(card => card.addEventListener('click', (e) => {
-          if (e.target.closest('a, button, input')) return;
-          window.location.href = `/staff.html?id=${encodeURIComponent(card.dataset.id)}`;
-        }));
         listEl.querySelectorAll('.edit-title-btn').forEach(btn => {
           btn.addEventListener('click', () => {
             const card = btn.closest('.team-card');
@@ -593,8 +595,12 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+      teamMyId = session.user.id;
       const myRole = await getMyRole();
       teamCanEditTitles = myRole === 'admin' || myRole === 'finance';
+      const hint = document.getElementById('hr-hint');
+      if (!teamCanEditTitles) hint.textContent = 'Click your own card to see your profile, documents, letters and KPIs.';
+      hint.style.display = '';
       await loadTeam();
       // Company insurance/licences and every employee's licences: admin only,
       // same as when this lived under Settings.

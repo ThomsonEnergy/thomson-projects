@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Incidents - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=14" />
+<link rel="stylesheet" href="/css/hr.css?v=1" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+      <div>
+        <h1>Incidents</h1>
+        <p class="subtitle">Near misses, incidents and accidents, with everyone involved, evidence, actions, and reporting to SafeWork and the insurer. Keep records for at least 5 years.</p>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="secondary" id="blank-btn">Blank Form 10</button>
+        <button type="button" id="new-btn">+ New incident</button>
+      </div>
+    </div>
+    <div id="content"><p class="subtitle">Loading...</p></div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=66"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/hr-templates.js?v=2"></script>
+  <script src="/js/hr-shared.js?v=1"></script>
+  <script>
+    // The incident register: every incident, near miss and accident. Admin and finance only.
+    let incidents = [], peopleByIncident = {}, filter = 'open';
+
+    function render() {
+      const el = document.getElementById('content');
+      const list = incidents.filter(i => filter === 'all' || i.status === filter);
+      const counts = { open: incidents.filter(i => i.status === 'open').length, closed: incidents.filter(i => i.status === 'closed').length, all: incidents.length };
+      const flags = (i) => {
+        const f = [];
+        if (i.notifiable && !i.safework_notified_at) f.push('<span class="badge red">SafeWork not told</span>');
+        else if (i.notifiable) f.push('<span class="badge amber">Notifiable</span>');
+        if (i.wc_required) f.push(`<span class="badge ${i.wc_insurer_notified_at ? 'sent' : 'red'}">${i.wc_insurer_notified_at ? 'Workers comp' : 'Insurer not told'}</span>`);
+        return f.join(' ');
+      };
+      el.innerHTML = `
+        <div style="display:flex; gap:6px; margin:6px 0 14px; flex-wrap:wrap;">
+          ${['open', 'closed', 'all'].map(k => `<button type="button" class="${k === filter ? '' : 'secondary'} f-btn" data-f="${k}" style="font-size:12px; padding:5px 12px;">${k[0].toUpperCase() + k.slice(1)} (${counts[k]})</button>`).join('')}
+        </div>
+        <div class="card">
+          ${list.length ? `<table class="responsive-stack">
+            <thead><tr><th>Ref</th><th>Date</th><th>What happened</th><th>Type</th><th>People</th><th></th></tr></thead>
+            <tbody>${list.map(i => {
+              const ppl = peopleByIncident[i.id] || [];
+              return `<tr class="inc-row" data-id="${i.id}" style="cursor:pointer;">
+                <td data-label="Ref"><strong>${escapeHtml(incidentRef(i))}</strong></td>
+                <td data-label="Date">${hrDate(i.incident_date)}</td>
+                <td data-label="What happened">${escapeHtml(i.title || '-')}${i.site_location ? `<span class="subtitle" style="display:block; font-size:12px;">${escapeHtml(i.site_location)}</span>` : ''}</td>
+                <td data-label="Type">${escapeHtml(INCIDENT_NATURE_LABELS[i.nature])}</td>
+                <td data-label="People">${ppl.map(p => `${escapeHtml(p.name)}${p.at_fault ? ' <span title="Contributing fault">&#9888;</span>' : ''}`).join(', ') || '-'}</td>
+                <td data-label="">${flags(i)} <span class="badge ${i.status === 'open' ? 'amber' : 'accepted'}">${i.status}</span></td>
+              </tr>`;
+            }).join('')}</tbody></table>` : `<p class="subtitle">${filter === 'open' ? 'No open incidents.' : 'Nothing here yet.'}</p>`}
+        </div>`;
+      el.querySelectorAll('.f-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.f; render(); }));
+      el.querySelectorAll('.inc-row').forEach(r => r.addEventListener('click', () => { window.location.href = `/incident.html?id=${r.dataset.id}`; }));
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('incidents');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault(); await supabaseClient.auth.signOut(); window.location.href = '/login.html';
+      });
+      const el = document.getElementById('content');
+      await hrInit(session);
+      if (!hrIsFinance()) {
+        document.getElementById('new-btn').style.display = 'none'; document.getElementById('blank-btn').style.display = 'none';
+        el.innerHTML = '<div class="card"><p>Incident records are only available to admin and finance.</p></div>'; return;
+      }
+      document.getElementById('new-btn').addEventListener('click', () => hrNewIncident());
+      document.getElementById('blank-btn').addEventListener('click', () => showHrDocument(incidentReportHtml({}, HR.company), 'Blank Form 10'));
+      const [{ data, error }, { data: ppl }] = await Promise.all([
+        supabaseClient.from('incident_reports').select('*').order('incident_date', { ascending: false }).order('incident_number', { ascending: false }),
+        supabaseClient.from('incident_people').select('incident_id, name, role, at_fault'),
+      ]);
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      incidents = data || [];
+      (ppl || []).forEach(p => { (peopleByIncident[p.incident_id] = peopleByIncident[p.incident_id] || []).push(p); });
+      if (!incidents.some(i => i.status === 'open') && incidents.length) filter = 'all';
+      render();
+    })();
+  </script>
+</body>
+</html>
