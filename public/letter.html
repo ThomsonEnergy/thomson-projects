@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Letter - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=14" />
+<link rel="stylesheet" href="/css/hr.css?v=1" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .letter-frame { width: 100%; height: 70vh; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div id="content"><p class="subtitle">Loading...</p></div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=67"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/hr-templates.js?v=2"></script>
+  <script>
+    // An employee reading and signing a letter (written warning or letter of
+    // counselling) sent to them from their staff profile. The database only
+    // shows them their own letters once sent, and signing goes through
+    // sign_hr_letter() so they can't change anything else (migration 148).
+    const letterId = new URLSearchParams(location.search).get('id');
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav(null);
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault(); await supabaseClient.auth.signOut(); window.location.href = '/login.html';
+      });
+      const el = document.getElementById('content');
+      const [{ data: w, error }, { data: me }, { data: companyRow }] = await Promise.all([
+        supabaseClient.from('staff_warnings').select('*').eq('id', letterId).maybeSingle(),
+        supabaseClient.from('profiles').select('id, full_name, job_title').eq('id', session.user.id).single(),
+        supabaseClient.from('company_settings').select('company_name, abn, address, phone, logo_url').eq('id', 1).maybeSingle(),
+      ]);
+      if (error || !w) { el.innerHTML = '<div class="card"><p>This letter isn\'t available. If you were expecting one, ask your manager.</p></div>'; return; }
+      const company = companyRow && companyRow.company_name ? companyRow : Object.assign({}, HR_COMPANY_FALLBACK, companyRow || {}, { company_name: HR_COMPANY_FALLBACK.company_name });
+      // Admin/finance opening someone else's letter just see it (they manage it from the staff profile).
+      const isMine = w.profile_id === session.user.id;
+      const person = isMine ? me : { full_name: w.employee_signed_name || '', job_title: '' };
+      const signed = !!w.employee_signed_at;
+
+      el.innerHTML = `
+        <h1>${escapeHtml(letterTitle(w))}</h1>
+        <p class="subtitle">From ${escapeHtml(w.issued_by_name || 'management')}, ${hrDate(w.issued_date)}. Private: only you, admin and finance can see this.</p>
+        ${w.status === 'resolved' ? `<div class="callout"><strong>Resolved ${hrDate(w.resolved_at)}.</strong> ${escapeHtml(w.resolved_note || 'This matter is closed.')} <button type="button" class="secondary" id="res-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Read the resolution letter</button></div>` : ''}
+        <iframe class="letter-frame" id="letter-frame" title="Letter"></iframe>
+        <p style="margin:8px 0 18px;"><button type="button" class="secondary" id="print-btn" style="font-size:12px; padding:6px 10px;">Print / save a copy</button></p>
+        <div class="card" id="sign-card">
+          ${signed ? `<h2>Signed</h2><p>You signed this on ${hrDateTime(w.employee_signed_at)}.${w.employee_comments ? ' Your comments are on the letter.' : ''}</p>`
+          : !isMine ? '<p class="subtitle">Waiting for the employee to sign.</p>'
+          : `<h2>Sign to confirm you've received it</h2>
+            <p class="subtitle">Signing means you have received and read this letter. It does not mean you agree with it. If you don't agree, or there's anything you want on record, write it in the comments: they're kept with the letter.</p>
+            <label>Your comments (optional)</label><textarea id="comments" style="min-height:110px;"></textarea>
+            <label>Your name</label><input id="name" value="${escapeHtml(me.full_name || '')}" />
+            <label>Your signature</label><div id="pad"></div>
+            <button type="button" id="sign-btn" style="margin-top:14px;">Sign</button>
+            <div id="msg"></div>`}
+        </div>`;
+      const frame = document.getElementById('letter-frame');
+      const docHtml = writtenWarningHtml(w, person, company);
+      frame.srcdoc = docHtml.replace('<div class="toolbar">', '<div class="toolbar" style="display:none">');
+      document.getElementById('print-btn').addEventListener('click', () => frame.contentWindow.print());
+      const resBtn = document.getElementById('res-btn');
+      if (resBtn) resBtn.addEventListener('click', () => showHrDocument(resolutionLetterHtml(w, person, company), 'Resolution letter'));
+      if (!signed && isMine) {
+        const pad = createSignaturePad(document.getElementById('pad'));
+        document.getElementById('sign-btn').addEventListener('click', async () => {
+          const msg = document.getElementById('msg');
+          const name = document.getElementById('name').value.trim();
+          if (!name || pad.isEmpty()) { msg.innerHTML = '<div class="error-box">Add your name and draw your signature.</div>'; return; }
+          const btn = document.getElementById('sign-btn'); btn.disabled = true;
+          const { error: sErr } = await supabaseClient.rpc('sign_hr_letter', { p_id: w.id, p_signature: pad.toDataURL(), p_name: name, p_comments: document.getElementById('comments').value });
+          if (sErr) { btn.disabled = false; msg.innerHTML = `<div class="error-box">${escapeHtml(sErr.message)}</div>`; return; }
+          location.reload();
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

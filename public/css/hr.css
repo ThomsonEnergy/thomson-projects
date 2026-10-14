@@ -1,0 +1,30 @@
+/* Shared by the HR pages: staff.html, incident.html, incidents.html, letter.html. */
+.grid.cols-2 { grid-template-columns: 1fr 1fr; }
+@media (max-width: 800px) { .grid.cols-2 { grid-template-columns: 1fr; } }
+.kv { display: grid; grid-template-columns: 170px 1fr; gap: 6px 12px; font-size: 14px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+@media (max-width: 520px) { .kv { grid-template-columns: 1fr; } .kv dd { margin-bottom: 6px; } }
+.tab-count { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: var(--surface-2); font-size: 11px; text-align: center; }
+.badge.red { background: rgba(220, 70, 70, 0.15); color: var(--red); }
+.badge.amber { background: rgba(230, 160, 40, 0.15); color: #c98a12; }
+.callout { border: 1px solid var(--border); background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; font-size: 14px; }
+.callout.red { border-color: var(--red); background: rgba(220, 70, 70, 0.1); }
+.callout.amber { border-color: #c98a12; background: rgba(230, 160, 40, 0.1); }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.photo-grid .ph { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--surface-2); cursor: pointer; }
+.photo-grid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-grid .ph button { position: absolute; top: 4px; right: 4px; font-size: 11px; padding: 2px 7px; }
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.stat-tile { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.stat-tile .v { font-size: 22px; font-weight: 600; }
+.stat-tile .l { font-size: 12px; color: var(--muted); }
+.chip-check { display: inline-flex; align-items: center; gap: 5px; margin: 0 6px 6px 0; padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; cursor: pointer; color: var(--text); }
+.chip-check input { width: auto; margin: 0; }
+.form-section { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--border); font-weight: 600; }
+.row-actions button, .row-actions .btn { font-size: 12px; padding: 5px 10px; margin: 2px 0 2px 4px; }
+@media (max-width: 700px) {
+  .project-list-item { flex-wrap: wrap; gap: 6px; }
+  .project-list-item .row-actions { white-space: normal !important; text-align: left !important; }
+  .project-list-item .row-actions button:first-child { margin-left: 0; }
+}

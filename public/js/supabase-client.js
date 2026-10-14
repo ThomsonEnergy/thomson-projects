@@ -1691,6 +1691,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html', icon: '&#128218;' },
   { key: 'support', label: 'Tech Support', href: '/support.html', icon: '&#128222;' },
   { key: 'team', label: 'Team', href: '/team.html', icon: '&#128101;' },
+  { key: 'incidents', label: 'Incidents', href: '/incidents.html', icon: '&#9888;', financeOnly: true },
   { key: 'dnsp', label: 'DNSP', href: '/dnsp.html', icon: '&#9889;' },
   { key: 'fleet', label: 'Fleet', href: '/fleet.html', icon: '&#128666;' },
   { key: 'bugs', label: 'Bugs & Updates', href: '/bugs.html', icon: '&#128030;' },
