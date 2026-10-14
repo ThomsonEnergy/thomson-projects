@@ -1976,40 +1976,77 @@
     // came back with an error last time (shown so it's obvious why -
     // see the function's own error text for the actual reason).
     function onboardingCellHtml(u) {
-      if (!u.onboarding_completed_at) return `<span class="badge draft">Not started</span>`;
-      if (u.xero_payroll_status === 'synced') return `<span class="badge accepted">Synced to Xero</span>`;
-      const errorNote = u.xero_payroll_status === 'failed' && u.xero_payroll_error
-        ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px; color:var(--red);">${u.xero_payroll_error}</p>`
+      return u.onboarding_completed_at
+        ? `<span class="badge accepted">Complete</span>`
+        : `<span class="badge draft">Not started</span>`;
+    }
+
+    // The app never creates employees in Xero (that made duplicates and
+    // half-done STP2 records). New staff are added in Xero with "Invite
+    // to onboard"; this only links to that record, and once linked can
+    // send address/date of birth to it. See link-employee-to-xero.js.
+    function xeroCellHtml(u) {
+      const errorNote = u.xero_payroll_error
+        ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px; color:var(--red);">${escapeHtml(u.xero_payroll_error)}</p>`
         : '';
+      const btnStyle = 'display:block; margin-top:4px; font-size:11px; padding:4px 8px;';
+      const actions = u.xero_employee_id
+        ? (u.onboarding_completed_at ? `<button type="button" class="secondary xero-send-details-btn" data-id="${u.id}" style="${btnStyle}">Send details to Xero</button>` : '')
+        : `<button type="button" class="secondary xero-link-btn" data-id="${u.id}" style="${btnStyle}">Link to Xero</button>`;
       return `
-        <span class="badge ${u.xero_payroll_status === 'failed' ? 'draft' : 'sent'}">${u.xero_payroll_status === 'failed' ? 'Push failed' : 'Ready to push'}</span>
-        <button type="button" class="secondary push-to-xero-btn" data-id="${u.id}" style="display:block; margin-top:4px; font-size:11px; padding:4px 8px;">Push to Xero</button>
+        <input class="xero-employee-input" data-id="${u.id}" value="${escapeHtml(u.xero_employee_id || '')}" placeholder="Not linked" style="font-size:12px;" />
+        ${actions}
         ${errorNote}`;
     }
 
-    // Shown when the live Xero Payroll push fails. Xero's own bulk-CSV
-    // employee import is "deliberately limited to basic identity and
-    // contact details" anyway - TFN/bank/rates always need manual entry
-    // regardless of import method - so this is a plain summary to key
-    // into Xero by hand, not a guessed CSV format.
-    function openXeroFallbackSummary(summary, errorMessage) {
+    function openXeroCandidatePicker(profileId, candidates) {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      const rows = Object.entries(summary || {}).filter(([, v]) => v !== null && v !== undefined && v !== '');
       overlay.innerHTML = `
-        <div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Couldn't push to Xero automatically</h2>
-          <div class="error-box" style="margin-bottom:14px;">${errorMessage || 'Unknown error'}</div>
-          <p class="subtitle" style="margin-bottom:10px;">In the meantime, here's everything collected so you can enter it in Xero yourself:</p>
+        <div class="card" style="max-width:560px; width:100%; max-height:85vh; overflow-y:auto;">
+          <h2>More than one match in Xero</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Pick the right one. The record with a pay calendar is usually the complete one; a record without one is often a half-created duplicate you can delete in Xero (the ⋮ menu, if they've never been paid).</p>
           <table>
+            <thead><tr><th>Name</th><th>Email</th><th>Pay calendar</th><th></th></tr></thead>
             <tbody>
-              ${rows.map(([k, v]) => `<tr><td style="font-weight:600; white-space:nowrap;">${k}</td><td style="padding-left:12px;">${v}</td></tr>`).join('')}
+              ${candidates.map(c => `
+                <tr>
+                  <td>${escapeHtml(c.name)}${c.status === 'TERMINATED' ? ' <span class="badge draft">Terminated</span>' : ''}</td>
+                  <td>${escapeHtml(c.email)}</td>
+                  <td>${c.hasPayCalendar ? 'Yes' : '<span style="color:var(--red);">None</span>'}</td>
+                  <td><button type="button" class="secondary xero-pick-btn" data-xero-id="${escapeHtml(c.xeroEmployeeId)}" style="font-size:12px; padding:4px 10px;">Link this one</button></td>
+                </tr>`).join('')}
             </tbody>
           </table>
-          <button type="button" class="secondary" id="xero-fallback-close-btn" style="margin-top:16px;">Close</button>
+          <button type="button" class="secondary" id="xero-picker-close-btn" style="margin-top:16px;">Cancel</button>
         </div>`;
       document.body.appendChild(overlay);
-      overlay.querySelector('#xero-fallback-close-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#xero-picker-close-btn').addEventListener('click', () => overlay.remove());
+      overlay.querySelectorAll('.xero-pick-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            const data = await callLinkEmployee({ action: 'link', profileId, xeroEmployeeId: btn.dataset.xeroId });
+            if (!data.ok) throw new Error(data.error || 'Link failed');
+            overlay.remove();
+            await loadUsers();
+          } catch (err) {
+            alert(err.message);
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
+    async function callLinkEmployee(payload) {
+      const res = await authedFetch('/.netlify/functions/link-employee-to-xero', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok && data.ok !== false) throw new Error(data.error || 'Request failed');
+      return data;
     }
 
     async function loadUsers() {
@@ -2032,15 +2069,19 @@
         const roleLabel = (r) => r ? r[0].toUpperCase() + r.slice(1) : '-';
 
         listEl.innerHTML = `
+          <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px;">
+            <button type="button" class="secondary" id="xero-link-all-btn">Match all staff to Xero</button>
+            <span class="subtitle" style="margin:0; font-size:12px;">Links each person to their existing Xero Payroll employee by email or name. It never creates employees in Xero: add new staff there with New employee &gt; Invite to onboard, then link them here.</span>
+          </div>
           <table class="responsive-stack">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Xero Employee ID</th><th>Onboarding</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Xero Employee</th><th>Onboarding</th><th>Status</th><th></th></tr></thead>
             <tbody>
               ${activeUsers.map(u => `
                 <tr data-id="${u.id}">
                   <td data-label="Name"><input class="user-name-input" data-id="${u.id}" value="${u.full_name || ''}" placeholder="Full name" style="font-size:13px;" /></td>
                   <td data-label="Email">${u.email}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
                   <td data-label="Role"><select class="role-select" data-id="${u.id}">${roleOptionsHtml(u.role)}</select></td>
-                  <td data-label="Xero Employee ID"><input class="xero-employee-input" data-id="${u.id}" value="${u.xero_employee_id || ''}" placeholder="From Xero Payroll" style="font-size:12px;" /></td>
+                  <td data-label="Xero Employee">${xeroCellHtml(u)}</td>
                   <td data-label="Onboarding">${onboardingCellHtml(u)}</td>
                   <td data-label="Status">${u.active ? '<span class="badge accepted">Active</span>' : '<span class="badge draft">Deactivated</span>'}</td>
                   <td data-label="" style="text-align:right;">
@@ -2089,38 +2130,69 @@
 
         listEl.querySelectorAll('.xero-employee-input').forEach(input => {
           input.addEventListener('change', async () => {
+            const id = input.value.trim() || null;
             const { error } = await supabaseClient
               .from('profiles')
-              .update({ xero_employee_id: input.value.trim() || null })
+              .update({ xero_employee_id: id, xero_payroll_status: id ? 'synced' : 'pending', xero_payroll_error: null })
               .eq('id', input.dataset.id);
             if (error) alert('Could not save Xero Employee ID: ' + error.message);
+            else await loadUsers();
           });
         });
 
-        listEl.querySelectorAll('.push-to-xero-btn').forEach(btn => {
+        listEl.querySelectorAll('.xero-link-btn').forEach(btn => {
           btn.addEventListener('click', async () => {
             btn.disabled = true;
-            btn.textContent = 'Pushing...';
+            btn.textContent = 'Looking in Xero...';
             try {
-              const res = await authedFetch('/.netlify/functions/sync-employee-to-xero', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ profileId: btn.dataset.id }),
-              });
-              const data = await res.json();
-              if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
-              if (data.status === 'failed') {
-                openXeroFallbackSummary(data.summary, data.error);
-              } else if (data.reminder) {
-                alert(data.reminder);
+              const data = await callLinkEmployee({ action: 'link', profileId: btn.dataset.id });
+              if (!data.ok) throw new Error(data.error || 'Link failed');
+              if (data.status === 'choose') {
+                openXeroCandidatePicker(btn.dataset.id, data.candidates);
+              } else if (data.status === 'not_found') {
+                alert(data.message);
               }
               await loadUsers();
             } catch (err) {
               alert(err.message);
               btn.disabled = false;
-              btn.textContent = 'Push to Xero';
+              btn.textContent = 'Link to Xero';
             }
           });
+        });
+
+        listEl.querySelectorAll('.xero-send-details-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            if (!confirm("Send this person's date of birth and home address from their onboarding to their Xero Payroll record? Nothing else in Xero is changed.")) return;
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            try {
+              const data = await callLinkEmployee({ action: 'send_details', profileId: btn.dataset.id });
+              if (!data.ok) throw new Error(data.error || 'Could not update Xero');
+              alert('Updated in Xero.');
+              await loadUsers();
+            } catch (err) {
+              alert(err.message);
+              await loadUsers();
+            }
+          });
+        });
+
+        document.getElementById('xero-link-all-btn')?.addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          btn.textContent = 'Matching...';
+          try {
+            const data = await callLinkEmployee({ action: 'link_all' });
+            if (!data.ok) throw new Error(data.error || 'Matching failed');
+            const lines = [`Linked: ${data.linked.length ? data.linked.join(', ') : 'none'}`];
+            if (data.ambiguous.length) lines.push(`More than one match in Xero (press Link to Xero on each to choose): ${data.ambiguous.join(', ')}`);
+            if (data.notFound.length) lines.push(`Not found in Xero (add them there with Invite to onboard): ${data.notFound.join(', ')}`);
+            alert(lines.join('\n\n'));
+          } catch (err) {
+            alert(err.message);
+          }
+          await loadUsers();
         });
 
         listEl.querySelectorAll('.role-select').forEach(sel => {

@@ -18,7 +18,7 @@ This was decided in a long conversation with the owner (Jasper). Nothing in this
 
 ## How Xero is wired
 - Xero **Custom Connection** (client_credentials), one organisation. `netlify/functions/_shared/xero-client.js` fetches a token each call. Keys live in the `api_keys` table: `xero_client_id`, `xero_client_secret`, `xero_webhook_key` (all currently set, belonging to the DEMO company).
-- Invoices: `push-invoice-to-xero.js`, `update-invoice-in-xero.js`, payload in `_shared/build-xero-invoice-payload.js`. Credit notes: `push-credit-note-to-xero.js`. Timesheets: `push-timesheets-to-xero.js`. Employees: `sync-employee-to-xero.js`. Webhook (invoice paid, Invoices topic): `xero-webhook.js`.
+- Invoices: `push-invoice-to-xero.js`, `update-invoice-in-xero.js`, payload in `_shared/build-xero-invoice-payload.js`. Credit notes: `push-credit-note-to-xero.js`. Timesheets: `push-timesheets-to-xero.js`. Employees: `link-employee-to-xero.js` (links to existing Xero employees only, never creates; see SETUP.md). Webhook (invoice paid, Invoices topic): `xero-webhook.js`.
 - Settings screens: Settings > API Keys, Settings > Xero Mapping (account mapping table plus the "Xero connection" card with IDs and "Look up IDs from Xero", backed by `lookup-xero-ids.js` and `get-xero-chart-of-accounts.js`).
 - `xero_account_mapping` has 5 rows (all demo codes): `labour` 2002 OUTPUT, `materials` 2001 OUTPUT, `stc_credits_individual` 2003 EXEMPTOUTPUT, `stc_credits_company` 2004 OUTPUT, `stc_trading_variance` 2005 OUTPUT.
 - Xero tax type codes are the API codes (OUTPUT, EXEMPTOUTPUT, OUTPUT2...), not the labels in Xero's screens.

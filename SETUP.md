@@ -126,17 +126,21 @@ those fields, and reviews/edits the auto-filled draft before marking it ready to
 goes to the employee unreviewed. Policy/contract text itself lives in Settings > Onboarding
 Documents.
 
-Once onboarding is complete, an admin/finance user clicks "Push to Xero" (same Users & Roles
-page) to create the employee in Xero Payroll AU via `netlify/functions/sync-employee-to-xero.js`.
-This uses the same Xero Custom Connection already set up for invoices/timesheets, but creating
-an employee needs the `payroll.employees` scope specifically - this app's existing Custom
-Connection likely doesn't have it yet (add it under the app's settings in the Xero Developer
-portal). If the push fails, the button shows exactly why and falls back to a plain summary of
-everything collected, to key into Xero by hand - Xero's own bulk-CSV employee import doesn't
-cover TFN/bank/rates either way, so there's no CSV shortcut worth building here. On success, the
-returned Xero EmployeeID is stored in the existing `xero_employee_id` column, the same one
-`push-timesheets-to-xero.js` already reads - nothing else needs to change once that scope is
-granted.
+The app never creates employees in Xero. Pushing from here used to make duplicates (it could not see
+people already in Xero) and half-done records ("Update details for STP2", since TFN, super and bank
+details are never collected here), and Xero's own onboarding invite then made a second copy. Now:
+
+- Add new staff in Xero with **New employee > Invite to onboard**. They enter TFN, super and bank
+  details themselves and come out as a complete employee.
+- In Settings > Users & Roles, press **Link to Xero** on the person (or **Match all staff to Xero**
+  for everyone). `netlify/functions/link-employee-to-xero.js` finds their existing Xero Payroll
+  record by email, then by full name, and stores its EmployeeID in `xero_employee_id` (the column
+  `push-timesheets-to-xero.js` reads). If several records match, an admin picks one; the one with a
+  pay calendar is normally the complete one.
+- Once linked, **Send details to Xero** updates only date of birth and home address on that record,
+  using its EmployeeID, so it can never create a duplicate or touch tax, bank, super or pay setup.
+
+Needs the `payroll.employees` scope on the Custom Connection.
 
 - Purchase orders and supplier invoices logged in this tool are kept separate from the
   labour/material actuals synced from ServiceM8, on purpose, so nothing gets double-counted.
