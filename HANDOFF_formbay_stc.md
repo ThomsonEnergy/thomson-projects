@@ -1,14 +1,14 @@
 # Handoff: Formbay + STCs (STC page, job STC tab, Formbay job creation)
 
 Written for a fresh chat to pick up. Read `README.md`, `PROJECT_SPEC.md`, `SOLAR_QUOTE_COMPLIANCE_REQUIREMENTS.md` too.
-Decided in a long conversation with the owner (Jasper). Only the Formbay test button has been built; the rest is a plan.
+Decided in a long conversation with the owner (Jasper). Phase 0 and Phase 1 are built (see "Progress" at the end); Phases 2 to 4 are still a plan.
 
 ## Ground rules (apply to everything)
 - Hard rule from the owner: never use em dashes anywhere (chat, code, comments, docs).
 - Work in your git worktree, then `git fetch origin && git rebase origin/main && git push origin HEAD:main`. Other chats push to main too.
-- Migrations: next free number is above 145 (re-check `ls Migrations` after fetching). Apply with the Supabase MCP (`apply_migration`, project id `ziakpklnzkbbjjnqgkmz`), save the `.sql` in `Migrations/`, add a row to `Migrations/migration_audit_diagnostic.sql`.
+- Migrations: next free number is above 147 (re-check `ls Migrations` after fetching). Apply with the Supabase MCP (`apply_migration`, project id `ziakpklnzkbbjjnqgkmz`), save the `.sql` in `Migrations/`, add a row to `Migrations/migration_audit_diagnostic.sql`.
 - Check JavaScript with `node --check` (for pages, extract the inline `<script>` first). No test suite.
-- Pages load `/js/supabase-client.js?v=NN` (currently 64) and `/css/style.css?v=NN` (14). Bump on every page when you change those files.
+- Pages load `/js/supabase-client.js?v=NN` (currently 66) and `/css/style.css?v=NN` (15). Bump on every page when you change those files.
 - Never enter credentials for the owner and do not ask for passwords in chat. Do not download files without asking. Ask before production data changes. Tax rules are for the owner's accountant, not for you to decide.
 
 ## What the owner wants (in their words, tidied)
@@ -65,3 +65,13 @@ Worked example, 417171: gross $5,809.00, fees 148 x $1.10 = $162.80, deposit $5,
 
 ## Open questions for the owner
 Do Formbay's invoices act as the tax invoice for the sale (so the app must not issue its own)? Is the booked price always $35? Start with solar only (batteries and hot water later)? Where are installers' CEC accreditation numbers and Formbay IDs kept (needed to assign installers when creating jobs)?
+
+## Progress (2026-10-14), supersedes "Where it is stuck" and parts of the Formbay facts above
+- **Formbay login works.** It is NOT the trading site's `/formbay/token`. It is OAuth2 password grant: `POST https://oauth2.formbay.com.au/token`, header `Authorization: Basic <API key exactly as shown in Formbay > Settings > API Access>`, form body `grant_type=password&username=...&password=...&scope=admin`. Token lasts 86400 s. Settings > API Keys now has `formbay` (API key), `formbay_username`, `formbay_password`.
+- With that token: `api.formbay.com.au/entrypoint` answers (returns the account identity link); on trading.formbay.com.au the installer/electrician lists answer but `auth_metadata` is 401 and `pv_form_list` was empty. The account is brand new with **zero jobs**, so whether jobs carry `sell_info` is still unknown. The account is flagged `fb2_enabled` (Formbay's newer system). `test-formbay-trading.js` now crawls `api.formbay.com.au` links read-only to map that API; api-doc.formbay.com.au was down for maintenance.
+- **Formbay DOES have webhooks** (Formbay > Settings > Webhooks): events `job.created`, `job.updated`, `job.deleted`, `doc.updated`; custom header auth; it sends a `webhook.test` ping and only saves on HTTP 2xx. Receiver built: `netlify/functions/formbay-webhook.js` (checks header `X-Webhook-Secret` against api key `formbay_webhook_secret`, stores every event raw in `formbay_webhook_events`, migration 146). Payload format unknown until real jobs exist; processing not built.
+- **Owner answers:** customers credited $35/STC; Formbay buys at usually $39.25 ($38 to $39.50); fee is $0.53 processing + $0.47 CER registration = $1.00 ex GST per STC ($1.10 inc), deducted from the payment. Payments come in batches. Solar, batteries and hot water all in scope. Commercial installs get 10% "GST on Units" added to the sale.
+- **Formbay payment PDFs:** a "Payment Advice" (Reference No, one line per Formbay job: `PV|BSTC <formbay job id> (owner) [SPV status] [* Commercial Install] units $price GST total`) plus a fee "TAX INVOICE" numbered `FEE<reference>`. Cash received = advice Total minus fee invoice Total.
+- **Phase 1 built:** migration 147 (`job_stcs`, `formbay_payment_advices` with generated `amount_received`, `formbay_payment_advice_lines`, `company_settings.stc_expected_sale_price` 39.25 and `stc_fee_per_certificate` 1.00; pricing roles only). Job page "STCs" tab (pricing roles, any job) to add/edit lines; it keeps `projects.formbay_lodgement_status` in step (least advanced line wins, paid counts as sold). New page `public/stcs.html` (nav "STCs", pricing only): tiles, status filter, expected price/fee settings, and **import of payment advice + fee invoice PDFs** read in the browser with pdf.js (cdnjs 3.11.174) and parsed by `public/js/formbay-advice-parser.js`; preview, match lines to jobs by Formbay job id, then save (marks matched lines paid). Shared helpers in `supabase-client.js`: `STC_TYPES`, `STC_STATUSES`, `stcCountForStage`, `stcFigures`. Also fixed: the job page never loaded the stage STC calculator inputs (added to `COST_CENTRE_COLS_PRICING`).
+- Do NOT use `pdf-parse` server-side for these PDFs: it returned one file's text for another when several were read in the same process (it fails on some of these files too).
+- **Still to do:** fix the STC line on customer invoices for company clients (see the Xero handoff); Phase 2 (process webhook events, pull job status and sale info); Phase 3 (post settlements to Xero, accountant's method first); Phase 4 (create and submit Formbay jobs, test site first).
