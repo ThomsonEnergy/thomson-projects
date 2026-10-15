@@ -97,8 +97,10 @@ function circuitSymbol(s) {
 }
 
 let _circuitBgCount = 0;
-function addCircuitBackground(opacity = 0.06) {
-  const animate = !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+// opts.still: just the drawing, nothing moving (no ripples, current or
+// sparks). Used on every staff page except login and home.
+function addCircuitBackground(opacity = 0.06, opts = {}) {
+  const animate = !opts.still && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
   let svg = null, frame = null;
   const scale = opacity / 0.06; // the current is a touch dimmer where the background is fainter
 
@@ -115,6 +117,7 @@ function addCircuitBackground(opacity = 0.06) {
     const stroke = `fill="none" stroke="#36379A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="stroke:var(--accent, #36379A); color:var(--accent, #36379A)"`;
 
     const html = `<svg id="${id}-svg" aria-hidden="true" focusable="false" style="position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:-1;">
+      <style>@media print { #${id}-svg { display: none; } }</style>
       <defs>
         <g id="${id}-diagram">${routes.map((r, i) => `<g data-route="${i}" data-mid="${r.mid}"><path class="te-wire" d="${r.d}"/>${r.symbols.map(circuitSymbol).join('')}</g>`).join('')}</g>
         ${animate ? `

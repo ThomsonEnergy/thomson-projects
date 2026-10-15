@@ -5129,3 +5129,21 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
       </div>`;
   }).join('');
 }
+
+// The faint wiring drawing (circuit-background.js) behind every staff page,
+// still here; login and home load the animated version themselves. Left off
+// the client-facing pages, which also keeps it out of quote and invoice PDFs.
+(function () {
+  const clientPages = ['quote', 'invoice', 'review', 'letter', 'share-licences'];
+  const page = (location.pathname.split('/').pop() || '').replace(/\.html$/, '');
+  if (clientPages.includes(page)) return;
+  const start = () => {
+    if (typeof addCircuitBackground === 'function') return; // login and home add their own
+    const s = document.createElement('script');
+    s.src = '/js/circuit-background.js?v=15';
+    s.onload = () => addCircuitBackground(0.05, { still: true });
+    document.head.appendChild(s);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})();
