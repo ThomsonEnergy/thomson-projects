@@ -519,7 +519,11 @@
       const baseCentres = centres.filter(c => !c.is_variation); // what the original quote's deposit and payment schedule are worked out on
       const baseTotal = baseCentres.reduce((sum, c) => sum + Number(c.quoted_amount), 0);
       const total = centres.reduce((sum, c) => sum + Number(c.quoted_amount), 0);
-      const stcTotal = centres.reduce((sum, c) => sum + Number(c.stc_total || 0), 0);
+      // stc_total is ex GST; a company client's credit carries GST on top,
+      // the same as the invoice and Xero (stc_credit_inc_gst, migration 153).
+      const isCompanyClient = data.client_type === 'company';
+      const stcExGst = centres.reduce((sum, c) => sum + Number(c.stc_total || 0), 0);
+      const stcTotal = isCompanyClient ? Math.round(stcExGst * 1.1 * 100) / 100 : stcExGst;
       const gstAmount = Math.round(total * 0.10 * 100) / 100;
       const totalIncGst = total + gstAmount;
       const totalAfterStc = totalIncGst - stcTotal;
@@ -709,7 +713,7 @@
             <div class="totals">
               <div class="l">Subtotal (ex GST): ${money(total)}</div>
               <div class="l">GST (10%): ${money(gstAmount)}</div>
-              ${stcTotal > 0 ? `<div class="stc">STC credit: -${money(stcTotal)}</div>` : ''}
+              ${stcTotal > 0 ? `<div class="stc">STC credit${isCompanyClient ? ' (inc GST)' : ''}: -${money(stcTotal)}</div>` : ''}
               <div class="big">Total${stcTotal > 0 ? ' after STC credit' : ' inc GST'}: ${money(stcTotal > 0 ? totalAfterStc : totalIncGst)}</div>
               ${stcTotal > 0 ? `<div class="note-line">The STC credit is applied against your invoice once the system is installed and registered - not a separate payment.</div>` : ''}
             </div>

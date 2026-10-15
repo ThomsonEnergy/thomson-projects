@@ -500,4 +500,7 @@ select '152', 'public holiday base + penalty',
   case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_public_holiday_base_earnings_rate_id')
     and exists (select 1 from information_schema.tables where table_name = 'public_holiday_pay_pushes')
   then 'present' else 'MISSING' end
+union all
+select '153', 'STC credit inc GST for companies',
+  case when exists (select 1 from pg_proc where proname = 'stc_credit_inc_gst') then 'present' else 'MISSING' end
 order by 1;

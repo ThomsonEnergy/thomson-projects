@@ -142,7 +142,10 @@
 
       const labourAmount = Number(inv.labour_amount) || 0;
       const materialAmount = Number(inv.material_amount) || 0;
-      const stcAmount = Number(inv.stc_amount) || 0;
+      // The STC credit as Xero has it: GST-free for an individual, plus GST
+      // for a company (stc_credit_inc_gst, migration 153).
+      const isCompanyClient = inv.client_type === 'company';
+      const stcAmount = inv.stc_credit_inc_gst != null ? Number(inv.stc_credit_inc_gst) : (Number(inv.stc_amount) || 0);
       const subtotal = labourAmount + materialAmount;
       const gst = Math.round(subtotal * 0.10 * 100) / 100;
       const totalIncGst = subtotal + gst;
@@ -250,7 +253,7 @@
               <div><span class="k">Sub-Total ex GST</span><span class="v">${money(subtotal)}</span></div>
               <div><span class="k">GST</span><span class="v">${money(gst)}</span></div>
               <div><span class="k">Total inc GST</span><span class="v">${money(totalIncGst)}</span></div>
-              ${stcAmount > 0 ? `<div><span class="k">STC Credit</span><span class="v">-${money(stcAmount)}</span></div>` : ''}
+              ${stcAmount > 0 ? `<div><span class="k">STC Credit${isCompanyClient ? ' (inc GST)' : ''}</span><span class="v">-${money(stcAmount)}</span></div>` : ''}
               <div><span class="k">Amount Applied</span><span class="v">${money(amountApplied)}</span></div>
               <div><span class="k">Balance Due</span><span class="v">${money(balanceDue)}</span></div>
             </div>
