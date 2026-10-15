@@ -1,6 +1,14 @@
 // POST /api/create-invoice
-// Body: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent }],
+// Body: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent, items? }],
 //         variationEntryIds? (logged variations being billed on this invoice) }
+// items (do-and-charge invoice builder): Stock materials and prebuilds added
+// straight onto this invoice under that cost centre -
+// [{ kind: 'material' | 'prebuild', materialId?, prebuildId?, quantity, unitPrice?, description? }].
+// Priced by _shared/invoice-items.js and added on top of the claim's
+// labour/material amounts; each is recorded in invoice_line_items, and a
+// Stock material is taken out of the warehouse and costed to the job
+// (job_material_usage), same as any other draw from Stock. Nothing is
+// priced or moved until the request is otherwise valid.
 // One invoice, one row per cost centre included (a single-stage claim is
 // just claims.length === 1) - either a % of that stage's quote (the
 // normal claim panel) or, for a no-quote job (proposal_template
@@ -15,6 +23,7 @@
 const crypto = require('crypto');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { computeDueDate } = require('./_shared/compute-due-date');
+const { priceInvoiceItems, adjustWarehouseStockAdmin, r2 } = require('./_shared/invoice-items');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -34,13 +43,26 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectId and at least one claim are required' }) };
     }
 
-    const claimRows = claims
-      .map(c => ({
+    const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('id, name, sort_order, quoted_amount, invoiced_amount, markup_percent').eq('project_id', projectId);
+    if (claims.some(c => c.costCentreId && !(allCentres || []).some(cc => cc.id === c.costCentreId))) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'A cost centre on this invoice does not belong to this job.' }) };
+    }
+
+    // Items are priced here (server side, from Stock / the prebuild library)
+    // and added on top of whatever labour / materials the claim carries.
+    const pricedClaims = await Promise.all(claims.map(async (c) => {
+      const centre = (allCentres || []).find(cc => cc.id === c.costCentreId);
+      const priced = await priceInvoiceItems(supabaseAdmin, c.items, centre?.markup_percent ?? 45);
+      return { c, priced };
+    }));
+    const claimRows = pricedClaims
+      .map(({ c, priced }) => ({
         cost_centre_id: c.costCentreId,
-        labour_amount: Number(c.labourAmount) || 0,
-        material_amount: Number(c.materialAmount) || 0,
+        labour_amount: r2((Number(c.labourAmount) || 0) + priced.labour),
+        material_amount: r2((Number(c.materialAmount) || 0) + priced.material),
         stc_amount: Number(c.stcAmount) || 0,
         claim_percent: c.claimPercent != null ? Number(c.claimPercent) : null,
+        _items: priced.rows,
       }))
       .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount) > 0);
     if (!claimRows.length) {
@@ -59,7 +81,6 @@ exports.handler = async (event) => {
     const { data: companySettings } = await supabaseAdmin.from('company_settings').select('invoice_number_prefix').eq('id', 1).single();
     const invoiceNumberStr = `${companySettings?.invoice_number_prefix || 'SI'}${drawnNumber}`;
 
-    const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('id, quoted_amount, invoiced_amount').eq('project_id', projectId);
     const projectTotal = (allCentres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
     // Null (not a misleading 0%/100%) when there's no quote behind this job
     // at all (a direct/no-quote job) - there's nothing for a % to mean.
@@ -81,8 +102,20 @@ exports.handler = async (event) => {
       return newInvoiced >= (Number(c.quoted_amount) || 0) - 0.01;
     });
 
+    const { data: projectRow } = await supabaseAdmin.from('projects').select('client_id, proposal_template').eq('id', projectId).single();
+
     let claimLabel;
-    if (isFinalClaim) {
+    if (projectRow?.proposal_template === 'direct_job' && projectTotal <= 0) {
+      // No quote to claim against: name the invoice after the cost centres
+      // it covers (e.g. "Disconnect" or "Disconnect + Reconnect"), which is
+      // also what the Xero reference reads ("Job 7000 - Disconnect").
+      claimLabel = claimRows
+        .map(c => (allCentres || []).find(cc => cc.id === c.cost_centre_id))
+        .sort((a, b) => (a?.sort_order || 0) - (b?.sort_order || 0))
+        .map(cc => cc?.name || 'Work')
+        .join(' + ')
+        .slice(0, 200);
+    } else if (isFinalClaim) {
       claimLabel = 'Final claim';
     } else {
       const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
@@ -98,7 +131,7 @@ exports.handler = async (event) => {
     // can override it below.
     let dueDate = overrideDueDate || null;
     if (!dueDate) {
-      const resolvedClientId = (await supabaseAdmin.from('projects').select('client_id').eq('id', projectId).single()).data?.client_id;
+      const resolvedClientId = projectRow?.client_id;
       const { data: client } = resolvedClientId
         ? await supabaseAdmin.from('clients').select('payment_terms').eq('id', resolvedClientId).maybeSingle()
         : { data: null };
@@ -127,10 +160,37 @@ exports.handler = async (event) => {
       .single();
     if (insErr) throw insErr;
 
-    const { error: claimsErr } = await supabaseAdmin
+    const { data: insertedClaims, error: claimsErr } = await supabaseAdmin
       .from('invoice_claims')
-      .insert(claimRows.map(c => ({ ...c, invoice_id: insertedInvoice.id })));
+      .insert(claimRows.map(({ _items, ...c }) => ({ ...c, invoice_id: insertedInvoice.id })))
+      .select('id, cost_centre_id');
     if (claimsErr) throw claimsErr;
+
+    // Items added in the invoice builder: Stock comes out of the warehouse
+    // and is costed to the job, then each item is recorded against its claim.
+    for (const c of claimRows) {
+      if (!c._items.length) continue;
+      const claimId = (insertedClaims || []).find(ic => ic.cost_centre_id === c.cost_centre_id)?.id || null;
+      const itemRows = [];
+      for (const item of c._items) {
+        let usageId = null;
+        if (item.kind === 'material' && item.material_id) {
+          const { data: usage, error: usageErr } = await supabaseAdmin.from('job_material_usage').insert({
+            project_id: projectId, cost_centre_id: c.cost_centre_id, material_id: item.material_id,
+            quantity: item.quantity, unit_cost: item.unit_cost, source: 'from_stock', created_by: user.id,
+          }).select('id').single();
+          if (usageErr) throw usageErr;
+          usageId = usage.id;
+          await adjustWarehouseStockAdmin(supabaseAdmin, item.material_id, -Number(item.quantity));
+        }
+        itemRows.push({
+          ...item, invoice_id: insertedInvoice.id, invoice_claim_id: claimId, cost_centre_id: c.cost_centre_id,
+          job_material_usage_id: usageId, created_by: user.id,
+        });
+      }
+      const { error: itemsErr } = await supabaseAdmin.from('invoice_line_items').insert(itemRows);
+      if (itemsErr) throw itemsErr;
+    }
 
     const { data: centresBefore } = await supabaseAdmin
       .from('cost_centres')

@@ -1568,54 +1568,83 @@
       return { labourAmount, materialAmount };
     }
 
-    // For a no-quote job (dashboard.html's "+ New job (no quote)") -
-    // there's no quoted amount to claim a % of, so this invoices whatever
-    // has actually accrued instead: labour at each person's own charge-out
-    // rate for every hour logged (server-side, same reason pay rates never
-    // reach the browser directly - see get-invoiceable-actuals.js), and
-    // materials at received-PO cost marked up by the cost centre's own
-    // markup%. Pre-fills editable amounts covering whatever's accrued but
-    // not yet invoiced; the user can still adjust before sending.
+    // For a no-quote (do-and-charge) job (dashboard.html's "+ New job (no
+    // quote)") - there's no quoted amount to claim a % of, so this invoices
+    // whatever has actually accrued instead, per cost centre: labour at
+    // each person's own charge-out rate for every hour logged to it
+    // (server-side, same reason pay rates never reach the browser directly -
+    // see get-invoiceable-actuals.js), and materials at cost marked up by the
+    // cost centre's own markup%. Pre-fills editable amounts covering
+    // whatever's accrued but not yet invoiced on each cost centre.
+    // Tick the cost centres to invoice, then either raise ONE invoice
+    // covering all of them (one Xero invoice, a Labour / Materials line per
+    // cost centre) or a separate invoice for each. Stock materials and
+    // prebuilds can be added straight onto any cost centre while building
+    // it: create-invoice.js prices them, takes Stock out of the warehouse
+    // and records them in invoice_line_items.
     async function openInvoiceActualCostsPanel(project) {
       const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px;';
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `<div class="card" style="max-width:440px; width:100%;"><p class="subtitle">Working out what's accrued...</p></div>`;
       document.body.appendChild(overlay);
 
-      let actuals;
+      let actuals, prebuilds, materials;
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/get-invoiceable-actuals', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ projectId: project.id }),
-        });
+        const [res, pbs, { data: mats }] = await Promise.all([
+          fetch('/.netlify/functions/get-invoiceable-actuals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ projectId: project.id }),
+          }),
+          getPrebuilds(),
+          supabaseClient.from('materials').select('id, name, cost_price'),
+        ]);
         actuals = await res.json();
         if (!res.ok || !actuals.ok) throw new Error(actuals.error || 'Could not work out accrued costs');
+        prebuilds = pbs || [];
+        materials = mats || [];
       } catch (err) {
         overlay.innerHTML = `<div class="card" style="max-width:440px; width:100%;"><div class="error-box">${err.message}</div><button type="button" class="secondary" id="ia-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
         overlay.querySelector('#ia-close-btn').addEventListener('click', () => overlay.remove());
         return;
       }
 
-      const totalAccrued = actuals.actualLabourSell + actuals.materialSell;
-      const remaining = Math.max(0, totalAccrued - actuals.invoicedAmount);
-      const labourShare = totalAccrued > 0 ? actuals.actualLabourSell / totalAccrued : 0;
-      const defaultLabour = Math.round(remaining * labourShare * 100) / 100;
-      const defaultMaterial = Math.round((remaining - defaultLabour) * 100) / 100;
+      const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+      // Same pricing create-invoice.js uses (_shared/invoice-items.js), so
+      // what's shown here is what gets charged unless it's typed over.
+      const prebuildUnitPrice = (p, markup) => {
+        const factor = 1 + (Number(markup) || 0) / 100;
+        return r2((p.prebuild_components || []).reduce((s, c) => {
+          const line = (Number(c.quantity) || 0) * (Number(c.unit_cost) || 0);
+          return s + (c.item_type === 'labour' ? line : line * factor);
+        }, 0));
+      };
+
+      const centres = actuals.centres.map((c) => {
+        const accrued = c.actualLabourSell + c.materialSell;
+        const remaining = Math.max(0, accrued - c.invoicedAmount);
+        const labourShare = accrued > 0 ? c.actualLabourSell / accrued : 0;
+        const labour = r2(remaining * labourShare);
+        return { ...c, labour, material: r2(remaining - labour), items: [], include: remaining > 0.004 };
+      });
+      // Nothing accrued anywhere yet (e.g. invoicing straight from a prebuild): start with every cost centre ticked.
+      if (!centres.some(c => c.include)) centres.forEach(c => { c.include = true; });
+      let mode = 'combined';
+
+      const centreTotal = (c) => r2((Number(c.labour) || 0) + (Number(c.material) || 0) + c.items.reduce((s, it) => s + r2(it.quantity * it.unitPrice), 0));
 
       overlay.innerHTML = `
-        <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
+        <div class="card" style="max-width:720px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Invoice actual costs</h2>
-          <p class="subtitle" style="margin-bottom:12px;">${actuals.actualHours} hours logged so far &middot; ${money(actuals.materialCost)} in received materials (marked up to ${money(actuals.materialSell)}). ${money(actuals.invoicedAmount)} already invoiced.</p>
-          <label style="margin-top:0">Labour</label>
-          <input type="number" step="0.01" id="ia-labour" value="${defaultLabour}" />
-          <label>Materials</label>
-          <input type="number" step="0.01" id="ia-material" value="${defaultMaterial}" />
-          <label>Invoice date</label>
-          <input type="date" id="ia-date" value="${new Date().toISOString().slice(0, 10)}" />
-          <label>Due date (optional - defaults to the client's payment terms)</label>
-          <input type="date" id="ia-due-date" />
+          <p class="subtitle" style="margin-bottom:12px;">Tick the cost centres to invoice. Amounts are what's accrued but not yet invoiced on each; change them, and add Stock materials or prebuilds straight onto the invoice (Stock comes out of the warehouse when the invoice is created).</p>
+          <div id="ia-centres"></div>
+          <div id="ia-mode-wrap" style="margin-top:12px;"></div>
+          <div class="grid cols-2">
+            <div><label>Invoice date</label><input type="date" id="ia-date" value="${new Date().toLocaleDateString('en-CA')}" /></div>
+            <div><label>Due date (optional - defaults to the client's payment terms)</label><input type="date" id="ia-due-date" /></div>
+          </div>
+          <p id="ia-total" style="margin:14px 0 0; font-weight:600;"></p>
           <div style="margin-top:14px;">
             <button id="ia-confirm-btn">Create &amp; send</button>
             <button type="button" class="secondary" id="ia-cancel-btn">Cancel</button>
@@ -1623,46 +1652,144 @@
           <div id="ia-msg"></div>
         </div>`;
 
+      const centresEl = overlay.querySelector('#ia-centres');
+      const modeWrap = overlay.querySelector('#ia-mode-wrap');
+
+      function refreshTotals() {
+        const picked = centres.filter(c => c.include);
+        const total = picked.reduce((s, c) => s + centreTotal(c), 0);
+        overlay.querySelector('#ia-total').textContent = picked.length
+          ? `${mode === 'separate' && picked.length > 1 ? `${picked.length} invoices, ` : ''}${money(total)} ex GST`
+          : 'Tick at least one cost centre.';
+        centres.forEach((c, i) => {
+          const el = centresEl.querySelector(`[data-ci="${i}"] .ia-centre-total`);
+          if (el) el.textContent = money(centreTotal(c));
+        });
+        modeWrap.innerHTML = picked.length > 1 ? `
+          <label style="margin-top:0;">How to invoice the ${picked.length} cost centres</label>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:4px; font-weight:400;"><input type="radio" name="ia-mode" value="combined" ${mode === 'combined' ? 'checked' : ''} style="width:auto;" /> One invoice covering all of them</label>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:4px; font-weight:400;"><input type="radio" name="ia-mode" value="separate" ${mode === 'separate' ? 'checked' : ''} style="width:auto;" /> A separate invoice for each</label>` : '';
+        modeWrap.querySelectorAll('input[name="ia-mode"]').forEach(r => r.addEventListener('change', () => { mode = r.value; refreshTotals(); }));
+      }
+
+      function renderCentres() {
+        centresEl.innerHTML = centres.map((c, i) => `
+          <div data-ci="${i}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; ${c.include ? '' : 'opacity:0.6;'}">
+            <label style="margin-top:0; display:flex; align-items:center; gap:8px; justify-content:space-between;">
+              <span style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="ia-include" ${c.include ? 'checked' : ''} style="width:auto;" /><strong>${escapeHtml(c.name)}</strong></span>
+              <span class="ia-centre-total" style="font-weight:600;"></span>
+            </label>
+            <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${c.actualHours} hrs logged &middot; ${money(c.materialCost)} materials at cost (${money(c.materialSell)} with ${c.markupPercent}% markup) &middot; ${money(c.invoicedAmount)} already invoiced</p>
+            ${c.include ? `
+              <div class="grid cols-2">
+                <div><label>Labour</label><input type="number" step="0.01" class="ia-labour" value="${c.labour}" /></div>
+                <div><label>Materials</label><input type="number" step="0.01" class="ia-material" value="${c.material}" /></div>
+              </div>
+              ${c.items.length ? `
+                <table style="margin-top:10px; font-size:13px;">
+                  <thead><tr><th>Added item</th><th class="num" style="width:70px;">Qty</th><th class="num" style="width:110px;">Price each</th><th class="num">Total</th><th></th></tr></thead>
+                  <tbody>
+                    ${c.items.map((it, j) => `
+                      <tr data-ii="${j}">
+                        <td>${escapeHtml(it.name)} <span class="subtitle" style="font-size:11px;">${it.kind === 'prebuild' ? 'Prebuild' : 'Stock'}</span></td>
+                        <td class="num"><input type="number" step="0.01" min="0.01" class="ia-item-qty" value="${it.quantity}" style="padding:4px 6px;" /></td>
+                        <td class="num"><input type="number" step="0.01" min="0" class="ia-item-price" value="${it.unitPrice}" style="padding:4px 6px;" /></td>
+                        <td class="num ia-item-total">${money(it.quantity * it.unitPrice)}</td>
+                        <td><button type="button" class="secondary ia-item-remove" style="font-size:12px; padding:4px 8px;">Remove</button></td>
+                      </tr>`).join('')}
+                  </tbody>
+                </table>` : ''}
+              <button type="button" class="secondary ia-add-item" style="margin-top:10px; font-size:13px;">+ Add from Stock / prebuild</button>
+            ` : ''}
+          </div>`).join('');
+
+        centresEl.querySelectorAll('[data-ci]').forEach((box) => {
+          const c = centres[Number(box.dataset.ci)];
+          box.querySelector('.ia-include').addEventListener('change', (e) => { c.include = e.target.checked; renderCentres(); });
+          if (!c.include) return;
+          box.querySelector('.ia-labour').addEventListener('input', (e) => { c.labour = parseFloat(e.target.value) || 0; refreshTotals(); });
+          box.querySelector('.ia-material').addEventListener('input', (e) => { c.material = parseFloat(e.target.value) || 0; refreshTotals(); });
+          box.querySelectorAll('[data-ii]').forEach((row) => {
+            const it = c.items[Number(row.dataset.ii)];
+            const sync = () => { row.querySelector('.ia-item-total').textContent = money(it.quantity * it.unitPrice); refreshTotals(); };
+            row.querySelector('.ia-item-qty').addEventListener('input', (e) => { it.quantity = parseFloat(e.target.value) || 0; sync(); });
+            row.querySelector('.ia-item-price').addEventListener('input', (e) => { it.unitPrice = parseFloat(e.target.value) || 0; sync(); });
+            row.querySelector('.ia-item-remove').addEventListener('click', () => { c.items.splice(Number(row.dataset.ii), 1); renderCentres(); });
+          });
+          box.querySelector('.ia-add-item').addEventListener('click', async () => {
+            const picked = await openVariationStockPicker(true);
+            if (!picked) return;
+            if (picked.kind === 'material') {
+              const m = materials.find(x => x.id === picked.id);
+              c.items.push({ kind: 'material', materialId: picked.id, name: picked.name, quantity: picked.quantity, unitPrice: r2((Number(m?.cost_price) || 0) * (1 + c.markupPercent / 100)) });
+            } else {
+              const p = prebuilds.find(x => x.id === picked.id);
+              c.items.push({ kind: 'prebuild', prebuildId: picked.id, name: picked.name, quantity: picked.quantity, unitPrice: p ? prebuildUnitPrice(p, c.markupPercent) : 0 });
+            }
+            renderCentres();
+          });
+        });
+        refreshTotals();
+      }
+      renderCentres();
+
       overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#ia-confirm-btn').addEventListener('click', async () => {
         const confirmBtn = overlay.querySelector('#ia-confirm-btn');
         const msg = overlay.querySelector('#ia-msg');
-        const labourAmount = parseFloat(overlay.querySelector('#ia-labour').value) || 0;
-        const materialAmount = parseFloat(overlay.querySelector('#ia-material').value) || 0;
-        if (labourAmount + materialAmount <= 0) { msg.innerHTML = `<div class="error-box">Enter a labour or material amount.</div>`; return; }
+        const picked = centres.filter(c => c.include);
+        if (!picked.length) { msg.innerHTML = `<div class="error-box">Tick at least one cost centre.</div>`; return; }
+        const empty = picked.find(c => centreTotal(c) <= 0);
+        if (empty) { msg.innerHTML = `<div class="error-box">${escapeHtml(empty.name)} has nothing to invoice. Enter an amount, add an item, or untick it.</div>`; return; }
+        if (picked.some(c => c.items.some(it => !(it.quantity > 0)))) { msg.innerHTML = `<div class="error-box">Every added item needs a quantity.</div>`; return; }
+
+        const toClaim = (c) => ({
+          costCentreId: c.costCentreId, labourAmount: Number(c.labour) || 0, materialAmount: Number(c.material) || 0, claimPercent: null,
+          items: c.items.map(it => ({ kind: it.kind, materialId: it.materialId || null, prebuildId: it.prebuildId || null, quantity: it.quantity, unitPrice: it.unitPrice })),
+        });
+        const batches = mode === 'separate' ? picked.map(c => [toClaim(c)]) : [picked.map(toClaim)];
 
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Creating...';
+        const created = [];
         try {
           const { data: { session } } = await supabaseClient.auth.getSession();
-          const res = await fetch('/.netlify/functions/create-invoice', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-            body: JSON.stringify({
-              projectId: project.id,
-              claims: [{ costCentreId: actuals.costCentreId, labourAmount, materialAmount, claimPercent: null }],
-              sentAt: overlay.querySelector('#ia-date').value || null,
-              dueDate: overlay.querySelector('#ia-due-date').value || null,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
-          await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (actual costs)`);
-          autoGenerateInvoicePdf(data.invoiceId);
-
-          const invoiceUrl = `${shareOrigin()}/invoice.html?token=${data.invoiceToken}`;
-          msg.innerHTML = `
-            <div class="success-box">Created as ${data.invoiceNumber}.</div>
-            <label>Invoice link</label>
-            <input readonly value="${invoiceUrl}" onclick="this.select()" />`;
-          confirmBtn.style.display = 'none';
-          overlay.querySelector('#ia-cancel-btn').textContent = 'Close';
-          overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => window.location.reload());
+          for (const claims of batches) {
+            const res = await fetch('/.netlify/functions/create-invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({
+                projectId: project.id,
+                claims,
+                sentAt: overlay.querySelector('#ia-date').value || null,
+                dueDate: overlay.querySelector('#ia-due-date').value || null,
+              }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
+            created.push(data);
+            await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (actual costs)`);
+            autoGenerateInvoicePdf(data.invoiceId);
+          }
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-          confirmBtn.disabled = false;
-          confirmBtn.textContent = 'Create & send';
+          msg.innerHTML = `${created.length ? `<div class="success-box">Created ${created.map(d => d.invoiceNumber).join(', ')} before this failed.</div>` : ''}<div class="error-box">${err.message}</div>`;
+          if (created.length) {
+            confirmBtn.style.display = 'none';
+            overlay.querySelector('#ia-cancel-btn').textContent = 'Close';
+            overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => window.location.reload());
+          } else {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Create & send';
+          }
+          return;
         }
+
+        msg.innerHTML = `
+          <div class="success-box">Created ${created.map(d => d.invoiceNumber).join(', ')}.</div>
+          ${created.map(d => `<label>${d.invoiceNumber} link</label><input readonly value="${shareOrigin()}/invoice.html?token=${d.invoiceToken}" onclick="this.select()" />`).join('')}`;
+        confirmBtn.style.display = 'none';
+        overlay.querySelector('#ia-cancel-btn').textContent = 'Close';
+        overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => window.location.reload());
       });
     }
 
@@ -3166,7 +3293,18 @@
               ${isQuoteFree ? `
               <div class="card">
                 <h2>Invoice actual costs</h2>
-                <p class="subtitle" style="margin-bottom:10px;">No quote behind this job - invoice for whatever's actually been logged so far (labour at each person's charge-out rate, materials at cost plus markup), not a % of an estimate.</p>
+                <p class="subtitle" style="margin-bottom:10px;">No quote behind this job - invoice for whatever's actually been logged so far (labour at each person's charge-out rate, materials at cost plus markup), not a % of an estimate. Cost it to more than one cost centre (e.g. a disconnect and the reconnect as two site visits), then invoice them together or separately, adding Stock and prebuilds as you go.</p>
+                <table style="margin-bottom:10px;">
+                  <thead><tr><th>Cost centre</th><th class="num">Invoiced</th></tr></thead>
+                  <tbody>
+                    ${centres.map((c, i) => `<tr><td>${costCentreNumber(project.job_number, i + 1)} ${escapeHtml(c.name)}</td><td class="num">${money(c.invoiced_amount)}</td></tr>`).join('')}
+                  </tbody>
+                </table>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+                  <input id="add-cost-centre-name" placeholder="New cost centre, e.g. Reconnect" style="flex:1; min-width:180px;" />
+                  <button type="button" class="secondary" id="add-cost-centre-btn">+ Add cost centre</button>
+                </div>
+                <div id="add-cost-centre-msg"></div>
                 <button class="secondary" id="invoice-actual-btn">Invoice actual costs...</button>
               </div>` : `
               <div class="card">
@@ -3447,6 +3585,28 @@
       if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
       const invoiceActualBtn = document.getElementById('invoice-actual-btn');
       if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => openInvoiceActualCostsPanel(project));
+      // Do-and-charge jobs: a named cost centre is all that's needed (no
+      // quote lines) - it's what the team clocks time and costs Stock to.
+      const addCostCentreBtn = document.getElementById('add-cost-centre-btn');
+      if (addCostCentreBtn) addCostCentreBtn.addEventListener('click', async () => {
+        const nameEl = document.getElementById('add-cost-centre-name');
+        const msgEl = document.getElementById('add-cost-centre-msg');
+        const name = nameEl.value.trim();
+        if (!name) { msgEl.innerHTML = `<div class="error-box">Give the cost centre a name.</div>`; return; }
+        addCostCentreBtn.disabled = true;
+        try {
+          const existing = project.cost_centres || [];
+          const nextSort = existing.reduce((m, c) => Math.max(m, Number(c.sort_order) || 0), -1) + 1;
+          const markup = existing.length ? Number(existing[0].markup_percent) || 45 : 45;
+          const { error } = await supabaseClient.from('cost_centres').insert({ project_id: project.id, name, sort_order: nextSort, markup_percent: markup, quoted_amount: 0 });
+          if (error) throw error;
+          await logActivity('project', project.id, 'cost_centre_added', `Cost centre added: ${name}`);
+          window.location.reload();
+        } catch (err) {
+          msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+          addCostCentreBtn.disabled = false;
+        }
+      });
 
       const jobNotesSaveBtn = document.getElementById('job-notes-save-btn');
       if (jobNotesSaveBtn) jobNotesSaveBtn.addEventListener('click', async () => {
