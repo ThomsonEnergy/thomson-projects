@@ -78,9 +78,11 @@ async function pushOne(supabaseAdmin, profile, settings) {
     LastName: current.LastName,
     DateOfBirth: xeroDateToIso(current.DateOfBirth) || undefined,
     HomeAddress: current.HomeAddress || undefined,
-    // An employee needs an ordinary earnings rate for STP; only fill it if
-    // Xero has none, never change one that's already set.
-    OrdinaryEarningsRateID: current.OrdinaryEarningsRateID || settings.xero_ordinary_earnings_rate_id || undefined,
+    // The employee's main ordinary earnings rate (used for STP and leave)
+    // follows the Ordinary - Jobs rate chosen in Settings > Xero Mapping, so
+    // moving to new pay items is a clean swap rather than leaving people on
+    // an old one. Falls back to whatever Xero has if none is chosen.
+    OrdinaryEarningsRateID: settings.xero_ordinary_earnings_rate_id || current.OrdinaryEarningsRateID || undefined,
     PayTemplate: { ...template, EarningsLines: lines },
   };
   await xeroRequest('payroll.au', 'Employees', { method: 'POST', body: [update] });
