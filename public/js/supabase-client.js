@@ -1791,9 +1791,57 @@ async function renderMainNav(activeKey) {
       if (menu && menu.classList.contains('open') && !menu.contains(e.target) &&
           !e.target.closest('.nav-more-btn, #mobile-menu-btn')) menu.classList.remove('open');
     });
+    // The ☰ button opens the same menu from the far left, wherever "More" last put it
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    if (menuBtn) menuBtn.addEventListener('click', () => dropdownEl && dropdownEl.style.removeProperty('--more-left'), true);
   }
+  watchTopbarFit();
   renderAIChatWidget();
   loadNotificationBell();
+  loadGlobalSearch();
+}
+
+// Keeps the top bar from ever running wider than the screen. In order:
+// the tabs fold into the ☰ menu if they don't all fit, then the search box
+// shrinks to an icon, then the icons tighten up. Re-checked whenever the
+// bar changes size or something is added to it (bell, search, a star).
+function fitTopbar() {
+  const bar = document.querySelector('.topbar');
+  const right = bar && bar.querySelector('.topbar-right');
+  if (!right) return;
+  const overflowing = () => {
+    const inner = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
+    return right.getBoundingClientRect().right > inner + 0.5;
+  };
+  const tabs = document.getElementById('topbar-tabs');
+  bar.classList.remove('nav-collapsed', 'search-compact', 'topbar-tight');
+  if (window.innerWidth <= 700 || (tabs && tabs.scrollWidth > tabs.clientWidth + 1) || overflowing()) bar.classList.add('nav-collapsed');
+  if (overflowing()) bar.classList.add('search-compact');
+  if (overflowing()) bar.classList.add('topbar-tight');
+}
+window.__fitTopbar = fitTopbar;
+
+function watchTopbarFit() {
+  const bar = document.querySelector('.topbar');
+  if (!bar) return;
+  fitTopbar();
+  if (window.__topbarWatched) return;
+  window.__topbarWatched = true;
+  let frame = null;
+  const schedule = () => { if (!frame) frame = requestAnimationFrame(() => { frame = null; fitTopbar(); }); };
+  window.addEventListener('resize', schedule);
+  if (window.ResizeObserver) new ResizeObserver(schedule).observe(bar);
+  new MutationObserver(schedule).observe(bar, { childList: true, subtree: true });
+  // Logo/fonts change widths once they finish loading
+  window.addEventListener('load', schedule);
+}
+
+function loadGlobalSearch() {
+  if (window.__globalSearchScript || !document.querySelector('.topbar-right')) return;
+  window.__globalSearchScript = true;
+  const s = document.createElement('script');
+  s.src = '/js/global-search.js?v=1';
+  document.head.appendChild(s);
 }
 
 // The notification bell + phone push setup live in their own file, loaded once

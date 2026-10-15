@@ -38,6 +38,16 @@ html[data-theme="navy"] {
 
 * { box-sizing: border-box; }
 
+/* Pages never slide sideways. clip (not hidden) so it doesn't turn the page
+   into its own scroll box, which would break position: sticky. Anything
+   meant to scroll sideways (the pipeline board) does it inside its
+   own box instead. */
+html { overflow-x: hidden; overflow-x: clip; }
+body { overflow-x: clip; }
+img, video, iframe { max-width: 100%; }
+.grid > *, .card { min-width: 0; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -68,12 +78,10 @@ body {
   display: flex;
   align-items: stretch;
   gap: 2px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: hidden; /* never scrolls - fitTopbar() folds it into the ☰ menu instead */
   flex: 1;
   min-width: 0;
 }
-.topbar-tabs::-webkit-scrollbar { display: none; }
 
 .topbar-tab {
   display: flex;
@@ -235,6 +243,115 @@ body {
   .topbar-logo img { height: 42px; }
   .topbar-tabs { display: none; }
   .mobile-menu-btn { display: flex; }
+}
+
+/* Set by fitTopbar() when the tabs don't all fit: the bar swaps to the ☰
+   button, whose menu then lists every page (not just the un-starred ones). */
+.topbar.nav-collapsed .topbar-tabs { display: none; }
+.topbar.nav-collapsed .mobile-menu-btn { display: flex; }
+.topbar.nav-collapsed .mobile-menu-dropdown a.nav-in-bar { display: flex; }
+.topbar.topbar-tight .topbar-right { gap: 4px; }
+.topbar.topbar-tight .topbar-icon-link { padding: 6px 4px; }
+.topbar.topbar-tight .topbar-logo img { height: 34px; }
+
+/* ===================================================================
+   Global search (top bar) - see /js/global-search.js
+   =================================================================== */
+.gsearch { display: flex; align-items: center; order: -1; }
+.gsearch input {
+  width: 240px;
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 999px;
+}
+.gsearch-icon { display: none; background: none; border: none; cursor: pointer; font-family: inherit; }
+.gsearch-close { display: none; }
+.topbar.search-compact .gsearch input { display: none; }
+.topbar.search-compact .gsearch-icon { display: inline-flex; }
+/* Icon tapped: the box opens across the whole bar */
+.topbar.search-compact.gsearch-open .gsearch input {
+  display: block;
+  position: absolute;
+  left: 12px;
+  right: 56px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: auto;
+  z-index: 61;
+  font-size: 16px; /* 16px stops iOS zooming the page in on focus */
+}
+.topbar.search-compact.gsearch-open .gsearch-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 61;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 20px;
+}
+.topbar.search-compact.gsearch-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+  z-index: 60;
+}
+.gsearch-panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 16px;
+  width: min(480px, calc(100% - 32px));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.25);
+  z-index: 70;
+  padding: 6px 0;
+}
+.gsearch-panel.open { display: block; }
+.topbar.search-compact .gsearch-panel { left: 8px; right: 8px; width: auto; }
+.gsearch-group {
+  padding: 10px 16px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.gsearch-result {
+  display: block;
+  padding: 8px 16px;
+  text-decoration: none;
+  color: var(--text);
+}
+.gsearch-result:hover, .gsearch-result.active { background: var(--surface-2); }
+.gsearch-title { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.gsearch-sub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.gsearch-empty { padding: 14px 16px; color: var(--muted); font-size: 13px; }
+
+/* Narrow screens: long values (emails, addresses) wrap instead of pushing
+   the page wider. Headers only break between words. A table that still
+   can't fit swipes inside its own box rather than moving the page. */
+@media (max-width: 900px) {
+  td { overflow-wrap: anywhere; }
+}
+@media (max-width: 700px) {
+  th, td { padding: 8px 5px; }
+  th { letter-spacing: 0; }
+  table:not(.responsive-stack) { display: block; overflow-x: auto; } /* .responsive-stack tables stack into cards instead - see below */
 }
 
 .wrap {
