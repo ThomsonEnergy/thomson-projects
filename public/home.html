@@ -11,9 +11,23 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=15" />
+<link rel="stylesheet" href="/css/style.css?v=16" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
+  .home-grid { display:grid; gap:20px; align-items:start; }
+  .home-grid > * { min-width:0; }
+  .home-top { grid-template-columns:minmax(0, 3fr) minmax(0, 2fr); }
+  .home-main { grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); }
+  @media (max-width: 1000px) {
+    .home-top, .home-main { grid-template-columns:1fr; gap:0; }
+  }
+  .sched-day { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted); margin:12px 0 2px; }
+  .sched-day:first-child { margin-top:0; }
+  .sched-item { display:flex; gap:12px; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px; text-decoration:none; color:var(--text); }
+  .sched-item:last-child { border-bottom:none; }
+  a.sched-item:hover .sched-what { color:var(--accent); }
+  .sched-time { color:var(--muted); white-space:nowrap; min-width:92px; }
+  .sched-what { overflow-wrap:anywhere; }
   .quick-nav { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px; margin-bottom:24px; }
   .quick-nav a {
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;
@@ -52,7 +66,7 @@
     </div>
   </div>
 
-  <div class="wrap">
+  <div class="wrap wide" style="max-width:1600px;">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:4px;">
       <h1 id="greeting" style="margin:0 0 20px;">Home</h1>
       <div style="text-align:right;">
@@ -61,38 +75,57 @@
       </div>
     </div>
 
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-      <p class="subtitle" style="margin:0;">Your shortcuts - star any tab up top to add one, or edit here.</p>
-      <button type="button" class="secondary" id="edit-quick-nav-btn" style="font-size:12px; padding:6px 10px;">Edit</button>
-    </div>
-    <div class="quick-nav" id="quick-nav"><p class="subtitle">Loading...</p></div>
-
-    <div class="card" id="my-calls-card" style="display:none;">
-      <h2>Your calls</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Call requests you've claimed - they stay here until you mark them done. You get a notification 5 minutes before each one.</p>
-      <div id="my-calls-list"></div>
-    </div>
-
-    <div class="card" id="callback-requests-card" style="display:none;">
-      <h2>Call requests - up for grabs</h2>
-      <p class="subtitle" style="margin-bottom:10px;">"Book a call" requests from the website that nobody's claimed yet - grab one if you can make the time.</p>
-      <div id="callback-requests-home-list"></div>
-    </div>
-
-    <div class="card">
-      <h2>Needs attention</h2>
-      <div id="action-items"><p class="subtitle">Loading...</p></div>
+    <!-- On a computer: shortcuts with My schedule beside them, then Needs
+         attention on the left and the Company feed on the right. Stacks on a phone. -->
+    <div class="home-grid home-top">
+      <div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <p class="subtitle" style="margin:0;">Your shortcuts - star any tab up top to add one, or edit here.</p>
+          <button type="button" class="secondary" id="edit-quick-nav-btn" style="font-size:12px; padding:6px 10px;">Edit</button>
+        </div>
+        <div class="quick-nav" id="quick-nav"><p class="subtitle">Loading...</p></div>
+      </div>
+      <div class="card" id="my-schedule-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+          <h2 style="margin:0;">My schedule</h2>
+          <a href="/schedule.html" class="link-quiet" style="font-size:12px;">Full schedule &rarr;</a>
+        </div>
+        <div id="my-schedule-list"><p class="subtitle">Loading...</p></div>
+      </div>
     </div>
 
-    <div class="card">
-      <h2>Company feed</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Posts from the team, plus job notes people have chosen to share here - click a job number to jump to it.</p>
-      <div id="feed-composer"></div>
-      <div id="feed-list" style="margin-top:16px;"><p class="subtitle">Loading...</p></div>
+    <div class="home-grid home-main">
+      <div>
+        <div class="card" id="my-calls-card" style="display:none;">
+          <h2>Your calls</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Call requests you've claimed - they stay here until you mark them done. You get a notification 5 minutes before each one.</p>
+          <div id="my-calls-list"></div>
+        </div>
+
+        <div class="card" id="callback-requests-card" style="display:none;">
+          <h2>Call requests - up for grabs</h2>
+          <p class="subtitle" style="margin-bottom:10px;">"Book a call" requests from the website that nobody's claimed yet - grab one if you can make the time.</p>
+          <div id="callback-requests-home-list"></div>
+        </div>
+
+        <div class="card">
+          <h2>Needs attention</h2>
+          <div id="action-items"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h2>Company feed</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Posts from the team, plus job notes people have chosen to share here - click a job number to jump to it.</p>
+          <div id="feed-composer"></div>
+          <div id="feed-list" style="margin-top:16px;"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=67"></script>
+  <script src="/js/supabase-client.js?v=68"></script>
   <script src="/js/feed.js?v=7"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -372,21 +405,49 @@
     }
     document.getElementById('edit-quick-nav-btn').addEventListener('click', openEditQuickNavPanel);
 
+    // The next 7 days of your own schedule, beside the shortcuts (today's
+    // bookings used to be a line in Needs attention instead).
+    const SCHEDULE_CATEGORY_LABELS = { quoting: 'Quoting', admin: 'Admin', maintenance: 'Maintenance', tafe: 'TAFE', training: 'Training', office: 'Admin', other: 'Other' };
+    async function loadMySchedule() {
+      const el = document.getElementById('my-schedule-list');
+      const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const today = new Date();
+      const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+      const until = new Date(today); until.setDate(today.getDate() + 6);
+      const { data, error } = await supabaseClient
+        .from('schedule_assignments')
+        .select('id, project_id, assignment_date, start_time, end_time, block_type, note, projects(name, job_number, quote_number)')
+        .eq('staff_id', myUserId)
+        .gte('assignment_date', ymd(today))
+        .lte('assignment_date', ymd(until))
+        .order('assignment_date')
+        .order('start_time');
+      if (error) { el.innerHTML = `<p class="subtitle" style="margin:0;">Could not load your schedule - ${escapeHtml(error.message)}</p>`; return; }
+      if (!data || !data.length) { el.innerHTML = '<p class="subtitle" style="margin:0;">Nothing booked in for the next 7 days.</p>'; return; }
+      const dayLabel = (dateStr) => {
+        if (dateStr === ymd(today)) return 'Today';
+        if (dateStr === ymd(tomorrow)) return 'Tomorrow';
+        return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });
+      };
+      let html = '', lastDate = null;
+      data.forEach(a => {
+        if (a.assignment_date !== lastDate) { html += `<div class="sched-day">${dayLabel(a.assignment_date)}</div>`; lastDate = a.assignment_date; }
+        const what = a.block_type === 'site_inspection'
+          ? `Inspection${a.projects ? ': ' + projectRef(a.projects) : ''}`
+          : a.project_id
+            ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects ? projectRef(a.projects) : 'Job'}`
+            : `${SCHEDULE_CATEGORY_LABELS[a.block_type] || 'Admin'}${a.note ? ' - ' + a.note : ''}`;
+        const inner = `<span class="sched-time">${(a.start_time || '').slice(0, 5)} - ${(a.end_time || '').slice(0, 5)}</span><span class="sched-what">${escapeHtml(what)}</span>`;
+        html += a.project_id ? `<a class="sched-item" href="/project.html?id=${a.project_id}">${inner}</a>` : `<div class="sched-item">${inner}</div>`;
+      });
+      el.innerHTML = html;
+    }
+
     async function loadActionItems() {
       const el = document.getElementById('action-items');
       const items = [];
       const today = new Date();
       const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-      // Today's schedule for this person
-      const { data: mySchedule } = await supabaseClient
-        .from('schedule_assignments')
-        .select('project_id, projects(name, job_number, quote_number)')
-        .eq('staff_id', myUserId)
-        .eq('assignment_date', todayStr);
-      (mySchedule || []).forEach(a => {
-        items.push({ group: 'job', label: `You're scheduled today: ${a.projects ? projectRef(a.projects) : 'General / Office'}`, link: a.project_id ? `/project.html?id=${a.project_id}` : null });
-      });
 
       // Tasks assigned to you or your role
       const { data: myTasks } = await supabaseClient
@@ -859,6 +920,7 @@
 
       await refreshClockButton();
       await renderQuickNav();
+      loadMySchedule();
       await loadMyCalls();
       await loadCallbackRequestsHome();
       await loadActionItems();
