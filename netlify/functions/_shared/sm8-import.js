@@ -62,6 +62,12 @@ function normPhone(s) {
   return digits.length >= 8 ? digits.slice(-9) : '';
 }
 
+// "4515b" -> { base: '4515', letter: 'b' }; a plain "4515" is not a claim.
+function claimOf(job) {
+  const m = String(job.generated_job_id || '').trim().match(/^(\d+)([a-z]+)$/i);
+  return m ? { base: m[1], letter: m[2].toLowerCase() } : null;
+}
+
 function contactName(c) {
   return [c.first, c.last].map(clean).filter(Boolean).join(' ');
 }
@@ -78,10 +84,14 @@ function noteDate(n) {
   return /^\d{4}-\d{2}-\d{2}$/.test(d) && d !== '0000-00-00' ? d : '';
 }
 
-function buildNotesText(job, notes) {
+function buildNotesText(job, notes, claims = []) {
   const header = [`Imported from ServiceM8 job #${job.generated_job_id || '?'}.`];
   if (job.purchase_order_number) header.push(`Client PO: ${clean(job.purchase_order_number)}`);
   const parts = [header.join('\n')];
+  if (claims.length) {
+    parts.push('Invoiced in ServiceM8 before the move (ex GST):\n' + claims.map(c =>
+      `#${c.number}${c.date ? ` (${c.date})` : ''}: $${c.totalExGst.toFixed(2)}${c.paymentAmount > 0 ? `, $${c.paymentAmount.toFixed(2)} paid inc GST` : ''}`).join('\n'));
+  }
   const workDone = clean(job.work_done_description);
   if (workDone) parts.push(`Work done so far (ServiceM8):\n${workDone}`);
   if (notes.length) {
@@ -130,7 +140,7 @@ function matchClient(company, contacts, clients) {
 async function loadSm8OpenJobs(supabaseAdmin) {
   const apiKey = await getIntegrationKey('servicem8');
 
-  const [jobs, quoteJobs, companies, companyContacts, jobContacts, notes] = await Promise.all([
+  const [workOrders, quoteJobs, companies, companyContacts, jobContacts, notes] = await Promise.all([
     sm8GetAll(apiKey, 'job', "status eq 'Work Order' and active eq 1"),
     sm8GetAll(apiKey, 'job', "status eq 'Quote' and active eq 1"),
     sm8GetAll(apiKey, 'company', 'active eq 1'),
@@ -138,6 +148,42 @@ async function loadSm8OpenJobs(supabaseAdmin) {
     sm8GetAll(apiKey, 'jobcontact', 'active eq 1'),
     sm8GetAll(apiKey, 'note', "related_object eq 'job' and active eq 1"),
   ]);
+
+  // Partial invoices: ServiceM8 raises each claim as its own job numbered
+  // after the main one - 4515 is the job, 4515a the deposit, 4515b progress
+  // claim 1 and so on. Those are not jobs to import, they are what has
+  // been invoiced to date on the main job. A claim is usually Completed
+  // (not in the Work Order list), so fetch every job dated on or after the
+  // oldest open main job to find them.
+  const mainJobs = workOrders.filter(j => !claimOf(j));
+  const openNumbers = new Set(mainJobs.map(j => String(j.generated_job_id)));
+  const dates = mainJobs.map(j => String(j.date || '').slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d > '2000-01-01').sort();
+  const since = dates[0] || '2015-01-01';
+  const recentJobs = mainJobs.length ? await sm8GetAll(apiKey, 'job', `active eq 1 and date ge '${since} 00:00:00'`) : [];
+  const claimsByNumber = new Map();
+  const seenClaims = new Set();
+  for (const j of [...workOrders, ...recentJobs]) {
+    const claim = claimOf(j);
+    if (!claim || seenClaims.has(j.uuid) || !openNumbers.has(claim.base)) continue;
+    if (['Quote', 'Unsuccessful'].includes(j.status)) continue;
+    seenClaims.add(j.uuid);
+    (claimsByNumber.get(claim.base) || claimsByNumber.set(claim.base, []).get(claim.base)).push({
+      number: String(j.generated_job_id),
+      letter: claim.letter,
+      status: j.status,
+      date: String(j.date || '').slice(0, 10),
+      total: r2(j.total_invoice_amount),
+      totalExGst: exGst(j.total_invoice_amount),
+      invoiceSent: isOn(j.invoice_sent),
+      paymentAmount: r2(j.payment_amount),
+    });
+  }
+  // Open claims whose main job is not open (finished in ServiceM8, or the
+  // claim numbering is off) - listed so they are not silently dropped.
+  const orphanClaims = workOrders
+    .filter(j => { const c = claimOf(j); return c && !openNumbers.has(c.base); })
+    .map(j => String(j.generated_job_id));
+  const jobs = mainJobs;
 
   const [{ data: clients, error: clientsErr }, { data: imported, error: importedErr }] = await Promise.all([
     supabaseAdmin.from('clients').select('id, name, email, phone, address, sm8_company_uuid').limit(10000),
@@ -189,9 +235,15 @@ async function loadSm8OpenJobs(supabaseAdmin) {
     const invoiceSent = isOn(job.invoice_sent);
     const paymentAmount = r2(job.payment_amount);
     const quotedExGst = exGst(sm8Total);
-    const invoicedExGst = invoiceSent ? quotedExGst : 0;
-    if (!invoiceSent && paymentAmount > 0) warnings.push(`ServiceM8 shows ${paymentAmount.toFixed(2)} paid but no invoice sent - check invoiced to date`);
-    if (invoiceSent) warnings.push('ServiceM8 says this job has been invoiced - set invoiced to date to what was actually billed');
+    const claims = (claimsByNumber.get(String(job.generated_job_id)) || []).sort((a, b) => a.letter.length - b.letter.length || a.letter.localeCompare(b.letter));
+    // Invoiced to date = the lettered claims. Without any, fall back to the
+    // main job's own "invoice sent" flag (billed in one go).
+    const invoicedExGst = claims.length
+      ? r2(claims.reduce((s, c) => s + c.totalExGst, 0))
+      : (invoiceSent ? quotedExGst : 0);
+    if (claims.length && invoicedExGst > quotedExGst + 0.01) warnings.push(`Claims add up to more than the main job total - check whether the main job still holds the full contract value`);
+    if (!claims.length && invoiceSent) warnings.push('ServiceM8 says this job has been invoiced in full - check invoiced to date');
+    if (!claims.length && !invoiceSent && paymentAmount > 0) warnings.push(`ServiceM8 shows ${paymentAmount.toFixed(2)} paid but no invoice - check invoiced to date`);
     if (!(sm8Total > 0)) warnings.push('No job total in ServiceM8');
 
     const { match, candidates } = matchClient({ ...company, name: companyName }, [...coContacts, ...jContacts], clients || []);
@@ -219,8 +271,9 @@ async function loadSm8OpenJobs(supabaseAdmin) {
       paymentAmount,
       quotedExGst,
       invoicedExGst,
+      claims,
       notes: jobNotes,
-      notesText: buildNotesText(job, jobNotes),
+      notesText: buildNotesText(job, jobNotes, claims),
       clientMatch: match ? { clientId: match.clientId, reason: match.reason, ambiguous: !!match.ambiguous } : null,
       candidates: candidates.map(c => ({ id: c.id, name: c.name, email: c.email || '', phone: c.phone || '', address: c.address || '' })),
       alreadyImported: already ? { projectId: already.id, jobNumber: already.job_number } : null,
@@ -234,6 +287,8 @@ async function loadSm8OpenJobs(supabaseAdmin) {
       workOrders: rows.length,
       alreadyImported: rows.filter(r => r.alreadyImported).length,
       quotesNotImported: quoteJobs.length,
+      claimsFound: seenClaims.size,
+      orphanClaims,
     },
   };
 }
