@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8" />
-<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<!-- The login page is always the dark theme, whatever theme someone uses in the app (so no theme.js here). -->
 <title>Log in - Thomson Energy Projects</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
@@ -11,13 +11,25 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Michroma&family=Orbitron:wght@400;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/css/style.css?v=16" />
+<style>
+  .te-te { color: #36379A; font-weight: 800; }
+  .te-ops { color: #0072BC; font-weight: 400; }
+
+  /* Lighter on the black dark theme so the wordmark stays readable */
+  html[data-theme="dark"] .te-te { color: #8F90E6; }
+  html[data-theme="dark"] .te-ops { color: #3FA3E8; }
+</style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="wrap" style="max-width:420px; padding-top:80px;">
-    <img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" style="height:64px; display:block; margin-bottom:24px;" />
-    <h1>Projects</h1>
+    <img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" style="height:110px; display:block; margin:0 auto 22px;" />
+    <h1 style="font-family:'Orbitron', sans-serif; font-weight:400; font-size:34px; letter-spacing:1px; line-height:1.1; margin:0 0 6px; text-align:center;"><span class="te-te">TE</span><span class="te-ops">ops</span></h1>
+    <div style="font-family:'Michroma', sans-serif; font-size:10px; letter-spacing:4px; color:var(--muted); margin-bottom:28px; text-align:center;">ORDER &middot; PLAN &middot; SCHEDULE</div>
     <p class="subtitle">Staff login</p>
     <div class="card">
       <form id="login-form">
@@ -25,18 +37,44 @@
         <input type="email" id="email" required autocomplete="username" />
         <label>Password</label>
         <input type="password" id="password" required autocomplete="current-password" />
-        <div style="margin-top:20px;">
+        <div style="text-align:right; margin-top:8px;">
+          <a href="#" id="forgot-link" class="link-quiet" style="font-size:13px;">Forgot?</a>
+        </div>
+        <div style="margin-top:12px;">
           <button type="submit" style="width:100%">Log in</button>
         </div>
       </form>
       <div id="msg"></div>
+
+      <!-- Forgot? - contact an admin, or email yourself a link to set a new password -->
+      <form id="forgot-form" style="display:none; margin-top:18px; padding-top:16px; border-top:1px solid var(--border);">
+        <p style="margin:0 0 4px; font-size:14px;">Forgotten your password? Contact your admin, or put your email in below and we'll send you a link to set a new password.</p>
+        <label>Email</label>
+        <input type="email" id="forgot-email" required autocomplete="username" />
+        <div style="margin-top:14px;">
+          <button type="submit" class="secondary" style="width:100%">Send new password link</button>
+        </div>
+        <div id="forgot-msg"></div>
+      </form>
+
+      <!-- Shown after following the link in a password reset email -->
+      <form id="reset-form" style="display:none;">
+        <h2 style="margin:0 0 4px;">Set a new password</h2>
+        <label>New password</label>
+        <input type="password" id="new-password" required minlength="8" autocomplete="new-password" />
+        <p class="subtitle" style="margin:6px 0 0; font-size:12px;">At least 8 characters.</p>
+        <div style="margin-top:16px;">
+          <button type="submit" style="width:100%">Save password and log in</button>
+        </div>
+        <div id="reset-msg"></div>
+      </form>
     </div>
-    <p class="subtitle">First time setup? Create your team's logins in Supabase under Authentication &gt; Users, then log in here.</p>
   </div>
 
   <script src="/js/supabase-client.js?v=68"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/circuit-background.js?v=14"></script>
   <script>
+    addCircuitBackground(0.06);
     const landingPage = '/home.html';
 
     document.getElementById('login-form').addEventListener('submit', async (e) => {
@@ -57,8 +95,45 @@
       window.location.href = landingPage;
     });
 
+    document.getElementById('forgot-link').addEventListener('click', (e) => {
+      e.preventDefault();
+      const f = document.getElementById('forgot-form');
+      f.style.display = f.style.display === 'none' ? 'block' : 'none';
+      document.getElementById('forgot-email').value = document.getElementById('email').value;
+      document.getElementById('forgot-email').focus();
+    });
+
+    document.getElementById('forgot-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('forgot-email').value.trim();
+      const msg = document.getElementById('forgot-msg');
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/login.html` });
+      msg.innerHTML = error
+        ? `<div class="error-box">${escapeHtml(error.message)}</div>`
+        : `<div class="success-box">If ${escapeHtml(email)} has a login, a link to set a new password is on its way. Check your inbox.</div>`;
+    });
+
+    // Arrived from the reset email: show the new-password form instead of logging straight in.
+    const isRecovery = /type=recovery/.test(location.hash);
+    function showResetForm() {
+      document.getElementById('login-form').style.display = 'none';
+      document.getElementById('forgot-form').style.display = 'none';
+      document.getElementById('reset-form').style.display = 'block';
+    }
+    if (isRecovery) showResetForm();
+    supabaseClient.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') showResetForm(); });
+    document.getElementById('reset-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('new-password').value;
+      const msg = document.getElementById('reset-msg');
+      if (password.length < 8) { msg.innerHTML = '<div class="error-box">Use at least 8 characters.</div>'; return; }
+      const { error } = await supabaseClient.auth.updateUser({ password });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      window.location.href = landingPage;
+    });
+
     // If already logged in, skip straight to the landing page.
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+    if (!isRecovery) supabaseClient.auth.getSession().then(({ data: { session } }) => {
       if (session) window.location.href = landingPage;
     });
   </script>
