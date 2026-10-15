@@ -87,6 +87,16 @@
         <span id="import-msg" class="subtitle"></span>
       </div>
     </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 6px;">Docs and photos</h2>
+      <p class="subtitle" style="margin:0 0 12px;">Once jobs are imported, this copies their ServiceM8 attachments across: pictures into the job's Photos, everything else (PDFs, plans, HEIC photos, videos...) into its Documents under a "ServiceM8" folder. It runs in the background, so you can leave this page, and it is safe to press again: copied files are skipped, failed ones are retried, and anything left over when a run hits its 15 minute limit is picked up next time.</p>
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <button id="copy-btn">Copy docs and photos</button>
+        <span id="copy-msg" class="subtitle"></span>
+      </div>
+      <div id="copy-progress" style="margin-top:12px;"></div>
+    </div>
   </div>
 
   <script src="/js/supabase-client.js?v=68"></script>
@@ -340,6 +350,66 @@
       renderList();
     }
 
+    // ---- Docs and photos (sm8-copy-attachments-background.js) ----
+    let copyPollTimer = null;
+    let copyStartedAt = 0;
+
+    async function loadCopyProgress() {
+      const count = (status) => {
+        let q = supabaseClient.from('sm8_attachment_copies').select('id', { count: 'exact', head: true });
+        if (status) q = q.in('status', status);
+        return q.then(r => r.count || 0);
+      };
+      const [total, copied, waiting, failed, failedRows] = await Promise.all([
+        count(null), count(['copied']), count(['pending', 'copying']), count(['failed']),
+        supabaseClient.from('sm8_attachment_copies').select('file_name, error, projects(id, job_number)').eq('status', 'failed').order('created_at').limit(100).then(r => r.data || []),
+      ]);
+      const el = document.getElementById('copy-progress');
+      if (!total) {
+        el.innerHTML = copyStartedAt ? '<p class="subtitle">Asking ServiceM8 for the file list...</p>' : '<p class="subtitle">Nothing copied yet.</p>';
+      } else {
+        const pct = Math.round((copied / total) * 100);
+        el.innerHTML = `
+          <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+          <p class="subtitle" style="margin:8px 0 0;">${copied} of ${total} files copied${waiting ? ` &middot; ${waiting} to go` : ''}${failed ? ` &middot; <span style="color:var(--red);">${failed} failed</span>` : ''}</p>
+          ${failedRows.length ? `<details style="margin-top:8px;"><summary>Failed files</summary><ul style="margin:8px 0 0; padding-left:18px; font-size:13px;">${failedRows.map(f =>
+            `<li>${f.projects ? `<a href="/project.html?id=${f.projects.id}" target="_blank">J${f.projects.job_number}</a> ` : ''}${escapeHtml(f.file_name)}: ${escapeHtml(f.error || 'unknown error')}</li>`).join('')}</ul></details>` : ''}`;
+      }
+      // Keep polling while files are waiting, and for a couple of minutes
+      // after pressing the button (queueing the list comes first).
+      const running = waiting > 0 || (copyStartedAt && Date.now() - copyStartedAt < 120000);
+      if (!running) {
+        if (copyStartedAt) document.getElementById('copy-msg').textContent = failed ? 'Finished, with some failures - press again to retry them.' : 'Finished.';
+        copyStartedAt = 0;
+        document.getElementById('copy-btn').disabled = false;
+      }
+      clearTimeout(copyPollTimer);
+      if (running) copyPollTimer = setTimeout(loadCopyProgress, 5000);
+    }
+
+    async function startCopy() {
+      const btn = document.getElementById('copy-btn');
+      const msg = document.getElementById('copy-msg');
+      btn.disabled = true;
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/sm8-copy-attachments-background', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: '{}',
+        });
+        // Background functions answer 202 straight away; the work carries on.
+        if (res.status !== 202 && !res.ok) throw new Error(`Could not start the copy (${res.status})`);
+        copyStartedAt = Date.now();
+        msg.textContent = 'Copying in the background...';
+        loadCopyProgress();
+      } catch (err) {
+        msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`;
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('copy-btn').addEventListener('click', startCopy);
     document.getElementById('tick-all-btn').addEventListener('click', () => setAllIncluded(true));
     document.getElementById('untick-all-btn').addEventListener('click', () => setAllIncluded(false));
     document.getElementById('load-btn').addEventListener('click', loadPreview);
@@ -357,6 +427,7 @@
       });
       const role = await getMyRole();
       if (role !== 'admin') { window.location.href = '/home.html'; return; }
+      await loadCopyProgress();
     })();
   </script>
 </body>

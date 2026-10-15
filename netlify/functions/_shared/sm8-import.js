@@ -293,4 +293,4 @@ async function loadSm8OpenJobs(supabaseAdmin) {
   };
 }
 
-module.exports = { loadSm8OpenJobs };
+module.exports = { loadSm8OpenJobs, sm8GetAll, SM8_BASE };
