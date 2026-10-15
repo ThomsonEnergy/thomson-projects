@@ -103,30 +103,72 @@
       document.getElementById('forgot-email').focus();
     });
 
+    // Only the newest reset link works, so the button locks for a minute after
+    // sending - a double tap used to send two emails and kill the first link.
+    const forgotBtn = document.querySelector('#forgot-form button[type="submit"]');
+    function lockForgotButton(seconds) {
+      forgotBtn.disabled = true;
+      const step = () => {
+        if (seconds <= 0) { forgotBtn.disabled = false; forgotBtn.textContent = 'Send new password link'; return; }
+        forgotBtn.textContent = `Sent - you can resend in ${seconds--}s`;
+        setTimeout(step, 1000);
+      };
+      step();
+    }
     document.getElementById('forgot-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (forgotBtn.disabled) return;
       const email = document.getElementById('forgot-email').value.trim();
       const msg = document.getElementById('forgot-msg');
+      forgotBtn.disabled = true; forgotBtn.textContent = 'Sending...';
       const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/login.html` });
-      msg.innerHTML = error
-        ? `<div class="error-box">${escapeHtml(error.message)}</div>`
-        : `<div class="success-box">If ${escapeHtml(email)} has a login, a link to set a new password is on its way. Check your inbox.</div>`;
+      if (error) {
+        forgotBtn.disabled = false; forgotBtn.textContent = 'Send new password link';
+        msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+        return;
+      }
+      msg.innerHTML = `<div class="success-box">If ${escapeHtml(email)} has a login, a link to set a new password is on its way from TEops. Check your inbox (and junk folder). Use the newest email if you get more than one.</div>`;
+      lockForgotButton(60);
     });
 
-    // Arrived from the reset email: show the new-password form instead of logging straight in.
-    const isRecovery = /type=recovery/.test(location.hash);
+    // Arrived from the reset email. The email links here with ?token_hash=...&type=recovery
+    // and the token is only spent when the new password is saved, so a mail scanner that
+    // opens the link first can't use it up. (The older #...type=recovery style links,
+    // where Supabase has already signed you in, still work too.)
+    const query = new URLSearchParams(location.search);
+    const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const recoveryToken = query.get('type') === 'recovery' ? query.get('token_hash') : null;
+    const linkError = query.get('error_code') || hash.get('error_code');
+    const isRecovery = !!recoveryToken || hash.get('type') === 'recovery';
+    if (recoveryToken || linkError) history.replaceState(null, '', location.pathname); // keep the token out of the address bar and history
+
     function showResetForm() {
       document.getElementById('login-form').style.display = 'none';
       document.getElementById('forgot-form').style.display = 'none';
       document.getElementById('reset-form').style.display = 'block';
+      document.getElementById('new-password').focus();
+    }
+    function showLinkExpired() {
+      document.getElementById('reset-form').style.display = 'none';
+      document.getElementById('login-form').style.display = 'block';
+      document.getElementById('forgot-form').style.display = 'block';
+      document.getElementById('forgot-msg').innerHTML = '<div class="error-box">That password link has expired or has already been used. Each link works once, and only the newest one works if you asked more than once. Send yourself a new one here.</div>';
     }
     if (isRecovery) showResetForm();
+    else if (linkError) showLinkExpired();
     supabaseClient.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') showResetForm(); });
+
+    let recoveryUsed = false;
     document.getElementById('reset-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const password = document.getElementById('new-password').value;
       const msg = document.getElementById('reset-msg');
       if (password.length < 8) { msg.innerHTML = '<div class="error-box">Use at least 8 characters.</div>'; return; }
+      if (recoveryToken && !recoveryUsed) {
+        const { error } = await supabaseClient.auth.verifyOtp({ token_hash: recoveryToken, type: 'recovery' });
+        if (error) { showLinkExpired(); return; }
+        recoveryUsed = true;
+      }
       const { error } = await supabaseClient.auth.updateUser({ password });
       if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       window.location.href = landingPage;
