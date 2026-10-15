@@ -495,4 +495,9 @@ select '150', 'xero pay rates push tracking',
 union all
 select '151', 'xero office earnings rates',
   case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_ordinary_office_earnings_rate_id') then 'present' else 'MISSING' end
+union all
+select '152', 'public holiday base + penalty',
+  case when exists (select 1 from information_schema.columns where table_name = 'company_settings' and column_name = 'xero_public_holiday_base_earnings_rate_id')
+    and exists (select 1 from information_schema.tables where table_name = 'public_holiday_pay_pushes')
+  then 'present' else 'MISSING' end
 order by 1;

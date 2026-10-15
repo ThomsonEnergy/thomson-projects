@@ -157,6 +157,15 @@ hours clocked to a job to the Jobs rate and every other kind of hour to the Offi
 labour sits above gross profit and the rest below; the pay-rate push puts the same $/hr on both.
 Push pay rates before the first timesheet push, so every employee's pay template has all 8 lines.
 
+Public holidays are paid as **base + penalty** (migration 152). A 9th earnings rate, "Public
+holiday (base)", carries the ordinary rate and is linked to an overhead account; the public holiday
+Jobs/Office rates carry only the penalty (2.5x rate minus ordinary rate). Hours worked on a public
+holiday go on both, so pay still totals the contract 2.5x, but only the penalty is a job cost (job
+costing in the app charges the same; casuals, who get no base, are charged the full rate). Full-time
+staff are also paid 8 base hours for a weekday public holiday they didn't work, recorded in
+`public_holiday_pay_pushes` so it's never paid twice; part-timers are listed as a warning to add by
+hand, since their hours vary.
+
 - Purchase orders and supplier invoices logged in this tool are kept separate from the
   labour/material actuals synced from ServiceM8, on purpose, so nothing gets double-counted.
   If your ServiceM8 account already tracks purchase costs (via the MyPO add-on or an accounting

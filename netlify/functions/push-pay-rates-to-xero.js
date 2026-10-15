@@ -28,11 +28,16 @@ const { xeroRequest } = require('./_shared/xero-client');
 // Each band has a Jobs earnings rate (Direct Costs account) and an Office
 // one (overheads account, migration 151); both get the same $/hr, since a
 // person's contract rate doesn't change with the kind of work.
+// Public holiday is paid as base + penalty (migration 152): the Jobs/Office
+// public holiday rates carry only the penalty (rate_2_5x - ordinary_rate),
+// and a separate "Public holiday" base rate carries the ordinary rate, so
+// worked hours still total the contract 2.5x rate.
 const BANDS = [
-  { key: 'ordinary', label: 'Ordinary', rateCol: 'ordinary_rate', idCol: 'xero_ordinary_earnings_rate_id', officeIdCol: 'xero_ordinary_office_earnings_rate_id' },
-  { key: 'ot1', label: 'Overtime - first 2hrs', rateCol: 'rate_1_5x', idCol: 'xero_ot1_earnings_rate_id', officeIdCol: 'xero_ot1_office_earnings_rate_id' },
-  { key: 'ot2', label: 'Overtime - after that', rateCol: 'rate_2x', idCol: 'xero_ot2_earnings_rate_id', officeIdCol: 'xero_ot2_office_earnings_rate_id' },
-  { key: 'publicHoliday', label: 'Public holiday', rateCol: 'rate_2_5x', idCol: 'xero_public_holiday_earnings_rate_id', officeIdCol: 'xero_public_holiday_office_earnings_rate_id' },
+  { key: 'ordinary', label: 'Ordinary', rate: p => p.ordinary_rate, idCol: 'xero_ordinary_earnings_rate_id', officeIdCol: 'xero_ordinary_office_earnings_rate_id' },
+  { key: 'ot1', label: 'Overtime - first 2hrs', rate: p => p.rate_1_5x, idCol: 'xero_ot1_earnings_rate_id', officeIdCol: 'xero_ot1_office_earnings_rate_id' },
+  { key: 'ot2', label: 'Overtime - after that', rate: p => p.rate_2x, idCol: 'xero_ot2_earnings_rate_id', officeIdCol: 'xero_ot2_office_earnings_rate_id' },
+  { key: 'publicHoliday', label: 'Public holiday penalty', rate: p => (Number(p.rate_2_5x) > 0 && Number(p.ordinary_rate) > 0) ? Math.round((p.rate_2_5x - p.ordinary_rate) * 100) / 100 : 0, idCol: 'xero_public_holiday_earnings_rate_id', officeIdCol: 'xero_public_holiday_office_earnings_rate_id' },
+  { key: 'publicHolidayBase', label: 'Public holiday (base)', rate: p => p.ordinary_rate, idCol: 'xero_public_holiday_base_earnings_rate_id' },
 ];
 
 // Payroll AU 1.0 returns dates as "/Date(1234567890000+0000)/"; send them
@@ -47,12 +52,13 @@ async function pushOne(supabaseAdmin, profile, settings) {
   const skipped = [];
   const bandLines = [];
   for (const band of BANDS) {
-    const rate = Number(profile[band.rateCol]);
+    const rate = Number(band.rate(profile));
     if (!(rate > 0)) { skipped.push(`${band.label} (no rate on their profile)`); continue; }
     let any = false;
-    for (const [col, kind] of [[band.idCol, 'Jobs'], [band.officeIdCol, 'Office']]) {
+    const targets = band.officeIdCol ? [[band.idCol, 'Jobs'], [band.officeIdCol, 'Office']] : [[band.idCol, '']];
+    for (const [col, kind] of targets) {
       if (settings[col]) { bandLines.push({ earningsRateId: settings[col], rate }); any = true; }
-      else skipped.push(`${band.label} - ${kind} (no Xero earnings rate chosen in Settings > Xero Mapping)`);
+      else skipped.push(`${band.label}${kind ? ` - ${kind}` : ""} (no Xero earnings rate chosen in Settings > Xero Mapping)`);
     }
     if (any) sent[band.key] = rate;
   }
@@ -112,7 +118,7 @@ exports.handler = async (event) => {
 
   try {
     const { data: settings } = await supabaseAdmin.from('company_settings')
-      .select(BANDS.flatMap(b => [b.idCol, b.officeIdCol]).join(', ')).eq('id', 1).single();
+      .select(BANDS.flatMap(b => [b.idCol, b.officeIdCol]).filter(Boolean).join(', ')).eq('id', 1).single();
 
     let query = supabaseAdmin.from('profiles')
       .select('id, full_name, active, xero_employee_id, ordinary_rate, rate_1_5x, rate_2x, rate_2_5x');

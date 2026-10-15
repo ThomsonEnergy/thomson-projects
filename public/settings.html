@@ -236,14 +236,19 @@
                 <input id="xero-ot2-office-earnings-rate-id" placeholder="Blank = office hours use the Jobs rate" />
               </div>
               <div>
-                <label>Public holiday - Jobs</label>
+                <label>Public holiday penalty - Jobs</label>
                 <input id="xero-public-holiday-earnings-rate-id" placeholder="Blank = falls back to Ordinary" />
               </div>
               <div>
-                <label>Public holiday - Office</label>
+                <label>Public holiday penalty - Office</label>
                 <input id="xero-public-holiday-office-earnings-rate-id" placeholder="Blank = office hours use the Jobs rate" />
               </div>
+              <div>
+                <label>Public holiday (base)</label>
+                <input id="xero-public-holiday-base-earnings-rate-id" placeholder="Required before any public holiday is pushed" />
+              </div>
             </div>
+            <p class="subtitle" style="margin:2px 0 0;">Public holidays are paid as base + penalty. <strong>Base</strong> = the person's ordinary rate, link it to an overhead account: paid for hours worked on a public holiday and, for full-time staff, 8 hours on a weekday public holiday they didn't work. <strong>Penalty</strong> = their public holiday rate minus their ordinary rate, only for hours worked, so only the extra is a job cost.</p>
             <label>LAHA (living away from home) earnings rate ID</label>
             <input id="xero-laha-earnings-rate-id" placeholder="Required before pushing anyone with a flagged overnight stay" />
             <p class="subtitle" style="margin:2px 0 0;">Paid per night flagged at clock-out on a LAHA-approved job (Settings on the job/quote itself). No fallback for this one - if it's not set, that person's whole timesheet is skipped (not pushed at the wrong rate) until it is.</p>
@@ -2322,7 +2327,7 @@
     });
 
     async function loadXeroConnection() {
-      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_ordinary_office_earnings_rate_id, xero_ot1_office_earnings_rate_id, xero_ot2_office_earnings_rate_id, xero_public_holiday_office_earnings_rate_id, xero_laha_earnings_rate_id, xero_payroll_calendar_id').eq('id', 1).single();
+      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_ordinary_office_earnings_rate_id, xero_ot1_office_earnings_rate_id, xero_ot2_office_earnings_rate_id, xero_public_holiday_office_earnings_rate_id, xero_public_holiday_base_earnings_rate_id, xero_laha_earnings_rate_id, xero_payroll_calendar_id').eq('id', 1).single();
       if (data) {
         document.getElementById('xero-tracking-category-id').value = data.xero_tracking_category_id || '';
         document.getElementById('xero-earnings-rate-id').value = data.xero_ordinary_earnings_rate_id || '';
@@ -2333,6 +2338,7 @@
         document.getElementById('xero-ot1-office-earnings-rate-id').value = data.xero_ot1_office_earnings_rate_id || '';
         document.getElementById('xero-ot2-office-earnings-rate-id').value = data.xero_ot2_office_earnings_rate_id || '';
         document.getElementById('xero-public-holiday-office-earnings-rate-id').value = data.xero_public_holiday_office_earnings_rate_id || '';
+        document.getElementById('xero-public-holiday-base-earnings-rate-id').value = data.xero_public_holiday_base_earnings_rate_id || '';
         document.getElementById('xero-laha-earnings-rate-id').value = data.xero_laha_earnings_rate_id || '';
         document.getElementById('xero-payroll-calendar-id').value = data.xero_payroll_calendar_id || '';
       }
@@ -2352,6 +2358,7 @@
           xero_ot1_office_earnings_rate_id: document.getElementById('xero-ot1-office-earnings-rate-id').value.trim() || null,
           xero_ot2_office_earnings_rate_id: document.getElementById('xero-ot2-office-earnings-rate-id').value.trim() || null,
           xero_public_holiday_office_earnings_rate_id: document.getElementById('xero-public-holiday-office-earnings-rate-id').value.trim() || null,
+          xero_public_holiday_base_earnings_rate_id: document.getElementById('xero-public-holiday-base-earnings-rate-id').value.trim() || null,
           xero_laha_earnings_rate_id: document.getElementById('xero-laha-earnings-rate-id').value.trim(),
           xero_payroll_calendar_id: document.getElementById('xero-payroll-calendar-id').value.trim(),
         })
@@ -2401,8 +2408,9 @@
                 <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot1-office-earnings-rate-id').value='${er.id}'">OT1 Office</button>
                 <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot2-earnings-rate-id').value='${er.id}'">OT2 Jobs</button>
                 <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot2-office-earnings-rate-id').value='${er.id}'">OT2 Office</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-earnings-rate-id').value='${er.id}'">Pub hol. Jobs</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-office-earnings-rate-id').value='${er.id}'">Pub hol. Office</button>
+                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-earnings-rate-id').value='${er.id}'">Pub hol. penalty Jobs</button>
+                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-office-earnings-rate-id').value='${er.id}'">Pub hol. penalty Office</button>
+                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-base-earnings-rate-id').value='${er.id}'">Pub hol. Base</button>
                 <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-laha-earnings-rate-id').value='${er.id}'">LAHA</button>
               </div>
             </div>`;

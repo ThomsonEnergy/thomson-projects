@@ -37,7 +37,7 @@ const { getOrCreateTrackingOptionId } = require('./_shared/xero-tracking');
 const { dayBands, localDateKey, entryHours } = require('./_shared/compute-labour-cost');
 
 const BAND_LABELS = ['ordinary', 'ot1', 'ot2', 'publicHoliday'];
-const BAND_NAMES = { ordinary: 'Ordinary Hours', ot1: 'OT1 (1.5x)', ot2: 'OT2 (2x)', publicHoliday: 'Public holiday (2.5x)' };
+const BAND_NAMES = { ordinary: 'Ordinary Hours', ot1: 'OT1 (1.5x)', ot2: 'OT2 (2x)', publicHoliday: 'Public holiday penalty' };
 
 function dateOnly(iso) {
   return iso.slice(0, 10);
@@ -75,7 +75,7 @@ exports.handler = async (event) => {
 
     const { data: settings } = await supabaseAdmin
       .from('company_settings')
-      .select('xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_ordinary_office_earnings_rate_id, xero_ot1_office_earnings_rate_id, xero_ot2_office_earnings_rate_id, xero_public_holiday_office_earnings_rate_id, xero_laha_earnings_rate_id, xero_tracking_category_id')
+      .select('xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_ordinary_office_earnings_rate_id, xero_ot1_office_earnings_rate_id, xero_ot2_office_earnings_rate_id, xero_public_holiday_office_earnings_rate_id, xero_public_holiday_base_earnings_rate_id, xero_laha_earnings_rate_id, xero_tracking_category_id')
       .eq('id', 1)
       .single();
     if (!settings?.xero_ordinary_earnings_rate_id) {
@@ -134,24 +134,53 @@ exports.handler = async (event) => {
       .not('clock_out', 'is', null)
       .is('xero_pushed_at', null);
     if (entriesErr) throw entriesErr;
-    if (!entries.length) {
-      return { statusCode: 200, body: JSON.stringify({ ok: true, pushed: 0, message: 'No unpushed entries in that range.' }) };
-    }
 
     const { data: holidays } = await supabaseAdmin.from('public_holidays').select('holiday_date');
     const holidaySet = new Set((holidays || []).map(h => h.holiday_date));
 
+    // Public holidays are paid as base + penalty (migration 152). The base
+    // (ordinary rate, overhead account) is owed to full-time staff for a
+    // weekday public holiday even if they don't work it, so those days are
+    // pushed below as 8 base hours. public_holiday_pay_pushes stops a re-run
+    // paying the same day twice. Part-timers' hours vary, so they're listed
+    // as a warning to add by hand in Xero instead.
+    const FULL_TIME_PUBLIC_HOLIDAY_HOURS = 8;
+    const weekdayHolidaysInRange = [...holidaySet].filter(d => d >= startDate && d <= endDate)
+      .filter(d => { const dow = new Date(`${d}T12:00:00Z`).getUTCDay(); return dow >= 1 && dow <= 5; });
+    const { data: staffProfiles } = await supabaseAdmin.from('profiles')
+      .select('id, full_name, xero_employee_id, employment_type, active');
+    const profileById = Object.fromEntries((staffProfiles || []).map(p => [p.id, p]));
+    const alreadyPaidHoliday = new Set();
+    if (weekdayHolidaysInRange.length) {
+      const { data: paid } = await supabaseAdmin.from('public_holiday_pay_pushes')
+        .select('profile_id, holiday_date').in('holiday_date', weekdayHolidaysInRange);
+      (paid || []).forEach(r => alreadyPaidHoliday.add(`${r.profile_id}|${r.holiday_date}`));
+    }
+
     const byStaff = {};
     entries.forEach(e => { (byStaff[e.staff_id] ||= []).push(e); });
+    // Full-timers with an unpaid weekday public holiday in range get a
+    // timesheet even if they logged no hours at all this period.
+    (staffProfiles || []).filter(p => p.active && p.xero_employee_id && p.employment_type === 'full_time')
+      .forEach(p => {
+        if (weekdayHolidaysInRange.some(d => !alreadyPaidHoliday.has(`${p.id}|${d}`))) byStaff[p.id] ||= [];
+      });
+
+    if (!Object.keys(byStaff).length) {
+      return { statusCode: 200, body: JSON.stringify({ ok: true, pushed: 0, message: 'No unpushed entries in that range.' }) };
+    }
 
     const results = [];
     const skipped = [];
+    const warnings = [];
     const pushedEntryIds = [];
+    const paidHolidayRows = [];
 
     for (const staffId of Object.keys(byStaff)) {
       const staffEntries = byStaff[staffId];
-      const employeeId = staffEntries[0].profiles?.xero_employee_id;
-      const staffName = staffEntries[0].profiles?.full_name || staffId;
+      const staffProfile = profileById[staffId] || staffEntries[0]?.profiles || {};
+      const employeeId = staffProfile.xero_employee_id;
+      const staffName = staffProfile.full_name || staffId;
 
       if (!employeeId) {
         skipped.push(`${staffName} has no Xero Employee ID set (Settings > Users & Roles)`);
@@ -220,6 +249,26 @@ exports.handler = async (event) => {
         continue;
       }
 
+      // Unworked weekday public holidays still owed to this person.
+      const unworkedHolidays = [];
+      weekdayHolidaysInRange.forEach(d => {
+        if (alreadyPaidHoliday.has(`${staffId}|${d}`)) return;
+        const workedHours = (byDay[d] || []).reduce((s, e) => s + entryHours(e), 0);
+        if (staffProfile.employment_type === 'full_time') {
+          if (workedHours === 0) unworkedHolidays.push(d);
+          else if (workedHours < FULL_TIME_PUBLIC_HOLIDAY_HOURS) warnings.push(`${staffName} worked ${Math.round(workedHours * 100) / 100}h on the ${d} public holiday - check whether a top-up to ${FULL_TIME_PUBLIC_HOLIDAY_HOURS}h base pay is owed and add it in Xero if so.`);
+        } else if (staffProfile.employment_type === 'part_time' && workedHours === 0) {
+          warnings.push(`${staffName} (part-time) didn't work the ${d} public holiday - if it was one of their normal days, add their usual hours on the "Public holiday" pay item in Xero.`);
+        }
+      });
+      const hasPublicHolidayHours = Object.values(unitsByLabelBandDay).some(b => b.publicHoliday);
+      // No safe fallback: without the base rate, worked public holiday hours
+      // would only get the penalty (1.5x) and unworked days nothing at all.
+      if ((hasPublicHolidayHours || unworkedHolidays.length) && !settings.xero_public_holiday_base_earnings_rate_id) {
+        skipped.push(`${staffName}: has public holiday pay this period but no "Public holiday (base)" earnings rate is set (Settings > Xero Mapping) - set that first so it isn't underpaid.`);
+        continue;
+      }
+
       const timesheetLines = [];
       let allEntriesForThisStaff = [];
       for (const label of Object.keys(unitsByLabelBandDay)) {
@@ -236,6 +285,15 @@ exports.handler = async (event) => {
             NumberOfUnits: numberOfUnits,
             TrackingItemID: trackingItemId || undefined,
           });
+          // Public holiday hours worked: the line above is the penalty only,
+          // so the same hours also go on the base rate (ordinary rate).
+          if (bandLabel === 'publicHoliday') {
+            timesheetLines.push({
+              EarningsRateID: settings.xero_public_holiday_base_earnings_rate_id,
+              NumberOfUnits: numberOfUnits,
+              TrackingItemID: trackingItemId || undefined,
+            });
+          }
           labelHasLine = true;
         });
 
@@ -257,6 +315,13 @@ exports.handler = async (event) => {
         }
       }
 
+      if (unworkedHolidays.length) {
+        timesheetLines.push({
+          EarningsRateID: settings.xero_public_holiday_base_earnings_rate_id,
+          NumberOfUnits: days.map(d => unworkedHolidays.includes(d) ? FULL_TIME_PUBLIC_HOLIDAY_HOURS : 0),
+        });
+      }
+
       if (!timesheetLines.length) { continue; }
 
       try {
@@ -276,6 +341,7 @@ exports.handler = async (event) => {
         const timesheetId = result?.Timesheets?.[0]?.TimesheetID;
         results.push({ staff: staffName, timesheetId });
         allEntriesForThisStaff.forEach(e => pushedEntryIds.push(e.id));
+        unworkedHolidays.forEach(d => paidHolidayRows.push({ profile_id: staffId, holiday_date: d, hours: FULL_TIME_PUBLIC_HOLIDAY_HOURS }));
       } catch (err) {
         skipped.push(`${staffName}: ${err.message}`);
       }
@@ -287,11 +353,14 @@ exports.handler = async (event) => {
         .update({ xero_pushed_at: new Date().toISOString() })
         .in('id', pushedEntryIds);
     }
+    if (paidHolidayRows.length) {
+      await supabaseAdmin.from('public_holiday_pay_pushes').upsert(paidHolidayRows, { onConflict: 'profile_id,holiday_date' });
+    }
 
-    const warnings = [
+    warnings.push(
       ...[...fallbackBands].map(b => `${BAND_NAMES[b]} has no earnings rate ID set - those hours were pushed at the Ordinary Hours rate instead (Settings > Xero Mapping).`),
       ...[...officeFallbackBands].map(b => `${BAND_NAMES[b]} (Office) has no earnings rate ID set - non-job hours in that band were pushed to the Jobs rate, so they landed in Direct Costs (Settings > Xero Mapping).`),
-    ];
+    );
 
     return {
       statusCode: 200,

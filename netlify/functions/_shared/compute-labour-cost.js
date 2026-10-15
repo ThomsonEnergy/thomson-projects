@@ -9,7 +9,12 @@
 // Overtime bands per CALENDAR DAY (Australia/Sydney local date), not a
 // weekly threshold - each employee's cumulative hours that day, in the
 // order they were logged:
-//   Public holiday : all hours at the public holiday rate (rate_2_5x)
+//   Public holiday : all hours at the penalty only (rate_2_5x minus
+//                    ordinary_rate), since full/part-time staff are paid
+//                    the ordinary 1.0x for the day whether they work it or
+//                    not, and that base is already in the overheads
+//                    on-cost. Casuals get no base, so for them it's the
+//                    full rate_2_5x.
 //   Sunday         : all hours at OT2 (rate_2x)
 //   Saturday       : first 4 hours at OT1 (rate_1_5x), rest at OT2 (rate_2x)
 //   Weekday        : first 8 hours ordinary, next 2 hours OT1, rest OT2
@@ -50,7 +55,7 @@ function dayBands(dateKey, isPublicHoliday, rates) {
 // functionally the same thing as that person's pay rate.
 async function computeEntryLabourCosts(supabaseAdmin, timeEntries) {
   const [{ data: allProfiles }, { data: allTiers }, { data: holidays }] = await Promise.all([
-    supabaseAdmin.from('profiles').select('id, rate_tier_id, ordinary_rate, rate_1_5x, rate_2x, rate_2_5x'),
+    supabaseAdmin.from('profiles').select('id, rate_tier_id, employment_type, ordinary_rate, rate_1_5x, rate_2x, rate_2_5x'),
     supabaseAdmin.from('billable_rate_tiers').select('id, sell_rate'),
     supabaseAdmin.from('public_holidays').select('holiday_date'),
   ]);
@@ -93,11 +98,15 @@ async function computeEntryLabourCosts(supabaseAdmin, timeEntries) {
     // set up for this person - an imperfect stand-in, but better than
     // treating unconfigured staff as free.
     const fallbackOrdinary = sellRateByProfile[staffId] || 0;
+    const ordinary = Number(profile?.ordinary_rate) || fallbackOrdinary;
+    const publicHolidayFull = Number(profile?.rate_2_5x) || fallbackOrdinary * 2.5;
     const rates = {
-      ordinary: Number(profile?.ordinary_rate) || fallbackOrdinary,
+      ordinary,
       ot1: Number(profile?.rate_1_5x) || fallbackOrdinary * 1.5,
       ot2: Number(profile?.rate_2x) || fallbackOrdinary * 2,
-      publicHoliday: Number(profile?.rate_2_5x) || fallbackOrdinary * 2.5,
+      publicHoliday: profile?.employment_type === 'casual'
+        ? publicHolidayFull
+        : Math.max(0, publicHolidayFull - ordinary),
     };
     const bands = dayBands(dateKey, holidaySet.has(dateKey), rates);
 
