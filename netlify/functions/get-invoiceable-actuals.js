@@ -7,15 +7,26 @@
 // employee's own sell rate for every hour logged against the job (no OT
 // banding - a client is billed the same rate per hour regardless of
 // whether it happened to be overtime internally, unlike wage cost), and
-// materials at received-PO cost marked up by the cost centre's own
-// markup%, same relationship a quoted stage's materials use. Runs
-// server-side so an individual's pay rate never has to reach the browser
-// (same reason as compute-labour-cost.js) - only the derived sell $ and
-// safe hours total come back.
-// Assumes one cost centre (true for every no-quote job) - the first is
-// used if more than one somehow exists.
+// materials (received POs plus Stock drawn for the job) at cost marked up
+// by the cost centre's own markup%, same relationship a quoted stage's
+// materials use. Runs server-side so an individual's pay rate never has to
+// reach the browser (same reason as compute-labour-cost.js) - only the
+// derived sell $ and safe hours total come back.
+//
+// Worked out per cost centre (a do-and-charge job can be costed to several,
+// e.g. a solar disconnect and the reconnect as two site visits): hours go to
+// the cost centre they were clocked to, received PO materials to the PO's
+// cost centre, and Stock drawn for the job to its job_material_usage cost
+// centre. Anything not tied to a cost centre lands on the first one. Stock
+// and prebuilds added straight onto an invoice (invoice_line_items) are left
+// out of both sides - they were priced and invoiced in one go - so what's
+// left to invoice here is only what's accrued outside the invoice builder.
+// The top-level fields are the whole job's totals (with the first cost
+// centre's id), which is all the warranty close-out panel needs.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
+
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -36,20 +47,23 @@ exports.handler = async (event) => {
 
     const { data: centres } = await supabaseAdmin
       .from('cost_centres')
-      .select('id, markup_percent, invoiced_amount')
+      .select('id, name, markup_percent, invoiced_amount, sort_order')
       .eq('project_id', projectId)
-      .order('sort_order')
-      .limit(1);
-    const centre = (centres || [])[0];
-    if (!centre) {
+      .order('sort_order');
+    if (!(centres || []).length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'This job has no cost centre yet.' }) };
     }
+    const firstId = centres[0].id;
+    const centreOf = (id) => (id && centres.some(c => c.id === id) ? id : firstId);
 
-    const { data: entries } = await supabaseAdmin
-      .from('time_entries')
-      .select('staff_id, clock_in, clock_out')
-      .eq('project_id', projectId)
-      .not('clock_out', 'is', null);
+    const [{ data: entries }, { data: pos }, { data: usage }, { data: invItems }, { data: settings }] = await Promise.all([
+      supabaseAdmin.from('time_entries').select('staff_id, clock_in, clock_out, cost_centre_id').eq('project_id', projectId).not('clock_out', 'is', null),
+      supabaseAdmin.from('purchase_orders').select('id, cost_centre_id').eq('project_id', projectId),
+      // from_po usage is the same spend as the received PO lines below, so only Stock draws count here.
+      supabaseAdmin.from('job_material_usage').select('id, cost_centre_id, quantity, unit_cost').eq('project_id', projectId).eq('source', 'from_stock'),
+      supabaseAdmin.from('invoice_line_items').select('cost_centre_id, labour_amount, material_amount, job_material_usage_id, invoices!inner(project_id)').eq('invoices.project_id', projectId),
+      supabaseAdmin.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
+    ]);
 
     const staffIds = [...new Set((entries || []).map(e => e.staff_id))];
     const [{ data: profiles }, { data: tiers }] = await Promise.all([
@@ -62,32 +76,58 @@ exports.handler = async (event) => {
       sellRateByProfile[p.id] = tier ? Number(tier.sell_rate) : 0;
     });
 
-    let actualHours = 0, actualLabourSell = 0;
+    const byCentre = Object.fromEntries(centres.map(c => [c.id, { hours: 0, labourSell: 0, materialCost: 0, itemInvoiced: 0 }]));
     (entries || []).forEach(e => {
       const hours = (new Date(e.clock_out) - new Date(e.clock_in)) / 3600000;
-      actualHours += hours;
-      actualLabourSell += hours * (sellRateByProfile[e.staff_id] || 0);
+      const b = byCentre[centreOf(e.cost_centre_id)];
+      b.hours += hours;
+      b.labourSell += hours * (sellRateByProfile[e.staff_id] || 0);
     });
 
-    const { data: pos } = await supabaseAdmin.from('purchase_orders').select('id').eq('project_id', projectId);
-    const poIds = (pos || []).map(p => p.id);
+    const poCentre = Object.fromEntries((pos || []).map(p => [p.id, centreOf(p.cost_centre_id)]));
+    const poIds = Object.keys(poCentre);
     const { data: poLines } = poIds.length
-      ? await supabaseAdmin.from('purchase_order_line_items').select('quantity, unit_cost').in('po_id', poIds).eq('received', true)
+      ? await supabaseAdmin.from('purchase_order_line_items').select('po_id, quantity, unit_cost').in('po_id', poIds).eq('received', true)
       : { data: [] };
-    const materialCost = (poLines || []).reduce((s, li) => s + (Number(li.quantity) || 0) * (Number(li.unit_cost) || 0), 0);
-    const markupFactor = 1 + (Number(centre.markup_percent) || 45) / 100;
-    const materialSell = materialCost * markupFactor;
+    (poLines || []).forEach(li => { byCentre[poCentre[li.po_id]].materialCost += (Number(li.quantity) || 0) * (Number(li.unit_cost) || 0); });
+
+    const usageOnInvoices = new Set((invItems || []).map(i => i.job_material_usage_id).filter(Boolean));
+    (usage || []).filter(u => !usageOnInvoices.has(u.id)).forEach(u => {
+      byCentre[centreOf(u.cost_centre_id)].materialCost += (Number(u.quantity) || 0) * (Number(u.unit_cost) || 0);
+    });
+    (invItems || []).forEach(i => {
+      byCentre[centreOf(i.cost_centre_id)].itemInvoiced += (Number(i.labour_amount) || 0) + (Number(i.material_amount) || 0);
+    });
+
+    const defaultMarkup = Number(settings?.default_markup_percent) || 45;
+    const centreRows = centres.map(c => {
+      const b = byCentre[c.id];
+      const markupPercent = c.markup_percent != null ? Number(c.markup_percent) : defaultMarkup;
+      return {
+        costCentreId: c.id,
+        name: c.name,
+        markupPercent,
+        actualHours: r2(b.hours),
+        actualLabourSell: r2(b.labourSell),
+        materialCost: r2(b.materialCost),
+        materialSell: r2(b.materialCost * (1 + markupPercent / 100)),
+        // Invoiced against what's accrued here - builder-added items excluded (see above).
+        invoicedAmount: r2(Math.max(0, (Number(c.invoiced_amount) || 0) - b.itemInvoiced)),
+      };
+    });
+    const sum = (k) => r2(centreRows.reduce((s, c) => s + c[k], 0));
 
     return {
       statusCode: 200,
       body: JSON.stringify({
         ok: true,
-        costCentreId: centre.id,
-        actualHours: Math.round(actualHours * 100) / 100,
-        actualLabourSell: Math.round(actualLabourSell * 100) / 100,
-        materialCost: Math.round(materialCost * 100) / 100,
-        materialSell: Math.round(materialSell * 100) / 100,
-        invoicedAmount: Number(centre.invoiced_amount) || 0,
+        costCentreId: firstId,
+        actualHours: sum('actualHours'),
+        actualLabourSell: sum('actualLabourSell'),
+        materialCost: sum('materialCost'),
+        materialSell: sum('materialSell'),
+        invoicedAmount: sum('invoicedAmount'),
+        centres: centreRows,
       }),
     };
   } catch (err) {

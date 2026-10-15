@@ -161,6 +161,7 @@
 
       // ---- sections of items (each becomes a headed table that can continue on the next sheet) ----
       const itemRow = (name, amount) => ({ cells: [esc(name), '1.00', money(amount), money(amount)], cls: ['', 'ctr', 'num', 'num'] });
+      const qtyRow = (name, qty, unit) => ({ cells: [esc(name), (Number(qty) || 0).toFixed(2), money(unit), money((Number(qty) || 0) * (Number(unit) || 0))], cls: ['', 'ctr', 'num', 'num'] });
       const sections = [];
       if (isStandalone || !claims.length) {
         const rows = [];
@@ -177,15 +178,23 @@
           const rows = [];
           if (isDeposit) rows.push(itemRow('Deposit', lab + mat)); // a deposit is one line, not a labour / materials split
           else {
-            if (lab > 0) rows.push(itemRow('Labour', lab));
-            if (mat > 0) rows.push(itemRow('Materials', mat));
+            // Stock / prebuilds added while building the invoice (do-and-charge jobs) are
+            // listed on their own; Labour / Materials are whatever's left of the claim.
+            const items = c.invoice_items || [];
+            items.forEach((it) => rows.push(qtyRow(it.description, it.quantity, it.unit_price)));
+            const itemLab = items.reduce((t, it) => t + (Number(it.labour_amount) || 0), 0);
+            const itemMat = items.reduce((t, it) => t + (Number(it.material_amount) || 0), 0);
+            const restLab = Math.round((lab - itemLab) * 100) / 100, restMat = Math.round((mat - itemMat) * 100) / 100;
+            if (restLab > 0) rows.push(itemRow('Labour', restLab));
+            if (restMat > 0) rows.push(itemRow('Materials', restMat));
             if (!rows.length) rows.push(itemRow(c.cost_centre_name, 0));
           }
           sections.push({ title: `${c.cost_centre_name}${partial ? ` - progress claim (${pct}% of this stage)` : ''}`, rows });
         });
       }
       // what each stage has been claimed to date, so a progress claim still tells the whole story
-      if (!isStandalone && claims.length) {
+      // (not for a job with no quote behind it - there's no stage value to claim against)
+      if (!isStandalone && claims.length && claims.some((c) => Number(c.quoted_amount) > 0)) {
         const rows = claims.map((c) => {
           const thisClaim = Number(c.labour_amount) + Number(c.material_amount);
           const quoted = Number(c.quoted_amount) || 0;
