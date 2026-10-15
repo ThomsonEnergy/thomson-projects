@@ -8,6 +8,10 @@
 // desktop shows only the first frame of a GIF - that's an Outlook
 // limitation, nothing to do with how it's built here.
 //
+// Other photos are served through Supabase's resize endpoint at twice their
+// shown size (sharp on retina screens), not the original upload: a 5.8MB
+// phone photo shown as a 76px circle comes down as roughly 4-40KB.
+//
 // Table-based inline-styled HTML on purpose: email clients ignore most
 // modern CSS.
 
@@ -45,7 +49,7 @@ function buildSignature(person, company) {
   const showPhoto = person.photoUrl && person.includePhoto !== false;
 
   const photoCell = showPhoto
-    ? `<td valign="top" style="padding-right:14px;"><img src="${esc(person.photoUrl)}" width="76" height="76" alt="${esc(person.fullName)}" style="display:block; width:76px; height:76px; border-radius:38px; object-fit:cover;" /></td>`
+    ? `<td valign="top" style="padding-right:14px;"><img src="${esc(emailImageUrl(person.photoUrl, 152, 152, 'cover'))}" width="76" height="76" alt="${esc(person.fullName)}" style="display:block; width:76px; height:76px; border-radius:38px; object-fit:cover;" /></td>`
     : '';
 
   const socials = [
@@ -121,19 +125,36 @@ function plainTextWithoutButtons(text) {
   return String(text || '').split(/\r?\n/).map(l => { const m = l.match(BUTTON_LINE); return m ? `${m[1]}: ${m[2]}` : l; }).join('\n');
 }
 
+// A resized copy of a Supabase Storage image, `width` x `height` pixels.
+// 'cover' crops to fill the box (a square photo for the round avatar, so it
+// isn't squashed in mail apps that ignore object-fit); 'contain' keeps the
+// whole picture. Supabase sends WebP to mail apps that can show it and the
+// original format to those that can't. GIFs are left alone, since resizing
+// would freeze an animation, and so is anything not in Supabase Storage.
+function emailImageUrl(url, width, height, resize) {
+  if (!url || /\.gif(\?|$)/i.test(url)) return url;
+  const marker = '/storage/v1/object/public/';
+  const idx = url.indexOf(marker);
+  if (idx === -1) return url;
+  return `${url.slice(0, idx)}/storage/v1/render/image/public/${url.slice(idx + marker.length)}?width=${width}&height=${height}&resize=${resize}&quality=80`;
+}
+
 // Gmail fetches signature images through its own proxy, which gives up on
 // big files (a 5MB, 20000px logo shows as a broken image in Gmail while
-// Outlook copes). So the uploaded logo is only used when it is small enough;
-// otherwise the app's own small wordmark is used instead.
+// Outlook copes). So the uploaded logo is resized to 480px wide (twice its
+// shown width) and used only when that works and is small enough; a source
+// too large for Supabase to resize falls back to the app's own wordmark,
+// already sized for the signature.
 const MAX_EMAIL_LOGO_BYTES = 1024 * 1024;
 
 function fallbackLogoUrl() {
   const base = publicBaseUrl();
-  return `${base}/icons/logo-wordmark-full.png`;
+  return `${base}/icons/logo-email-signature.png`;
 }
 
-async function emailSafeLogoUrl(url) {
-  if (!url) return '';
+async function emailSafeLogoUrl(uploadedUrl) {
+  if (!uploadedUrl) return '';
+  const url = emailImageUrl(uploadedUrl, 480, 480, 'contain');
   try {
     const res = await fetch(url, { method: 'HEAD', timeout: 4000 });
     const len = Number(res.headers.get('content-length'));
