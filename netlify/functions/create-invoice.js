@@ -1,6 +1,12 @@
 // POST /api/create-invoice
 // Body: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent, items? }],
-//         variationEntryIds? (logged variations being billed on this invoice) }
+//         variationEntryIds? (logged variations being billed on this invoice),
+//         invoiceType?: 'final' | 'progress' }
+// invoiceType is what the person raising the invoice chose: 'final' means
+// there's nothing more to invoice on this job (labelled "Final claim"
+// and moves the job on to Invoice Sent - Awaiting Payment),
+// 'progress' means there's more to come ("Progress claim N"). Left out (the
+// warranty close-out panel), it's worked out from the quote as before.
 // items (do-and-charge invoice builder): Stock materials and prebuilds added
 // straight onto this invoice under that cost centre -
 // [{ kind: 'material' | 'prebuild', materialId?, prebuildId?, quantity, unitPrice?, description? }].
@@ -37,7 +43,10 @@ exports.handler = async (event) => {
   const { supabaseAdmin, user } = auth;
 
   try {
-    const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId, variationEntryIds } = JSON.parse(event.body || '{}');
+    const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId, variationEntryIds, invoiceType } = JSON.parse(event.body || '{}');
+    if (invoiceType != null && !['final', 'progress'].includes(invoiceType)) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'invoiceType must be final or progress' }) };
+    }
 
     if (!projectId || !Array.isArray(claims) || !claims.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectId and at least one claim are required' }) };
@@ -96,31 +105,33 @@ exports.handler = async (event) => {
     // raised before this label existed) still correctly counts as "not
     // the deposit", not gets silently excluded by SQL's
     // null != 'Deposit' => null semantics.
-    const isFinalClaim = projectTotal > 0 && (allCentres || []).every(c => {
+    const autoFinal = projectTotal > 0 && (allCentres || []).every(c => {
       const claimedForThisCentre = claimRows.find(cr => cr.cost_centre_id === c.id);
       const newInvoiced = (Number(c.invoiced_amount) || 0) + (claimedForThisCentre ? claimedForThisCentre.labour_amount + claimedForThisCentre.material_amount : 0);
       return newInvoiced >= (Number(c.quoted_amount) || 0) - 0.01;
     });
+    const isFinalClaim = invoiceType ? invoiceType === 'final' : autoFinal;
 
     const { data: projectRow } = await supabaseAdmin.from('projects').select('client_id, proposal_template').eq('id', projectId).single();
 
     let claimLabel;
-    if (projectRow?.proposal_template === 'direct_job' && projectTotal <= 0) {
-      // No quote to claim against: name the invoice after the cost centres
-      // it covers (e.g. "Disconnect" or "Disconnect + Reconnect"), which is
-      // also what the Xero reference reads ("Job 7000 - Disconnect").
-      claimLabel = claimRows
-        .map(c => (allCentres || []).find(cc => cc.id === c.cost_centre_id))
-        .sort((a, b) => (a?.sort_order || 0) - (b?.sort_order || 0))
-        .map(cc => cc?.name || 'Work')
-        .join(' + ')
-        .slice(0, 200);
-    } else if (isFinalClaim) {
+    if (isFinalClaim) {
       claimLabel = 'Final claim';
     } else {
       const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
-      const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit' && inv.description !== 'Final claim').length;
+      const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit' && !/^Final /.test(inv.description || '')).length;
       claimLabel = `Progress claim ${priorProgressCount + 1}`;
+    }
+    if (projectRow?.proposal_template === 'direct_job' && projectTotal <= 0) {
+      // No quote to claim against: also name the cost centres it covers
+      // ("Final claim - Disconnect + Reconnect", "Progress claim 1 -
+      // Disconnect"), which is what the Xero reference reads too.
+      const centreNames = claimRows
+        .map(c => (allCentres || []).find(cc => cc.id === c.cost_centre_id))
+        .sort((a, b) => (a?.sort_order || 0) - (b?.sort_order || 0))
+        .map(cc => cc?.name || 'Work')
+        .join(' + ');
+      claimLabel = `${claimLabel} - ${centreNames}`.slice(0, 200);
     }
 
     const invoiceToken = crypto.randomUUID();
@@ -209,12 +220,17 @@ exports.handler = async (event) => {
       }).in('id', variationEntryIds).eq('project_id', projectId);
     }
 
-    // The final claim landing while the job's sitting at Ready to Invoice
-    // (reached once client handover is done) is exactly the "invoice
-    // sent" moment the pipeline board is waiting on - a progress claim
-    // raised earlier, mid-install, shouldn't touch the stage at all.
+    // The final claim is the "invoice sent" moment the pipeline board is
+    // waiting on. Worked out automatically, it only moves a job already at
+    // Ready to Invoice (reached once client handover is done). Chosen as
+    // final by the person raising it, it moves the job on from any stage
+    // the work could be at (e.g. a do-and-charge disconnect/reconnect that
+    // never goes through handover). A progress claim never touches the stage.
+    let pipelineStage = null;
     if (isFinalClaim) {
-      await supabaseAdmin.from('projects').update({ pipeline_stage: 'awaiting_payment' }).eq('id', projectId).eq('pipeline_stage', 'ready_to_invoice');
+      const fromStages = invoiceType === 'final' ? ['job_booked', 'job_not_complete', 'client_handover', 'ready_to_invoice'] : ['ready_to_invoice'];
+      const { data: moved } = await supabaseAdmin.from('projects').update({ pipeline_stage: 'awaiting_payment' }).eq('id', projectId).in('pipeline_stage', fromStages).select('id');
+      if ((moved || []).length) pipelineStage = 'awaiting_payment';
     }
 
     // No Airwallex payment link is created here. It's generated on demand
@@ -227,7 +243,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ ok: true, invoiceId: insertedInvoice.id, invoiceNumber: invoiceNumberStr, invoiceToken }),
+      body: JSON.stringify({ ok: true, invoiceId: insertedInvoice.id, invoiceNumber: invoiceNumberStr, invoiceToken, isFinal: isFinalClaim, description: claimLabel, pipelineStage }),
     };
   } catch (err) {
     console.error(err);

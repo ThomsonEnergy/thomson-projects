@@ -27,6 +27,25 @@ async function requireLogin() {
   return session;
 }
 
+// Every pipeline stage a quote / job moves through, in board order - shared by
+// dashboard.html (the pipeline board) and project.html (the Summary tab's
+// "Pipeline" card). 'archived' is a valid stage too but sits off-board.
+const PIPELINE_STAGES = [
+  { key: 'lead',              label: 'Lead' },
+  { key: 'draft_quote',       label: 'Draft Quote' },
+  { key: 'quote_sent',        label: 'Quote Sent' },
+  { key: 'quote_approved',    label: 'Quote Approved' },
+  { key: 'deposit_paid',      label: 'Deposit Paid' },
+  { key: 'awaiting_action',   label: 'Awaiting Action' },
+  { key: 'ready_to_book',     label: 'Ready to Book' },
+  { key: 'job_booked',        label: 'Job Booked' },
+  { key: 'job_not_complete',  label: 'Job Not Complete' },
+  { key: 'client_handover',   label: 'Client Handover' },
+  { key: 'ready_to_invoice',  label: 'Ready to Invoice' },
+  { key: 'awaiting_payment',  label: 'Invoice Sent - Awaiting Payment' },
+  { key: 'complete',          label: 'Complete' },
+];
+
 function money(n) {
   return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n || 0);
 }

@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=68"></script>
+  <script src="/js/supabase-client.js?v=69"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=7"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -1568,6 +1568,41 @@
       return { labourAmount, materialAmount };
     }
 
+    // Summary tab: where this quote / job sits on the pipeline board
+    // (dashboard.html) - one segment per stage, filled up to the current one.
+    function pipelineCardHtml(stageKey) {
+      const idx = PIPELINE_STAGES.findIndex(s => s.key === stageKey);
+      const archived = stageKey === 'archived';
+      const reached = archived ? PIPELINE_STAGES.length : idx + 1;
+      const current = archived ? { label: 'Archived' } : (PIPELINE_STAGES[idx] || { label: stageKey.replace(/_/g, ' ') });
+      const next = !archived && idx >= 0 ? PIPELINE_STAGES[idx + 1] : null;
+      return `
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap;">
+            <h2 style="margin:0;">Pipeline: ${escapeHtml(current.label)}</h2>
+            <a class="link-quiet" href="/dashboard.html" style="font-size:13px;">Pipeline board</a>
+          </div>
+          <p class="subtitle" style="margin:4px 0 10px;">${idx >= 0 ? `Stage ${idx + 1} of ${PIPELINE_STAGES.length}` : (archived ? `Past all ${PIPELINE_STAGES.length} stages` : 'Not on the board')}${next ? ` &middot; next: ${escapeHtml(next.label)}` : ''}</p>
+          <div style="display:flex; gap:3px;" aria-hidden="true">
+            ${PIPELINE_STAGES.map((s, i) => `<div title="${escapeHtml(s.label)}" style="flex:1; height:8px; border-radius:999px; background:${i < reached ? (i === idx ? 'var(--accent, var(--green))' : 'var(--green)') : 'var(--surface-2)'}; ${i === idx ? 'outline:2px solid var(--text); outline-offset:1px;' : ''}"></div>`).join('')}
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top:6px;" class="subtitle"><span style="font-size:11px;">${escapeHtml(PIPELINE_STAGES[0].label)}</span><span style="font-size:11px;">${escapeHtml(PIPELINE_STAGES[PIPELINE_STAGES.length - 1].label)}</span></div>
+        </div>`;
+    }
+
+    // Every invoice raised from a job says whether it's the last one: nothing
+    // is preselected, so whoever's invoicing has to choose. Final moves the
+    // job on to Invoice Sent - Awaiting Payment (see create-invoice.js).
+    function invoiceTypeChooserHtml(name) {
+      return `
+        <div style="margin-top:14px;">
+          <label style="margin-top:0;">Is this the final invoice for this job?</label>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:4px; font-weight:400;"><input type="radio" name="${name}" value="progress" style="width:auto;" /> Progress claim - there's more to invoice on this job later</label>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:4px; font-weight:400;"><input type="radio" name="${name}" value="final" style="width:auto;" /> Final claim - nothing more to invoice (moves the job to Invoice Sent - Awaiting Payment)</label>
+          <p class="subtitle" id="${name}-hint" style="margin:4px 0 0; font-size:12px;"></p>
+        </div>`;
+    }
+
     // For a no-quote (do-and-charge) job (dashboard.html's "+ New job (no
     // quote)") - there's no quoted amount to claim a % of, so this invoices
     // whatever has actually accrued instead, per cost centre: labour at
@@ -1640,6 +1675,7 @@
           <p class="subtitle" style="margin-bottom:12px;">Tick the cost centres to invoice. Amounts are what's accrued but not yet invoiced on each; change them, and add Stock materials or prebuilds straight onto the invoice (Stock comes out of the warehouse when the invoice is created).</p>
           <div id="ia-centres"></div>
           <div id="ia-mode-wrap" style="margin-top:12px;"></div>
+          ${invoiceTypeChooserHtml('ia-type')}
           <div class="grid cols-2">
             <div><label>Invoice date</label><input type="date" id="ia-date" value="${new Date().toLocaleDateString('en-CA')}" /></div>
             <div><label>Due date (optional - defaults to the client's payment terms)</label><input type="date" id="ia-due-date" /></div>
@@ -1670,6 +1706,9 @@
           <label style="display:flex; align-items:center; gap:8px; margin-top:4px; font-weight:400;"><input type="radio" name="ia-mode" value="combined" ${mode === 'combined' ? 'checked' : ''} style="width:auto;" /> One invoice covering all of them</label>
           <label style="display:flex; align-items:center; gap:8px; margin-top:4px; font-weight:400;"><input type="radio" name="ia-mode" value="separate" ${mode === 'separate' ? 'checked' : ''} style="width:auto;" /> A separate invoice for each</label>` : '';
         modeWrap.querySelectorAll('input[name="ia-mode"]').forEach(r => r.addEventListener('change', () => { mode = r.value; refreshTotals(); }));
+        overlay.querySelector('#ia-type-hint').textContent = mode === 'separate' && picked.length > 1
+          ? 'With separate invoices, a final claim makes the last one (the bottom cost centre ticked) the final claim; the others are progress claims.'
+          : '';
       }
 
       function renderCentres() {
@@ -1742,6 +1781,8 @@
         const empty = picked.find(c => centreTotal(c) <= 0);
         if (empty) { msg.innerHTML = `<div class="error-box">${escapeHtml(empty.name)} has nothing to invoice. Enter an amount, add an item, or untick it.</div>`; return; }
         if (picked.some(c => c.items.some(it => !(it.quantity > 0)))) { msg.innerHTML = `<div class="error-box">Every added item needs a quantity.</div>`; return; }
+        const invoiceType = overlay.querySelector('input[name="ia-type"]:checked')?.value;
+        if (!invoiceType) { msg.innerHTML = `<div class="error-box">Choose whether this is a progress claim or the final claim for this job.</div>`; return; }
 
         const toClaim = (c) => ({
           costCentreId: c.costCentreId, labourAmount: Number(c.labour) || 0, materialAmount: Number(c.material) || 0, claimPercent: null,
@@ -1754,13 +1795,15 @@
         const created = [];
         try {
           const { data: { session } } = await supabaseClient.auth.getSession();
-          for (const claims of batches) {
+          for (const [bi, claims] of batches.entries()) {
             const res = await fetch('/.netlify/functions/create-invoice', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
               body: JSON.stringify({
                 projectId: project.id,
                 claims,
+                // Separate invoices: only the last one can be the final claim.
+                invoiceType: invoiceType === 'final' && bi === batches.length - 1 ? 'final' : 'progress',
                 sentAt: overlay.querySelector('#ia-date').value || null,
                 dueDate: overlay.querySelector('#ia-due-date').value || null,
               }),
@@ -1768,7 +1811,7 @@
             const data = await res.json();
             if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
             created.push(data);
-            await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (actual costs)`);
+            await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created: ${data.description}`);
             autoGenerateInvoicePdf(data.invoiceId);
           }
         } catch (err) {
@@ -1785,7 +1828,7 @@
         }
 
         msg.innerHTML = `
-          <div class="success-box">Created ${created.map(d => d.invoiceNumber).join(', ')}.</div>
+          <div class="success-box">Created ${created.map(d => `${d.invoiceNumber} (${escapeHtml(d.description)})`).join(', ')}.${created.some(d => d.pipelineStage === 'awaiting_payment') ? ' The job has moved to Invoice Sent - Awaiting Payment.' : ''}</div>
           ${created.map(d => `<label>${d.invoiceNumber} link</label><input readonly value="${shareOrigin()}/invoice.html?token=${d.invoiceToken}" onclick="this.select()" />`).join('')}`;
         confirmBtn.style.display = 'none';
         overlay.querySelector('#ia-cancel-btn').textContent = 'Close';
@@ -2015,6 +2058,8 @@
 
           <div id="inv-variations-section"></div>
 
+          ${invoiceTypeChooserHtml('inv-type')}
+
           <div class="grid cols-2" style="margin-top:14px;">
             <div>
               <label style="margin-top:0">Invoice date</label>
@@ -2172,6 +2217,11 @@
           if (it.checked && !t.missing) total += t.total;
         });
         overlay.querySelector('#inv-total-display').textContent = money(total);
+        const claimedNow = claims.reduce((s, c) => s + c.labourAmount + c.materialAmount, 0);
+        const leftAfter = Math.max(0, projectRemaining - claimedNow);
+        overlay.querySelector('#inv-type-hint').textContent = leftAfter > 0.004
+          ? `${money(leftAfter)} of the quote will still be uninvoiced after this claim.`
+          : 'This claims everything left on the quote.';
         const pctPreview = overlay.querySelector('#inv-project-preview');
         if (pctPreview) {
           const pct = Math.max(0, Math.min(100, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
@@ -2197,6 +2247,8 @@
         const claims = computeClaims();
         const chosenVars = varItems.filter(i => i.checked);
         if (!claims.length && !chosenVars.length) { panelMsg.innerHTML = `<div class="error-box">Select at least one stage with a non-zero claim, or tick a logged variation.</div>`; return; }
+        const invoiceType = overlay.querySelector('input[name="inv-type"]:checked')?.value;
+        if (!invoiceType) { panelMsg.innerHTML = `<div class="error-box">Choose whether this is a progress claim or the final claim for this job.</div>`; return; }
         const unpriced = chosenVars.find(i => varTotals(i).missing);
         if (unpriced) { panelMsg.innerHTML = `<div class="error-box">Set a price for every line of "${escapeHtml(unpriced.description)}", or untick it.</div>`; return; }
 
@@ -2237,6 +2289,7 @@
               projectId: project.id,
               claims,
               variationEntryIds,
+              invoiceType,
               sentAt: overlay.querySelector('#inv-date').value || null,
               dueDate: overlay.querySelector('#inv-due-date').value || null,
             }),
@@ -2248,7 +2301,7 @@
 
           const invoiceUrl = `${shareOrigin()}/invoice.html?token=${data.invoiceToken}`;
           panelMsg.innerHTML = `
-            <div class="success-box">Created as ${data.invoiceNumber}.</div>
+            <div class="success-box">Created as ${data.invoiceNumber} (${escapeHtml(data.description)}).${data.pipelineStage === 'awaiting_payment' ? ' The job has moved to Invoice Sent - Awaiting Payment.' : ''}</div>
             <label>Invoice link</label>
             <input readonly value="${invoiceUrl}" onclick="this.select()" />
             <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
@@ -2881,6 +2934,7 @@
           <div class="job-tab-main">
 
             <div class="settings-panel active" id="panel-summary">
+              ${!editMode && project.pipeline_stage ? pipelineCardHtml(project.pipeline_stage) : ''}
               ${!editMode ? '<div id="clock-here-card"></div>' : ''}
               ${!editMode && (project.notes || (TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length)) ? `
               <div class="card">
