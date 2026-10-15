@@ -27,7 +27,7 @@
       label: 'Jobs & quotes',
       run: async (q, num) => {
         const ors = [ilikeOr(['name', 'client_name', 'client_address'], q)];
-        if (num) ors.push(`job_number.eq.${num}`, `quote_number.eq.${num}`);
+        if (num) ors.push(`job_number.eq.${num}`, `quote_number.eq.${num}`, `sm8_job_number.eq.${num}`);
         const { data } = await supabaseClient.from('projects')
           .select('id, name, job_number, quote_number, client_name, client_address')
           .or(ors.join(',')).order('created_at', { ascending: false }).limit(PER_GROUP);
