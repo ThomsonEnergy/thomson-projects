@@ -9,9 +9,12 @@ const { requireAdmin } = require('./_shared/require-admin');
 // Xero (push-pay-rates-to-xero.js), so a pay rise not yet sent is flagged.
 function ratesStatus(p) {
   if (!p) return null;
-  const now = { ordinary: p.ordinary_rate, ot1: p.rate_1_5x, ot2: p.rate_2x, publicHoliday: p.rate_2_5x };
-  if (!Object.values(now).some(v => Number(v) > 0)) return 'no_rates';
+  if (![p.ordinary_rate, p.rate_1_5x, p.rate_2x, p.rate_2_5x].some(v => Number(v) > 0)) return 'no_rates';
   if (!p.xero_rates_pushed) return 'never';
+  // Public holiday goes to Xero as the penalty only (base + penalty split,
+  // migration 152), worked out the same way push-pay-rates-to-xero.js does.
+  const phPenalty = (Number(p.rate_2_5x) > 0 && Number(p.ordinary_rate) > 0) ? Math.round((p.rate_2_5x - p.ordinary_rate) * 100) / 100 : 0;
+  const now = { ordinary: p.ordinary_rate, ot1: p.rate_1_5x, ot2: p.rate_2x, publicHoliday: phPenalty };
   const same = Object.keys(now).every(k => !(Number(now[k]) > 0) || Number(now[k]) === Number(p.xero_rates_pushed[k]));
   return same ? 'in_xero' : 'changed';
 }
