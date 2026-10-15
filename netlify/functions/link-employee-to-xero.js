@@ -177,7 +177,10 @@ exports.handler = async (event) => {
         EmployeeID: profile.xero_employee_id,
         FirstName: current.FirstName,
         LastName: current.LastName,
-        DateOfBirth: profile.date_of_birth || current.DateOfBirth || undefined,
+        // Xero returns "/Date(ms+0000)/"; send it back as a plain date.
+        DateOfBirth: profile.date_of_birth
+          || (String(current.DateOfBirth || '').match(/\/Date\((-?\d+)/) ? new Date(Number(current.DateOfBirth.match(/\/Date\((-?\d+)/)[1])).toISOString().slice(0, 10) : current.DateOfBirth)
+          || undefined,
         HomeAddress: fullAddress ? {
           AddressLine1: profile.residential_address,
           City: profile.residential_suburb,

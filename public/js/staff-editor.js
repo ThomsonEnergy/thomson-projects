@@ -59,7 +59,7 @@ async function openStaffEditor(userId, opts = {}) {
   const { data: profile, error } = await supabaseClient.from('profiles')
     .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id,
       employment_type, employment_start_date, pay_type, salary_includes_super, has_company_vehicle, has_probationary_period,
-      emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason`)
+      emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_employee_id`)
     .eq('id', userId).single();
   const { data: rates } = await supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle();
   const { data: sensitive } = await supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', userId).maybeSingle();
@@ -368,6 +368,30 @@ async function openStaffEditor(userId, opts = {}) {
       if (newAllowances.length) {
         const { error: allowErr } = await supabaseClient.from('employee_allowances').insert(newAllowances);
         if (allowErr) throw allowErr;
+      }
+
+      // A pay rise is entered here once and then sent to the person's Xero
+      // pay template (push-pay-rates-to-xero.js), so Xero never has to be
+      // edited by hand.
+      const ratesChanged = ['ordinary_rate', 'rate_1_5x', 'rate_2x', 'rate_2_5x']
+        .some(k => (Number(updates[k]) || 0) !== (Number(profile[k]) || 0));
+      if (ratesChanged && profile.xero_employee_id
+        && confirm('Pay rates changed. Push the new rates to their Xero pay template now?')) {
+        saveBtn.textContent = 'Pushing to Xero...';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/push-pay-rates-to-xero', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ profileId: userId }),
+          });
+          const data = await res.json();
+          const r = data.results?.[0];
+          if (!data.ok || !r?.ok) throw new Error(r?.error || data.error || 'Push failed');
+          alert(`New rates are in Xero.${r.skipped.length ? ` Skipped: ${r.skipped.join('; ')}` : ''}`);
+        } catch (pushErr) {
+          alert(`Saved in the app, but NOT updated in Xero: ${pushErr.message}\n\nYou can retry from Settings > Users & Roles > Push pay rates to Xero.`);
+        }
       }
 
       overlay.remove();

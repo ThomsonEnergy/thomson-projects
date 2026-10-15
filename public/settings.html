@@ -1554,8 +1554,18 @@
         ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px; color:var(--red);">${escapeHtml(u.xero_payroll_error)}</p>`
         : '';
       const btnStyle = 'display:block; margin-top:4px; font-size:11px; padding:4px 8px;';
+      // Pay rates live on the staff profile; push-pay-rates-to-xero.js sends
+      // them into the person's Xero pay template. Only a status comes back
+      // from list-users, never the rates themselves.
+      const ratesBadge = {
+        in_xero: `<span class="badge accepted" style="margin-top:4px; display:inline-block;">Rates in Xero</span>`,
+        changed: `<span class="badge sent" style="margin-top:4px; display:inline-block;">Rates changed, not in Xero</span>`,
+        never: `<span class="badge draft" style="margin-top:4px; display:inline-block;">Rates not pushed yet</span>`,
+      }[u.xero_rates_status] || '';
       const actions = u.xero_employee_id
-        ? (u.onboarding_completed_at ? `<button type="button" class="secondary xero-send-details-btn" data-id="${u.id}" style="${btnStyle}">Send details to Xero</button>` : '')
+        ? `${ratesBadge}
+           ${u.xero_rates_status && u.xero_rates_status !== 'no_rates' ? `<button type="button" class="secondary xero-push-rates-btn" data-id="${u.id}" style="${btnStyle}">Push pay rates to Xero</button>` : ''}
+           ${u.onboarding_completed_at ? `<button type="button" class="secondary xero-send-details-btn" data-id="${u.id}" style="${btnStyle}">Send details to Xero</button>` : ''}`
         : `<button type="button" class="secondary xero-link-btn" data-id="${u.id}" style="${btnStyle}">Link to Xero</button>`;
       return `
         <input class="xero-employee-input" data-id="${u.id}" value="${escapeHtml(u.xero_employee_id || '')}" placeholder="Not linked" style="font-size:12px;" />
@@ -1635,6 +1645,7 @@
         listEl.innerHTML = `
           <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px;">
             <button type="button" class="secondary" id="xero-link-all-btn">Match all staff to Xero</button>
+            <button type="button" class="secondary" id="xero-push-all-rates-btn">Push all pay rates to Xero</button>
             <span class="subtitle" style="margin:0; font-size:12px;">Links each person to their existing Xero Payroll employee by email or name. It never creates employees in Xero: add new staff there with New employee &gt; Invite to onboard, then link them here.</span>
           </div>
           <table class="responsive-stack">
@@ -1674,7 +1685,7 @@
                       <td data-label="Status"><span class="badge draft">Deactivated</span></td>
                       <td data-label="" style="text-align:right;">
                         <button class="secondary toggle-active-btn" data-id="${u.id}" data-active="false">Reactivate</button>
-                        <button class="secondary open-profile-btn" data-id="${u.id}" style="margin-top:4px;">Profile</button>
+                        <a class="btn secondary" href="/staff.html?id=${u.id}" style="margin-top:4px;">View employee</a>
                       </td>
                     </tr>
                   `).join('')}
@@ -1757,6 +1768,41 @@
             alert(err.message);
           }
           await loadUsers();
+        });
+
+        async function pushPayRates(payload, btn) {
+          const original = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Pushing...';
+          try {
+            const res = await authedFetch('/.netlify/functions/push-pay-rates-to-xero', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || 'Push failed');
+            alert(data.results.map(r => r.ok
+              ? `${r.name}: rates updated in Xero${r.skipped.length ? `. Skipped: ${r.skipped.join('; ')}` : ''}`
+              : `${r.name}: NOT updated. ${r.error}`).join('\n\n'));
+          } catch (err) {
+            alert(err.message);
+          }
+          btn.disabled = false;
+          btn.textContent = original;
+          await loadUsers();
+        }
+
+        listEl.querySelectorAll('.xero-push-rates-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            if (!confirm("Send this person's 4 pay rates from their staff profile into their Xero pay template? Their super, leave and other pay items in Xero are left as they are.")) return;
+            pushPayRates({ profileId: btn.dataset.id }, btn);
+          });
+        });
+
+        document.getElementById('xero-push-all-rates-btn')?.addEventListener('click', (e) => {
+          if (!confirm('Send every linked, active staff member\'s 4 pay rates into their Xero pay template? Super, leave and other pay items in Xero are left as they are.')) return;
+          pushPayRates({ all: true }, e.currentTarget);
         });
 
         listEl.querySelectorAll('.role-select').forEach(sel => {

@@ -142,6 +142,15 @@ details are never collected here), and Xero's own onboarding invite then made a 
 
 Needs the `payroll.employees` scope on the Custom Connection.
 
+**Pay rates.** Each person's 4 contract rates (ordinary, overtime first 2hrs, overtime after
+that, public holiday) are set on their staff profile and pushed into their Xero pay template by
+`netlify/functions/push-pay-rates-to-xero.js`: when saving changed rates on a linked person (it
+asks), or from Settings > Users & Roles (per person, or "Push all pay rates to Xero"). In Xero,
+each of the 4 earnings rates must be a **Rate per unit** (hours) pay item, chosen per band in
+Settings > Xero Mapping; the push sets a pay template line per band with "Enter earnings rate"
+and the person's $/hr, and leaves every other pay template line (super, leave, allowances)
+untouched. The Team list flags anyone whose rates changed since the last push.
+
 - Purchase orders and supplier invoices logged in this tool are kept separate from the
   labour/material actuals synced from ServiceM8, on purpose, so nothing gets double-counted.
   If your ServiceM8 account already tracks purchase costs (via the MyPO add-on or an accounting

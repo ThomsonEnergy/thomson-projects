@@ -5,6 +5,17 @@
 
 const { requireAdmin } = require('./_shared/require-admin');
 
+// Whether the 4 pay rates on the profile match what was last pushed to
+// Xero (push-pay-rates-to-xero.js), so a pay rise not yet sent is flagged.
+function ratesStatus(p) {
+  if (!p) return null;
+  const now = { ordinary: p.ordinary_rate, ot1: p.rate_1_5x, ot2: p.rate_2x, publicHoliday: p.rate_2_5x };
+  if (!Object.values(now).some(v => Number(v) > 0)) return no_rates;
+  if (!p.xero_rates_pushed) return never;
+  const same = Object.keys(now).every(k => !(Number(now[k]) > 0) || Number(now[k]) === Number(p.xero_rates_pushed[k]));
+  return same ? in_xero : changed;
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== 'GET') {
     return { statusCode: 405, body: 'Method not allowed' };
@@ -22,7 +33,7 @@ exports.handler = async (event) => {
 
     const { data: profiles, error: profileErr } = await supabaseAdmin
       .from('profiles')
-      .select('id, role, active, full_name, xero_employee_id, onboarding_completed_at, xero_payroll_status, xero_payroll_error');
+      .select('id, role, active, full_name, xero_employee_id, onboarding_completed_at, xero_payroll_status, xero_payroll_error, ordinary_rate, rate_1_5x, rate_2x, rate_2_5x, xero_rates_pushed, xero_rates_pushed_at');
     if (profileErr) throw profileErr;
 
     const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
@@ -40,6 +51,9 @@ exports.handler = async (event) => {
       onboarding_completed_at: profileById[u.id]?.onboarding_completed_at || null,
       xero_payroll_status: profileById[u.id]?.xero_payroll_status || 'pending',
       xero_payroll_error: profileById[u.id]?.xero_payroll_error || '',
+      // Only a status leaves this function, never the rates themselves.
+      xero_rates_status: ratesStatus(profileById[u.id]),
+      xero_rates_pushed_at: profileById[u.id]?.xero_rates_pushed_at || null,
     }));
 
     return { statusCode: 200, body: JSON.stringify({ users }) };
