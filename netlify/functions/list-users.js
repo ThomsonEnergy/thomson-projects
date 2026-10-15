@@ -10,10 +10,10 @@ const { requireAdmin } = require('./_shared/require-admin');
 function ratesStatus(p) {
   if (!p) return null;
   const now = { ordinary: p.ordinary_rate, ot1: p.rate_1_5x, ot2: p.rate_2x, publicHoliday: p.rate_2_5x };
-  if (!Object.values(now).some(v => Number(v) > 0)) return no_rates;
-  if (!p.xero_rates_pushed) return never;
+  if (!Object.values(now).some(v => Number(v) > 0)) return 'no_rates';
+  if (!p.xero_rates_pushed) return 'never';
   const same = Object.keys(now).every(k => !(Number(now[k]) > 0) || Number(now[k]) === Number(p.xero_rates_pushed[k]));
-  return same ? in_xero : changed;
+  return same ? 'in_xero' : 'changed';
 }
 
 exports.handler = async (event) => {
