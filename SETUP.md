@@ -151,6 +151,12 @@ Settings > Xero Mapping; the push sets a pay template line per band with "Enter 
 and the person's $/hr, and leaves every other pay template line (super, leave, allowances)
 untouched. The Team list flags anyone whose rates changed since the last push.
 
+Each band has two earnings rates in Xero (8 in all, migration 151): a **Jobs** one linked to a
+Direct Costs account and an **Office** one linked to an Overheads account. The timesheet push sends
+hours clocked to a job to the Jobs rate and every other kind of hour to the Office rate, so job
+labour sits above gross profit and the rest below; the pay-rate push puts the same $/hr on both.
+Push pay rates before the first timesheet push, so every employee's pay template has all 8 lines.
+
 - Purchase orders and supplier invoices logged in this tool are kept separate from the
   labour/material actuals synced from ServiceM8, on purpose, so nothing gets double-counted.
   If your ServiceM8 account already tracks purchase costs (via the MyPO add-on or an accounting

@@ -25,11 +25,14 @@
 const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { xeroRequest } = require('./_shared/xero-client');
 
+// Each band has a Jobs earnings rate (Direct Costs account) and an Office
+// one (overheads account, migration 151); both get the same $/hr, since a
+// person's contract rate doesn't change with the kind of work.
 const BANDS = [
-  { key: 'ordinary', label: 'Ordinary', rateCol: 'ordinary_rate', idCol: 'xero_ordinary_earnings_rate_id' },
-  { key: 'ot1', label: 'Overtime - first 2hrs', rateCol: 'rate_1_5x', idCol: 'xero_ot1_earnings_rate_id' },
-  { key: 'ot2', label: 'Overtime - after that', rateCol: 'rate_2x', idCol: 'xero_ot2_earnings_rate_id' },
-  { key: 'publicHoliday', label: 'Public holiday', rateCol: 'rate_2_5x', idCol: 'xero_public_holiday_earnings_rate_id' },
+  { key: 'ordinary', label: 'Ordinary', rateCol: 'ordinary_rate', idCol: 'xero_ordinary_earnings_rate_id', officeIdCol: 'xero_ordinary_office_earnings_rate_id' },
+  { key: 'ot1', label: 'Overtime - first 2hrs', rateCol: 'rate_1_5x', idCol: 'xero_ot1_earnings_rate_id', officeIdCol: 'xero_ot1_office_earnings_rate_id' },
+  { key: 'ot2', label: 'Overtime - after that', rateCol: 'rate_2x', idCol: 'xero_ot2_earnings_rate_id', officeIdCol: 'xero_ot2_office_earnings_rate_id' },
+  { key: 'publicHoliday', label: 'Public holiday', rateCol: 'rate_2_5x', idCol: 'xero_public_holiday_earnings_rate_id', officeIdCol: 'xero_public_holiday_office_earnings_rate_id' },
 ];
 
 // Payroll AU 1.0 returns dates as "/Date(1234567890000+0000)/"; send them
@@ -44,12 +47,14 @@ async function pushOne(supabaseAdmin, profile, settings) {
   const skipped = [];
   const bandLines = [];
   for (const band of BANDS) {
-    const earningsRateId = settings[band.idCol];
     const rate = Number(profile[band.rateCol]);
-    if (!earningsRateId) { skipped.push(`${band.label} (no Xero earnings rate chosen in Settings > Xero Mapping)`); continue; }
     if (!(rate > 0)) { skipped.push(`${band.label} (no rate on their profile)`); continue; }
-    bandLines.push({ earningsRateId, rate });
-    sent[band.key] = rate;
+    let any = false;
+    for (const [col, kind] of [[band.idCol, 'Jobs'], [band.officeIdCol, 'Office']]) {
+      if (settings[col]) { bandLines.push({ earningsRateId: settings[col], rate }); any = true; }
+      else skipped.push(`${band.label} - ${kind} (no Xero earnings rate chosen in Settings > Xero Mapping)`);
+    }
+    if (any) sent[band.key] = rate;
   }
   if (!bandLines.length) throw new Error(`Nothing to push: ${skipped.join('; ')}`);
 
@@ -105,7 +110,7 @@ exports.handler = async (event) => {
 
   try {
     const { data: settings } = await supabaseAdmin.from('company_settings')
-      .select(BANDS.map(b => b.idCol).join(', ')).eq('id', 1).single();
+      .select(BANDS.flatMap(b => [b.idCol, b.officeIdCol]).join(', ')).eq('id', 1).single();
 
     let query = supabaseAdmin.from('profiles')
       .select('id, full_name, active, xero_employee_id, ordinary_rate, rate_1_5x, rate_2x, rate_2_5x');

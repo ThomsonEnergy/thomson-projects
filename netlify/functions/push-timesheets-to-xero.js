@@ -43,9 +43,11 @@ function dateOnly(iso) {
   return iso.slice(0, 10);
 }
 
+const JOB_LABEL = 'Billable (Jobs)';
+
 function trackingLabelFor(entry) {
   switch (entry.time_category) {
-    case 'job': return 'Billable (Jobs)';
+    case 'job': return JOB_LABEL;
     case 'quoting': return 'Quoting';
     case 'maintenance': return 'Maintenance';
     case 'tafe': return 'TAFE';
@@ -73,7 +75,7 @@ exports.handler = async (event) => {
 
     const { data: settings } = await supabaseAdmin
       .from('company_settings')
-      .select('xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_laha_earnings_rate_id, xero_tracking_category_id')
+      .select('xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_ordinary_office_earnings_rate_id, xero_ot1_office_earnings_rate_id, xero_ot2_office_earnings_rate_id, xero_public_holiday_office_earnings_rate_id, xero_laha_earnings_rate_id, xero_tracking_category_id')
       .eq('id', 1)
       .single();
     if (!settings?.xero_ordinary_earnings_rate_id) {
@@ -84,14 +86,32 @@ exports.handler = async (event) => {
     // Hours rather than blocking the push - tracked so the response can
     // warn that those hours posted at the wrong rate/account.
     const fallbackBands = new Set();
-    function earningsRateFor(bandLabel) {
-      const direct = {
+    // Each band has two earnings rates: a "Jobs" one (the original
+    // xero_*_earnings_rate_id columns) whose Xero account is a Direct Cost,
+    // and an "Office" one (xero_*_office_earnings_rate_id) whose account is
+    // an overhead. Xero Payroll posts hours to the earnings rate's own
+    // account and tracking never moves them, so this choice is what puts
+    // job labour above gross profit and everything else below it. An
+    // Office rate not set yet falls back to the Jobs rate for that band.
+    const officeFallbackBands = new Set();
+    function earningsRateFor(bandLabel, isJob) {
+      const jobsRate = {
         ordinary: settings.xero_ordinary_earnings_rate_id,
         ot1: settings.xero_ot1_earnings_rate_id,
         ot2: settings.xero_ot2_earnings_rate_id,
         publicHoliday: settings.xero_public_holiday_earnings_rate_id,
       }[bandLabel];
-      if (direct) return direct;
+      if (!isJob) {
+        const officeRate = {
+          ordinary: settings.xero_ordinary_office_earnings_rate_id,
+          ot1: settings.xero_ot1_office_earnings_rate_id,
+          ot2: settings.xero_ot2_office_earnings_rate_id,
+          publicHoliday: settings.xero_public_holiday_office_earnings_rate_id,
+        }[bandLabel];
+        if (officeRate) return officeRate;
+        officeFallbackBands.add(bandLabel);
+      }
+      if (jobsRate) return jobsRate;
       fallbackBands.add(bandLabel);
       return settings.xero_ordinary_earnings_rate_id;
     }
@@ -212,7 +232,7 @@ exports.handler = async (event) => {
           const numberOfUnits = days.map(d => Math.round(((bandDays[d] || 0)) * 100) / 100);
           if (numberOfUnits.every(n => n === 0)) return;
           timesheetLines.push({
-            EarningsRateID: earningsRateFor(bandLabel),
+            EarningsRateID: earningsRateFor(bandLabel, label === JOB_LABEL),
             NumberOfUnits: numberOfUnits,
             TrackingItemID: trackingItemId || undefined,
           });
@@ -268,7 +288,10 @@ exports.handler = async (event) => {
         .in('id', pushedEntryIds);
     }
 
-    const warnings = [...fallbackBands].map(b => `${BAND_NAMES[b]} has no earnings rate ID set - those hours were pushed at the Ordinary Hours rate instead (Settings > Xero Mapping).`);
+    const warnings = [
+      ...[...fallbackBands].map(b => `${BAND_NAMES[b]} has no earnings rate ID set - those hours were pushed at the Ordinary Hours rate instead (Settings > Xero Mapping).`),
+      ...[...officeFallbackBands].map(b => `${BAND_NAMES[b]} (Office) has no earnings rate ID set - non-job hours in that band were pushed to the Jobs rate, so they landed in Direct Costs (Settings > Xero Mapping).`),
+    ];
 
     return {
       statusCode: 200,
