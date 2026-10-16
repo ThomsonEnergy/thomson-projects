@@ -25,7 +25,12 @@
   .imp-meta { font-size:12px; color:var(--muted); }
   .imp-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px 14px; margin-top:10px; }
   .imp-grid label { margin-top:0; }
-  .imp-claims { margin-top:10px; font-size:13px; padding:8px 10px; background:var(--surface-2); border-radius:8px; }
+  .imp-stages { width:100%; border-collapse:collapse; font-size:13px; min-width:520px; }
+  .imp-stages th { text-align:left; font-weight:600; color:var(--muted); padding:4px 6px; border-bottom:1px solid var(--border); }
+  .imp-stages td { padding:4px 6px; vertical-align:middle; }
+  .imp-stages .num { text-align:right; width:140px; }
+  .imp-stages input { margin:0; }
+  .imp-stages tfoot td { border-top:1px solid var(--border); padding-top:8px; font-weight:600; }
   .imp-warn { margin-top:10px; font-size:12px; color:var(--red); }
   .imp-warn div::before { content:'! '; font-weight:700; }
   .imp-match { font-size:12px; margin-top:4px; color:var(--muted); }
@@ -72,7 +77,7 @@
 
     <div id="review" class="card" style="display:none;">
       <h2 style="margin:0 0 6px;">Review</h2>
-      <p class="subtitle" style="margin:0 0 12px;">All amounts are ex GST, like everywhere else in the app. ServiceM8's job total includes GST, so it has been divided by 1.1; the original figure is shown under each job. <strong>Invoiced to date</strong> is worked out from the lettered claims in ServiceM8 (4515a deposit, 4515b progress claim 1, and so on, all counted against job 4515): the app only lets you invoice the rest, so check it on part-billed jobs. Lettered claims are never imported as jobs of their own.</p>
+      <p class="subtitle" style="margin:0 0 12px;">All amounts are ex GST, like everywhere else in the app. ServiceM8's job total includes GST, so it has been divided by 1.1; the original figure is shown under each job. Lettered jobs in ServiceM8 (4515a, 4515b, and so on) are grouped under their main job 4515 and become its stages (cost centres): a Completed one counts as invoiced, and 4515 itself becomes the balance still to bill. Job total = 4515 + its claims. The app only lets you invoice what is left, so check the invoiced column on part-billed jobs.</p>
       <div id="orphan-claims"></div>
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
         <div class="imp-filters" id="filters"></div>
@@ -105,7 +110,7 @@
     const BATCH = 5;
     let rows = [];
     let filter = 'all';
-    // Per-job state the admin edits: { include, name, clientId, quoted, invoiced, result }
+    // Per-job state the admin edits: { include, name, clientId, stages: [{ name, quoted, invoiced }], result }
     const edits = new Map();
 
     const FILTERS = [
@@ -145,8 +150,7 @@
           include: !r.alreadyImported,
           name: r.suggestedName,
           clientId: r.clientMatch ? r.clientMatch.clientId : 'new',
-          quoted: r.quotedExGst.toFixed(2),
-          invoiced: r.invoicedExGst.toFixed(2),
+          stages: r.stages.map(s => ({ name: s.name, quoted: s.quotedExGst.toFixed(2), invoiced: s.invoicedExGst.toFixed(2) })),
           result: r.alreadyImported ? { ok: true, skipped: true, projectId: r.alreadyImported.projectId, jobNumber: r.alreadyImported.jobNumber } : null,
         }));
         document.getElementById('stat-open').textContent = data.summary.workOrders;
@@ -211,6 +215,30 @@
       return `<div class="imp-match">Chosen by you</div>`;
     }
 
+    const stageTotals = (e) => e.stages.reduce((t, s) => ({ quoted: t.quoted + (Number(s.quoted) || 0), invoiced: t.invoiced + (Number(s.invoiced) || 0) }), { quoted: 0, invoiced: 0 });
+
+    // One row per stage the job will get: each ServiceM8 claim (4515a,
+    // 4515b...) and the balance left on the main job.
+    function stageTable(r, e, locked) {
+      const t = stageTotals(e);
+      const statusOf = (i) => r.stages[i] ? r.stages[i].sm8Status : '';
+      return `
+        <div style="overflow-x:auto; margin-top:12px;">
+          <table class="imp-stages">
+            <thead><tr><th>Stage (cost centre)</th><th>ServiceM8</th><th class="num">Value, ex GST</th><th class="num">Invoiced, ex GST</th></tr></thead>
+            <tbody>${e.stages.map((s, i) => `
+              <tr>
+                <td><input data-stage="${i}" data-stage-field="name" value="${escAttr(s.name)}" ${locked} /></td>
+                <td class="imp-meta">${escapeHtml(statusOf(i))}</td>
+                <td class="num"><input type="number" step="0.01" min="0" data-stage="${i}" data-stage-field="quoted" value="${escAttr(s.quoted)}" ${locked} /></td>
+                <td class="num"><input type="number" step="0.01" min="0" data-stage="${i}" data-stage-field="invoiced" value="${escAttr(s.invoiced)}" ${locked} /></td>
+              </tr>`).join('')}
+            </tbody>
+            <tfoot><tr><td colspan="2">Job total &middot; left to invoice <strong class="imp-stage-total-l">${money(t.quoted - t.invoiced)}</strong></td><td class="num imp-stage-total-q">${money(t.quoted)}</td><td class="num imp-stage-total-i">${money(t.invoiced)}</td></tr></tfoot>
+          </table>
+        </div>`;
+    }
+
     function resultLine(e) {
       if (!e.result) return '';
       if (!e.result.ok) return `<div class="imp-result fail">Import failed: ${escapeHtml(e.result.error)}</div>`;
@@ -238,10 +266,8 @@
               <div style="grid-column:1 / -1;"><label>Client</label><select data-field="clientId" ${locked}>${clientOptions(r, e)}</select>${done ? '' : matchLine(r, e)}</div>
               <div><label>Site address</label><div>${escapeHtml(r.siteAddress) || '<span class="subtitle">None in ServiceM8</span>'}</div></div>
               <div><label>Contact</label><div>${escapeHtml([r.clientPhone, r.clientEmail].filter(Boolean).join(' / ')) || '<span class="subtitle">None in ServiceM8</span>'}</div></div>
-              <div><label>Quoted, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="quoted" value="${e.quoted}" ${locked} /></div>
-              <div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${e.invoiced}" ${locked} /></div>
             </div>
-            ${r.claims.length ? `<div class="imp-claims"><strong>Claims already invoiced in ServiceM8:</strong> ${r.claims.map(c => `#${escapeHtml(c.number)} ${money(c.totalExGst)}${c.paymentAmount > 0 ? ' (paid)' : ''}`).join(' &middot; ')} &middot; <strong>total ${money(r.claims.reduce((s, c) => s + c.totalExGst, 0))} ex GST</strong></div>` : ''}
+            ${stageTable(r, e, locked)}
             ${r.warnings.length && !done ? `<div class="imp-warn">${r.warnings.map(w => `<div>${escapeHtml(w)}</div>`).join('')}</div>` : ''}
             <details>
               <summary>Description and ${r.notes.length} note${r.notes.length === 1 ? '' : 's'}</summary>
@@ -254,6 +280,15 @@
 
       el.querySelectorAll('.imp-job').forEach(card => {
         const e = edits.get(card.dataset.uuid);
+        card.querySelectorAll('[data-stage]').forEach(input => {
+          input.addEventListener('input', () => {
+            e.stages[Number(input.dataset.stage)][input.dataset.stageField] = input.value;
+            const t = stageTotals(e);
+            card.querySelector('.imp-stage-total-q').textContent = money(t.quoted);
+            card.querySelector('.imp-stage-total-i').textContent = money(t.invoiced);
+            card.querySelector('.imp-stage-total-l').textContent = money(t.quoted - t.invoiced);
+          });
+        });
         card.querySelectorAll('[data-field]').forEach(input => {
           const field = input.dataset.field;
           const evt = input.type === 'checkbox' || input.tagName === 'SELECT' ? 'change' : 'input';
@@ -283,10 +318,13 @@
     function validate(list) {
       for (const r of list) {
         const e = edits.get(r.sm8JobUuid);
-        const q = Number(e.quoted), i = Number(e.invoiced);
         if (!e.name.trim()) return `ServiceM8 #${r.sm8JobNumber}: job name is required.`;
-        if (!(q >= 0) || !(i >= 0) || e.quoted === '' || e.invoiced === '') return `ServiceM8 #${r.sm8JobNumber}: quoted and invoiced must be numbers, 0 or more.`;
-        if (i > q + 0.01) return `ServiceM8 #${r.sm8JobNumber}: invoiced to date (${money(i)}) is more than quoted (${money(q)}).`;
+        for (const s of e.stages) {
+          const q = Number(s.quoted), i = Number(s.invoiced);
+          if (!String(s.name).trim()) return `ServiceM8 #${r.sm8JobNumber}: every stage needs a name.`;
+          if (!(q >= 0) || !(i >= 0) || s.quoted === '' || s.invoiced === '') return `ServiceM8 #${r.sm8JobNumber}, ${s.name}: value and invoiced must be numbers, 0 or more.`;
+          if (i > q + 0.01) return `ServiceM8 #${r.sm8JobNumber}, ${s.name}: invoiced (${money(i)}) is more than its value (${money(q)}).`;
+        }
       }
       return null;
     }
@@ -316,7 +354,7 @@
               clientEmail: r.clientEmail, clientPhone: r.clientPhone, siteAddress: r.siteAddress,
               description: r.description, notesText: r.notesText,
               name: e.name.trim(), clientId: e.clientId,
-              quotedExGst: Number(e.quoted), invoicedExGst: Number(e.invoiced),
+              stages: e.stages.map(s => ({ name: String(s.name).trim(), quotedExGst: Number(s.quoted), invoicedExGst: Number(s.invoiced) })),
             };
           });
           try {

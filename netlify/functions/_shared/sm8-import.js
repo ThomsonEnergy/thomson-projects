@@ -89,8 +89,8 @@ function buildNotesText(job, notes, claims = []) {
   if (job.purchase_order_number) header.push(`Client PO: ${clean(job.purchase_order_number)}`);
   const parts = [header.join('\n')];
   if (claims.length) {
-    parts.push('Invoiced in ServiceM8 before the move (ex GST):\n' + claims.map(c =>
-      `#${c.number}${c.date ? ` (${c.date})` : ''}: $${c.totalExGst.toFixed(2)}${c.paymentAmount > 0 ? `, $${c.paymentAmount.toFixed(2)} paid inc GST` : ''}`).join('\n'));
+    parts.push('ServiceM8 claims at the move (ex GST):\n' + claims.map(c =>
+      `#${c.number}${c.date ? ` (${c.date})` : ''}: $${c.totalExGst.toFixed(2)}, ${c.status === 'Completed' ? 'invoiced' : `not invoiced yet (${c.status})`}${c.paymentAmount > 0 ? `, $${c.paymentAmount.toFixed(2)} paid inc GST` : ''}`).join('\n'));
   }
   const workDone = clean(job.work_done_description);
   if (workDone) parts.push(`Work done so far (ServiceM8):\n${workDone}`);
@@ -149,11 +149,13 @@ async function loadSm8OpenJobs(supabaseAdmin) {
     sm8GetAll(apiKey, 'note', "related_object eq 'job' and active eq 1"),
   ]);
 
-  // Partial invoices: ServiceM8 raises each claim as its own job numbered
+  // Partial invoices: ServiceM8 splits a job into lettered jobs numbered
   // after the main one - 4515 is the job, 4515a the deposit, 4515b progress
-  // claim 1 and so on. Those are not jobs to import, they are what has
-  // been invoiced to date on the main job. A claim is usually Completed
-  // (not in the Work Order list), so fetch every job dated on or after the
+  // claim 1 and so on. They work like the app's cost centres: each one
+  // becomes a stage on the imported job, a Completed one has been
+  // invoiced, and the main 4515 holds whatever has not been split off yet
+  // (the balance). Job total = 4515 + every claim. A Completed claim is
+  // not in the Work Order list, so fetch every job dated on or after the
   // oldest open main job to find them.
   const mainJobs = workOrders.filter(j => !claimOf(j));
   const openNumbers = new Set(mainJobs.map(j => String(j.generated_job_id)));
@@ -171,6 +173,7 @@ async function loadSm8OpenJobs(supabaseAdmin) {
       number: String(j.generated_job_id),
       letter: claim.letter,
       status: j.status,
+      description: clean(j.job_description),
       date: String(j.date || '').slice(0, 10),
       total: r2(j.total_invoice_amount),
       totalExGst: exGst(j.total_invoice_amount),
@@ -234,17 +237,42 @@ async function loadSm8OpenJobs(supabaseAdmin) {
     const sm8Total = r2(job.total_invoice_amount);
     const invoiceSent = isOn(job.invoice_sent);
     const paymentAmount = r2(job.payment_amount);
-    const quotedExGst = exGst(sm8Total);
     const claims = (claimsByNumber.get(String(job.generated_job_id)) || []).sort((a, b) => a.letter.length - b.letter.length || a.letter.localeCompare(b.letter));
-    // Invoiced to date = the lettered claims. Without any, fall back to the
-    // main job's own "invoice sent" flag (billed in one go).
-    const invoicedExGst = claims.length
-      ? r2(claims.reduce((s, c) => s + c.totalExGst, 0))
-      : (invoiceSent ? quotedExGst : 0);
-    if (claims.length && invoicedExGst > quotedExGst + 0.01) warnings.push(`Claims add up to more than the main job total - check whether the main job still holds the full contract value`);
+    const mainNumber = String(job.generated_job_id || '');
+    const mainTitle = shortTitle(job.job_description);
+
+    // One stage per claim, then the balance still on the main job. Without
+    // any claims that balance is the whole job (one "Labour & Materials"
+    // stage, same as any Direct Job), invoiced only if ServiceM8 says the
+    // main job itself has gone out.
+    const stages = claims.map(c => {
+      const title = c.description && shortTitle(c.description) !== mainTitle ? shortTitle(c.description) : '';
+      return {
+        name: `${c.number}${title ? ` - ${title}` : ''}`,
+        sm8Number: c.number,
+        sm8Status: c.status,
+        quotedExGst: c.totalExGst,
+        invoicedExGst: c.status === 'Completed' ? c.totalExGst : 0,
+      };
+    });
+    const mainExGst = exGst(sm8Total);
+    if (mainExGst > 0 || !claims.length) {
+      stages.push({
+        name: claims.length ? `${mainNumber} - Balance` : 'Labour & Materials',
+        sm8Number: mainNumber,
+        sm8Status: job.status,
+        quotedExGst: mainExGst,
+        invoicedExGst: !claims.length && invoiceSent ? mainExGst : 0,
+      });
+    }
+    const quotedExGst = r2(stages.reduce((s, x) => s + x.quotedExGst, 0));
+    const invoicedExGst = r2(stages.reduce((s, x) => s + x.invoicedExGst, 0));
+
+    const openClaims = claims.filter(c => c.status !== 'Completed');
+    if (openClaims.length) warnings.push(`${openClaims.map(c => '#' + c.number).join(', ')} not Completed in ServiceM8, so counted as not invoiced yet - check if any have actually gone out`);
     if (!claims.length && invoiceSent) warnings.push('ServiceM8 says this job has been invoiced in full - check invoiced to date');
     if (!claims.length && !invoiceSent && paymentAmount > 0) warnings.push(`ServiceM8 shows ${paymentAmount.toFixed(2)} paid but no invoice - check invoiced to date`);
-    if (!(sm8Total > 0)) warnings.push('No job total in ServiceM8');
+    if (!(quotedExGst > 0)) warnings.push('No job total in ServiceM8');
 
     const { match, candidates } = matchClient({ ...company, name: companyName }, [...coContacts, ...jContacts], clients || []);
     if (match?.ambiguous) warnings.push(`Client match needs checking: ${match.reason}`);
@@ -265,12 +293,13 @@ async function loadSm8OpenJobs(supabaseAdmin) {
       clientPhone,
       siteAddress: clean(job.job_address) || clean(company.address),
       description: clean(job.job_description),
-      suggestedName: `${matchedName} - ${shortTitle(job.job_description)}`,
+      suggestedName: `${matchedName} - ${mainTitle}`,
       sm8Total,
       invoiceSent,
       paymentAmount,
       quotedExGst,
       invoicedExGst,
+      stages,
       claims,
       notes: jobNotes,
       notesText: buildNotesText(job, jobNotes, claims),

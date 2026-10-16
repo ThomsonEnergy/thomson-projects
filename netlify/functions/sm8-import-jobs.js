@@ -2,17 +2,18 @@
 // Body: { rows: [{ sm8JobUuid, sm8JobNumber, companyUuid, companyName,
 //   companyAddress, clientEmail, clientPhone, siteAddress, description,
 //   notesText, name, clientId ('new' or an existing client id),
-//   quotedExGst, invoicedExGst }] }
+//   stages: [{ name, quotedExGst, invoicedExGst }] }] }
 // Admin only. Writes the rows the admin ticked on the review screen
 // (sm8-import-preview.js) as Direct Jobs, a few at a time - the page
 // sends them in small batches so no single call runs past the function
 // time limit.
 //
 // Each job is created exactly like a Direct Job from the Quick Job panel
-// (job_booked, one "Labour & Materials" stage, job number from the usual
-// trigger), plus:
-//   * quoted_amount / invoiced_amount on that stage, so invoicing from the
-//     app only bills the balance ServiceM8 hasn't already billed
+// (job_booked, job number from the usual trigger), plus:
+//   * one stage per ServiceM8 claim (4515a, 4515b...) and one for the
+//     balance left on the main job, each with quoted_amount /
+//     invoiced_amount, so invoicing from the app only bills what
+//     ServiceM8 hasn't already billed
 //   * the ServiceM8 job's notes in projects.notes
 //   * sm8_job_uuid / sm8_job_number, which make a re-run skip it
 // Reads nothing from and writes nothing to ServiceM8.
@@ -66,9 +67,15 @@ async function importRow(supabaseAdmin, userId, row) {
   if (!sm8JobUuid) throw new Error('Missing ServiceM8 job id');
   const name = str(row.name, 300);
   if (!name) throw new Error('Job name is required');
-  const quoted = r2(row.quotedExGst);
-  const invoiced = r2(row.invoicedExGst);
-  if (quoted < 0 || invoiced < 0) throw new Error('Amounts cannot be negative');
+  const stages = (Array.isArray(row.stages) ? row.stages : []).slice(0, 30).map(s => ({
+    name: str(s.name, 200), quoted: r2(s.quotedExGst), invoiced: r2(s.invoicedExGst),
+  }));
+  if (!stages.length) throw new Error('At least one stage is required');
+  for (const s of stages) {
+    if (!s.name) throw new Error('Every stage needs a name');
+    if (s.quoted < 0 || s.invoiced < 0) throw new Error(`${s.name}: amounts cannot be negative`);
+    if (s.invoiced > s.quoted + 0.01) throw new Error(`${s.name}: invoiced is more than its value`);
+  }
 
   const { data: existing } = await supabaseAdmin
     .from('projects').select('id, job_number').eq('sm8_job_uuid', sm8JobUuid).maybeSingle();
@@ -105,16 +112,16 @@ async function importRow(supabaseAdmin, userId, row) {
     throw projectErr;
   }
 
-  const { error: ccErr } = await supabaseAdmin.from('cost_centres').insert({
+  const { error: ccErr } = await supabaseAdmin.from('cost_centres').insert(stages.map((s, i) => ({
     project_id: project.id,
-    name: 'Labour & Materials',
-    sort_order: 0,
+    name: s.name,
+    sort_order: i,
     markup_percent: 45,
-    quoted_amount: quoted,
-    invoiced_amount: invoiced,
-  });
+    quoted_amount: s.quoted,
+    invoiced_amount: s.invoiced,
+  })));
   if (ccErr) {
-    // No stage means nowhere to log time or invoice against - take the
+    // No stages means nowhere to log time or invoice against - take the
     // half-made job back out so a re-run creates it cleanly.
     await supabaseAdmin.from('projects').delete().eq('id', project.id);
     throw ccErr;
