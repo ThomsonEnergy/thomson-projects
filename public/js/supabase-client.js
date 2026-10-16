@@ -5,12 +5,65 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Logging out anywhere ends every session for that user (signOut's default
+// scope is global), but other tabs and devices keep a copy of the old token
+// and only find out when the server rejects it ("Admin access required").
+// These checks notice that and send them to the login page instead.
+const onLoginPage = window.location.pathname.endsWith('/login.html');
+
+function goToLogin() {
+  if (!onLoginPage) window.location.href = '/login.html';
+}
+
+// Asks Supabase whether this browser's session is still alive. Only a
+// definite rejection logs out: offline or a server hiccup leaves it alone.
+let sessionCheck = null;
+function checkSessionAlive() {
+  if (sessionCheck) return sessionCheck;
+  sessionCheck = (async () => {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) return false;
+    const { error } = await supabaseClient.auth.getUser();
+    if (error && (error.status === 401 || error.status === 403 || /session.*not.*found|user.*not.*found/i.test(error.message || ''))) {
+      await supabaseClient.auth.signOut({ scope: 'local' });
+      goToLogin();
+      return false;
+    }
+    return true;
+  })().finally(() => { sessionCheck = null; });
+  return sessionCheck;
+}
+
+// Another tab in this browser logged out.
+supabaseClient.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT') goToLogin();
+});
+
+// Logged out on another device: recheck when the tab comes back into view,
+// every 5 minutes while it's open, and whenever one of our API calls is
+// refused.
+if (!onLoginPage) {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkSessionAlive();
+  });
+  setInterval(() => { if (document.visibilityState === 'visible') checkSessionAlive(); }, 5 * 60 * 1000);
+
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const res = await originalFetch(...args);
+    const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+    if ((res.status === 401 || res.status === 403) && url.includes('/.netlify/functions/')) checkSessionAlive();
+    return res;
+  };
+}
+
 async function requireLogin() {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) {
     window.location.href = '/login.html';
     return null;
   }
+  if (!(await checkSessionAlive())) return null;
 
   // Every page calls requireLogin() as its first act, so this is the one
   // shared place to force incomplete onboarding to finish before anyone
