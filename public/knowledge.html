@@ -96,7 +96,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=71"></script>
+  <script src="/js/supabase-client.js?v=72"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allEntries = [];
@@ -209,8 +209,9 @@
           backgroundPayload = { source_url: url };
         } else {
           const fileInput = document.getElementById('kb-file-input');
-          const file = fileInput.files[0];
-          if (!file) throw new Error('Choose a file first.');
+          const picked = fileInput.files[0];
+          if (!picked) throw new Error('Choose a file first.');
+          const file = await compressImage(picked, DOC_IMAGE_MAX, DOC_IMAGE_QUALITY);
           btn.textContent = 'Uploading...';
           const path = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
           const { error: upErr } = await supabaseClient.storage.from('knowledge-files').upload(path, file);
