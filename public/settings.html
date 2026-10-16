@@ -61,6 +61,7 @@
         <button class="settings-tab" data-panel="photos">Photo Categories</button>
         <button class="settings-tab" data-panel="users" data-admin-only="1">Users &amp; Roles</button>
         <button class="settings-tab" data-panel="onboarding-docs" data-admin-only="1">Onboarding Documents</button>
+        <button class="settings-tab" data-panel="sm8-import" data-admin-only="1">ServiceM8 Import</button>
         <button class="settings-tab" data-panel="apikeys" data-admin-only="1" data-dev-only="1">API Keys</button>
         <button class="settings-tab" data-panel="appearance">Appearance</button>
       </div>
@@ -577,6 +578,15 @@
             <p class="subtitle" style="margin-bottom:10px;">The employment contract is a template with placeholders - it's auto-filled per new hire and reviewed on the person's staff profile (Team &gt; their card &gt; Edit employee) before they see it, rather than edited directly. Everything else here is shown to staff exactly as written below.</p>
             <div id="onboarding-docs-list"><p class="subtitle">Loading...</p></div>
             <button type="button" class="secondary" id="add-onboarding-doc-btn" style="margin-top:10px;">+ Add document</button>
+          </div>
+        </div>
+
+        <!-- ServiceM8 Import -->
+        <div class="settings-panel" id="panel-sm8-import" data-admin-only="1">
+          <div class="card">
+            <h2>Move open jobs from ServiceM8</h2>
+            <p class="subtitle" style="margin-bottom:12px;">Brings every job still open in ServiceM8 across as a Direct Job: client, site address, description, quoted value, invoiced to date and notes. You see a dry run and check each job before anything is saved, and jobs already brought across are skipped, so it is safe to run again on cutover day. Nothing is changed in ServiceM8.</p>
+            <a class="btn" href="/sm8-import.html">Open ServiceM8 Import</a>
           </div>
         </div>
 

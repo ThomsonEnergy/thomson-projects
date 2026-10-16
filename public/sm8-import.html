@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>ServiceM8 Import - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=16" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .imp-filters { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+  .imp-filters button { font-size:12px; padding:5px 10px; }
+  .imp-filters button.active { background:var(--accent-dim); color:var(--accent); border-color:var(--accent); }
+  .imp-job { border:1px solid var(--border); border-radius:var(--radius); padding:14px; margin-bottom:12px; background:var(--surface); }
+  .imp-job.excluded { opacity:0.55; }
+  .imp-job-head { display:flex; gap:10px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; }
+  .imp-job-head label { margin:0; display:flex; gap:8px; align-items:center; font-weight:600; cursor:pointer; }
+  .imp-job-head input[type=checkbox] { width:auto; margin:0; }
+  .imp-meta { font-size:12px; color:var(--muted); }
+  .imp-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px 14px; margin-top:10px; }
+  .imp-grid label { margin-top:0; }
+  .imp-warn { margin-top:10px; font-size:12px; color:var(--red); }
+  .imp-warn div::before { content:'! '; font-weight:700; }
+  .imp-match { font-size:12px; margin-top:4px; color:var(--muted); }
+  .imp-match.ok { color:var(--green); }
+  .imp-match.check { color:var(--red); }
+  .imp-result { margin-top:10px; font-size:13px; }
+  .imp-result.ok { color:var(--green); }
+  .imp-result.fail { color:var(--red); }
+  .imp-job details { margin-top:10px; font-size:13px; }
+  .imp-job details pre { white-space:pre-wrap; font-family:inherit; background:var(--surface-2); padding:10px; border-radius:8px; margin:8px 0 0; max-height:260px; overflow:auto; }
+  .imp-bar { position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--border); padding:12px 0; display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:6px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>ServiceM8 Import</h1>
+    <p class="subtitle">Brings the jobs still open in ServiceM8 (status Work Order) across as Direct Jobs. Loading the list is a dry run: it only reads from ServiceM8 and saves nothing. Check each job, untick any you would rather finish in ServiceM8, then press Import. Jobs already brought across are skipped, so this can be run again on cutover day.</p>
+
+    <div class="card">
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <button id="load-btn">Load open jobs from ServiceM8</button>
+        <span id="load-msg" class="subtitle"></span>
+      </div>
+    </div>
+
+    <div id="stats" class="grid cols-4" style="display:none;">
+      <div class="stat"><div class="label">Open jobs in ServiceM8</div><div class="value" id="stat-open">-</div></div>
+      <div class="stat"><div class="label">Already imported</div><div class="value" id="stat-done">-</div></div>
+      <div class="stat"><div class="label">Need checking</div><div class="value" id="stat-check">-</div></div>
+      <div class="stat"><div class="label">Quotes (not imported)</div><div class="value" id="stat-quotes">-</div></div>
+    </div>
+
+    <div id="review" class="card" style="display:none;">
+      <h2 style="margin:0 0 6px;">Review</h2>
+      <p class="subtitle" style="margin:0 0 12px;">All amounts are ex GST, like everywhere else in the app. ServiceM8's job total includes GST, so it has been divided by 1.1; the original figure is shown under each job. <strong>Invoiced to date</strong> is what ServiceM8 (or Xero) has already billed: the app only lets you invoice the rest, so get it right on part-billed jobs.</p>
+      <div class="imp-filters" id="filters"></div>
+      <div id="job-list"></div>
+      <div class="imp-bar">
+        <button id="import-btn">Import selected jobs</button>
+        <span id="import-msg" class="subtitle"></span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=68"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    const BATCH = 5;
+    let rows = [];
+    let filter = 'all';
+    // Per-job state the admin edits: { include, name, clientId, quoted, invoiced, result }
+    const edits = new Map();
+
+    const FILTERS = [
+      { value: 'all', label: 'All' },
+      { value: 'check', label: 'Need checking' },
+      { value: 'new-client', label: 'New clients' },
+      { value: 'done', label: 'Already imported' },
+    ];
+
+    async function callFn(name, body) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch(`/.netlify/functions/${name}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      return data;
+    }
+
+    // escapeHtml leaves double quotes alone, which breaks value="..." attributes.
+    const escAttr = (s) => escapeHtml(s).replace(/"/g, '&quot;');
+
+    const needsCheck = (r) => r.warnings.length > 0 || !r.clientMatch;
+
+    async function loadPreview() {
+      const btn = document.getElementById('load-btn');
+      const msg = document.getElementById('load-msg');
+      btn.disabled = true;
+      msg.textContent = 'Reading open jobs, clients, contacts and notes from ServiceM8...';
+      try {
+        const data = await callFn('sm8-import-preview');
+        rows = data.rows;
+        edits.clear();
+        rows.forEach(r => edits.set(r.sm8JobUuid, {
+          include: !r.alreadyImported,
+          name: r.suggestedName,
+          clientId: r.clientMatch ? r.clientMatch.clientId : 'new',
+          quoted: r.quotedExGst.toFixed(2),
+          invoiced: r.invoicedExGst.toFixed(2),
+          result: r.alreadyImported ? { ok: true, skipped: true, projectId: r.alreadyImported.projectId, jobNumber: r.alreadyImported.jobNumber } : null,
+        }));
+        document.getElementById('stat-open').textContent = data.summary.workOrders;
+        document.getElementById('stat-done').textContent = data.summary.alreadyImported;
+        document.getElementById('stat-check').textContent = rows.filter(r => !r.alreadyImported && needsCheck(r)).length;
+        document.getElementById('stat-quotes').textContent = data.summary.quotesNotImported;
+        document.getElementById('stats').style.display = '';
+        document.getElementById('review').style.display = rows.length ? '' : 'none';
+        msg.textContent = rows.length
+          ? `Loaded ${rows.length} open job${rows.length === 1 ? '' : 's'}. Nothing has been saved.`
+          : 'No open Work Order jobs found in ServiceM8.';
+        btn.textContent = 'Reload from ServiceM8';
+        renderFilters();
+        renderList();
+      } catch (err) {
+        msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderFilters() {
+      document.getElementById('filters').innerHTML = FILTERS.map(f =>
+        `<button type="button" class="secondary ${filter === f.value ? 'active' : ''}" data-filter="${f.value}">${f.label}</button>`).join('');
+      document.querySelectorAll('#filters button').forEach(b => b.addEventListener('click', () => {
+        filter = b.dataset.filter;
+        renderFilters();
+        renderList();
+      }));
+    }
+
+    function visibleRows() {
+      return rows.filter(r => {
+        const e = edits.get(r.sm8JobUuid);
+        if (filter === 'check') return !r.alreadyImported && needsCheck(r);
+        if (filter === 'new-client') return !r.alreadyImported && e.clientId === 'new';
+        if (filter === 'done') return !!(e.result && e.result.ok);
+        return true;
+      });
+    }
+
+    function clientOptions(r, e) {
+      const opts = r.candidates.map(c => {
+        const detail = [c.email, c.phone, c.address].filter(Boolean).join(', ');
+        return `<option value="${c.id}" ${e.clientId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}${detail ? ' (' + escapeHtml(detail) + ')' : ''}</option>`;
+      });
+      opts.push(`<option value="new" ${e.clientId === 'new' ? 'selected' : ''}>Create new client: ${escapeHtml(r.companyName)}</option>`);
+      return opts.join('');
+    }
+
+    function matchLine(r, e) {
+      if (e.clientId === 'new') {
+        return `<div class="imp-match ${r.candidates.length ? 'check' : ''}">${r.candidates.length ? 'Possible existing clients above - pick one if it is the same client' : 'No existing client found, a new one will be created'}</div>`;
+      }
+      if (r.clientMatch && r.clientMatch.clientId === e.clientId) {
+        return `<div class="imp-match ${r.clientMatch.ambiguous ? 'check' : 'ok'}">${escapeHtml(r.clientMatch.reason)}</div>`;
+      }
+      return `<div class="imp-match">Chosen by you</div>`;
+    }
+
+    function resultLine(e) {
+      if (!e.result) return '';
+      if (!e.result.ok) return `<div class="imp-result fail">Import failed: ${escapeHtml(e.result.error)}</div>`;
+      const link = `<a href="/project.html?id=${e.result.projectId}" target="_blank">J${e.result.jobNumber}</a>`;
+      return `<div class="imp-result ok">${e.result.skipped ? 'Already in the app as' : 'Imported as'} ${link}</div>`;
+    }
+
+    function renderList() {
+      const list = visibleRows();
+      const el = document.getElementById('job-list');
+      if (!list.length) { el.innerHTML = '<p class="subtitle">Nothing in this view.</p>'; updateImportBar(); return; }
+
+      el.innerHTML = list.map(r => {
+        const e = edits.get(r.sm8JobUuid);
+        const done = !!(e.result && e.result.ok);
+        const locked = done ? 'disabled' : '';
+        return `
+          <div class="imp-job ${!e.include && !done ? 'excluded' : ''}" data-uuid="${r.sm8JobUuid}">
+            <div class="imp-job-head">
+              <label><input type="checkbox" data-field="include" ${e.include && !done ? 'checked' : ''} ${locked} /> ServiceM8 #${escapeHtml(r.sm8JobNumber)}</label>
+              <div class="imp-meta">${r.sm8Date ? 'Work order ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}ServiceM8 total ${money(r.sm8Total)} inc GST${r.invoiceSent ? ' &middot; invoice sent' : ''}${r.paymentAmount > 0 ? ' &middot; ' + money(r.paymentAmount) + ' paid' : ''}</div>
+            </div>
+            <div class="imp-grid">
+              <div style="grid-column:1 / -1;"><label>Job name</label><input data-field="name" value="${escAttr(e.name)}" ${locked} /></div>
+              <div style="grid-column:1 / -1;"><label>Client</label><select data-field="clientId" ${locked}>${clientOptions(r, e)}</select>${done ? '' : matchLine(r, e)}</div>
+              <div><label>Site address</label><div>${escapeHtml(r.siteAddress) || '<span class="subtitle">None in ServiceM8</span>'}</div></div>
+              <div><label>Contact</label><div>${escapeHtml([r.clientPhone, r.clientEmail].filter(Boolean).join(' / ')) || '<span class="subtitle">None in ServiceM8</span>'}</div></div>
+              <div><label>Quoted, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="quoted" value="${e.quoted}" ${locked} /></div>
+              <div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${e.invoiced}" ${locked} /></div>
+            </div>
+            ${r.warnings.length && !done ? `<div class="imp-warn">${r.warnings.map(w => `<div>${escapeHtml(w)}</div>`).join('')}</div>` : ''}
+            <details>
+              <summary>Description and ${r.notes.length} note${r.notes.length === 1 ? '' : 's'}</summary>
+              <pre>${escapeHtml(r.description || '(no description)')}</pre>
+              <pre>${escapeHtml(r.notesText)}</pre>
+            </details>
+            ${resultLine(e)}
+          </div>`;
+      }).join('');
+
+      el.querySelectorAll('.imp-job').forEach(card => {
+        const e = edits.get(card.dataset.uuid);
+        card.querySelectorAll('[data-field]').forEach(input => {
+          const field = input.dataset.field;
+          const evt = input.type === 'checkbox' || input.tagName === 'SELECT' ? 'change' : 'input';
+          input.addEventListener(evt, () => {
+            e[field] = input.type === 'checkbox' ? input.checked : input.value;
+            // Re-render for changes that alter the card itself; typing in a
+            // text box just updates state so focus is not lost.
+            if (field === 'include' || field === 'clientId') renderList();
+            else updateImportBar();
+          });
+        });
+      });
+      updateImportBar();
+    }
+
+    function selectedRows() {
+      return rows.filter(r => { const e = edits.get(r.sm8JobUuid); return e.include && !(e.result && e.result.ok); });
+    }
+
+    function updateImportBar() {
+      const n = selectedRows().length;
+      const btn = document.getElementById('import-btn');
+      btn.textContent = `Import ${n} selected job${n === 1 ? '' : 's'}`;
+      btn.disabled = n === 0;
+    }
+
+    function validate(list) {
+      for (const r of list) {
+        const e = edits.get(r.sm8JobUuid);
+        const q = Number(e.quoted), i = Number(e.invoiced);
+        if (!e.name.trim()) return `ServiceM8 #${r.sm8JobNumber}: job name is required.`;
+        if (!(q >= 0) || !(i >= 0) || e.quoted === '' || e.invoiced === '') return `ServiceM8 #${r.sm8JobNumber}: quoted and invoiced must be numbers, 0 or more.`;
+        if (i > q + 0.01) return `ServiceM8 #${r.sm8JobNumber}: invoiced to date (${money(i)}) is more than quoted (${money(q)}).`;
+      }
+      return null;
+    }
+
+    async function runImport() {
+      const list = selectedRows();
+      const msg = document.getElementById('import-msg');
+      const problem = validate(list);
+      if (problem) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(problem)}</span>`; return; }
+
+      const newClients = new Set(list.filter(r => edits.get(r.sm8JobUuid).clientId === 'new').map(r => r.companyUuid || r.companyName)).size;
+      if (!confirm(`Create ${list.length} job${list.length === 1 ? '' : 's'} in the app${newClients ? ` and ${newClients} new client${newClients === 1 ? '' : 's'}` : ''}? Nothing is changed in ServiceM8.`)) return;
+
+      const btn = document.getElementById('import-btn');
+      const loadBtn = document.getElementById('load-btn');
+      btn.disabled = true;
+      loadBtn.disabled = true;
+      let ok = 0, failed = 0;
+      try {
+        for (let i = 0; i < list.length; i += BATCH) {
+          msg.textContent = `Importing ${Math.min(i + BATCH, list.length)} of ${list.length}...`;
+          const batch = list.slice(i, i + BATCH).map(r => {
+            const e = edits.get(r.sm8JobUuid);
+            return {
+              sm8JobUuid: r.sm8JobUuid, sm8JobNumber: r.sm8JobNumber,
+              companyUuid: r.companyUuid, companyName: r.companyName, companyAddress: r.companyAddress,
+              clientEmail: r.clientEmail, clientPhone: r.clientPhone, siteAddress: r.siteAddress,
+              description: r.description, notesText: r.notesText,
+              name: e.name.trim(), clientId: e.clientId,
+              quotedExGst: Number(e.quoted), invoicedExGst: Number(e.invoiced),
+            };
+          });
+          try {
+            const data = await callFn('sm8-import-jobs', { rows: batch });
+            data.results.forEach(res => {
+              edits.get(res.sm8JobUuid).result = res;
+              if (res.ok) ok++; else failed++;
+            });
+          } catch (err) {
+            batch.forEach(b => { edits.get(b.sm8JobUuid).result = { ok: false, error: err.message }; });
+            failed += batch.length;
+          }
+          renderList();
+        }
+        msg.innerHTML = failed
+          ? `<span style="color:var(--red);">${ok} imported, ${failed} failed. Fix the failed ones and press Import again; the imported ones are skipped.</span>`
+          : `<span style="color:var(--green);">${ok} job${ok === 1 ? '' : 's'} imported.</span>`;
+      } finally {
+        loadBtn.disabled = false;
+        updateImportBar();
+      }
+    }
+
+    document.getElementById('load-btn').addEventListener('click', loadPreview);
+    document.getElementById('import-btn').addEventListener('click', runImport);
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('settings');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      const role = await getMyRole();
+      if (role !== 'admin') { window.location.href = '/home.html'; return; }
+    })();
+  </script>
+</body>
+</html>

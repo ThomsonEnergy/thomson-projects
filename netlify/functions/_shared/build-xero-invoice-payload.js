@@ -104,13 +104,17 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
     lineItems = [];
     claims.forEach(c => {
       const stageName = c.cost_centres?.name || 'Stage';
-      lineItems.push({
-        Description: `${stageName} - Labour`,
-        Quantity: 1,
-        UnitAmount: Number(c.labour_amount) || 0,
-        AccountCode: labourMap.xero_account_code,
-        TaxType: labourMap.xero_tax_type,
-      });
+      // A $0 Labour line only when the stage has nothing else (e.g. a
+      // do-and-charge invoice that's only Stock added in the builder skips it).
+      if (Number(c.labour_amount) > 0 || !(Number(c.material_amount) > 0 || Number(c.stc_amount) > 0)) {
+        lineItems.push({
+          Description: `${stageName} - Labour`,
+          Quantity: 1,
+          UnitAmount: Number(c.labour_amount) || 0,
+          AccountCode: labourMap.xero_account_code,
+          TaxType: labourMap.xero_tax_type,
+        });
+      }
       if (Number(c.material_amount) > 0) {
         lineItems.push({
           Description: `${stageName} - Materials`,
