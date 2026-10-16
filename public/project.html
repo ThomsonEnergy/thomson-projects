@@ -1554,15 +1554,18 @@
       return { stageInvoices, claimedTotal, quotedAmt, remaining, stcApplied, stcRemaining };
     }
 
-    // Splits a stage's claimed $ into labour/materials using the same ratio
-    // as its estimated cost breakdown - matches how each stage's own
-    // estimated_labour_cost/estimated_material_cost split was already being
-    // used to default a single-stage claim before this was project-wide.
+    // Splits a stage's claimed $ into labour/materials (the two income lines
+    // it posts to Xero) in proportion to what each sells for in the stage's
+    // price. estimated_labour_cost is already a sell total (hours x the
+    // tier's sell rate); estimated_material_cost is a cost, so it is marked
+    // up by the stage's markup% first - the same sell = material x (1 +
+    // markup%) + labour that updateStageTotals prices the stage with.
+    // Comparing labour sell against material cost would over-code labour.
     function splitLabourMaterial(centre, amount) {
-      const labourCost = Number(centre.estimated_labour_cost) || 0;
-      const materialCost = Number(centre.estimated_material_cost) || 0;
-      const costTotal = labourCost + materialCost;
-      const labourShare = costTotal > 0 ? labourCost / costTotal : 1;
+      const labourSell = Number(centre.estimated_labour_cost) || 0;
+      const materialSell = (Number(centre.estimated_material_cost) || 0) * (1 + (Number(centre.markup_percent) || 0) / 100);
+      const sellTotal = labourSell + materialSell;
+      const labourShare = sellTotal > 0 ? labourSell / sellTotal : 1;
       const labourAmount = Math.round(amount * labourShare * 100) / 100;
       const materialAmount = Math.round((amount - labourAmount) * 100) / 100;
       return { labourAmount, materialAmount };
