@@ -28,7 +28,7 @@
 
 const crypto = require('crypto');
 const { requireAdmin } = require('./_shared/require-admin');
-const { stageFromLines } = require('./_shared/sm8-import');
+const { stageFromLines, stcsText } = require('./_shared/sm8-import');
 
 const MAX_ROWS = 10;
 const MAX_LINES = 3000;
@@ -104,8 +104,15 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
   // it is the figure typed on the review screen.
   const quoted = lines.length ? r2(lines.reduce((t, l) => t + r2(l.quantity * l.price), 0)) : r2(s.quotedExGst);
   const invoiced = r2(s.invoicedExGst);
-  const stcTotal = r2(s.stcTotalExGst);
-  if (stcTotal < 0) throw new Error('STC credit cannot be negative');
+  // ServiceM8's STC rebate lines, kept for staff to enter by hand.
+  const stcs = (Array.isArray(s.stcs) ? s.stcs : []).slice(0, 10).map(x => ({
+    type: ['pv', 'bstc', 'swh'].includes(x.type) ? x.type : 'pv',
+    count: Math.round(n(x.count)), price: r2(x.price), total: r2(x.total), label: str(x.label, 200),
+  }));
+  if (stcs.some(x => !(x.count >= 0) || !(x.price >= 0))) throw new Error('Bad STC figures');
+  const stcNote = stcs.length
+    ? `\n\nSTCs in ServiceM8, NOT applied to this job yet: ${stcsText(stcs)}.\nEnter them on the job's STCs tab (+ Add STCs) and set the stage's STC credit in Edit stages.`
+    : '';
   if (Number.isNaN(quoted) || quoted < 0 || !(invoiced >= 0)) throw new Error('Value and invoiced must be numbers, 0 or more');
   if (invoiced > quoted + 0.01) throw new Error(`Invoiced ($${invoiced.toFixed(2)}) is more than the job value ($${quoted.toFixed(2)})`);
   const groupDescriptions = new Map((Array.isArray(s.groups) ? s.groups : []).map(g => [str(g.key, 100), str(g.description, 5000)]));
@@ -121,7 +128,8 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
     .insert({
       name,
       sow_text: str(row.description) || null,
-      notes: str(row.notesText, 100000) || null,
+      notes: (str(row.notesText, 100000) + stcNote).trim() || null,
+      sm8_stcs: stcs.length ? stcs : null,
       client_id: client.id,
       client_name: client.name,
       client_email: client.email || str(row.clientEmail, 300) || null,
@@ -159,9 +167,8 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
       estimated_material_cost: calc ? calc.estimatedMaterial : 0,
       quoted_amount: quoted,
       invoiced_amount: invoiced,
-      // ServiceM8's STC rebate lines: the customer's STC credit, taken off
-      // each invoice like a quote's STCs.
-      stc_total: stcTotal,
+      // STCs are not applied here - staff enter them on the job (STCs tab
+      // and this stage's STC credit) from projects.sm8_stcs / the notes.
     }).select('id').single();
     if (ccErr) throw ccErr;
 

@@ -305,9 +305,18 @@ async function loadSm8OpenJobs(supabaseAdmin) {
 const isPartialInvoice = (m) => /partial\s*invoice/i.test(String(m.name || ''));
 const num = (v) => Number(v) || 0;
 // "STC Rebate", "BSTC rebate": the customer's STC credit, a negative,
-// GST-free line. In the app that is the stage's STC credit (stc_total),
-// taken off each invoice, not a line item.
+// GST-free line. Not imported as a line item or applied automatically:
+// staff enter STCs on the job the normal way (STCs tab and the stage's STC
+// credit), from the list kept in projects.sm8_stcs and the job's notes.
 const isStcRebate = (m) => /\bb?stcs?\b/i.test(String(m.name || '')) && num(m.price) * num(m.quantity) < 0;
+const stcTypeOf = (name) => (/\bbstc/i.test(name) ? 'bstc' : /\b(swh|hot\s*water)\b/i.test(name) ? 'swh' : 'pv');
+const STC_TYPE_LABELS = { pv: 'solar STCs', bstc: 'battery STCs', swh: 'hot water STCs' };
+
+// "160 solar STCs at $35.00 ($5,600.00), 420 battery STCs at $35.00 ($14,700.00)"
+function stcsText(stcs) {
+  const fmt = (n) => n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return stcs.map(x => `${x.count} ${STC_TYPE_LABELS[x.type]} at $${fmt(x.price)} ($${fmt(x.total)})`).join(', ');
+}
 
 // Labour: a rate tier's name, even with a date on the end ("Licensed
 // Electrical Specialist (14/05/2026)"), or an obvious trade/labour word.
@@ -346,10 +355,14 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
   const bundleByUuid = new Map(bundles.filter(b => isOn(b.active) && num(b.quantity) > 0).map(b => [b.uuid, b]));
   const componentsByBundle = new Map();
   const standalone = [];
-  let stcTotal = 0;
+  const stcs = [];
   for (const m of active) {
     if (isPartialInvoice(m)) continue;
-    if (!m.job_material_bundle_uuid && isStcRebate(m)) { stcTotal += -num(m.price) * num(m.quantity); continue; }
+    if (!m.job_material_bundle_uuid && isStcRebate(m)) {
+      const count = Math.abs(num(m.quantity)), price = Math.abs(num(m.price));
+      stcs.push({ type: stcTypeOf(clean(m.name)), count, price, total: r2(count * price), label: clean(m.name) });
+      continue;
+    }
     if (m.job_material_bundle_uuid) {
       if (!bundleByUuid.has(m.job_material_bundle_uuid) || !num(m.quantity)) continue;
       (componentsByBundle.get(m.job_material_bundle_uuid) || componentsByBundle.set(m.job_material_bundle_uuid, []).get(m.job_material_bundle_uuid)).push(m);
@@ -388,7 +401,6 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
 
   const quotedExGst = r2(lines.reduce((s, l) => s + l.sell, 0));
   const invoicedExGst = r2(claimsUsed.filter(c => c.invoiced).reduce((s, c) => s + c.valueExGst, 0));
-  stcTotal = r2(stcTotal);
 
   // Check against ServiceM8's own total, which includes GST line by line
   // (STC rebates are GST-free): every active row at its own tax rate
@@ -398,13 +410,13 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
   if (active.length && Math.abs(expectedInc - num(job.totalIncGst)) > 1) {
     warnings.push(`Line items come to $${expectedInc.toFixed(2)} inc GST but ServiceM8's job total is $${num(job.totalIncGst).toFixed(2)} - check the value`);
   }
-  if (stcTotal > 0) warnings.push(`STC rebate of $${stcTotal.toFixed(2)} becomes the job's STC credit (taken off its invoices) - check it against any STCs already credited on ServiceM8 claims`);
+  if (stcs.length) warnings.push(`STCs not applied: ${stcsText(stcs)}. They go in the job's notes - enter them on the job (STCs tab and the stage's STC credit) after importing`);
   if (lines.length) {
     const { markupPercent } = stageFromLines(lines);
     if (markupPercent < 0 || markupPercent > 300) warnings.push(`Materials in ServiceM8 have ${markupPercent < 0 ? 'costs above their sell price' : 'little or no cost recorded'} (stage markup ${Math.round(markupPercent)}%) - profit on this job will look ${markupPercent < 0 ? 'low' : 'high'}`);
   }
 
-  return { lines, groups, claimsUsed, quotedExGst, invoicedExGst, stcTotal, warnings };
+  return { lines, groups, claimsUsed, quotedExGst, invoicedExGst, stcs, warnings };
 }
 
 // Server side, at import: turns review-screen lines into cost centre line
@@ -461,4 +473,4 @@ async function loadSm8JobLines(apiKey, jobs, tierNames) {
   return out;
 }
 
-module.exports = { loadSm8OpenJobs, loadSm8JobLines, buildJobStage, stageFromLines, sm8GetAll, SM8_BASE };
+module.exports = { stcsText, loadSm8OpenJobs, loadSm8JobLines, buildJobStage, stageFromLines, sm8GetAll, SM8_BASE };

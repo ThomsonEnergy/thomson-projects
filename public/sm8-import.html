@@ -324,9 +324,9 @@
       const claims = e.lines ? e.lines.claimsUsed : [];
       const groups = e.lines ? e.lines.groups : [];
       const standaloneCount = f.lines.filter(l => l.standalone).length;
-      const stc = e.lines ? e.lines.stcTotal || 0 : 0;
+      const stc = e.lines ? (e.lines.stcs || []).reduce((s, x) => s + x.total, 0) : 0;
       const valueField = e.lines && f.lines.length
-        ? `<div><label>Job value, ex GST</label><div class="imp-figure">${money(f.value)}</div><div class="imp-meta">${groups.length} prebuild${groups.length === 1 ? '' : 's'}, ${standaloneCount} other line${standaloneCount === 1 ? '' : 's'} &middot; labour ${money(f.labour)}, materials ${money(f.materials)}${stc ? ` &middot; less STC credit ${money(stc)}` : ''}</div></div>`
+        ? `<div><label>Job value, ex GST</label><div class="imp-figure">${money(f.value)}</div><div class="imp-meta">${groups.length} prebuild${groups.length === 1 ? '' : 's'}, ${standaloneCount} other line${standaloneCount === 1 ? '' : 's'} &middot; labour ${money(f.labour)}, materials ${money(f.materials)}${stc ? ` &middot; STCs ${money(stc)} to enter by hand after importing` : ''}</div></div>`
         : `<div><label>Job value, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="manualValue" value="${escAttr(e.manualValue)}" ${locked} /><div class="imp-meta">${e.linesError ? 'No line items - typed value' : 'No line items in ServiceM8'}</div></div>`;
 
       // Prebuild groups, then the standalone lines (whose Labour/Material
@@ -353,7 +353,7 @@
         <div class="imp-grid">
           ${typeSelect}
           ${valueField}
-          <div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${escAttr(e.invoiced)}" ${locked} /><div class="imp-meta">Left to invoice <strong class="imp-left">${money(f.value - f.invoiced)}</strong>${stc ? ' before STC credit' : ''}</div></div>
+          <div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${escAttr(e.invoiced)}" ${locked} /><div class="imp-meta">Left to invoice <strong class="imp-left">${money(f.value - f.invoiced)}</strong>${stc ? ' before STCs' : ''}</div></div>
         </div>
         ${claims.length ? `<div class="imp-claims">ServiceM8 claims: ${claims.map(c => `#${escapeHtml(c.number)} ${money(c.valueExGst)} ${c.invoiced ? 'invoiced' : `<span style="color:var(--red);">not invoiced (${escapeHtml(c.status)})</span>`}`).join(' &middot; ')}</div>` : ''}
         ${groupRows ? `<details style="margin-top:10px;"><summary>Line items (${f.lines.length})${standaloneCount ? ` - check Labour/Material on the ${standaloneCount} line${standaloneCount === 1 ? '' : 's'} outside a prebuild` : ''}</summary>
@@ -492,7 +492,7 @@
                 name: e.stageName.trim() || 'Labour & Materials',
                 quotedExGst: Number(e.manualValue) || 0,
                 invoicedExGst: Number(e.invoiced) || 0,
-                stcTotalExGst: e.lines ? e.lines.stcTotal || 0 : 0,
+                stcs: e.lines ? e.lines.stcs || [] : [],
                 lines: linesOf(e).map(l => ({ item_type: l.item_type, description: l.description, quantity: l.quantity, cost: l.cost, price: l.price, group: l.group, base_quantity: l.base_quantity })),
                 groups: e.lines ? e.lines.groups.map(g => ({ key: g.key, description: g.description })) : [],
               },
