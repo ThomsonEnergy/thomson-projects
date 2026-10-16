@@ -25,6 +25,16 @@
   .imp-meta { font-size:12px; color:var(--muted); }
   .imp-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px 14px; margin-top:10px; }
   .imp-grid label { margin-top:0; }
+  .imp-stages { width:100%; border-collapse:collapse; font-size:13px; min-width:520px; }
+  .imp-stages th { text-align:left; font-weight:600; color:var(--muted); padding:4px 6px; border-bottom:1px solid var(--border); }
+  .imp-stages td { padding:4px 6px; vertical-align:middle; }
+  .imp-stages .num { text-align:right; width:140px; }
+  .imp-stages input { margin:0; }
+  .imp-stages tr.imp-group td { padding-top:10px; border-bottom:1px solid var(--border); }
+  .imp-stages tr.imp-comp td:first-child { padding-left:18px; color:var(--muted); }
+  .imp-stages select { margin:0; padding:3px 6px; font-size:12px; width:auto; }
+  .imp-figure { font-size:18px; font-weight:600; }
+  .imp-claims { margin-top:10px; font-size:13px; padding:8px 10px; background:var(--surface-2); border-radius:8px; }
   .imp-warn { margin-top:10px; font-size:12px; color:var(--red); }
   .imp-warn div::before { content:'! '; font-weight:700; }
   .imp-match { font-size:12px; margin-top:4px; color:var(--muted); }
@@ -71,13 +81,30 @@
 
     <div id="review" class="card" style="display:none;">
       <h2 style="margin:0 0 6px;">Review</h2>
-      <p class="subtitle" style="margin:0 0 12px;">All amounts are ex GST, like everywhere else in the app. ServiceM8's job total includes GST, so it has been divided by 1.1; the original figure is shown under each job. <strong>Invoiced to date</strong> is what ServiceM8 (or Xero) has already billed: the app only lets you invoice the rest, so get it right on part-billed jobs.</p>
-      <div class="imp-filters" id="filters"></div>
+      <p class="subtitle" style="margin:0 0 12px;">All amounts are ex GST, like everywhere else in the app. Each job comes across with its ServiceM8 line items: every bundle as a prebuild with its real parts and labour, at the prices the client was quoted, so labour and materials split properly when it is invoiced to Xero. Lettered jobs (4515A deposit, 4515B progress claim, and so on) are not imported as jobs: a Completed one counts toward 4515's invoiced to date, and the app only lets you invoice what is left. Check the Labour/Material choice on any line that is not part of a prebuild.</p>
+      <div id="orphan-claims"></div>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+        <div class="imp-filters" id="filters"></div>
+        <div class="imp-filters">
+          <button type="button" class="secondary" id="tick-all-btn">Tick all</button>
+          <button type="button" class="secondary" id="untick-all-btn">Untick all</button>
+        </div>
+      </div>
       <div id="job-list"></div>
       <div class="imp-bar">
         <button id="import-btn">Import selected jobs</button>
         <span id="import-msg" class="subtitle"></span>
       </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 6px;">Docs and photos</h2>
+      <p class="subtitle" style="margin:0 0 12px;">Once jobs are imported, this copies their ServiceM8 attachments across: pictures into the job's Photos, everything else (PDFs, plans, HEIC photos, videos...) into its Documents under a "ServiceM8" folder. It runs in the background, so you can leave this page, and it is safe to press again: copied files are skipped, failed ones are retried, and anything left over when a run hits its 15 minute limit is picked up next time.</p>
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <button id="copy-btn">Copy docs and photos</button>
+        <span id="copy-msg" class="subtitle"></span>
+      </div>
+      <div id="copy-progress" style="margin-top:12px;"></div>
     </div>
   </div>
 
@@ -85,9 +112,13 @@
   <script src="/js/theme.js"></script>
   <script>
     const BATCH = 5;
+    const LINES_BATCH = 8;
     let rows = [];
     let filter = 'all';
-    // Per-job state the admin edits: { include, name, clientId, quoted, invoiced, result }
+    let linesLoading = false;
+    // Per-job state the admin edits: { include, name, clientId, jobType,
+    // stageName, invoiced, manualValue, typeOverrides: {lineIndex: type},
+    // lines (from sm8-import-lines, null until loaded), linesError, result }
     const edits = new Map();
 
     const FILTERS = [
@@ -112,7 +143,71 @@
     // escapeHtml leaves double quotes alone, which breaks value="..." attributes.
     const escAttr = (s) => escapeHtml(s).replace(/"/g, '&quot;');
 
-    const needsCheck = (r) => r.warnings.length > 0 || !r.clientMatch;
+    const allWarnings = (r) => {
+      const e = edits.get(r.sm8JobUuid);
+      return [...r.warnings, ...(e && e.lines ? e.lines.warnings : []), ...(e && e.linesError ? [`Line items could not be loaded: ${e.linesError}`] : [])];
+    };
+    const needsCheck = (r) => allWarnings(r).length > 0 || !r.clientMatch;
+
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    // Line items for every job not already imported, a few jobs per call.
+    // ServiceM8 allows about 180 calls a minute and each job takes two, so
+    // batches are spaced out, and any job it turned away (rate limit) is
+    // tried again after a pause.
+    async function loadLines() {
+      const msg = document.getElementById('load-msg');
+      let todo = rows.filter(r => !r.alreadyImported);
+      const total = todo.length;
+      linesLoading = true;
+      updateImportBar();
+      for (let round = 0; round < 3 && todo.length; round++) {
+        if (round > 0) {
+          msg.textContent = `ServiceM8 asked us to slow down - waiting a minute, then reading the last ${todo.length} job${todo.length === 1 ? '' : 's'}... Nothing has been saved.`;
+          await sleep(60000);
+        }
+        const retry = [];
+        for (let i = 0; i < todo.length; i += LINES_BATCH) {
+          const started = Date.now();
+          const done = total - todo.length + Math.min(i + LINES_BATCH, todo.length);
+          msg.textContent = `Loaded ${rows.length} open jobs. Reading line items from ServiceM8: ${done} of ${total}... Nothing has been saved.`;
+          const batch = todo.slice(i, i + LINES_BATCH);
+          try {
+            const data = await callFn('sm8-import-lines', {
+              jobs: batch.map(r => ({ uuid: r.sm8JobUuid, number: r.sm8JobNumber, totalIncGst: r.sm8Total, claims: r.claims })),
+            });
+            batch.forEach(r => {
+              const e = edits.get(r.sm8JobUuid);
+              const res = data.lines[r.sm8JobUuid];
+              if (res && res.ok) {
+                e.lines = res;
+                e.linesError = null;
+                e.invoiced = res.invoicedExGst.toFixed(2);
+                // Nothing to quote from: default to do and charge.
+                if (!res.lines.length && !(r.sm8Total > 0)) e.jobType = 'do_and_charge';
+              } else if (res && res.rateLimited) {
+                retry.push(r);
+              } else {
+                e.linesError = res ? res.error : 'no response';
+              }
+            });
+          } catch (err) {
+            if (/\b429\b/.test(err.message)) retry.push(...batch);
+            else batch.forEach(r => { edits.get(r.sm8JobUuid).linesError = err.message; });
+          }
+          renderList();
+          // ~17 calls per batch: one batch every 7 seconds stays under the limit.
+          if (i + LINES_BATCH < todo.length) await sleep(Math.max(0, 7000 - (Date.now() - started)));
+        }
+        todo = retry;
+      }
+      todo.forEach(r => { edits.get(r.sm8JobUuid).linesError = 'ServiceM8 rate limit - press Reload to try again'; });
+      linesLoading = false;
+      document.getElementById('stat-check').textContent = rows.filter(r => !r.alreadyImported && needsCheck(r)).length;
+      const failed = todo.filter(r => edits.get(r.sm8JobUuid).linesError).length;
+      msg.textContent = `Loaded ${rows.length} open job${rows.length === 1 ? '' : 's'} and their line items${failed ? ` (${failed} could not be read - those can still be imported with a typed value)` : ''}. Nothing has been saved.`;
+      updateImportBar();
+    }
 
     async function loadPreview() {
       const btn = document.getElementById('load-btn');
@@ -127,14 +222,23 @@
           include: !r.alreadyImported,
           name: r.suggestedName,
           clientId: r.clientMatch ? r.clientMatch.clientId : 'new',
-          quoted: r.quotedExGst.toFixed(2),
-          invoiced: r.invoicedExGst.toFixed(2),
+          jobType: 'quoted',
+          stageName: 'Labour & Materials',
+          invoiced: (r.invoiceSent && !r.claims.length ? r.sm8Total / 1.1 : 0).toFixed(2),
+          manualValue: (r.sm8Total / 1.1).toFixed(2),
+          typeOverrides: {},
+          lines: null,
+          linesError: null,
           result: r.alreadyImported ? { ok: true, skipped: true, projectId: r.alreadyImported.projectId, jobNumber: r.alreadyImported.jobNumber } : null,
         }));
         document.getElementById('stat-open').textContent = data.summary.workOrders;
         document.getElementById('stat-done').textContent = data.summary.alreadyImported;
         document.getElementById('stat-check').textContent = rows.filter(r => !r.alreadyImported && needsCheck(r)).length;
         document.getElementById('stat-quotes').textContent = data.summary.quotesNotImported;
+        const orphans = data.summary.orphanClaims || [];
+        document.getElementById('orphan-claims').innerHTML = orphans.length
+          ? `<div class="error-box" style="margin-bottom:12px;">Open claims in ServiceM8 whose main job is not open, so they are not imported: ${orphans.map(n => '#' + escapeHtml(n)).join(', ')}. Check those in ServiceM8.</div>`
+          : '';
         document.getElementById('stats').style.display = '';
         document.getElementById('review').style.display = rows.length ? '' : 'none';
         msg.textContent = rows.length
@@ -143,6 +247,8 @@
         btn.textContent = 'Reload from ServiceM8';
         renderFilters();
         renderList();
+        btn.disabled = true;
+        await loadLines();
       } catch (err) {
         msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`;
       } finally {
@@ -189,6 +295,79 @@
       return `<div class="imp-match">Chosen by you</div>`;
     }
 
+    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    // The job's lines with the admin's Labour/Material choices applied.
+    const linesOf = (e) => (e.lines ? e.lines.lines.map((l, i) => ({ ...l, item_type: e.typeOverrides[i] || l.item_type })) : []);
+    function jobFigures(e) {
+      const lines = linesOf(e);
+      const value = lines.length ? r2(lines.reduce((s, l) => s + l.sell, 0)) : (Number(e.manualValue) || 0);
+      const labour = r2(lines.filter(l => l.item_type === 'labour').reduce((s, l) => s + l.sell, 0));
+      return { lines, value, labour, materials: r2(value - labour), invoiced: Number(e.invoiced) || 0 };
+    }
+
+    // The one stage the job gets: its prebuilds and line items (labour and
+    // materials at ServiceM8's sell prices), invoiced to date from the
+    // Completed claims.
+    function jobSection(r, e, locked) {
+      const f = jobFigures(e);
+      const typeSelect = `
+        <div><label>Job type</label><select data-field="jobType" ${locked}>
+          <option value="quoted" ${e.jobType === 'quoted' ? 'selected' : ''}>Quoted - invoice the remaining balance</option>
+          <option value="do_and_charge" ${e.jobType === 'do_and_charge' ? 'selected' : ''}>Do and charge - invoice actual time and materials</option>
+        </select></div>
+        <div><label>Stage name</label><input data-field="stageName" value="${escAttr(e.stageName)}" ${locked} /></div>`;
+
+      if (!e.lines && !e.linesError) {
+        return `<div class="imp-grid">${typeSelect}</div><p class="subtitle" style="margin:10px 0 0;">Reading line items from ServiceM8...</p>`;
+      }
+
+      const claims = e.lines ? e.lines.claimsUsed : [];
+      const groups = e.lines ? e.lines.groups : [];
+      const standaloneCount = f.lines.filter(l => l.standalone).length;
+      const stc = e.lines ? (e.lines.stcs || []).reduce((s, x) => s + x.total, 0) : 0;
+      const valueField = e.lines && f.lines.length
+        ? `<div><label>Job value, ex GST</label><div class="imp-figure">${money(f.value)}</div><div class="imp-meta">${groups.length} prebuild${groups.length === 1 ? '' : 's'}, ${standaloneCount} other line${standaloneCount === 1 ? '' : 's'} &middot; labour ${money(f.labour)}, materials ${money(f.materials)}${stc ? ` &middot; STCs ${money(stc)} to enter by hand after importing` : ''}</div></div>`
+        : `<div><label>Job value, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="manualValue" value="${escAttr(e.manualValue)}" ${locked} /><div class="imp-meta">${e.linesError ? 'No line items - typed value' : 'No line items in ServiceM8'}</div></div>`;
+
+      // Prebuild groups, then the standalone lines (whose Labour/Material
+      // can be changed - a prebuild's own split comes from its components).
+      let groupRows = '';
+      if (e.lines) {
+        const lineRows = [];
+        let lastGroup = null;
+        f.lines.forEach((l, i) => {
+          if (l.group && l.group !== lastGroup) {
+            const g = groups.find(x => x.key === l.group);
+            lineRows.push(`<tr class="imp-group"><td colspan="3"><strong>${escapeHtml(g.code || 'Prebuild')}</strong> x ${g.quantity} &middot; ${escapeHtml((g.description || '').split('\n').find(Boolean) || '').slice(0, 90)}</td><td class="num">${money(g.sell)}</td></tr>`);
+          }
+          lastGroup = l.group;
+          const typeCell = l.standalone
+            ? `<select data-line="${i}" ${locked}><option value="material" ${l.item_type === 'material' ? 'selected' : ''}>Material</option><option value="labour" ${l.item_type === 'labour' ? 'selected' : ''}>Labour</option></select>`
+            : (l.item_type === 'labour' ? 'Labour' : 'Material');
+          lineRows.push(`<tr class="${l.group ? 'imp-comp' : ''}"><td>${escapeHtml(l.description)}</td><td>${typeCell}</td><td class="num">${l.quantity} x ${money(l.price)}</td><td class="num">${money(l.sell)}</td></tr>`);
+        });
+        groupRows = lineRows.join('');
+      }
+
+      return `
+        <div class="imp-grid">
+          ${typeSelect}
+          ${valueField}
+          <div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${escAttr(e.invoiced)}" ${locked} /><div class="imp-meta">Left to invoice <strong class="imp-left">${money(f.value - f.invoiced)}</strong>${stc ? ' before STCs' : ''}</div></div>
+        </div>
+        ${claims.length ? `<div class="imp-claims">ServiceM8 claims: ${claims.map(c => `#${escapeHtml(c.number)} ${money(c.valueExGst)} ${c.invoiced ? 'invoiced' : `<span style="color:var(--red);">not invoiced (${escapeHtml(c.status)})</span>`}`).join(' &middot; ')}</div>` : ''}
+        ${groupRows ? `<details style="margin-top:10px;"><summary>Line items (${f.lines.length})${standaloneCount ? ` - check Labour/Material on the ${standaloneCount} line${standaloneCount === 1 ? '' : 's'} outside a prebuild` : ''}</summary>
+          <div style="overflow-x:auto;"><table class="imp-stages"><thead><tr><th>Item</th><th>Type</th><th class="num">Qty x sell</th><th class="num">Sell, ex GST</th></tr></thead><tbody>${groupRows}</tbody></table></div>
+        </details>` : ''}`;
+    }
+
+    // Claims for the job's notes, so the history stays with the job.
+    function claimsNote(e) {
+      const claims = e.lines ? e.lines.claimsUsed : [];
+      if (!claims.length) return '';
+      return '\n\nServiceM8 claims at the move (ex GST):\n' + claims.map(c => `#${c.number}: $${c.valueExGst.toFixed(2)}, ${c.invoiced ? 'invoiced' : `not invoiced yet (${c.status})`}`).join('\n');
+    }
+
     function resultLine(e) {
       if (!e.result) return '';
       if (!e.result.ok) return `<div class="imp-result fail">Import failed: ${escapeHtml(e.result.error)}</div>`;
@@ -209,17 +388,16 @@
           <div class="imp-job ${!e.include && !done ? 'excluded' : ''}" data-uuid="${r.sm8JobUuid}">
             <div class="imp-job-head">
               <label><input type="checkbox" data-field="include" ${e.include && !done ? 'checked' : ''} ${locked} /> ServiceM8 #${escapeHtml(r.sm8JobNumber)}</label>
-              <div class="imp-meta">${r.sm8Date ? 'Work order ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}ServiceM8 total ${money(r.sm8Total)} inc GST${r.invoiceSent ? ' &middot; invoice sent' : ''}${r.paymentAmount > 0 ? ' &middot; ' + money(r.paymentAmount) + ' paid' : ''}</div>
+              <div class="imp-meta">${r.sm8Date ? 'Work order ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}ServiceM8 total ${money(r.sm8Total)} inc GST${r.invoiceSent && !r.claims.length ? ' &middot; invoice sent' : ''}${r.paymentAmount > 0 ? ' &middot; ' + money(r.paymentAmount) + ' paid' : ''}</div>
             </div>
             <div class="imp-grid">
               <div style="grid-column:1 / -1;"><label>Job name</label><input data-field="name" value="${escAttr(e.name)}" ${locked} /></div>
               <div style="grid-column:1 / -1;"><label>Client</label><select data-field="clientId" ${locked}>${clientOptions(r, e)}</select>${done ? '' : matchLine(r, e)}</div>
               <div><label>Site address</label><div>${escapeHtml(r.siteAddress) || '<span class="subtitle">None in ServiceM8</span>'}</div></div>
               <div><label>Contact</label><div>${escapeHtml([r.clientPhone, r.clientEmail].filter(Boolean).join(' / ')) || '<span class="subtitle">None in ServiceM8</span>'}</div></div>
-              <div><label>Quoted, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="quoted" value="${e.quoted}" ${locked} /></div>
-              <div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${e.invoiced}" ${locked} /></div>
             </div>
-            ${r.warnings.length && !done ? `<div class="imp-warn">${r.warnings.map(w => `<div>${escapeHtml(w)}</div>`).join('')}</div>` : ''}
+            ${jobSection(r, e, locked)}
+            ${allWarnings(r).length && !done ? `<div class="imp-warn">${allWarnings(r).map(w => `<div>${escapeHtml(w)}</div>`).join('')}</div>` : ''}
             <details>
               <summary>Description and ${r.notes.length} note${r.notes.length === 1 ? '' : 's'}</summary>
               <pre>${escapeHtml(r.description || '(no description)')}</pre>
@@ -231,6 +409,15 @@
 
       el.querySelectorAll('.imp-job').forEach(card => {
         const e = edits.get(card.dataset.uuid);
+        card.querySelectorAll('[data-line]').forEach(sel => {
+          sel.addEventListener('change', () => {
+            e.typeOverrides[Number(sel.dataset.line)] = sel.value;
+            // Keep the line items list open across the re-render.
+            renderList();
+            const again = document.querySelector(`.imp-job[data-uuid="${card.dataset.uuid}"] details`);
+            if (again) again.open = true;
+          });
+        });
         card.querySelectorAll('[data-field]').forEach(input => {
           const field = input.dataset.field;
           const evt = input.type === 'checkbox' || input.tagName === 'SELECT' ? 'change' : 'input';
@@ -239,7 +426,14 @@
             // Re-render for changes that alter the card itself; typing in a
             // text box just updates state so focus is not lost.
             if (field === 'include' || field === 'clientId') renderList();
-            else updateImportBar();
+            else {
+              if (field === 'invoiced' || field === 'manualValue') {
+                const f = jobFigures(e);
+                const left = card.querySelector('.imp-left');
+                if (left) left.textContent = money(f.value - f.invoiced);
+              }
+              updateImportBar();
+            }
           });
         });
       });
@@ -253,17 +447,18 @@
     function updateImportBar() {
       const n = selectedRows().length;
       const btn = document.getElementById('import-btn');
-      btn.textContent = `Import ${n} selected job${n === 1 ? '' : 's'}`;
-      btn.disabled = n === 0;
+      btn.textContent = linesLoading ? 'Reading line items...' : `Import ${n} selected job${n === 1 ? '' : 's'}`;
+      btn.disabled = n === 0 || linesLoading;
     }
 
     function validate(list) {
       for (const r of list) {
         const e = edits.get(r.sm8JobUuid);
-        const q = Number(e.quoted), i = Number(e.invoiced);
         if (!e.name.trim()) return `ServiceM8 #${r.sm8JobNumber}: job name is required.`;
-        if (!(q >= 0) || !(i >= 0) || e.quoted === '' || e.invoiced === '') return `ServiceM8 #${r.sm8JobNumber}: quoted and invoiced must be numbers, 0 or more.`;
-        if (i > q + 0.01) return `ServiceM8 #${r.sm8JobNumber}: invoiced to date (${money(i)}) is more than quoted (${money(q)}).`;
+        if (!e.lines && !e.linesError) return `ServiceM8 #${r.sm8JobNumber}: line items are still loading.`;
+        const f = jobFigures(e);
+        if (!(f.value >= 0) || e.invoiced === '' || !(Number(e.invoiced) >= 0)) return `ServiceM8 #${r.sm8JobNumber}: value and invoiced must be numbers, 0 or more.`;
+        if (f.invoiced > f.value + 0.01) return `ServiceM8 #${r.sm8JobNumber}: invoiced (${money(f.invoiced)}) is more than the job value (${money(f.value)}).`;
       }
       return null;
     }
@@ -291,9 +486,16 @@
               sm8JobUuid: r.sm8JobUuid, sm8JobNumber: r.sm8JobNumber,
               companyUuid: r.companyUuid, companyName: r.companyName, companyAddress: r.companyAddress,
               clientEmail: r.clientEmail, clientPhone: r.clientPhone, siteAddress: r.siteAddress,
-              description: r.description, notesText: r.notesText,
-              name: e.name.trim(), clientId: e.clientId,
-              quotedExGst: Number(e.quoted), invoicedExGst: Number(e.invoiced),
+              description: r.description, notesText: r.notesText + claimsNote(e),
+              name: e.name.trim(), clientId: e.clientId, jobType: e.jobType,
+              stage: {
+                name: e.stageName.trim() || 'Labour & Materials',
+                quotedExGst: Number(e.manualValue) || 0,
+                invoicedExGst: Number(e.invoiced) || 0,
+                stcs: e.lines ? e.lines.stcs || [] : [],
+                lines: linesOf(e).map(l => ({ item_type: l.item_type, description: l.description, quantity: l.quantity, cost: l.cost, price: l.price, group: l.group, base_quantity: l.base_quantity })),
+                groups: e.lines ? e.lines.groups.map(g => ({ key: g.key, description: g.description })) : [],
+              },
             };
           });
           try {
@@ -317,6 +519,78 @@
       }
     }
 
+    // Applies to the jobs in the current filter view only, skipping ones
+    // already in the app.
+    function setAllIncluded(include) {
+      visibleRows().forEach(r => {
+        const e = edits.get(r.sm8JobUuid);
+        if (!(e.result && e.result.ok)) e.include = include;
+      });
+      renderList();
+    }
+
+    // ---- Docs and photos (sm8-copy-attachments-background.js) ----
+    let copyPollTimer = null;
+    let copyStartedAt = 0;
+
+    async function loadCopyProgress() {
+      const count = (status) => {
+        let q = supabaseClient.from('sm8_attachment_copies').select('id', { count: 'exact', head: true });
+        if (status) q = q.in('status', status);
+        return q.then(r => r.count || 0);
+      };
+      const [total, copied, waiting, failed, failedRows] = await Promise.all([
+        count(null), count(['copied']), count(['pending', 'copying']), count(['failed']),
+        supabaseClient.from('sm8_attachment_copies').select('file_name, error, projects(id, job_number)').eq('status', 'failed').order('created_at').limit(100).then(r => r.data || []),
+      ]);
+      const el = document.getElementById('copy-progress');
+      if (!total) {
+        el.innerHTML = copyStartedAt ? '<p class="subtitle">Asking ServiceM8 for the file list...</p>' : '<p class="subtitle">Nothing copied yet.</p>';
+      } else {
+        const pct = Math.round((copied / total) * 100);
+        el.innerHTML = `
+          <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+          <p class="subtitle" style="margin:8px 0 0;">${copied} of ${total} files copied${waiting ? ` &middot; ${waiting} to go` : ''}${failed ? ` &middot; <span style="color:var(--red);">${failed} failed</span>` : ''}</p>
+          ${failedRows.length ? `<details style="margin-top:8px;"><summary>Failed files</summary><ul style="margin:8px 0 0; padding-left:18px; font-size:13px;">${failedRows.map(f =>
+            `<li>${f.projects ? `<a href="/project.html?id=${f.projects.id}" target="_blank">J${f.projects.job_number}</a> ` : ''}${escapeHtml(f.file_name)}: ${escapeHtml(f.error || 'unknown error')}</li>`).join('')}</ul></details>` : ''}`;
+      }
+      // Keep polling while files are waiting, and for a couple of minutes
+      // after pressing the button (queueing the list comes first).
+      const running = waiting > 0 || (copyStartedAt && Date.now() - copyStartedAt < 120000);
+      if (!running) {
+        if (copyStartedAt) document.getElementById('copy-msg').textContent = failed ? 'Finished, with some failures - press again to retry them.' : 'Finished.';
+        copyStartedAt = 0;
+        document.getElementById('copy-btn').disabled = false;
+      }
+      clearTimeout(copyPollTimer);
+      if (running) copyPollTimer = setTimeout(loadCopyProgress, 5000);
+    }
+
+    async function startCopy() {
+      const btn = document.getElementById('copy-btn');
+      const msg = document.getElementById('copy-msg');
+      btn.disabled = true;
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/sm8-copy-attachments-background', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: '{}',
+        });
+        // Background functions answer 202 straight away; the work carries on.
+        if (res.status !== 202 && !res.ok) throw new Error(`Could not start the copy (${res.status})`);
+        copyStartedAt = Date.now();
+        msg.textContent = 'Copying in the background...';
+        loadCopyProgress();
+      } catch (err) {
+        msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`;
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('copy-btn').addEventListener('click', startCopy);
+    document.getElementById('tick-all-btn').addEventListener('click', () => setAllIncluded(true));
+    document.getElementById('untick-all-btn').addEventListener('click', () => setAllIncluded(false));
     document.getElementById('load-btn').addEventListener('click', loadPreview);
     document.getElementById('import-btn').addEventListener('click', runImport);
 
@@ -332,6 +606,7 @@
       });
       const role = await getMyRole();
       if (role !== 'admin') { window.location.href = '/home.html'; return; }
+      await loadCopyProgress();
     })();
   </script>
 </body>

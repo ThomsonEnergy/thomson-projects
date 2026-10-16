@@ -1554,15 +1554,18 @@
       return { stageInvoices, claimedTotal, quotedAmt, remaining, stcApplied, stcRemaining };
     }
 
-    // Splits a stage's claimed $ into labour/materials using the same ratio
-    // as its estimated cost breakdown - matches how each stage's own
-    // estimated_labour_cost/estimated_material_cost split was already being
-    // used to default a single-stage claim before this was project-wide.
+    // Splits a stage's claimed $ into labour/materials (the two income lines
+    // it posts to Xero) in proportion to what each sells for in the stage's
+    // price. estimated_labour_cost is already a sell total (hours x the
+    // tier's sell rate); estimated_material_cost is a cost, so it is marked
+    // up by the stage's markup% first - the same sell = material x (1 +
+    // markup%) + labour that updateStageTotals prices the stage with.
+    // Comparing labour sell against material cost would over-code labour.
     function splitLabourMaterial(centre, amount) {
-      const labourCost = Number(centre.estimated_labour_cost) || 0;
-      const materialCost = Number(centre.estimated_material_cost) || 0;
-      const costTotal = labourCost + materialCost;
-      const labourShare = costTotal > 0 ? labourCost / costTotal : 1;
+      const labourSell = Number(centre.estimated_labour_cost) || 0;
+      const materialSell = (Number(centre.estimated_material_cost) || 0) * (1 + (Number(centre.markup_percent) || 0) / 100);
+      const sellTotal = labourSell + materialSell;
+      const labourShare = sellTotal > 0 ? labourSell / sellTotal : 1;
       const labourAmount = Math.round(amount * labourShare * 100) / 100;
       const materialAmount = Math.round((amount - labourAmount) * 100) / 100;
       return { labourAmount, materialAmount };
@@ -4253,8 +4256,14 @@
       jobStcSettings = s.data || { stc_expected_sale_price: 39.25, stc_fee_per_certificate: 1 };
       jobStcRows = r.data || [];
       const quoteCount = centres.reduce((n, c) => n + stcCountForStage(c), 0);
+      const sm8Box = sm8StcsBox(project, centres);
+      const wireSm8 = () => el.querySelectorAll('.job-stc-sm8-add').forEach(b => b.addEventListener('click', () => {
+        const x = project.sm8_stcs[Number(b.dataset.i)];
+        openJobStcForm(project, centres, null, { stc_type: x.type, stc_count: x.count, booked_price: x.price, notes: `From ServiceM8 job #${project.sm8_job_number || ''}: ${x.label || ''}`.trim() });
+      }));
       if (!jobStcRows.length) {
-        el.innerHTML = `<p class="subtitle">No STCs recorded on this job yet.${quoteCount ? ` The quote credited ${quoteCount} STCs; press + Add STCs to start tracking them.` : ''}</p><div id="job-stc-form"></div>`;
+        el.innerHTML = `${sm8Box}<p class="subtitle">No STCs recorded on this job yet.${quoteCount ? ` The quote credited ${quoteCount} STCs; press + Add STCs to start tracking them.` : ''}</p><div id="job-stc-form"></div>`;
+        wireSm8();
         return;
       }
       const tot = { count: 0, booked: 0, net: 0, gain: 0 };
@@ -4276,7 +4285,7 @@
           <td data-label=""><button type="button" class="secondary job-stc-edit" data-id="${row.id}" style="font-size:12px; padding:4px 8px;">Edit</button></td>
         </tr>`;
       }).join('');
-      el.innerHTML = `
+      el.innerHTML = `${sm8Box}
         <table class="responsive-stack">
           <thead><tr><th>Type</th><th>Formbay ID</th><th class="num">STCs</th><th class="num">Credited</th><th>Status</th><th class="num">Sale</th><th class="num">Fee</th><th class="num">Net</th><th class="num">Gain</th><th></th></tr></thead>
           <tbody>${body}</tbody>
@@ -4285,15 +4294,42 @@
         ${quoteCount && quoteCount !== tot.count ? `<p class="subtitle" style="margin-top:8px;">The quote credited ${quoteCount} STCs; ${tot.count} are recorded here.</p>` : ''}
         <div id="job-stc-form"></div>`;
       el.querySelectorAll('.job-stc-edit').forEach(b => b.addEventListener('click', () => openJobStcForm(project, centres, jobStcRows.find(x => x.id === b.dataset.id))));
+      wireSm8();
     }
 
-    function openJobStcForm(project, centres, row) {
+    // Jobs brought across from ServiceM8 (sm8-import-jobs.js) arrive with
+    // their STCs listed but not applied (projects.sm8_stcs). This lists them
+    // with an Add button that opens the normal STC form prefilled, and shows
+    // how much of their value is on the stages' STC credit so far (set in
+    // Edit stages). It drops away once every type has been recorded here.
+    function sm8StcsBox(project, centres) {
+      const list = Array.isArray(project.sm8_stcs) ? project.sm8_stcs : [];
+      if (!list.length) return '';
+      const labels = { pv: 'solar STCs', bstc: 'battery STCs', swh: 'hot water STCs' };
+      const pending = list.map((x, i) => ({ ...x, i, recorded: jobStcRows.some(r => r.stc_type === x.type) })).filter(x => !x.recorded);
+      const sm8Total = list.reduce((s, x) => s + (Number(x.total) || 0), 0);
+      const stageCredit = centres.reduce((s, c) => s + (Number(c.stc_total) || 0), 0);
+      const creditDone = stageCredit >= sm8Total - 0.01;
+      if (!pending.length && creditDone) return '';
+      return `
+        <div style="margin-bottom:12px; padding:12px 14px; border:1px solid var(--accent); border-radius:8px; background:var(--accent-dim);">
+          <strong>STCs from ServiceM8 to enter</strong>
+          <p class="subtitle" style="margin:4px 0 8px;">This job came across from ServiceM8 #${escapeHtml(project.sm8_job_number || '')} without its STCs applied. Add each one here, and set the stage's STC credit in Edit stages.</p>
+          ${pending.map(x => `<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:6px;">
+            <span>${x.count} ${labels[x.type] || 'STCs'} at ${money(x.price)} = ${money(x.total)}</span>
+            <button type="button" class="secondary job-stc-sm8-add" data-i="${x.i}" style="font-size:12px; padding:4px 10px;">Add</button>
+          </div>`).join('')}
+          <p class="subtitle" style="margin:8px 0 0;">Stage STC credit: ${money(stageCredit)} of ${money(sm8Total)}${creditDone ? ' - done' : ''}.</p>
+        </div>`;
+    }
+
+    function openJobStcForm(project, centres, row, prefill = null) {
       const holder = document.getElementById('job-stc-form');
       if (!holder) return;
       const quoteCount = centres.reduce((n, c) => n + stcCountForStage(c), 0);
       const quotePrice = (centres.find(c => Number(c.stc_price_per_certificate) > 0) || {}).stc_price_per_certificate || 35;
       const paid = !!(row && (row.formbay_payment_advice_lines || []).length);
-      const v = row || { stc_type: 'pv', stc_count: jobStcRows.length ? '' : (quoteCount || ''), booked_price: quotePrice, status: project.formbay_lodgement_status || 'not_lodged', formbay_job_id: project.formbay_lodgement_id || '' };
+      const v = row || { stc_type: 'pv', stc_count: jobStcRows.length ? '' : (quoteCount || ''), booked_price: quotePrice, status: project.formbay_lodgement_status || 'not_lodged', formbay_job_id: project.formbay_lodgement_id || '', ...(prefill || {}) };
       holder.innerHTML = `
         <div style="margin-top:14px; padding:14px; background:var(--surface-2); border-radius:8px;">
           <h3 style="margin:0 0 8px;">${row ? 'Edit STCs' : 'Add STCs'}</h3>

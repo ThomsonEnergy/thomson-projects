@@ -23,11 +23,15 @@ const { computeDueDate } = require('./compute-due-date');
 const { createDefaultJobTasks } = require('./create-default-job-tasks');
 const { advanceToActionOrReady } = require('./advance-job-stage');
 
+// Same split as project.html's splitLabourMaterial: labour vs materials by
+// what each sells for (labour is already a sell total; materials are a
+// cost, marked up by the stage's markup%), so the deposit posts to the
+// right Xero income lines.
 function splitLabourMaterial(centre, amount) {
-  const labourCost = Number(centre.estimated_labour_cost) || 0;
-  const materialCost = Number(centre.estimated_material_cost) || 0;
-  const costTotal = labourCost + materialCost;
-  const labourShare = costTotal > 0 ? labourCost / costTotal : 1;
+  const labourSell = Number(centre.estimated_labour_cost) || 0;
+  const materialSell = (Number(centre.estimated_material_cost) || 0) * (1 + (Number(centre.markup_percent) || 0) / 100);
+  const sellTotal = labourSell + materialSell;
+  const labourShare = sellTotal > 0 ? labourSell / sellTotal : 1;
   const labourAmount = Math.round(amount * labourShare * 100) / 100;
   const materialAmount = Math.round((amount - labourAmount) * 100) / 100;
   return { labourAmount, materialAmount };

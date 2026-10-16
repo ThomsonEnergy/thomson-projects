@@ -2,26 +2,47 @@
 // Body: { rows: [{ sm8JobUuid, sm8JobNumber, companyUuid, companyName,
 //   companyAddress, clientEmail, clientPhone, siteAddress, description,
 //   notesText, name, clientId ('new' or an existing client id),
-//   quotedExGst, invoicedExGst }] }
+//   jobType ('quoted' | 'do_and_charge'),
+//   stage: { name, quotedExGst, invoicedExGst,
+//     lines: [{ item_type, description, quantity, cost, price, group, base_quantity }],
+//     groups: [{ key, description }] } }] }
 // Admin only. Writes the rows the admin ticked on the review screen
-// (sm8-import-preview.js) as Direct Jobs, a few at a time - the page
-// sends them in small batches so no single call runs past the function
-// time limit.
+// (sm8-import-preview.js + sm8-import-lines.js) as jobs, a few at a time -
+// the page sends them in small batches so no single call runs past the
+// function time limit.
 //
-// Each job is created exactly like a Direct Job from the Quick Job panel
-// (job_booked, one "Labour & Materials" stage, job number from the usual
-// trigger), plus:
-//   * quoted_amount / invoiced_amount on that stage, so invoicing from the
-//     app only bills the balance ServiceM8 hasn't already billed
-//   * the ServiceM8 job's notes in projects.notes
-//   * sm8_job_uuid / sm8_job_number, which make a re-run skip it
-// Reads nothing from and writes nothing to ServiceM8.
+// Each job is created like a job from an approved quote (job_booked, job
+// number from the usual trigger) with one stage holding:
+//   * every ServiceM8 bundle as a prebuild group of its real components,
+//     plus the standalone lines - labour at ServiceM8's sell rate (on the
+//     matching rate tier), materials at ServiceM8 cost, and the stage
+//     markup that makes them sell for exactly the ServiceM8 value
+//     (stageFromLines), so labour and materials split properly for Xero
+//   * invoiced_amount = the Completed ServiceM8 claims, so "Invoice
+//     project" only bills what ServiceM8 hasn't already billed
+// A "quoted" job is a normal quoted job (new_build); "do_and_charge" is a
+// Direct Job, invoiced from actual time and materials logged in the app.
+// Also the ServiceM8 notes (projects.notes) and sm8_job_uuid /
+// sm8_job_number, which make a re-run skip it. Nothing is read from or
+// written to ServiceM8.
 
+const crypto = require('crypto');
 const { requireAdmin } = require('./_shared/require-admin');
+const { stageFromLines, stcsText } = require('./_shared/sm8-import');
 
 const MAX_ROWS = 10;
+const MAX_LINES = 3000;
+const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : NaN);
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const str = (v, max = 20000) => String(v ?? '').trim().slice(0, max);
+
+// The rate tier a labour line belongs to: the tier whose name it starts
+// with ("Licensed Electrical Specialist (14/05/2026)"), longest name first.
+function tierFor(tierIds, description) {
+  const d = String(description || '').trim().toLowerCase();
+  const hit = [...tierIds.keys()].sort((a, b) => b.length - a.length).find(name => d.startsWith(name));
+  return hit ? tierIds.get(hit) : null;
+}
 
 async function resolveClient(supabaseAdmin, row) {
   if (row.clientId && row.clientId !== 'new') {
@@ -61,14 +82,40 @@ async function resolveClient(supabaseAdmin, row) {
   return created;
 }
 
-async function importRow(supabaseAdmin, userId, row) {
+async function importRow(supabaseAdmin, userId, row, tierIds) {
   const sm8JobUuid = str(row.sm8JobUuid, 100);
   if (!sm8JobUuid) throw new Error('Missing ServiceM8 job id');
   const name = str(row.name, 300);
   if (!name) throw new Error('Job name is required');
-  const quoted = r2(row.quotedExGst);
-  const invoiced = r2(row.invoicedExGst);
-  if (quoted < 0 || invoiced < 0) throw new Error('Amounts cannot be negative');
+  const jobType = row.jobType === 'do_and_charge' ? 'do_and_charge' : 'quoted';
+  const s = row.stage || {};
+  const stageName = str(s.name, 200) || 'Labour & Materials';
+  const rawLines = Array.isArray(s.lines) ? s.lines : [];
+  if (rawLines.length > MAX_LINES) throw new Error(`More than ${MAX_LINES} line items`);
+  const lines = rawLines.map(l => ({
+    item_type: l.item_type === 'labour' ? 'labour' : 'material',
+    description: str(l.description, 1000) || 'ServiceM8 item',
+    quantity: n(l.quantity), cost: n(l.cost), price: n(l.price),
+    group: l.group ? str(l.group, 100) : null,
+    base_quantity: l.base_quantity == null ? null : n(l.base_quantity),
+  }));
+  if (lines.some(l => [l.quantity, l.cost, l.price].some(Number.isNaN) || Number.isNaN(l.base_quantity))) throw new Error('A line item has a non-numeric amount');
+  // With line items the value is theirs (ServiceM8's sell prices); without,
+  // it is the figure typed on the review screen.
+  const quoted = lines.length ? r2(lines.reduce((t, l) => t + r2(l.quantity * l.price), 0)) : r2(s.quotedExGst);
+  const invoiced = r2(s.invoicedExGst);
+  // ServiceM8's STC rebate lines, kept for staff to enter by hand.
+  const stcs = (Array.isArray(s.stcs) ? s.stcs : []).slice(0, 10).map(x => ({
+    type: ['pv', 'bstc', 'swh'].includes(x.type) ? x.type : 'pv',
+    count: Math.round(n(x.count)), price: r2(x.price), total: r2(x.total), label: str(x.label, 200),
+  }));
+  if (stcs.some(x => !(x.count >= 0) || !(x.price >= 0))) throw new Error('Bad STC figures');
+  const stcNote = stcs.length
+    ? `\n\nSTCs in ServiceM8, NOT applied to this job yet: ${stcsText(stcs)}.\nEnter them on the job's STCs tab (+ Add STCs) and set the stage's STC credit in Edit stages.`
+    : '';
+  if (Number.isNaN(quoted) || quoted < 0 || !(invoiced >= 0)) throw new Error('Value and invoiced must be numbers, 0 or more');
+  if (invoiced > quoted + 0.01) throw new Error(`Invoiced ($${invoiced.toFixed(2)}) is more than the job value ($${quoted.toFixed(2)})`);
+  const groupDescriptions = new Map((Array.isArray(s.groups) ? s.groups : []).map(g => [str(g.key, 100), str(g.description, 5000)]));
 
   const { data: existing } = await supabaseAdmin
     .from('projects').select('id, job_number').eq('sm8_job_uuid', sm8JobUuid).maybeSingle();
@@ -81,13 +128,17 @@ async function importRow(supabaseAdmin, userId, row) {
     .insert({
       name,
       sow_text: str(row.description) || null,
-      notes: str(row.notesText, 100000) || null,
+      notes: (str(row.notesText, 100000) + stcNote).trim() || null,
+      sm8_stcs: stcs.length ? stcs : null,
       client_id: client.id,
       client_name: client.name,
       client_email: client.email || str(row.clientEmail, 300) || null,
       client_phone: client.phone || str(row.clientPhone, 100) || null,
       client_address: str(row.siteAddress, 500) || null,
-      proposal_template: 'direct_job',
+      // new_build: the general quoted electrical job, invoiced as a share
+      // of its quoted value ("Invoice project"). direct_job: invoiced from
+      // actual time and materials.
+      proposal_template: jobType === 'quoted' ? 'new_build' : 'direct_job',
       pipeline_stage: 'job_booked',
       status: 'in_progress',
       created_by: userId,
@@ -105,19 +156,49 @@ async function importRow(supabaseAdmin, userId, row) {
     throw projectErr;
   }
 
-  const { error: ccErr } = await supabaseAdmin.from('cost_centres').insert({
-    project_id: project.id,
-    name: 'Labour & Materials',
-    sort_order: 0,
-    markup_percent: 45,
-    quoted_amount: quoted,
-    invoiced_amount: invoiced,
-  });
-  if (ccErr) {
-    // No stage means nowhere to log time or invoice against - take the
-    // half-made job back out so a re-run creates it cleanly.
+  try {
+    const calc = lines.length ? stageFromLines(lines) : null;
+    const { data: centre, error: ccErr } = await supabaseAdmin.from('cost_centres').insert({
+      project_id: project.id,
+      name: stageName,
+      sort_order: 0,
+      markup_percent: calc ? calc.markupPercent : 45,
+      estimated_labour_cost: calc ? calc.estimatedLabour : 0,
+      estimated_material_cost: calc ? calc.estimatedMaterial : 0,
+      quoted_amount: quoted,
+      invoiced_amount: invoiced,
+      // STCs are not applied here - staff enter them on the job (STCs tab
+      // and this stage's STC credit) from projects.sm8_stcs / the notes.
+    }).select('id').single();
+    if (ccErr) throw ccErr;
+
+    if (calc) {
+      const groupIds = new Map();
+      const items = calc.items.map((l, i) => {
+        if (l.group && !groupIds.has(l.group)) groupIds.set(l.group, crypto.randomUUID());
+        return {
+          cost_centre_id: centre.id,
+          description: l.description,
+          item_type: l.item_type,
+          quantity: l.quantity,
+          unit_cost: l.unit_cost,
+          sort_order: i,
+          rate_tier_id: l.item_type === 'labour' ? tierFor(tierIds, l.description) : null,
+          prebuild_group_id: l.group ? groupIds.get(l.group) : null,
+          prebuild_client_description: l.group ? (groupDescriptions.get(l.group) || null) : null,
+          prebuild_base_quantity: l.group ? l.base_quantity : null,
+        };
+      });
+      for (let i = 0; i < items.length; i += 500) {
+        const { error: liErr } = await supabaseAdmin.from('cost_centre_line_items').insert(items.slice(i, i + 500));
+        if (liErr) throw liErr;
+      }
+    }
+  } catch (err) {
+    // A job without its stage or line items is half made - take it back out
+    // (stages and line items cascade) so a re-run creates it cleanly.
     await supabaseAdmin.from('projects').delete().eq('id', project.id);
-    throw ccErr;
+    throw err;
   }
 
   return { projectId: project.id, jobNumber: project.job_number };
@@ -143,12 +224,18 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: `Send at most ${MAX_ROWS} jobs per call` }) };
     }
 
+    // Labour lines land on the rate tier of the same name ("Licensed
+    // Electrical Specialist"), like a prebuild's labour does.
+    const { data: tiers, error: tierErr } = await supabaseAdmin.from('billable_rate_tiers').select('id, name');
+    if (tierErr) throw tierErr;
+    const tierIds = new Map((tiers || []).map(t => [String(t.name).trim().toLowerCase(), t.id]));
+
     // One at a time, not in parallel: two jobs for the same new client
     // must not both create it.
     const results = [];
     for (const row of rows) {
       try {
-        const r = await importRow(supabaseAdmin, user.id, row);
+        const r = await importRow(supabaseAdmin, user.id, row, tierIds);
         results.push({ sm8JobUuid: row.sm8JobUuid, ok: true, ...r });
       } catch (err) {
         console.error('sm8-import-jobs row error:', row.sm8JobUuid, err.message);
