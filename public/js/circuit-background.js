@@ -12,6 +12,9 @@
 // ever closed while current is on its route. Soft bands of light also ripple
 // slowly down the screen over the whole diagram.
 //
+// A brighter circle of light follows the mouse (or a finger on a phone),
+// lighting up the wiring around it, and fades when the pointer leaves the page.
+//
 // Touching a wire with the mouse (or dragging a finger across one) throws
 // sparks off the contact point for as long as you stay on it.
 //
@@ -24,10 +27,13 @@ const LANE_HEIGHT = 120;         // roughly one route per this many px of screen
 const SPARK_REACH = 7;           // how close (px) the pointer has to be to a wire to spark it
 const SPARK_MAX = 160;           // most sparks on screen at once
 const SPARK_COLOUR = { dark: '#FFD66B', light: '#E8930C' };
+const GLOW_RADIUS = 170;         // px, the circle of light around the pointer
+const GLOW_STRENGTH = 15;        // how much brighter the wiring is at its centre (times the faint drawing)
+const GLOW_FOLLOW = 9;           // how quickly it catches up with the pointer (higher is snappier)
 const RIPPLES = 4;
 const RIPPLE_SECONDS = 3;
-const RIPPLE_TILT = 8;            // the ripple bands lean this way on screen...
-const WIRING_TILT = -8;           // ...and the wiring leans the other way
+const RIPPLE_TILT = 8;           // the ripple bands lean this way on screen...
+const WIRING_TILT = -8;          // ...and the wiring leans the other way
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -128,12 +134,18 @@ function addCircuitBackground(opacity = 0.06, opts = {}) {
           <!-- Moving down exactly one band spacing per loop makes the repeat seamless; additive keeps the tilt -->
           <animateTransform attributeName="gradientTransform" type="translate" from="0 0" to="0 ${period}" dur="${RIPPLE_SECONDS}s" repeatCount="indefinite" additive="sum"/>
         </linearGradient>
-        <mask id="${id}-mask" maskUnits="userSpaceOnUse" ${box}><rect ${box} fill="url(#${id}-band)"/></mask>` : ''}
+        <mask id="${id}-mask" maskUnits="userSpaceOnUse" ${box}><rect ${box} fill="url(#${id}-band)"/></mask>
+        <radialGradient id="${id}-glow" class="te-glow-spot" gradientUnits="userSpaceOnUse" cx="-9999" cy="-9999" r="${GLOW_RADIUS}">
+          <stop offset="0" stop-color="#fff"/><stop offset="0.3" stop-color="#ddd"/>
+          <stop offset="0.65" stop-color="#555"/><stop offset="1" stop-color="#000"/>
+        </radialGradient>
+        <mask id="${id}-glow-mask" maskUnits="userSpaceOnUse" ${box}><rect ${box} fill="url(#${id}-glow)"/></mask>` : ''}
       </defs>
       <g ${stroke} transform="rotate(${WIRING_TILT} ${W / 2} ${H / 2})">
         <g opacity="${opacity}"><use href="#${id}-diagram"/></g>
         ${animate ? `
         <g opacity="${Math.min(1, opacity * 5)}" mask="url(#${id}-mask)"><use href="#${id}-diagram"/></g>
+        <g class="te-glow" opacity="0" stroke-width="2.6" mask="url(#${id}-glow-mask)"><use href="#${id}-diagram"/></g>
         <g class="te-live" style="display:none">
           ${STREAK.slice().reverse().map((len, i) => `<path class="te-streak" data-len="${len}" stroke-width="${[1.5, 3, 5][i]}" opacity="${Math.min(1, [0.3, 0.55, 0.9][i] * scale)}"/>`).join('')}
           <circle class="te-head-glow" r="9" fill="currentColor" stroke="none" opacity="${Math.min(1, 0.25 * scale)}"/>
@@ -217,7 +229,28 @@ function addCircuitBackground(opacity = 0.06, opts = {}) {
       flash.setAttribute('opacity', (0.7 * (1 - ft / 0.18)).toFixed(2));
     } else if (flash.getAttribute('opacity') !== '0') flash.setAttribute('opacity', '0');
   }
+  // ---------- the circle of light that follows the pointer ----------
+  let glowTarget = null, glowPos = null, glowFade = 0;
+  function updateGlow(dt) {
+    if (!svg || !geo) return;
+    const spot = svg.querySelector('.te-glow-spot'), layer = svg.querySelector('.te-glow');
+    if (!spot || !layer) return;
+    if (glowTarget) {
+      const target = rotate(glowTarget[0], glowTarget[1], -rad); // into the tilted drawing's own space
+      if (!glowPos) glowPos = target;
+      const k = 1 - Math.exp(-GLOW_FOLLOW * dt);                // eases after the pointer, the same at any frame rate
+      glowPos = [glowPos[0] + (target[0] - glowPos[0]) * k, glowPos[1] + (target[1] - glowPos[1]) * k];
+      glowFade = Math.min(1, glowFade + dt * 4);
+    } else {
+      glowFade = Math.max(0, glowFade - dt * 2.5);
+      if (glowFade === 0) glowPos = null;
+    }
+    if (glowPos) { spot.setAttribute('cx', glowPos[0].toFixed(1)); spot.setAttribute('cy', glowPos[1].toFixed(1)); }
+    layer.setAttribute('opacity', (Math.min(1, opacity * GLOW_STRENGTH) * glowFade).toFixed(3));
+  }
+
   function onPointer(e) {
+    glowTarget = [e.clientX, e.clientY];
     const hit = wireAt(e.clientX, e.clientY);
     // A fresh touch on the wire gets a bigger first burst
     if (hit && !contact) { burst(hit[0], hit[1], 14); lastBurst = now(); }
@@ -275,6 +308,7 @@ function addCircuitBackground(opacity = 0.06, opts = {}) {
     const t = now();
     if (t - lastTick > 1) { run = null; nextAt = t + 0.8; lastTick = t; } // came back to a hidden tab: start afresh
     updateSparks(t, Math.min(0.05, t - lastTick));
+    updateGlow(Math.min(0.05, t - lastTick));
     lastTick = t;
     if (!run) {
       if (t >= nextAt) startRun(t);
@@ -315,7 +349,7 @@ function addCircuitBackground(opacity = 0.06, opts = {}) {
     nextAt = now() + 0.8; lastTick = now(); frame = requestAnimationFrame(tick);
     window.addEventListener('pointermove', onPointer, { passive: true });
     window.addEventListener('pointerdown', onPointer, { passive: true });
-    const lift = () => { contact = null; };
+    const lift = () => { contact = null; glowTarget = null; };
     window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') lift(); }, { passive: true });
     window.addEventListener('pointercancel', lift, { passive: true });
     document.addEventListener('pointerleave', lift);
