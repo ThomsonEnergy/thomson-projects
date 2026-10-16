@@ -36,6 +36,7 @@ function hrModal(html, maxWidth = 640) {
 // ---------- Private files ----------
 
 async function hrUpload(file, prefix) {
+  file = await compressImage(file, DOC_IMAGE_MAX, DOC_IMAGE_QUALITY);
   const path = `${prefix}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
   const { error } = await supabaseClient.storage.from(HR_BUCKET).upload(path, file);
   if (error) throw error;

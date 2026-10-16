@@ -1,0 +1,23 @@
+# Browser caching. Pages (.html) keep Netlify's default (always re-checked),
+# so a deploy shows up straight away.
+#
+# Scripts and styles: most are loaded with a ?v= number that gets bumped when
+# the file changes, which makes a new URL, so the browser fetches it fresh.
+# The few without one (theme.js and friends) can be up to 10 minutes stale
+# after a deploy. Within that window pages open from the browser's copy with
+# no round trip to Netlify.
+/js/*
+  Cache-Control: public, max-age=600, stale-while-revalidate=86400
+/css/*
+  Cache-Control: public, max-age=600, stale-while-revalidate=86400
+
+# Fonts never change; a new font would get a new file name.
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Logos, icons and showcase photos rarely change. If you replace one, give it
+# a new file name (or a ?v= on the reference) so everyone sees it at once.
+/icons/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/img/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800

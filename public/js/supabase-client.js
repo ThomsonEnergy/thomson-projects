@@ -33,7 +33,10 @@ function money(n) {
 
 // Uploads a single file to the private project-documents bucket. Returns the
 // storage path (not a public URL, this bucket has no public access).
+// Photos are shrunk first (documents get a bigger cap than site photos so fine
+// print stays readable); PDFs and other files go up untouched.
 async function uploadPrivateFile(file, folder) {
+  file = await compressImage(file, DOC_IMAGE_MAX, DOC_IMAGE_QUALITY);
   const path = `${folder}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
   const { error } = await supabaseClient.storage.from('project-documents').upload(path, file);
   if (error) throw error;
@@ -642,6 +645,11 @@ function autoGenerateQuotePdf(project) {
     }).catch(() => {});
   } catch (e) { /* the Generate PDF button is still there */ }
 }
+
+// Size cap for photos of paperwork (licences, receipts, plans, scanned forms):
+// bigger than the site-photo default so small text stays readable.
+const DOC_IMAGE_MAX = 2560;
+const DOC_IMAGE_QUALITY = 0.85;
 
 async function compressImage(file, maxDimension = 1920, quality = 0.82) {
   if (!file.type.startsWith('image/')) return file;
