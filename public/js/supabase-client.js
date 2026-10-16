@@ -5148,7 +5148,7 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
   const start = () => {
     if (typeof addCircuitBackground === 'function') return; // login and home add their own
     const s = document.createElement('script');
-    s.src = '/js/circuit-background.js?v=15';
+    s.src = '/js/circuit-background.js?v=17';
     s.onload = () => addCircuitBackground(0.05, { still: true });
     document.head.appendChild(s);
   };
