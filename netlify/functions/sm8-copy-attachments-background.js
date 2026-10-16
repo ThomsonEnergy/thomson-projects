@@ -70,10 +70,19 @@ async function queueAttachments(supabaseAdmin, apiKey) {
   return rows.length;
 }
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 async function copyOne(supabaseAdmin, apiKey, userId, row) {
-  const res = await fetch(`${SM8_BASE}/Attachment/${row.sm8_attachment_uuid}.file`, {
-    headers: { 'X-API-Key': apiKey },
-  });
+  // ServiceM8 allows about 180 calls a minute. When it says slow down
+  // (429), wait and try the same file again rather than failing it.
+  let res;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    res = await fetch(`${SM8_BASE}/Attachment/${row.sm8_attachment_uuid}.file`, {
+      headers: { 'X-API-Key': apiKey },
+    });
+    if (res.status !== 429) break;
+    await sleep(20000);
+  }
   if (!res.ok) throw new Error(`ServiceM8 download failed: ${res.status}`);
   const bytes = await res.buffer();
   if (!bytes.length) throw new Error('ServiceM8 returned an empty file');
@@ -142,6 +151,8 @@ exports.handler = async (event) => {
           .eq('id', row.id).eq('status', 'pending')
           .select('id');
         if (!claimed || !claimed.length) continue;
+        // About two downloads a second keeps well under ServiceM8's limit.
+        await sleep(450);
         try {
           const links = await copyOne(supabaseAdmin, apiKey, user.id, row);
           await supabaseAdmin.from('sm8_attachment_copies')

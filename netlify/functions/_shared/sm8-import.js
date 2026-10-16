@@ -27,9 +27,15 @@ async function sm8GetAll(apiKey, object, filter) {
     // need to go as %20, not +.
     const query = [`cursor=${encodeURIComponent(cursor)}`];
     if (filter) query.push(`%24filter=${encodeURIComponent(filter)}`);
-    const res = await fetch(`${SM8_BASE}/${object}.json?${query.join('&')}`, {
-      headers: { 'X-API-Key': apiKey, Accept: 'application/json' },
-    });
+    const url = `${SM8_BASE}/${object}.json?${query.join('&')}`;
+    let res;
+    // ServiceM8 allows roughly 180 calls a minute; when it says slow down
+    // (429), wait a moment and try again rather than failing the job.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      res = await fetch(url, { headers: { 'X-API-Key': apiKey, Accept: 'application/json' } });
+      if (res.status !== 429) break;
+      await new Promise(r => setTimeout(r, 2000));
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       throw new Error(`ServiceM8 ${object} request failed: ${res.status} ${text.slice(0, 200)}`);
@@ -84,14 +90,10 @@ function noteDate(n) {
   return /^\d{4}-\d{2}-\d{2}$/.test(d) && d !== '0000-00-00' ? d : '';
 }
 
-function buildNotesText(job, notes, claims = []) {
+function buildNotesText(job, notes) {
   const header = [`Imported from ServiceM8 job #${job.generated_job_id || '?'}.`];
   if (job.purchase_order_number) header.push(`Client PO: ${clean(job.purchase_order_number)}`);
   const parts = [header.join('\n')];
-  if (claims.length) {
-    parts.push('ServiceM8 claims at the move (ex GST):\n' + claims.map(c =>
-      `#${c.number}${c.date ? ` (${c.date})` : ''}: $${c.totalExGst.toFixed(2)}, ${c.status === 'Completed' ? 'invoiced' : `not invoiced yet (${c.status})`}${c.paymentAmount > 0 ? `, $${c.paymentAmount.toFixed(2)} paid inc GST` : ''}`).join('\n'));
-  }
   const workDone = clean(job.work_done_description);
   if (workDone) parts.push(`Work done so far (ServiceM8):\n${workDone}`);
   if (notes.length) {
@@ -150,24 +152,26 @@ async function loadSm8OpenJobs(supabaseAdmin) {
   ]);
 
   // Partial invoices: ServiceM8 splits a job into lettered jobs numbered
-  // after the main one - 4515 is the job, 4515a the deposit, 4515b progress
-  // claim 1 and so on. They work like the app's cost centres: each one
-  // becomes a stage on the imported job, a Completed one has been
-  // invoiced, and the main 4515 holds whatever has not been split off yet
-  // (the balance). Job total = 4515 + every claim. A Completed claim is
-  // not in the Work Order list, so fetch every job dated on or after the
-  // oldest open main job to find them.
+  // after the main one - 4515 is the job, 4515A the deposit, 4515B progress
+  // claim 1 and so on - and takes each one off the main job as a negative
+  // "Partial invoice #4515A" line. A Completed claim has been invoiced.
+  // Here we only need each claim's status (its value comes from that line
+  // on the main job, see buildJobStage). A Completed claim is not in the
+  // Work Order list, so fetch every job dated after the day before the
+  // oldest open main job ('gt', ServiceM8 has no 'ge').
   const mainJobs = workOrders.filter(j => !claimOf(j));
   const openNumbers = new Set(mainJobs.map(j => String(j.generated_job_id)));
   const dates = mainJobs.map(j => String(j.date || '').slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d > '2000-01-01').sort();
-  const since = dates[0] || '2015-01-01';
-  const recentJobs = mainJobs.length ? await sm8GetAll(apiKey, 'job', `active eq 1 and date ge '${since} 00:00:00'`) : [];
+  const since = new Date(new Date(`${dates[0] || '2015-01-02'}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10);
+  const recentJobs = mainJobs.length ? await sm8GetAll(apiKey, 'job', `active eq 1 and date gt '${since}'`) : [];
   const claimsByNumber = new Map();
   const seenClaims = new Set();
   for (const j of [...workOrders, ...recentJobs]) {
     const claim = claimOf(j);
     if (!claim || seenClaims.has(j.uuid) || !openNumbers.has(claim.base)) continue;
-    if (['Quote', 'Unsuccessful'].includes(j.status)) continue;
+    // Unsuccessful (voided) claims are kept so the review screen can say so;
+    // only Completed ones count as invoiced.
+    if (j.status === 'Quote') continue;
     seenClaims.add(j.uuid);
     (claimsByNumber.get(claim.base) || claimsByNumber.set(claim.base, []).get(claim.base)).push({
       number: String(j.generated_job_id),
@@ -238,41 +242,7 @@ async function loadSm8OpenJobs(supabaseAdmin) {
     const invoiceSent = isOn(job.invoice_sent);
     const paymentAmount = r2(job.payment_amount);
     const claims = (claimsByNumber.get(String(job.generated_job_id)) || []).sort((a, b) => a.letter.length - b.letter.length || a.letter.localeCompare(b.letter));
-    const mainNumber = String(job.generated_job_id || '');
     const mainTitle = shortTitle(job.job_description);
-
-    // One stage per claim, then the balance still on the main job. Without
-    // any claims that balance is the whole job (one "Labour & Materials"
-    // stage, same as any Direct Job), invoiced only if ServiceM8 says the
-    // main job itself has gone out.
-    const stages = claims.map(c => {
-      const title = c.description && shortTitle(c.description) !== mainTitle ? shortTitle(c.description) : '';
-      return {
-        name: `${c.number}${title ? ` - ${title}` : ''}`,
-        sm8Number: c.number,
-        sm8Status: c.status,
-        quotedExGst: c.totalExGst,
-        invoicedExGst: c.status === 'Completed' ? c.totalExGst : 0,
-      };
-    });
-    const mainExGst = exGst(sm8Total);
-    if (mainExGst > 0 || !claims.length) {
-      stages.push({
-        name: claims.length ? `${mainNumber} - Balance` : 'Labour & Materials',
-        sm8Number: mainNumber,
-        sm8Status: job.status,
-        quotedExGst: mainExGst,
-        invoicedExGst: !claims.length && invoiceSent ? mainExGst : 0,
-      });
-    }
-    const quotedExGst = r2(stages.reduce((s, x) => s + x.quotedExGst, 0));
-    const invoicedExGst = r2(stages.reduce((s, x) => s + x.invoicedExGst, 0));
-
-    const openClaims = claims.filter(c => c.status !== 'Completed');
-    if (openClaims.length) warnings.push(`${openClaims.map(c => '#' + c.number).join(', ')} not Completed in ServiceM8, so counted as not invoiced yet - check if any have actually gone out`);
-    if (!claims.length && invoiceSent) warnings.push('ServiceM8 says this job has been invoiced in full - check invoiced to date');
-    if (!claims.length && !invoiceSent && paymentAmount > 0) warnings.push(`ServiceM8 shows ${paymentAmount.toFixed(2)} paid but no invoice - check invoiced to date`);
-    if (!(quotedExGst > 0)) warnings.push('No job total in ServiceM8');
 
     const { match, candidates } = matchClient({ ...company, name: companyName }, [...coContacts, ...jContacts], clients || []);
     if (match?.ambiguous) warnings.push(`Client match needs checking: ${match.reason}`);
@@ -297,12 +267,11 @@ async function loadSm8OpenJobs(supabaseAdmin) {
       sm8Total,
       invoiceSent,
       paymentAmount,
-      quotedExGst,
-      invoicedExGst,
-      stages,
-      claims,
+      // Only the claims' status here - the line items step (loadSm8JobLines)
+      // works out each claim's value and builds the job's stage.
+      claims: claims.map(c => ({ number: c.number, status: c.status, totalExGst: c.totalExGst, date: c.date, paymentAmount: c.paymentAmount })),
       notes: jobNotes,
-      notesText: buildNotesText(job, jobNotes, claims),
+      notesText: buildNotesText(job, jobNotes),
       clientMatch: match ? { clientId: match.clientId, reason: match.reason, ambiguous: !!match.ambiguous } : null,
       candidates: candidates.map(c => ({ id: c.id, name: c.name, email: c.email || '', phone: c.phone || '', address: c.address || '' })),
       alreadyImported: already ? { projectId: already.id, jobNumber: already.job_number } : null,
@@ -322,4 +291,174 @@ async function loadSm8OpenJobs(supabaseAdmin) {
   };
 }
 
-module.exports = { loadSm8OpenJobs, sm8GetAll, SM8_BASE };
+// ---- Line items -----------------------------------------------------------
+//
+// ServiceM8 keeps a job's billing as jobmaterial rows. A bundle (what the
+// app calls a prebuild, e.g. GPO10 x 53) is a jobmaterialbundle record
+// with no price of its own; its components are jobmaterial rows pointing
+// at it (job_material_bundle_uuid), each already multiplied out for the
+// job (26.5 hrs of labour for 53 GPOs at 0.5 hr each) and alternates left
+// at quantity 0. Everything else is a standalone row, including the
+// negative "Partial invoice #4515A" rows that take each claim off the
+// main job. Every row has a unit sell (price) and unit cost, ex GST.
+
+const isPartialInvoice = (m) => /partial\s*invoice/i.test(String(m.name || ''));
+const num = (v) => Number(v) || 0;
+// "STC Rebate", "BSTC rebate": the customer's STC credit, a negative,
+// GST-free line. In the app that is the stage's STC credit (stc_total),
+// taken off each invoice, not a line item.
+const isStcRebate = (m) => /\bb?stcs?\b/i.test(String(m.name || '')) && num(m.price) * num(m.quantity) < 0;
+
+// Labour: a rate tier's name, even with a date on the end ("Licensed
+// Electrical Specialist (14/05/2026)"), or an obvious trade/labour word.
+function isLabourName(name, tierNames) {
+  const n = clean(name).toLowerCase();
+  return tierNames.some(t => n.startsWith(t.toLowerCase())) || /\b(labou?r|labou?rer|electrician|apprentice)\b/.test(n);
+}
+
+// Builds the one stage an imported job gets: all its prebuilds and line
+// items at the full job value, and invoiced to date = the Completed claims.
+// job: { number, totalIncGst }, claims: [{ number, status }] from the job list.
+// taxRates: Map of ServiceM8 tax_rate_uuid -> rate % (10 for GST, 0 for
+// GST-free), used only to check the result against ServiceM8's total.
+function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates = new Map()) {
+  const warnings = [];
+  const active = jobMaterials.filter(m => isOn(m.active));
+  const claimStatus = new Map(claims.map(c => [String(c.number).toLowerCase(), c.status]));
+
+  // Claims: value from the main job's partial invoice line.
+  const claimsUsed = [];
+  for (const m of active.filter(isPartialInvoice)) {
+    const value = r2(num(m.price) * -num(m.quantity));
+    const number = (clean(m.name).match(/(\d+[a-z]+)\b/i) || [])[1] || '';
+    if (!number) { warnings.push(`A partial invoice line has no claim number ("${clean(m.name)}") - check invoiced to date`); }
+    const status = claimStatus.get(number.toLowerCase());
+    if (!value) continue; // empty claim (e.g. 4515C at $0): nothing taken off the job yet
+    let invoiced = status === 'Completed';
+    if (!status) { invoiced = true; warnings.push(`Claim #${number || '?'} not found in ServiceM8 - counted as invoiced, check it`); }
+    else if (status === 'Unsuccessful') warnings.push(`Claim #${number} ($${value.toFixed(2)}) is Unsuccessful (voided) in ServiceM8 but still taken off the job there - counted as not invoiced, check it`);
+    else if (!invoiced) warnings.push(`Claim #${number} ($${value.toFixed(2)}) is taken off the job in ServiceM8 but is not Completed - counted as not invoiced yet`);
+    claimsUsed.push({ number, status: status || 'unknown', valueExGst: value, invoiced });
+  }
+
+  // Line items, in ServiceM8's order: each bundle followed by its
+  // components, standalone rows in between.
+  const bundleByUuid = new Map(bundles.filter(b => isOn(b.active) && num(b.quantity) > 0).map(b => [b.uuid, b]));
+  const componentsByBundle = new Map();
+  const standalone = [];
+  let stcTotal = 0;
+  for (const m of active) {
+    if (isPartialInvoice(m)) continue;
+    if (!m.job_material_bundle_uuid && isStcRebate(m)) { stcTotal += -num(m.price) * num(m.quantity); continue; }
+    if (m.job_material_bundle_uuid) {
+      if (!bundleByUuid.has(m.job_material_bundle_uuid) || !num(m.quantity)) continue;
+      (componentsByBundle.get(m.job_material_bundle_uuid) || componentsByBundle.set(m.job_material_bundle_uuid, []).get(m.job_material_bundle_uuid)).push(m);
+    } else if (num(m.quantity)) {
+      standalone.push(m);
+    }
+  }
+  const entries = [
+    ...[...bundleByUuid.values()].filter(b => componentsByBundle.has(b.uuid)).map(b => ({ sort: num(b.sort_order), bundle: b })),
+    ...standalone.map(m => ({ sort: num(m.sort_order), item: m })),
+  ].sort((a, b) => a.sort - b.sort);
+
+  const toLine = (m, extra) => ({
+    item_type: isLabourName(m.name, tierNames) ? 'labour' : 'material',
+    description: clean(m.name) || 'ServiceM8 item',
+    quantity: num(m.quantity),
+    cost: num(m.cost),
+    price: num(m.price),
+    sell: r2(num(m.price) * num(m.quantity)),
+    ...extra,
+  });
+  const groups = [];
+  const lines = [];
+  for (const e of entries) {
+    if (e.bundle) {
+      const b = e.bundle;
+      const key = b.uuid;
+      const comps = componentsByBundle.get(key).sort((x, y) => num(x.sort_order) - num(y.sort_order));
+      const groupLines = comps.map(m => toLine(m, { group: key, base_quantity: num(m.quantity) / num(b.quantity) }));
+      groups.push({ key, code: clean(b.item_number), description: clean(b.name), quantity: num(b.quantity), sell: r2(groupLines.reduce((s, l) => s + l.sell, 0)) });
+      lines.push(...groupLines);
+    } else {
+      lines.push(toLine(e.item, { group: null, base_quantity: null, standalone: true }));
+    }
+  }
+
+  const quotedExGst = r2(lines.reduce((s, l) => s + l.sell, 0));
+  const invoicedExGst = r2(claimsUsed.filter(c => c.invoiced).reduce((s, c) => s + c.valueExGst, 0));
+  stcTotal = r2(stcTotal);
+
+  // Check against ServiceM8's own total, which includes GST line by line
+  // (STC rebates are GST-free): every active row at its own tax rate
+  // should come to the main job's total, give or take rounding.
+  const rateOf = (m) => (taxRates.has(m.tax_rate_uuid) ? taxRates.get(m.tax_rate_uuid) : 10);
+  const expectedInc = r2(active.reduce((s, m) => s + num(m.price) * num(m.quantity) * (1 + rateOf(m) / 100), 0));
+  if (active.length && Math.abs(expectedInc - num(job.totalIncGst)) > 1) {
+    warnings.push(`Line items come to $${expectedInc.toFixed(2)} inc GST but ServiceM8's job total is $${num(job.totalIncGst).toFixed(2)} - check the value`);
+  }
+  if (stcTotal > 0) warnings.push(`STC rebate of $${stcTotal.toFixed(2)} becomes the job's STC credit (taken off its invoices) - check it against any STCs already credited on ServiceM8 claims`);
+  if (lines.length) {
+    const { markupPercent } = stageFromLines(lines);
+    if (markupPercent < 0 || markupPercent > 300) warnings.push(`Materials in ServiceM8 have ${markupPercent < 0 ? 'costs above their sell price' : 'little or no cost recorded'} (stage markup ${Math.round(markupPercent)}%) - profit on this job will look ${markupPercent < 0 ? 'low' : 'high'}`);
+  }
+
+  return { lines, groups, claimsUsed, quotedExGst, invoicedExGst, stcTotal, warnings };
+}
+
+// Server side, at import: turns review-screen lines into cost centre line
+// items and the stage's figures, the app's way - labour at its sell rate,
+// materials at cost with the stage markup on top. The markup is the one
+// that makes the materials sell for exactly what ServiceM8 charged, so the
+// stage's value matches the job and editing it later does not move it.
+function stageFromLines(lines) {
+  let labourSell = 0, materialCost = 0, materialSell = 0;
+  for (const l of lines) {
+    if (l.item_type === 'labour') labourSell += l.quantity * l.price;
+    else { materialCost += l.quantity * l.cost; materialSell += l.quantity * l.price; }
+  }
+  const costBasis = materialCost > 0.005;
+  let markup = 45;
+  if (costBasis) markup = Math.round(((materialSell / materialCost) - 1) * 100 * 10000) / 10000;
+  else if (Math.abs(materialSell) > 0.005) markup = 0; // no costs in ServiceM8: carry the sell price as the cost
+  const items = lines.map(l => ({
+    ...l,
+    unit_cost: l.item_type === 'labour' ? l.price : (costBasis ? l.cost : l.price),
+  }));
+  return {
+    items,
+    markupPercent: markup,
+    estimatedLabour: r2(labourSell),
+    estimatedMaterial: r2(costBasis ? materialCost : materialSell),
+  };
+}
+
+// Line items for a handful of jobs (the review screen asks a few at a
+// time, paced to stay under ServiceM8's per-minute limit): two ServiceM8
+// calls per job, two jobs at once, plus the tax rates once.
+async function loadSm8JobLines(apiKey, jobs, tierNames) {
+  const rates = await sm8GetAll(apiKey, 'taxrate');
+  // ServiceM8 calls the percentage 'amount' (10 for GST on Income, 0 for GST free).
+  const taxRates = new Map(rates.map(t => [t.uuid, num(t.amount)]));
+  const out = {};
+  let i = 0;
+  async function worker() {
+    while (i < jobs.length) {
+      const job = jobs[i++];
+      try {
+        const [mats, bundles] = await Promise.all([
+          sm8GetAll(apiKey, 'jobmaterial', `job_uuid eq '${job.uuid}' and active eq 1`),
+          sm8GetAll(apiKey, 'jobmaterialbundle', `job_uuid eq '${job.uuid}' and active eq 1`),
+        ]);
+        out[job.uuid] = { ok: true, ...buildJobStage(job, job.claims || [], mats, bundles, tierNames, taxRates) };
+      } catch (err) {
+        out[job.uuid] = { ok: false, error: err.message, rateLimited: /\b429\b/.test(err.message) };
+      }
+    }
+  }
+  await Promise.all([worker(), worker()]);
+  return out;
+}
+
+module.exports = { loadSm8OpenJobs, loadSm8JobLines, buildJobStage, stageFromLines, sm8GetAll, SM8_BASE };
