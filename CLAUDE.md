@@ -41,7 +41,7 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
 2. Write the SQL, run `npm run check`.
 3. Show the owner the SQL and wait for "yes".
 4. Apply to staging (`supabase db push` with the CLI linked to staging), test.
-5. Merge to `main`: the Supabase GitHub integration applies it to production, then Netlify deploys. Confirm both succeeded.
+5. After the owner says yes: `supabase db push` linked to production, then merge to `main` so Netlify deploys. Confirm both succeeded. (Supabase "Deploy to production" is off on purpose.)
 6. Risky changes (dropping columns or tables, bulk updates): take a backup first.
 
 Full detail in `docs/STAGING.md`.
