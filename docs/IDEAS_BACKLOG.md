@@ -267,6 +267,13 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 ### Inbound
 - **Texts:** SMS tab in the inbox (beside Sales / Mine), matched by phone number, auto-tagged by the tagger. Push to opted-in staff inside their hours.
 - **Calls:** ring all opted-in staff inside their hours; first to answer wins. Caller ID shows customer and open J numbers if known.
+
+### Incoming call screen (owner requirement, 17 Oct 2026)
+Staff must see at a glance: (1) it is a work call, (2) which client is calling, (3) that client's jobs, so they have the info ready.
+- **Ringing (iPhone lock screen, CallKit):** iOS only allows one line of caller text. Shows "Thomson Energy" as the calling app, plus the client name and their main open J number, e.g. "Jane Smith, J7006". Distinct TEops ringtone. Unknown number: "New caller" plus the number.
+- **Ringing (desktop):** a TEops pop-up with the full card below, plus Answer and Decline.
+- **Once answered (iPhone and desktop):** TEops opens a call screen with the client card: name, phone, address, and each job (J number, site address, stage, next booking, assigned crew, balance owing), plus open quotes (Q) and unpaid invoices (SI). One tap opens a job. Unknown caller: one tap to create a lead.
+- **Matching:** the incoming number is normalised and matched to clients (and leads); the server looks it up before ringing so the details arrive with the push. Several clients sharing a number: show all.
 - **Nobody available:** voicemail, transcribed, logged, pushed. Optional auto-reply SMS.
 
 ### Opt-in and hours (Settings, per user)
