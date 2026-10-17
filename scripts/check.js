@@ -59,16 +59,17 @@ for (const file of walk(path.join(root, 'public'), '.html')) {
   }
 }
 
-// 3. SQL migrations (real Postgres parser).
-let parse;
-try { ({ parseSync: parse } = require('libpg-query')); } catch (e) { parse = null; }
+(async () => {
+// 3. SQL migrations (real Postgres parser, installed by scripts/cloud-setup.sh).
+let pg;
+try { pg = require('libpg-query'); if (pg.loadModule) await pg.loadModule(); } catch (e) { pg = null; }
 const sqlFiles = walk(path.join(root, 'supabase', 'migrations'), '.sql');
-if (!parse) {
-  console.warn('SKIP SQL: run npm install first (libpg-query is a dev dependency)');
+if (!pg) {
+  console.warn('SKIP SQL: run scripts/cloud-setup.sh first (installs libpg-query)');
 } else {
   for (const file of sqlFiles) {
     checked++;
-    try { parse(fs.readFileSync(file, 'utf8')); } catch (err) { fail(file, err); }
+    try { pg.parseSync(fs.readFileSync(file, 'utf8')); } catch (err) { fail(file, err); }
   }
 }
 
@@ -85,3 +86,4 @@ for (const file of sqlFiles) {
 
 console.log(`${checked} checked, ${failures} failed`);
 process.exit(failures ? 1 : 0);
+})();
