@@ -40,4 +40,6 @@ Installs dependencies and the Supabase CLI, links to Supabase if the env vars ar
 - [docs/AI_AGENTS_PLAN.md](docs/AI_AGENTS_PLAN.md): AI agents
 - [docs/ENV_VARS.md](docs/ENV_VARS.md): env vars and keys
 - [docs/STAGING.md](docs/STAGING.md): staging, migrations, backups
+- [docs/BUSINESS_FACTS.md](docs/BUSINESS_FACTS.md): Xero codes, pay rates, STC pricing, perf backlog
+- [docs/EXTERNAL_ACCOUNTS.md](docs/EXTERNAL_ACCOUNTS.md): Twilio, Telstra port, Apple, D-U-N-S and Google Workspace status
 - [CLAUDE.md](CLAUDE.md): rules for Claude Code

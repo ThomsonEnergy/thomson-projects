@@ -18,6 +18,8 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 
 ## High lead time, start now
 
+Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in `docs/EXTERNAL_ACCOUNTS.md`.
+
 - **Apple Developer organisation account:** needs a D-U-N-S number for Thomson Energy Australia Pty Ltd. D-U-N-S can take weeks. Blocks item 3 and in-app call ringing (item 7 phase 2).
 - **Twilio:** open our own Twilio account, lodge the AU regulatory bundle now (approval takes days to weeks), then port 0455 415 464 from Telstra once the build is tested. Blocks item 7.
 - **NSW surveillance notice:** get the notice and policy reviewed by Formby or an HR adviser, then 14 days' written notice before AI reading or tracking starts. Blocks AI on chat, email, voice and location (items 2, 5, 6).
