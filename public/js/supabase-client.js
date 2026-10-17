@@ -66,18 +66,44 @@ async function requireLogin() {
   if (!(await checkSessionAlive())) return null;
 
   // Every page calls requireLogin() as its first act, so this is the one
-  // shared place to force incomplete onboarding to finish before anyone
-  // touches the rest of the app - covers all pages without editing each
-  // one individually.
+  // shared place to send incomplete onboarding to the onboarding page -
+  // covers all pages without editing each one individually. "Finish later"
+  // on that page lets them into the app until their next login, with a
+  // banner on every page until it's done.
   if (!window.location.pathname.endsWith('/onboarding.html')) {
     const { data: profile } = await supabaseClient.from('profiles').select('onboarding_completed_at').eq('id', session.user.id).maybeSingle();
     if (profile && !profile.onboarding_completed_at) {
-      window.location.href = '/onboarding.html';
-      return null;
+      if (!onboardingDeferred(session)) {
+        window.location.href = '/onboarding.html';
+        return null;
+      }
+      showOnboardingBanner();
     }
   }
 
   return session;
+}
+
+// "Finish later" lasts until the next login: the saved marker is tied to
+// this login's sign-in time, which changes every time they log in again.
+const ONBOARDING_LATER_KEY = 'te-onboarding-later';
+function onboardingLaterMarker(session) {
+  return `${session.user.id}|${session.user.last_sign_in_at || ''}`;
+}
+function deferOnboarding(session) {
+  try { localStorage.setItem(ONBOARDING_LATER_KEY, onboardingLaterMarker(session)); } catch (e) { /* storage blocked: they'll just see onboarding again */ }
+}
+function onboardingDeferred(session) {
+  try { return localStorage.getItem(ONBOARDING_LATER_KEY) === onboardingLaterMarker(session); } catch (e) { return false; }
+}
+
+function showOnboardingBanner() {
+  if (document.getElementById('onboarding-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'onboarding-banner';
+  bar.style.cssText = 'display:flex; align-items:center; justify-content:center; gap:12px; flex-wrap:wrap; padding:10px 16px; background:var(--accent-dim); color:var(--text); border-bottom:1px solid var(--border); font-size:14px; text-align:center;';
+  bar.innerHTML = `<span>Your onboarding isn't finished yet.</span><a href="/onboarding.html" style="color:var(--accent); font-weight:700;">Finish now</a>`;
+  document.body.prepend(bar);
 }
 
 function money(n) {

@@ -36,13 +36,17 @@
   <div class="wrap">
     <h1 id="ob-heading">Welcome to Thomson Energy</h1>
     <p class="subtitle" id="ob-subheading">A few things to get sorted before you start - this only needs doing once.</p>
+    <p id="ob-later-row" style="display:none; margin:-6px 0 16px;">
+      <button type="button" class="secondary" id="ob-later-btn">Finish later</button>
+      <span class="subtitle" style="margin-left:8px;">You can come back to this any time. We'll remind you at the top of each page.</span>
+    </p>
 
     <div class="ob-steps" id="ob-steps"></div>
 
     <div id="ob-content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
+  <script src="/js/supabase-client.js?v=73"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId;
@@ -447,14 +451,44 @@
 
       await loadOnboardingData();
       renderWelcomeHeader();
+
+      if (!profile.onboarding_completed_at) {
+        document.getElementById('ob-later-row').style.display = '';
+        document.getElementById('ob-later-btn').addEventListener('click', async () => {
+          await saveDetailsSoFar();
+          deferOnboarding(session);
+          window.location.href = '/home.html';
+        });
+      }
+
       // Already finished once (onboarding_completed_at set) but linked back
       // here - e.g. from the home page's "your contract isn't signed yet"
       // reminder, since a contract can go from pending to ready well after
       // someone's already been using the app day to day. Redoing details/
       // pay rates from step 1 would make no sense at that point, so land
-      // straight on the documents step instead.
-      goToStep(profile.onboarding_completed_at ? 3 : 1);
+      // straight on the documents step instead. Same for someone coming back
+      // after "Finish later" who already saved their details.
+      goToStep(profile.onboarding_completed_at || profile.residential_address ? 3 : 1);
     })();
+
+    // "Finish later" from step 1 keeps whatever's been typed so far, without
+    // the full-address check the Next button does. Other steps save as they go.
+    async function saveDetailsSoFar() {
+      if (currentStep !== 1 || !document.getElementById('ob-address')) return;
+      const val = id => document.getElementById(id)?.value.trim() || null;
+      const updates = {
+        date_of_birth: val('ob-dob'),
+        residential_address: val('ob-address'),
+        residential_suburb: val('ob-suburb'),
+        residential_state: val('ob-state'),
+        residential_postcode: val('ob-postcode'),
+        emergency_contact_name: val('ob-em-name'),
+        emergency_contact_phone: val('ob-em-phone'),
+        emergency_contact_relationship: val('ob-em-relationship'),
+      };
+      Object.keys(updates).forEach(k => { if (updates[k] === null) delete updates[k]; });
+      if (Object.keys(updates).length) await supabaseClient.from('profiles').update(updates).eq('id', myUserId);
+    }
   </script>
 </body>
 </html>
