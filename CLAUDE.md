@@ -11,7 +11,17 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
 - Numbers over names everywhere: J, Q, PO, SI numbers, migration numbers.
 - State the plan and wait for "yes" / "let's build" before building.
 - One consolidated delivery, not lots of small ones.
-- Owner is also the bookkeeper (does Xero payroll). Xero entity is Thomson Energy Australia only, never Thomson Energy Solutions, and use the real account codes.
+- Talk plainly, one step at a time: say exactly what to click and what they should see, especially in dashboards (Netlify, Supabase, Twilio, Apple, Google). No "see line 6 of seed.sql": test-only staging logins can be stated in chat directly. Real keys and passwords never go in chat.
+- Owner is also the bookkeeper (does Xero payroll). Give Xero steps directly, never "ask your bookkeeper". Xero entity is Thomson Energy Australia only, never Thomson Energy Solutions, and use the real account codes (see `docs/BUSINESS_FACTS.md`).
+
+## Working across devices (phone and laptop)
+
+The owner switches between Claude Code on the laptop and cloud sessions on the phone. Cloud sessions only see GitHub, and the laptop's local Claude memory does not travel. So:
+
+- **GitHub is the only shared memory.** Anything worth remembering (rules, decisions, account progress, business facts) goes in this file or `docs/`, never only in local memory or chat.
+- **Never leave work only on one device.** Before ending a turn that changed files: commit, push, and open (or update) a PR. Merge to `main` once the owner approves, so the next session on any device starts from it.
+- **Start of every session:** pull the latest `main` (or sync the worktree with the base branch) before working, and check open PRs/branches from the other device.
+- Decisions and progress from planning chats go in `docs/` the same day (for example `docs/EXTERNAL_ACCOUNTS.md`).
 
 ## Delivery standards
 
