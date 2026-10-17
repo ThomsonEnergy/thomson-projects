@@ -10,7 +10,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 |---|------|--------|----------------|------------|
 | 1 | Payment reconciliation, receipts, tools register | Partly built | N | Airwallex read-only key, accountant sign-off |
 | 2 | Voice messages in team chat + Siri Shortcut | Not started | N | Team chat channels, tagger agent, policy sign-off (6) |
-| 3 | Native iPhone app (Capacitor) | Not started | Y | Apple Developer org account, offline sync design |
+| 3 | Native iPhone app (Capacitor) | Not started | Y | Apple Developer org enrolment (D-U-N-S received), offline sync design |
 | 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
@@ -18,7 +18,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 
 ## High lead time, start now
 
-- **Apple Developer organisation account:** needs a D-U-N-S number for Thomson Energy Australia Pty Ltd. D-U-N-S can take weeks. Blocks item 3 and in-app call ringing (item 7 phase 2).
+- **Apple Developer organisation account:** D-U-N-S number for Thomson Energy Australia Pty Ltd received 16 Oct 2026. Next: enrol in the Apple Developer Program as an organisation (Apple verifies the D-U-N-S, can take a few days). Blocks item 3 and in-app call ringing (item 7 phase 2).
 - **Twilio:** open our own Twilio account, lodge the AU regulatory bundle now (approval takes days to weeks), then port 0455 415 464 from Telstra once the build is tested. Blocks item 7.
 - **NSW surveillance notice:** get the notice and policy reviewed by Formby or an HR adviser, then 14 days' written notice before AI reading or tracking starts. Blocks AI on chat, email, voice and location (items 2, 5, 6).
 - **Google OAuth app:** internal Google Workspace app, no Google verification needed, so this is fast. The shared inbox already uses one; per-user Gmail scopes are an extension.
@@ -121,10 +121,10 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 3. CallKit/PushKit for calls, widgets, Siri App Intents.
 4. Voice keyboard.
 
-**Dependencies:** Apple Developer organisation account (D-U-N-S, high lead time); offline design decisions.
+**Dependencies:** Apple Developer organisation account (D-U-N-S received 16 Oct 2026, enrolment next); offline design decisions.
 
 **Open questions**
-- [ ] Organisation vs individual account (organisation recommended)
+- [x] Organisation account (D-U-N-S received 16 Oct 2026)
 - [ ] Cloud build service
 - [ ] Buy a Mac now or later
 - [ ] Offline conflicts: last write wins, or flag for review?
