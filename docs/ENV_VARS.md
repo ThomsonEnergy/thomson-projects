@@ -33,7 +33,7 @@ Future (not built): Twilio (`twilio_account_sid`, `twilio_auth_token`, `twilio_n
 | Name | What it's for |
 |---|---|
 | `SUPABASE_ACCESS_TOKEN` | Supabase CLI login (personal access token from supabase.com/dashboard/account/tokens) |
-| `SUPABASE_PROJECT_REF` | Project the CLI links to. **Default to the staging branch ref.** Use the live ref `ziakpklnzkbbjjnqgkmz` only for an approved production migration |
+| `SUPABASE_PROJECT_REF` | Project the CLI links to. **Default to the staging branch ref `jpmaudhhsahjhnrufzez`.** Use the live ref `ziakpklnzkbbjjnqgkmz` only for an approved production migration |
 | `SUPABASE_DB_PASSWORD` | Database password for the linked project |
 
 `scripts/cloud-setup.sh` uses all three to link the CLI. Without them it still installs everything and runs `npm run check`.
