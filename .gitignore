@@ -1,2 +1,28 @@
 # Local Netlify folder
 .netlify
+
+# Dependencies
+node_modules/
+
+# Secrets and local env (never commit these)
+.env
+.env.*
+!.env.example
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
+# Claude Code local files
+.claude/worktrees/
+.claude/settings.local.json
+
+# Logs, archives, editors, OS junk (the repo sits in OneDrive)
+*.log
+npm-debug.log*
+*.zip
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
