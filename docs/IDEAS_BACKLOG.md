@@ -274,6 +274,13 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 - **Ringing (desktop):** a TEops pop-up with the full card below, plus Answer and Decline.
 - **Once answered (iPhone and desktop):** TEops opens a call screen with the client card: name, phone, address, and each job (J number, site address, stage, next booking, assigned crew, balance owing), plus open quotes (Q) and unpaid invoices (SI). One tap opens a job. Unknown caller: one tap to create a lead.
 - **Matching:** the incoming number is normalised and matched to clients (and leads); the server looks it up before ringing so the details arrive with the push. Several clients sharing a number: show all.
+
+### Ringtones (decided 17 Oct 2026)
+- A branded Thomson Energy default plus 4 to 6 alternatives. Each user picks theirs in Settings (calls and texts section); the admin sets the company default.
+- iPhone apps cannot use the iPhone's built-in ringtones, so every ringtone is a sound file bundled in the native app (CallKit). Adding one needs an app update.
+- Each file under 30 seconds (longer falls back to the iOS default), loops while ringing, small file size. The silent switch and Focus modes still apply.
+- Desktop plays the same files in the browser, so both match.
+- Sources: branded default made in GarageBand or by a sound designer; alternatives from Pixabay (free for commercial use), Zapsplat or Freesound (CC0 only). Keep a note of each file's source and licence.
 - **Nobody available:** voicemail, transcribed, logged, pushed. Optional auto-reply SMS.
 
 ### Opt-in and hours (Settings, per user)
