@@ -22,14 +22,19 @@ if (!url || !anonKey) {
   process.exit(0);
 }
 
+const URL_RE = /^const SUPABASE_URL = '[^']*';/m;
+const KEY_RE = /^const SUPABASE_ANON_KEY = '[^']*';/m;
 const src = fs.readFileSync(file, 'utf8');
-const out = src
-  .replace(/^const SUPABASE_URL = '[^']*';/m, `const SUPABASE_URL = '${url}';`)
-  .replace(/^const SUPABASE_ANON_KEY = '[^']*';/m, `const SUPABASE_ANON_KEY = '${anonKey}';`);
-
-if (out === src || !out.includes(url) || !out.includes(anonKey)) {
+if (!URL_RE.test(src) || !KEY_RE.test(src)) {
   console.error('write-config: could not find the Supabase constants in supabase-client.js');
   process.exit(1);
+}
+const out = src
+  .replace(URL_RE, `const SUPABASE_URL = '${url}';`)
+  .replace(KEY_RE, `const SUPABASE_ANON_KEY = '${anonKey}';`);
+if (out === src) {
+  console.log(`write-config: ${context} deploy env matches the live values, nothing to change (set staging values for this context to use staging)`);
+  process.exit(0);
 }
 fs.writeFileSync(file, out);
 console.log(`write-config: ${context} deploy now points at ${url}`);
