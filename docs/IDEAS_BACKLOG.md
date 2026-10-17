@@ -212,7 +212,9 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 
 **Built today:** onboarding makes staff sign the employment contract and `onboarding_documents` policies, with signed PDFs (migration 098, `generate-signed-document`). Not built: versioned re-sign on login, AI opt-in and start date, location consent and capture.
 
-**Source document:** "Notice of Workplace Surveillance and Computer Surveillance Policy". Adviser (Formby or HR) review before go-live.
+**Source documents (drafts, 18 Oct 2026):** `policies and Contracts/` has the "Notice of Workplace Surveillance and Computer Surveillance Policy" (required, acknowledge only, also gives notice of future location tracking), "AI Features Consent" (optional) and "Location Tracking Consent" (optional, load only when the iPhone app ships). Adviser (Formby or HR) review before go-live.
+
+**Location decision:** the iPhone "Allow location" prompt is Apple's permission, not the written notice the Act needs, so location stays in the notice now (the 14 days is done before the app ships). The location consent form waits for the app.
 
 ### Sign-off flow
 - Extend the onboarding signing: on login, anyone who has not signed the current version sees it full-screen and must sign first.
