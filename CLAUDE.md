@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-TEops: the live operations app for Thomson Energy Australia (electrical and solar). See README.md for the stack and folder layout, and `docs/` for the spec, backlog, agents plan, env vars and staging.
+TEops: the live operations app for Thomson Energy Australia (electrical and solar). See README.md for the stack and folder layout, and `docs/` for the spec, backlog, agents plan, env vars, staging and external accounts (Twilio, Apple, Telstra, Google).
 
 **The app is live and used on real jobs every day.** Code is the source of truth; if a doc disagrees, fix the doc.
 
