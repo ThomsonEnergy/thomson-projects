@@ -5,7 +5,7 @@ TEops is live. Everything is tested on staging first.
 ## How it fits together
 
 - **Production:** Supabase project `ziakpklnzkbbjjnqgkmz` + the Netlify production deploy from `main`.
-- **Staging:** a persistent Supabase branch called `staging`, built from `supabase/migrations/` and seeded with fake data from `supabase/seed.sql`. Netlify branch deploys and deploy previews point at it (see `docs/ENV_VARS.md`).
+- **Staging:** a persistent Supabase branch called `staging` (ref `jpmaudhhsahjhnrufzez`, https://jpmaudhhsahjhnrufzez.supabase.co), following the `staging` git branch, built from `supabase/migrations/` and seeded with fake data from `supabase/seed.sql`. Netlify branch deploys and deploy previews point at it (set 18 Oct 2026, see `docs/ENV_VARS.md`).
 - **Preview branches (optional):** with the GitHub integration on, each pull request gets a throwaway Supabase branch that runs the PR's migrations. It is deleted when the PR closes.
 - **Production migrations:** NOT automatic ("Deploy to production" is off, so the repo can never change live auth settings or the live schema by itself). After the owner approves, Claude runs `supabase db push` linked to production, then the PR is merged and Netlify deploys the code.
 
