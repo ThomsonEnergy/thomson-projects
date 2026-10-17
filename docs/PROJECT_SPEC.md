@@ -69,7 +69,7 @@ Manual steps only a person can do (the code is live):
 4. Job page charts and flags (Part J).
 5. Stay logged in and Face ID login (B4).
 6. Offline support (G2), only if poor signal proves a real problem.
-7. SMS and calling (G3).
+7. SMS and calling (G3), after the native iPhone app.
 8. In-app solar pricing tool (Part K).
 
 **Tier 4: AI helpers and automation (deliberately last)**
@@ -312,7 +312,7 @@ Direct Job (A3) plus do-and-charge invoicing (A22) covers most of it today. Stil
 
 - **G1. Field forms:** variations are built (A3). **SWMS, Take 5, solar and electrical inspection forms with PDFs: not built.**
 - **G2. Offline support (not built):** `sw.js` only handles push. Plan: cache the app shell, IndexedDB write queue with local timestamps, sync on reconnect; start with SWMS/Take 5. Design conflicts, photo retry and slider reconciliation up front.
-- **G3. SMS and calling (not built):** see `docs/IDEAS_BACKLOG.md` item 7 (SMS and calls via Twilio) and the Roadmap lead-time items.
+- **G3. SMS and calling (not built):** built after the native iPhone app, as an in-app softphone with no interim forward-to-mobile phase (decided 17 Oct 2026). See `docs/IDEAS_BACKLOG.md` item 7 and the Roadmap lead-time items.
 - **G4. Push notifications:** built (A20). Not wired yet: invoice paid.
 
 ---

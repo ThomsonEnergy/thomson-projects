@@ -14,12 +14,12 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
-| 7 | SMS and calls via Twilio | Not started | Y | Own Twilio account, AU regulatory bundle, Telstra port |
+| 7 | SMS and calls via Twilio | Not started | Y | Native app (3), own Twilio account, AU regulatory bundle, Telstra port |
 
 ## High lead time, start now
 
-- **Apple Developer organisation account:** D-U-N-S number for Thomson Energy Australia Pty Ltd received 16 Oct 2026. Next: enrol in the Apple Developer Program as an organisation (Apple verifies the D-U-N-S, can take a few days). Blocks item 3 and in-app call ringing (item 7 phase 2).
-- **Twilio:** open our own Twilio account, lodge the AU regulatory bundle now (approval takes days to weeks), then port 0455 415 464 from Telstra once the build is tested. Blocks item 7.
+- **Apple Developer organisation account:** D-U-N-S number for Thomson Energy Australia Pty Ltd received 16 Oct 2026. Next: enrol in the Apple Developer Program as an organisation (Apple verifies the D-U-N-S, can take a few days). Blocks item 3, and so item 7.
+- **Twilio:** open our own Twilio account, lodge the AU regulatory bundle now (approval takes days to weeks), then port 0455 415 464 from Telstra once the build is tested. Blocks item 7 (built after the native app).
 - **NSW surveillance notice:** get the notice and policy reviewed by Formby or an HR adviser, then 14 days' written notice before AI reading or tracking starts. Blocks AI on chat, email, voice and location (items 2, 5, 6).
 - **Google OAuth app:** internal Google Workspace app, no Google verification needed, so this is fast. The shared inbox already uses one; per-user Gmail scopes are an extension.
 
@@ -103,7 +103,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 ### What native unlocks
 - **Offline (main reason):** on-device SQLite iOS won't clear, proper photo file storage, background upload/sync after the app closes.
 - **Push:** more reliable than web push; needed for team chat replacing WhatsApp.
-- **CallKit + PushKit:** in-app ringing for SMS/calls phase 2 (item 7).
+- **CallKit + PushKit:** TEops calls ring like normal phone calls, even when locked (item 7).
 - Home screen widgets, Siri App Intents.
 - Custom voice keyboard (iOS keyboards cannot use the mic, needs the "hop to the app" workaround). Lowest priority.
 
@@ -252,9 +252,11 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 
 **Today:** not built. 0455 415 464 is on Telstra; ServiceM8 only uses it as a Twilio verified caller ID.
 
+**Decision (17 Oct 2026):** no interim phase. The forward-to-mobile and click-to-call bridge is dropped; SMS and calls are built in one go after the native app (item 3), with TEops itself as the phone. Keep using the current setup until then.
+
 **Plan**
 1. Open our own Twilio account; lodge the AU regulatory bundle now.
-2. Build and test on a temporary Twilio number.
+2. After the native app ships: build and test on a temporary Twilio number.
 3. Port 0455 415 464 from Telstra to Twilio once tested.
 
 ### Outbound
@@ -274,8 +276,7 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 - Admin view: who is opted in, hours, warning if a business-hours slot is uncovered.
 
 ### How calls reach the phone
-- **Phase 1 (web app):** Twilio forwards to the staff mobile showing the business number. Call button is click-to-call (Twilio rings staff first, then connects the customer).
-- **Phase 2:** Twilio Voice SDK in-app softphone. Reliable iPhone ringing needs the native app (CallKit + PushKit, item 3).
+- **In-app softphone** (Twilio Voice SDK): calls go straight out of and ring inside TEops, no personal mobiles. The iPhone app uses CallKit + PushKit so calls ring when locked or closed (item 3); desktop uses the same SDK in the browser.
 
 ### Under the hood
 - Twilio Messaging + Voice webhooks to Netlify functions (signature-verified). Supabase tables: messages, calls, voicemails, per-user availability (fast RLS, indexed FKs).
@@ -283,7 +284,7 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 - New push notification types (new SMS, missed call) on the existing per-type prefs.
 - AI tagging/summaries only for users with an AI start date.
 
-**Dependencies:** Twilio account + regulatory bundle + port (high lead time); staff mobiles on employee records; native app for phase 2.
+**Dependencies:** native app (item 3); Twilio account + regulatory bundle + port (high lead time).
 
 **Open questions**
 - [ ] Record calls? Needs a "may be recorded" message and staff notice coverage.
