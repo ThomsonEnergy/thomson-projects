@@ -1,6 +1,10 @@
 [build]
   publish = "public"
   functions = "netlify/functions"
+  # Points branch deploys and previews at the staging Supabase branch when
+  # SUPABASE_URL / SUPABASE_ANON_KEY are set for that context. Production is
+  # left as is. See scripts/write-config.js and docs/ENV_VARS.md.
+  command = "node scripts/write-config.js"
 
 # Headless Chromium (quote/invoice PDF rendering) needs more headroom than
 # the default Lambda allocation - it was OOM-killing consistently even

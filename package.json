@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "engines": {
-    "node": "18"
+    "node": "20"
+  },
+  "scripts": {
+    "check": "node scripts/check.js"
   },
   "dependencies": {
     "@sparticuz/chromium": "^131.0.1",

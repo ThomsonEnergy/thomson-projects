@@ -1,31 +1,43 @@
-# Thomson Projects — All Migrations
+# TEops (Thomson Energy operations app)
 
-Every migration for this project, migration_001 through the highest-numbered
-file in this folder, in run order. migration_007 through migration_043 were
-reconstructed from what had already been applied directly in Supabase, since
-nothing in this app runs a migration automatically and several changes were
-made straight in the SQL Editor with no file ever committed for them.
-migration_044 onward continues from there in the order it actually happened.
+Live business app for Thomson Energy Australia: leads, quotes, jobs, scheduling, timesheets, POs, stock, invoices, STCs, HR, overheads, with Xero, Gmail, Airwallex, Formbay and web push.
 
-## Run order
+**Live:** https://projects.thomsonenergy.com.au
 
-Run these in numeric order. Each is safe to re-run if something fails partway
-through — every policy has a matching `drop policy if exists` guard, so
-re-running a migration that already partially applied won't error out on
-duplicate policies.
+## Stack
 
-## Checking what's actually been run
+- **Netlify:** static front end in `public/` (no build step beyond `scripts/write-config.js`), serverless and scheduled functions in `netlify/functions/`.
+- **Supabase:** Postgres, auth, storage, RLS. Schema in `supabase/migrations/`.
+- **Anthropic API:** AI extraction, drafting, Sparky chat.
+- **Integrations:** Xero (accounting + payroll, live), Gmail (shared sales@ inbox), Airwallex (payment links), Formbay (STCs), Pylon, Web Push. Twilio planned.
 
-`migration_audit_diagnostic.sql` is read-only — run it any time in Supabase's
-SQL Editor to see which migrations show real evidence of having been applied
-to your live database, versus which are just sitting in this folder unrun.
-This checks your actual schema, not your GitHub files, so it catches
-migrations that exist in the repo but were never executed. Keep it in sync
-when you add a new migration - one more `union all` row checking for
-something that migration's SQL actually created.
+## Layout
 
-## If you're setting these up in a fresh GitHub repo / Claude Code session
+| Path | What |
+|---|---|
+| `public/` | Pages (`*.html`), `js/`, `css/`, icons, PWA manifest, `sw.js` |
+| `netlify/functions/` | API and scheduled functions, `_shared/` helpers |
+| `supabase/migrations/` | Schema migrations (baseline + new changes) |
+| `supabase/seed.sql` | Fake data for staging and preview branches |
+| `Migrations/` | Archive of the old numbered migrations (007 to 155), history only |
+| `scripts/` | `check.js` (syntax checks), `cloud-setup.sh`, `write-config.js` |
+| `docs/` | Spec, backlog, agents plan, env vars, staging; `docs/archive/` for finished handoffs |
+| `policies and Contracts/` | Source text for onboarding documents and contracts |
+| `BUGS_AND_UPDATES.md` | Auto-written by `sync-bugs-to-repo.js`, do not edit by hand |
 
-Recommended folder: `migrations/` in your repo root, one file each, kept in
-this same numbered order. That numbering is meaningful — later migrations
-sometimes depend on columns/tables an earlier one created.
+## Getting started
+
+```bash
+bash scripts/cloud-setup.sh
+```
+
+Installs dependencies and the Supabase CLI, links to Supabase if the env vars are set, and runs `npm run check`.
+
+## Docs
+
+- [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md): what is built and what is planned
+- [docs/IDEAS_BACKLOG.md](docs/IDEAS_BACKLOG.md): future features
+- [docs/AI_AGENTS_PLAN.md](docs/AI_AGENTS_PLAN.md): AI agents
+- [docs/ENV_VARS.md](docs/ENV_VARS.md): env vars and keys
+- [docs/STAGING.md](docs/STAGING.md): staging, migrations, backups
+- [CLAUDE.md](CLAUDE.md): rules for Claude Code
