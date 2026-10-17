@@ -65,17 +65,18 @@
           .not('job_number', 'is', null)
           .neq('pipeline_stage', 'archived')
           .order('created_at', { ascending: false }),
-        supabaseClient.from('purchase_orders').select('project_id, amount, status, purchase_order_line_items(quantity, unit_cost)').neq('status', 'ordered'),
+        supabaseClient.from('purchase_orders').select('project_id, purchase_order_line_items(quantity, unit_cost, received)'),
       ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
-      // Materials actually incurred, per project - only POs that have been
-      // received/invoiced/paid count as real cost; 'ordered' hasn't
-      // actually happened yet.
+      // Materials actually incurred, per project - only line items actually
+      // received count, the same rule the job page's "Actual cost" uses, so
+      // a part-received PO shows the same figure in both places.
       const materialCostByProject = {};
       (poRows || []).forEach(po => {
-        const items = po.purchase_order_line_items || [];
-        const total = items.length ? items.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0) : Number(po.amount) || 0;
+        const total = (po.purchase_order_line_items || [])
+          .filter(li => li.received)
+          .reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
         materialCostByProject[po.project_id] = (materialCostByProject[po.project_id] || 0) + total;
       });
 

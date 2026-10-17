@@ -2917,14 +2917,14 @@
                 <div class="grid cols-${project.job_number ? '4' : '3'}">
                   <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
                   <div class="stat" data-oh-cost="${cost}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
-                  <div class="stat"><div class="label" data-oh-gross="Estimated gross profit">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
+                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
                   ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
                 </div>
 
                 ${project.job_number ? `
                 <div class="grid cols-2" style="margin-top:10px;">
                   <div class="stat" data-oh-cost="${accruedTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
-                  <div class="stat"><div class="label" data-oh-gross="Actual gross profit">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
+                  <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
                 </div>
                 ` : ''}
 
@@ -5434,7 +5434,7 @@
       });
     }
 
-    // Finance and Admin see the Summary cost tiles with overheads added: employee overhead (direct plus
+    // Finance and Admin see a note under the Summary cost tiles with overheads added: employee overhead (direct plus
     // indirect, see the Overheads page) and company overhead (company_pct of the job's profit, or of its
     // price if the Overheads page is set to price). The estimate uses the average employee overhead per
     // quoted hour; the actual uses each person's own rate on the job hours they logged. Deliberately no
@@ -5460,12 +5460,11 @@
         const d = tile.dataset, base = Number(d.ohCost) || 0;
         const empCost = d.ohActual ? actual : est * (Number(d.ohHours) || 0);
         const coCost = (pct / 100) * Math.max(0, Number(byPrice ? d.ohPrice : d.ohProfit) || 0);
-        valueEl.textContent = money(base + empCost + coCost);
+        // The tile itself stays the true cash cost (materials and wages, same as the Projects
+        // dashboard); the overheads-loaded figure is only a note underneath.
         tile.querySelector('.oh-note')?.remove();
-        valueEl.insertAdjacentHTML('afterend', `<div class="subtitle oh-note" style="margin:2px 0 0; font-size:12px;" title="${money(base)} materials and wages + ${money(empCost)} employee overhead + ${money(coCost)} company overhead">includes overheads</div>`);
+        valueEl.insertAdjacentHTML('afterend', `<div class="subtitle oh-note" style="margin:2px 0 0; font-size:12px;" title="${money(base)} materials and wages + ${money(empCost)} employee overhead + ${money(coCost)} company overhead">${money(base + empCost + coCost)} incl. overheads</div>`);
       });
-      // The profit tiles still leave overheads out, so say so next to costs that now include them
-      document.querySelectorAll('[data-oh-gross]').forEach(label => { label.textContent = label.dataset.ohGross; });
     }
 
     // Meetings held about this job (meetings.html), with how many of their
