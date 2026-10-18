@@ -21,7 +21,7 @@ Progress on the outside accounts that gate SMS/calls (backlog item 7) and the na
 | D-U-N-S | Done, 775058635 | None |
 | Apple Developer Program (organisation) | Submitted 17 Oct 2026, Enrollment ID 58NBR3V7K9. Apple is verifying signing authority. | Watch for Apple's email or call (answer unknown calls on 0455 415 464). Accept the agreement and pay ~AU$149/yr. Chase Apple Developer Support with the Enrollment ID if nothing after ~2 weeks. |
 | Apple Business (Manager) | Account created 17 Oct 2026 ("Manage IT needs") | Note the **Organisation ID** (Preferences > Organisation information): the TEops iPhone app ships as a private Custom App to that ID. Skip MDM, Managed Apple Accounts and Apps and Books. |
-| Twilio | Account created on Full access (pay as you go, US$50 credit). Business compliance profile part filled in. | Upload ID (licence front and back, or passport), submit the Business Profile. Then the AU **Mobile** regulatory bundle (Business). Then turn on 2FA, set a usage alert (~US$20), rename the account to Thomson Energy. |
+| Twilio | Business Profile **approved** 18 Oct 2026. AU Mobile regulatory bundle (Business, Messaging channel, Direct Customer) **approved** 18 Oct 2026. Test number **0468 085 277** (+61468085277) active: Voice, SMS, MMS, US$8.25/month. Messaging and Voice configuration not set up yet. | SMS/calls are built after the native iPhone app (decided 17 Oct 2026, backlog item 7), then tested on this number. Until then: turn on 2FA, set a usage alert (~US$20), rename the account to Thomson Energy. |
 | Telstra (0455 415 464) | Number still on Telstra. | Note the account number, exact account holder name, DOB/ABN on the account, any port-out PIN or lock, and the contract end date. Do not cancel anything. |
 | NSW surveillance notice | Drafts written 18 Oct 2026 in `policies and Contracts/`: surveillance notice (covers AI and future location), AI Features Consent, Location Tracking Consent. | Send all three to Formby or an HR adviser. After sign-off, fill in the start date, load the notice and AI consent in Settings > Onboarding, then give existing staff the notice (14 days before the start date). |
 
@@ -30,10 +30,12 @@ Progress on the outside accounts that gate SMS/calls (backlog item 7) and the na
 - ServiceM8 never gave us a Twilio login. SM8 used 0455 415 464 only as a Twilio **verified caller ID** (outbound caller ID only, no SMS, inbound still goes to Telstra). The signed Twilio document was for that, or for a port that never finished.
 - Plan:
   1. Business Profile approved, then the AU Mobile regulatory bundle approved. Australian numbers cannot be bought before that.
-  2. Buy one temporary AU mobile number (a few dollars a month) and build and test TEops SMS/calls on it.
+  2. Buy one temporary AU mobile number (a few dollars a month) to build and test TEops SMS/calls on. Done: 0468 085 277. The build waits for the native iPhone app (no interim forward-to-mobile phase, decided 17 Oct 2026).
   3. Port 0455 415 464 from Telstra into our Twilio account (new LOA signed in Twilio, roughly 1 to 2 weeks).
   4. Keep SM8 calling and the Telstra service until the port completes. After the port, the Telstra SIM no longer gets calls or texts on 0455; decide whether it keeps a new number or is cancelled.
-- Onboarding answers used: Messaging + Voice, With code. Domain verification skipped (only for org-wide user management, not needed).
+- Onboarding answers used: Messaging + Voice, With code.
+- Number compliance flow only allows one channel at a time; Messaging was chosen first, Voice can be added later. The bundle is a separate "registration" from the Business Profile, and the approved profile feeds it.
+- SIDs (Account, Business Profile, bundle) are not recorded in this public repo. The Account SID goes into TEops Settings (`api_keys`) at build time. Domain verification skipped (only for org-wide user management, not needed).
 - The Auth Token goes into TEops Settings (`api_keys` table) when SMS is built, never into chat or the repo. The Account SID is not secret.
 
 ## Apple

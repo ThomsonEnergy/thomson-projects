@@ -35,6 +35,7 @@ Installs dependencies and the Supabase CLI, links to Supabase if the env vars ar
 
 ## Docs
 
+- [docs/DECISIONS.md](docs/DECISIONS.md): dated log of decisions and progress, read first
 - [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md): what is built and what is planned
 - [docs/IDEAS_BACKLOG.md](docs/IDEAS_BACKLOG.md): future features
 - [docs/AI_AGENTS_PLAN.md](docs/AI_AGENTS_PLAN.md): AI agents

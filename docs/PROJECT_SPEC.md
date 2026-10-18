@@ -19,8 +19,9 @@ Internal operations app for Thomson Energy Australia (electrical and solar contr
 - **Ideas and new features:** `docs/IDEAS_BACKLOG.md` (reconciliation and receipts, voice messages, native iPhone app, weather scheduling, per-user inboxes, policy sign-off and location, SMS and calls).
 - **AI agents:** `docs/AI_AGENTS_PLAN.md` (ops manager agent, workers, team chat).
 - **High lead time, start now (external, weeks of waiting):**
-  1. **Apple Developer organisation account:** needs a D-U-N-S number for Thomson Energy Australia Pty Ltd. Blocks the native iPhone app and in-app call ringing.
-  2. **Port 0455 415 464 from Telstra to our own Twilio account:** lodge the AU regulatory bundle first. Today SM8 only uses the number as a Twilio verified caller ID, so nothing in-house sends or receives on it yet.
+  Live status: `docs/EXTERNAL_ACCOUNTS.md`.
+  1. **Apple Developer organisation account:** D-U-N-S 17 Oct 2026, enrolment submitted 17 Oct, Apple verifying. Blocks the native iPhone app, and so SMS and calls.
+  2. **Port 0455 415 464 from Telstra to our own Twilio account:** Twilio bundle approved 18 Oct 2026, test number 0468 085 277 active. Port after SMS and calls are built and tested. Today SM8 only uses the number as a Twilio verified caller ID.
   3. **NSW Workplace Surveillance notice:** adviser review of the notice and policy, then 14 days' written notice before any AI reading of chat/email/voice or location tracking starts.
 
 ---
@@ -69,7 +70,7 @@ Manual steps only a person can do (the code is live):
 4. Job page charts and flags (Part J).
 5. Stay logged in and Face ID login (B4).
 6. Offline support (G2), only if poor signal proves a real problem.
-7. SMS and calling (G3).
+7. SMS and calling (G3), after the native iPhone app.
 8. In-app solar pricing tool (Part K).
 
 **Tier 4: AI helpers and automation (deliberately last)**
@@ -312,7 +313,7 @@ Direct Job (A3) plus do-and-charge invoicing (A22) covers most of it today. Stil
 
 - **G1. Field forms:** variations are built (A3). **SWMS, Take 5, solar and electrical inspection forms with PDFs: not built.**
 - **G2. Offline support (not built):** `sw.js` only handles push. Plan: cache the app shell, IndexedDB write queue with local timestamps, sync on reconnect; start with SWMS/Take 5. Design conflicts, photo retry and slider reconciliation up front.
-- **G3. SMS and calling (not built):** see `docs/IDEAS_BACKLOG.md` item 7 (SMS and calls via Twilio) and the Roadmap lead-time items.
+- **G3. SMS and calling (not built):** built after the native iPhone app, as an in-app softphone with no interim forward-to-mobile phase (decided 17 Oct 2026). See `docs/IDEAS_BACKLOG.md` item 7 and the Roadmap lead-time items.
 - **G4. Push notifications:** built (A20). Not wired yet: invoice paid.
 
 ---
