@@ -11,7 +11,7 @@
 (function () {
   const esc = (s) => escapeHtml(s);
   const S = {
-    me: null, role: null, isAdmin: false, aiConsent: false, botName: 'Sparky',
+    me: null, role: null, isAdmin: false, botName: 'Sparky',
     staff: [], staffById: {}, channels: [], current: null,
     messages: [], threadRoot: null, threadMsgs: [], hasOlder: false,
     projects: {}, urls: {}, outbox: [], botWaiting: {}, filter: '',
@@ -610,12 +610,10 @@
         <button type="button" class="cc-icon cc-mic" title="Voice message">&#127908;</button>
         <button type="button" class="cc-send">Send</button>
       </div>
-      <div class="cc-note" style="display:none;"></div>
     </div>`;
     const ta = el.querySelector('textarea');
     const pop = el.querySelector('.cc-pop');
     const chips = el.querySelector('.cc-chips');
-    const note = el.querySelector('.cc-note');
     const fileInput = el.querySelector('.cc-file-input');
     const draftKey = `te-chat-draft:${ctx.channelId}:${ctx.parentId || ''}`;
     try { ta.value = localStorage.getItem(draftKey) || ''; } catch (e) { /* private mode */ }
@@ -752,16 +750,11 @@
       if (!body && !state.files.length) return;
       const mentionIds = S.staff.filter(s => s.full_name && body.includes('@' + s.full_name)).map(s => s.id);
       const asksBot = botRegex().test(body);
-      note.style.display = 'none';
-      if (asksBot && !S.aiConsent) {
-        note.innerHTML = `${esc(S.botName)} only answers people who have turned on AI features. You can turn them on in <a href="/settings.html">Settings, My Profile</a>.`;
-        note.style.display = 'block';
-      }
       const rec = {
         client_id: crypto.randomUUID ? crypto.randomUUID() : 'c' + Date.now() + Math.random().toString(16).slice(2),
         author_id: S.me, channel_id: ctx.channelId, parent_id: ctx.parentId || null,
         body, mention_ids: mentionIds, project_id: state.projectId,
-        created_at: new Date().toISOString(), status: 'pending', asks_bot: asksBot && S.aiConsent,
+        created_at: new Date().toISOString(), status: 'pending', asks_bot: asksBot,
         files: state.files.map(({ blob, name, type, size, kind, duration }) => ({ blob, name, type, size, kind, duration })),
       };
       ta.value = ''; saveDraft(); grow();
@@ -941,12 +934,10 @@
     S.isAdmin = S.role === 'admin';
     if (S.isAdmin) document.getElementById('ch-new-channel').style.display = '';
     S.botName = (typeof aiAssistantName === 'function' && aiAssistantName()) || 'Sparky';
-    const [, , consent] = await Promise.all([
+    await Promise.all([
       loadStaff(),
       supabaseClient.from('company_settings').select('ai_assistant_name').eq('id', 1).maybeSingle().then(r => { if (r.data && r.data.ai_assistant_name && r.data.ai_assistant_name.trim()) S.botName = r.data.ai_assistant_name.trim(); }),
-      supabaseClient.rpc('get_consent_status', { p_profile_id: S.me }),
     ]);
-    S.aiConsent = !!(consent && consent.data && consent.data[0] && consent.data[0].ai_consent_at);
     try { S.outbox = await outboxAll(); S.outbox.forEach(r => { if (r.status === 'failed') return; r.status = 'pending'; }); } catch (e) { S.outbox = []; }
     await loadProjects(S.outbox.map(r => r.project_id));
     await loadChannels();

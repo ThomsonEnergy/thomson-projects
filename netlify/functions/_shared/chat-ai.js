@@ -6,19 +6,17 @@ const {
 } = require('./sparky-tools');
 
 // Sparky in team chat (docs/AI_AGENTS_PLAN.md "Chat agents"):
-//  - Tagger: every new message from someone with AI consent is matched to a
-//    job. An explicit J or Q number tags straight away; otherwise a small model
+//  - Tagger: every new message is matched to a job. An explicit J or Q number tags straight away; otherwise a small model
 //    tags when sure and suggests when guessing (the team taps Yes or No). It can
 //    also tag the earlier messages a J number answers ("what job for the
 //    downlights?" then "J7006").
-//  - Voice messages from people with consent are turned into text first.
-//  - Assistant: answers when someone with consent @mentions Sparky, using the
-//    same read-only lookups as the Ask AI widget, run with the asker's login.
+//  - Voice messages are turned into text first.
+//  - Assistant: answers when someone @mentions Sparky, using the same
+//    read-only lookups as the Ask AI widget, run with the asker's login.
 //
-// Consent rule for every step: a message is only read by AI when its author
-// has profiles.ai_consent_at set and the message was sent after that time.
-// Everyone else's messages are left out, including from the context given to
-// the model. In the Social channel Sparky only tags work talk and never
+// Sparky is a member of every chat, so no AI consent is needed for chat (the
+// owner's lawyer, 18 Oct 2026; staff who don't want it can text outside the
+// app). In the Social channel Sparky only tags work talk and never
 // summarises or reports on anything said there.
 
 const TAGGER_MODEL = 'claude-haiku-5-5';
@@ -47,17 +45,11 @@ async function assistantName(admin) {
   return (data && data.ai_assistant_name && data.ai_assistant_name.trim()) || 'Sparky';
 }
 
-async function consentMap(admin, ids) {
+async function peopleMap(admin, ids) {
   const want = [...new Set(ids.filter(Boolean))];
   if (!want.length) return {};
-  const { data } = await admin.from('profiles').select('id, full_name, ai_consent_at').in('id', want);
+  const { data } = await admin.from('profiles').select('id, full_name').in('id', want);
   return Object.fromEntries((data || []).map((p) => [p.id, p]));
-}
-// The one consent check everything goes through.
-function aiMayRead(msg, people) {
-  if (msg.is_bot) return true;
-  const p = people[msg.author_id];
-  return !!(p && p.ai_consent_at && new Date(msg.created_at) >= new Date(p.ai_consent_at));
 }
 
 const jobRef = (p) => (p.job_number ? `J${p.job_number}` : p.quote_number ? `Q${p.quote_number}` : null);
@@ -151,8 +143,8 @@ async function tagMessage(admin, apiKey, msg, channel, people) {
     .order('created_at', { ascending: false }).limit(12);
   q = msg.parent_id ? q.or(`id.eq.${msg.parent_id},parent_id.eq.${msg.parent_id}`) : q.is('parent_id', null);
   const { data: recentRaw } = await q;
-  Object.assign(people, await consentMap(admin, (recentRaw || []).map((r) => r.author_id).filter((id) => !people[id])));
-  const recent = (recentRaw || []).filter((r) => aiMayRead(r, people)).reverse();
+  Object.assign(people, await peopleMap(admin, (recentRaw || []).map((r) => r.author_id).filter((id) => !people[id])));
+  const recent = (recentRaw || []).reverse();
   const candidates = recent.filter((r) => !r.project_id && !r.is_bot);
 
   if (sure && !candidates.length) {
@@ -210,12 +202,12 @@ async function processPending(admin, { limit = 15 } = {}) {
     .gt('created_at', new Date(Date.now() - 2 * 86400000).toISOString())
     .order('created_at').limit(limit);
   if (!rows || !rows.length) return 0;
-  const people = await consentMap(admin, rows.map((r) => r.author_id));
+  const people = await peopleMap(admin, rows.map((r) => r.author_id));
   let apiKey = null, staffNames = null, done = 0;
   const channels = {};
   for (const row of rows) {
     const { data: claimed } = await admin.from('chat_messages').update({ ai_processed_at: new Date().toISOString() }).eq('id', row.id).is('ai_processed_at', null).select('id');
-    if (!claimed || !claimed.length || !aiMayRead(row, people)) continue;
+    if (!claimed || !claimed.length) continue;
     try {
       apiKey = apiKey || await getIntegrationKey('anthropic');
       if (!channels[row.channel_id]) {
@@ -262,16 +254,14 @@ async function answer(admin, userClient, userId, messageId) {
     msg.voice_transcript = again && again.voice_transcript;
   }
   if (!mentionsAssistant(fullText(msg), name)) return 'not-asked';
-  const people = await consentMap(admin, [msg.author_id]);
-  if (!aiMayRead(msg, people)) return 'no-consent';
+  const people = await peopleMap(admin, [msg.author_id]);
   const { data: claimed } = await admin.from('chat_messages').update({ ai_asked_at: new Date().toISOString() }).eq('id', msg.id).is('ai_asked_at', null).select('id');
   if (!claimed || !claimed.length) return 'already';
 
   const { data: channel } = await admin.from('chat_channels').select('id, kind, name, is_social').eq('id', msg.channel_id).single();
   const threadRoot = msg.parent_id || null;
 
-  // What Sparky can see of the conversation: never Social, and only
-  // messages from people with consent.
+  // What Sparky can see of the conversation: never Social.
   let context = [];
   if (!channel.is_social) {
     let q = admin.from('chat_messages')
@@ -281,7 +271,7 @@ async function answer(admin, userClient, userId, messageId) {
       .order('created_at', { ascending: false }).limit(25);
     q = threadRoot ? q.or(`id.eq.${threadRoot},parent_id.eq.${threadRoot}`) : q.is('parent_id', null);
     const { data } = await q;
-    Object.assign(people, await consentMap(admin, (data || []).map((r) => r.author_id)));
+    Object.assign(people, await peopleMap(admin, (data || []).map((r) => r.author_id)));
     context = (data || []).reverse();
   }
   const projectIds = [...new Set([msg.project_id, ...context.map((c) => c.project_id)].filter(Boolean))];
@@ -290,9 +280,7 @@ async function answer(admin, userClient, userId, messageId) {
     : { data: [] };
   const refOf = (id) => { const p = (projects || []).find((x) => x.id === id); return p ? `${jobRef(p) || ''} ${p.name}`.trim() : null; };
   const who = (m) => (m.is_bot ? name : ((people[m.author_id] && people[m.author_id].full_name) || 'Staff'));
-  const line = (m) => (aiMayRead(m, people)
-    ? `${who(m)}${m.project_id ? ` [tagged ${refOf(m.project_id)}]` : ''}: ${fullText(m).slice(0, 1500) || '(photo or file)'}`
-    : `${who(m)}: (hidden: this person has not turned on AI features)`);
+  const line = (m) => `${who(m)}${m.project_id ? ` [tagged ${refOf(m.project_id)}]` : ''}: ${fullText(m).slice(0, 1500) || '(photo or file)'}`;
 
   const asker = people[msg.author_id] ? people[msg.author_id].full_name : 'a staff member';
   const now = new Date();
@@ -365,4 +353,4 @@ Answer their question in one short chat message. Look things up rather than gues
   return 'answered';
 }
 
-module.exports = { processPending, answer, mentionsAssistant, aiMayRead, TAGGER_MODEL, ASSISTANT_MODEL };
+module.exports = { processPending, answer, mentionsAssistant, TAGGER_MODEL, ASSISTANT_MODEL };

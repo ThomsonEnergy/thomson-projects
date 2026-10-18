@@ -28,7 +28,7 @@ AI processing of these systems only applies to staff who sign the separate AI Fe
 - The Social channel in team chat is only scanned to spot work talk so it can be matched to a job. AI never summarises, reports on or keeps a record of personal chat.
 
 5. How it is carried out
-Messages, emails, texts and voice messages are stored in TEops (hosted by Supabase). For staff who consent, AI reads them as they arrive, using these service providers: Anthropic (Claude), AssemblyAI (speech to text), Google (Gmail) and Twilio (texts and calls). Some of these providers process data outside Australia. Nothing is ever sent to a customer or supplier by AI without a person pressing send.
+Messages, emails, texts and voice messages are stored in TEops (hosted by Supabase). Sparky (the AI) is a member of every TEops team chat and reads chat messages as they arrive. For email, texts and calls, AI reads them only for staff who consent, using these service providers: Anthropic (Claude), AssemblyAI (speech to text), Google (Gmail) and Twilio (texts and calls). Some of these providers process data outside Australia. Nothing is ever sent to a customer or supplier by AI without a person pressing send.
 
 6. Continuous or intermittent
 Continuous and ongoing, for as long as you are employed. It is not for a limited period.
