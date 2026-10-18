@@ -4,6 +4,10 @@
 
 const NOTIF_VAPID_PUBLIC = 'BPWaE-Nk0X9vEeR7Lq3MEtE8U7e7yDNu2DwyKFAdJAJFiWnPfmvODPcV1u2AJMB2C9sl23mRsG0_TEaBzUMPS5s';
 const NOTIF_KINDS = [
+  ['chat_dm', 'Chat: direct messages to me'],
+  ['chat_mention', 'Chat: @mentions of me (and Sparky answering me)'],
+  ['chat_reply', 'Chat: replies in threads I am in'],
+  ['chat_message', 'Chat: every new message in my channels (mute a channel in Chat to stop just that one)'],
   ['tag', 'Tagged in a post or comment'],
   ['comment', 'Comments on my posts'],
   ['task_assigned', 'Tasks given to me'],

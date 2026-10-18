@@ -49,3 +49,8 @@
 # warm-pdf.js.
 [functions.warm-pdf]
   schedule = "*/4 * * * *"
+
+# Every 2 minutes: catches any team chat message Sparky has not tagged to a
+# job yet (normally done the moment it is sent) - see chat-ai-sweep.js.
+[functions.chat-ai-sweep]
+  schedule = "*/2 * * * *"

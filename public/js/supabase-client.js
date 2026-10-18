@@ -1795,6 +1795,7 @@ async function findMatchingSupplier(fields) {
 // how small nav inconsistencies kept creeping in before this existed).
 const MAIN_NAV_ITEMS = [
   { key: 'my-day', label: 'My Day', href: '/my-day.html', icon: '&#127749;' },
+  { key: 'chat', label: 'Chat', href: '/chat.html', icon: '&#128172;' },
   { key: 'inbox', label: 'Inbox', href: '/inbox.html', icon: '&#128231;' },
   { key: 'leads', label: 'Leads', href: '/leads.html', icon: '&#127919;' },
   { key: 'quotes', label: 'Quotes', href: '/quotes.html', icon: '&#128221;' },
@@ -1923,6 +1924,7 @@ async function renderMainNav(activeKey) {
   }
   watchTopbarFit();
   renderAIChatWidget();
+  loadChatBadge();
   loadNotificationBell();
   loadGlobalSearch();
 }
@@ -1972,11 +1974,45 @@ function loadGlobalSearch() {
 
 // The notification bell + phone push setup live in their own file, loaded once
 // on any page that shows the top bar.
+// Chat icon in the top bar with the unread count (chats not muted), kept up
+// to date by Realtime and a once-a-minute refresh. See chat.html.
+function loadChatBadge() {
+  const right = document.querySelector('.topbar-right');
+  if (!right || document.getElementById('chat-topbar-link')) return;
+  const link = document.createElement('a');
+  link.href = '/chat.html'; link.id = 'chat-topbar-link'; link.className = 'topbar-icon-link'; link.title = 'Chat';
+  link.style.position = 'relative';
+  link.innerHTML = '&#128172;<span id="chat-topbar-badge" style="position:absolute; top:-5px; right:-6px; min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:#e5484d; color:#fff; font-size:11px; font-weight:700; display:none; align-items:center; justify-content:center; line-height:1;"></span>';
+  right.insertBefore(link, right.firstChild);
+  refreshChatBadge();
+  setInterval(refreshChatBadge, 60000);
+  try {
+    let t = null;
+    supabaseClient.channel('chat-badge-' + Math.random().toString(36).slice(2))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, () => { clearTimeout(t); t = setTimeout(refreshChatBadge, 1500); })
+      .subscribe();
+  } catch (e) { /* the minute refresh still keeps it current */ }
+}
+let _chatBadgeBusy = false;
+async function refreshChatBadge() {
+  const badge = document.getElementById('chat-topbar-badge');
+  if (!badge || _chatBadgeBusy) return;
+  _chatBadgeBusy = true;
+  try {
+    const { data, error } = await supabaseClient.rpc('chat_unread_total');
+    const n = error ? 0 : (data || 0);
+    badge.textContent = n > 99 ? '99+' : String(n);
+    badge.style.display = n ? 'flex' : 'none';
+  } finally {
+    _chatBadgeBusy = false;
+  }
+}
+
 function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=5';
+  s.src = '/js/notifications.js?v=6';
   document.head.appendChild(s);
 }
 
