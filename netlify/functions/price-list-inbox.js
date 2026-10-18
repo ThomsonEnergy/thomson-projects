@@ -7,6 +7,7 @@
 //   undo_change    { id }               put an applied change back
 //   apply_all      { id: import id }    apply every waiting change from one price list
 //   set_supplier   { id, supplier_id }  supplier picked by hand: compare the list now
+//   new_supplier   { id }               create the supplier named on the list, then compare
 //   read_all       { id }               a very large file: read every page anyway
 //   not_price_list { id }               put the file aside
 //   retry          { id }               read the file again from the start
@@ -39,6 +40,20 @@ exports.handler = async (event) => {
       let applied = 0;
       for (const c of waiting || []) { await applyChange(admin, c.id, user.id); applied += 1; }
       return json(200, { ok: true, applied });
+    }
+    if (action === 'new_supplier') {
+      if (!(imp.items || []).length) return json(400, { ok: false, error: 'Nothing has been read from this file yet.' });
+      const meta = imp.read_meta || {};
+      const name = (imp.supplier_name_read || meta.supplier || '').trim();
+      if (!name) return json(400, { ok: false, error: 'No supplier name was read from the file. Add the supplier on the Suppliers page, then pick it here.' });
+      const { data: created, error } = await admin.from('suppliers').insert({
+        name, credit_terms_type: 'net_days', credit_terms_days: 30, abn: meta.abn || null, our_account_number: meta.our_account_number || null,
+      }).select('id').single();
+      if (error) throw error;
+      await admin.from('activity_log').insert({ entity_type: 'supplier', entity_id: created.id, action: 'created', description: `Supplier "${name}" created from an emailed price list`, changed_by: user.id });
+      await admin.from('price_list_imports').update({ supplier_id: created.id }).eq('id', id);
+      const r = await applyPriceList(admin, id);
+      return json(200, { ok: true, summary: r.summary });
     }
     if (action === 'set_supplier') {
       if (!supplierId) return json(400, { ok: false, error: 'supplier_id is required' });
