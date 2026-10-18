@@ -1,7 +1,9 @@
 // POST /.netlify/functions/sm8-copy-attachments-background
-// Admin only. Second step of the ServiceM8 move, after sm8-import-jobs.js:
-// copies every attachment on the imported jobs from ServiceM8 into the
-// app - pictures into the job's Photos (project_photos, site-photos
+// Admin only. Second step of the ServiceM8 move, after sm8-import-jobs.js
+// (the import screen starts it on its own once jobs are imported). First
+// the labour check-ins and checklists (_shared/sm8-labour.js, a summary of
+// each run kept in sm8_copy_runs), then every attachment on the imported
+// jobs - pictures into the job's Photos (project_photos, site-photos
 // bucket, same as a photo taken on site), everything else into its
 // Documents under a "ServiceM8" folder.
 //
@@ -16,6 +18,7 @@ const fetch = require('node-fetch');
 const { requireAdmin } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { sm8GetAll, SM8_BASE } = require('./_shared/sm8-import');
+const { copyLabourAndChecklists } = require('./_shared/sm8-labour');
 
 // Stop picking up new files with time to spare before the 15 minute limit.
 const TIME_BUDGET_MS = 13 * 60 * 1000;
@@ -120,6 +123,16 @@ exports.handler = async (event) => {
 
   try {
     const apiKey = await getIntegrationKey('servicem8');
+
+    const { data: run } = await supabaseAdmin.from('sm8_copy_runs').insert({}).select('id').single();
+    const summary = {};
+    try {
+      await copyLabourAndChecklists(supabaseAdmin, apiKey, user.id, summary);
+    } catch (err) {
+      console.error('sm8-copy-attachments labour/checklists error:', err.message);
+      summary.error = String(err.message).slice(0, 500);
+    }
+    if (run) await supabaseAdmin.from('sm8_copy_runs').update({ summary, finished_at: new Date().toISOString() }).eq('id', run.id);
 
     // A run that crashed mid-file leaves its claim behind - hand it back.
     await supabaseAdmin.from('sm8_attachment_copies')
