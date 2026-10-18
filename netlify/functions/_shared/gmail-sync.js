@@ -13,6 +13,7 @@
 
 const { getAdminClient } = require('./require-admin');
 const { gmailRequest, GMAIL_MAILBOX } = require('./google-client');
+const { getBillLabelId, isSupplierBillMessage, startSupplierBillProcessing } = require('./supplier-bill-intake');
 
 function headerValue(headers, name) {
   return (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || null;
@@ -95,9 +96,10 @@ async function findClientIdForAddress(supabaseAdmin, address) {
   return contact?.client_id || null;
 }
 
-async function processMessageId(supabaseAdmin, messageId) {
+// Returns true when the message came in through invoice@ (a supplier bill).
+async function processMessageId(supabaseAdmin, messageId, billLabelId) {
   const { data: alreadyHave } = await supabaseAdmin.from('emails').select('id').eq('gmail_message_id', messageId).maybeSingle();
-  if (alreadyHave) return; // already synced (includes ones we sent ourselves via send-gmail.js)
+  if (alreadyHave) return false; // already synced (includes ones we sent ourselves via send-gmail.js)
 
   const msg = await gmailRequest(`messages/${messageId}?format=full`);
   const headers = msg.payload?.headers;
@@ -109,6 +111,9 @@ async function processMessageId(supabaseAdmin, messageId) {
   const bodyText = extractPlainText(msg.payload);
   const bodyHtml = extractHtml(msg.payload) || null;
   const attachments = extractAttachments(msg.payload);
+  // invoice@ bills: hidden from the Sales tab, no "New email" notification, read by
+  // process-supplier-bills-background.js instead
+  const isBill = direction === 'inbound' && isSupplierBillMessage(msg, billLabelId);
 
   let { data: thread } = await supabaseAdmin.from('email_threads').select('*').eq('gmail_thread_id', msg.threadId).maybeSingle();
   if (!thread) {
@@ -116,10 +121,12 @@ async function processMessageId(supabaseAdmin, messageId) {
     const clientId = await findClientIdForAddress(supabaseAdmin, matchAddress);
     const { data: newThread, error: threadErr } = await supabaseAdmin
       .from('email_threads')
-      .insert({ gmail_thread_id: msg.threadId, subject, client_id: clientId })
+      .insert({ gmail_thread_id: msg.threadId, subject, client_id: clientId, is_supplier_bill: isBill })
       .select('*').single();
     if (threadErr) throw threadErr;
     thread = newThread;
+  } else if (isBill && !thread.is_supplier_bill) {
+    await supabaseAdmin.from('email_threads').update({ is_supplier_bill: true }).eq('id', thread.id);
   }
 
   const { error: emailErr } = await supabaseAdmin.from('emails').insert({
@@ -143,6 +150,7 @@ async function processMessageId(supabaseAdmin, messageId) {
     subject: thread.subject || subject,
     is_read: direction === 'inbound' ? false : thread.is_read,
   }).eq('id', thread.id);
+  return isBill;
 }
 
 
@@ -196,10 +204,11 @@ async function runSync({ budgetMs = 8000 } = {}) {
   }
 
   messageIds = [...new Set(messageIds)];
-  let synced = 0, done = true;
+  const billLabelId = messageIds.length ? await getBillLabelId() : null;
+  let synced = 0, done = true, bills = 0;
   for (const id of messageIds) {
     if (Date.now() - startedAt > budgetMs) { done = false; break; }
-    await processMessageId(supabaseAdmin, id);
+    if (await processMessageId(supabaseAdmin, id, billLabelId)) bills += 1;
     synced += 1;
   }
 
@@ -208,8 +217,12 @@ async function runSync({ budgetMs = 8000 } = {}) {
   }
   let backfilled = 0;
   if (done) backfilled = await backfillEmails(supabaseAdmin, startedAt, budgetMs);
-  console.log(`sync-gmail: processed ${synced} of ${messageIds.length} message(s)${done ? '' : ' (out of time, will carry on next run)'}, filled in ${backfilled} older email(s).`);
-  return { synced, done, total: messageIds.length, backfilled };
+  // Supplier bills are read in the background (a PDF takes longer than this function gets).
+  // Started when a bill came in, when some are still waiting, and once an hour as a safety net.
+  const { count: waiting } = await supabaseAdmin.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+  if (bills || waiting || new Date().getMinutes() < 5) await startSupplierBillProcessing();
+  console.log(`sync-gmail: processed ${synced} of ${messageIds.length} message(s)${done ? '' : ' (out of time, will carry on next run)'}, ${bills} supplier bill(s), filled in ${backfilled} older email(s).`);
+  return { synced, done, total: messageIds.length, backfilled, bills };
 }
 
 module.exports = { runSync, extractHtml, extractAttachments, extractPlainText };

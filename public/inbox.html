@@ -73,7 +73,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=75"></script>
+  <script src="/js/supabase-client.js?v=76"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=4"></script>
@@ -122,6 +122,7 @@
       const { data: threads, error } = await supabaseClient
         .from('email_threads')
         .select('*, clients(name)')
+        .eq('is_supplier_bill', false) // invoice@ bills live on the Emailed bills page
         .order('last_message_at', { ascending: false, nullsFirst: false })
         .limit(100);
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }

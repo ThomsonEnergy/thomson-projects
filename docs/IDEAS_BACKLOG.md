@@ -15,7 +15,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
-| 8 | invoice@ supplier bill intake agent | Planned, waiting on owner answers | N | invoice@ alias in Google Workspace, which mailbox it sits on |
+| 8 | invoice@ supplier bill intake agent | Built, waiting on migration approval, then 2 weeks suggest-only | N | Migration 20261019000000 on staging then production |
 
 ## High lead time, start now
 
@@ -317,18 +317,11 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 
 ## 8. invoice@ supplier bill intake agent
 
-**Goal:** suppliers email bills to invoice@thomsonenergy.com.au (a Google Workspace alias, not a mailbox). An agent pulls each bill out, reads it and attaches it to the right PO, so nobody uploads bills by hand.
+**Goal:** suppliers email bills to invoice@thomsonenergy.com.au. An agent reads each bill and attaches it to the right PO, so nobody uploads bills by hand.
 
-**Built today (reused):** sales@ Gmail sync (`_shared/gmail-sync.js`, every 5 min), supplier invoice extraction (`extract-supplier-invoice.js`), supplier matching (account number > ABN > bank > name), PO auto-match on the invoice's own order reference (`supplier-detail.html`), `supplier_bills` with `po_id`.
+**Built 18 Oct 2026:** see `docs/PROJECT_SPEC.md` A11a. Google side done by the owner 18 Oct: invoice@ (Google Group) delivers to sales@, Gmail filter skips the inbox and labels `Supplier Bills` ("Bills" is reserved by Gmail). Only supplier bills go to invoice@ ("Hola Supply" was voice typing for "only supply"). accounts@ not used: TEops reads sales@ only.
 
-**Plan (proposed 18 Oct 2026):**
-- Google: add invoice@ as an alias on sales@ (already connected to TEops), so no new OAuth or seat.
-- Scheduled function every 5 min: Gmail search `to:invoice@thomsonenergy.com.au has:attachment`, label processed mail `TEops/Bill processed`; invoice@ mail is hidden from the Sales inbox tab.
-- Per PDF/image: extract (same prompt as A11), match supplier, de-duplicate on supplier + bill number, save file to storage, create the `supplier_bills` row.
-- PO matching, in order: PO number on the bill > PO number in subject/body > same supplier open PO with matching total (within $1) > line match. Confident: linked and logged on the PO. Not confident: goes to a new "Bills to check" queue with the top 3 PO guesses, one tap to confirm.
-- Never approves for payment or pushes to Xero; a person still approves.
-- Starts on staging, then read-only on production (suggest only) for 2 weeks before auto-linking.
-
-**Owner answers 18 Oct 2026:** only supplier bills come to invoice@ ("Hola Supply" was voice typing for "only supply"). invoice@ currently delivers to jasper@, accounts@ and jade@. Owner does not want sales@ cluttered; prefers TEops reads accounts@ if that avoids it.
-
-**Decided 18 Oct 2026:** invoice@ delivers to sales@ (owner setting it up in Google Admin). Gmail filter on sales@: To invoice@thomsonenergy.com.au, skip the inbox, label `Supplier Bills` ("Bills" is reserved by Gmail), never spam. The TEops sales@ sync reads all mail, so TEops must also hide invoice@ mail from the Sales tab. Build waits on owner's go-ahead.
+**Next:**
+- Apply migration 20261019000000 to staging, test, then production after the owner's yes.
+- 2 weeks suggest-only on production. If the confident matches are right, turn on auto-save (`api_keys` `supplier_bill_auto_save` = `on`).
+- Later: credit notes and statements emailed to invoice@ (today they land in To check as "not a bill"), add to stock from an emailed bill, Xero bill push.

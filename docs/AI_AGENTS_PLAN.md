@@ -36,6 +36,8 @@ AI agents run as much admin as possible. Jasper directs them from his phone and 
 3. Scheduling and job allocation (suggestions only, a human confirms)
 4. Compliance docs and certificates (AI prepares, the licensed signatory reviews and signs every one)
 
+Already built: **supplier bill intake** (invoice@ emails read, matched to POs, suggest-only until proven; `docs/PROJECT_SPEC.md` A11a).
+
 Drafts, not sends, for the first few weeks. Later workers: payment reconciliation, weather (see docs/IDEAS_BACKLOG.md items 1 and 4).
 
 ## Email (per-user opt-in)
