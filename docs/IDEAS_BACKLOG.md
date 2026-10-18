@@ -329,6 +329,8 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 - 2 weeks suggest-only on production. If the confident matches are right, turn on auto-save (`api_keys` `supplier_bill_auto_save` = `on`).
 - Price lists emailed to sales@ or invoice@ built 18 Oct 2026 (spec A11b): auto-update under 20% on known parts, the rest waits.
 - Bill checks against POs, supplier queries from invoice@ and statement reconciliation built 18 Oct 2026 (spec A11c).
+- Supplier or contractor type, suppliers created from bills, ABN Lookup check on every bill: built 18 Oct 2026 (spec A11a).
+- Later: contractor licence and insurance expiry (certificate reader as for staff), warn before approving a bill from a contractor whose insurance has lapsed. Offered 18 Oct 2026, not yet asked for.
 - Later: credit notes emailed to invoice@ (matched against queried bills) (today they land in To check as "not a bill"), add to stock from an emailed bill, Xero bill push.
 
 ---

@@ -25,6 +25,7 @@ async function extractSupplierInvoiceWithUsage({ fileBase64, mediaType }) {
 - bpay_biller_code: their BPAY Biller Code, if shown
 - bpay_reference: the BPAY reference/Ref number for paying this account, if shown
 - document_type: one of "invoice" (a tax invoice or bill to pay), "credit_note", "statement" (a list of several invoices or an account summary), or "other" (a quote, remittance, order confirmation, delivery docket or anything else)
+- supplier_kind: "contractor" if the bill is mostly labour or services (hours, call-out, installation, labour hire, equipment hire with an operator, trade work), "supplier" if it is mostly goods or materials
 - bill_number: their invoice or bill number
 - bill_date: the invoice date, as YYYY-MM-DD
 - line_items: an array of every line item, each with:
