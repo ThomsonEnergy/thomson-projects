@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=79"></script>
+  <script src="/js/supabase-client.js?v=80"></script>
   <script src="/js/theme.js"></script>
   <script>
     const supplierId = new URLSearchParams(window.location.search).get('id');
@@ -239,7 +239,8 @@
     async function openStatementReviewPanel(extracted, sourceFile) {
       const { data: ourBills } = await supabaseClient.from('supplier_bills').select('*').eq('supplier_id', supplierId);
       const bills = ourBills || [];
-      const statementInvoices = extracted.invoices || [];
+      // payments and credits are listed on statements too; only invoices are matched to bills
+      const statementInvoices = (extracted.invoices || []).filter(inv => !inv.type || inv.type === 'invoice');
 
       // Reconcile: for each line the statement shows, does it match one of
       // our own bills (by bill number), and if so, does the amount agree?
@@ -288,17 +289,25 @@
         try {
           const { data: { user } } = await supabaseClient.auth.getUser();
           const filePath = await uploadPrivateFile(sourceFile, `statements/${supplierId}`);
-          const { error } = await supabaseClient.from('supplier_statements').insert({
+          const { data: savedSt, error } = await supabaseClient.from('supplier_statements').insert({
             supplier_id: supplierId,
             statement_date: extracted.statement_date || null,
             total_amount: extracted.total_amount || 0,
             file_path: filePath,
+            file_name: sourceFile.name,
+            lines: extracted.invoices || [],
             reconciliation_notes: overlay.querySelector('#st-notes').value.trim() || null,
             created_by: user.id,
-          });
+          }).select('id').single();
           if (error) throw error;
+          // full two-way reconciliation, kept on the Bill checks page
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          await fetch('/.netlify/functions/supplier-checks', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ action: 'reconcile', id: savedSt.id }),
+          }).catch(e => console.error('statement reconcile did not run:', e.message));
           overlay.remove();
-          alert('Statement saved.');
+          alert('Statement saved. The full check (both ways, duplicates, balance) is on the Bill checks page.');
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${err.message}</div>`;
         }
@@ -818,6 +827,15 @@
               bill_id: newBill.id, material_id: materialId, description, quantity, unit_cost: unitCost,
               po_line_item_id: poLineItemId, flag_reason: flagReason,
             });
+          }
+
+          // check the new bill line by line against its PO (Bill checks page)
+          {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            await fetch('/.netlify/functions/supplier-checks', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({ action: 'check_bill', id: newBill.id }),
+            }).catch(e => console.error('bill check did not run:', e.message));
           }
 
           if (inboxItemId) {

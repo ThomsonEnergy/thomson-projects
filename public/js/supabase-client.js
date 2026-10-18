@@ -1808,6 +1808,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;' },
   { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;' },
   { key: 'supplier-bills', label: 'Emailed bills', href: '/supplier-bills.html', icon: '&#129534;', pricingOnly: true },
+  { key: 'supplier-checks', label: 'Bill checks', href: '/supplier-checks.html', icon: '&#9989;', pricingOnly: true },
   { key: 'price-lists', label: 'Price lists', href: '/price-lists.html', icon: '&#127991;', pricingOnly: true },
   { key: 'ops', label: 'Ops manager', href: '/ops.html', icon: '&#129302;', adminOnly: true },
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;' },
@@ -2014,7 +2015,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=8';
+  s.src = '/js/notifications.js?v=9';
   document.head.appendChild(s);
 }
 
@@ -4808,8 +4809,9 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
         await supabaseClient.from('purchase_orders').update({
           received: true, received_by: user.id, received_at: new Date().toISOString(),
         }).eq('id', po.id);
-        await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', po.id);
-        await logActivity('purchase_order', po.id, 'fully_received', `PO ${po.po_number || ''} fully received - any linked bill approved for payment`);
+        // only bills that passed their PO check (Bill checks page); the others wait there
+        await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', po.id).in('check_status', ['matches', 'resolved']);
+        await logActivity('purchase_order', po.id, 'fully_received', `PO ${po.po_number || ''} fully received - linked bills that match it approved for payment`);
       }
 
       overlay.remove();

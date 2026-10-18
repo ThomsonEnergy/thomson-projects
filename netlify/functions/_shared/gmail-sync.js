@@ -13,8 +13,9 @@
 
 const { getAdminClient } = require('./require-admin');
 const { gmailRequest, GMAIL_MAILBOX } = require('./google-client');
-const { getBillLabelId, isSupplierBillMessage, startSupplierBillProcessing } = require('./supplier-bill-intake');
+const { getBillLabelId, isSupplierBillMessage, startSupplierBillProcessing, INVOICE_ADDRESS } = require('./supplier-bill-intake');
 const { looksLikePriceListEmail, startPriceListProcessing } = require('./price-list-intake');
+const { startStatementProcessing } = require('./statement-intake');
 
 function headerValue(headers, name) {
   return (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || null;
@@ -107,7 +108,8 @@ async function processMessageId(supabaseAdmin, messageId, billLabelId) {
   const headers = msg.payload?.headers;
   const fromRaw = headerValue(headers, 'From');
   const fromAddress = firstAddress(fromRaw);
-  const direction = fromAddress === GMAIL_MAILBOX.toLowerCase() ? 'outbound' : 'inbound';
+  // sales@ also sends supplier queries as invoice@ (_shared/supplier-email.js)
+  const direction = [GMAIL_MAILBOX.toLowerCase(), INVOICE_ADDRESS].includes(fromAddress) ? 'outbound' : 'inbound';
   const subject = headerValue(headers, 'Subject');
   const sentAt = headerValue(headers, 'Date');
   const bodyText = extractPlainText(msg.payload);
@@ -234,6 +236,8 @@ async function runSync({ budgetMs = 8000 } = {}) {
   // emailed price lists (from sales@ or invoice@): same idea, started on a likely one, while any are part read, and hourly
   const { count: listsWaiting } = await supabaseAdmin.from('price_list_imports').select('id', { count: 'exact', head: true }).eq('status', 'pending');
   if (priceLists || listsWaiting || new Date().getMinutes() < 5) await startPriceListProcessing();
+  // bill checks and statements: after the bill reader has had a go, so hourly is soon enough
+  if (new Date().getMinutes() >= 30 && new Date().getMinutes() < 35) await startStatementProcessing();
   console.log(`sync-gmail: processed ${synced} of ${messageIds.length} message(s)${done ? '' : ' (out of time, will carry on next run)'}, ${bills} supplier bill(s), filled in ${backfilled} older email(s).`);
   return { synced, done, total: messageIds.length, backfilled, bills, priceLists };
 }

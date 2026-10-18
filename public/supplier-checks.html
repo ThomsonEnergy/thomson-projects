@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Bill checks - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=16" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .bc-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+  .bc-filters button { font-size:13px; padding:6px 14px; border-radius:20px; }
+  .bc-filters button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .bc-item { padding:12px 0; border-top:1px solid var(--border); }
+  .bc-item:first-child { border-top:none; }
+  .bc-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline; }
+  .bc-meta { font-size:12px; color:var(--muted); margin-top:3px; word-wrap:break-word; }
+  .bc-issue { font-size:13px; margin-top:4px; padding-left:10px; border-left:3px solid #d08a00; }
+  .bc-issue.bad { border-left-color:var(--red, #c0392b); }
+  .bc-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .bc-actions button, .bc-actions a, .bc-actions select { font-size:12px; padding:5px 10px; }
+  .bc-chip { font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
+  .bc-chip.ok { color:var(--green); border-color:var(--green); }
+  .bc-chip.bad { color:var(--red, #c0392b); border-color:var(--red, #c0392b); }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Bill checks</h1>
+    <p class="subtitle">Every supplier bill is checked line by line against its PO, and every supplier statement against our bills, so nothing is missed, paid twice or overcharged. Emails to suppliers go from invoice@ and only when you press Send.</p>
+
+    <div class="card">
+      <div class="bc-filters" id="bc-filters">
+        <button type="button" class="secondary active" data-f="approve">To approve</button>
+        <button type="button" class="secondary" data-f="problems">Problems</button>
+        <button type="button" class="secondary" data-f="statements">Statements</button>
+        <button type="button" class="secondary" data-f="missing">Missing statements</button>
+      </div>
+      <div id="bc-body"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=80"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    let filter = 'approve', bills = [], statements = [], suppliers = [], missing = [];
+    const esc = (s) => escapeHtml(s == null ? '' : String(s));
+    const dateText = (iso) => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const supName = (id) => (suppliers.find(s => s.id === id) || {}).name || 'Unknown supplier';
+    const BAD = ['missing_bill', 'statement_duplicate', 'our_duplicate', 'amount_differs', 'price_higher', 'over_quantity', 'duplicate_number', 'po_total_exceeded'];
+
+    async function call(body) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/supplier-checks', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+      return data;
+    }
+    async function act(btn, body, busy) {
+      const t = btn.textContent; btn.disabled = true; btn.textContent = busy;
+      try { await call(body); await load(); } catch (err) { alert(err.message); btn.disabled = false; btn.textContent = t; }
+    }
+
+    // Write the email, let the person change anything, send only on Send.
+    async function emailSupplier(kind, id) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; overflow-y:auto;';
+      overlay.innerHTML = `<div class="card" style="max-width:620px; width:100%; max-height:90vh; overflow-y:auto;"><p class="subtitle">Writing the email...</p></div>`;
+      document.body.appendChild(overlay);
+      try {
+        const d = await call({ action: 'draft_email', kind, id });
+        overlay.querySelector('.card').innerHTML = `
+          <h2>Email the supplier</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Sent from invoice@thomsonenergy.com.au. Their reply comes back there and shows on this page.</p>
+          <label style="margin-top:0">To</label><input id="em-to" value="${esc(d.to)}" placeholder="supplier@example.com" />
+          <label>Subject</label><input id="em-subject" value="${esc(d.subject)}" />
+          <label>Message</label><textarea id="em-body" style="min-height:260px;">${esc(d.body)}</textarea>
+          <div style="margin-top:12px;"><button id="em-send">Send</button> <button type="button" class="secondary" id="em-cancel">Cancel</button></div>
+          <div id="em-msg"></div>`;
+        overlay.querySelector('#em-cancel').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('#em-send').addEventListener('click', async (e) => {
+          e.target.disabled = true; e.target.textContent = 'Sending...';
+          try {
+            await call({ action: 'send_email', kind, id, to: overlay.querySelector('#em-to').value.trim(), subject: overlay.querySelector('#em-subject').value.trim(), body: overlay.querySelector('#em-body').value });
+            overlay.remove(); await load();
+          } catch (err) { overlay.querySelector('#em-msg').innerHTML = `<div class="error-box">${esc(err.message)}</div>`; e.target.disabled = false; e.target.textContent = 'Send'; }
+        });
+      } catch (err) {
+        overlay.querySelector('.card').innerHTML = `<div class="error-box">${esc(err.message)}</div><button type="button" class="secondary" id="em-x">Close</button>`;
+        overlay.querySelector('#em-x').addEventListener('click', () => overlay.remove());
+      }
+    }
+
+    function billHtml(b, mode) {
+      const issues = (b.check_issues || []).filter(i => mode === 'approve' ? false : true);
+      const status = b.check_status === 'queried' ? `<span class="bc-chip bad">Queried ${dateText(b.query_sent_at)}${b.query_reply_at ? ' · supplier replied ' + dateText(b.query_reply_at) : ''}</span>`
+        : b.check_status === 'resolved' ? '<span class="bc-chip ok">Accepted</span>'
+        : b.check_status === 'matches' ? '<span class="bc-chip ok">Matches PO</span>'
+        : b.check_status === 'no_po' ? '<span class="bc-chip">No PO</span>' : '<span class="bc-chip bad">Problems</span>';
+      let actions = '';
+      if (mode === 'approve') actions = `<button type="button" data-approve="${b.id}">Approve for payment</button>`;
+      else {
+        if (b.check_status !== 'no_po') actions += `<button type="button" data-query="${b.id}">${b.check_status === 'queried' ? 'Email again' : 'Query supplier'}</button>`;
+        actions += `<button type="button" class="secondary" data-resolve="${b.id}">${b.check_status === 'no_po' ? 'OK without a PO' : 'Accept as is'}</button>`;
+      }
+      actions += `<a class="btn secondary" style="display:inline-flex;" href="/supplier-detail.html?id=${b.supplier_id}">Supplier</a>`;
+      if (b.file_path) actions += `<button type="button" class="secondary" data-file="${esc(b.file_path)}">Open bill</button>`;
+      return `<div class="bc-item">
+        <div class="bc-head"><span><strong>${esc(supName(b.supplier_id))}</strong> bill ${esc(b.bill_number || '(no number)')} ${status}</span><strong>${money(b.amount)}</strong></div>
+        <div class="bc-meta">${b.bill_date ? dateText(b.bill_date) + ' · ' : ''}${b.purchase_orders ? esc(b.purchase_orders.po_number) + (b.purchase_orders.received ? ' (received)' : ' (not received yet)') : 'No PO'}${b.resolved_note ? ' · ' + esc(b.resolved_note) : ''}</div>
+        ${issues.map(i => `<div class="bc-issue ${BAD.includes(i.kind) ? 'bad' : ''}">${esc(i.text)}</div>`).join('')}
+        <div class="bc-actions">${actions}</div></div>`;
+    }
+
+    function statementHtml(s) {
+      const issues = s.issues || [];
+      const chip = s.status === 'reconciled' ? '<span class="bc-chip ok">Reconciled</span>' : s.status === 'reviewed' ? '<span class="bc-chip ok">Reviewed</span>'
+        : s.status === 'issues' ? `<span class="bc-chip bad">${issues.length} issue${issues.length === 1 ? '' : 's'}</span>` : s.status === 'failed' ? '<span class="bc-chip bad">Could not be read</span>'
+        : s.status === 'pending' || s.status === 'processing' ? '<span class="bc-chip">Being read</span>' : `<span class="bc-chip">${esc(s.status || 'Uploaded')}</span>`;
+      const b = [];
+      if (issues.some(i => i.kind === 'no_supplier')) b.push(`<select data-sup-for="${s.id}"><option value="">Pick the supplier...</option>${suppliers.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select><button type="button" data-set-sup="${s.id}">Use</button>`);
+      if (issues.some(i => i.kind === 'missing_bill')) b.push(`<button type="button" data-copies="${s.id}">Ask for missing invoices</button>`);
+      if (issues.some(i => ['amount_differs', 'statement_duplicate', 'balance_differs', 'not_on_statement'].includes(i.kind))) b.push(`<button type="button" data-st-query="${s.id}">Email supplier about these</button>`);
+      if (s.status === 'issues') b.push(`<button type="button" class="secondary" data-reviewed="${s.id}">Mark gone through</button>`);
+      if (s.status === 'failed') b.push(`<button type="button" data-st-retry="${s.id}">Try again</button>`);
+      if (s.file_path) b.push(`<button type="button" class="secondary" data-file="${esc(s.file_path)}">Open statement</button>`);
+      return `<div class="bc-item">
+        <div class="bc-head"><span><strong>${esc(s.supplier_id ? supName(s.supplier_id) : (s.supplier_name_read || s.file_name || 'Statement'))}</strong> ${s.statement_date ? dateText(s.statement_date) : ''} ${chip}</span><strong>${money(s.total_amount)}</strong></div>
+        <div class="bc-meta">${s.our_unpaid != null ? `Our unpaid bills: ${money(s.our_unpaid)} · ` : ''}${(s.lines || []).length} lines${s.query_sent_at ? ` · emailed supplier ${dateText(s.query_sent_at)}` : ''}${s.query_reply_at ? ` · they replied ${dateText(s.query_reply_at)}` : ''}${s.error && s.status === 'failed' ? ' · ' + esc(s.error) : ''}</div>
+        ${s.status === 'reviewed' ? '' : issues.map(i => `<div class="bc-issue ${BAD.includes(i.kind) ? 'bad' : ''}">${esc(i.text)}</div>`).join('')}
+        ${b.length ? `<div class="bc-actions">${b.join('')}</div>` : ''}</div>`;
+    }
+
+    function render() {
+      const body = document.getElementById('bc-body');
+      const toApprove = bills.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment && !b.paid);
+      const problems = bills.filter(b => ['problems', 'queried', 'no_po'].includes(b.check_status) && !b.paid && !b.approved_for_payment);
+      const stIssues = statements.filter(s => ['issues', 'failed'].includes(s.status)).length;
+      const counts = { approve: toApprove.length, problems: problems.length, statements: stIssues, missing: missing.length };
+      document.querySelectorAll('#bc-filters button').forEach(b => { const base = b.textContent.replace(/ \(\d+\)$/, ''); b.textContent = counts[b.dataset.f] ? `${base} (${counts[b.dataset.f]})` : base; });
+
+      if (filter === 'approve') body.innerHTML = toApprove.length ? toApprove.map(b => billHtml(b, 'approve')).join('') : '<p class="subtitle">Nothing waiting. Bills that match their PO and are approved when the PO is received do not show here.</p>';
+      else if (filter === 'problems') body.innerHTML = problems.length ? problems.sort((a, b) => (a.check_status === 'no_po') - (b.check_status === 'no_po')).map(b => billHtml(b, 'problems')).join('') : '<p class="subtitle">No bills with problems.</p>';
+      else if (filter === 'statements') body.innerHTML = statements.length ? statements.map(statementHtml).join('') : '<p class="subtitle">No statements yet. Emailed statements are picked up within the hour; you can also upload one on a supplier\'s page.</p>';
+      else body.innerHTML = missing.length ? missing.map(s => `<div class="bc-item"><div class="bc-head"><strong>${esc(s.name)}</strong><span class="bc-chip bad">No statement for last month</span></div>
+          <div class="bc-actions"><button type="button" data-req-st="${s.id}">Ask for a statement</button><a class="btn secondary" style="display:inline-flex;" href="/supplier-detail.html?id=${s.id}">Supplier</a></div></div>`).join('')
+        : '<p class="subtitle">Every supplier that billed us last month has sent a statement (checked from the 10th of the month).</p>';
+
+      body.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', () => act(b, { action: 'approve_bill', id: b.dataset.approve }, 'Approving...')));
+      body.querySelectorAll('[data-resolve]').forEach(b => b.addEventListener('click', () => {
+        const note = prompt('Why is it OK? (for example: price rise agreed with the rep, credit note coming)');
+        if (note === null) return;
+        act(b, { action: 'resolve_bill', id: b.dataset.resolve, note }, 'Saving...');
+      }));
+      body.querySelectorAll('[data-query]').forEach(b => b.addEventListener('click', () => emailSupplier('bill_query', b.dataset.query)));
+      body.querySelectorAll('[data-copies]').forEach(b => b.addEventListener('click', () => emailSupplier('request_copies', b.dataset.copies)));
+      body.querySelectorAll('[data-st-query]').forEach(b => b.addEventListener('click', () => emailSupplier('statement_query', b.dataset.stQuery)));
+      body.querySelectorAll('[data-req-st]').forEach(b => b.addEventListener('click', () => emailSupplier('request_statement', b.dataset.reqSt)));
+      body.querySelectorAll('[data-reviewed]').forEach(b => b.addEventListener('click', () => act(b, { action: 'statement_reviewed', id: b.dataset.reviewed }, 'Saving...')));
+      body.querySelectorAll('[data-st-retry]').forEach(b => b.addEventListener('click', () => act(b, { action: 'statement_retry', id: b.dataset.stRetry }, 'Starting...')));
+      body.querySelectorAll('[data-set-sup]').forEach(b => b.addEventListener('click', () => {
+        const sid = body.querySelector(`[data-sup-for="${b.dataset.setSup}"]`).value;
+        if (!sid) { alert('Pick the supplier first.'); return; }
+        act(b, { action: 'statement_supplier', id: b.dataset.setSup, supplier_id: sid }, 'Reconciling...');
+      }));
+      body.querySelectorAll('[data-file]').forEach(b => b.addEventListener('click', async () => {
+        const win = window.open('', '_blank');
+        try { const url = await getSignedDocUrl(b.dataset.file); if (win) win.location = url; else window.location = url; } catch (err) { if (win) win.close(); alert(err.message); }
+      }));
+    }
+
+    // Suppliers that billed us last month and have not sent a statement since (from the 10th).
+    function findMissing(allBills, allStatements) {
+      const now = new Date();
+      if (now.getDate() < 10) return [];
+      const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      const startLast = iso(new Date(now.getFullYear(), now.getMonth() - 1, 1)), startThis = iso(new Date(now.getFullYear(), now.getMonth(), 1));
+      const billed = new Set(allBills.filter(b => b.bill_date && b.bill_date >= startLast && b.bill_date < startThis).map(b => b.supplier_id).filter(Boolean));
+      allStatements.filter(s => s.statement_date && s.statement_date >= startLast).forEach(s => billed.delete(s.supplier_id));
+      return suppliers.filter(s => billed.has(s.id));
+    }
+
+    async function load() {
+      const [b, st, sup] = await Promise.all([
+        supabaseClient.from('supplier_bills').select('id, supplier_id, bill_number, bill_date, amount, paid, approved_for_payment, check_status, check_issues, query_sent_at, query_reply_at, resolved_note, file_path, purchase_orders(po_number, received)').order('bill_date', { ascending: false }).limit(1000),
+        supabaseClient.from('supplier_statements').select('id, supplier_id, statement_date, total_amount, file_path, status, lines, issues, our_unpaid, supplier_name_read, file_name, error, query_sent_at, query_reply_at, created_at').order('created_at', { ascending: false }).limit(100),
+        supabaseClient.from('suppliers').select('id, name').order('name'),
+      ]);
+      const err = [b, st, sup].find(r => r.error);
+      if (err) { document.getElementById('bc-body').innerHTML = `<div class="error-box">${esc(err.error.message)}</div>`; return; }
+      bills = b.data || []; statements = st.data || []; suppliers = sup.data || [];
+      missing = findMissing(bills, statements);
+      render();
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('supplier-checks');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      if (!isPricingRole(await getMyRole())) {
+        document.getElementById('bc-body').innerHTML = '<div class="error-box">Bill checks are for Admin, Finance and Sales.</div>';
+        return;
+      }
+      const tab = new URLSearchParams(location.search).get('tab');
+      if (tab) filter = tab;
+      document.querySelectorAll('#bc-filters button').forEach(b => {
+        b.classList.toggle('active', b.dataset.f === filter);
+        b.addEventListener('click', () => {
+          filter = b.dataset.f;
+          document.querySelectorAll('#bc-filters button').forEach(x => x.classList.toggle('active', x === b));
+          render();
+        });
+      });
+      await load();
+    })();
+  </script>
+</body>
+</html>
