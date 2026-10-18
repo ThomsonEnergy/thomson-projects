@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=81"></script>
+  <script src="/js/supabase-client.js?v=82"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -5133,7 +5133,7 @@
         const listEl = overlay.querySelector('#td-list');
         const { data: entries, error } = await supabaseClient
           .from('time_entries')
-          .select('id, staff_id, clock_in, clock_out, cost_centre_id, selected_cost_centre_ids, time_category, profiles(full_name)')
+          .select('id, staff_id, clock_in, clock_out, cost_centre_id, selected_cost_centre_ids, time_category, sm8_activity_uuid, profiles(full_name)')
           .eq('project_id', project.id)
           .order('clock_in', { ascending: false });
         if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
@@ -5173,7 +5173,7 @@
                   <td data-label="Staff">${e.profiles?.full_name || 'Unknown'}</td>
                   <td data-label="Date">${new Date(e.clock_in).toLocaleDateString()}</td>
                   <td class="num" data-label="Hours">${hrs === null ? 'In progress' : hrs.toFixed(2)}</td>
-                  <td data-label="Stage / category">${stageLabel(e)}</td>
+                  <td data-label="Stage / category">${stageLabel(e)}${e.sm8_activity_uuid ? ' <span class="subtitle">(ServiceM8, already paid)</span>' : ''}</td>
                   ${isFinanceOrAdmin ? `<td class="num" data-label="Cost">${cost === undefined ? '-' : money(cost)}</td>` : ''}
                   ${isAdmin ? `<td><button type="button" class="secondary td-edit-btn" data-id="${e.id}" style="font-size:12px; padding:4px 8px;">Edit</button></td>` : ''}
                 </tr>

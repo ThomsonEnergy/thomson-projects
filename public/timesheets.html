@@ -154,7 +154,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=81"></script>
+  <script src="/js/supabase-client.js?v=82"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId = null;
@@ -284,6 +284,7 @@
         .from('time_entries')
         .select('id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, clock_out, xero_pushed_at, break_taken, break_start, break_minutes, break_skip_reason, projects(name, job_number, quote_number)')
         .eq('staff_id', myUserId)
+        .is('sm8_activity_uuid', null) // ServiceM8 imports show on the job only
         .gte('clock_in', rangeStart.toISOString())
         .lt('clock_in', rangeEndExclusive.toISOString())
         .order('clock_in');
@@ -615,6 +616,7 @@
         .from('time_entries')
         .select('id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, clock_out, xero_pushed_at, break_taken, break_start, break_minutes, break_skip_reason, stayed_overnight, projects(name, job_number, quote_number, laha_approved)')
         .eq('staff_id', staffId)
+        .is('sm8_activity_uuid', null)
         .gte('clock_in', windowStart.toISOString())
         .lt('clock_in', windowEnd.toISOString())
         .order('clock_in');

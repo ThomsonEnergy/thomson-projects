@@ -269,7 +269,8 @@ Manual steps only a person can do (the code is live):
 - Jobs with a value import as `new_build` (so "Invoice project" bills the balance), others as Direct Jobs. One stage per job with SM8 line items: bundles as prebuild groups, standalone lines marked Labour/Material, paced for SM8's ~180 calls/minute.
 - Lettered SM8 jobs (e.g. 4515A deposit) count toward invoiced to date.
 - STC lines are not applied: listed in the job notes and `projects.sm8_stcs` (migration 155), offered prefilled on the STCs tab.
-- `sm8-copy-attachments-background.js` (migration 154 `sm8_attachment_copies`): pictures to Photos, other files to Documents > "ServiceM8", with retries.
+- `sm8-copy-attachments-background.js` (migration 154 `sm8_attachment_copies`): pictures to Photos, other files to Documents > "ServiceM8", with retries. Starts by itself after Import.
+- Labour and checklists (same background run, `_shared/sm8-labour.js`, migration 20261021000000): each recorded SM8 check-in becomes a time entry on the job for the matched person, marked already paid (`xero_pushed_at`), shown on the job only (hidden from Timesheets, staff KPIs, timesheet problems, never pushed to Xero). Every checklist item, ticked or not, becomes an unassigned onsite task. Staff matched on the import page (`sm8-staff.js`, `profiles.sm8_staff_uuid`); unmatched staff's time is skipped and listed in the run summary (`sm8_copy_runs`). Re-runs never double up.
 
 ### A28. Other built features
 - **Leads and call requests** from the website forms (`leads.html`), converted to quotes or jobs.

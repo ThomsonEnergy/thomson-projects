@@ -2442,6 +2442,7 @@ async function findTimesheetProblems({ staffId = null, days = 45 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   let q = supabaseClient.from('time_entries')
     .select('id, staff_id, clock_in, clock_out, project_id, projects(name, job_number, quote_number)')
+    .is('sm8_activity_uuid', null) // ServiceM8 imports: on the job only, already paid
     .gte('clock_in', since).order('clock_in');
   if (staffId) q = q.eq('staff_id', staffId);
   const { data } = await q;
