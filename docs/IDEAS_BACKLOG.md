@@ -12,7 +12,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 2 | Voice messages in team chat + Siri Shortcut | Not started | N | Team chat channels, tagger agent, policy sign-off (6) |
 | 3 | Native iPhone app (TEgo, Capacitor) | Stage 1 built, waiting on Apple | Y | Apple Developer enrolment approval, then `docs/IOS_APP.md` setup; offline sync design for stage 2 |
 | 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
-| 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
+| 5 | Per-user inboxes with job tagging | Partly built (email workers live on sales@) | N | Per-user Gmail OAuth, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
 
@@ -174,7 +174,7 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 
 **Goal:** most job emails sit in personal work inboxes (Cooper to a customer, Guy to a builder). Bring each user's work email into TEops so job emails are tagged, read and drafted by AI, and visible on the job.
 
-**Built today:** shared sales@ inbox is LIVE: `google-oauth-start` / `google-oauth-callback`, `sync-gmail` every 5 min, Inbox / Sent / All tabs, `send-gmail`, `extract-email-job`. Not built: per-user Gmail OAuth, Mine tab, AI tagging and drafting.
+**Built today:** shared sales@ inbox is LIVE: `google-oauth-start` / `google-oauth-callback`, `sync-gmail` every 5 min, Inbox / Sent / All tabs, `send-gmail`, `extract-email-job`. Email workers (Postie, Bouncer, Tagger, Ghostwriter) live on sales@ from 18 Oct 2026: sort, archive spam, tag and draft (see `docs/AI_AGENTS_PLAN.md`). Not built: per-user Gmail OAuth, Mine tab, workers on personal inboxes.
 
 **Decision:** per-user, opt-in. Supersedes admin-granted access to all mailboxes (see AI_AGENTS_PLAN.md). Admin access only revisited if people don't connect, and only after the staff notice.
 

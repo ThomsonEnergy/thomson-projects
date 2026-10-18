@@ -1,5 +1,6 @@
 // POST /.netlify/functions/send-gmail
-// Body: { to, cc, subject, bodyText, replyToThreadId?, attachments?, tagProjectId?, tagKind? }
+// Body: { to, cc, subject, bodyText, replyToThreadId?, attachments?, tagProjectId?, tagKind?, draftId? }
+// draftId: the Ghostwriter draft this reply was written from; it is marked used and taken out of Gmail Drafts.
 //   attachments: [{ bucket: 'email-attachments' | 'project-documents', path, name }]
 //                (files are uploaded to storage by the browser first - never sent through
 //                 here - and attached from there; up to 10 files, 20 MB in total)
@@ -13,7 +14,7 @@
 // not just in this app.
 
 const { requireActiveUser } = require('./_shared/require-active-user');
-const { gmailRequest, gmailUploadSend, GMAIL_MAILBOX } = require('./_shared/google-client');
+const { gmailRequest, gmailUploadSend, gmailDeleteDraft, GMAIL_MAILBOX } = require('./_shared/google-client');
 const { buildMimeMessage, buildRfc822 } = require('./_shared/build-mime-message');
 const { signatureForUser, plainTextToHtml, plainTextWithoutButtons } = require('./_shared/build-email-signature');
 
@@ -53,7 +54,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { to, cc, subject, bodyText, replyToThreadId, attachments: attachmentRefs, tagProjectId, tagKind } = JSON.parse(event.body || '{}');
+    const { to, cc, subject, bodyText, replyToThreadId, attachments: attachmentRefs, tagProjectId, tagKind, draftId } = JSON.parse(event.body || '{}');
     if (!to || !subject || !bodyText) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'to, subject and bodyText are required' }) };
     }
@@ -128,6 +129,13 @@ exports.handler = async (event) => {
     if (emailErr) throw emailErr;
 
     await supabaseAdmin.from('email_threads').update({ last_message_at: nowIso, is_read: true }).eq('id', thread.id);
+
+    // any Ghostwriter draft for this conversation is spent now a reply has gone
+    const { data: drafts } = await supabaseAdmin.from('email_drafts').select('id, gmail_draft_id').eq('thread_id', thread.id).eq('status', 'ready');
+    for (const d of drafts || []) {
+      await gmailDeleteDraft(d.gmail_draft_id);
+      await supabaseAdmin.from('email_drafts').update({ status: d.id === draftId ? 'used' : 'dismissed', updated_at: nowIso }).eq('id', d.id);
+    }
 
     if (tagProjectId && UUID.test(tagProjectId)) {
       // already tagged to that job? leave the existing tag as it is

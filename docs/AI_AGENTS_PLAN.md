@@ -1,6 +1,6 @@
 # AI Agents Plan
 
-Last updated 17 Oct 2026
+Last updated 18 Oct 2026
 
 ## Goal
 
@@ -22,7 +22,35 @@ AI agents run as much admin as possible. Jasper directs them from his phone and 
 - Edge Functions have per-run time limits. Long jobs are split into steps, or moved to a small cloud server later if needed.
 - Least privilege: each agent gets only the access its job needs.
 
-## Ops manager agent
+## Worker names
+
+Every worker has a name that says its job. The name shows in the app (for example "tagged by Tagger").
+
+| Name | Job | Status |
+|---|---|---|
+| Foreman | Ops manager: runs the workers, approvals inbox, daily digest | Planned |
+| Postie | Sorts every new email: spam, customer, builder, supplier, other | **Live on sales@** |
+| Bouncer | Archives spam (out of the Inbox, never deleted, one-tap "Not spam") | **Live on sales@** |
+| Tagger | Tags emails (later chat and SMS) to jobs: tags when sure, suggests when guessing | **Live on sales@** |
+| Ghostwriter | Drafts replies for staff to check and send (never sends) | **Live on sales@** |
+| Sparky | Chat assistant (Ask AI today, later @Claude in team chat) | Live (Ask AI) |
+| Chaser | Quote, invoice and payment follow-ups | Planned |
+| Dispatcher | Scheduling and job allocation suggestions | Planned |
+| Certifier | Prepares compliance docs and certificates for the licensed signatory | Planned |
+| Matcher | Matches payments to invoices and receipts | Planned |
+| Weatherman | Weather-aware scheduling | Planned |
+
+## Email workers (live on sales@, 18 Oct 2026)
+
+- `netlify/functions/email-workers.js`, a Netlify scheduled function every minute (not a Supabase Edge Function: it reuses the Gmail and sync code already in Netlify). Prompts in `netlify/functions/_shared/email-worker-prompts.js`. Migration `20261018120000_email_workers.sql`.
+- `sync-gmail` queues each new incoming email (`emails.ai_status = 'pending'`). Older mail is never processed.
+- Postie (Claude Haiku 5.5) sorts it. Bouncer archives spam in TEops and Gmail, but never someone we deal with (saved client, contact or supplier), a conversation we replied in, or one tagged to a job.
+- Tagger tags when the email has a J, Q or PO number, or the model is sure and the sender is that job's client. Otherwise it leaves a suggestion ("Tagger suggests J7006", Tag it or x). A conversation already tagged is left alone, so replies stay on their job.
+- Ghostwriter (Claude Sonnet 5.5) drafts only for customers, builders and suppliers who ask something. Draft goes in the reply box in TEops and in Gmail Drafts, with [brackets] for facts it does not have. Sending from TEops or Gmail retires it; Discard removes it from both. Push notification type "email_draft".
+- Off switch: Settings > Google Workspace (Gmail) > Email workers on. Archiving and Gmail drafts need the `gmail.modify` scope: reconnect sales@ once.
+- sales@ is shared by the whole team, so the staff notice does not apply to it. Personal inboxes still wait for the notice (item 5).
+
+## Ops manager agent (Foreman)
 
 - Workers report to it, not to Jasper. It handles what it can within set rules and escalates the rest.
 - Jasper talks to it inside TEops: a chat screen, a questions/approvals inbox, and a daily digest (done, stuck, needs me), delivered via existing Web Push.
@@ -60,8 +88,8 @@ Build on the existing feeds:
 
 ## Chat agents (separate workers, both report to the ops manager)
 
-- **Tagger:** runs on every message with a small, cheap model and matches messages to jobs. Sure (explicit J number): tags immediately. Guessing: suggests a tag to confirm. All tags show "tagged by Claude" with one-tap undo. Can retro-tag earlier messages (e.g. "what job for the downlights at m-ARTS?" then "J7006" tags both). Access: chat and jobs list only. Shared with email and SMS tagging.
-- **Chat assistant:** wakes only on @Claude or a question it can answer. Smarter model, read access to job emails, drafts and notes. Answers instantly from TEops (e.g. which J number to clock into).
+- **Tagger:** (live on sales@ email, see Email workers) runs on every message with a small, cheap model and matches messages to jobs. Sure (explicit J number): tags immediately. Guessing: suggests a tag to confirm. All tags show "tagged by Tagger" with one-tap undo. Can retro-tag earlier messages (e.g. "what job for the downlights at m-ARTS?" then "J7006" tags both). Access: chat and jobs list only. Shared with email and SMS tagging.
+- **Chat assistant (Sparky):** wakes only on @Claude or a question it can answer. Smarter model, read access to job emails, drafts and notes. Answers instantly from TEops (e.g. which J number to clock into).
 - **Social channel:** Claude reads it only to spot and tag work talk. It never summarises, reports on or stores personal chat. This goes in the staff notice.
 
 ## Consent

@@ -167,3 +167,4 @@ exports.handler = async (event) => {
 exports.cleanExtract = cleanExtract;
 exports.buildPrompt = buildPrompt;
 exports.withoutQuotedReply = withoutQuotedReply;
+exports.emailText = emailText;

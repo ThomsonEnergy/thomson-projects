@@ -135,8 +135,16 @@ async function processMessageId(supabaseAdmin, messageId) {
     attachments,
     message_id_header: headerValue(headers, 'Message-ID') || headerValue(headers, 'Message-Id'),
     sent_at: sentAt ? new Date(sentAt).toISOString() : new Date().toISOString(),
+    // new incoming mail goes to the email workers (email-workers.js); older mail found on a
+    // first sync or a catch-up does not
+    ai_status: direction === 'inbound' && (!sentAt || new Date(sentAt) > new Date(Date.now() - 86400000)) ? 'pending' : null,
   });
   if (emailErr) throw emailErr;
+
+  // a reply went out from Gmail itself: Ghostwriter's draft for this conversation is spent
+  if (direction === 'outbound') {
+    await supabaseAdmin.from('email_drafts').update({ status: 'used', updated_at: new Date().toISOString() }).eq('thread_id', thread.id).eq('status', 'ready');
+  }
 
   await supabaseAdmin.from('email_threads').update({
     last_message_at: sentAt ? new Date(sentAt).toISOString() : new Date().toISOString(),
@@ -212,4 +220,4 @@ async function runSync({ budgetMs = 8000 } = {}) {
   return { synced, done, total: messageIds.length, backfilled };
 }
 
-module.exports = { runSync, extractHtml, extractAttachments, extractPlainText };
+module.exports = { runSync, extractHtml, extractAttachments, extractPlainText, firstAddress };

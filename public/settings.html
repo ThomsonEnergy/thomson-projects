@@ -699,6 +699,10 @@
             <button type="button" class="secondary" id="google-connect-btn">Connect sales@thomsonenergy.com.au</button>
             <button type="button" class="secondary" id="google-sync-btn" style="margin-left:8px;">Sync now</button>
             <div id="google-connect-msg" style="margin-top:10px;"></div>
+            <h3 style="margin:18px 0 6px;">Email workers</h3>
+            <p class="subtitle" style="margin-bottom:8px;">On every new email: <strong>Postie</strong> sorts it, <strong>Bouncer</strong> archives spam (never deletes), <strong>Tagger</strong> tags it to a job or suggests one, and <strong>Ghostwriter</strong> drafts a reply when a customer, builder or supplier asks something. Nothing is sent without someone clicking Send. Archiving spam and Gmail drafts need the connection above to have been made after 18 Oct 2026: if not, click Connect again once.</p>
+            <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="email-workers-on" style="width:auto;" /> Email workers on</label>
+            <div id="email-workers-msg"></div>
           </div>
         </div>
 
@@ -730,7 +734,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=74"></script>
+  <script src="/js/supabase-client.js?v=75"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -807,6 +811,7 @@
       document.getElementById('google-maps-key').value = data.google_maps_api_key || '';
       document.getElementById('tagline').value = data.tagline || '';
       document.getElementById('google-review-url').value = data.google_review_url || '';
+      document.getElementById('email-workers-on').checked = data.email_workers_on !== false;
       document.getElementById('default-markup').value = data.default_markup_percent ?? 45;
       document.getElementById('default-deposit').value = data.default_deposit_percent ?? 10;
       document.getElementById('next-quote-number').value = data.next_quote_number ?? 1000;
@@ -2171,6 +2176,12 @@
         btn.disabled = false;
         btn.textContent = label;
       });
+    });
+
+    document.getElementById('email-workers-on').addEventListener('change', async (e) => {
+      const msg = document.getElementById('email-workers-msg');
+      const { error } = await supabaseClient.from('company_settings').update({ email_workers_on: e.target.checked }).eq('id', 1);
+      msg.innerHTML = error ? `<div class="error-box">${error.message}</div>` : `<div class="success-box">Email workers ${e.target.checked ? 'on' : 'off'}.</div>`;
     });
 
     document.getElementById('google-connect-btn').addEventListener('click', async () => {

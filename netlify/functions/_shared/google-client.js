@@ -91,4 +91,11 @@ async function gmailUploadSend(rfc822, threadId) {
   return json;
 }
 
-module.exports = { getGoogleAccessToken, gmailRequest, gmailUploadSend, GMAIL_MAILBOX };
+// Removes one of the email workers' drafts from Gmail Drafts. Quiet if it is already gone
+// (sent or deleted from Gmail itself).
+async function gmailDeleteDraft(gmailDraftId) {
+  if (!gmailDraftId) return;
+  try { await gmailRequest(`drafts/${encodeURIComponent(gmailDraftId)}`, { method: 'DELETE' }); } catch (err) { console.error('Gmail draft delete:', err.message); }
+}
+
+module.exports = { getGoogleAccessToken, gmailRequest, gmailUploadSend, gmailDeleteDraft, GMAIL_MAILBOX };

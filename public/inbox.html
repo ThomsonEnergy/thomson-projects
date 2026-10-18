@@ -73,7 +73,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=74"></script>
+  <script src="/js/supabase-client.js?v=75"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=4"></script>
@@ -91,9 +91,22 @@
     }
 
     let activeThreadId = null;
-    let inboxBox = 'inbox';   // inbox | sent | all
+    let inboxBox = 'inbox';   // inbox | sent | all | spam
     let unreadOnly = false;
-    let loadedThreads = [], loadedLatest = {}, loadedRecent = [];
+    let loadedThreads = [], loadedLatest = {}, loadedRecent = [], draftThreads = new Set();
+
+    // The email workers (netlify/functions/email-workers.js) and their undo buttons.
+    async function workerAction(body) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/email-worker-action', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({ ok: false, error: `Did not answer properly (status ${res.status}).` }));
+      if (!data.ok) throw new Error(data.error || 'That did not work.');
+      if (data.warning) alert(data.warning);
+      return data;
+    }
+    const workerBadge = (text) => '<span class="dir-badge" style="color:var(--accent); border:1px solid var(--accent);">' + text + '</span>';
 
     // "Bob Jones <bob@x.com>" -> "Bob Jones"; a bare address stays as it is
     function addrName(raw) {
@@ -137,6 +150,8 @@
         .in('thread_id', threads.map(t => t.id)).order('sent_at', { ascending: false }).limit(1500);
       const latest = {};
       (recent || []).forEach(e => { if (!latest[e.thread_id]) latest[e.thread_id] = e; });
+      const { data: drafts } = await supabaseClient.from('email_drafts').select('thread_id').eq('status', 'ready').in('thread_id', threads.map(t => t.id));
+      draftThreads = new Set((drafts || []).map(d => d.thread_id));
       loadedThreads = threads; loadedLatest = latest; loadedRecent = recent || [];
       renderThreadList();
     }
@@ -148,7 +163,8 @@
       const threads = loadedThreads, latest = loadedLatest;
       const byId = Object.fromEntries(threads.map(t => [t.id, t]));
       const hasInbound = new Set(loadedRecent.filter(e => e.direction === 'inbound').map(e => e.thread_id));
-      const unreadCount = threads.filter(t => !t.is_read && hasInbound.has(t.id)).length;
+      const unreadCount = threads.filter(t => !t.is_read && !t.spam_at && hasInbound.has(t.id)).length;
+      const spamCount = threads.filter(t => t.spam_at).length;
       const tab = (key, label, extra) => '<button type="button" class="secondary ' + (inboxBox === key ? 'on' : '') + '" data-box="' + key + '">' + label + (extra || '') + '</button>';
       const sub = (t, when) => '<p class="subtitle" style="margin:2px 0 0; font-size:12px;">' + (t.clients?.name ? escapeHtml(t.clients.name) + ' &middot; ' : '') + when + '</p>';
 
@@ -162,7 +178,10 @@
             + sub(t, timeAgo(e.sent_at)) + '</a>';
         }).join('') || '<p class="subtitle" style="padding:8px 4px;">Nothing sent yet.</p>';
       } else {
-        body = threads.filter(t => (inboxBox === 'all' || hasInbound.has(t.id)) && (!unreadOnly || !t.is_read)).map(t => {
+        const shown = inboxBox === 'spam'
+          ? threads.filter(t => t.spam_at)
+          : threads.filter(t => !t.spam_at && (inboxBox === 'all' || hasInbound.has(t.id)) && (!unreadOnly || !t.is_read));
+        body = shown.map(t => {
           const l = latest[t.id];
           const out = !!l && l.direction === 'outbound';
           const who = !l ? '' : out
@@ -170,11 +189,13 @@
             : '<span class="dir-badge inbound">Received</span>From ' + escapeHtml(addrShort(l.from_address) || 'unknown');
           return '<a class="inbox-thread-item ' + (t.id === activeThreadId ? 'active' : '') + ' ' + (!t.is_read ? 'unread' : '') + ' ' + (l ? (out ? 'sent-last' : 'recv-last') : '') + '" data-id="' + t.id + '">'
             + '<div class="inbox-subject">' + escapeHtml(t.subject || '(no subject)') + '</div>'
-            + '<div class="inbox-who">' + who + '</div>' + sub(t, timeAgo(t.last_message_at)) + '</a>';
-        }).join('') || '<p class="subtitle" style="padding:8px 4px;">Nothing here.</p>';
+            + '<div class="inbox-who">' + who + '</div>'
+            + (draftThreads.has(t.id) || t.ai_suggested_project_id ? '<div style="margin-top:3px;">' + (draftThreads.has(t.id) ? workerBadge('Draft ready') : '') + (t.ai_suggested_project_id ? workerBadge('Job suggested') : '') + '</div>' : '')
+            + sub(t, timeAgo(t.last_message_at)) + '</a>';
+        }).join('') || '<p class="subtitle" style="padding:8px 4px;">' + (inboxBox === 'spam' ? 'No spam. Bouncer archives junk here; nothing is deleted.' : 'Nothing here.') + '</p>';
       }
-      listEl.innerHTML = '<div class="inbox-filters">' + tab('inbox', 'Inbox', unreadCount ? ' (' + unreadCount + ')' : '') + tab('sent', 'Sent') + tab('all', 'All')
-        + (inboxBox === 'sent' ? '' : '<label style="margin:0 0 0 auto; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="unread-only" style="width:auto;" ' + (unreadOnly ? 'checked' : '') + ' /> Unread only</label>')
+      listEl.innerHTML = '<div class="inbox-filters">' + tab('inbox', 'Inbox', unreadCount ? ' (' + unreadCount + ')' : '') + tab('sent', 'Sent') + tab('all', 'All') + tab('spam', 'Spam', spamCount ? ' (' + spamCount + ')' : '')
+        + (inboxBox === 'sent' || inboxBox === 'spam' ? '' : '<label style="margin:0 0 0 auto; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="unread-only" style="width:auto;" ' + (unreadOnly ? 'checked' : '') + ' /> Unread only</label>')
         + '</div>' + body;
 
       listEl.querySelectorAll('[data-box]').forEach(b => b.addEventListener('click', () => { inboxBox = b.dataset.box; renderThreadList(); }));
@@ -205,11 +226,18 @@
     async function loadThreadTags(threadId) {
       const el = document.getElementById('thread-tags');
       if (!el) return;
-      const { data: links } = await supabaseClient.from('email_job_links')
-        .select('id, kind, note, projects(id, name, job_number, quote_number)').eq('thread_id', threadId);
+      const [{ data: links }, { data: thread }] = await Promise.all([
+        supabaseClient.from('email_job_links').select('id, kind, note, tagged_by_ai, projects(id, name, job_number, quote_number)').eq('thread_id', threadId),
+        supabaseClient.from('email_threads').select('ai_suggested_project_id, ai_suggested_reason, projects:ai_suggested_project_id(id, name, job_number, quote_number)').eq('id', threadId).single(),
+      ]);
+      const suggestion = !(links || []).length && thread?.projects ? thread.projects : null;
       el.innerHTML = (links || []).map(l => `<span style="font-size:12px; padding:3px 10px; border:1px solid var(--accent); border-radius:20px; display:inline-flex; gap:6px; align-items:center;">
           <a href="/project.html?id=${l.projects.id}&tab=emails" class="link-quiet" title="${escapeHtml(l.note || '')}">${escapeHtml(projectRef(l.projects))} &middot; ${EMAIL_KINDS[l.kind] || 'Other'}</a>
-          <a href="#" data-untag="${l.id}" title="Remove this tag">&times;</a></span>`).join('')
+          ${l.tagged_by_ai ? '<span class="subtitle" style="font-size:11px;" title="' + escapeHtml(l.note || '') + '">tagged by Tagger</span>' : ''}
+          <a href="#" data-untag="${l.id}" title="${l.tagged_by_ai ? 'Undo' : 'Remove this tag'}">&times;</a></span>`).join('')
+        + (suggestion ? `<span style="font-size:12px; padding:3px 10px; border:1px dashed var(--accent); border-radius:20px; display:inline-flex; gap:8px; align-items:center;" title="${escapeHtml(thread.ai_suggested_reason || '')}">
+          Tagger suggests <a href="/project.html?id=${suggestion.id}" class="link-quiet">${escapeHtml(projectRef(suggestion))}</a>
+          <a href="#" id="suggest-yes">Tag it</a><a href="#" id="suggest-no" title="Not this job">&times;</a></span>` : '')
         + '<button type="button" class="secondary" id="tag-email-btn" style="font-size:12px; padding:4px 10px;">+ Tag to a job</button>'
         + '<button type="button" id="create-from-email-btn" style="font-size:12px; padding:4px 10px;">Create quote / job from this email</button>';
       el.querySelectorAll('[data-untag]').forEach(a => a.addEventListener('click', async (e) => {
@@ -218,6 +246,18 @@
         await supabaseClient.from('email_job_links').delete().eq('id', a.dataset.untag);
         loadThreadTags(threadId);
       }));
+      const clearSuggestion = () => supabaseClient.from('email_threads').update({ ai_suggested_project_id: null, ai_suggested_reason: null }).eq('id', threadId);
+      document.getElementById('suggest-yes')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const { error } = await supabaseClient.from('email_job_links').insert({ thread_id: threadId, project_id: suggestion.id, kind: 'client', note: 'Tagger: ' + (thread.ai_suggested_reason || ''), created_by: user.id });
+        if (error) { alert(error.message); return; }
+        await clearSuggestion(); loadThreadTags(threadId); loadThreadList();
+      });
+      document.getElementById('suggest-no')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await clearSuggestion(); loadThreadTags(threadId); loadThreadList();
+      });
       document.getElementById('create-from-email-btn').addEventListener('click', () => openCreateFromEmailModal(threadId));
       document.getElementById('tag-email-btn').addEventListener('click', () => openTagEmailModal({ threadId, onSaved: () => loadThreadTags(threadId) }));
     }
@@ -229,28 +269,48 @@
       const detailEl = document.getElementById('thread-detail');
       detailEl.innerHTML = `<p class="subtitle">Loading...</p>`;
 
-      const [{ data: thread }, { data: emails }, { data: staff }, { data: { user } }] = await Promise.all([
+      const [{ data: thread }, { data: emails }, { data: staff }, { data: { user } }, { data: drafts }] = await Promise.all([
         supabaseClient.from('email_threads').select('*, clients(name)').eq('id', threadId).single(),
         supabaseClient.from('emails').select('*').eq('thread_id', threadId).order('sent_at', { ascending: true }),
         supabaseClient.from('profiles').select('id, full_name'),
         supabaseClient.auth.getUser(),
+        supabaseClient.from('email_drafts').select('id, body_text').eq('thread_id', threadId).eq('status', 'ready').order('created_at', { ascending: false }).limit(1),
       ]);
+      const draft = (drafts || [])[0] || null;
       const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'A team member';
 
       detailEl.innerHTML = `
         <h2 style="margin:0 0 4px;">${escapeHtml(thread.subject || '(no subject)')}</h2>
         ${thread.clients?.name ? `<p class="subtitle" style="margin:0 0 6px;">${escapeHtml(thread.clients.name)}</p>` : ''}
+        ${thread.spam_at ? `<div class="error-box" style="display:flex; gap:10px; align-items:center; justify-content:space-between; margin:0 0 10px;"><span>Bouncer archived this as spam (out of the Inbox here and in Gmail, not deleted).</span><button type="button" class="secondary" id="not-spam-btn" style="font-size:12px; padding:4px 10px;">Not spam</button></div>` : ''}
         <div id="thread-tags" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 14px;"></div>
         <div id="thread-messages">${(emails || []).map(m => messageHtml(m, user.id, staffName)).join('')}</div>
         <div class="card" style="margin-top:16px;">
           <label style="margin-top:0">Reply</label>
-          <textarea id="reply-body" style="min-height:120px;" placeholder="Type your reply..."></textarea>
+          ${draft ? `<p class="subtitle" id="draft-note" style="margin:0 0 6px; font-size:12px;">${workerBadge('Ghostwriter')} Drafted for you, also in Gmail Drafts. Check it, fill in anything in [brackets], then send. <a href="#" id="discard-draft">Discard draft</a></p>` : ''}
+          <textarea id="reply-body" style="min-height:${draft ? 220 : 120}px;" placeholder="Type your reply...">${draft ? escapeHtml(draft.body_text) : ''}</textarea>
           <div id="reply-attach" style="margin-top:8px;"></div>
           <button type="button" id="reply-send-btn" style="margin-top:10px;">Send reply</button>
           <div id="reply-msg"></div>
         </div>`;
 
       const replyPicker = emailLocalFilePicker(document.getElementById('reply-attach'));
+      let draftId = draft ? draft.id : null;
+      document.getElementById('discard-draft')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        if (!confirm('Discard this draft? It is also removed from Gmail Drafts.')) return;
+        try { await workerAction({ action: 'discard_draft', draft_id: draftId }); } catch (err) { alert(err.message); return; }
+        draftId = null;
+        document.getElementById('draft-note')?.remove();
+        document.getElementById('reply-body').value = '';
+        loadThreadList();
+      });
+      document.getElementById('not-spam-btn')?.addEventListener('click', async () => {
+        try { await workerAction({ action: 'not_spam', thread_id: threadId }); } catch (err) { alert(err.message); return; }
+        inboxBox = 'inbox';
+        await loadThreadList();
+        await openThread(threadId);
+      });
       loadThreadTags(threadId);
       (emails || []).forEach(m => mountEmailBody(detailEl.querySelector(`.email-body[data-email-id="${m.id}"]`), m, { fetchAttachment: fetchEmailAttachment, fetchStored: fetchStoredAttachment }));
 
@@ -275,7 +335,7 @@
         try {
           const uploaded = await emailUploadFiles(replyPicker.files());
           btn.textContent = 'Sending...';
-          await emailSendNow({ to: emailAddressOnly(toAddress), subject: thread.subject || '', bodyText, replyToThreadId: threadId, attachments: uploaded.map(u => ({ bucket: u.bucket, path: u.path, name: u.name })) });
+          await emailSendNow({ to: emailAddressOnly(toAddress), subject: thread.subject || '', bodyText, replyToThreadId: threadId, draftId, attachments: uploaded.map(u => ({ bucket: u.bucket, path: u.path, name: u.name })) });
           await loadThreadList();
           await openThread(threadId);
         } catch (err) {

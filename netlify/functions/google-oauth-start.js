@@ -16,6 +16,8 @@ const crypto = require('crypto');
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
+  // the email workers archive spam and save draft replies in Gmail (email-workers.js)
+  'https://www.googleapis.com/auth/gmail.modify',
 ].join(' ');
 
 exports.handler = async (event) => {

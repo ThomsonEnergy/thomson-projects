@@ -34,6 +34,11 @@
 [functions.sync-gmail]
   schedule = "*/5 * * * *"
 
+# Every minute: the email workers (Postie, Bouncer, Tagger, Ghostwriter) sort, archive
+# spam, tag and draft replies for new sales@ mail - see email-workers.js.
+[functions.email-workers]
+  schedule = "* * * * *"
+
 # Every minute: turns due meeting-action reminders into notifications and sends
 # new notifications to people's phones (web push) - see send-notifications.js.
 [functions.send-notifications]

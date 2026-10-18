@@ -179,10 +179,11 @@ Manual steps only a person can do (the code is live):
 - Cost centre cards show labour plus materials quoted vs actual and GP%.
 
 ### A18. Shared inbox (sales@ Gmail)
-- `sync-gmail.js` every 5 minutes, Sync now via `sync-gmail-now.js`. HTML viewer, inline pictures, attachments, Inbox / Sent / All.
+- `sync-gmail.js` every 5 minutes, Sync now via `sync-gmail-now.js`. HTML viewer, inline pictures, attachments, Inbox / Sent / All / Spam.
 - Reply and compose with attachments; tag conversations to jobs; Emails tab on every job with "Email the client".
 - Create a quote or job from an email (AI reads client, site and work).
 - Signatures always show sales@thomsonenergy.com.au and 0455 415 464.
+- Email workers (`email-workers.js`, every minute): Postie sorts each new email, Bouncer archives spam (Spam tab, Not spam undo), Tagger tags to a job or suggests one, Ghostwriter drafts replies for customers, builders and suppliers who ask something (reply box and Gmail Drafts, never sent). On/off in Settings. Detail: `docs/AI_AGENTS_PLAN.md`.
 
 ### A19. Feeds, meetings, job extras
 - Company feed and per-job feed (likes, comments, tags).
@@ -242,6 +243,7 @@ Manual steps only a person can do (the code is live):
 | Function | Schedule |
 |---|---|
 | send-notifications | every minute |
+| email-workers | every minute |
 | warm-pdf | every 4 minutes |
 | sync-gmail | every 5 minutes |
 | archive-completed-jobs | daily |
