@@ -1,6 +1,6 @@
 // Mailboxes: sales@ (shared) and each person's own Gmail (personal, private to them).
 // Who may use what, and keeping Gmail in step with TEops (labels, archive, read,
-// drafts). See migration 20261021000000 and docs/PROJECT_SPEC.md A18.
+// drafts). See migration 20261021020000 and docs/PROJECT_SPEC.md A18.
 //
 // Gmail mirroring needs the gmail.modify permission. sales@ was first connected
 // read and send only: until it is connected again from Settings, mirroring is

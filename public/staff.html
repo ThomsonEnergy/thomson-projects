@@ -38,7 +38,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=81"></script>
+  <script src="/js/supabase-client.js?v=83"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/hr-templates.js?v=2"></script>
   <script src="/js/hr-shared.js?v=2"></script>
@@ -525,7 +525,7 @@
       const since30 = new Date(Date.now() - 30 * 86400000);
       const { data: entries, error } = await supabaseClient.from('time_entries')
         .select('clock_in, clock_out, break_minutes, project_id, time_category')
-        .eq('staff_id', staffId).gte('clock_in', since90.toISOString());
+        .eq('staff_id', staffId).is('sm8_activity_uuid', null).gte('clock_in', since90.toISOString());
       if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       const hours = (list) => list.reduce((sum, e) => sum + (e.clock_out ? Math.max(0, (new Date(e.clock_out) - new Date(e.clock_in)) / 3600000 - (e.break_minutes || 0) / 60) : 0), 0);
       const last30 = entries.filter(e => new Date(e.clock_in) >= since30);

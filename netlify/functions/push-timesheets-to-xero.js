@@ -132,7 +132,10 @@ exports.handler = async (event) => {
       .gte('clock_in', `${startDate}T00:00:00`)
       .lte('clock_in', `${endDate}T23:59:59`)
       .not('clock_out', 'is', null)
-      .is('xero_pushed_at', null);
+      .is('xero_pushed_at', null)
+      // ServiceM8 imports were paid through Xero already (marked pushed
+      // anyway, this is belt and braces).
+      .is('sm8_activity_uuid', null);
     if (entriesErr) throw entriesErr;
 
     const { data: holidays } = await supabaseAdmin.from('public_holidays').select('holiday_date');

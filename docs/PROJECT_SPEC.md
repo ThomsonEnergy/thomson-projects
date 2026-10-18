@@ -177,6 +177,7 @@ Manual steps only a person can do (the code is live):
 ### A13. Job tasks
 - Added at quote stage or later; assign to a person, a role or anyone. Tasks page; Home "Needs attention" count.
 - **"Required before scheduling" is enforced** on every Schedule entry point and drives awaiting_action (A6).
+- Take photo on any task (open the task): saved as a site photo captioned "#task <task>" (`project_photos.task_id`), thumbnails and count on the task. Ticked tasks show who ticked them and when.
 
 ### A13a. Activity log
 - One `activity_log` table (`logActivity()` / `renderActivityLog()`), shown as a sidebar on the job page. Covers POs, jobs/quotes (stage edits), invoices, suppliers, materials, clients, tasks, documents, variations, timesheets. Not yet: settings changes, schedule changes.
@@ -209,7 +210,7 @@ Manual steps only a person can do (the code is live):
 - Cost centre cards show labour plus materials quoted vs actual and GP%.
 
 ### A18. Sales inbox and My inbox (Gmail)
-- `inbox.html`: toggle **Sales inbox** (sales@, every staff member) | **My inbox** (the logged-in person's own work Gmail, private to them). Migration 20261021000000 (`mailboxes`, `mailbox_tokens`, labels, drafts, sender rules, clean up, Gmail notice).
+- `inbox.html`: toggle **Sales inbox** (sales@, every staff member) | **My inbox** (the logged-in person's own work Gmail, private to them). Migration 20261021020000 (`mailboxes`, `mailbox_tokens`, labels, drafts, sender rules, clean up, Gmail notice).
 - `sync-gmail.js` every 5 minutes (sales@ first, then each My inbox from Gmail history, including read and archive changes made in Gmail), Sync now via `sync-gmail-now.js`. HTML viewer, inline pictures, attachments.
 - Sections sorted by the email agent (`_shared/email-agent.js`, run by `mailbox-work-background.js`): **Priority** (someone waiting on our reply, with a one-line reason; drops off once we reply), **Other**, **Subscriptions and updates**, plus Sent, Done, All. Order: the person's "always for this sender" rule, Gmail's Promotions/Social/Updates/Forums tabs and unsubscribe headers, then Claude Haiku 5.5. Move any conversation; Done archives (in Gmail too).
 - Labels (Gmail style) for non-job matters (a supplier dispute, a licence application): sidebar with counts, Open or Finished, description tells the agent what belongs. The agent applies existing labels and suggests new ones (a person confirms). Sales inbox labels are shared, My inbox labels are private. Mirrored to Gmail as `TEops/<name>`.
@@ -277,7 +278,11 @@ Manual steps only a person can do (the code is live):
 - Jobs with a value import as `new_build` (so "Invoice project" bills the balance), others as Direct Jobs. One stage per job with SM8 line items: bundles as prebuild groups, standalone lines marked Labour/Material, paced for SM8's ~180 calls/minute.
 - Lettered SM8 jobs (e.g. 4515A deposit) count toward invoiced to date.
 - STC lines are not applied: listed in the job notes and `projects.sm8_stcs` (migration 155), offered prefilled on the STCs tab.
-- `sm8-copy-attachments-background.js` (migration 154 `sm8_attachment_copies`): pictures to Photos, other files to Documents > "ServiceM8", with retries.
+- `sm8-copy-attachments-background.js` (migration 154 `sm8_attachment_copies`): pictures to Photos, other files to Documents > "ServiceM8", with retries. Starts by itself after Import.
+- Labour and checklists (same background run, `_shared/sm8-labour.js`, migration 20261021000000): each recorded SM8 check-in becomes a time entry on the job for the matched person, marked already paid (`xero_pushed_at`), shown on the job only (hidden from Timesheets, staff KPIs, timesheet problems, never pushed to Xero). Every checklist item, ticked or not, becomes an unassigned onsite task. Staff matched on the import page (`sm8-staff.js`, `profiles.sm8_staff_uuid`); unmatched staff's time is skipped and listed in the run summary (`sm8_copy_runs`). Re-runs never double up. Lettered jobs (4515A-D) are folded in: their time, checklists, docs and photos land on the main job.
+- Copy details (migration 20261021010000): AVIF photos and videos go to Photos (videos play in place), files already in Documents are moved on the next run. Photos and documents keep ServiceM8's date and the matched person who added them. Checklist groups become a task each with the items as subtasks (who ticked, when, reminder as due date and assignee). The run summary keeps a few raw ServiceM8 checklist records to check field names.
+- ServiceM8 invoice PDFs (file name has "invoice") go to the "ServiceM8 invoices" folder, listed under "From ServiceM8" on the job's Invoices tab and hidden from Documents. Reference only: not `invoices` rows, so no Xero push and no change to invoiced to date.
+- File size: no bucket has its own limit, so Supabase's project-wide limit applies (Storage > Settings, default 50 MB). SM8 videos over it fail with "The object exceeded the maximum allowed size"; raise it to 500 MB and press the copy button again (failed files are retried).
 
 ### A28. Other built features
 - **Leads and call requests** from the website forms (`leads.html`), converted to quotes or jobs.

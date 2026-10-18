@@ -98,17 +98,29 @@
     </div>
 
     <div class="card">
-      <h2 style="margin:0 0 6px;">Docs and photos</h2>
-      <p class="subtitle" style="margin:0 0 12px;">Once jobs are imported, this copies their ServiceM8 attachments across: pictures into the job's Photos, everything else (PDFs, plans, HEIC photos, videos...) into its Documents under a "ServiceM8" folder. It runs in the background, so you can leave this page, and it is safe to press again: copied files are skipped, failed ones are retried, and anything left over when a run hits its 15 minute limit is picked up next time.</p>
+      <h2 style="margin:0 0 6px;">Staff</h2>
+      <p class="subtitle" style="margin:0 0 12px;">Match each ServiceM8 staff member to their TEops login, so their check-ins land on the right person and ticked checklist items show who ticked them. Do this before importing. Matches are suggested by email, mobile, then name; nothing is saved until you press Save. Anyone left on "Not matched" has their time skipped (the summary below says how much).</p>
       <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <button id="copy-btn">Copy docs and photos</button>
+        <button id="staff-load-btn" class="secondary">Load ServiceM8 staff</button>
+        <button id="staff-save-btn" style="display:none;">Save staff matches</button>
+        <span id="staff-msg" class="subtitle"></span>
+      </div>
+      <div id="staff-list" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 6px;">Timesheets, checklists, docs and photos</h2>
+      <p class="subtitle" style="margin:0 0 12px;">Starts by itself once jobs are imported (and after saving staff matches). For every imported job it brings across: each ServiceM8 check-in as a timesheet entry on the job (shown on the job only, marked already paid, never sent to Xero again), every checklist item as a task (ticked if it was ticked), pictures into Photos and other files (PDFs, plans, HEIC photos, videos...) into Documents under a "ServiceM8" folder. It runs in the background, so you can leave this page, and it is safe to press again: nothing is doubled up, failed files are retried, and anything left over when a run hits its 15 minute limit is picked up next time.</p>
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <button id="copy-btn">Copy timesheets, checklists, docs and photos</button>
         <span id="copy-msg" class="subtitle"></span>
       </div>
+      <div id="copy-summary" style="margin-top:12px;"></div>
       <div id="copy-progress" style="margin-top:12px;"></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=81"></script>
+  <script src="/js/supabase-client.js?v=83"></script>
   <script src="/js/theme.js"></script>
   <script>
     const BATCH = 5;
@@ -513,6 +525,8 @@
         msg.innerHTML = failed
           ? `<span style="color:var(--red);">${ok} imported, ${failed} failed. Fix the failed ones and press Import again; the imported ones are skipped.</span>`
           : `<span style="color:var(--green);">${ok} job${ok === 1 ? '' : 's'} imported.</span>`;
+        // Then bring their timesheets, checklists, docs and photos across.
+        if (ok) startCopy();
       } finally {
         loadBtn.disabled = false;
         updateImportBar();
@@ -533,7 +547,91 @@
     let copyPollTimer = null;
     let copyStartedAt = 0;
 
+    // ---- Staff matches (sm8-staff.js) ----
+    let staffData = null;
+
+    async function loadStaff() {
+      const msg = document.getElementById('staff-msg');
+      const btn = document.getElementById('staff-load-btn');
+      btn.disabled = true;
+      msg.textContent = 'Reading staff from ServiceM8...';
+      try {
+        staffData = await callFn('sm8-staff', {});
+        renderStaff();
+        msg.textContent = '';
+        document.getElementById('staff-save-btn').style.display = '';
+      } catch (err) {
+        msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderStaff() {
+      const el = document.getElementById('staff-list');
+      const { staff, profiles } = staffData;
+      if (!staff.length) { el.innerHTML = '<p class="subtitle">No staff found in ServiceM8.</p>'; return; }
+      const options = (selected) => `<option value="">Not matched (skip their time)</option>` + profiles.map(p =>
+        `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${escapeHtml(p.name)}${p.active ? '' : ' (inactive)'}</option>`).join('');
+      el.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>ServiceM8 staff</th><th>TEops person</th><th>Why</th></tr></thead>
+          <tbody>${staff.map(s => `
+            <tr>
+              <td data-label="ServiceM8 staff">${escapeHtml(s.name)}${s.active ? '' : ' <span class="subtitle">(inactive in ServiceM8)</span>'}${s.email ? `<div class="imp-meta">${escapeHtml(s.email)}</div>` : ''}</td>
+              <td data-label="TEops person"><select data-sm8-staff="${escAttr(s.uuid)}" style="margin:0;">${options(s.match ? s.match.profileId : '')}</select></td>
+              <td data-label="Why" class="imp-meta">${s.match ? escapeHtml(s.match.reason) : '-'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function saveStaff() {
+      const msg = document.getElementById('staff-msg');
+      const links = [...document.querySelectorAll('#staff-list select[data-sm8-staff]')].map(sel => ({ sm8StaffUuid: sel.dataset.sm8Staff, profileId: sel.value || null }));
+      const picked = links.map(l => l.profileId).filter(Boolean);
+      if (new Set(picked).size !== picked.length) { msg.innerHTML = '<span style="color:var(--red);">The same TEops person is picked twice. Each person can only match one ServiceM8 staff member.</span>'; return; }
+      const btn = document.getElementById('staff-save-btn');
+      btn.disabled = true;
+      try {
+        const data = await callFn('sm8-staff', { links });
+        msg.innerHTML = `<span style="color:var(--green);">${data.saved} match${data.saved === 1 ? '' : 'es'} saved.</span>`;
+        await loadStaff();
+        // Jobs already imported: bring the newly matched staff's time across.
+        const { count } = await supabaseClient.from('projects').select('id', { count: 'exact', head: true }).not('sm8_job_uuid', 'is', null);
+        if (count) startCopy();
+      } catch (err) {
+        msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // Latest run's timesheet and checklist summary (sm8_copy_runs).
+    async function loadCopySummary() {
+      const el = document.getElementById('copy-summary');
+      const { data: run } = await supabaseClient.from('sm8_copy_runs').select('started_at, finished_at, summary').order('started_at', { ascending: false }).limit(1).maybeSingle();
+      if (!run) { el.innerHTML = ''; return false; }
+      if (!run.finished_at) {
+        // A run past the background function's 15 minute limit died part way.
+        if (Date.now() - new Date(run.started_at).getTime() > 16 * 60000) { el.innerHTML = '<p class="subtitle" style="color:var(--red);">The last run stopped part way. Press the button to run it again.</p>'; return false; }
+        el.innerHTML = '<p class="subtitle">Reading timesheets and checklists from ServiceM8...</p>';
+        return true;
+      }
+      const s = run.summary || {};
+      const unmatched = Object.entries(s.unmatchedStaff || {});
+      el.innerHTML = `
+        <p class="subtitle" style="margin:0;">Last run ${new Date(run.finished_at).toLocaleString()}: ${s.jobs || 0} job${s.jobs === 1 ? '' : 's'} checked${s.letteredJobs ? `, with ${s.letteredJobs} lettered job${s.letteredJobs === 1 ? '' : 's'} (4515A and so on) folded in` : ''}. ServiceM8 had ${s.activitiesSeen || 0} time record${s.activitiesSeen === 1 ? '' : 's'} and ${s.checklistSeen || 0} checklist item${s.checklistSeen === 1 ? '' : 's'} on them.</p>
+        <p style="margin:6px 0 0; font-size:13px;">Timesheets: ${s.timeAdded || 0} added${s.timeAlready ? `, ${s.timeAlready} already in` : ''}${s.timeMoved ? `, ${s.timeMoved} moved to a newly matched person` : ''}${s.timeSkippedNoTimes ? `, ${s.timeSkippedNoTimes} skipped (no check-out time)` : ''}.</p>
+        <p style="margin:4px 0 0; font-size:13px;">Checklist tasks: ${s.checklistAdded || 0} added${s.checklistAlready ? `, ${s.checklistAlready} already in` : ''}${s.checklistTicked ? `, ${s.checklistTicked} newly ticked` : ''}.</p>
+        ${unmatched.length ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">${s.timeSkippedUnmatched} check-in${s.timeSkippedUnmatched === 1 ? '' : 's'} skipped, staff not matched: ${unmatched.map(([name, n]) => `${escapeHtml(name)} (${n})`).join(', ')}. Match them under Staff above and save; their time comes across then.</p>` : ''}
+        ${s.error ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">Stopped: ${escapeHtml(s.error)}</p>` : ''}
+        ${(s.jobErrors || []).length ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">Could not read: ${s.jobErrors.map(j => `J${escapeHtml(String(j.jobNumber))} (${escapeHtml(j.error)})`).join(', ')}. Press the button again to retry.</p>` : ''}`;
+      return false;
+    }
+
     async function loadCopyProgress() {
+      const summaryRunning = await loadCopySummary();
       const count = (status) => {
         let q = supabaseClient.from('sm8_attachment_copies').select('id', { count: 'exact', head: true });
         if (status) q = q.in('status', status);
@@ -545,7 +643,7 @@
       ]);
       const el = document.getElementById('copy-progress');
       if (!total) {
-        el.innerHTML = copyStartedAt ? '<p class="subtitle">Asking ServiceM8 for the file list...</p>' : '<p class="subtitle">Nothing copied yet.</p>';
+        el.innerHTML = copyStartedAt ? '<p class="subtitle">Asking ServiceM8 for the file list...</p>' : '<p class="subtitle">No docs or photos copied yet.</p>';
       } else {
         const pct = Math.round((copied / total) * 100);
         el.innerHTML = `
@@ -556,7 +654,7 @@
       }
       // Keep polling while files are waiting, and for a couple of minutes
       // after pressing the button (queueing the list comes first).
-      const running = waiting > 0 || (copyStartedAt && Date.now() - copyStartedAt < 120000);
+      const running = summaryRunning || waiting > 0 || (copyStartedAt && Date.now() - copyStartedAt < 120000);
       if (!running) {
         if (copyStartedAt) document.getElementById('copy-msg').textContent = failed ? 'Finished, with some failures - press again to retry them.' : 'Finished.';
         copyStartedAt = 0;
@@ -569,6 +667,7 @@
     async function startCopy() {
       const btn = document.getElementById('copy-btn');
       const msg = document.getElementById('copy-msg');
+      if (btn.disabled) return; // already running
       btn.disabled = true;
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
@@ -589,6 +688,8 @@
     }
 
     document.getElementById('copy-btn').addEventListener('click', startCopy);
+    document.getElementById('staff-load-btn').addEventListener('click', loadStaff);
+    document.getElementById('staff-save-btn').addEventListener('click', saveStaff);
     document.getElementById('tick-all-btn').addEventListener('click', () => setAllIncluded(true));
     document.getElementById('untick-all-btn').addEventListener('click', () => setAllIncluded(false));
     document.getElementById('load-btn').addEventListener('click', loadPreview);

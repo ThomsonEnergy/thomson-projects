@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=81"></script>
+  <script src="/js/supabase-client.js?v=83"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -2330,6 +2330,34 @@
     // Mapping. Same xeroBreakdownHtml() the standalone Invoices list uses,
     // so the two can never disagree. Each invoice pushes to Xero on its
     // own; never bundled together by project.
+    // Invoice PDFs brought across from ServiceM8 (sm8-copy-attachments,
+    // folder "ServiceM8 invoices"). Copies of what ServiceM8 already sent,
+    // for reference: not invoices in the app, so they never touch Xero or
+    // invoiced to date. Kept out of the Documents tab.
+    const SM8_INVOICE_FOLDER = 'ServiceM8 invoices';
+    async function loadSm8Invoices(projectId) {
+      const el = document.getElementById('sm8-invoices-list');
+      if (!el) return;
+      const { data: docs } = await supabaseClient.from('project_documents')
+        .select('id, file_path, file_name, created_at').eq('project_id', projectId).eq('folder', SM8_INVOICE_FOLDER).order('created_at');
+      if (!docs || !docs.length) { el.innerHTML = ''; return; }
+      el.innerHTML = `
+        <h3 style="font-size:14px; margin:18px 0 6px;">From ServiceM8</h3>
+        <p class="subtitle" style="margin:0 0 8px;">Invoices already sent from ServiceM8, for reference. They are counted in invoiced to date from the import, not here.</p>
+        <table class="responsive-stack">
+          <thead><tr><th>Invoice</th><th>Date</th></tr></thead>
+          <tbody>${docs.map(d => `
+            <tr><td data-label="Invoice"><a href="#" class="sm8-inv-link" data-path="${escapeHtml(d.file_path)}">${escapeHtml(d.file_name.replace(/\.pdf$/i, ''))}</a></td>
+            <td data-label="Date">${new Date(d.created_at).toLocaleDateString('en-AU')}</td></tr>`).join('')}
+          </tbody>
+        </table>`;
+      el.querySelectorAll('.sm8-inv-link').forEach(a => a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const d = docs.find(x => x.file_path === a.dataset.path);
+        openPdfViewer(d.file_path, d.file_name);
+      }));
+    }
+
     async function loadJobInvoices(project) {
       const listEl = document.getElementById('job-invoices-list');
       const myRole = await getMyRole();
@@ -3320,6 +3348,7 @@
                 <h2>Invoices</h2>
                 <p class="subtitle" style="margin-bottom:14px;">How each invoice is coded to post to Xero - materials, labour, and STC credit as their own lines, per the mapping in Settings &gt; Xero Mapping. Each invoice pushes to Xero on its own, never bundled with others.</p>
                 <div id="job-invoices-list"><p class="subtitle">Loading...</p></div>
+                <div id="sm8-invoices-list"></div>
               </div>
             </div>
             ` : ''}
@@ -3521,7 +3550,7 @@
       }
 
       if (project.job_number) loadPurchaseOrders(project.id, centres);
-      if (document.getElementById('job-invoices-list')) loadJobInvoices(project);
+      if (document.getElementById('job-invoices-list')) { loadJobInvoices(project); loadSm8Invoices(project.id); }
       if (document.getElementById('variations-list')) loadVariations(project.id);
       loadJobTasks(project.id);
       initJobSearch(project, pricingVisible);
@@ -4478,7 +4507,7 @@
         const q = (p) => Promise.resolve(p).then(r => r.data || []).catch(() => []);
         const sb = supabaseClient;
         const [docs, photos, tasks, posts, comments, meetings, fieldNotes, assets, pos, varEntries, emailLinks] = await Promise.all([
-          q(sb.from('project_documents').select('id, folder, file_path, file_name, mime_type, page_names, plan_summary').eq('project_id', pid)),
+          q(sb.from('project_documents').select('id, folder, file_path, file_name, mime_type, page_names, plan_summary').eq('project_id', pid).neq('folder', SM8_INVOICE_FOLDER)),
           q(sb.from('project_photos').select('id, url, caption, created_at').eq('project_id', pid).order('created_at', { ascending: false })),
           q(sb.from('job_tasks').select('id, description, notes, parent_task_id, completed').eq('project_id', pid)),
           q(sb.from('feed_posts').select('id, message').eq('project_id', pid)),
@@ -4508,13 +4537,13 @@
           const link = [...document.querySelectorAll('#documents-list .doc-view-link')].find(a => a.dataset.path === d.file_path);
           if (link) { flash(link.closest('.doc-tile')); link.click(); }
         }));
-        photos.forEach((p, i) => {
+        photos.forEach((p) => {
           const fileName = decodeURIComponent((p.url || '').split('?')[0].split('/').pop() || '');
           add('Photos', p.caption || fileName || 'Site photo', [p.caption, fileName.replace(/[-_.]+/g, ' ')], async () => {
             goTab('photos');
             await loadSitePhotos(pid);
-            const img = document.querySelector(`#site-photos-list .site-photo-view[data-i="${i}"]`);
-            if (img) { flash(img); img.click(); }
+            const img = document.querySelector(`#site-photos-list [data-photo-id="${p.id}"]`);
+            if (img) { flash(img); if (img.classList.contains('site-photo-view')) img.click(); }
           });
         });
         const taskById = Object.fromEntries(tasks.map(t => [t.id, t]));
@@ -4642,6 +4671,10 @@
       st.id = 'jt-styles';
       st.textContent = `
         .jt-group { margin-bottom:18px; }
+        .jt-photos { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+        .jt-photo { width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--border); cursor:pointer; }
+        .jt-video { display:flex; align-items:center; justify-content:center; background:#000; color:#fff; text-decoration:none; font-size:20px; }
+        .jt-photo-btn { font-size:13px; padding:6px 10px; border:1px solid var(--border); border-radius:8px; }
         .jt-group h3 { font-size:14px; margin:0 0 6px; }
         .jt-item { border-bottom:1px solid var(--border); }
         .jt-item.sub { margin-left:30px; }
@@ -4685,9 +4718,10 @@
       const addBtn = document.getElementById('add-task-btn');
       if (addBtn) addBtn.onclick = () => openAddTaskPanel(projectId);
 
-      const [{ data: tasks, error }, { data: staff }] = await Promise.all([
+      const [{ data: tasks, error }, { data: staff }, { data: taskPhotos }] = await Promise.all([
         supabaseClient.from('job_tasks').select('*').eq('project_id', projectId).order('created_at', { ascending: true }),
         supabaseClient.from('profiles').select('id, full_name, active'),
+        supabaseClient.from('project_photos').select('id, url, task_id').eq('project_id', projectId).not('task_id', 'is', null).order('created_at'),
       ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
@@ -4700,7 +4734,7 @@
           : `<p class="subtitle">${outstanding.length} task${outstanding.length === 1 ? '' : 's'} outstanding${requiredOutstanding.length ? `, <span style="color:var(--red);">${requiredOutstanding.length} required before scheduling</span>` : ''}.</p>`;
       }
 
-      listEl._jt = { projectId, tasks: tasks || [], staff: staff || [] };
+      listEl._jt = { projectId, tasks: tasks || [], staff: staff || [], photos: taskPhotos || [] };
       bindJobTaskEvents(listEl);
       renderJobTasks(listEl);
       if (focusSelector) { const f = listEl.querySelector(focusSelector); if (f) f.focus(); }
@@ -4713,7 +4747,8 @@
     }
 
     function renderJobTasks(listEl) {
-      const { tasks, staff } = listEl._jt;
+      const { tasks, staff, photos } = listEl._jt;
+      const photosOf = (id) => photos.filter(p => p.task_id === id);
       const staffName = (id) => (staff.find(s => s.id === id) || {}).full_name || 'Someone';
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const subsOf = (id) => tasks.filter(t => t.parent_task_id === id).sort((a, b) => (Number(a.completed) - Number(b.completed)) || jtSort(a, b));
@@ -4727,6 +4762,9 @@
         if (who) bits.push(escapeHtml(who));
         if (due) bits.push(`<span style="${overdue ? 'color:var(--red);' : ''}">Due ${due}</span>`);
         if (subs.length) bits.push(`${subs.filter(s => s.completed).length}/${subs.length} subtasks`);
+        if (t.completed && t.completed_at) bits.push(`Done${t.completed_by ? ' by ' + escapeHtml(staffName(t.completed_by)) : ''} ${new Date(t.completed_at).toLocaleDateString('en-AU')}`);
+        const tPhotos = photosOf(t.id);
+        if (tPhotos.length) bits.push(`${tPhotos.length} photo${tPhotos.length === 1 ? '' : 's'}`);
         if (t.notes) bits.push('Has notes');
         if (t.recurrence) bits.push(`Repeats ${t.recurrence}`);
         if (t.schedule_assignment_id) bits.push('On calendar');
@@ -4752,6 +4790,12 @@
                     ${staff.filter(s => s.active !== false || s.id === t.assigned_to_user_id).sort((a, b) => String(a.full_name).localeCompare(String(b.full_name))).map(s => `<option value="${s.id}" ${s.id === t.assigned_to_user_id ? 'selected' : ''}>${escapeHtml(s.full_name || 'Unnamed')}</option>`).join('')}
                   </select></div>
                   <div><label>Due date</label><input type="date" class="jt-due" data-id="${t.id}" value="${t.due_date || ''}" /></div>
+                </div>
+                <div><label>Photos</label>
+                  ${tPhotos.length ? `<div class="jt-photos">${tPhotos.map(p => isVideoUrl(p.url)
+                    ? `<a href="${escapeHtml(p.url)}" target="_blank" rel="noopener" class="jt-photo jt-video">&#9654;</a>`
+                    : `<img src="${supaImageVariant(p.url, 200, 60)}" class="jt-photo" data-act="task-photo-view" data-id="${t.id}" data-url="${escapeHtml(p.url)}" alt="" />`).join('')}</div>` : ''}
+                  <label class="secondary jt-photo-btn" style="display:inline-block; margin-top:4px; cursor:pointer;">&#128247; Take photo<input type="file" accept="image/*" capture="environment" class="jt-photo-input" data-id="${t.id}" style="display:none;" /></label>
                 </div>
                 ${!isSub ? `<div><label>Subtasks</label>
                   <input class="jt-sub-add" data-parent="${t.id}" placeholder="Add a subtask and press Enter" style="margin-top:4px;" /></div>` : ''}
@@ -4853,6 +4897,11 @@
         const actEl = e.target.closest('[data-act]');
         if (actEl) {
           const act = actEl.dataset.act;
+          if (act === 'task-photo-view') {
+            const pics = state().photos.filter(p => p.task_id === actEl.dataset.id && !isVideoUrl(p.url)).map(p => p.url);
+            openPhotoLightbox(pics, Math.max(0, pics.indexOf(actEl.dataset.url)));
+            return;
+          }
           if (act === 'toggle-done') {
             const g = actEl.dataset.group;
             if (jtDoneOpen.has(g)) jtDoneOpen.delete(g); else jtDoneOpen.add(g);
@@ -4887,6 +4936,27 @@
         const el = e.target;
         const t = el.dataset.id ? find(el.dataset.id) : null;
         if (!t) return;
+        if (el.classList.contains('jt-photo-input')) {
+          // A photo taken from a task is a normal site photo (Photos tab),
+          // captioned "#task <task>" and linked back to the task.
+          if (!el.files.length) return;
+          const label = el.closest('label');
+          label.firstChild.textContent = 'Uploading... ';
+          try {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            const urls = await uploadPhotos(el.files, state().projectId, 'site-photos');
+            const { error } = await supabaseClient.from('project_photos').insert(urls.map(url => ({
+              project_id: state().projectId, staff_id: user.id, url, task_id: t.id, caption: `#task ${t.description}`.slice(0, 200),
+            })));
+            if (error) throw error;
+            jtExpanded.add(t.id);
+            await reload();
+          } catch (err) {
+            alert('Could not save the photo: ' + err.message);
+            label.firstChild.textContent = 'Take photo ';
+          }
+          return;
+        }
         if (el.classList.contains('jt-check')) await setCompleted(t, el.checked);
         else if (el.classList.contains('jt-assign')) { await patch(t.id, { assigned_to_user_id: el.value || null, assigned_to_role: el.value ? null : t.assigned_to_role }); await reload(); }
         else if (el.classList.contains('jt-due')) { await patch(t.id, { due_date: el.value || null }); await reload(); }
@@ -5133,7 +5203,7 @@
         const listEl = overlay.querySelector('#td-list');
         const { data: entries, error } = await supabaseClient
           .from('time_entries')
-          .select('id, staff_id, clock_in, clock_out, cost_centre_id, selected_cost_centre_ids, time_category, profiles(full_name)')
+          .select('id, staff_id, clock_in, clock_out, cost_centre_id, selected_cost_centre_ids, time_category, sm8_activity_uuid, profiles(full_name)')
           .eq('project_id', project.id)
           .order('clock_in', { ascending: false });
         if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
@@ -5173,7 +5243,7 @@
                   <td data-label="Staff">${e.profiles?.full_name || 'Unknown'}</td>
                   <td data-label="Date">${new Date(e.clock_in).toLocaleDateString()}</td>
                   <td class="num" data-label="Hours">${hrs === null ? 'In progress' : hrs.toFixed(2)}</td>
-                  <td data-label="Stage / category">${stageLabel(e)}</td>
+                  <td data-label="Stage / category">${stageLabel(e)}${e.sm8_activity_uuid ? ' <span class="subtitle">(ServiceM8, already paid)</span>' : ''}</td>
                   ${isFinanceOrAdmin ? `<td class="num" data-label="Cost">${cost === undefined ? '-' : money(cost)}</td>` : ''}
                   ${isAdmin ? `<td><button type="button" class="secondary td-edit-btn" data-id="${e.id}" style="font-size:12px; padding:4px 8px;">Edit</button></td>` : ''}
                 </tr>
@@ -5317,6 +5387,7 @@
         .from('project_documents')
         .select('*, profiles(full_name)')
         .eq('project_id', projectId)
+        .neq('folder', SM8_INVOICE_FOLDER) // shown on the Invoices tab
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
@@ -6346,21 +6417,27 @@
     // somewhere to browse them instead of piling up unseen.
     async function loadSitePhotos(projectId) {
       const listEl = document.getElementById('site-photos-list');
-      const { data: photos, error } = await supabaseClient
+      let { data: photos, error } = await supabaseClient
         .from('project_photos')
-        .select('id, url, caption, staff_id, created_at, profiles(full_name)')
+        .select('id, url, caption, staff_id, created_at, task_id, profiles(full_name)')
         .eq('project_id', projectId)
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (!photos.length) { listEl.innerHTML = `<p class="subtitle">No site photos yet.</p>`; return; }
 
+      // Videos (ServiceM8 brought some across) play in place; only pictures
+      // go to the lightbox, so photos below means pictures only.
+      const allPhotos = photos;
+      photos = allPhotos.filter(p => !isVideoUrl(p.url));
       const urls = photos.map(p => p.url);
       const captions = photos.map(p => p.caption || '');
       listEl.innerHTML = `
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">
-          ${photos.map((p, i) => `
+          ${allPhotos.map(p => `
             <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
-              <img src="${supaImageVariant(p.url, 400, 70)}" data-i="${i}" class="site-photo-view" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" />
+              ${isVideoUrl(p.url)
+                ? `<video src="${escapeHtml(p.url)}" data-photo-id="${p.id}" controls playsinline preload="metadata" style="width:100%; height:110px; object-fit:cover; display:block; background:#000;"></video>`
+                : `<img src="${supaImageVariant(p.url, 400, 70)}" data-i="${photos.indexOf(p)}" data-photo-id="${p.id}" class="site-photo-view" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" />`}
               <div style="padding:6px 8px; font-size:11px; color:var(--muted);">
                 ${p.caption ? `<strong style="color:var(--text); font-size:12px;">${escapeHtml(p.caption)}</strong><br>` : ''}${p.profiles?.full_name || 'Unknown'}<br>${new Date(p.created_at).toLocaleDateString('en-AU')}
               </div>
