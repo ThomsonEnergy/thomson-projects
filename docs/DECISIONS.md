@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 18 Oct 2026
+- invoice@ goes to sales@ with a Gmail filter (skip inbox, label Bills); TEops agent reads it from there. Not accounts@. (`docs/IDEAS_BACKLOG.md` item 8)
 - invoice@ is supplier bills only, currently delivers to jasper@, accounts@, jade@; agent to read accounts@ (or sales@ with a skip-inbox filter) so sales@ stays clean. (`docs/IDEAS_BACKLOG.md` item 8)
 - invoice@ supplier bill intake agent planned (alias, agent reads bills, attaches to POs), waiting on owner answers before build. (`docs/IDEAS_BACKLOG.md` item 8)
 - Surveillance notice, AI consent and location consent drafted for adviser review; location stays in the notice now, location consent form waits for the iPhone app. (`policies and Contracts/`, `docs/IDEAS_BACKLOG.md` item 6)
