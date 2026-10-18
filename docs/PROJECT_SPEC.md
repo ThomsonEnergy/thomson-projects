@@ -301,6 +301,13 @@ Manual steps only a person can do (the code is live):
 - **Ops manager page** (`ops.html`, Admin): Ask the manager buttons, Needs me (emailed bills to check, worker tasks with Done / Dismiss), latest digest, workers, what they did.
 - The assistant is the manager in chat: reads the worker tables and emailed bills, and can line up `save_emailed_bill`, `put_aside_emailed_bill`, `close_agent_task` (Confirm needed, `_shared/ops-actions.js`). Cannot deploy, change permissions, move money, approve payment, push to Xero or send email.
 
+### A31. Documents page (company documents, migration 20261022000000)
+- **Documents** in the main menu (`documents.html`): company docs we send to clients. Table `company_documents` (kind `schedule_of_rates` or `file`). Everyone can view, add and rename; only Admin can delete; the Schedule of Rates cannot be deleted. Uploaded files sit in `project-documents` under `company-documents/`.
+- **Schedule of Rates** (`rates.html`, public link, 2 A4 pages): the estimate's Schedule of Rates page without the estimate parts, live rates from Billable Rates through `get_schedule_of_rates()`. Wording shared with estimates in `public/js/schedule-of-rates.js`.
+- **"Current as at"** date: `company_settings.rates_reviewed_on` (set 18 Oct 2026), printed on the standalone doc and on estimates. Moved to today by changing a rate or pressing "Rates checked, still correct today" in Settings > Billable Rates.
+- **6 monthly review:** the 5am ops digest opens a "Needs me" task (dedupe `rates_review`, one push) once 6 months have passed, and closes it when the date moves on.
+- **On a job:** Documents tab > Add from Documents. Files are copied into the job's "Company docs" folder; the Schedule of Rates is printed to a PDF at today's rates (`generate-client-document-pdf.js`, `doc_type: schedule_of_rates`, logged-in staff only). Then attach from the job's Emails tab as usual.
+
 ### A29. Scheduled functions (netlify.toml)
 | Function | Schedule |
 |---|---|
@@ -354,7 +361,7 @@ Manual steps only a person can do (the code is live):
 
 ## PART D: Costing and prebuild AI
 
-- **D1. Billable Rates (built):** rate tiers with sell rates (`billable_rate_tiers`), cost rate per staff profile.
+- **D1. Billable Rates (built):** rate tiers with sell rates (`billable_rate_tiers`), cost rate per staff profile. Reviewed every 6 months (A31).
 - **D3. AI prebuild creation (not built):** from a description or an uploaded list, with review before save. `generate-scope.js` / `generate-sow.js` only write scope text.
 - **D4. Plan takeoff and wholesaler loop (not built):** read plans into a part list, send to a wholesaler, read the quote back into costs. Needs D3.
 - **D5. Profit reporting (built):** per-job GP (labour plus materials, A17) and net profit with overheads plus monthly net (A24).

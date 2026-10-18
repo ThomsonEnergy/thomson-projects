@@ -1,5 +1,6 @@
 const { getAdminClient } = require('./_shared/require-admin');
 const { selfBaseUrl } = require('./_shared/site-url');
+const { requireActiveUser } = require('./_shared/require-active-user');
 
 // Renders the actual client-facing quote.html / invoice.html page (via headless Chromium) into a
 // real PDF. Both pages are laid out as A4 sheets with their own letterhead, so the PDF is the page
@@ -245,6 +246,14 @@ async function handle(event) {
 
     if (!doc_type || !record_id) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'doc_type and record_id are required' }) };
 
+    // Adding the Schedule of Rates to a job (Documents page) files a document on the job, so it
+    // needs a logged-in staff member. The other types only refresh a document's own PDF.
+    let actor = null;
+    if (doc_type === 'schedule_of_rates') {
+      actor = await requireActiveUser(event);
+      if (!actor) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Please log in again' }) };
+    }
+
     // Start Chromium now, while the lookups below happen.
     pendingBrowser = getBrowser();
     pendingBrowser.catch(() => {}); // a failed early start is reported when it is picked up in renderOnce
@@ -319,6 +328,26 @@ async function handle(event) {
       const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
       if (upErr) throw upErr;
       await supabaseAdmin.from('job_variation_entries').update({ pdf_path: path, pdf_generated_at: new Date().toISOString() }).eq('id', entry.id);
+    } else if (doc_type === 'schedule_of_rates') {
+      // record_id is the job: the Schedule of Rates at today's rates goes in its "Company docs"
+      // folder, so the job keeps the version the client was sent and the job email can attach it.
+      const { data: project, error } = await supabaseAdmin.from('projects').select('id').eq('id', record_id).single();
+      if (error || !project) throw new Error(error?.message || 'Job not found');
+
+      const finalPdf = await renderPageToPdf(`${siteUrl}/rates.html?print=1`, {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+
+      const day = new Date().toLocaleDateString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', year: 'numeric' });
+      path = `documents/${project.id}/${Date.now()}-Schedule_of_Rates.pdf`;
+      const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf' });
+      if (upErr) throw upErr;
+      const { error: docErr } = await supabaseAdmin.from('project_documents').insert({
+        project_id: project.id, folder: 'Company docs', file_path: path, file_name: `Schedule of Rates (${day}).pdf`, mime_type: 'application/pdf', uploaded_by: actor.user.id,
+      });
+      if (docErr) throw docErr;
     } else {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: `Unknown doc_type "${doc_type}"` }) };
     }

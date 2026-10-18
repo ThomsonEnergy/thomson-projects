@@ -79,6 +79,28 @@ async function buildDigest(admin) {
   return { title, text: lines.join(' '), needCount, down: down.map(d => d.agent) };
 }
 
+// The Schedule of Rates is reviewed every 6 months (company_settings.rates_reviewed_on, set from
+// Settings > Billable Rates). When it is due, one "Needs me" task is opened (and listed in the
+// digest); it closes itself once the date is moved on.
+async function ratesReviewCheck(admin) {
+  const dedupe = 'rates_review';
+  const { data } = await admin.from('company_settings').select('rates_reviewed_on').eq('id', 1).maybeSingle();
+  const reviewed = data?.rates_reviewed_on;
+  const due = reviewed ? new Date(reviewed + 'T00:00:00Z') : null;
+  if (due) due.setUTCMonth(due.getUTCMonth() + 6);
+  if (due && due.toISOString().slice(0, 10) > sydneyDate()) {
+    await admin.from('agent_tasks').update({ status: 'done', resolved_at: new Date().toISOString(), body: `Reviewed ${reviewed}.` })
+      .eq('dedupe_key', dedupe).eq('status', 'open');
+    return;
+  }
+  const { data: task } = await admin.from('agent_tasks').insert({
+    agent: 'ops-digest', title: 'Review the Schedule of Rates (6 monthly)',
+    body: `Last reviewed ${reviewed || 'never'}. Check the rates in Settings > Billable Rates, then press "Rates checked" (or change a rate).`,
+    link: '/settings.html?panel=billable-rates', dedupe_key: dedupe,
+  }).select('id').maybeSingle(); // the unique index stops a second open reminder
+  if (task) await notifyManagers(admin, { kind: 'agent_alert', title: 'Review the Schedule of Rates', body: 'It is 6 months since the rates were last checked.', link: '/settings.html?panel=billable-rates', dedupe: `${dedupe}:${task.id}` });
+}
+
 exports.handler = async (event) => {
   // the 18:00 and 19:00 UTC runs: only the one that is 5am in Sydney sends
   if (sydneyHour() !== 5 && !(event && event.queryStringParameters && event.queryStringParameters.force === '1' && process.env.CONTEXT !== 'production')) {
@@ -86,6 +108,7 @@ exports.handler = async (event) => {
   }
   return runAgent('ops-digest', async () => {
     const admin = getAdminClient();
+    await ratesReviewCheck(admin).catch((err) => console.error('rates review check failed:', err.message));
     const digest = await buildDigest(admin);
     await notifyManagers(admin, { kind: 'ops_digest', title: digest.title, body: digest.text.slice(0, 300), link: '/ops.html', dedupe: `ops_digest:${sydneyDate()}` });
     await admin.from('agent_runs').delete().lt('started_at', new Date(Date.now() - 90 * 86400000).toISOString());

@@ -216,7 +216,8 @@
     <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading your proposal...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=83"></script>
+  <script src="/js/supabase-client.js?v=84"></script>
+  <script src="/js/schedule-of-rates.js?v=2"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -751,40 +752,7 @@
           ${headHtml}
           <div class="pg-body sor">
             <h1 class="pg-title">Schedule<br>of rates</h1>
-            <div class="sor-h">1. Application</div>
-            <p>This Schedule of Rates applies to all works performed by Thomson Energy where a fixed quotation has not been issued or cannot reasonably be provided. This includes but is not limited to fault-finding, investigative works, service calls, variations, urgent works, and client-requested additional works.</p>
-            <div class="sor-h">2. Labour rates</div>
-            <table class="qtable">
-              <thead><tr><th>Description</th><th class="num">Unit price ex GST</th><th class="num">Unit price inc GST</th></tr></thead>
-              <tbody>${rates.map(r => `<tr><td>${esc(r.name)}</td><td class="num">${money(r.sell_rate)}</td><td class="num">${money(Math.round(Number(r.sell_rate) * 1.1))}</td></tr>`).join('')}</tbody>
-            </table>
-            <div class="sor-h">3. Standard hours</div>
-            <p><b>Standard hours:</b> Monday to Friday, 6:30am to 4:00pm.<br><b>Minimum charge:</b> 2 hours per attendance per technician.</p>
-            <p>Personnel classification is determined solely by Thomson Energy based on licensing, experience, competency, and responsibility required for the task.</p>
-            <div class="sor-h">4. Overtime &amp; after hours multipliers</div>
-            <table class="qtable">
-              <thead><tr><th>Period</th><th class="num">Rate applied</th></tr></thead>
-              <tbody>
-                <tr><td>Outside standard hours</td><td class="num">1.5x</td></tr>
-                <tr><td>Saturday</td><td class="num">1.5x</td></tr>
-                <tr><td>Sunday</td><td class="num">2.0x</td></tr>
-                <tr><td>Public Holiday</td><td class="num">2.5x</td></tr>
-                <tr><td>Emergency Callout</td><td class="num">Minimum 3 hours</td></tr>
-              </tbody>
-            </table>
-            <p class="note-line">Multipliers apply to all labour classifications.</p>
-            <div class="sor-h">5. Do &amp; charge basis</div>
-            <p>All works performed under this Schedule are charged on a time and materials (do-and-charge) basis, meaning:</p>
-            <ul>
-              <li>Labour is charged for actual time spent.</li>
-              <li>Time includes travel where applicable, fault finding, setup, testing, documentation, compliance verification, and pack-down.</li>
-              <li>Materials are charged as supplied and installed.</li>
-              <li>Any estimate provided is indicative only and does not constitute a fixed price.</li>
-            </ul>
-            <div class="sor-h">6. Materials, equipment &amp; consumables</div>
-            <p>Materials are charged at Thomson Energy's supply rate, which includes procurement, handling, warranty risk, administration, logistics, and margin. Supply rates are confidential and not subject to disclosure.</p>
-            <p>Specialist equipment, access equipment, plant hire, test instruments, lifting equipment, or machinery will be charged at applicable daily or hourly rates.</p>
-            <p class="note-line">This document is current as at April 2026.</p>
+            ${scheduleOfRatesHtml(rates, s.rates_reviewed_on)}
           </div>
         </section>` : '';
 
