@@ -49,6 +49,10 @@ function fileParts(att) {
   return { fileName, ext, kind, mime };
 }
 
+// ServiceM8's own invoice PDFs ("Partial Invoice #4515A", "Thomson Energy
+// Invoice #4515B") are listed on the job's Invoices tab, not in Documents.
+const docFolder = (fileName) => (/\binvoice\b/i.test(fileName) ? 'ServiceM8 invoices' : 'ServiceM8');
+
 const safe = (s) => s.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
 
 // "Photo.avif" / "Video.mp4" are ServiceM8's default names: no caption
@@ -175,7 +179,7 @@ async function copyOne(supabaseAdmin, apiKey, userId, row, meta) {
   const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, bytes, { contentType: mime === 'application/octet-stream' ? contentType : mime, upsert: true });
   if (upErr) throw upErr;
   const { data: doc, error: insErr } = await supabaseAdmin.from('project_documents')
-    .insert({ project_id: row.project_id, folder: 'ServiceM8', file_path: path, file_name: row.file_name, mime_type: mime === 'application/octet-stream' ? contentType : mime, uploaded_by: meta.staffId || userId, ...(meta.createdAt ? { created_at: meta.createdAt } : {}) })
+    .insert({ project_id: row.project_id, folder: docFolder(row.file_name), file_path: path, file_name: row.file_name, mime_type: mime === 'application/octet-stream' ? contentType : mime, uploaded_by: meta.staffId || userId, ...(meta.createdAt ? { created_at: meta.createdAt } : {}) })
     .select('id').single();
   if (insErr) throw insErr;
   return { project_document_id: doc.id };

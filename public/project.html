@@ -2330,6 +2330,34 @@
     // Mapping. Same xeroBreakdownHtml() the standalone Invoices list uses,
     // so the two can never disagree. Each invoice pushes to Xero on its
     // own; never bundled together by project.
+    // Invoice PDFs brought across from ServiceM8 (sm8-copy-attachments,
+    // folder "ServiceM8 invoices"). Copies of what ServiceM8 already sent,
+    // for reference: not invoices in the app, so they never touch Xero or
+    // invoiced to date. Kept out of the Documents tab.
+    const SM8_INVOICE_FOLDER = 'ServiceM8 invoices';
+    async function loadSm8Invoices(projectId) {
+      const el = document.getElementById('sm8-invoices-list');
+      if (!el) return;
+      const { data: docs } = await supabaseClient.from('project_documents')
+        .select('id, file_path, file_name, created_at').eq('project_id', projectId).eq('folder', SM8_INVOICE_FOLDER).order('created_at');
+      if (!docs || !docs.length) { el.innerHTML = ''; return; }
+      el.innerHTML = `
+        <h3 style="font-size:14px; margin:18px 0 6px;">From ServiceM8</h3>
+        <p class="subtitle" style="margin:0 0 8px;">Invoices already sent from ServiceM8, for reference. They are counted in invoiced to date from the import, not here.</p>
+        <table class="responsive-stack">
+          <thead><tr><th>Invoice</th><th>Date</th></tr></thead>
+          <tbody>${docs.map(d => `
+            <tr><td data-label="Invoice"><a href="#" class="sm8-inv-link" data-path="${escapeHtml(d.file_path)}">${escapeHtml(d.file_name.replace(/\.pdf$/i, ''))}</a></td>
+            <td data-label="Date">${new Date(d.created_at).toLocaleDateString('en-AU')}</td></tr>`).join('')}
+          </tbody>
+        </table>`;
+      el.querySelectorAll('.sm8-inv-link').forEach(a => a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const d = docs.find(x => x.file_path === a.dataset.path);
+        openPdfViewer(d.file_path, d.file_name);
+      }));
+    }
+
     async function loadJobInvoices(project) {
       const listEl = document.getElementById('job-invoices-list');
       const myRole = await getMyRole();
@@ -3320,6 +3348,7 @@
                 <h2>Invoices</h2>
                 <p class="subtitle" style="margin-bottom:14px;">How each invoice is coded to post to Xero - materials, labour, and STC credit as their own lines, per the mapping in Settings &gt; Xero Mapping. Each invoice pushes to Xero on its own, never bundled with others.</p>
                 <div id="job-invoices-list"><p class="subtitle">Loading...</p></div>
+                <div id="sm8-invoices-list"></div>
               </div>
             </div>
             ` : ''}
@@ -3521,7 +3550,7 @@
       }
 
       if (project.job_number) loadPurchaseOrders(project.id, centres);
-      if (document.getElementById('job-invoices-list')) loadJobInvoices(project);
+      if (document.getElementById('job-invoices-list')) { loadJobInvoices(project); loadSm8Invoices(project.id); }
       if (document.getElementById('variations-list')) loadVariations(project.id);
       loadJobTasks(project.id);
       initJobSearch(project, pricingVisible);
@@ -4478,7 +4507,7 @@
         const q = (p) => Promise.resolve(p).then(r => r.data || []).catch(() => []);
         const sb = supabaseClient;
         const [docs, photos, tasks, posts, comments, meetings, fieldNotes, assets, pos, varEntries, emailLinks] = await Promise.all([
-          q(sb.from('project_documents').select('id, folder, file_path, file_name, mime_type, page_names, plan_summary').eq('project_id', pid)),
+          q(sb.from('project_documents').select('id, folder, file_path, file_name, mime_type, page_names, plan_summary').eq('project_id', pid).neq('folder', SM8_INVOICE_FOLDER)),
           q(sb.from('project_photos').select('id, url, caption, created_at').eq('project_id', pid).order('created_at', { ascending: false })),
           q(sb.from('job_tasks').select('id, description, notes, parent_task_id, completed').eq('project_id', pid)),
           q(sb.from('feed_posts').select('id, message').eq('project_id', pid)),
@@ -5358,6 +5387,7 @@
         .from('project_documents')
         .select('*, profiles(full_name)')
         .eq('project_id', projectId)
+        .neq('folder', SM8_INVOICE_FOLDER) // shown on the Invoices tab
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
 
