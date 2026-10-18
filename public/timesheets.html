@@ -154,7 +154,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=83"></script>
+  <script src="/js/supabase-client.js?v=84"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId = null;
@@ -172,6 +172,17 @@
     }
     function fmtTime(iso) {
       return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+    }
+    // Activity log helpers: "Fri 16 Oct", "7:00 am - 8:45 am", and the
+    // short job ref ("J7003") so a line reads plainly on the job page.
+    function fmtLogDay(dateStr) {
+      return new Date(`${dateStr}T00:00`).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '');
+    }
+    function fmtLogRange(inIso, outIso) {
+      return `${fmtTime(inIso)} - ${outIso ? fmtTime(outIso) : 'in progress'}`;
+    }
+    function shortRef(label) {
+      return label ? label.split(' - ')[0] : 'General / Office';
     }
 
     // Break is a once-per-day answer, so it lives on whichever entry
@@ -584,7 +595,7 @@
       return {
         key: dayBlockKeySeq++, id: null, projectId: null, projectLabel: '', projectLahaApproved: false, ccIds: [],
         clockInTime: '', clockOutTime: '', xeroPushed: false, centres: [], splitPercentages: [],
-        origClockIn: null, origClockOut: null, origProjectId: null, timeCategory: 'admin', stayedOvernight: null,
+        origClockIn: null, origClockOut: null, origProjectId: null, origProjectLabel: '', timeCategory: 'admin', stayedOvernight: null,
       };
     }
     function dayBlockFromEntry(e) {
@@ -596,6 +607,7 @@
         clockInTime: isoToTimePart(e.clock_in), clockOutTime: isoToTimePart(e.clock_out),
         xeroPushed: !!e.xero_pushed_at, centres: [], splitPercentages: [],
         origClockIn: e.clock_in, origClockOut: e.clock_out, origProjectId: e.project_id,
+        origProjectLabel: e.projects ? projectRef(e.projects) : '',
         timeCategory: (e.time_category && e.time_category !== 'job') ? e.time_category : 'admin',
         stayedOvernight: e.stayed_overnight !== null && e.stayed_overnight !== undefined ? e.stayed_overnight : null,
       };
@@ -1007,7 +1019,7 @@
           const { error } = await supabaseClient.from('time_entries').delete().eq('id', removed.id);
           if (error) throw error;
           if (removed.origProjectId) {
-            await logActivity('project', removed.origProjectId, 'timesheet_removed', `Timesheet entry removed (was ${fmtTime(removed.origClockIn)} - ${removed.origClockOut ? fmtTime(removed.origClockOut) : 'in progress'})`);
+            await logActivity('project', removed.origProjectId, 'timesheet_removed', `Timesheet entry removed for ${fmtLogDay(dateStr)} (was ${fmtLogRange(removed.origClockIn, removed.origClockOut)})`);
           }
         }
 
@@ -1071,27 +1083,33 @@
           if (block.id) {
             const { error } = await supabaseClient.from('time_entries').update(fields).eq('id', block.id);
             if (error) throw error;
-            // A time change is worth a paper trail, surfaced on the job's
-            // own Activity Log when it's tied to one.
-            if (!block.xeroPushed) {
-              const changes = [];
-              if (new Date(block.origClockIn).getTime() !== clockIn.getTime()) {
-                changes.push(`clock-in ${fmtTime(block.origClockIn)} to ${fmtTime(clockIn.toISOString())}`);
+            // A time or job change is worth a paper trail, surfaced on the
+            // job's own Activity Log. Written as "was X, now Y" with the day
+            // it was for, since edits are often made days later. A move
+            // between jobs is logged on both jobs.
+            const day = fmtLogDay(dateStr);
+            const wasRange = fmtLogRange(block.origClockIn, block.origClockOut);
+            const nowRange = block.xeroPushed ? wasRange : fmtLogRange(clockIn.toISOString(), clockOut ? clockOut.toISOString() : null);
+            const timeChanged = wasRange !== nowRange;
+            const origProjectId = block.origProjectId || null;
+            if (origProjectId !== (projectId || null)) {
+              const timeNote = timeChanged ? `was ${wasRange}, now ${nowRange}` : nowRange;
+              if (origProjectId) {
+                await logActivity('project', origProjectId, 'timesheet_moved', `Timesheet entry for ${day} moved to ${shortRef(block.projectLabel)} (${timeNote})`);
               }
-              const origOutMs = block.origClockOut ? new Date(block.origClockOut).getTime() : null;
-              const newOutMs = clockOut ? clockOut.getTime() : null;
-              if (origOutMs !== newOutMs) {
-                changes.push(`clock-out ${block.origClockOut ? fmtTime(block.origClockOut) : 'in progress'} to ${clockOut ? fmtTime(clockOut.toISOString()) : 'in progress'}`);
+              if (projectId) {
+                await logActivity('project', projectId, 'timesheet_moved', `Timesheet entry for ${day} moved from ${shortRef(block.origProjectLabel)} (${timeNote})`);
               }
-              if (changes.length) {
-                const entityProjectId = projectId || block.origProjectId || null;
-                await logActivity(entityProjectId ? 'project' : 'time_entry', entityProjectId || block.id, 'timesheet_edited', `Timesheet edited: ${changes.join(', ')}`);
-              }
+            } else if (timeChanged) {
+              await logActivity(projectId ? 'project' : 'time_entry', projectId || block.id, 'timesheet_edited', `Timesheet edited for ${day}: was ${wasRange}, now ${nowRange}`);
             }
           } else {
             fields.staff_id = staffId;
             const { error } = await supabaseClient.from('time_entries').insert(fields);
             if (error) throw error;
+            if (projectId) {
+              await logActivity('project', projectId, 'timesheet_added', `Timesheet entry added for ${fmtLogDay(dateStr)}: ${fmtLogRange(clockIn.toISOString(), clockOut ? clockOut.toISOString() : null)}`);
+            }
           }
         }
 
