@@ -39,12 +39,18 @@ async function backfill(admin, mailbox, startedAt) {
   let loaded = 0;
   while (Date.now() - startedAt < BUDGET_MS) {
     const list = await gmailRequest(`messages?q=${encodeURIComponent(BACKFILL_QUERY)}&maxResults=100${mb.backfill_page_token ? `&pageToken=${mb.backfill_page_token}` : ''}`, {}, mb);
-    for (const m of (list.messages || [])) {
-      try { await processMessageId(admin, m.id, null, mb); } catch (err) {
-        if (err.status !== 404 && !/not found/i.test(err.message || '')) throw err;
+    // 5 at a time: a 60 day load is thousands of emails
+    const ids = (list.messages || []).map((m) => m.id);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(5, ids.length) }, async () => {
+      while (next < ids.length) {
+        const id = ids[next++];
+        try { await processMessageId(admin, id, null, mb); } catch (err) {
+          if (err.status !== 404 && !/not found/i.test(err.message || '')) throw err;
+        }
+        loaded += 1;
       }
-      loaded += 1;
-    }
+    }));
     const patch = { backfill_page_token: list.nextPageToken || null };
     if (!list.nextPageToken) patch.backfill_done_at = new Date().toISOString();
     await admin.from('mailboxes').update(patch).eq('id', mb.id);
@@ -68,6 +74,10 @@ exports.handler = () => runAgent('mailbox-work', async () => {
     if (!mb) continue; // another run has it
     try {
       if (mb.kind === 'personal' && !mb.backfill_done_at) {
+        // sort what has loaded so far first (newest first), so the inbox is usable while the rest loads
+        const early = await runEmailAgent(admin, mb, { budgetMs: 3 * 60000 });
+        usage.input_tokens += early.usage.input_tokens; usage.output_tokens += early.usage.output_tokens;
+        if (early.sorted) parts.push(`${mb.address}: ${early.sorted} sorted, ${early.priority} need a reply, ${early.drafted} drafted`);
         const r = await backfill(admin, mb, startedAt);
         if (r.loaded) parts.push(`${mb.address}: ${r.loaded} emails loaded`);
         if (!r.done) more = true;
