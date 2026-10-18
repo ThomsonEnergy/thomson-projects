@@ -1,5 +1,6 @@
 const { getAdminClient } = require('./_shared/require-admin');
 const { deliverPending } = require('./_shared/push');
+const { runAgent } = require('./_shared/agent-log');
 
 // Runs every minute (netlify.toml). Two jobs:
 //  1. Timed reminders: a meeting action (job_tasks.remind_at) whose reminder time
@@ -67,18 +68,15 @@ async function createDueCallReminders(admin) {
 }
 
 exports.sydneyLocalToUtc = sydneyLocalToUtc;
-exports.handler = async () => {
+// Reports to the ops manager (_shared/agent-log.js) as a heartbeat only: runs every minute,
+// so only failures are logged.
+exports.handler = () => runAgent('send-notifications', async () => {
   const admin = getAdminClient();
-  try {
-    const reminders = await createDueReminders(admin);
-    const callReminders = await createDueCallReminders(admin);
-    const pushed = await deliverPending(admin);
-    // housekeeping: read notifications older than 60 days, any older than 180
-    await admin.from('notifications').delete().lt('created_at', new Date(Date.now() - 180 * 86400000).toISOString());
-    await admin.from('notifications').delete().not('read_at', 'is', null).lt('created_at', new Date(Date.now() - 60 * 86400000).toISOString());
-    return { statusCode: 200, body: JSON.stringify({ ok: true, reminders, callReminders, pushed }) };
-  } catch (err) {
-    console.error('send-notifications failed:', err);
-    return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
-  }
-};
+  const reminders = await createDueReminders(admin);
+  const callReminders = await createDueCallReminders(admin);
+  const pushed = await deliverPending(admin);
+  // housekeeping: read notifications older than 60 days, any older than 180
+  await admin.from('notifications').delete().lt('created_at', new Date(Date.now() - 180 * 86400000).toISOString());
+  await admin.from('notifications').delete().not('read_at', 'is', null).lt('created_at', new Date(Date.now() - 60 * 86400000).toISOString());
+  return { quiet: true, response: { statusCode: 200, body: JSON.stringify({ ok: true, reminders, callReminders, pushed }) } };
+});

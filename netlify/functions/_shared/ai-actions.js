@@ -9,6 +9,8 @@
 // (their own token, so the database rules apply exactly as in the app: anyone
 // can make tasks, only admin / finance / sales can change the Schedule).
 
+const { prepareOps, executeOps, OPS_TOOLS, OPS_TOOL_NAMES } = require('./ops-actions');
+
 const TASK_TYPES = ['prejob', 'onsite', 'handover', 'quote'];
 const BLOCK_KINDS = ['job', 'site_visit', 'quoting', 'admin', 'maintenance', 'tafe', 'training', 'other'];
 const KIND_LABEL = { job: 'on the job', site_visit: 'for a site visit', quoting: 'quoting', admin: 'office / admin', office: 'office / admin', maintenance: 'maintenance', tafe: 'TAFE', training: 'training', other: 'other' };
@@ -110,6 +112,7 @@ const describeBooking = (a) => `${hhmm(a.start_time)}-${hhmm(a.end_time)} ${a.pr
 
 // ---------- prepare: check + describe one action (no changes made) ----------
 async function prepare(client, type, input, ctx = {}) {
+  if (OPS_TOOL_NAMES.includes(type)) return prepareOps(client, type, input);
   input = input || {};
   const warnings = [];
   try {
@@ -289,6 +292,7 @@ const permissionMessage = (err, what = 'schedule') => (err && (err.code === '425
   : (err && err.message) || 'Something went wrong.');
 
 async function execute(client, userId, type, params) {
+  if (OPS_TOOL_NAMES.includes(type)) return executeOps(client, userId, type, params);
   const input = { ...(params || {}) };
   // A proposal's params hold the resolved ids; map them back onto what prepare()
   // takes so everything is checked again, by id, at the moment it is confirmed.
@@ -447,6 +451,7 @@ const ACTION_TOOLS = [
     input_schema: { type: 'object', properties: { assignment_id: { type: 'string' } }, required: ['assignment_id'] },
   },
 ];
+ACTION_TOOLS.push(...OPS_TOOLS); // ops manager actions (_shared/ops-actions.js)
 const ACTION_TOOL_NAMES = ACTION_TOOLS.map(t => t.name);
 
 module.exports = { prepare, execute, ACTION_TOOLS, ACTION_TOOL_NAMES, resolveStaff, resolveJob };

@@ -49,3 +49,8 @@
 # warm-pdf.js.
 [functions.warm-pdf]
   schedule = "*/4 * * * *"
+
+# The ops manager's morning digest at 5am Sydney time - see ops-digest.js. Runs at 18:00 and
+# 19:00 UTC so it lands on 5am with and without daylight saving; only the 5am one sends.
+[functions.ops-digest]
+  schedule = "0 18,19 * * *"

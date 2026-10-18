@@ -6,7 +6,8 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./get-integration-key');
 
-async function extractSupplierInvoice({ fileBase64, mediaType }) {
+// Returns { extracted, usage } (usage = the Claude tokens, for the ops manager's log).
+async function extractSupplierInvoiceWithUsage({ fileBase64, mediaType }) {
   const apiKey = await getIntegrationKey('anthropic');
   const isPdf = mediaType === 'application/pdf';
 
@@ -49,7 +50,7 @@ If a field genuinely isn't visible or determinable, use null rather than guessin
     },
     body: JSON.stringify({
       model: 'claude-sonnet-5',
-      max_tokens: 2000,
+      max_tokens: 4000,
       messages: [{
         role: 'user',
         content: [contentBlock, { type: 'text', text: prompt }],
@@ -65,7 +66,11 @@ If a field genuinely isn't visible or determinable, use null rather than guessin
   const data = await res.json();
   const raw = data.content.map((b) => b.text || '').join('').trim();
   const cleaned = raw.replace(/^```json/i, '').replace(/```$/, '').trim();
-  return JSON.parse(cleaned);
+  return { extracted: JSON.parse(cleaned), usage: data.usage || {} };
 }
 
-module.exports = { extractSupplierInvoice };
+async function extractSupplierInvoice(file) {
+  return (await extractSupplierInvoiceWithUsage(file)).extracted;
+}
+
+module.exports = { extractSupplierInvoice, extractSupplierInvoiceWithUsage };

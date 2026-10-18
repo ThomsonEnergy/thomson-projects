@@ -248,11 +248,21 @@ Manual steps only a person can do (the code is live):
 - **Licence sharing:** a live link to a chosen set of company and employee licences (`share-licences.html`); licences and insurance with AI-extracted expiry on the Team page.
 - **Knowledge base** with OCR for scanned PDFs, **Tech Support** numbers, **Team**, **DNSP**, **Fleet**, **Bugs & Updates** board (synced to `BUGS_AND_UPDATES.md` by `sync-bugs-to-repo.js`).
 
+### A30. Ops manager (AI agents, version 1)
+- Workers report through `_shared/agent-log.js` (`runAgent`): supplier bill reader, sales@ email sync, phone notifications, nightly Xero overheads sync, nightly job archiving. Migration 20261019010000.
+- `agent_heartbeats` (one row per worker: last worked, last failed), `agent_runs` (runs that did something or failed, with AI tokens; kept 90 days), `agent_tasks` (the "Needs me" list). Admin only.
+- A worker not working for 3 of its usual gaps opens a "Needs me" task and sends one `agent_alert` push; the task closes itself when it works again.
+- 5am Sydney digest (`ops-digest.js`, `ops_digest` push): what needs you, last 24 hours, workers not working, AI tokens.
+- Recipients: `company_settings.ops_manager_user_ids` (Jasper only for now).
+- **Ops manager page** (`ops.html`, Admin): Ask the manager buttons, Needs me (emailed bills to check, worker tasks with Done / Dismiss), latest digest, workers, what they did.
+- The assistant is the manager in chat: reads the worker tables and emailed bills, and can line up `save_emailed_bill`, `put_aside_emailed_bill`, `close_agent_task` (Confirm needed, `_shared/ops-actions.js`). Cannot deploy, change permissions, move money, approve payment, push to Xero or send email.
+
 ### A29. Scheduled functions (netlify.toml)
 | Function | Schedule |
 |---|---|
 | send-notifications | every minute |
 | warm-pdf | every 4 minutes |
+| ops-digest | 18:00 and 19:00 UTC, sends only at 5am Sydney (A30) |
 | sync-gmail | every 5 minutes (also starts process-supplier-bills-background, A11a) |
 | archive-completed-jobs | daily |
 | sync-overheads-nightly | daily |
