@@ -314,6 +314,13 @@
             <div id="my-licences-msg"></div>
           </div>
 
+          <div class="card" id="my-consent-card" style="display:none;">
+            <h2>AI and location</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Your choice, any time. Changing it has no effect on your job or pay.</p>
+            <div id="my-consent-list"></div>
+            <div id="my-consent-msg"></div>
+          </div>
+
           <div class="card">
             <h2>Documents I've signed</h2>
             <p class="subtitle" style="margin-bottom:10px;">Exactly what you agreed to and when - re-signing something later (e.g. after a pay rise) adds a new entry here rather than replacing the old one.</p>
@@ -720,7 +727,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=73"></script>
+  <script src="/js/supabase-client.js?v=74"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -1417,6 +1424,48 @@
 
       await loadMySignedDocs(userId);
       await loadMyLetters(userId);
+      await loadMyConsent(userId);
+    }
+
+    // AI and location consent (migration 20261018000000). Turning one off
+    // is instant; turning it on means signing the consent form again. The
+    // card only shows once an admin has added a consent form.
+    async function loadMyConsent(userId) {
+      const [{ data: forms }, { data: status, error }] = await Promise.all([
+        supabaseClient.from('onboarding_documents').select('id, consent_type').not('consent_type', 'is', null),
+        supabaseClient.rpc('get_consent_status', { p_profile_id: userId }),
+      ]);
+      if (error || !forms || !forms.length) return;
+      const st = (status && status[0]) || {};
+      const fmt = (d) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      const labels = { ai: 'AI features (chat, voice, email if connected)', location: 'Location tracking (iPhone app)' };
+      document.getElementById('my-consent-card').style.display = '';
+      const listEl = document.getElementById('my-consent-list');
+      listEl.innerHTML = ['ai', 'location'].filter(t => forms.some(f => f.consent_type === t)).map(t => {
+        const on = st[`${t}_consent_at`];
+        const form = forms.find(f => f.consent_type === t);
+        return `
+          <div class="project-list-item">
+            <div>
+              <div class="name">${labels[t]}</div>
+              <div class="meta">${on ? `On since ${fmt(on)}` : 'Off'}</div>
+            </div>
+            ${on
+              ? `<button type="button" class="secondary consent-off-btn" data-type="${t}" style="font-size:12px; padding:6px 10px;">Turn off</button>`
+              : `<button type="button" class="secondary consent-on-btn" data-doc="${form.id}" style="font-size:12px; padding:6px 10px;">Turn on</button>`}
+          </div>`;
+      }).join('');
+      listEl.querySelectorAll('.consent-on-btn').forEach(btn => {
+        btn.addEventListener('click', () => { window.location.href = `/policy-update.html?doc=${btn.dataset.doc}`; });
+      });
+      listEl.querySelectorAll('.consent-off-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Turn this off? It stops straight away.')) return;
+          const { error: wErr } = await supabaseClient.rpc('withdraw_consent', { p_type: btn.dataset.type });
+          if (wErr) { document.getElementById('my-consent-msg').innerHTML = `<div class="error-box">${escapeHtml(wErr.message)}</div>`; return; }
+          await loadMyConsent(userId);
+        });
+      });
     }
 
     // Letters sent to this person from their staff profile (migration 148);
@@ -1985,13 +2034,24 @@
           <div style="display:flex; gap:10px; align-items:center; margin-bottom:8px;">
             <input class="od-title" value="${d.title || ''}" placeholder="Document title" style="flex:1; font-weight:600;" />
             ${d.is_contract ? '<span class="badge sent">Contract template</span>' : `
+              ${d.id ? `<span class="badge draft" title="Publish new version to make everyone re-sign">v${d.version || 1}</span>` : ''}
               <label style="display:flex; align-items:center; gap:6px; font-weight:400; white-space:nowrap;">
                 <input type="checkbox" class="od-required" style="width:auto;" ${d.is_required !== false ? 'checked' : ''} /> Required
               </label>`}
           </div>
+          ${d.is_contract ? '' : `
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+              <label style="margin:0; white-space:nowrap;">Type</label>
+              <select class="od-consent-type" style="max-width:260px;">
+                <option value="" ${!d.consent_type ? 'selected' : ''}>Policy (read and sign)</option>
+                <option value="ai" ${d.consent_type === 'ai' ? 'selected' : ''}>AI consent (I agree / I don't agree)</option>
+                <option value="location" ${d.consent_type === 'location' ? 'selected' : ''}>Location consent (I agree / I don't agree)</option>
+              </select>
+            </div>`}
           <textarea class="od-body" style="min-height:140px;">${d.body || ''}</textarea>
-          <div style="margin-top:8px; display:flex; gap:8px;">
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="secondary od-save-btn" style="font-size:12px; padding:6px 12px;">Save</button>
+            ${!d.is_contract && d.id ? `<button type="button" class="secondary od-publish-btn" style="font-size:12px; padding:6px 12px;">Publish new version (everyone re-signs)</button>` : ''}
             ${d.is_contract ? '' : `<button type="button" class="secondary od-delete-btn" style="font-size:12px; padding:6px 12px;">Delete</button>`}
           </div>
           <div class="od-msg"></div>
@@ -2016,8 +2076,10 @@
           const body = row.querySelector('.od-body').value;
           if (!title) { msg.innerHTML = `<div class="error-box">Enter a title.</div>`; return; }
           const requiredCheckbox = row.querySelector('.od-required');
+          const consentSelect = row.querySelector('.od-consent-type');
           const fields = { title, body };
           if (requiredCheckbox) fields.is_required = requiredCheckbox.checked;
+          if (consentSelect) fields.consent_type = consentSelect.value || null;
           const { error } = row.dataset.id
             ? await supabaseClient.from('onboarding_documents').update(fields).eq('id', row.dataset.id)
             : await supabaseClient.from('onboarding_documents').insert(fields);
@@ -2025,6 +2087,28 @@
           msg.innerHTML = `<div class="success-box">Saved.</div>`;
           await loadOnboardingDocs();
         };
+        // Saving fixes typos without bothering anyone. Publishing bumps the
+        // version: everyone who finished onboarding is asked to sign it
+        // again on their next login (policy-update.html).
+        const publishBtn = row.querySelector('.od-publish-btn');
+        if (publishBtn) {
+          publishBtn.onclick = async () => {
+            const msg = row.querySelector('.od-msg');
+            if (!confirm('Save and publish a new version? Everyone will be asked to read and sign it again next time they log in.')) return;
+            const consentSelect = row.querySelector('.od-consent-type');
+            const { data: current, error: readErr } = await supabaseClient.from('onboarding_documents').select('version').eq('id', row.dataset.id).single();
+            if (readErr) { msg.innerHTML = `<div class="error-box">${readErr.message}</div>`; return; }
+            const { error } = await supabaseClient.from('onboarding_documents').update({
+              title: row.querySelector('.od-title').value.trim(),
+              body: row.querySelector('.od-body').value,
+              is_required: row.querySelector('.od-required').checked,
+              consent_type: consentSelect ? (consentSelect.value || null) : null,
+              version: (current.version || 1) + 1,
+            }).eq('id', row.dataset.id);
+            if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+            await loadOnboardingDocs();
+          };
+        }
         const deleteBtn = row.querySelector('.od-delete-btn');
         if (deleteBtn) {
           deleteBtn.onclick = async () => {
