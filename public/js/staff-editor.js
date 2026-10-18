@@ -68,6 +68,7 @@ async function openStaffEditor(userId, opts = {}) {
   const { data: rateTiers } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
   const { data: contract } = await supabaseClient.from('employee_contracts').select('*').eq('profile_id', userId).maybeSingle();
   const { data: contractTemplate } = await supabaseClient.from('onboarding_documents').select('*').eq('is_contract', true).maybeSingle();
+  const policyStatusHtml = await staffPolicyStatusHtml(userId);
   if (error) { overlay.querySelector('.card').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
   if (rates) Object.assign(profile, rates);
   if (sensitive) Object.assign(profile, sensitive);
@@ -152,6 +153,8 @@ async function openStaffEditor(userId, opts = {}) {
 
     <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
       <p style="margin:0 0 10px; font-weight:600;">Onboarding &amp; payroll ${profile.onboarding_completed_at ? '<span class="badge accepted" style="font-weight:400;">Onboarding complete</span>' : '<span class="badge draft" style="font-weight:400;">Onboarding not started</span>'}${profile.onboarding_reissue_reason ? ' <span class="badge sent" style="font-weight:400;">Re-issue pending</span>' : ''}</p>
+
+      ${policyStatusHtml}
 
       ${profile.onboarding_completed_at ? `
         <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:12px;">
@@ -495,3 +498,35 @@ async function openStaffEditor(userId, opts = {}) {
   }
 }
 
+// Which version of each policy this person signed, and their AI and
+// location answers (migration 20261018000000). Empty if that migration
+// isn't there or nothing applies.
+async function staffPolicyStatusHtml(userId) {
+  const [{ data: docs }, { data: sigs }, { data: status }] = await Promise.all([
+    supabaseClient.from('onboarding_documents').select('id, title, version, is_required, consent_type, is_contract').eq('is_contract', false).order('sort_order'),
+    supabaseClient.from('onboarding_document_signatures').select('document_id, document_version, response, signed_at').eq('profile_id', userId),
+    supabaseClient.rpc('get_consent_status', { p_profile_id: userId }),
+  ]);
+  const tracked = (docs || []).filter(d => d.is_required || d.consent_type);
+  if (!tracked.length) return '';
+  const fmt = (d) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  const st = (status && status[0]) || {};
+  const rows = tracked.map(d => {
+    const latest = (sigs || []).filter(x => x.document_id === d.id).sort((a, b) => new Date(b.signed_at) - new Date(a.signed_at))[0];
+    const current = latest && (latest.document_version || 1) >= (d.version || 1);
+    let state;
+    if (!latest) state = '<span class="badge draft">Not signed</span>';
+    else if (!current) state = `<span class="badge sent">Signed v${latest.document_version || 1}, needs v${d.version || 1}</span>`;
+    else state = `<span class="badge accepted">Signed v${latest.document_version || 1} ${fmt(latest.signed_at)}</span>`;
+    let answer = '';
+    if (d.consent_type) {
+      const on = st[`${d.consent_type}_consent_at`];
+      const off = st[`${d.consent_type}_consent_withdrawn_at`];
+      answer = on ? ` <span class="badge accepted">On since ${fmt(on)}</span>`
+        : off ? ` <span class="badge draft">Off (withdrawn ${fmt(off)})</span>`
+        : latest ? ' <span class="badge draft">Did not agree</span>' : '';
+    }
+    return `<div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:6px 0; border-bottom:0.5px solid var(--border);"><span>${escapeHtml(d.title)}</span><span>${state}${answer}</span></div>`;
+  }).join('');
+  return `<div style="margin-bottom:12px;"><p class="subtitle" style="margin:0 0 6px;">Policies and consent</p>${rows}</div>`;
+}

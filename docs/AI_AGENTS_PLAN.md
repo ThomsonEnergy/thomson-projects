@@ -68,7 +68,7 @@ Build on the existing feeds:
 
 - **NSW Workplace Surveillance Act 2005:** written notice (generally 14 days) plus a computer surveillance policy before AI reading of email, chat or voice starts. Adviser review first. One notice covers email, chat, voice, SMS and location.
 - Staff sign in TEops with a versioned re-sign and two tick boxes (AI features, location). AI start date per user = sign date if ticked, else none. Users with no AI start date are excluded from all agent processing; manual tagging still works.
-- Onboarding signing (migration 098) already exists and is extended for this. Full detail: docs/IDEAS_BACKLOG.md item 6.
+- Built: versioned re-sign and AI / location consent with dates per user (migration 20261018000000, `profiles.ai_consent_at`). Every agent must skip users with no `ai_consent_at`, and anything before the notice start date. Full detail: docs/IDEAS_BACKLOG.md item 6.
 
 ## Safety
 

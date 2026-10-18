@@ -23,7 +23,7 @@ Progress on the outside accounts that gate SMS/calls (backlog item 7) and the na
 | Apple Business (Manager) | Account created 17 Oct 2026 ("Manage IT needs") | Note the **Organisation ID** (Preferences > Organisation information): the TEops iPhone app ships as a private Custom App to that ID. Skip MDM, Managed Apple Accounts and Apps and Books. |
 | Twilio | Business Profile **approved** 18 Oct 2026. AU Mobile regulatory bundle (Business, Messaging channel, Direct Customer) **approved** 18 Oct 2026. Test number **0468 085 277** (+61468085277) active: Voice, SMS, MMS, US$8.25/month. Messaging and Voice configuration not set up yet. | SMS/calls are built after the native iPhone app (decided 17 Oct 2026, backlog item 7), then tested on this number. Until then: turn on 2FA, set a usage alert (~US$20), rename the account to Thomson Energy. |
 | Telstra (0455 415 464) | Number still on Telstra. | Note the account number, exact account holder name, DOB/ABN on the account, any port-out PIN or lock, and the contract end date. Do not cancel anything. |
-| NSW surveillance notice | Not started. | Send the notice draft to Formby or an HR adviser (starts the 14-day clock sooner). |
+| NSW surveillance notice | Drafts written 18 Oct 2026 in `policies and Contracts/`: surveillance notice (covers AI and future location), AI Features Consent, Location Tracking Consent. | Send all three to Formby or an HR adviser. After sign-off, fill in the start date, load the notice and AI consent in Settings > Onboarding, then give existing staff the notice (14 days before the start date). |
 
 ## Twilio and the main number
 
