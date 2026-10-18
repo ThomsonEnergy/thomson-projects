@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 18 Oct 2026
+- ServiceM8 videos failed on Supabase's 50 MB project-wide upload limit; owner to raise it to 500 MB in Storage > Settings, then re-run the copy. (`docs/PROJECT_SPEC.md` A27)
 - Fixed: ServiceM8 copy only read the main job (4515), not its lettered jobs (4515A-D) where the time, checklists and photos were. Now folded into the main job, run summary shows how many records ServiceM8 had. (`netlify/functions/_shared/sm8-labour.js`, `docs/PROJECT_SPEC.md` A27)
 - ServiceM8 import now brings labour check-ins (matched to TEops staff, on the job only, already paid) and all checklist items as tasks, and starts the docs and photos copy by itself. LIVE: migration 20261021000000 applied straight to production at the owner's request (staging skipped), PR #55 merged. (`docs/PROJECT_SPEC.md` A27)
 - Inbox plan: page renamed Sales inbox with a Sales / My inbox toggle (jasper@ first), Priority / Other / Subscriptions sections sorted by an agent, Gmail-style labels for non-job matters, agent drafts inline and in a Drafts corner list. Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 5)

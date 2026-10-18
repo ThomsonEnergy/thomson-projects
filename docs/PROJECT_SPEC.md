@@ -271,6 +271,7 @@ Manual steps only a person can do (the code is live):
 - STC lines are not applied: listed in the job notes and `projects.sm8_stcs` (migration 155), offered prefilled on the STCs tab.
 - `sm8-copy-attachments-background.js` (migration 154 `sm8_attachment_copies`): pictures to Photos, other files to Documents > "ServiceM8", with retries. Starts by itself after Import.
 - Labour and checklists (same background run, `_shared/sm8-labour.js`, migration 20261021000000): each recorded SM8 check-in becomes a time entry on the job for the matched person, marked already paid (`xero_pushed_at`), shown on the job only (hidden from Timesheets, staff KPIs, timesheet problems, never pushed to Xero). Every checklist item, ticked or not, becomes an unassigned onsite task. Staff matched on the import page (`sm8-staff.js`, `profiles.sm8_staff_uuid`); unmatched staff's time is skipped and listed in the run summary (`sm8_copy_runs`). Re-runs never double up. Lettered jobs (4515A-D) are folded in: their time, checklists, docs and photos land on the main job.
+- File size: no bucket has its own limit, so Supabase's project-wide limit applies (Storage > Settings, default 50 MB). SM8 videos over it fail with "The object exceeded the maximum allowed size"; raise it to 500 MB and press the copy button again (failed files are retried).
 
 ### A28. Other built features
 - **Leads and call requests** from the website forms (`leads.html`), converted to quotes or jobs.
