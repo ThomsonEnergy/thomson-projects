@@ -7,7 +7,7 @@ const { processPending, answer } = require('./_shared/chat-ai');
 // sender's login and their new message ids, or by chat-ai-sweep.js with
 // { sweep: true } and no login.
 //  - Always: works through messages Sparky has not looked at yet (job tags,
-//    voice transcripts). See _shared/chat-ai.js for the consent rules.
+//    voice transcripts). See _shared/chat-ai.js.
 //  - With a login: answers any of those messages that @mention Sparky, using
 //    the sender's own access for every lookup.
 

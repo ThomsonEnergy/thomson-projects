@@ -116,7 +116,6 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 .cc-rec { display: flex; align-items: center; gap: 10px; padding: 6px 4px; font-size: 14px; }
 .cc-rec .dot { width: 10px; height: 10px; border-radius: 50%; background: #e5484d; animation: cc-blink 1s infinite; }
 @keyframes cc-blink { 50% { opacity: .2; } }
-.cc-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
 .ch-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 280; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .ch-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; width: min(460px, 100%); max-height: 86vh; display: flex; flex-direction: column; }
