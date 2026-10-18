@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Policy update - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=16" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .ob-doc-body { white-space:pre-wrap; line-height:1.6; max-height:320px; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px; margin-bottom:14px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <nav class="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1 id="pu-heading">Policy update</h1>
+    <p class="subtitle" id="pu-subheading">Please read and sign before you carry on. It only takes a minute.</p>
+    <p id="pu-later-row" style="display:none; margin:-6px 0 16px;">
+      <button type="button" class="secondary" id="pu-later-btn">Remind me later</button>
+      <span class="subtitle" style="margin-left:8px;">You'll be asked again next time you log in, or tomorrow.</span>
+    </p>
+    <div id="pu-content"><p class="subtitle">Loading...</p></div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=75"></script>
+  <script src="/js/document-signing.js?v=1"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    // Shown by requireLogin() to anyone who finished onboarding but has a
+    // policy or consent form they haven't signed in its current version
+    // (my_pending_documents(), migration 20261018120000). Also opened from
+    // My Profile with ?doc=<id> to opt back in to AI or location.
+    const params = new URLSearchParams(location.search);
+    const singleDocId = params.get('doc');
+    // Only ever go back to a page on this site.
+    const rawNext = params.get('next') || '';
+    const nextUrl = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/home.html';
+
+    let myUserId;
+    let myName = '';
+    let docs = [];
+
+    async function loadDocs() {
+      let ids;
+      if (singleDocId) {
+        ids = [singleDocId];
+      } else {
+        const { data, error } = await supabaseClient.rpc('my_pending_documents');
+        if (error) throw error;
+        ids = (data || []).map(r => (typeof r === 'string' ? r : r.my_pending_documents));
+      }
+      if (!ids.length) { docs = []; return; }
+      const { data, error } = await supabaseClient.from('onboarding_documents').select('*').in('id', ids).order('sort_order');
+      if (error) throw error;
+      docs = data || [];
+    }
+
+    function render() {
+      const content = document.getElementById('pu-content');
+      if (!docs.length) {
+        document.getElementById('pu-later-row').style.display = 'none';
+        content.innerHTML = `
+          <div class="card">
+            <h2>All done</h2>
+            <p class="subtitle" style="margin-bottom:14px;">Thanks. A signed copy is saved in Settings, My Profile, Documents I've signed.</p>
+            <button id="pu-continue-btn">Continue</button>
+          </div>`;
+        document.getElementById('pu-continue-btn').addEventListener('click', () => { window.location.href = singleDocId ? '/settings.html' : nextUrl; });
+        return;
+      }
+      content.innerHTML = `
+        <div class="card">
+          <h2>${docs.length === 1 ? 'To read and sign' : `${docs.length} to read and sign`}</h2>
+          ${docs.map(d => `
+            <div style="padding:14px 0; border-bottom:1px solid var(--border);">
+              <p style="margin:0 0 8px; font-weight:600;">${d.title}</p>
+              ${d.consent_type ? `<p class="subtitle" style="margin:0 0 8px;">You choose: I agree or I don't agree. Either answer is fine.</p>` : ''}
+              <div class="ob-doc-body">${d.body}</div>
+              <button type="button" class="secondary pu-sign-btn" data-id="${d.id}">${d.consent_type ? 'Review &amp; answer' : 'Review &amp; sign'}</button>
+            </div>`).join('')}
+          ${singleDocId ? `<button type="button" class="secondary" id="pu-cancel-btn" style="margin-top:14px;">Cancel</button>` : ''}
+        </div>`;
+      content.querySelectorAll('.pu-sign-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const doc = docs.find(d => d.id === btn.dataset.id);
+          openDocumentSignPanel({
+            doc,
+            bodyText: doc.body,
+            profileId: myUserId,
+            defaultName: myName,
+            onSigned: async () => {
+              if (singleDocId) docs = [];
+              else await loadDocs();
+              render();
+            },
+          });
+        });
+      });
+      const cancelBtn = document.getElementById('pu-cancel-btn');
+      if (cancelBtn) cancelBtn.addEventListener('click', () => { window.location.href = '/settings.html'; });
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      myUserId = session.user.id;
+      syncThemeFromProfile();
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+
+      const { data: p } = await supabaseClient.from('profiles').select('full_name').eq('id', myUserId).maybeSingle();
+      myName = p?.full_name || '';
+
+      if (singleDocId) {
+        document.getElementById('pu-heading').textContent = 'Change your answer';
+        document.getElementById('pu-subheading').textContent = 'Read it again, then choose and sign.';
+      } else {
+        document.getElementById('pu-later-row').style.display = '';
+        document.getElementById('pu-later-btn').addEventListener('click', () => {
+          deferPolicyUpdate(session);
+          window.location.href = nextUrl;
+        });
+      }
+
+      try {
+        await loadDocs();
+      } catch (err) {
+        document.getElementById('pu-content').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        return;
+      }
+      render();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+DRAFT v1, 18 Oct 2026. For adviser review (Formby or HR adviser) before use. Optional document: staff do not have to sign it.
+
+Thomson Energy Australia Pty Ltd
+AI Features Consent
+
+Please read the Notice of Workplace Surveillance and Computer Surveillance Policy first.
+
+This form is optional. If you do not sign it, nothing changes for your job or pay. You can still use TEops and tag messages to jobs yourself.
+
+If you sign, I agree that AI (artificial intelligence) tools used by Thomson Energy may read and process:
+- My TEops team chat messages, job feed posts, comments and notes.
+- My voice messages in TEops, including turning them into text.
+- Business text messages (SMS), calls and voicemails I send or receive through the company number in TEops.
+- My work Gmail, but only if I later choose to connect it. I can disconnect it at any time.
+
+so that it can:
+- Match messages, emails and texts to the right job.
+- Write summaries and answer questions about a job for the team.
+- Draft replies for me to check. Nothing is sent without a person pressing send.
+
+I understand that:
+- AI does not read my personal phone, personal texts, personal email or personal social media.
+- Emails from my own inbox that are not tagged to a job stay private to me.
+- AI is not used to score, rate or rank me.
+- I can withdraw this consent at any time in TEops or by telling a director, and it stops straight away.
+- AI processing starts on the later of the date I sign this and the start date in the surveillance notice.
+
+By signing, I consent to the AI features described above.

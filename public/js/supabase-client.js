@@ -70,18 +70,56 @@ async function requireLogin() {
   // covers all pages without editing each one individually. "Finish later"
   // on that page lets them into the app until their next login, with a
   // banner on every page until it's done.
-  if (!window.location.pathname.endsWith('/onboarding.html')) {
-    const { data: profile } = await supabaseClient.from('profiles').select('onboarding_completed_at').eq('id', session.user.id).maybeSingle();
+  const path = window.location.pathname;
+  if (!path.endsWith('/onboarding.html') && !path.endsWith('/policy-update.html')) {
+    // Checked together so pages load no slower. A failed pending check
+    // (e.g. code deployed before its migration) never blocks anyone.
+    const [{ data: profile }, pending] = await Promise.all([
+      supabaseClient.from('profiles').select('onboarding_completed_at').eq('id', session.user.id).maybeSingle(),
+      supabaseClient.rpc('my_pending_documents'),
+    ]);
     if (profile && !profile.onboarding_completed_at) {
       if (!onboardingDeferred(session)) {
         window.location.href = '/onboarding.html';
         return null;
       }
       showOnboardingBanner();
+    } else if (profile && !pending.error && pending.data && pending.data.length) {
+      // Onboarding done, but a policy has a new version (or a new policy or
+      // consent form was added). Same "later" rule as onboarding: once per
+      // login, with a banner until it's signed.
+      if (!policyUpdateDeferred(session)) {
+        window.location.href = '/policy-update.html?next=' + encodeURIComponent(path + window.location.search + window.location.hash);
+        return null;
+      }
+      showPolicyUpdateBanner();
     }
   }
 
   return session;
+}
+
+// "Remind me later" lasts until the next login or the end of the day,
+// whichever comes first: phones stay logged in for weeks, so a login alone
+// could put it off forever.
+const POLICY_LATER_KEY = 'te-policy-later';
+function policyLaterMarker(session) {
+  return `${onboardingLaterMarker(session)}|${new Date().toDateString()}`;
+}
+function deferPolicyUpdate(session) {
+  try { localStorage.setItem(POLICY_LATER_KEY, policyLaterMarker(session)); } catch (e) { /* storage blocked: they'll just see it again */ }
+}
+function policyUpdateDeferred(session) {
+  try { return localStorage.getItem(POLICY_LATER_KEY) === policyLaterMarker(session); } catch (e) { return false; }
+}
+
+function showPolicyUpdateBanner() {
+  if (document.getElementById('policy-update-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'policy-update-banner';
+  bar.style.cssText = 'display:flex; align-items:center; justify-content:center; gap:12px; flex-wrap:wrap; padding:10px 16px; background:var(--accent-dim); color:var(--text); border-bottom:1px solid var(--border); font-size:14px; text-align:center;';
+  bar.innerHTML = `<span>You have a policy to read and sign.</span><a href="/policy-update.html" style="color:var(--accent); font-weight:700;">Sign now</a>`;
+  document.body.prepend(bar);
 }
 
 // "Finish later" lasts until the next login: the saved marker is tied to
