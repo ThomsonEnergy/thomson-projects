@@ -10,11 +10,11 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 |---|------|--------|----------------|------------|
 | 1 | Payment reconciliation, receipts, tools register | Partly built | N | Airwallex read-only key, accountant sign-off |
 | 2 | Voice messages in team chat + Siri Shortcut | Not started | N | Team chat channels, tagger agent, policy sign-off (6) |
-| 3 | Native iPhone app (Capacitor) | Not started | Y | Apple Developer org account, offline sync design |
+| 3 | Native iPhone app (TEgo, Capacitor) | Stage 1 built, waiting on Apple | Y | Apple Developer org account approval, then `docs/IOS_APP.md` setup; offline sync design for stage 2 |
 | 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
-| 7 | SMS and calls via Twilio | Not started | Y | Own Twilio account, AU regulatory bundle, Telstra port |
+| 7 | SMS and calls via Twilio | Parked (18 Oct 2026) | Y | Build as an in-app Phone console after the iPhone app (item 3); Telstra port |
 
 ## High lead time, start now
 
@@ -98,7 +98,9 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 
 ## 3. Native iPhone app (Capacitor wrap)
 
-**Today:** TEops is a PWA: manifest, push-only `sw.js`, no offline caching. Web Push is LIVE.
+**Today:** stage 1 built 18 Oct 2026 as **TEgo** (`tego-app/`, bundle ID `au.com.thomsonenergy.app`): loads the live site, native Apple push, black icon, cloud builds on GitHub. Waiting on Apple to approve the Developer account before it can be signed and installed. Setup steps, how it works and known gaps: `docs/IOS_APP.md`. Browsers keep the PWA and web push.
+
+**Stage 1 decisions:** load the live site rather than bundling pages (one codebase, instant updates; bundle when offline mode is built); iPhone only, portrait; GitHub Actions on macOS for builds (free on this public repo), no Mac needed.
 
 **Decision:** wrap the existing web app with Capacitor, no rewrite. iOS only (whole team on iPhone). Keep the web app Capacitor-ready.
 
@@ -126,9 +128,10 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 **Dependencies:** Apple Developer organisation account (D-U-N-S, high lead time); offline design decisions.
 
 **Open questions**
-- [ ] Organisation vs individual account (organisation recommended)
-- [ ] Cloud build service
-- [ ] Buy a Mac now or later
+- [x] Organisation vs individual account: organisation (Enrollment 58NBR3V7K9)
+- [x] Cloud build service: GitHub Actions (macOS runner)
+- [x] Buy a Mac now or later: later, only if debugging gets painful
+- [ ] Final app name (TEgo for now, can change any time)
 - [ ] Offline conflicts: last write wins, or flag for review?
 
 ---
@@ -252,7 +255,7 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 
 **Goal:** text and call customers from TEops and receive calls and texts in the app, instead of personal phones or the ServiceM8 setup.
 
-**Today:** not built. 0455 415 464 is on Telstra; ServiceM8 only uses it as a Twilio verified caller ID.
+**Today:** parked 18 Oct 2026 until the iPhone app (item 3) is in. Decision: skip the "Phase 1" call forwarding and build one in-app **Phone console** (calls and texts together) so nothing is built twice. Twilio account, Business Profile, AU Mobile bundle and test number 0468 085 277 are ready (`docs/EXTERNAL_ACCOUNTS.md`). 0455 415 464 is still on Telstra; ServiceM8 only uses it as a Twilio verified caller ID.
 
 **Plan**
 1. Open our own Twilio account; lodge the AU regulatory bundle now.

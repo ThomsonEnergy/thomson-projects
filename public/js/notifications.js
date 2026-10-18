@@ -68,7 +68,20 @@ const NOTIF_KINDS = [
     const reg = await navigator.serviceWorker.getRegistration('/sw.js') || await navigator.serviceWorker.getRegistration();
     return reg ? reg.pushManager.getSubscription() : null;
   }
+  // Inside the TEgo iPhone app, native.js handles push (Apple push, not web push).
+  const isApp = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  function loadNative() {
+    if (!isApp() || window.TEgoNative) return Promise.resolve();
+    return new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = '/js/native.js?v=1';
+      s.onload = s.onerror = () => resolve();
+      document.head.appendChild(s);
+    });
+  }
+
   async function pushStatus() {
+    if (window.TEgoNative) return window.TEgoNative.pushStatus();
     if (isIos() && !isStandalone()) return 'ios-install';
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
     if (Notification.permission === 'denied') return 'denied';
@@ -83,6 +96,7 @@ const NOTIF_KINDS = [
     if (error) throw error;
   }
   async function enablePush() {
+    if (window.TEgoNative) return window.TEgoNative.enablePush();
     const perm = await Notification.requestPermission();
     if (perm !== 'granted') throw new Error('Notifications were not allowed. You can change this in your browser or phone settings for this site.');
     const reg = await navigator.serviceWorker.register('/sw.js');
@@ -92,6 +106,7 @@ const NOTIF_KINDS = [
     await saveSubscription(sub);
   }
   async function disablePush() {
+    if (window.TEgoNative) return window.TEgoNative.disablePush();
     const sub = await currentSubscription();
     if (sub) { const endpoint = sub.endpoint; await sub.unsubscribe(); await supabaseClient.from('push_subscriptions').delete().eq('endpoint', endpoint); }
   }
@@ -125,7 +140,7 @@ const NOTIF_KINDS = [
     let pushHtml;
     if (status === 'ios-install') pushHtml = '<p>To get notifications on your iPhone lock screen, first add this app to your Home Screen (Share button, then Add to Home Screen), open it from there, and turn them on here.</p>';
     else if (status === 'unsupported') pushHtml = '<p>This browser cannot show phone notifications. Try Chrome or Safari.</p>';
-    else if (status === 'denied') pushHtml = '<p>Notifications are blocked for this site. Allow them in your browser or phone settings, then come back here.</p>';
+    else if (status === 'denied') pushHtml = window.TEgoNative ? '<p>Notifications are turned off for TEgo. Turn them on in the iPhone Settings app, under TEgo, then Notifications.</p>' : '<p>Notifications are blocked for this site. Allow them in your browser or phone settings, then come back here.</p>';
     else if (status === 'on') pushHtml = '<p style="color:#3fb97a;">Phone notifications are on for this device.</p><button type="button" class="secondary" id="nf-test">Send a test</button> <button type="button" class="secondary" id="nf-off">Turn off</button>';
     else pushHtml = '<p>Get these on your lock screen, even when the app is closed.</p><button type="button" id="nf-on">Turn on phone notifications</button>';
 
@@ -197,6 +212,7 @@ const NOTIF_KINDS = [
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (!session) return;
     me = session.user.id;
+    await loadNative();
     addStyles();
 
     const bell = document.createElement('a');
@@ -222,7 +238,7 @@ const NOTIF_KINDS = [
 
     // keep this device's push registration fresh (once per browser session)
     try {
-      if (!sessionStorage.getItem('te-push-synced') && (await pushStatus()) === 'on') {
+      if (!window.TEgoNative && !sessionStorage.getItem('te-push-synced') && (await pushStatus()) === 'on') {
         const sub = await currentSubscription();
         if (sub) { await saveSubscription(sub); sessionStorage.setItem('te-push-synced', '1'); }
       }

@@ -17,6 +17,7 @@ Live business app for Thomson Energy Australia: leads, quotes, jobs, scheduling,
 |---|---|
 | `public/` | Pages (`*.html`), `js/`, `css/`, icons, PWA manifest, `sw.js` |
 | `netlify/functions/` | API and scheduled functions, `_shared/` helpers |
+| `tego-app/` | TEgo iPhone app (Capacitor, own `package.json`, Node 22); built by `.github/workflows/tego-ios.yml` |
 | `supabase/migrations/` | Schema migrations (baseline + new changes) |
 | `supabase/seed.sql` | Fake data for staging and preview branches |
 | `Migrations/` | Archive of the old numbered migrations (007 to 155), history only |
@@ -41,5 +42,6 @@ Installs dependencies and the Supabase CLI, links to Supabase if the env vars ar
 - [docs/ENV_VARS.md](docs/ENV_VARS.md): env vars and keys
 - [docs/STAGING.md](docs/STAGING.md): staging, migrations, backups
 - [docs/BUSINESS_FACTS.md](docs/BUSINESS_FACTS.md): Xero codes, pay rates, STC pricing, perf backlog
+- [docs/IOS_APP.md](docs/IOS_APP.md): TEgo iPhone app, Apple setup steps
 - [docs/EXTERNAL_ACCOUNTS.md](docs/EXTERNAL_ACCOUNTS.md): Twilio, Telstra port, Apple, D-U-N-S and Google Workspace status
 - [CLAUDE.md](CLAUDE.md): rules for Claude Code

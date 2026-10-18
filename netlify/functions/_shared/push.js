@@ -1,5 +1,6 @@
 const webpush = require('web-push');
 const { getIntegrationKey } = require('./get-integration-key');
+const { createApnsSender } = require('./apns');
 
 // Phone / browser push for the notifications table. Used by the scheduled
 // send-notifications function (every minute) and by notify-test (instant).
@@ -22,9 +23,15 @@ async function configure() {
 // Sends every notification that has not been pushed yet (or just `onlyIds`)
 // to each of its owner's subscribed devices, then marks it pushed. A device
 // the push service says is gone (404 / 410) is forgotten.
-// `send` is injectable for tests.
-async function deliverPending(supabaseAdmin, { onlyIds = null, send = null } = {}) {
+// Browsers get web push; the TEgo iPhone app (platform 'ios') gets Apple push.
+// `send` and `sendApns` are injectable for tests.
+async function deliverPending(supabaseAdmin, { onlyIds = null, send = null, sendApns = null } = {}) {
   const sendFn = send || (async (sub, payload) => { await configure(); return webpush.sendNotification(sub, payload, { TTL: 60 * 60 * 24, urgency: 'high' }); });
+  let apns = null;
+  const apnsSend = sendApns || (async (token, n) => {
+    if (!apns) apns = await createApnsSender();
+    return apns.send(token, n);
+  });
 
   let q = supabaseAdmin.from('notifications').select('id, user_id, kind, title, body, link').is('pushed_at', null);
   q = onlyIds ? q.in('id', onlyIds) : q.gt('created_at', new Date(Date.now() - 2 * 86400000).toISOString()).order('created_at').limit(300);
@@ -33,7 +40,7 @@ async function deliverPending(supabaseAdmin, { onlyIds = null, send = null } = {
   if (!rows || !rows.length) return { notifications: 0, sent: 0, failed: 0, removed: 0 };
 
   const userIds = [...new Set(rows.map(r => r.user_id))];
-  const { data: subs } = await supabaseAdmin.from('push_subscriptions').select('id, user_id, endpoint, p256dh, auth').in('user_id', userIds);
+  const { data: subs } = await supabaseAdmin.from('push_subscriptions').select('id, user_id, endpoint, p256dh, auth, platform').in('user_id', userIds);
   const unread = {};
   await Promise.all(userIds.filter(u => (subs || []).some(s => s.user_id === u)).map(async (u) => {
     const { count } = await supabaseAdmin.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', u).is('read_at', null);
@@ -43,9 +50,10 @@ async function deliverPending(supabaseAdmin, { onlyIds = null, send = null } = {
   let sent = 0, failed = 0; const dead = new Set();
   for (const n of rows) {
     for (const s of (subs || []).filter(x => x.user_id === n.user_id && !dead.has(x.id))) {
-      const payload = JSON.stringify({ id: n.id, title: n.title, body: n.body || '', url: n.link || '/home.html', tag: n.id, count: unread[n.user_id] || 0 });
+      const msg = { id: n.id, title: n.title, body: n.body || '', url: n.link || '/home.html', tag: n.id, count: unread[n.user_id] || 0 };
       try {
-        await sendFn({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload);
+        if (s.platform === 'ios') await apnsSend(s.endpoint, msg);
+        else await sendFn({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(msg));
         sent++;
       } catch (err) {
         failed++;
@@ -54,6 +62,7 @@ async function deliverPending(supabaseAdmin, { onlyIds = null, send = null } = {
       }
     }
   }
+  if (apns) apns.close();
   if (dead.size) await supabaseAdmin.from('push_subscriptions').delete().in('id', [...dead]);
   const okUsers = new Set((subs || []).filter(s => !dead.has(s.id)).map(s => s.user_id));
   if (sent) {

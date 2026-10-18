@@ -1,0 +1,90 @@
+# TEgo iPhone app build (see docs/IOS_APP.md).
+#
+# Every push or PR that touches tego-app/ builds the app for the iPhone
+# simulator, unsigned, to prove it still compiles. Nothing is signed or sent
+# to Apple on these runs.
+#
+# Run it by hand (Actions > TEgo iOS > Run workflow) with "Upload to
+# TestFlight" ticked to sign the app and send it to TestFlight. That needs
+# these repository secrets (Settings > Secrets and variables > Actions):
+#   APPLE_TEAM_ID         10 character Team ID (Apple Developer > Membership)
+#   ASC_KEY_ID            App Store Connect API key ID (Users and Access > Integrations)
+#   ASC_ISSUER_ID         the Issuer ID shown above that key list
+#   ASC_KEY_P8            the whole downloaded AuthKey_XXXX.p8 file text
+# Xcode uses the API key to create the signing certificate and profile
+# itself, so no certificates are stored here.
+name: TEgo iOS
+
+on:
+  push:
+    branches: [main]
+    paths: ['tego-app/**', '.github/workflows/tego-ios.yml']
+  pull_request:
+    paths: ['tego-app/**', '.github/workflows/tego-ios.yml']
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload to TestFlight'
+        type: boolean
+        default: false
+
+concurrency:
+  group: tego-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: tego-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tego-app/package-lock.json
+
+      - name: Install and sync Capacitor
+        run: |
+          npm ci
+          npx cap sync ios
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      - name: Build for simulator (unsigned)
+        if: ${{ !inputs.upload }}
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 40
+          exit ${PIPESTATUS[0]}
+
+      - name: Archive and upload to TestFlight
+        if: ${{ inputs.upload }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -o pipefail
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            if [ -z "${!v}" ]; then echo "Missing secret $v (see docs/IOS_APP.md)"; exit 1; fi
+          done
+          KEY="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY"
+          AUTH="-allowProvisioningUpdates -authenticationKeyPath $KEY -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"
+          # Build number = this workflow's run number, so every upload is new.
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/TEgo.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            $AUTH archive | tail -n 40
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/TEgo.xcarchive" \
+            -exportOptionsPlist ci/ExportOptions.plist -exportPath "$RUNNER_TEMP/export" \
+            $AUTH | tail -n 40
+          rm -f "$KEY"
