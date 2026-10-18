@@ -2352,18 +2352,30 @@
       if (!docs || !docs.length) { el.innerHTML = ''; return; }
       el.innerHTML = `
         <h3 style="font-size:14px; margin:18px 0 6px;">From ServiceM8</h3>
-        <p class="subtitle" style="margin:0 0 8px;">Invoices already sent from ServiceM8, for reference. They are counted in invoiced to date from the import, not here.</p>
+        <p class="subtitle" style="margin:0 0 8px;">Invoices already sent from ServiceM8, for reference. They are counted in invoiced to date from the import, not here. Deleting one only removes this copy.</p>
         <table class="responsive-stack">
-          <thead><tr><th>Invoice</th><th>Date</th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Date</th><th></th></tr></thead>
           <tbody>${docs.map(d => `
-            <tr><td data-label="Invoice"><a href="#" class="sm8-inv-link" data-path="${escapeHtml(d.file_path)}">${escapeHtml(d.file_name.replace(/\.pdf$/i, ''))}</a></td>
-            <td data-label="Date">${new Date(d.created_at).toLocaleDateString('en-AU')}</td></tr>`).join('')}
+            <tr><td data-label="Invoice"><a href="#" class="sm8-inv-link" data-path="${escapeHtml(d.file_path)}" style="color:var(--text); text-decoration:underline; font-weight:600;">${escapeHtml(d.file_name.replace(/\.pdf$/i, ''))}</a></td>
+            <td data-label="Date">${new Date(d.created_at).toLocaleDateString('en-AU')}</td>
+            <td><button type="button" class="secondary sm8-inv-delete" data-id="${d.id}" style="font-size:12px; padding:4px 10px;">Delete</button></td></tr>`).join('')}
           </tbody>
         </table>`;
       el.querySelectorAll('.sm8-inv-link').forEach(a => a.addEventListener('click', (e) => {
         e.preventDefault();
         const d = docs.find(x => x.file_path === a.dataset.path);
         openPdfViewer(d.file_path, d.file_name);
+      }));
+      el.querySelectorAll('.sm8-inv-delete').forEach(btn => btn.addEventListener('click', async () => {
+        const d = docs.find(x => x.id === btn.dataset.id);
+        if (!confirm(`Delete "${d.file_name}"? This only removes the copy here, nothing in ServiceM8 or Xero.`)) return;
+        try {
+          await supabaseClient.storage.from('project-documents').remove([d.file_path]);
+          const { error: delErr } = await supabaseClient.from('project_documents').delete().eq('id', d.id);
+          if (delErr) throw delErr;
+          await logActivity('project', projectId, 'document_deleted', `Deleted ServiceM8 invoice copy ${d.file_name}`);
+          await loadSm8Invoices(projectId);
+        } catch (err) { alert(err.message); }
       }));
     }
 
