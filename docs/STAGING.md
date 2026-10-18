@@ -2,6 +2,8 @@
 
 TEops is live. Everything is tested on staging first.
 
+**Paused from 18 Oct 2026:** the owner said skip staging and push all updates straight to production until they say otherwise. See `CLAUDE.md` Staging and production.
+
 ## How it fits together
 
 - **Production:** Supabase project `ziakpklnzkbbjjnqgkmz` + the Netlify production deploy from `main`.

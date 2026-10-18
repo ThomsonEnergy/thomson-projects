@@ -55,6 +55,8 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 
 ## Staging and production
 
+**CURRENT MODE (from 18 Oct 2026, owner's instruction): STAGING PAUSED.** Skip staging for everything: apply migrations and push updates straight to production and merge to `main` so Netlify deploys. Still state the plan and get the owner's "yes" before building, run `npm run check`, and take a backup before risky changes. This stays until the owner says to go back to staging; then delete this paragraph and log it in `docs/DECISIONS.md`. The staging rules below are on hold until then.
+
 - Test migrations, features and agents on the `staging` Supabase branch first, never on production data. Cloud sessions use staging credentials by default.
 - Production changes (migrations, data fixes, settings) only after the owner approves.
 - Supabase SQL runs without a permission popup (`.claude/settings.json` allows `execute_sql`, `list_migrations`, `list_tables`) on staging and production alike, so asking in chat is the only check: get the owner's yes before any production write.
@@ -66,7 +68,7 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 1. `supabase migration new <name>` (files go in `supabase/migrations/`, never the old `Migrations/` archive).
 2. Write the SQL, run `npm run check`.
 3. Show the owner the SQL and wait for "yes".
-4. Apply to staging (`supabase db push` with the CLI linked to staging), test.
+4. Apply to staging (`supabase db push` with the CLI linked to staging), test. (Skipped while staging is paused, see above.)
 5. After the owner says yes: `supabase db push` linked to production, then merge to `main` so Netlify deploys. Confirm both succeeded. (Supabase "Deploy to production" is off on purpose.)
 6. Risky changes (dropping columns or tables, bulk updates): take a backup first.
 
