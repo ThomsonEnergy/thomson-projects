@@ -93,46 +93,110 @@ async function copyJobLabour(supabaseAdmin, project, activities, profileByStaff,
   }
 }
 
+// ServiceM8 shows a job's checklist in named groups ("Checklist", "Things
+// to confirm with Matt"), each a list of items. Here each group becomes a
+// task and its items its subtasks. ServiceM8's API docs don't name the
+// group field, so the first of these that an item carries is used; an item
+// with none goes under a "Checklist" task. If the group value is another
+// item's uuid, that item is the group's heading and becomes the task.
+const GROUP_NAME_FIELDS = ['checklist_group_name', 'group_name', 'checklist_group', 'group', 'heading', 'section', 'category', 'checklist_name'];
+const GROUP_UUID_FIELDS = ['checklist_group_uuid', 'group_uuid', 'parent_uuid', 'parent_checklist_uuid'];
+const isUuidLike = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || '').trim());
+function groupOf(item) {
+  for (const f of GROUP_UUID_FIELDS) if (isUuidLike(item[f])) return { key: String(item[f]).toLowerCase(), name: GROUP_NAME_FIELDS.map(n => clean(item[n])).find(v => v && !isUuidLike(v)) || null };
+  for (const f of GROUP_NAME_FIELDS) {
+    const v = clean(item[f]);
+    if (v && isUuidLike(v)) return { key: v.toLowerCase(), name: null };
+    if (v) return { key: `name:${v.toLowerCase()}`, name: v };
+  }
+  return { key: 'name:checklist', name: 'Checklist' };
+}
+
 async function copyJobChecklist(supabaseAdmin, userId, project, items, profileByStaff, summary) {
   const { data: existing, error } = await supabaseAdmin.from('job_tasks')
-    .select('id, completed, sm8_checklist_uuid').eq('project_id', project.id).not('sm8_checklist_uuid', 'is', null);
+    .select('id, completed, parent_task_id, sm8_checklist_uuid').eq('project_id', project.id).not('sm8_checklist_uuid', 'is', null);
   if (error) throw error;
   const existingByUuid = new Map((existing || []).map(t => [t.sm8_checklist_uuid, t]));
-  const inserts = [];
+  const byUuid = new Map(items.map(i => [String(i.uuid).toLowerCase(), i]));
+  const sorted = items.slice().sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
 
-  for (const item of items.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0))) {
-    const description = clean(item.name);
-    if (!description) continue;
+  // Group the items. A group whose key is an item's own uuid is headed by
+  // that item; others get a task named after the group (or "Checklist").
+  const groups = new Map();
+  const headingUuids = new Set();
+  for (const item of sorted) {
+    const g = groupOf(item);
+    if (byUuid.has(g.key)) headingUuids.add(g.key);
+    if (!groups.has(g.key)) groups.set(g.key, { key: g.key, name: g.name, items: [] });
+    groups.get(g.key).items.push(item);
+  }
+  // A heading item belongs to no group of its own.
+  for (const g of groups.values()) g.items = g.items.filter(i => !headingUuids.has(String(i.uuid).toLowerCase()));
+
+  const itemFields = (item) => {
     const completedAt = sm8DateToIso(item.completed_timestamp);
-    const completedBy = profileByStaff.get(item.completed_by_staff_uuid) || null;
-    const had = existingByUuid.get(item.uuid);
-    if (had) {
-      if (completedAt && !had.completed) {
-        const { error: upErr } = await supabaseAdmin.from('job_tasks')
-          .update({ completed: true, completed_at: completedAt, completed_by: completedBy }).eq('id', had.id);
-        if (upErr) throw upErr;
-        summary.checklistTicked++;
-      } else summary.checklistAlready++;
-      continue;
-    }
-    inserts.push({
-      project_id: project.id,
-      description,
-      task_type: 'onsite',
+    const createdAt = sm8DateToIso(item.create_date) || sm8DateToIso(item.timestamp);
+    const fields = {
       completed: !!completedAt,
       completed_at: completedAt,
-      completed_by: completedAt ? completedBy : null,
-      created_by: userId,
-      sort_order: Number(item.sort_order) || null,
-      notes: 'From the ServiceM8 checklist',
-      sm8_checklist_uuid: item.uuid,
-    });
-  }
-  if (inserts.length) {
+      completed_by: completedAt ? profileByStaff.get(item.completed_by_staff_uuid) || null : null,
+      created_by: profileByStaff.get(item.created_by_staff_uuid) || userId,
+    };
+    if (createdAt) fields.created_at = createdAt;
+    // The Sydney date as ServiceM8 shows it (not the UTC one).
+    const due = [item.reminder_date, item.due_date].map(d => String(d || '').slice(0, 10)).find(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d !== '0000-00-00');
+    if (due && !completedAt) fields.due_date = due;
+    const assignee = profileByStaff.get(item.reminder_staff_uuid) || profileByStaff.get(item.assigned_to_staff_uuid);
+    if (assignee && !completedAt) fields.assigned_to_user_id = assignee;
+    return fields;
+  };
+
+  // Insert or update one task; returns its id.
+  async function upsertTask(sm8Uuid, row, isItem) {
+    const had = existingByUuid.get(sm8Uuid);
+    if (had) {
+      const fields = { parent_task_id: row.parent_task_id ?? null };
+      // Ticked in ServiceM8 since the last run: tick it here too.
+      if (row.completed && !had.completed) { Object.assign(fields, { completed: true, completed_at: row.completed_at, completed_by: row.completed_by }); if (isItem) summary.checklistTicked++; }
+      else if (isItem) summary.checklistAlready++;
+      if (row.created_at) fields.created_at = row.created_at;
+      if (row.created_by) fields.created_by = row.created_by;
+      const { error: upErr } = await supabaseAdmin.from('job_tasks').update(fields).eq('id', had.id);
+      if (upErr) throw upErr;
+      return had.id;
+    }
     const { data, error: insErr } = await supabaseAdmin.from('job_tasks')
-      .upsert(inserts, { onConflict: 'sm8_checklist_uuid', ignoreDuplicates: true }).select('id');
+      .insert({ project_id: project.id, task_type: 'onsite', notes: 'From the ServiceM8 checklist', sm8_checklist_uuid: sm8Uuid, ...row })
+      .select('id').single();
     if (insErr) throw insErr;
-    summary.checklistAdded += (data || []).length;
+    if (isItem) summary.checklistAdded++;
+    return data.id;
+  }
+
+  let groupOrder = 0;
+  for (const g of groups.values()) {
+    if (!g.items.length && !headingUuids.has(g.key)) continue;
+    groupOrder++;
+    const heading = byUuid.get(g.key);
+    const subs = g.items.filter(i => clean(i.name));
+    const allDone = subs.length > 0 && subs.every(i => sm8DateToIso(i.completed_timestamp));
+    const lastDone = allDone ? subs.map(i => sm8DateToIso(i.completed_timestamp)).sort().pop() : null;
+    const parentRow = {
+      description: clean(heading && heading.name) || g.name || 'Checklist',
+      sort_order: groupOrder,
+      parent_task_id: null,
+      completed: allDone,
+      completed_at: lastDone,
+      completed_by: null,
+      ...(heading ? (({ completed, completed_at, completed_by, ...rest }) => rest)(itemFields(heading)) : { created_by: userId }),
+    };
+    if (!subs.length && heading) Object.assign(parentRow, itemFields(heading));
+    const parentId = await upsertTask(heading ? heading.uuid : `group:${project.sm8_job_uuid}:${g.key}`, parentRow, !!heading);
+    let subOrder = 0;
+    for (const item of subs) {
+      subOrder++;
+      await upsertTask(item.uuid, { description: clean(item.name), sort_order: subOrder, parent_task_id: parentId, ...itemFields(item) }, true);
+    }
   }
 }
 
@@ -197,6 +261,11 @@ async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary, g
         await sleep(500);
       }
       summary.activitiesSeen += activities.length;
+      // A few raw records kept in the run summary, to check ServiceM8's
+      // field names against what this code expects.
+      if (!summary.samples) summary.samples = { checklist: [], activity: [] };
+      if (!summary.samples.checklist.length) summary.samples.checklist = items.slice(0, 6);
+      if (!summary.samples.activity.length) summary.samples.activity = activities.slice(0, 2);
       summary.checklistSeen += items.length;
       // A job with one stage puts the time on it; otherwise it is left
       // unassigned to a stage, like a clock-in that picked none.
@@ -221,4 +290,4 @@ async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary, g
   return summary;
 }
 
-module.exports = { copyLabourAndChecklists, sm8JobGroups, sm8DateToIso };
+module.exports = { copyLabourAndChecklists, copyJobChecklist, sm8JobGroups, sm8DateToIso };
