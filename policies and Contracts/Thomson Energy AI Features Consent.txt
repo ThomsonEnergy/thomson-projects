@@ -8,8 +8,7 @@ Please read the Notice of Workplace Surveillance and Computer Surveillance Polic
 This form is optional. If you do not sign it, nothing changes for your job or pay. You can still use TEops and tag messages to jobs yourself.
 
 If you sign, I agree that AI (artificial intelligence) tools used by Thomson Energy may read and process:
-- My TEops team chat messages, job feed posts, comments and notes.
-- My voice messages in TEops, including turning them into text.
+- My job feed posts, comments and notes.
 - Business text messages (SMS), calls and voicemails I send or receive through the company number in TEops.
 - My work Gmail, but only if I later choose to connect it. I can disconnect it at any time.
 
@@ -24,6 +23,7 @@ I understand that:
 - AI is not used to score, rate or rank me.
 - I can withdraw this consent at any time in TEops or by telling a director, and it stops straight away.
 - AI processing starts on the later of the date I sign this and the start date in the surveillance notice.
+- TEops team chat is not covered by this form: Sparky (the AI) is a member of every chat in the app, like any other member, and reads it to tag jobs, turn voice messages into text and answer questions. If I don't want that, I can message people outside the app.
 - I agree to a shorter notice period than the 14 days in the Workplace Surveillance Act 2005 (NSW): if I sign before the start date in the surveillance notice, AI processing of my messages can start on the day I sign.
 
 By signing, I consent to the AI features described above.

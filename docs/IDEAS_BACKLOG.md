@@ -90,7 +90,7 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 - **Auth:** personal, revocable token per staff member, tied to their login; admin revokes in Settings, Users.
 - **Setup:** "Set up Siri" button installs the Shortcut via an iCloud link with the user's token.
 
-**Dependencies:** team chat channels (feeds exist, see AI_AGENTS_PLAN.md); tagger agent; user's AI start date (item 6). Users without one send audio only, no AI transcription.
+**Dependencies:** team chat channels (feeds exist, see AI_AGENTS_PLAN.md); tagger agent; no AI consent needed in chat (Sparky is a member of every chat, decided 18 Oct 2026); Siri still needs per-user tokens.
 
 **Open questions**
 - [ ] Stay on AssemblyAI or switch (accuracy on Aussie accents and trade terms, cost)?
@@ -233,7 +233,7 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 
 ### Per-user AI activation
 - **Day one or not at all:** AI start date = sign date if box 1 ticked, else none. Later opt-in from settings sets it to the opt-in date (same consent screen).
-- No AI start date: chat messages excluded from tagger, assistant, summaries, digests; email cannot be connected; voice messages not transcribed. Manual job tagging still works.
+- No AI start date: email cannot be connected. Team chat (including voice messages) is not covered by consent: Sparky is a member of every chat (owner's lawyer, 18 Oct 2026).
 - Email is always opt-in even after the start date.
 
 ### Location tracking (box 2 only)
