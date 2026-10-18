@@ -5069,9 +5069,9 @@ async function renderActivityLog(entityType, entityId, containerId) {
   if (!entries.length) { containerEl.innerHTML = `<p class="subtitle">No activity logged yet.</p>`; return; }
 
   containerEl.innerHTML = entries.map(e => `
-    <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
-      <span>${e.description}</span>
-      <span class="subtitle" style="white-space:nowrap;">${e.profiles?.full_name || 'Someone'} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+    <div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
+      <div>${e.description}</div>
+      <div class="subtitle" style="font-size:12px; margin-top:2px;">${e.profiles?.full_name || 'Someone'} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
     </div>`).join('');
 }
 

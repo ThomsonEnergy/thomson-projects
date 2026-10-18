@@ -10,6 +10,7 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
 - Short and concise.
 - Numbers over names everywhere: J, Q, PO, SI numbers, migration numbers.
 - State the plan and wait for "yes" / "let's build" before building.
+- After that "yes", carry the whole plan through without asking again: build, run production migrations, push, open the PR and merge to `main`. Only stop and ask the owner if there is a real question or a change of direction (new scope, a different migration, deleting data not in the plan, or a failure that changes the plan).
 - One consolidated delivery, not lots of small ones.
 - Talk plainly, one step at a time: say exactly what to click and what they should see, especially in dashboards (Netlify, Supabase, Twilio, Apple, Google). No "see line 6 of seed.sql": test-only staging logins can be stated in chat directly. Real keys and passwords never go in chat.
 - Owner is also the bookkeeper (does Xero payroll). Give Xero steps directly, never "ask your bookkeeper". Xero entity is Thomson Energy Australia only, never Thomson Energy Solutions, and use the real account codes (see `docs/BUSINESS_FACTS.md`).
@@ -30,7 +31,7 @@ Other chats only know what is on `main`. So in every session, before the final r
 1. **Write it back.** Anything finished, decided, added as an idea, or changed in scope (including talk-only planning chats with no code) goes in the repo:
    - one dated line at the top of `docs/DECISIONS.md` saying what changed and where the detail lives;
    - the detail in the right doc: `docs/PROJECT_SPEC.md` (built or in scope), `docs/IDEAS_BACKLOG.md` (ideas and plans), `docs/AI_AGENTS_PLAN.md` (agents), `docs/EXTERNAL_ACCOUNTS.md` (outside accounts), `docs/BUSINESS_FACTS.md` (business facts).
-2. **Get it onto `main`.** Commit, push, open a PR. Docs-only PRs (`docs/`, `CLAUDE.md`, `README.md`) are merged straight away so the next chat sees them. Code and migrations still wait for the owner's "yes".
+2. **Get it onto `main`.** Commit, push, open a PR. Docs-only PRs (`docs/`, `CLAUDE.md`, `README.md`) are merged straight away so the next chat sees them. Code and migrations wait for the owner's "yes" on the plan, then go all the way to `main` without asking again.
 3. **Say so.** End the reply with one line naming the docs updated, or "no repo notes needed".
 
 At the start of every session: pull `main` and read `docs/DECISIONS.md` before answering questions about plans or status. If the owner says something that contradicts the docs, ask, then fix the doc.
@@ -55,6 +56,8 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 
 ## Staging and production
 
+**CURRENT MODE (from 18 Oct 2026, owner's instruction): STAGING PAUSED.** Skip staging for everything: apply migrations and push updates straight to production and merge to `main` so Netlify deploys. Still state the plan and get the owner's "yes" before building, run `npm run check`, and take a backup before risky changes. This stays until the owner says to go back to staging; then delete this paragraph and log it in `docs/DECISIONS.md`. The staging rules below are on hold until then.
+
 - Test migrations, features and agents on the `staging` Supabase branch first, never on production data. Cloud sessions use staging credentials by default.
 - Production changes (migrations, data fixes, settings) only after the owner approves.
 - Supabase SQL runs without a permission popup (`.claude/settings.json` allows `execute_sql`, `list_migrations`, `list_tables`) on staging and production alike, so asking in chat is the only check: get the owner's yes before any production write.
@@ -66,7 +69,7 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 1. `supabase migration new <name>` (files go in `supabase/migrations/`, never the old `Migrations/` archive).
 2. Write the SQL, run `npm run check`.
 3. Show the owner the SQL and wait for "yes".
-4. Apply to staging (`supabase db push` with the CLI linked to staging), test.
+4. Apply to staging (`supabase db push` with the CLI linked to staging), test. (Skipped while staging is paused, see above.)
 5. After the owner says yes: `supabase db push` linked to production, then merge to `main` so Netlify deploys. Confirm both succeeded. (Supabase "Deploy to production" is off on purpose.)
 6. Risky changes (dropping columns or tables, bulk updates): take a backup first.
 
