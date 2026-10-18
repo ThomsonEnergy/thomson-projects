@@ -4809,8 +4809,10 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
         await supabaseClient.from('purchase_orders').update({
           received: true, received_by: user.id, received_at: new Date().toISOString(),
         }).eq('id', po.id);
-        // only bills that passed their PO check (Bill checks page); the others wait there
-        await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', po.id).in('check_status', ['matches', 'resolved']);
+        // only bills that passed their PO check (Bill checks page), and never for a supplier made
+        // automatically from a bill whose details nobody has checked yet
+        const { data: poSup } = po.supplier_id ? await supabaseClient.from('suppliers').select('needs_review').eq('id', po.supplier_id).maybeSingle() : { data: null };
+        if (!poSup?.needs_review) await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', po.id).in('check_status', ['matches', 'resolved']);
         await logActivity('purchase_order', po.id, 'fully_received', `PO ${po.po_number || ''} fully received - linked bills that match it approved for payment`);
       }
 

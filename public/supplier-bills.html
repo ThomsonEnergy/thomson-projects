@@ -64,7 +64,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=80"></script>
+  <script src="/js/supabase-client.js?v=81"></script>
   <script src="/js/theme.js"></script>
   <script>
     const FILTERS = {
@@ -148,6 +148,7 @@
         ${item.email_subject ? `<div class="sb-meta">Subject: ${esc(item.email_subject)}</div>` : ''}
         ${lines.length ? `<div class="sb-lines">${lines.length} line${lines.length === 1 ? '' : 's'}: ${esc(lines.slice(0, 3).map(l => l.description).join('; '))}${lines.length > 3 ? '...' : ''}</div>` : ''}
         ${item.match_reason ? `<div class="sb-reason ${reasonClass}">${esc(item.match_reason)}</div>` : ''}
+        ${item.abn_check ? (item.abn_check.problems || []).map(p => `<div class="sb-reason bad">ABN check: ${esc(p)}</div>`).join('') + (item.abn_check.notes || []).map(n => `<div class="sb-meta">${esc(n)}</div>`).join('') : ''}
         ${item.status === 'failed' && item.error ? `<div class="sb-reason bad">${esc(item.error)}</div>` : ''}
         ${body}
         <div class="sb-msg"></div>

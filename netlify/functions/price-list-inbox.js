@@ -48,6 +48,7 @@ exports.handler = async (event) => {
       if (!name) return json(400, { ok: false, error: 'No supplier name was read from the file. Add the supplier on the Suppliers page, then pick it here.' });
       const { data: created, error } = await admin.from('suppliers').insert({
         name, credit_terms_type: 'net_days', credit_terms_days: 30, abn: meta.abn || null, our_account_number: meta.our_account_number || null,
+        needs_review: true, created_from: 'price_list',
       }).select('id').single();
       if (error) throw error;
       await admin.from('activity_log').insert({ entity_type: 'supplier', entity_id: created.id, action: 'created', description: `Supplier "${name}" created from an emailed price list`, changed_by: user.id });

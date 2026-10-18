@@ -38,6 +38,8 @@ exports.handler = async (event) => {
       const { data: bill } = await admin.from('supplier_bills').select('id, supplier_id, bill_number, check_status').eq('id', id).maybeSingle();
       if (!bill) return json(404, { ok: false, error: 'That bill was not found.' });
       if (action === 'approve_bill') {
+        const { data: sup } = await admin.from('suppliers').select('name, needs_review').eq('id', bill.supplier_id).maybeSingle();
+        if (sup?.needs_review) return json(400, { ok: false, error: `${sup.name} was created automatically. Open the supplier, check their details (especially the bank account) and press Save first.` });
         await admin.from('supplier_bills').update({ approved_for_payment: true, approved_by: user.id, approved_at: now }).eq('id', id);
         await log('supplier', bill.supplier_id, 'bill_approved', `Bill ${bill.bill_number || ''} approved for payment${bill.check_status && bill.check_status !== 'matches' ? ` (check: ${bill.check_status})` : ''}`);
       } else {
