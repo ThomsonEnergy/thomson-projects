@@ -49,8 +49,11 @@ function fileParts(att) {
   return { fileName, ext, kind, mime };
 }
 
-// ServiceM8's own invoice PDFs ("Partial Invoice #4515A", "Thomson Energy
-// Invoice #4515B") are listed on the job's Invoices tab, not in Documents.
+// ServiceM8's own invoice PDFs ("Thomson Energy Invoice #4515B") are listed
+// on the job's Invoices tab, not in Documents. "Partial Invoice #4515A"
+// PDFs are ServiceM8's internal copy of each claim line on the main job,
+// not what the client got, so they are not brought across at all.
+const isPartialInvoice = (fileName) => /\bpartial\s+invoice\b/i.test(String(fileName || ''));
 const docFolder = (fileName) => (/\binvoice\b/i.test(fileName) ? 'ServiceM8 invoices' : 'ServiceM8');
 
 const safe = (s) => s.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
@@ -84,7 +87,7 @@ async function queueAttachments(supabaseAdmin, apiKey, groups) {
   // imported jobs' files.
   const attachments = await sm8GetAll(apiKey, 'attachment', "related_object eq 'job' and active eq 1");
   const rows = attachments
-    .filter(a => projectByJob.has(a.related_object_uuid))
+    .filter(a => projectByJob.has(a.related_object_uuid) && !isPartialInvoice(fileParts(a).fileName))
     .map(a => {
       const { fileName, kind } = fileParts(a);
       return { project_id: projectByJob.get(a.related_object_uuid), sm8_job_uuid: a.related_object_uuid, sm8_attachment_uuid: a.uuid, file_name: fileName, kind };
@@ -97,6 +100,19 @@ async function queueAttachments(supabaseAdmin, apiKey, groups) {
     if (upErr) throw upErr;
   }
   return new Map(attachments.filter(a => projectByJob.has(a.related_object_uuid)).map(a => [a.uuid, a]));
+}
+
+// Partial Invoice PDFs copied before they were left out: remove them (file,
+// document and copy record).
+async function removePartialInvoices(supabaseAdmin) {
+  const { data: rows, error } = await supabaseAdmin.from('sm8_attachment_copies')
+    .select('id, file_name, project_document_id, project_documents(file_path)').ilike('file_name', '%partial%invoice%');
+  if (error) throw error;
+  for (const row of (rows || []).filter(r => isPartialInvoice(r.file_name))) {
+    if (row.project_documents?.file_path) await supabaseAdmin.storage.from('project-documents').remove([row.project_documents.file_path]);
+    if (row.project_document_id) await supabaseAdmin.from('project_documents').delete().eq('id', row.project_document_id);
+    await supabaseAdmin.from('sm8_attachment_copies').delete().eq('id', row.id);
+  }
 }
 
 // Files copied before photos took AVIF and video went into Documents: take
@@ -221,6 +237,7 @@ exports.handler = async (event) => {
     const { data: linked } = await supabaseAdmin.from('profiles').select('id, sm8_staff_uuid').not('sm8_staff_uuid', 'is', null);
     const profileByStaff = new Map((linked || []).map(p => [p.sm8_staff_uuid, p.id]));
     const attachments = await queueAttachments(supabaseAdmin, apiKey, groups);
+    await removePartialInvoices(supabaseAdmin);
     const moved = await requeueNewPhotoTypes(supabaseAdmin);
     await syncCopiedMeta(supabaseAdmin, attachments, profileByStaff);
     console.log(`sm8-copy-attachments: ${attachments.size} attachments on imported jobs, ${moved} moved from Documents to Photos`);
