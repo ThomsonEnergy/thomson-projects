@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 18 Oct 2026
+- Team chat LIVE on production: migration 20261020000000 applied (staging first), PR #45 merged and deployed. Next: owner publishes the new AI consent version, tests with 2 people, sets a WhatsApp cutover date. (`docs/PROJECT_SPEC.md` A19a)
 - Team chat built with Sparky (job tagging, voice transcripts, @Sparky answers): migration 20261020000000 on staging, code on PR `claude/team-chat`, waiting on owner's yes for production. Defaults used: company feed stays as is, only admins make channels, staff only (no subcontractors). (`docs/PROJECT_SPEC.md` A19a, `docs/AI_AGENTS_PLAN.md`)
 - AI in chat goes live per person on signing: staff can agree to a shorter notice period than 14 days (Workplace Surveillance Act allows it), added to the AI Features Consent wording. Anyone who doesn't sign stays on WhatsApp until the 14 days are up. (`policies and Contracts/Thomson Energy AI Features Consent.txt`)
 - Emailed price lists built and live: read from sales@ and invoice@, keep material cost prices accurate. Owner chose option A: known parts under 20% change update automatically, bigger changes and first-time matches wait. Missing items flagged only if unused for 6 months and a likely replacement is on the list; deleting stays manual. Migration 20261019020000. (`docs/PROJECT_SPEC.md` A11b)
