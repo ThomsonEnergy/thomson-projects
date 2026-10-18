@@ -1825,6 +1825,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', icon: '&#129513;', pricingOnly: true },
   { key: 'overheads', label: 'Overheads', href: '/overheads.html', icon: '&#128178;', financeOnly: true },
   { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html', icon: '&#128218;' },
+  { key: 'documents', label: 'Documents', href: '/documents.html', icon: '&#128196;' },
   { key: 'support', label: 'Tech Support', href: '/support.html', icon: '&#128222;' },
   { key: 'team', label: 'Team', href: '/team.html', icon: '&#128101;' },
   { key: 'incidents', label: 'Incidents', href: '/incidents.html', icon: '&#9888;', financeOnly: true },

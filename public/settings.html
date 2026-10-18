@@ -413,6 +413,13 @@
             </div>
             <div id="rate-tiers-msg"></div>
           </div>
+          <div class="card">
+            <h2>Schedule of Rates review</h2>
+            <p class="subtitle" style="margin-bottom:10px;">These rates print on the <a href="/rates.html" target="_blank">Schedule of Rates</a> (Documents page and every estimate) as "current as at" this date. Changing a rate above sets it to today. Six months on, the Ops manager adds a "Needs me" reminder to review them.</p>
+            <div id="rates-review-status" class="subtitle"></div>
+            <button type="button" id="rates-reviewed-btn" class="secondary" style="margin-top:10px;">Rates checked, still correct today</button>
+            <div id="rates-review-msg"></div>
+          </div>
         </div>
 
         <!-- Inspection Checklists -->
@@ -738,7 +745,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=84"></script>
+  <script src="/js/supabase-client.js?v=85"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -969,7 +976,30 @@
         : `<div class="success-box">Saved.</div>`;
     });
 
+    // Schedule of Rates review date (company_settings.rates_reviewed_on, migration 20261022000000)
+    const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+    async function loadRatesReview() {
+      const el = document.getElementById('rates-review-status');
+      const { data } = await supabaseClient.from('company_settings').select('rates_reviewed_on').eq('id', 1).maybeSingle();
+      const reviewed = data?.rates_reviewed_on;
+      if (!reviewed) { el.textContent = 'No review date yet.'; return; }
+      const due = new Date(reviewed + 'T00:00:00'); due.setMonth(due.getMonth() + 6);
+      const fmt = (d) => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+      el.innerHTML = `Current as at <b>${fmt(new Date(reviewed + 'T00:00:00'))}</b>. ${due <= new Date() ? '<span style="color:var(--red); font-weight:600;">Review overdue</span>' : 'Next review'}: ${fmt(due)}.`;
+    }
+    async function markRatesReviewed() {
+      const { error } = await supabaseClient.from('company_settings').update({ rates_reviewed_on: sydneyToday() }).eq('id', 1);
+      if (error) throw error;
+      await loadRatesReview();
+    }
+    document.getElementById('rates-reviewed-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('rates-review-msg');
+      try { await markRatesReviewed(); msg.innerHTML = `<div class="success-box">Saved. The reminder clears at the next 5am digest.</div>`; }
+      catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+    });
+
     async function loadRateTiers() {
+      loadRatesReview();
       const listEl = document.getElementById('rate-tiers-list');
       const { data, error } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
 
@@ -1001,6 +1031,7 @@
           const sell_rate = parseFloat(listEl.querySelector(`.tier-rate-input[data-id="${id}"]`).value) || 0;
           const { error } = await supabaseClient.from('billable_rate_tiers').update({ name, sell_rate }).eq('id', id);
           if (error) alert('Could not save: ' + error.message);
+          else markRatesReviewed().catch(() => {});
         });
       });
       listEl.querySelectorAll('.delete-tier-btn').forEach(btn => {
@@ -1022,6 +1053,7 @@
       const nextSort = (existing?.[0]?.sort_order || 0) + 1;
       const { error } = await supabaseClient.from('billable_rate_tiers').insert({ name, sell_rate, sort_order: nextSort });
       if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      markRatesReviewed().catch(() => {});
       document.getElementById('new-tier-name').value = '';
       document.getElementById('new-tier-rate').value = '';
       msg.innerHTML = '';
@@ -2582,6 +2614,10 @@
         await loadRateTiers();
         await loadInspectionTemplates();
       }
+      // ?panel=<name> opens that tab (e.g. the ops manager's rates review reminder)
+      const deepLinkPanel = new URLSearchParams(location.search).get('panel');
+      const panelBtn = deepLinkPanel && document.querySelector(`.settings-tab[data-panel="${CSS.escape(deepLinkPanel)}"]`);
+      if (panelBtn && panelBtn.style.display !== 'none') panelBtn.click();
     })();
   </script>
 </body>

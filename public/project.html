@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=84"></script>
+  <script src="/js/supabase-client.js?v=85"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -3542,6 +3542,13 @@
                 <input type="file" id="doc-file-input" multiple />
                 <div id="doc-upload-msg"></div>
               </div>
+              <div class="card">
+                <h2>Add from Documents</h2>
+                <p class="subtitle" style="margin-bottom:10px;">Company documents (Schedule of Rates and others on the Documents page). They go in the "Company docs" folder, ready to attach on the Emails tab.</p>
+                <div id="company-docs-pick"><p class="subtitle">Loading...</p></div>
+                <button type="button" id="company-docs-add-btn" style="margin-top:10px;">Add to job</button>
+                <div id="company-docs-msg"></div>
+              </div>
             </div>
             ` : ''}
 
@@ -3623,6 +3630,7 @@
 
       loadDocuments(project.id);
       wireDocumentUpload(project);
+      wireCompanyDocs(project);
       if (document.getElementById('site-photos-list')) { loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
@@ -6527,6 +6535,61 @@
           msg.innerHTML = '';
           await loadSitePhotos(projectId);
         } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+      });
+    }
+
+    // Add from Documents: an uploaded company doc is copied into the job's own folder (so deleting
+    // it from Documents later leaves the job's copy); the Schedule of Rates is printed to a PDF at
+    // today's rates by generate-client-document-pdf.js, which files it on the job.
+    async function wireCompanyDocs(project) {
+      const pickEl = document.getElementById('company-docs-pick');
+      const btn = document.getElementById('company-docs-add-btn');
+      const msg = document.getElementById('company-docs-msg');
+      const { data: docs, error } = await supabaseClient.from('company_documents').select('*').order('sort_order').order('title');
+      if (error) { pickEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; btn.style.display = 'none'; return; }
+      if (!docs.length) { pickEl.innerHTML = `<p class="subtitle">No company documents yet. Add them on the <a href="/documents.html">Documents</a> page.</p>`; btn.style.display = 'none'; return; }
+      pickEl.innerHTML = docs.map(d => `
+        <label style="display:flex; gap:8px; align-items:center; margin:6px 0; font-weight:normal;">
+          <input type="checkbox" class="company-doc-cb" value="${d.id}" style="width:auto;" /> ${escapeHtml(d.title)}
+        </label>`).join('');
+      const byId = Object.fromEntries(docs.map(d => [d.id, d]));
+      btn.addEventListener('click', async () => {
+        const picked = [...pickEl.querySelectorAll('.company-doc-cb:checked')].map(cb => byId[cb.value]);
+        if (!picked.length) { msg.innerHTML = `<div class="error-box">Tick at least one document.</div>`; return; }
+        btn.disabled = true; btn.textContent = 'Adding...'; msg.innerHTML = '';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          for (const doc of picked) {
+            if (doc.kind === 'schedule_of_rates') {
+              const res = await fetch('/.netlify/functions/generate-client-document-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+                body: JSON.stringify({ doc_type: 'schedule_of_rates', record_id: project.id }),
+              });
+              const d = await res.json().catch(() => ({}));
+              if (!res.ok || !d.ok) throw new Error(d.error || 'Could not make the Schedule of Rates PDF');
+            } else {
+              const ext = (doc.file_name || '').match(/\.[^.]+$/)?.[0] || '';
+              const fileName = doc.title + (doc.title.toLowerCase().endsWith(ext.toLowerCase()) ? '' : ext);
+              const path = `documents/${project.id}/${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+              const { error: cpErr } = await supabaseClient.storage.from('project-documents').copy(doc.file_path, path);
+              if (cpErr) throw cpErr;
+              const { error: insErr } = await supabaseClient.from('project_documents').insert({
+                project_id: project.id, folder: 'Company docs', file_path: path, file_name: fileName, mime_type: doc.mime_type, uploaded_by: session.user.id,
+              });
+              if (insErr) throw insErr;
+            }
+          }
+          await logActivity('project', project.id, 'documents_uploaded', `Added ${picked.map(d => d.title).join(', ')} from Documents`);
+          pickEl.querySelectorAll('.company-doc-cb').forEach(cb => { cb.checked = false; });
+          selectedDocFolder = 'Company docs';
+          await loadDocuments(project.id);
+          msg.innerHTML = `<div class="success-box">Added to Company docs. Attach ${picked.length === 1 ? 'it' : 'them'} from the Emails tab.</div>`;
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        } finally {
+          btn.disabled = false; btn.textContent = 'Add to job';
+        }
       });
     }
 
