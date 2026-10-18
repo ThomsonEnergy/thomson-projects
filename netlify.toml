@@ -54,3 +54,7 @@
 # 19:00 UTC so it lands on 5am with and without daylight saving; only the 5am one sends.
 [functions.ops-digest]
   schedule = "0 18,19 * * *"
+# Every 2 minutes: catches any team chat message Sparky has not tagged to a
+# job yet (normally done the moment it is sent) - see chat-ai-sweep.js.
+[functions.chat-ai-sweep]
+  schedule = "*/2 * * * *"

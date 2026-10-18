@@ -31,9 +31,9 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=78"></script>
+  <script src="/js/supabase-client.js?v=79"></script>
   <script src="/js/template-questions.js"></script>
-  <script src="/js/feed.js?v=7"></script>
+  <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=4"></script>
   <script src="/js/assets.js?v=1"></script>
@@ -3332,6 +3332,11 @@
                 <div id="job-feed-composer"></div>
               </div>
               <div class="card"><div id="job-feed-list"><p class="subtitle">Loading...</p></div></div>
+              <div class="card">
+                <h2>From team chat</h2>
+                <p class="subtitle" style="margin-bottom:10px;">Chat messages tagged to this job, by a person or by Sparky. Tap one to open it in Chat.</p>
+                <div id="job-chat-list"><p class="subtitle">Loading...</p></div>
+              </div>
             </div>` : ''}
 
             ${project.job_number && !editMode && pricingVisible ? `
@@ -3572,6 +3577,7 @@
             await mountFeedComposer(document.getElementById('job-feed-composer'), { ...feedOpts, onPosted: () => renderFeedList(document.getElementById('job-feed-list'), feedOpts) });
           }
           await renderFeedList(document.getElementById('job-feed-list'), feedOpts);
+          await renderJobChat(document.getElementById('job-chat-list'), project.id);
         });
         if (new URLSearchParams(window.location.search).get('tab') === 'feed') feedTab.click();
       }

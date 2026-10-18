@@ -261,3 +261,33 @@ async function renderFeedList(el, opts) {
       .then(() => {}, () => {});
   }
 }
+
+// A job's Feed tab also lists team chat messages tagged to it (chat.html).
+// RLS only returns chats the viewer is in, so a DM tagged to a job only
+// shows to the people in that DM.
+async function renderJobChat(el, projectId) {
+  if (!el) return;
+  ensureFeedStyles();
+  const { data, error } = await supabaseClient.from('chat_messages')
+    .select('id, channel_id, parent_id, author_id, is_bot, body, voice_transcript, attachments, created_at, tagged_by, chat_channels(kind, name), profiles!chat_messages_author_id_fkey(full_name, photo_url)')
+    .eq('project_id', projectId).is('deleted_at', null)
+    .order('created_at', { ascending: false }).limit(60);
+  if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+  if (!data.length) { el.innerHTML = '<p class="subtitle">Nothing tagged to this job yet. In Chat, type # to tag a message to a job.</p>'; return; }
+  const bot = (typeof aiAssistantName === 'function' && aiAssistantName()) || 'Sparky';
+  el.innerHTML = data.map(m => {
+    const who = m.is_bot ? bot : (m.profiles ? m.profiles.full_name : 'Someone');
+    const where = m.chat_channels ? (m.chat_channels.kind === 'dm' ? 'Direct message' : '#' + m.chat_channels.name) : 'Chat';
+    const atts = m.attachments || [];
+    const extra = atts.length ? ` <span class="fd-time">(${atts.map(a => a.kind === 'voice' ? 'voice message' : a.kind === 'image' ? 'photo' : 'file').join(', ')})</span>` : '';
+    const text = m.body || m.voice_transcript || '';
+    const link = `/chat.html?c=${m.channel_id}${m.parent_id ? `&t=${m.parent_id}` : ''}&m=${m.id}`;
+    return `<a href="${link}" class="fd-comment" style="text-decoration:none; color:inherit; margin-bottom:10px;">
+      ${feedAvatar(who, true, m.profiles && m.profiles.photo_url)}
+      <div class="fd-bubble">
+        <div class="fd-bubble-head"><span class="fd-name">${escapeHtml(who)}</span><span class="fd-time">${escapeHtml(where)} &middot; ${feedWhen(m.created_at)}${m.tagged_by === 'ai' ? ` &middot; tagged by ${escapeHtml(bot)}` : ''}</span></div>
+        <div class="fd-bubble-text">${escapeHtml(text.length > 400 ? text.slice(0, 400) + '...' : text)}${extra}</div>
+      </div>
+    </a>`;
+  }).join('');
+}
