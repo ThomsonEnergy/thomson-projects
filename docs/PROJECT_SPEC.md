@@ -160,6 +160,14 @@ Manual steps only a person can do (the code is live):
 - **Price lists page** (`price-lists.html`, Admin/Finance/Sales): To check, Price lists, Changes made (Undo), Supplier lists (search). `price_list` push to Admin and Finance. Reports to the ops manager; the 5am digest counts prices updated and changes to check.
 - The manual price list upload on a supplier page (A11) still works as before.
 
+### A11c. Bill checks and statement reconciliation
+- Every supplier bill (emailed, one-tap, uploaded) is checked line by line against its PO (`_shared/bill-check.js`): not on the PO, price over 1% higher, more billed than ordered across every bill on the PO, PO total over 2%, same bill number twice, same amount within 3 days. Migration 20261019030000.
+- `check_status`: matches, problems, no_po, queried, resolved. Matches + PO received = approved for payment automatically. The PO "fully received" approval now only approves bills that matched or were accepted (it used to approve every linked bill).
+- Problems: **Query supplier** drafts an email listing each difference; a person edits and presses Send. Sent from invoice@ via sales@ (needs the "Send mail as" setting, `docs/EXTERNAL_ACCOUNTS.md`). The reply links back to the bill. **Accept as is** with a reason.
+- Statements: emailed ones (bill reader's statements, plus "statement" emails in sales@) read automatically; uploads on a supplier page still work and are reconciled on the server too. Two-way check (`_shared/statement-intake.js`): missing bills (one-tap email asking for copies), amounts that differ, invoice listed twice on the statement, bill entered twice in TEops, our unpaid bills not on the statement, bills with problems or no PO, balance vs our unpaid total. Payments and credits on the statement are ignored for matching.
+- Missing statements: from the 10th, suppliers that billed us last month with no statement since (one-tap "Ask for a statement").
+- **Bill checks page** (`supplier-checks.html`, Admin/Finance/Sales): To approve, Problems, Statements, Missing statements. `statement` push to Admin and Finance. Worker `statements` (hourly at :30) reports to the ops manager; the digest lists bills to approve, problems, statements not reconciling, missing statements and queries waiting on suppliers.
+
 ### A12. Stock locations
 - Warehouse plus each `holds_stock` vehicle as separate rows; `materials.quantity_on_hand` is a trigger-kept total. Stock page: total cost, minimums, location breakdown, "Suggest restock PO". Vehicle stock pages.
 

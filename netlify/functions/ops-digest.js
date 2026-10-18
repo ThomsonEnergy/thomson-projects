@@ -10,8 +10,9 @@
 
 const { getAdminClient } = require('./_shared/require-admin');
 const { runAgent, notifyManagers } = require('./_shared/agent-log');
+const { missingStatements } = require('./_shared/statement-intake');
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || word + 's')}`;
 
 function sydneyHour() {
   return Number(new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', hour: 'numeric', hourCycle: 'h23' }).format(new Date()));
@@ -20,13 +21,16 @@ const sydneyDate = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Aus
 
 async function buildDigest(admin) {
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const [runsRes, beatsRes, tasksRes, billsRes, savedRes, pricesRes] = await Promise.all([
+  const [runsRes, beatsRes, tasksRes, billsRes, savedRes, pricesRes, checkRes, stIssuesRes, missingSts] = await Promise.all([
     admin.from('agent_runs').select('agent, status, summary, input_tokens, output_tokens').gte('started_at', since),
     admin.from('agent_heartbeats').select('*'),
     admin.from('agent_tasks').select('title').eq('status', 'open').order('created_at'),
     admin.from('supplier_bill_inbox').select('status').in('status', ['to_check', 'failed']),
     admin.from('supplier_bill_inbox').select('resolved_by').eq('status', 'saved').gte('resolved_at', since),
     admin.from('price_changes').select('status, kind, change_pct, resolved_by').or(`status.eq.waiting,resolved_at.gte.${since}`),
+    admin.from('supplier_bills').select('check_status, approved_for_payment').eq('paid', false).in('check_status', ['matches', 'resolved', 'problems', 'queried']),
+    admin.from('supplier_statements').select('id', { count: 'exact', head: true }).eq('status', 'issues'),
+    missingStatements(admin),
   ]);
   const runs = runsRes.data || [], beats = beatsRes.data || [], tasks = tasksRes.data || [];
   const toCheck = (billsRes.data || []).filter(b => b.status === 'to_check').length;
@@ -35,6 +39,11 @@ async function buildDigest(admin) {
   const savedAuto = saved.filter(s => !s.resolved_by).length;
   const prices = pricesRes.data || [];
   const priceWaiting = prices.filter(p => p.status === 'waiting').length;
+  const checks = checkRes.data || [];
+  const toApprove = checks.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment).length;
+  const billProblems = checks.filter(b => b.check_status === 'problems').length;
+  const queried = checks.filter(b => b.check_status === 'queried').length;
+  const stIssues = stIssuesRes.count || 0;
   const priceAuto = prices.filter(p => p.status === 'applied' && !p.resolved_by).length;
 
   // a worker is down if it has not worked for 3 of its usual gaps
@@ -48,6 +57,11 @@ async function buildDigest(admin) {
   if (toCheck) needs.push(`${plural(toCheck, 'emailed bill')} to check`);
   if (failedBills) needs.push(`${plural(failedBills, 'bill')} that could not be read`);
   if (priceWaiting) needs.push(`${plural(priceWaiting, 'price list change')} to check`);
+  if (billProblems) needs.push(`${plural(billProblems, 'bill')} that do not match the PO`);
+  if (toApprove) needs.push(`${plural(toApprove, 'bill')} to approve for payment`);
+  if (stIssues) needs.push(`${plural(stIssues, 'statement')} that do not reconcile`);
+  if (missingSts.length) needs.push(`no statement yet from ${missingSts.map(s => s.name).join(', ')}`);
+  if (queried) needs.push(`${plural(queried, 'query', 'queries')} waiting on suppliers`);
   tasks.forEach(t => needs.push(t.title));
 
   const lines = [];
@@ -58,7 +72,7 @@ async function buildDigest(admin) {
   if (failedRuns.length) lines.push(`${plural(failedRuns.length, 'failed run')} in the last 24 hours.`);
   if (tokensIn || tokensOut) lines.push(`AI used: ${tokensIn.toLocaleString('en-AU')} tokens in, ${tokensOut.toLocaleString('en-AU')} out.`);
 
-  const needCount = toCheck + failedBills + tasks.length + priceWaiting;
+  const needCount = toCheck + failedBills + tasks.length + priceWaiting + billProblems + toApprove + stIssues + missingSts.length;
   const title = down.length ? `Morning: ${down[0].label} is not working`
     : needCount ? `Morning: ${plural(needCount, 'thing')} need${needCount === 1 ? 's' : ''} you`
     : 'Morning: all clear';

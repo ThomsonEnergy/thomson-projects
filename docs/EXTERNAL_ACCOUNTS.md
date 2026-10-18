@@ -59,3 +59,10 @@ Progress on the outside accounts that gate SMS/calls (backlog item 7) and the na
   - **Gemini Business (Legacy) add-on**, 3 licences on the Flexible plan. Check its cost on the invoice and cancel if not needed: Gemini features are now bundled with Workspace plans, and we use Claude.
   - **2 unused Starter seats** are paid for on the annual plan. Drop to 7 seats at renewal (note the renewal date), unless hiring soon.
 - Revisit the provider only before the per-user inbox build (backlog item 5), since that is when the integration deepens.
+
+## invoice@ (Google Group)
+
+- invoice@thomsonenergy.com.au is a Google Group (supplier bills, statements, price lists only). Members: sales@ (added 18 Oct 2026 so TEops reads it), jasper@, accounts@, jade@.
+- sales@ Gmail filter: To invoice@, skip the inbox, label `Supplier Bills`, never spam.
+- TEops sends supplier queries FROM invoice@ through the sales@ connection. Needs invoice@ as a "Send mail as" address on sales@ (Gmail, signed in as sales@: Settings > See all settings > Accounts > Send mail as > Add another email address > invoice@thomsonenergy.com.au (leave "Treat as an alias" ticked), verify with the code emailed to invoice@). Until that is done Gmail sends them as sales@. Status: owner to do (18 Oct 2026).
+

@@ -18,10 +18,11 @@ const { getAdminClient } = require('./require-admin');
 const { gmailRequest } = require('./google-client');
 const { selfBaseUrl } = require('./site-url');
 const { extractSupplierInvoiceWithUsage } = require('./supplier-invoice-ai');
+const { checkBillAndSiblings } = require('./bill-check');
 
 const INVOICE_ADDRESS = 'invoice@thomsonenergy.com.au';
 const BILL_LABEL = 'Supplier Bills';
-const GMAIL_QUERY = `(label:supplier-bills OR to:${INVOICE_ADDRESS} OR deliveredto:${INVOICE_ADDRESS}) newer_than:30d`;
+const GMAIL_QUERY = `(label:supplier-bills OR to:${INVOICE_ADDRESS} OR deliveredto:${INVOICE_ADDRESS}) newer_than:30d -in:sent`;
 const READABLE_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const MAX_ATTEMPTS = 3;
 const OPEN_PO = (po) => !['paid', 'invoiced'].includes(po.status);
@@ -126,6 +127,18 @@ async function enqueueNewBillEmails(supabaseAdmin, { extractAttachments, extract
       received_at: dateHeader ? new Date(dateHeader).toISOString() : new Date(Number(msg.internalDate) || Date.now()).toISOString(),
     };
     const files = billFiles(extractAttachments(msg.payload));
+
+    // a supplier answering one of our queries (_shared/supplier-email.js): link the reply
+    const { data: queriedBills } = await supabaseAdmin.from('supplier_bills').select('id, bill_number').eq('query_gmail_thread_id', msg.threadId);
+    const { data: queriedStatements } = await supabaseAdmin.from('supplier_statements').select('id').eq('query_gmail_thread_id', msg.threadId);
+    if ((queriedBills || []).length || (queriedStatements || []).length) {
+      const now = new Date().toISOString();
+      for (const qb of queriedBills || []) await supabaseAdmin.from('supplier_bills').update({ query_reply_at: now }).eq('id', qb.id);
+      for (const qs of queriedStatements || []) await supabaseAdmin.from('supplier_statements').update({ query_reply_at: now }).eq('id', qs.id);
+      await notifyToCheck(supabaseAdmin, { gmail_message_id: id, email_from: base.email_from, match_reason: 'Open Bill checks to see the reply' }, `Supplier replied about ${queriedBills?.[0]?.bill_number ? 'bill ' + queriedBills[0].bill_number : 'a statement'}`);
+      if (!files.length) continue; // just a reply, nothing to read as a bill
+    }
+
     const rows = files.length
       ? files.map(f => ({ ...base, attachment_part_id: String(f.part_id), file_name: f.name, mime_type: f.mime }))
       : [{ ...base, attachment_part_id: 'none', status: 'to_check', match_confidence: 'none', processed_at: new Date().toISOString(),
@@ -318,6 +331,10 @@ async function analyse(supabaseAdmin, row, { supplierId = null } = {}) {
   } else if (waitingTwin) {
     status = 'duplicate';
     reason = `Bill ${ex.bill_number} from ${supplierMatch.supplier.name} was emailed twice; the other copy is waiting to be checked`;
+  } else if (docType === 'statement') {
+    // the statement reader (_shared/statement-intake.js) reconciles these
+    status = 'not_a_bill';
+    reason = 'Statement: reconciled on the Bill checks page';
   } else if (docType === 'other' && /price|pricing|catalog/i.test(`${row.file_name || ''} ${row.email_subject || ''}`)) {
     // the price list reader (_shared/price-list-intake.js) picks these up
     status = 'not_a_bill';
@@ -420,6 +437,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   await supabaseAdmin.from('supplier_bill_inbox').update({
     status: 'saved', bill_id: bill.id, po_id: po?.id || null, resolved_by: userId, resolved_at: new Date().toISOString(),
   }).eq('id', itemId);
+  await checkBillAndSiblings(supabaseAdmin, bill.id);
 
   const who = userId ? '' : ' automatically';
   const desc = `Bill ${ex.bill_number || ''} (${money(ex.total)}) from ${supplier.name} saved${who} from an invoice@ email`.replace(/\s+/g, ' ');

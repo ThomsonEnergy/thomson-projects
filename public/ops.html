@@ -79,7 +79,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=79"></script>
+  <script src="/js/supabase-client.js?v=80"></script>
   <script src="/js/theme.js"></script>
   <script>
     const esc = (s) => escapeHtml(s == null ? '' : String(s));
@@ -93,7 +93,7 @@
     }
 
     async function load() {
-      const [bills, tasks, beats, runs, digest, sups, prices] = await Promise.all([
+      const [bills, tasks, beats, runs, digest, sups, prices, checks, stIssues] = await Promise.all([
         supabaseClient.from('supplier_bill_inbox').select('id, status, extracted, supplier_id, match_reason, error, email_from, created_at').in('status', ['to_check', 'failed']).order('created_at').limit(50),
         supabaseClient.from('agent_tasks').select('*').eq('status', 'open').order('created_at'),
         supabaseClient.from('agent_heartbeats').select('*').order('label'),
@@ -101,6 +101,8 @@
         supabaseClient.from('agent_runs').select('*').eq('agent', 'ops-digest').order('started_at', { ascending: false }).limit(1),
         supabaseClient.from('suppliers').select('id, name'),
         supabaseClient.from('price_changes').select('id', { count: 'exact', head: true }).eq('status', 'waiting'),
+        supabaseClient.from('supplier_bills').select('check_status, approved_for_payment').eq('paid', false).in('check_status', ['matches', 'resolved', 'problems']),
+        supabaseClient.from('supplier_statements').select('id', { count: 'exact', head: true }).eq('status', 'issues'),
       ]);
       const err = [bills, tasks, beats, runs, digest].find(r => r.error);
       if (err) { document.getElementById('op-needs').innerHTML = `<div class="error-box">${esc(err.error.message)}</div>`; return; }
@@ -121,6 +123,12 @@
           <div class="op-meta">${esc(b.status === 'failed' ? (b.error || '') : (b.match_reason || ''))}</div>
           <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/supplier-bills.html">Open Emailed bills</a></div></div>`);
       });
+      const chk = checks.data || [];
+      const nApprove = chk.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment).length;
+      const nProblems = chk.filter(b => b.check_status === 'problems').length;
+      const nSt = (stIssues.count || 0);
+      if (nProblems || nApprove || nSt) items.push(`<div class="op-item"><div class="op-head"><strong>Bill checks: ${[nProblems ? nProblems + ' not matching the PO' : '', nApprove ? nApprove + ' to approve' : '', nSt ? nSt + ' statement' + (nSt === 1 ? '' : 's') + ' not reconciling' : ''].filter(Boolean).join(', ')}</strong></div>
+          <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/supplier-checks.html${nProblems ? '?tab=problems' : (nSt ? '?tab=statements' : '')}">Open Bill checks</a></div></div>`);
       if (prices.count) items.push(`<div class="op-item"><div class="op-head"><strong>${prices.count} price list change${prices.count === 1 ? '' : 's'} to check</strong></div>
           <div class="op-meta">Big price moves, first-time matches and items that look replaced.</div>
           <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/price-lists.html">Open Price lists</a></div></div>`);
