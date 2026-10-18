@@ -320,7 +320,8 @@ async function analyse(supabaseAdmin, row, { supplierId = null } = {}) {
     reason = `Bill ${ex.bill_number} from ${supplierMatch.supplier.name} was emailed twice; the other copy is waiting to be checked`;
   } else if (docType !== 'invoice') {
     confidence = 'guess';
-    reason = `This looks like a ${docType.replace('_', ' ')}, not a bill. ${po.reason}`;
+    const looksLike = { credit_note: 'a credit note', statement: 'a statement' }[docType] || 'something other than a bill (price list, quote, remittance or similar)';
+    reason = `This looks like ${looksLike}, not a bill. ${po.reason}`;
   } else if (!sid) {
     confidence = po.confidence === 'none' ? 'none' : 'guess';
     reason = `Supplier "${ex.supplier || 'unknown'}" not recognised. ${po.reason}`;
