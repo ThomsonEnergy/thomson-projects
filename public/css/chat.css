@@ -55,7 +55,7 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 .ch-more-older button { font-size: 12px; padding: 4px 12px; }
 
 .cm { display: flex; gap: 10px; padding: 4px 14px 4px 14px; position: relative; }
-.cm:hover { background: var(--surface); }
+@media (hover: hover) { .cm:hover { background: var(--surface); } }
 .cm.flash { animation: cm-flash 2s ease; }
 @keyframes cm-flash { 0%, 40% { background: var(--accent-dim); } 100% { background: transparent; } }
 .cm .cm-av { width: 36px; flex: none; }
@@ -104,7 +104,8 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 .cc-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-x { background: none !important; border: none !important; color: var(--muted) !important; padding: 0 2px !important; font-size: 15px !important; }
 .cc-row { display: flex; gap: 6px; align-items: flex-end; }
-.cc-row textarea { flex: 1; min-height: 40px; max-height: 160px; resize: none; padding: 9px 12px; border-radius: 20px; line-height: 1.4; }
+.cc-row textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-row textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 160px; resize: none; padding: 9px 12px; border-radius: 20px; line-height: 1.4; }
 .cc-icon { background: none !important; border: none !important; color: var(--muted) !important; font-size: 21px !important; padding: 6px 6px !important; flex: none; }
 .cc-icon.on { color: #e5484d !important; }
 .cc-send { border-radius: 20px; padding: 9px 16px; flex: none; }
@@ -141,6 +142,9 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
   .chat-app.show-thread .ch-thread { display: flex; border-left: none; }
   .ch-back { display: inline-flex; }
   .cm-imgs img { width: 120px; height: 120px; }
+  .cc-row { gap: 2px; }
+  .cc-icon { font-size: 19px !important; padding: 6px 4px !important; }
+  .cc-send { padding: 9px 12px; }
 }
 @media (min-width: 701px) and (max-width: 1100px) {
   .chat-app.thread-open { grid-template-columns: 260px minmax(0, 1fr) 320px; }
