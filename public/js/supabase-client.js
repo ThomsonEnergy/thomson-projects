@@ -1806,6 +1806,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'tasks', label: 'Tasks', href: '/tasks.html', icon: '&#9989;' },
   { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;' },
   { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;' },
+  { key: 'supplier-bills', label: 'Emailed bills', href: '/supplier-bills.html', icon: '&#129534;', pricingOnly: true },
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;' },
   { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;' },
   { key: 'reviews', label: 'Reviews', href: '/reviews.html', icon: '&#11088;' },
@@ -1975,7 +1976,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=4';
+  s.src = '/js/notifications.js?v=5';
   document.head.appendChild(s);
 }
 
@@ -4454,7 +4455,9 @@ function wireUploadInvoiceButton(btnEl, msgEl) {
 // confirms a match, lets the person pick manually, or creates a brand
 // new supplier automatically, then hands off to that supplier's own page
 // with the extraction already done (no re-uploading, no re-running AI).
-async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload, file) {
+// extra: more fields for the supplier page, e.g. { inboxItemId } when the file came from
+// the Emailed bills page, so saving it there also ticks it off that list.
+async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload, file, extra = {}) {
   const matchFields = {
     name: extracted.supplier || extracted, // bills/statements pass the object, pricelist passes just the name string
     ourAccountNumber: extracted.our_account_number,
@@ -4474,7 +4477,7 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
 
   function proceedTo(supplierId) {
     sessionStorage.setItem('pending_upload', JSON.stringify({
-      type: uploadType, extracted: extractedPayload, fileBase64, fileName: file.name, fileType: file.type,
+      ...extra, type: uploadType, extracted: extractedPayload, fileBase64, fileName: file.name, fileType: file.type,
     }));
     window.location.href = `/supplier-detail.html?id=${supplierId}&resume_upload=1`;
   }

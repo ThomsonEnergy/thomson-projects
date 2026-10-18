@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Emailed bills - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=16" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .sb-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+  .sb-filters button { font-size:13px; padding:6px 14px; border-radius:20px; }
+  .sb-filters button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .sb-item { padding:14px 0; border-top:1px solid var(--border); }
+  .sb-item:first-child { border-top:none; }
+  .sb-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline; }
+  .sb-title { font-weight:600; }
+  .sb-total { font-weight:600; white-space:nowrap; }
+  .sb-meta { font-size:12px; color:var(--muted); margin-top:4px; word-wrap:break-word; }
+  .sb-reason { font-size:13px; margin-top:8px; }
+  .sb-reason.confident { color:var(--green); }
+  .sb-reason.guess { color:#d08a00; }
+  .sb-reason.none, .sb-reason.bad { color:var(--red, #c0392b); }
+  .sb-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  .sb-row select { flex:1 1 260px; min-width:0; margin:0; }
+  .sb-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .sb-actions button { font-size:13px; padding:6px 12px; }
+  .sb-chip { font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
+  .sb-lines { font-size:12px; color:var(--muted); margin-top:6px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Emailed bills</h1>
+    <p class="subtitle">Bills suppliers send to invoice@thomsonenergy.com.au. TEops reads each one, works out the supplier and the PO, and lists it here to check. Nothing is approved for payment or sent to Xero from here.</p>
+
+    <div class="card">
+      <div class="sb-filters" id="sb-filters">
+        <button type="button" class="secondary active" data-f="check">To check</button>
+        <button type="button" class="secondary" data-f="waiting">Being read</button>
+        <button type="button" class="secondary" data-f="saved">Saved</button>
+        <button type="button" class="secondary" data-f="aside">Put aside</button>
+        <button type="button" class="secondary" data-f="all">All</button>
+      </div>
+      <div id="sb-list"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=76"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    const FILTERS = {
+      check: ['to_check', 'failed'],
+      waiting: ['pending', 'processing'],
+      saved: ['saved'],
+      aside: ['duplicate', 'not_a_bill'],
+      all: null,
+    };
+    const STATUS_TEXT = { pending: 'Waiting to be read', processing: 'Being read', to_check: 'To check', failed: 'Could not be read', saved: 'Saved', duplicate: 'Duplicate', not_a_bill: 'Not a bill' };
+    let all = [], filter = 'check', suppliers = [], openPOs = [];
+    const esc = (s) => escapeHtml(s == null ? '' : String(s));
+    const dateText = (iso) => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
+    async function callInbox(body) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/supplier-bill-inbox', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+      return data;
+    }
+
+    function poOptions(item) {
+      const cands = item.po_candidates || [];
+      const candIds = new Set(cands.map(c => c.po_id));
+      const others = openPOs.filter(po => po.supplier_id === item.supplier_id && !candIds.has(po.id));
+      const picked = item.po_id || '';
+      return `<option value="">No PO for this bill</option>`
+        + (cands.length ? `<optgroup label="Suggested">${cands.map(c => `<option value="${c.po_id}" ${c.po_id === picked ? 'selected' : ''}>${esc(c.label)} (${esc(c.reason)})</option>`).join('')}</optgroup>` : '')
+        + (others.length ? `<optgroup label="Other open POs for this supplier">${others.map(po => `<option value="${po.id}">${esc(poRef(po))}</option>`).join('')}</optgroup>` : '');
+    }
+    function poRef(po) {
+      const p = po.projects;
+      return `${po.po_number || 'PO'} - ${p ? projectRef(p) : 'Stock'}${po.description ? ' - ' + po.description : ''}`;
+    }
+
+    function itemHtml(item) {
+      const ex = item.extracted || {};
+      const supplier = suppliers.find(s => s.id === item.supplier_id);
+      const title = supplier ? supplier.name : (ex.supplier ? `${ex.supplier} (not recognised)` : (item.email_from || 'Unknown sender'));
+      const reasonClass = item.status === 'failed' ? 'bad' : (item.match_confidence || 'none');
+      const lines = (ex.line_items || []);
+      let body = '';
+
+      // supplier not recognised but our PO number is on the bill: offer that PO's supplier
+      const guessSupplierId = ((item.po_candidates || [])[0] || {}).supplier_id || '';
+
+      if (item.status === 'to_check') {
+        const readable = item.attachment_part_id !== 'none' && item.extracted && ex.bill_number !== undefined;
+        body += !supplier && readable ? `
+          <div class="sb-row">
+            <select class="sb-supplier"><option value="">Pick the supplier...</option>${suppliers.map(s => `<option value="${s.id}" ${s.id === guessSupplierId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+            <button type="button" class="secondary sb-set-supplier">Use this supplier</button>
+          </div>` : '';
+        body += supplier && readable ? `<div class="sb-row"><select class="sb-po">${poOptions(item)}</select></div>` : '';
+        body += `<div class="sb-actions">
+            ${supplier && readable ? `<button type="button" class="sb-save">Save bill</button>` : ''}
+            ${readable ? `<button type="button" class="secondary sb-review">Review in full</button>` : ''}
+            ${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}
+            <button type="button" class="secondary sb-not-bill">Not a bill</button>
+          </div>
+          ${supplier && readable ? `<div class="sb-meta">Save bill links it to the PO and leaves stock and material prices as they are. Review in full opens the usual review screen to update those too.</div>` : ''}`;
+      } else if (item.status === 'failed') {
+        body += `<div class="sb-actions"><button type="button" class="sb-retry">Try again</button>${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}<button type="button" class="secondary sb-not-bill">Not a bill</button></div>`;
+      } else if (item.status === 'saved') {
+        const po = item.po_id ? (openPOs.find(p => p.id === item.po_id) || (item.po_candidates || []).find(c => c.po_id === item.po_id)) : null;
+        body += `<div class="sb-actions">${item.supplier_id ? `<a class="btn secondary" style="display:inline-flex;" href="/supplier-detail.html?id=${item.supplier_id}">Open supplier</a>` : ''}${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}</div>
+          <div class="sb-meta">Saved ${dateText(item.resolved_at)}${po ? ' against ' + esc(po.po_number) : ' with no PO'}${item.resolved_by ? '' : ' automatically'}.</div>`;
+      } else if (item.status === 'duplicate' || item.status === 'not_a_bill') {
+        body += `<div class="sb-actions">${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}<button type="button" class="secondary sb-reopen">${item.status === 'duplicate' ? 'Not a duplicate' : 'It is a bill'}</button></div>`;
+      }
+
+      return `<div class="sb-item" data-id="${item.id}">
+        <div class="sb-head">
+          <div><span class="sb-title">${esc(title)}</span> ${ex.bill_number ? `<span class="subtitle" style="margin:0;">Bill ${esc(ex.bill_number)}</span>` : ''} <span class="sb-chip">${STATUS_TEXT[item.status] || item.status}</span></div>
+          ${ex.total != null ? `<div class="sb-total">${money(ex.total)}</div>` : ''}
+        </div>
+        <div class="sb-meta">${ex.bill_date ? 'Dated ' + dateText(ex.bill_date) + ' · ' : ''}${ex.our_order_reference ? 'Our ref on bill: ' + esc(ex.our_order_reference) + ' · ' : ''}Emailed ${dateText(item.received_at || item.created_at)} by ${esc(item.email_from || 'unknown')}${item.file_name ? ' · ' + esc(item.file_name) : ''}</div>
+        ${item.email_subject ? `<div class="sb-meta">Subject: ${esc(item.email_subject)}</div>` : ''}
+        ${lines.length ? `<div class="sb-lines">${lines.length} line${lines.length === 1 ? '' : 's'}: ${esc(lines.slice(0, 3).map(l => l.description).join('; '))}${lines.length > 3 ? '...' : ''}</div>` : ''}
+        ${item.match_reason ? `<div class="sb-reason ${reasonClass}">${esc(item.match_reason)}</div>` : ''}
+        ${item.status === 'failed' && item.error ? `<div class="sb-reason bad">${esc(item.error)}</div>` : ''}
+        ${body}
+        <div class="sb-msg"></div>
+      </div>`;
+    }
+
+    function render() {
+      const statuses = FILTERS[filter];
+      const rows = statuses ? all.filter(i => statuses.includes(i.status)) : all;
+      const counts = {};
+      Object.entries(FILTERS).forEach(([k, st]) => { counts[k] = st ? all.filter(i => st.includes(i.status)).length : all.length; });
+      document.querySelectorAll('#sb-filters button').forEach(b => {
+        const label = b.textContent.replace(/ \(\d+\)$/, '');
+        b.textContent = counts[b.dataset.f] && b.dataset.f !== 'all' ? `${label} (${counts[b.dataset.f]})` : label;
+      });
+      const listEl = document.getElementById('sb-list');
+      if (!rows.length) {
+        listEl.innerHTML = `<p class="subtitle">${filter === 'check' ? 'Nothing to check. New bills emailed to invoice@ show up here within about 5 minutes.' : 'Nothing here.'}</p>`;
+        return;
+      }
+      listEl.innerHTML = rows.map(itemHtml).join('');
+      listEl.querySelectorAll('.sb-item').forEach(el => wire(el, all.find(i => i.id === el.dataset.id)));
+    }
+
+    function wire(el, item) {
+      const msg = el.querySelector('.sb-msg');
+      const showErr = (err) => { msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; };
+      const run = async (btn, body, busyText) => {
+        const text = btn.textContent;
+        btn.disabled = true; btn.textContent = busyText;
+        try { await callInbox(body); await load(); } catch (err) { showErr(err); btn.disabled = false; btn.textContent = text; }
+      };
+
+      el.querySelector('.sb-open')?.addEventListener('click', async () => {
+        const win = window.open('', '_blank');
+        try { const url = await getSignedDocUrl(item.file_path); if (win) win.location = url; else window.location = url; }
+        catch (err) { if (win) win.close(); showErr(err); }
+      });
+      el.querySelector('.sb-set-supplier')?.addEventListener('click', (e) => {
+        const supplierId = el.querySelector('.sb-supplier').value;
+        if (!supplierId) { showErr(new Error('Pick the supplier first.')); return; }
+        run(e.target, { action: 'set_supplier', id: item.id, supplier_id: supplierId }, 'Matching...');
+      });
+      el.querySelector('.sb-save')?.addEventListener('click', (e) => {
+        const poId = el.querySelector('.sb-po')?.value || null;
+        if (!poId && !confirm('Save this bill with no PO?')) return;
+        run(e.target, { action: 'save', id: item.id, po_id: poId }, 'Saving...');
+      });
+      el.querySelector('.sb-not-bill')?.addEventListener('click', (e) => run(e.target, { action: 'not_a_bill', id: item.id }, 'Putting aside...'));
+      el.querySelector('.sb-reopen')?.addEventListener('click', (e) => run(e.target, { action: 'reopen', id: item.id }, 'Moving...'));
+      el.querySelector('.sb-retry')?.addEventListener('click', (e) => run(e.target, { action: 'retry', id: item.id }, 'Starting...'));
+
+      // Opens the usual review screen on the supplier's page (stock, material prices, new PO),
+      // with the file and what was read already filled in.
+      el.querySelector('.sb-review')?.addEventListener('click', async (e) => {
+        const btn = e.target;
+        btn.disabled = true; btn.textContent = 'Opening...';
+        try {
+          if (!item.file_path) throw new Error('The file has not been saved yet.');
+          const url = await getSignedDocUrl(item.file_path);
+          const blob = await (await fetch(url)).blob();
+          const file = new File([blob], item.file_name || 'bill.pdf', { type: item.mime_type || blob.type || 'application/pdf' });
+          const extra = { inboxItemId: item.id };
+          if (item.supplier_id) {
+            const poId = el.querySelector('.sb-po')?.value || null;
+            sessionStorage.setItem('pending_upload', JSON.stringify({
+              ...extra, type: 'bill', extracted: item.extracted, fileBase64: await fileToBase64(file), fileName: file.name, fileType: file.type, preselectedPoId: poId,
+            }));
+            window.location.href = `/supplier-detail.html?id=${item.supplier_id}&resume_upload=1`;
+          } else {
+            btn.disabled = false; btn.textContent = 'Review in full';
+            await resolveSupplierAndHandoff(item.extracted, 'bill', item.extracted, file, extra);
+          }
+        } catch (err) { showErr(err); btn.disabled = false; btn.textContent = 'Review in full'; }
+      });
+    }
+
+    async function load() {
+      const [inbox, sup, pos] = await Promise.all([
+        supabaseClient.from('supplier_bill_inbox').select('*').order('created_at', { ascending: false }).limit(300),
+        supabaseClient.from('suppliers').select('id, name').order('name'),
+        supabaseClient.from('purchase_orders').select('id, po_number, description, supplier_id, status, projects(name, job_number, quote_number)').not('status', 'in', '(paid,invoiced)').order('created_at', { ascending: false }),
+      ]);
+      if (inbox.error) { document.getElementById('sb-list').innerHTML = `<div class="error-box">${esc(inbox.error.message)}</div>`; return; }
+      all = inbox.data || []; suppliers = sup.data || []; openPOs = pos.data || [];
+      render();
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('supplier-bills');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      if (!isPricingRole(await getMyRole())) {
+        document.getElementById('sb-list').innerHTML = `<div class="error-box">Emailed bills are for Admin, Finance and Sales.</div>`;
+        return;
+      }
+      document.querySelectorAll('#sb-filters button').forEach(b => b.addEventListener('click', () => {
+        filter = b.dataset.f;
+        document.querySelectorAll('#sb-filters button').forEach(x => x.classList.toggle('active', x === b));
+        render();
+      }));
+      await load();
+      // bills being read move to To check on their own
+      setInterval(() => { if (all.some(i => i.status === 'pending' || i.status === 'processing')) load(); }, 20000);
+    })();
+  </script>
+</body>
+</html>

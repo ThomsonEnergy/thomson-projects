@@ -141,6 +141,15 @@ Manual steps only a person can do (the code is live):
 ### A11. Supplier invoice upload (AI extraction)
 - Supplier, our account number, ABN, contacts, bank/BPAY, order reference and lines. Supplier matching: account number > ABN > bank details > fuzzy name; auto-creates new suppliers. Bills can be approved for payment.
 
+### A11a. Emailed supplier bills (invoice@, AI agent)
+- Suppliers email bills to invoice@thomsonenergy.com.au, a Google Group that delivers to sales@. Gmail filter on sales@: skip the inbox, label `Supplier Bills`, never spam. Only supplier bills go to invoice@.
+- The Gmail sync flags those conversations (`email_threads.is_supplier_bill`): hidden from the Sales tab, no "New email" notification. It starts `process-supplier-bills-background` when a bill arrives, while any are waiting, and hourly. That function also searches the label for the last 30 days, so nothing is missed.
+- One `supplier_bill_inbox` row per PDF or photo (migration 20261019000000). The file is saved to `project-documents/bills/emailed/`, read with the same AI reader as A11 (`_shared/supplier-invoice-ai.js`, now also returns `document_type`), supplier matched the A11 way, duplicates caught (same supplier + bill number, saved or waiting).
+- PO matching (`_shared/supplier-bill-intake.js`): our PO number on the bill or in the email (confident only when that PO is this supplier's), then same-supplier open PO with the total within $1, then line descriptions, then the supplier's other open POs. Job and quote numbers (J2014, Job 2014) are never read as PO numbers. Top 3 kept as suggestions.
+- **Emailed bills page** (`supplier-bills.html`, Admin/Finance/Sales): To check, Being read, Saved, Put aside. Per bill: pick supplier if not recognised, pick PO (suggestions first), **Save bill** (one tap, links lines to PO lines and flags extras/price rises like A11, leaves stock and material prices alone), **Review in full** (the A11 review screen with the file and reading filled in), Not a bill, Try again.
+- Push notification `supplier_bill` to Admin and Finance when one needs checking (per-person switch on the bell).
+- Auto-save is **off** (suggest only). With `api_keys` row `supplier_bill_auto_save` = `on`, confident matches are saved against the PO without a person. Never approves for payment, never touches Xero, stock or material prices.
+
 ### A12. Stock locations
 - Warehouse plus each `holds_stock` vehicle as separate rows; `materials.quantity_on_hand` is a trigger-kept total. Stock page: total cost, minimums, location breakdown, "Suggest restock PO". Vehicle stock pages.
 
@@ -244,7 +253,7 @@ Manual steps only a person can do (the code is live):
 |---|---|
 | send-notifications | every minute |
 | warm-pdf | every 4 minutes |
-| sync-gmail | every 5 minutes |
+| sync-gmail | every 5 minutes (also starts process-supplier-bills-background, A11a) |
 | archive-completed-jobs | daily |
 | sync-overheads-nightly | daily |
 

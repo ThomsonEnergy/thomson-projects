@@ -1,5 +1,6 @@
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { gmailRequest } = require('./_shared/google-client');
+const { findPart } = require('./_shared/supplier-bill-intake');
 
 // POST { email_id, part_id } - returns one attachment (or inline image) of an email in
 // the shared inbox as base64, fetched from Gmail on demand. Signed-in staff only.
@@ -8,16 +9,6 @@ const { gmailRequest } = require('./_shared/google-client');
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
-
-function findPart(payload, partId) {
-  if (!payload) return null;
-  if ((payload.partId || null) === partId && (payload.body?.attachmentId || payload.body?.data)) return payload;
-  for (const p of payload.parts || []) {
-    const hit = findPart(p, partId);
-    if (hit) return hit;
-  }
-  return null;
-}
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
