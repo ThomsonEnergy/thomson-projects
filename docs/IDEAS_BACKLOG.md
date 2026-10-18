@@ -16,6 +16,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
 | 8 | invoice@ supplier bill intake agent | Live 18 Oct 2026, suggest-only for 2 weeks | N | Owner checks matches, then auto-save on |
+| 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 
 ## High lead time, start now
 
@@ -329,3 +330,39 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 - Price lists emailed to sales@ or invoice@ built 18 Oct 2026 (spec A11b): auto-update under 20% on known parts, the rest waits.
 - Bill checks against POs, supplier queries from invoice@ and statement reconciliation built 18 Oct 2026 (spec A11c).
 - Later: credit notes emailed to invoice@ (matched against queried bills) (today they land in To check as "not a bill"), add to stock from an emailed bill, Xero bill push.
+
+---
+
+## 9. Staff policy set (gaps and fixes)
+
+Reviewed 18 Oct 2026 against `policies and Contracts/`. Have: Code of Conduct, Company Property, Staff Training and Development (all dated 28.10.2024), Surveillance Notice, AI consent, Location consent (drafts), Short Form Employment Contract.
+
+**Missing but the contract already binds staff to them (clause "The Employer's policies", Vehicle and Tools clauses):**
+- Tool Policy (what hand tools staff supply, test and tag, lost or stolen tools, tools register in item 1).
+- Vehicle Incident Policy (accident steps, photos, police, insurance, who pays excess, fines and nominations).
+- Disciplinary procedure (Code of Conduct section 5 refers to it): warnings, show cause, support person, procedural fairness.
+
+**Missing, high priority (safety and legal duties):**
+- WHS policy plus SWMS for high-risk work: roofs and heights, live or near-live electrical (isolation, lockout, test before touch), asbestos in old switchboards, heat, manual handling, incident and near-miss reporting.
+- Drug and alcohol policy (driving, roofs, electrical work), including whether testing is done.
+- Bullying, harassment, sexual harassment and discrimination policy, with how to complain (employers have a positive duty to prevent sexual harassment, and psychosocial hazards are a WHS duty).
+
+**Missing, should have:**
+- Licences and accreditations: keep electrical licence, CEC accreditation, white card and driver's licence current, upload expiry dates to TEops, report any suspension straight away.
+- Leave, sick days and timesheets: how to request leave, call (not text) before start if sick, evidence, clock in and out in TEops, overtime approval.
+- After-hours contact (right to disconnect, applies to small business since 26 Aug 2025): chat and push outside hours, on-call.
+- Phones, IT, social media and customer privacy: no posting customer homes or details, passwords and phone lock, lost phone steps.
+- Expenses and fuel card: receipts into TEops, what can be bought, personal use.
+- Customer site conduct (could go in the Code): arrival, shoe covers, clean up, no cash, pets and children, being alone with vulnerable customers.
+
+**Fixes to existing documents (for the adviser):**
+- 2024 policies say "Thomson Energy": change to Thomson Energy Australia Pty Ltd ACN 689 985 831, re-date, give version numbers.
+- Pay deductions (property, apparel, training repayment, insurance excess): Fair Work Act s324 needs written authorisation for a specific amount; a blanket policy line may not be enough.
+- Training repayment: limit to optional training above a set cost; not for training the role or law requires; per-course signed agreement.
+- Contract compliance clause names the Commonwealth WHS Act; staff in NSW fall under the NSW WHS Act 2011 and NSW Regulation. Also name NSW electrical licensing.
+- Property policy allows personal vehicle use with approval; contract says work use only. Pick one. Add whether vehicles go home overnight.
+- 24 month restraint ("do business with" any client): check enforceability and the planned federal limits on restraints.
+- Property policy covers contractors, but contractors are not employees: separate subcontractor terms if needed.
+
+**Delivery:** each policy goes into Settings > Onboarding as a versioned document (PROJECT_SPEC A26), so staff sign on login.
+
