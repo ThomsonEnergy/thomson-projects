@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 18 Oct 2026
+- ServiceM8 invoice PDFs now show on the job's Invoices tab ("From ServiceM8", reference only, no Xero), not Documents; 4515's 10 moved. (`docs/PROJECT_SPEC.md` A27)
 - ServiceM8 copy round 2: AVIF photos and videos into Photos, real dates and uploaders on photos and docs, checklist groups as tasks with subtasks. New: a Take photo button on every job task (photo goes to Photos captioned "#task ...", shown on the task). Migration 20261021010000. (`docs/PROJECT_SPEC.md` A27)
 - ServiceM8 videos failed on Supabase's 50 MB project-wide upload limit; owner to raise it to 500 MB in Storage > Settings, then re-run the copy. (`docs/PROJECT_SPEC.md` A27)
 - Fixed: ServiceM8 copy only read the main job (4515), not its lettered jobs (4515A-D) where the time, checklists and photos were. Now folded into the main job, run summary shows how many records ServiceM8 had. (`netlify/functions/_shared/sm8-labour.js`, `docs/PROJECT_SPEC.md` A27)
