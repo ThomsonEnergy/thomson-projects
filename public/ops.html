@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Ops manager - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=16" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .op-ask { display:flex; gap:8px; flex-wrap:wrap; }
+  .op-ask button { font-size:13px; padding:6px 12px; border-radius:20px; }
+  .op-item { padding:10px 0; border-top:1px solid var(--border); }
+  .op-item:first-child { border-top:none; }
+  .op-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline; }
+  .op-meta { font-size:12px; color:var(--muted); margin-top:3px; word-wrap:break-word; }
+  .op-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .op-actions button, .op-actions a { font-size:12px; padding:5px 10px; }
+  .op-pill { font-size:11px; padding:2px 8px; border-radius:10px; white-space:nowrap; border:1px solid var(--border); }
+  .op-pill.ok { color:var(--green); border-color:var(--green); }
+  .op-pill.bad { color:var(--red, #c0392b); border-color:var(--red, #c0392b); }
+  .op-pill.idle { color:var(--muted); }
+  .op-digest { white-space:pre-wrap; word-wrap:break-word; }
+  h2 { margin-top:0; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Ops manager</h1>
+    <p class="subtitle">The background workers report here. What needs you is at the top; the 5am digest is pushed to your phone. The manager can look things up and line up approvals, but cannot deploy, change permissions, move money, push to Xero or send email.</p>
+
+    <div class="card">
+      <h2>Ask the manager</h2>
+      <div class="op-ask">
+        <button type="button" class="secondary" data-q="What needs me right now? Most urgent first.">What needs me?</button>
+        <button type="button" class="secondary" data-q="Are all the background workers working? Anything failing?">Is everything working?</button>
+        <button type="button" class="secondary" data-q="What did the supplier bill reader do in the last 24 hours?">Bills in the last 24 hours</button>
+        <button type="button" class="secondary" data-q="Go through the emailed bills waiting to be checked and line up the ones where the PO match is confident, so I can confirm them.">Line up the sure bills</button>
+      </div>
+      <p class="subtitle" style="margin:8px 0 0;">Opens the assistant (bottom right). Anything it lines up still needs your Confirm.</p>
+    </div>
+
+    <div class="card">
+      <h2>Needs me</h2>
+      <div id="op-needs"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Latest digest</h2>
+      <div id="op-digest"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Workers</h2>
+      <div id="op-workers"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>What they did</h2>
+      <div id="op-runs"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=77"></script>
+  <script src="/js/theme.js"></script>
+  <script>
+    const esc = (s) => escapeHtml(s == null ? '' : String(s));
+    const when = (iso) => iso ? new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : 'never';
+    let labels = {};
+
+    function workerState(b) {
+      if (!b.last_ok_at) return b.last_error_at ? 'bad' : 'idle';
+      const late = Date.now() - new Date(b.last_ok_at).getTime() > 3 * b.expected_every_minutes * 60000;
+      return late ? 'bad' : 'ok';
+    }
+
+    async function load() {
+      const [bills, tasks, beats, runs, digest, sups] = await Promise.all([
+        supabaseClient.from('supplier_bill_inbox').select('id, status, extracted, supplier_id, match_reason, error, email_from, created_at').in('status', ['to_check', 'failed']).order('created_at').limit(50),
+        supabaseClient.from('agent_tasks').select('*').eq('status', 'open').order('created_at'),
+        supabaseClient.from('agent_heartbeats').select('*').order('label'),
+        supabaseClient.from('agent_runs').select('*').neq('agent', 'ops-digest').order('started_at', { ascending: false }).limit(40),
+        supabaseClient.from('agent_runs').select('*').eq('agent', 'ops-digest').order('started_at', { ascending: false }).limit(1),
+        supabaseClient.from('suppliers').select('id, name'),
+      ]);
+      const err = [bills, tasks, beats, runs, digest].find(r => r.error);
+      if (err) { document.getElementById('op-needs').innerHTML = `<div class="error-box">${esc(err.error.message)}</div>`; return; }
+      labels = Object.fromEntries((beats.data || []).map(b => [b.agent, b.label]));
+      const supplierName = Object.fromEntries((sups.data || []).map(s => [s.id, s.name]));
+
+      // Needs me
+      const items = [];
+      (tasks.data || []).forEach(t => items.push(`<div class="op-item" data-task="${t.id}">
+          <div class="op-head"><strong>${esc(t.title)}</strong><span class="op-pill bad">${esc(labels[t.agent] || t.agent)}</span></div>
+          ${t.body ? `<div class="op-meta">${esc(t.body)}</div>` : ''}<div class="op-meta">Since ${when(t.created_at)}</div>
+          <div class="op-actions"><button type="button" class="op-done">Done</button><button type="button" class="secondary op-dismiss">Dismiss</button></div></div>`));
+      (bills.data || []).forEach(b => {
+        const ex = b.extracted || {};
+        const who = supplierName[b.supplier_id] || ex.supplier || b.email_from || 'Unknown supplier';
+        items.push(`<div class="op-item">
+          <div class="op-head"><strong>${b.status === 'failed' ? 'Bill could not be read' : 'Emailed bill to check'}: ${esc(who)}${ex.bill_number ? ' ' + esc(ex.bill_number) : ''}</strong>${ex.total != null ? `<span>${money(ex.total)}</span>` : ''}</div>
+          <div class="op-meta">${esc(b.status === 'failed' ? (b.error || '') : (b.match_reason || ''))}</div>
+          <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/supplier-bills.html">Open Emailed bills</a></div></div>`);
+      });
+      const needsEl = document.getElementById('op-needs');
+      needsEl.innerHTML = items.length ? items.join('') : '<p class="subtitle">Nothing needs you.</p>';
+      needsEl.querySelectorAll('[data-task]').forEach(el => {
+        const close = async (status, btn) => {
+          btn.disabled = true;
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          const { error } = await supabaseClient.from('agent_tasks').update({ status, resolved_by: user.id, resolved_at: new Date().toISOString() }).eq('id', el.dataset.task);
+          if (error) { alert(error.message); btn.disabled = false; return; }
+          load();
+        };
+        el.querySelector('.op-done').addEventListener('click', (e) => close('done', e.target));
+        el.querySelector('.op-dismiss').addEventListener('click', (e) => close('dismissed', e.target));
+      });
+
+      // Digest
+      const d = (digest.data || [])[0];
+      document.getElementById('op-digest').innerHTML = d
+        ? `<div class="op-meta">${when(d.started_at)}</div><div class="op-digest" style="margin-top:6px;">${esc(d.summary)}</div>`
+        : '<p class="subtitle">The first digest arrives at 5am.</p>';
+
+      // Workers
+      const beatRows = beats.data || [];
+      const STATE_TEXT = { ok: 'Working', bad: 'Not working', idle: 'Not run yet' };
+      document.getElementById('op-workers').innerHTML = beatRows.length ? beatRows.map(b => {
+        const st = workerState(b);
+        return `<div class="op-item"><div class="op-head"><strong>${esc(b.label)}</strong><span class="op-pill ${st}">${STATE_TEXT[st]}</span></div>
+          <div class="op-meta">Last worked ${when(b.last_ok_at)}${b.last_error_at ? ` · last failed ${when(b.last_error_at)}: ${esc(b.last_error)}` : ''}</div></div>`;
+      }).join('') : '<p class="subtitle">No worker has reported yet. They start reporting within a few minutes of going live.</p>';
+
+      // Runs
+      const runRows = runs.data || [];
+      document.getElementById('op-runs').innerHTML = runRows.length ? runRows.map(r => `<div class="op-item">
+          <div class="op-head"><span><strong>${esc(labels[r.agent] || r.agent)}</strong> ${r.status === 'failed' ? '<span class="op-pill bad">Failed</span>' : ''}</span><span class="op-meta" style="margin:0;">${when(r.started_at)}</span></div>
+          <div class="op-meta">${esc(r.summary)}${r.input_tokens || r.output_tokens ? ` · AI ${(r.input_tokens + r.output_tokens).toLocaleString('en-AU')} tokens` : ''}</div></div>`).join('')
+        : '<p class="subtitle">Nothing yet.</p>';
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('ops');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      if ((await getMyRole()) !== 'admin') {
+        document.querySelector('.wrap').innerHTML = '<h1>Ops manager</h1><div class="error-box">The Ops manager is for admins.</div>';
+        return;
+      }
+      document.querySelectorAll('.op-ask button').forEach(b => b.addEventListener('click', () => {
+        if (window.askAssistant) window.askAssistant(b.dataset.q);
+        else alert('The assistant is still loading. Try again in a second.');
+      }));
+      await load();
+      setInterval(load, 60000);
+    })();
+  </script>
+</body>
+</html>

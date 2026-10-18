@@ -10,24 +10,22 @@
 // that, not gone, just out of the way of the day-to-day board.
 
 const { getAdminClient } = require('./_shared/require-admin');
+const { runAgent } = require('./_shared/agent-log');
 
-exports.handler = async () => {
-  try {
-    const supabaseAdmin = getAdminClient();
-    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+// Reports to the ops manager (_shared/agent-log.js).
+exports.handler = () => runAgent('archive-completed-jobs', async () => {
+  const supabaseAdmin = getAdminClient();
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data, error } = await supabaseAdmin
-      .from('projects')
-      .update({ pipeline_stage: 'archived' })
-      .eq('pipeline_stage', 'complete')
-      .lt('completed_at', twoDaysAgo)
-      .select('id');
-    if (error) throw error;
+  const { data, error } = await supabaseAdmin
+    .from('projects')
+    .update({ pipeline_stage: 'archived' })
+    .eq('pipeline_stage', 'complete')
+    .lt('completed_at', twoDaysAgo)
+    .select('id');
+  if (error) throw error;
 
-    console.log(`archive-completed-jobs: archived ${data?.length || 0} job(s) complete for over 2 days.`);
-    return { statusCode: 200, body: JSON.stringify({ ok: true, archived: data?.length || 0 }) };
-  } catch (err) {
-    console.error('archive-completed-jobs failed:', err.message);
-    return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
-  }
-};
+  const archived = data?.length || 0;
+  console.log(`archive-completed-jobs: archived ${archived} job(s) complete for over 2 days.`);
+  return { quiet: !archived, summary: `${archived} job${archived === 1 ? '' : 's'} archived`, response: { statusCode: 200, body: JSON.stringify({ ok: true, archived }) } };
+});
