@@ -499,7 +499,7 @@ async function openStaffEditor(userId, opts = {}) {
 }
 
 // Which version of each policy this person signed, and their AI and
-// location answers (migration 20261018000000). Empty if that migration
+// location answers (migration 20261018120000). Empty if that migration
 // isn't there or nothing applies.
 async function staffPolicyStatusHtml(userId) {
   const [{ data: docs }, { data: sigs }, { data: status }] = await Promise.all([

@@ -4,7 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 18 Oct 2026
 - Surveillance notice, AI consent and location consent drafted for adviser review; location stays in the notice now, location consent form waits for the iPhone app. (`policies and Contracts/`, `docs/IDEAS_BACKLOG.md` item 6)
-- Re-sign screen built: policy versions, I agree / I don't agree consent, Remind me later once per login or day, My Profile switches. Tested on staging, not yet on production. (`docs/PROJECT_SPEC.md` A26)
+- Re-sign screen built: policy versions, I agree / I don't agree consent, Remind me later once per login or day, My Profile switches. Live on production (migration 20261018120000, renumbered because 20261018000000 is push_ios_devices from the `feat/tego-ios-app` branch, applied to production but not yet on `main`). (`docs/PROJECT_SPEC.md` A26)
 - Twilio Business Profile and AU Mobile bundle approved; test number 0468 085 277 active. (`docs/EXTERNAL_ACCOUNTS.md`)
 - Rule added: every chat writes its notes back to the repo and gets them onto `main` the same session. (`CLAUDE.md`)
 - This log started. (`docs/DECISIONS.md`)

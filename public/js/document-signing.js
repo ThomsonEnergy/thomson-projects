@@ -4,7 +4,7 @@
 // signed, then bake it into a PDF. Consent documents (consent_type set)
 // also need an I agree / I don't agree answer; the answer is added to the
 // snapshot so the signed PDF shows it, and a database trigger applies it
-// to the person's consent (migration 20261018000000).
+// to the person's consent (migration 20261018120000).
 
 const CONSENT_ANSWER_TEXT = {
   agree: 'Answer: I agree',
