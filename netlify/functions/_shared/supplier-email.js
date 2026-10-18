@@ -6,6 +6,7 @@
 // bill or statement (query_gmail_thread_id). Nothing is ever sent without a person.
 
 const { gmailRequest } = require('./google-client');
+const { sharedMailboxId } = require('./mailboxes');
 const { buildMimeMessage } = require('./build-mime-message');
 const { INVOICE_ADDRESS } = require('./supplier-bill-intake');
 
@@ -65,7 +66,7 @@ async function send(admin, { kind, id, to, subject, body }) {
   const raw = buildMimeMessage({ fromName: FROM_NAME, fromAddress: INVOICE_ADDRESS, to, subject, bodyText: body, bodyHtml: null, attachments: [] });
   const sent = await gmailRequest('messages/send', { method: 'POST', body: { raw } });
   // keep the conversation with the bills, not in the Sales tab
-  await admin.from('email_threads').upsert({ gmail_thread_id: sent.threadId, subject, is_supplier_bill: true }, { onConflict: 'gmail_thread_id' });
+  await admin.from('email_threads').upsert({ mailbox_id: await sharedMailboxId(admin), gmail_thread_id: sent.threadId, subject, is_supplier_bill: true }, { onConflict: 'mailbox_id,gmail_thread_id' });
   const now = new Date().toISOString();
   if (kind === 'bill_query') {
     await admin.from('supplier_bills').update({ check_status: 'queried', query_sent_at: now, query_gmail_thread_id: sent.threadId, approved_for_payment: false }).eq('id', id);

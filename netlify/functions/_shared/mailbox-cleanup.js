@@ -208,7 +208,13 @@ async function unsubscribe(mailbox, row) {
 
 // Works through the archive / read / unsubscribe taps waiting for this mailbox.
 async function runQueuedActions(admin, mailbox, { startedAt, budgetMs }) {
-  if (!canMirror(mailbox)) return { done: 0 };
+  if (!canMirror(mailbox)) {
+    // no Gmail permission to change anything: drop what is waiting so the worker does not keep restarting
+    await admin.from('mailbox_cleanup_senders').update({ queued_action: null, done_action: 'error: connect this Gmail again to allow clean up' })
+      .eq('mailbox_id', mailbox.id).not('queued_action', 'is', null);
+    if (mailbox.cleanup_read_older_days) await admin.from('mailboxes').update({ cleanup_read_older_days: null }).eq('id', mailbox.id);
+    return { done: 0 };
+  }
   let done = 0;
   const { data: rows } = await admin.from('mailbox_cleanup_senders').select('*').eq('mailbox_id', mailbox.id).not('queued_action', 'is', null).limit(200);
   for (const row of (rows || [])) {

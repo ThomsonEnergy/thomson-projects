@@ -22,7 +22,7 @@ const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { startMailboxWork } = require('./_shared/gmail-sync');
 const {
-  mailboxById, canUseMailbox, threadForUser, archiveInGmail, markReadInGmail, labelInGmail,
+  mailboxById, canUseMailbox, canMirror, threadForUser, archiveInGmail, markReadInGmail, labelInGmail,
   renameGmailLabel, deleteGmailLabel, saveGmailDraft, deleteGmailDraft,
 } = require('./_shared/mailboxes');
 
@@ -62,6 +62,12 @@ exports.handler = async (event) => {
     const { data: draft } = await admin.from('email_drafts').select('*').eq('id', draftId).maybeSingle();
     if (!draft) throw new Refused('Draft not found.');
     return { draft, mailbox: await ownMailbox(draft.mailbox_id) };
+  };
+  // clean up changes Gmail itself, so it needs the gmail.modify permission
+  const cleanupMailbox = async (mailboxId) => {
+    const mb = await ownMailbox(mailboxId);
+    if (!canMirror(mb) || !mb.connected_at) throw new Refused(mb.kind === 'shared' ? 'Clean up needs sales@ connected again in Settings first.' : 'Connect your Gmail again to allow clean up.');
+    return mb;
   };
   const fromName = async () => (await admin.from('profiles').select('full_name').eq('id', userId).single()).data?.full_name || 'Thomson Energy';
 
@@ -214,7 +220,7 @@ exports.handler = async (event) => {
         return json(200, { ok: true });
       }
       case 'cleanup_scan': {
-        const mb = await ownMailbox(body.mailbox_id);
+        const mb = await cleanupMailbox(body.mailbox_id);
         await admin.from('mailbox_cleanup_senders').delete().eq('mailbox_id', mb.id);
         await admin.from('mailboxes').update({
           cleanup_started_at: new Date().toISOString(), cleanup_done_at: null, cleanup_page_token: null, cleanup_scanned: 0, cleanup_estimate: null,
@@ -223,7 +229,7 @@ exports.handler = async (event) => {
         return json(200, { ok: true });
       }
       case 'cleanup_queue': {
-        const mb = await ownMailbox(body.mailbox_id);
+        const mb = await cleanupMailbox(body.mailbox_id);
         const senders = (Array.isArray(body.senders) ? body.senders : []).map((s) => String(s).toLowerCase()).slice(0, 1000);
         if (!senders.length) throw new Refused('Pick at least one sender.');
         for (let i = 0; i < senders.length; i += 200) {
@@ -240,7 +246,7 @@ exports.handler = async (event) => {
         return json(200, { ok: true });
       }
       case 'cleanup_read_older': {
-        const mb = await ownMailbox(body.mailbox_id);
+        const mb = await cleanupMailbox(body.mailbox_id);
         const days = Math.max(1, Math.min(3650, parseInt(body.days, 10) || 30));
         await admin.from('mailboxes').update({ cleanup_read_older_days: days }).eq('id', mb.id);
         await startMailboxWork();
@@ -259,10 +265,18 @@ exports.handler = async (event) => {
           cleanup_started_at: null, cleanup_done_at: null, cleanup_page_token: null, cleanup_read_older_days: null,
         }).eq('id', mb.id);
         // private mail goes; conversations tagged to a job stay on the job (business records)
-        const { data: tagged } = await admin.from('email_job_links').select('thread_id, email_threads!inner(mailbox_id)').eq('email_threads.mailbox_id', mb.id);
-        const keep = new Set((tagged || []).map((l) => l.thread_id));
-        const { data: all } = await admin.from('email_threads').select('id').eq('mailbox_id', mb.id);
-        const drop = (all || []).map((t) => t.id).filter((id) => !keep.has(id));
+        const pageAll = async (make) => {
+          const out = [];
+          for (let from = 0; ; from += 1000) {
+            const { data } = await make().range(from, from + 999);
+            out.push(...(data || []));
+            if (!data || data.length < 1000) return out;
+          }
+        };
+        const tagged = await pageAll(() => admin.from('email_job_links').select('thread_id, email_threads!inner(mailbox_id)').eq('email_threads.mailbox_id', mb.id).order('id'));
+        const keep = new Set(tagged.map((l) => l.thread_id));
+        const all = await pageAll(() => admin.from('email_threads').select('id').eq('mailbox_id', mb.id).order('id'));
+        const drop = all.map((t) => t.id).filter((id) => !keep.has(id));
         for (let i = 0; i < drop.length; i += 200) await admin.from('email_threads').delete().in('id', drop.slice(i, i + 200));
         await admin.from('email_drafts').delete().eq('mailbox_id', mb.id);
         await admin.from('mailbox_cleanup_senders').delete().eq('mailbox_id', mb.id);

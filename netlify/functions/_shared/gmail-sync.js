@@ -107,8 +107,11 @@ async function findClientIdForAddress(supabaseAdmin, address) {
 // mailbox: a mailboxes row; without one it is sales@.
 async function processMessageId(supabaseAdmin, messageId, billLabelId, mailbox = null) {
   const personal = !!mailbox && mailbox.kind === 'personal';
-  const { data: alreadyHave } = await supabaseAdmin.from('emails').select('id').eq('gmail_message_id', messageId).maybeSingle();
-  if (alreadyHave) return {}; // already synced (includes ones we sent ourselves via send-gmail.js)
+  // Gmail ids are only unique within one mailbox
+  let haveQuery = supabaseAdmin.from('emails').select('id, email_threads!inner(mailbox_id)').eq('gmail_message_id', messageId);
+  if (mailbox) haveQuery = haveQuery.eq('email_threads.mailbox_id', mailbox.id);
+  const { data: alreadyHave } = await haveQuery.limit(1);
+  if (alreadyHave && alreadyHave.length) return {}; // already synced (includes ones we sent ourselves via send-gmail.js)
 
   const msg = await gmailRequest(`messages/${messageId}?format=full`, {}, mailbox);
   const labels = msg.labelIds || [];
@@ -223,6 +226,9 @@ async function syncPersonalMailbox(supabaseAdmin, mailbox, startedAt, budgetMs) 
     const history = page.history || [];
     const ids = [...new Set(history.flatMap((h) => (h.messagesAdded || []).map((m) => m.message.id)))];
     for (const id of ids) {
+      // out of time part way through a page: the starting point stays put and the next run
+      // does this page again (what is already saved is skipped quickly)
+      if (Date.now() - startedAt > budgetMs) return { synced, done: false, inbound };
       try {
         const seen = await processMessageId(supabaseAdmin, id, null, mailbox);
         if (seen.inbound) inbound += 1;
@@ -344,8 +350,9 @@ async function runSync({ budgetMs = 8000 } = {}) {
     }
   }
   // the email agent sorts new mail; personal first loads and clean ups carry on in the background
-  const { count: unsorted } = await supabaseAdmin.from('email_threads').select('id', { count: 'exact', head: true })
-    .is('triaged_at', null).eq('is_supplier_bill', false).gt('last_message_at', new Date(Date.now() - 60 * 86400000).toISOString());
+  const { count: unsorted } = await supabaseAdmin.from('email_threads').select('id, mailboxes!inner(connected_at)', { count: 'exact', head: true })
+    .is('triaged_at', null).eq('is_supplier_bill', false).not('mailboxes.connected_at', 'is', null)
+    .gt('last_message_at', new Date(Date.now() - 60 * 86400000).toISOString());
   const pendingWork = (personal || []).some((mb) => !mb.backfill_done_at || (mb.cleanup_started_at && !mb.cleanup_done_at) || mb.cleanup_read_older_days);
   if (inbound || unsorted || pendingWork) await startMailboxWork();
   // Supplier bills are read in the background (a PDF takes longer than this function gets).

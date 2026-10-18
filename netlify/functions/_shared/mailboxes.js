@@ -18,6 +18,13 @@ async function sharedMailbox(admin) {
   return data;
 }
 
+// sales@'s id, for code that only ever works on sales@ (bills, price lists, statements).
+let sharedIdCache = null;
+async function sharedMailboxId(admin) {
+  if (!sharedIdCache) sharedIdCache = (await sharedMailbox(admin))?.id || null;
+  return sharedIdCache;
+}
+
 async function connectedPersonalMailboxes(admin) {
   const { data } = await admin.from('mailboxes').select('*').eq('kind', 'personal').not('connected_at', 'is', null);
   return data || [];
@@ -133,7 +140,7 @@ async function deleteGmailDraft(mailbox, draft) {
 }
 
 module.exports = {
-  MODIFY_SCOPE, FORBIDDEN_PERSONAL, sharedMailbox, connectedPersonalMailboxes, mailboxById, canUseMailbox, threadForUser,
+  MODIFY_SCOPE, FORBIDDEN_PERSONAL, sharedMailbox, sharedMailboxId, connectedPersonalMailboxes, mailboxById, canUseMailbox, threadForUser,
   canMirror, archiveInGmail, markReadInGmail, ensureGmailLabel, labelInGmail, renameGmailLabel, deleteGmailLabel,
   saveGmailDraft, deleteGmailDraft,
 };

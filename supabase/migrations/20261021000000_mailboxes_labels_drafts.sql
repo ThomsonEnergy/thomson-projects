@@ -128,6 +128,33 @@ create trigger email_thread_default_mailbox
 
 alter table public.email_threads alter column mailbox_id set not null;
 
+-- A conversation never moves to another mailbox (that would make private mail shared).
+create or replace function public.trg_email_thread_keep_mailbox()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.mailbox_id is distinct from old.mailbox_id then
+    raise exception 'A conversation cannot move to another mailbox';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists email_thread_keep_mailbox on public.email_threads;
+create trigger email_thread_keep_mailbox
+  before update on public.email_threads
+  for each row execute function public.trg_email_thread_keep_mailbox();
+
+-- Gmail ids are only unique within one mailbox.
+alter table public.email_threads drop constraint if exists email_threads_gmail_thread_id_key;
+alter table public.email_threads drop constraint if exists email_threads_mailbox_gmail_thread_key;
+alter table public.email_threads add constraint email_threads_mailbox_gmail_thread_key unique (mailbox_id, gmail_thread_id);
+alter table public.emails drop constraint if exists emails_gmail_message_id_key;
+alter table public.emails drop constraint if exists emails_thread_gmail_message_key;
+alter table public.emails add constraint emails_thread_gmail_message_key unique (thread_id, gmail_message_id);
+create index if not exists emails_gmail_message_id_idx on public.emails (gmail_message_id);
+
 update public.email_threads t set last_direction = (
   select e.direction from public.emails e where e.thread_id = t.id order by e.sent_at desc nulls last limit 1
 ) where last_direction is null;
@@ -175,10 +202,8 @@ create policy "email_threads insert" on public.email_threads for insert to authe
   with check (mailbox_id in (select public.my_mailbox_ids()));
 drop policy if exists "email_threads update" on public.email_threads;
 create policy "email_threads update" on public.email_threads for update to authenticated
-  using (mailbox_id in (select public.my_mailbox_ids())
-         or exists (select 1 from public.email_job_links l where l.thread_id = email_threads.id))
-  with check (mailbox_id in (select public.my_mailbox_ids())
-         or exists (select 1 from public.email_job_links l where l.thread_id = email_threads.id));
+  using (mailbox_id in (select public.my_mailbox_ids()))
+  with check (mailbox_id in (select public.my_mailbox_ids()));
 drop policy if exists "email_threads delete" on public.email_threads;
 create policy "email_threads delete" on public.email_threads for delete to authenticated
   using (mailbox_id in (select public.my_mailbox_ids()));
@@ -192,7 +217,7 @@ create policy "emails insert" on public.emails for insert to authenticated
   with check (public.can_see_email_thread(thread_id));
 drop policy if exists "emails update" on public.emails;
 create policy "emails update" on public.emails for update to authenticated
-  using (public.can_see_email_thread(thread_id)) with check (true);
+  using (public.can_see_email_thread(thread_id)) with check (public.can_see_email_thread(thread_id));
 drop policy if exists "emails delete" on public.emails;
 create policy "emails delete" on public.emails for delete to authenticated
   using (public.can_see_email_thread(thread_id));
@@ -206,7 +231,7 @@ create policy "email_job_links insert" on public.email_job_links for insert to a
   with check (public.can_see_email_thread(thread_id));
 drop policy if exists "email_job_links update" on public.email_job_links;
 create policy "email_job_links update" on public.email_job_links for update to authenticated
-  using (public.can_see_email_thread(thread_id)) with check (true);
+  using (public.can_see_email_thread(thread_id)) with check (public.can_see_email_thread(thread_id));
 drop policy if exists "email_job_links delete" on public.email_job_links;
 create policy "email_job_links delete" on public.email_job_links for delete to authenticated
   using (public.can_see_email_thread(thread_id));
