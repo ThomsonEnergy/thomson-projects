@@ -16,6 +16,7 @@
 const fetch = require('node-fetch');
 const { getAdminClient } = require('./require-admin');
 const { gmailRequest } = require('./google-client');
+const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
 const { extractSupplierInvoiceWithUsage } = require('./supplier-invoice-ai');
 const { checkBillAndSiblings } = require('./bill-check');
@@ -114,9 +115,10 @@ async function enqueueNewBillEmails(supabaseAdmin, { extractAttachments, extract
   for (const id of ids.filter(i => !knownIds.has(i))) {
     const msg = await gmailRequest(`messages/${id}?format=full`);
     const headers = msg.payload?.headers;
-    const { data: email } = await supabaseAdmin.from('emails').select('id, thread_id').eq('gmail_message_id', id).maybeSingle();
+    const salesId = await sharedMailboxId(supabaseAdmin);
+    const { data: email } = await supabaseAdmin.from('emails').select('id, thread_id, email_threads!inner(mailbox_id)').eq('gmail_message_id', id).eq('email_threads.mailbox_id', salesId).maybeSingle();
     if (email) await supabaseAdmin.from('email_threads').update({ is_supplier_bill: true }).eq('id', email.thread_id);
-    else await supabaseAdmin.from('email_threads').update({ is_supplier_bill: true }).eq('gmail_thread_id', msg.threadId);
+    else await supabaseAdmin.from('email_threads').update({ is_supplier_bill: true }).eq('mailbox_id', salesId).eq('gmail_thread_id', msg.threadId);
 
     const dateHeader = headerValue(headers, 'Date');
     const base = {

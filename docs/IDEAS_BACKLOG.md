@@ -12,7 +12,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 2 | Voice messages in team chat + Siri Shortcut | Voice messages built with team chat (PROJECT_SPEC A19a), Siri not started | N | Personal tokens for the Siri Shortcut |
 | 3 | Native iPhone app (TEgo, Capacitor) | Stage 1 built, waiting on Apple | Y | Apple Developer enrolment approval, then `docs/IOS_APP.md` setup; offline sync design for stage 2 |
 | 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
-| 5 | Per-user inboxes with job tagging | Partly built, layout plan waiting on yes | N | Per-user Gmail OAuth, tagger agent, staff notice |
+| 5 | Per-user inboxes with job tagging | Built 18 Oct 2026 (spec A18), on staging | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
 | 8 | invoice@ supplier bill intake agent | Live 18 Oct 2026, suggest-only for 2 weeks | N | Owner checks matches, then auto-save on |
@@ -206,9 +206,10 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 
 **Dependencies:** per-user Gmail scopes on the internal OAuth app; refactor `inbox.html` into a shared component; tagger agent; staff notice before AI reading.
 
-### Inbox layout plan (18 Oct 2026, waiting on owner's yes)
+### Inbox layout (built 18 Oct 2026, see spec A18)
 - Page renamed **Sales inbox**. Toggle at the top: **Sales inbox** (sales@, shared) | **My inbox** (logged-in user's Gmail). jasper@ connected first.
-- My inbox: connect from Settings with Google sign-in (same internal OAuth app, own refresh token per user, service-role only table). Private to that user; only threads tagged to a job show on the job.
+- My inbox: connect from Inbox > My inbox with Google sign-in (same internal OAuth app, own refresh token per user, service-role only table), open to all staff. Workplace Surveillance Act notice first: agree (waives the 14 days) connects now, don't agree locks Connect for 14 days. Private to that user; only threads tagged to a job show on the job.
+- Clean up for big old inboxes (owner has 23,613 unread): whole-inbox scan by sender, agent suggests archive / look / keep, one tap per sender. Full load of every old email was not done (slow and costly); 60 days are loaded in full.
 - Sections, sorted by the triage agent (Gmail category labels and unsubscribe headers first, AI for the rest): **Priority** (agent flagged "you need to reply", with a one-line reason), **Other**, **Subscriptions and updates** (newsletters, receipts, notifications, marketing; skim when free to check nothing was missed), **Sent**, **All**. One tap moves a thread to another section; "always do this for this sender" saves a sender rule.
 - Labels like Gmail: job threads keep job tagging (`email_job_links`); non-job matters get labels (for example "Supplier dispute: X", "Electrical licence application"). Labels sidebar with counts, open/done per label. Agent applies existing labels when sure, suggests new ones for a person to confirm. Sales inbox labels are team labels, My inbox labels are private.
 - Drafts: agent drafts replies for Priority threads. Draft shows inline at the bottom of its thread (edit, Send, Discard) and in a **Drafts** list in the top corner with a count. Nothing sends without a click.
@@ -216,7 +217,7 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 
 **Open questions**
 - [ ] Replies to tagged threads auto-tag to the same job? (probably yes)
-- [ ] User disconnects: tagged emails stay on the job? (probably yes, business records)
+- [x] User disconnects: tagged emails stay on the job, private ones are removed from TEops (built).
 - [ ] Director inbox: connect but exclude from auto-tagging?
 
 ---

@@ -20,6 +20,7 @@
 
 const { getAdminClient } = require('./require-admin');
 const { gmailRequest } = require('./google-client');
+const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
 const fetch = require('node-fetch');
 const { fuzzyMatchScore, matchSupplier, downloadAttachment } = require('./supplier-bill-intake');
@@ -87,7 +88,7 @@ async function enqueue(admin, { extractAttachments }) {
     const headers = msg.payload?.headers;
     const files = extractAttachments(msg.payload).filter(a => !a.inline && ['pdf', 'sheet'].includes(fileKind(a.name, a.mime)));
     if (!files.length) continue;
-    const { data: email } = await admin.from('emails').select('id').eq('gmail_message_id', id).maybeSingle();
+    const { data: email } = await admin.from('emails').select('id, email_threads!inner(mailbox_id)').eq('gmail_message_id', id).eq('email_threads.mailbox_id', await sharedMailboxId(admin)).maybeSingle();
     const date = headerValue(headers, 'Date');
     const rows = files.map(f => ({
       email_id: email?.id || null, gmail_message_id: id, attachment_part_id: String(f.part_id), file_name: f.name, mime_type: f.mime,

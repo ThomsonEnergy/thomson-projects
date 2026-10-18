@@ -49,7 +49,8 @@ Drafts, not sends, for the first few weeks. Later workers: payment reconciliatio
 - Agents tag emails to jobs (auto when sure, suggest when guessing, "tagged by Claude" with one-tap undo), summarise, and draft replies (in TEops and Gmail). Nothing sends without the user's click.
 - **Tagged threads show on the job for everyone. Untagged emails stay private** to that user.
 - Team questions about a job are answered from tagged emails, drafts and messages.
-- Only users with an AI start date are processed. Full detail: docs/IDEAS_BACKLOG.md item 5.
+- Built 18 Oct 2026 (spec A18): email agent sorts Priority / Other / Subscriptions and updates, applies labels, tags jobs, drafts Priority replies, suggests per-sender clean up. Haiku 5.5 sorts, Opus 5.5 drafts. Runs in `mailbox-work-background.js`, reports to the ops manager as "Email agent".
+- A personal mailbox is processed only once its owner connected it, after the Gmail notice (agree and waive the 14 days, or 14 days after the notice). Full detail: docs/IDEAS_BACKLOG.md item 5.
 
 ## Team chat (replaces WhatsApp entirely, including social chat)
 
