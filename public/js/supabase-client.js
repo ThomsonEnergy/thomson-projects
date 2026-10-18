@@ -829,6 +829,12 @@ async function uploadPhotos(fileList, folder, bucket = 'proposal-photos') {
 // it, and costs nothing extra to add since every photo in this app is
 // already a Supabase Storage public URL. Falls back to the original URL
 // untouched for anything that isn't (e.g. a blank/missing value).
+// Site photos can be videos (ServiceM8 brought some across): those play
+// in a <video> rather than going through the image tools.
+function isVideoUrl(url) {
+  return /\.(mp4|mov|m4v|webm)$/i.test(String(url || '').split('?')[0]);
+}
+
 function supaImageVariant(url, width = 1200, quality = 70) {
   if (!url || typeof url !== 'string') return url;
   const marker = '/storage/v1/object/public/';

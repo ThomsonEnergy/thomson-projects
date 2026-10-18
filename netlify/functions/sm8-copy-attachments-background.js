@@ -18,20 +18,24 @@ const fetch = require('node-fetch');
 const { requireAdmin } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { sm8GetAll, SM8_BASE } = require('./_shared/sm8-import');
-const { copyLabourAndChecklists, sm8JobGroups } = require('./_shared/sm8-labour');
+const { copyLabourAndChecklists, sm8JobGroups, sm8DateToIso } = require('./_shared/sm8-labour');
 
 // Stop picking up new files with time to spare before the 15 minute limit.
 const TIME_BUDGET_MS = 13 * 60 * 1000;
 const STALE_CLAIM_MS = 16 * 60 * 1000;
 
-// Formats the Photos tab can show; anything else (PDF, Word, HEIC...) goes
-// to Documents, where it can still be opened or downloaded.
-const PHOTO_EXT = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+// Formats the Photos tab can show (pictures, and videos, which it plays);
+// anything else (PDF, Word, HEIC...) goes to Documents, where it can still
+// be opened or downloaded. ServiceM8 saves most site photos as AVIF.
+const PHOTO_EXT = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif',
+  mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/mp4', webm: 'video/webm',
+};
 const DOC_MIME = {
   pdf: 'application/pdf', heic: 'image/heic', heif: 'image/heif', txt: 'text/plain', csv: 'text/csv',
   doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  mp4: 'video/mp4', mov: 'video/quicktime', dwg: 'application/acad', zip: 'application/zip',
+  dwg: 'application/acad', zip: 'application/zip',
 };
 
 function fileParts(att) {
@@ -47,12 +51,30 @@ function fileParts(att) {
 
 const safe = (s) => s.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
 
+// "Photo.avif" / "Video.mp4" are ServiceM8's default names: no caption
+// beats a caption that just says Photo.
+function captionOf(fileName) {
+  const base = String(fileName || '').replace(/\.[^.]+$/, '').trim();
+  return /^(photo|video|image)$/i.test(base) ? null : base || null;
+}
+
+// The real date and person behind a ServiceM8 file: when it was taken or
+// attached (timestamp, else the record's create date) and who added it
+// (created_by_staff_uuid, through the staff matches). Either can be missing.
+function attachmentMeta(att, profileByStaff) {
+  return {
+    createdAt: (att && (sm8DateToIso(att.timestamp) || sm8DateToIso(att.create_date) || sm8DateToIso(att.edit_date))) || null,
+    staffId: (att && profileByStaff.get(att.created_by_staff_uuid)) || null,
+  };
+}
+
 // groups: project id -> every ServiceM8 job uuid on it (main job plus its
 // lettered jobs, sm8JobGroups), so 4515A-D's files land on 4515.
+// Returns the imported jobs' ServiceM8 attachment records by uuid.
 async function queueAttachments(supabaseAdmin, apiKey, groups) {
   const projectByJob = new Map();
   for (const [projectId, uuids] of groups) uuids.forEach(u => projectByJob.set(u, projectId));
-  if (!projectByJob.size) return 0;
+  if (!projectByJob.size) return new Map();
 
   // One bulk call (ServiceM8's filter has no "in"), then keep only the
   // imported jobs' files.
@@ -70,12 +92,56 @@ async function queueAttachments(supabaseAdmin, apiKey, groups) {
       .upsert(rows.slice(i, i + 500), { onConflict: 'sm8_attachment_uuid', ignoreDuplicates: true });
     if (upErr) throw upErr;
   }
-  return rows.length;
+  return new Map(attachments.filter(a => projectByJob.has(a.related_object_uuid)).map(a => [a.uuid, a]));
+}
+
+// Files copied before photos took AVIF and video went into Documents: take
+// them out (row and stored file) and queue them again as photos.
+async function requeueNewPhotoTypes(supabaseAdmin) {
+  const { data: rows, error } = await supabaseAdmin.from('sm8_attachment_copies')
+    .select('id, file_name, project_document_id, project_documents(file_path)')
+    .eq('kind', 'document');
+  if (error) throw error;
+  let moved = 0;
+  for (const row of rows || []) {
+    if (fileParts({ attachment_name: row.file_name }).kind !== 'photo') continue;
+    if (row.project_documents?.file_path) await supabaseAdmin.storage.from('project-documents').remove([row.project_documents.file_path]);
+    if (row.project_document_id) await supabaseAdmin.from('project_documents').delete().eq('id', row.project_document_id);
+    const { error: upErr } = await supabaseAdmin.from('sm8_attachment_copies')
+      .update({ kind: 'photo', status: 'pending', project_document_id: null, error: null, meta_synced_at: null }).eq('id', row.id);
+    if (upErr) throw upErr;
+    moved++;
+  }
+  return moved;
+}
+
+// Files copied before the real date and uploader were carried across get
+// them now (from the attachment records just read), once each.
+async function syncCopiedMeta(supabaseAdmin, attachments, profileByStaff) {
+  const { data: rows, error } = await supabaseAdmin.from('sm8_attachment_copies')
+    .select('id, sm8_attachment_uuid, file_name, project_photo_id, project_document_id')
+    .eq('status', 'copied').is('meta_synced_at', null);
+  if (error) throw error;
+  for (const row of rows || []) {
+    const { createdAt, staffId } = attachmentMeta(attachments.get(row.sm8_attachment_uuid), profileByStaff);
+    if (row.project_photo_id) {
+      const fields = { caption: captionOf(row.file_name) };
+      if (createdAt) fields.created_at = createdAt;
+      if (staffId) fields.staff_id = staffId;
+      await supabaseAdmin.from('project_photos').update(fields).eq('id', row.project_photo_id);
+    } else if (row.project_document_id) {
+      const fields = {};
+      if (createdAt) fields.created_at = createdAt;
+      if (staffId) fields.uploaded_by = staffId;
+      if (Object.keys(fields).length) await supabaseAdmin.from('project_documents').update(fields).eq('id', row.project_document_id);
+    }
+    await supabaseAdmin.from('sm8_attachment_copies').update({ meta_synced_at: new Date().toISOString() }).eq('id', row.id);
+  }
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function copyOne(supabaseAdmin, apiKey, userId, row) {
+async function copyOne(supabaseAdmin, apiKey, userId, row, meta) {
   // ServiceM8 allows about 180 calls a minute. When it says slow down
   // (429), wait and try the same file again rather than failing it.
   let res;
@@ -99,7 +165,7 @@ async function copyOne(supabaseAdmin, apiKey, userId, row) {
     if (upErr) throw upErr;
     const { data: pub } = supabaseAdmin.storage.from('site-photos').getPublicUrl(path);
     const { data: photo, error: insErr } = await supabaseAdmin.from('project_photos')
-      .insert({ project_id: row.project_id, staff_id: userId, url: pub.publicUrl, caption: row.file_name.replace(/\.[^.]+$/, '') })
+      .insert({ project_id: row.project_id, staff_id: meta.staffId || userId, url: pub.publicUrl, caption: captionOf(row.file_name), ...(meta.createdAt ? { created_at: meta.createdAt } : {}) })
       .select('id').single();
     if (insErr) throw insErr;
     return { project_photo_id: photo.id };
@@ -109,7 +175,7 @@ async function copyOne(supabaseAdmin, apiKey, userId, row) {
   const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, bytes, { contentType: mime === 'application/octet-stream' ? contentType : mime, upsert: true });
   if (upErr) throw upErr;
   const { data: doc, error: insErr } = await supabaseAdmin.from('project_documents')
-    .insert({ project_id: row.project_id, folder: 'ServiceM8', file_path: path, file_name: row.file_name, mime_type: mime === 'application/octet-stream' ? contentType : mime, uploaded_by: userId })
+    .insert({ project_id: row.project_id, folder: 'ServiceM8', file_path: path, file_name: row.file_name, mime_type: mime === 'application/octet-stream' ? contentType : mime, uploaded_by: meta.staffId || userId, ...(meta.createdAt ? { created_at: meta.createdAt } : {}) })
     .select('id').single();
   if (insErr) throw insErr;
   return { project_document_id: doc.id };
@@ -148,8 +214,12 @@ exports.handler = async (event) => {
     // Each run retries the previous run's failures once.
     await supabaseAdmin.from('sm8_attachment_copies').update({ status: 'pending' }).eq('status', 'failed');
 
-    const queued = await queueAttachments(supabaseAdmin, apiKey, groups);
-    console.log(`sm8-copy-attachments: ${queued} attachments on imported jobs`);
+    const { data: linked } = await supabaseAdmin.from('profiles').select('id, sm8_staff_uuid').not('sm8_staff_uuid', 'is', null);
+    const profileByStaff = new Map((linked || []).map(p => [p.sm8_staff_uuid, p.id]));
+    const attachments = await queueAttachments(supabaseAdmin, apiKey, groups);
+    const moved = await requeueNewPhotoTypes(supabaseAdmin);
+    await syncCopiedMeta(supabaseAdmin, attachments, profileByStaff);
+    console.log(`sm8-copy-attachments: ${attachments.size} attachments on imported jobs, ${moved} moved from Documents to Photos`);
 
     let copied = 0, failed = 0;
     while (Date.now() - started < TIME_BUDGET_MS) {
@@ -173,9 +243,9 @@ exports.handler = async (event) => {
         // About two downloads a second keeps well under ServiceM8's limit.
         await sleep(450);
         try {
-          const links = await copyOne(supabaseAdmin, apiKey, user.id, row);
+          const links = await copyOne(supabaseAdmin, apiKey, user.id, row, attachmentMeta(attachments.get(row.sm8_attachment_uuid), profileByStaff));
           await supabaseAdmin.from('sm8_attachment_copies')
-            .update({ status: 'copied', error: null, copied_at: new Date().toISOString(), ...links }).eq('id', row.id);
+            .update({ status: 'copied', error: null, copied_at: new Date().toISOString(), meta_synced_at: new Date().toISOString(), ...links }).eq('id', row.id);
           copied++;
         } catch (err) {
           console.error('sm8-copy-attachments file error:', row.sm8_attachment_uuid, err.message);
