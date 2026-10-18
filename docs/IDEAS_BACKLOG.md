@@ -329,5 +329,6 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 - Never approves for payment or pushes to Xero; a person still approves.
 - Starts on staging, then read-only on production (suggest only) for 2 weeks before auto-linking.
 
-**Open questions:** which mailbox the alias sits on; which supplier is "Hola Supply"; whether statements and credit notes also come to invoice@.
+**Owner answers 18 Oct 2026:** only supplier bills come to invoice@ ("Hola Supply" was voice typing for "only supply"). invoice@ currently delivers to jasper@, accounts@ and jade@. Owner does not want sales@ cluttered; prefers TEops reads accounts@ if that avoids it.
 
+**Open questions:** is accounts@ a real mailbox (user with a seat) or a group/alias; if not a mailbox, use sales@ with a Gmail filter (skip inbox, label Bills) instead.
