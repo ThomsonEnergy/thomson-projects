@@ -22,7 +22,7 @@ Names only. Values never go in the repo, in chat, or in a commit.
 
 Integration credentials live in the database, not env vars, read through `getIntegrationKey()` (`netlify/functions/_shared/get-integration-key.js`). A `<NAME>_API_KEY` env var is only a fallback.
 
-Keys: `anthropic`, `assemblyai`, `abr_guid`, `servicem8`, `pylon`, `xero_client_id`, `xero_client_secret`, `xero_webhook_key`, `google_client_id`, `google_client_secret`, `google_refresh_token`, `google_history_id`, `google_oauth_pending_state`, `airwallex_api_key`, `airwallex_client_id`, `airwallex_webhook_secret`, `formbay`, `formbay_username`, `formbay_password`, `formbay_webhook_secret`, `vapid_public_key`, `vapid_private_key`.
+Keys: `anthropic`, `assemblyai`, `abr_guid`, `servicem8`, `pylon`, `xero_client_id`, `xero_client_secret`, `xero_webhook_key`, `google_client_id`, `google_client_secret`, `google_refresh_token`, `google_history_id`, `google_oauth_pending_state`, `airwallex_api_key`, `airwallex_client_id`, `airwallex_webhook_secret`, `formbay`, `formbay_username`, `formbay_password`, `formbay_webhook_secret`, `vapid_public_key`, `vapid_private_key`, `apns_key_id`, `apns_team_id`, `apns_private_key` (Apple push for the TEgo iPhone app, see `docs/IOS_APP.md`).
 
 The staging branch starts with an empty `api_keys` table, so Xero, Gmail, Airwallex, Formbay and push do nothing there. That is deliberate: staging can never email a customer or post to the live Xero. Add sandbox keys to staging only when testing that integration.
 
@@ -37,3 +37,14 @@ Future (not built): Twilio (`twilio_account_sid`, `twilio_auth_token`, `twilio_n
 | `SUPABASE_DB_PASSWORD` | Database password for the linked project |
 
 `scripts/cloud-setup.sh` uses all three to link the CLI. Without them it still installs everything and runs `npm run check`.
+
+## GitHub Actions secrets (TEgo iPhone app builds)
+
+Repository > Settings > Secrets and variables > Actions. Only needed for the "Upload to TestFlight" run of `.github/workflows/tego-ios.yml`; the normal compile check needs none.
+
+| Name | What it's for |
+|---|---|
+| `APPLE_TEAM_ID` | Apple Developer Team ID |
+| `ASC_KEY_ID` | App Store Connect API key ID (Admin access) |
+| `ASC_ISSUER_ID` | App Store Connect API Issuer ID |
+| `ASC_KEY_P8` | The whole App Store Connect API .p8 key text |

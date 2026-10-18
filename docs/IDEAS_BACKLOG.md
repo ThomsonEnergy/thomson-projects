@@ -10,7 +10,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 |---|------|--------|----------------|------------|
 | 1 | Payment reconciliation, receipts, tools register | Partly built | N | Airwallex read-only key, accountant sign-off |
 | 2 | Voice messages in team chat + Siri Shortcut | Not started | N | Team chat channels, tagger agent, policy sign-off (6) |
-| 3 | Native iPhone app (Capacitor) | Not started | Y | Apple Developer enrolment (submitted 17 Oct), offline sync design |
+| 3 | Native iPhone app (TEgo, Capacitor) | Stage 1 built, waiting on Apple | Y | Apple Developer enrolment approval, then `docs/IOS_APP.md` setup; offline sync design for stage 2 |
 | 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
@@ -98,7 +98,9 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 
 ## 3. Native iPhone app (Capacitor wrap)
 
-**Today:** TEops is a PWA: manifest, push-only `sw.js`, no offline caching. Web Push is LIVE.
+**Today:** stage 1 built 18 Oct 2026 as **TEgo** (`tego-app/`, bundle ID `au.com.thomsonenergy.app`): loads the live site, native Apple push, black icon, cloud builds on GitHub. Waiting on Apple to approve the Developer account before it can be signed and installed. Setup steps, how it works and known gaps: `docs/IOS_APP.md`. Browsers keep the PWA and web push.
+
+**Stage 1 decisions:** load the live site rather than bundling pages (one codebase, instant updates; bundle when offline mode is built); iPhone only, portrait; GitHub Actions on macOS for builds (free on this public repo), no Mac needed. Name TEgo can change any time; the bundle ID cannot.
 
 **Decision:** wrap the existing web app with Capacitor, no rewrite. iOS only (whole team on iPhone). Keep the web app Capacitor-ready.
 
@@ -127,8 +129,9 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 
 **Open questions**
 - [x] Organisation account (D-U-N-S 17 Oct 2026)
-- [ ] Cloud build service
-- [ ] Buy a Mac now or later
+- [x] Cloud build service: GitHub Actions (macOS runner)
+- [x] Buy a Mac now or later: later, only if debugging gets painful
+- [ ] Final app name (TEgo for now, can change any time)
 - [ ] Offline conflicts: last write wins, or flag for review?
 
 ---
