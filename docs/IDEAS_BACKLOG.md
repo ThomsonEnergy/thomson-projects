@@ -15,6 +15,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
+| 8 | invoice@ supplier bill intake agent | Planned, waiting on owner answers | N | invoice@ alias in Google Workspace, which mailbox it sits on |
 
 ## High lead time, start now
 
@@ -313,3 +314,20 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 - [ ] Ring the assigned job's crew first, then everyone?
 - [ ] One business number, or extra numbers?
 - [ ] SMS replies: shared thread, or owned by whoever last texted?
+
+## 8. invoice@ supplier bill intake agent
+
+**Goal:** suppliers email bills to invoice@thomsonenergy.com.au (a Google Workspace alias, not a mailbox). An agent pulls each bill out, reads it and attaches it to the right PO, so nobody uploads bills by hand.
+
+**Built today (reused):** sales@ Gmail sync (`_shared/gmail-sync.js`, every 5 min), supplier invoice extraction (`extract-supplier-invoice.js`), supplier matching (account number > ABN > bank > name), PO auto-match on the invoice's own order reference (`supplier-detail.html`), `supplier_bills` with `po_id`.
+
+**Plan (proposed 18 Oct 2026):**
+- Google: add invoice@ as an alias on sales@ (already connected to TEops), so no new OAuth or seat.
+- Scheduled function every 5 min: Gmail search `to:invoice@thomsonenergy.com.au has:attachment`, label processed mail `TEops/Bill processed`; invoice@ mail is hidden from the Sales inbox tab.
+- Per PDF/image: extract (same prompt as A11), match supplier, de-duplicate on supplier + bill number, save file to storage, create the `supplier_bills` row.
+- PO matching, in order: PO number on the bill > PO number in subject/body > same supplier open PO with matching total (within $1) > line match. Confident: linked and logged on the PO. Not confident: goes to a new "Bills to check" queue with the top 3 PO guesses, one tap to confirm.
+- Never approves for payment or pushes to Xero; a person still approves.
+- Starts on staging, then read-only on production (suggest only) for 2 weeks before auto-linking.
+
+**Open questions:** which mailbox the alias sits on; which supplier is "Hola Supply"; whether statements and credit notes also come to invoice@.
+
