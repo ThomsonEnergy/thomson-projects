@@ -331,4 +331,4 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 
 **Owner answers 18 Oct 2026:** only supplier bills come to invoice@ ("Hola Supply" was voice typing for "only supply"). invoice@ currently delivers to jasper@, accounts@ and jade@. Owner does not want sales@ cluttered; prefers TEops reads accounts@ if that avoids it.
 
-**Decided 18 Oct 2026:** invoice@ delivers to sales@ (owner setting it up in Google Admin). Gmail filter on sales@: To invoice@thomsonenergy.com.au, skip the inbox, label `Bills`, never spam. The TEops sales@ sync reads all mail, so TEops must also hide invoice@ mail from the Sales tab. Build waits on owner's go-ahead.
+**Decided 18 Oct 2026:** invoice@ delivers to sales@ (owner setting it up in Google Admin). Gmail filter on sales@: To invoice@thomsonenergy.com.au, skip the inbox, label `Supplier Bills` ("Bills" is reserved by Gmail), never spam. The TEops sales@ sync reads all mail, so TEops must also hide invoice@ mail from the Sales tab. Build waits on owner's go-ahead.
