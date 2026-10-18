@@ -18,7 +18,7 @@ const fetch = require('node-fetch');
 const { requireAdmin } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { sm8GetAll, SM8_BASE } = require('./_shared/sm8-import');
-const { copyLabourAndChecklists } = require('./_shared/sm8-labour');
+const { copyLabourAndChecklists, sm8JobGroups } = require('./_shared/sm8-labour');
 
 // Stop picking up new files with time to spare before the 15 minute limit.
 const TIME_BUDGET_MS = 13 * 60 * 1000;
@@ -47,11 +47,11 @@ function fileParts(att) {
 
 const safe = (s) => s.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
 
-async function queueAttachments(supabaseAdmin, apiKey) {
-  const { data: projects, error } = await supabaseAdmin
-    .from('projects').select('id, sm8_job_uuid').not('sm8_job_uuid', 'is', null);
-  if (error) throw error;
-  const projectByJob = new Map((projects || []).map(p => [p.sm8_job_uuid, p.id]));
+// groups: project id -> every ServiceM8 job uuid on it (main job plus its
+// lettered jobs, sm8JobGroups), so 4515A-D's files land on 4515.
+async function queueAttachments(supabaseAdmin, apiKey, groups) {
+  const projectByJob = new Map();
+  for (const [projectId, uuids] of groups) uuids.forEach(u => projectByJob.set(u, projectId));
   if (!projectByJob.size) return 0;
 
   // One bulk call (ServiceM8's filter has no "in"), then keep only the
@@ -125,9 +125,15 @@ exports.handler = async (event) => {
     const apiKey = await getIntegrationKey('servicem8');
 
     const { data: run } = await supabaseAdmin.from('sm8_copy_runs').insert({}).select('id').single();
+    const { data: projects, error: projErr } = await supabaseAdmin
+      .from('projects').select('id, sm8_job_uuid, sm8_job_number').not('sm8_job_uuid', 'is', null);
+    if (projErr) throw projErr;
+    // If the lettered-job lookup fails, still copy each main job's own records.
+    let groups = new Map((projects || []).map(p => [p.id, [p.sm8_job_uuid]]));
     const summary = {};
     try {
-      await copyLabourAndChecklists(supabaseAdmin, apiKey, user.id, summary);
+      groups = await sm8JobGroups(apiKey, projects || []);
+      await copyLabourAndChecklists(supabaseAdmin, apiKey, user.id, summary, groups);
     } catch (err) {
       console.error('sm8-copy-attachments labour/checklists error:', err.message);
       summary.error = String(err.message).slice(0, 500);
@@ -142,7 +148,7 @@ exports.handler = async (event) => {
     // Each run retries the previous run's failures once.
     await supabaseAdmin.from('sm8_attachment_copies').update({ status: 'pending' }).eq('status', 'failed');
 
-    const queued = await queueAttachments(supabaseAdmin, apiKey);
+    const queued = await queueAttachments(supabaseAdmin, apiKey, groups);
     console.log(`sm8-copy-attachments: ${queued} attachments on imported jobs`);
 
     let copied = 0, failed = 0;

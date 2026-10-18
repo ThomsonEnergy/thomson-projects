@@ -15,6 +15,10 @@
 // job, ticked if it was ticked in ServiceM8. Nobody is assigned, so nobody
 // gets a notification for 100 old tasks.
 //
+// Lettered jobs (4515A deposit, 4515B claim...) are part of the main job
+// (see sm8-import.js), and staff often check in, tick checklists and take
+// photos on them, so everything on 4515A-D lands on 4515 too.
+//
 // Safe to re-run: each ServiceM8 record id is stored once (unique indexes,
 // migration 20261021000000). A re-run moves time to a newly matched person
 // and ticks tasks that were ticked in ServiceM8 since.
@@ -132,10 +136,37 @@ async function copyJobChecklist(supabaseAdmin, userId, project, items, profileBy
   }
 }
 
+// Every ServiceM8 job uuid that belongs to each imported job: its own, plus
+// its lettered jobs ("4515" -> 4515A, 4515b...). Same lookup as the import's
+// dry run: one call per imported job for its date, then every job dated
+// after the oldest ('gt', ServiceM8 has no 'ge'), since a lettered job is
+// always made after its main job. Returns Map project id -> [uuids].
+async function sm8JobGroups(apiKey, projects) {
+  const groups = new Map(projects.map(p => [p.id, [p.sm8_job_uuid]]));
+  if (!projects.length) return groups;
+  const byNumber = new Map(projects.filter(p => p.sm8_job_number).map(p => [String(p.sm8_job_number).toLowerCase(), p.id]));
+  const dates = [];
+  for (const p of projects) {
+    const [job] = await sm8GetAll(apiKey, 'job', `uuid eq '${p.sm8_job_uuid}'`);
+    const d = String((job && job.date) || '').slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d > '2000-01-01') dates.push(d);
+    await sleep(350);
+  }
+  dates.sort();
+  const since = new Date(new Date(`${dates[0] || '2015-01-02'}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10);
+  const jobs = await sm8GetAll(apiKey, 'job', `active eq 1 and date gt '${since}'`);
+  for (const j of jobs) {
+    const m = String(j.generated_job_id || '').trim().match(/^(\d+)[a-z]+$/i);
+    const projectId = m && byNumber.get(m[1].toLowerCase());
+    if (projectId && !groups.get(projectId).includes(j.uuid)) groups.get(projectId).push(j.uuid);
+  }
+  return groups;
+}
+
 // summary is filled in place so the caller can save it even if this throws.
-async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary) {
+async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary, groups) {
   Object.assign(summary, {
-    jobs: 0, jobErrors: [],
+    jobs: 0, letteredJobs: 0, jobErrors: [], activitiesSeen: 0, checklistSeen: 0,
     timeAdded: 0, timeAlready: 0, timeMoved: 0, timeSkippedUnmatched: 0, timeSkippedNoTimes: 0, unmatchedStaff: {},
     checklistAdded: 0, checklistAlready: 0, checklistTicked: 0,
   });
@@ -153,10 +184,20 @@ async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary) {
   // imported jobs' share. Paced to stay under ~180 calls a minute.
   for (const project of projects || []) {
     try {
-      const [activities, items] = await Promise.all([
-        sm8GetAll(apiKey, 'jobactivity', `job_uuid eq '${project.sm8_job_uuid}' and active eq 1`),
-        sm8GetAll(apiKey, 'jobchecklist', `job_uuid eq '${project.sm8_job_uuid}' and active eq 1`),
-      ]);
+      const activities = [], items = [];
+      const uuids = groups.get(project.id) || [project.sm8_job_uuid];
+      summary.letteredJobs += uuids.length - 1;
+      for (const uuid of uuids) {
+        const [a, c] = await Promise.all([
+          sm8GetAll(apiKey, 'jobactivity', `job_uuid eq '${uuid}' and active eq 1`),
+          sm8GetAll(apiKey, 'jobchecklist', `job_uuid eq '${uuid}' and active eq 1`),
+        ]);
+        activities.push(...a);
+        items.push(...c);
+        await sleep(500);
+      }
+      summary.activitiesSeen += activities.length;
+      summary.checklistSeen += items.length;
       // A job with one stage puts the time on it; otherwise it is left
       // unassigned to a stage, like a clock-in that picked none.
       const centreId = (project.cost_centres || []).length === 1 ? project.cost_centres[0].id : null;
@@ -180,4 +221,4 @@ async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary) {
   return summary;
 }
 
-module.exports = { copyLabourAndChecklists, sm8DateToIso };
+module.exports = { copyLabourAndChecklists, sm8JobGroups, sm8DateToIso };
