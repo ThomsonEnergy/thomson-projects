@@ -6,12 +6,16 @@
 // runs server-side at all: it needs every employee's real pay rate to
 // compute correctly, and those must never reach a browser directly.
 //
+// Labour cost returned is wages plus direct overhead (see
+// compute-labour-cost.js). Pricing roles also get the company average
+// direct/indirect overhead rates per hour, for the estimate side.
+//
 // Returns only aggregate $/hours per stage and per project - never an
 // individual employee's rate or which employee worked how many hours at
 // what rate. That stays admin/finance-only, in Settings > Users & Roles.
 
 const { requireActiveUser } = require('./_shared/require-active-user');
-const { computeAccruedLabourCost } = require('./_shared/compute-labour-cost');
+const { computeAccruedLabourCost, loadOverheadRates } = require('./_shared/compute-labour-cost');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -22,7 +26,7 @@ exports.handler = async (event) => {
   if (!auth) {
     return { statusCode: 403, body: JSON.stringify({ error: 'Not authorized' }) };
   }
-  const { supabaseAdmin } = auth;
+  const { supabaseAdmin, role } = auth;
 
   try {
     const { projectIds } = JSON.parse(event.body || '{}');
@@ -30,8 +34,11 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectIds (a non-empty array) is required' }) };
     }
 
-    const byProject = await computeAccruedLabourCost(supabaseAdmin, projectIds);
-    return { statusCode: 200, body: JSON.stringify({ ok: true, byProject }) };
+    const rates = await loadOverheadRates(supabaseAdmin);
+    const byProject = await computeAccruedLabourCost(supabaseAdmin, projectIds, { rates });
+    const isPricing = ['admin', 'finance', 'sales'].includes(role);
+    const overheadRates = isPricing ? { directRate: rates.directRate, indirectRate: rates.indirectRate } : null;
+    return { statusCode: 200, body: JSON.stringify({ ok: true, byProject, overheadRates }) };
   } catch (err) {
     console.error('get-accrued-labour-cost error:', err.message);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };

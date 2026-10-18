@@ -33,7 +33,7 @@
 
     <div class="grid cols-4">
       <div class="stat"><div class="label">Total signed</div><div class="value" id="stat-signed">-</div></div>
-      <div class="stat"><div class="label">Cost outlayed</div><div class="value" id="stat-cost">-</div></div>
+      <div class="stat"><div class="label">Cost outlayed</div><div class="value" id="stat-cost">-</div><div class="subtitle" id="stat-cost-incl" style="margin:2px 0 0; font-size:12px;"></div></div>
       <div class="stat"><div class="label">Total partial invoiced</div><div class="value" id="stat-invoiced">-</div></div>
       <div class="stat"><div class="label">Total pending</div><div class="value" id="stat-pending">-</div></div>
     </div>
@@ -84,8 +84,10 @@
       // (get-accrued-labour-cost.js) from each employee's real pay rate,
       // banded by the same weekly overtime rule used on the job page, so
       // an individual's ordinary_rate/rate_1_5x/rate_2x never has to reach
-      // this (or any) browser directly.
+      // this (or any) browser directly. Labour includes direct overheads;
+      // indirect only shows as the "incl. overheads" line.
       const labourCostByProject = {};
+      const indirectByProject = {};
       if (projects && projects.length) {
         try {
           const { data: { session } } = await supabaseClient.auth.getSession();
@@ -96,7 +98,10 @@
           });
           const data = await res.json();
           if (res.ok && data.ok) {
-            Object.entries(data.byProject).forEach(([pid, info]) => { labourCostByProject[pid] = info.totalActualLabourCost; });
+            Object.entries(data.byProject).forEach(([pid, info]) => {
+              labourCostByProject[pid] = info.totalActualLabourCost;
+              indirectByProject[pid] = info.totalIndirectOverhead || 0;
+            });
           }
         } catch (err) {
           console.error('Accrued labour cost fetch failed:', err.message);
@@ -110,7 +115,8 @@
         const pending = isSigned ? 0 : totalQuoted;
         const invoiced = (p.cost_centres || []).reduce((s, c) => s + (Number(c.invoiced_amount) || 0), 0);
         const costOutlayed = (materialCostByProject[p.id] || 0) + (labourCostByProject[p.id] || 0);
-        return { ...p, totalQuoted, signed, pending, invoiced, costOutlayed, isSigned };
+        const costInclOverheads = costOutlayed + (indirectByProject[p.id] || 0);
+        return { ...p, totalQuoted, signed, pending, invoiced, costOutlayed, costInclOverheads, isSigned };
       });
 
       renderProjects();
@@ -124,10 +130,11 @@
         : allRows;
 
       const totals = filtered.reduce((acc, p) => ({
-        signed: acc.signed + p.signed, cost: acc.cost + p.costOutlayed, invoiced: acc.invoiced + p.invoiced, pending: acc.pending + p.pending,
-      }), { signed: 0, cost: 0, invoiced: 0, pending: 0 });
+        signed: acc.signed + p.signed, cost: acc.cost + p.costOutlayed, costIncl: acc.costIncl + p.costInclOverheads, invoiced: acc.invoiced + p.invoiced, pending: acc.pending + p.pending,
+      }), { signed: 0, cost: 0, costIncl: 0, invoiced: 0, pending: 0 });
       document.getElementById('stat-signed').textContent = money(totals.signed);
       document.getElementById('stat-cost').textContent = money(totals.cost);
+      document.getElementById('stat-cost-incl').textContent = `incl. overheads ${money(totals.costIncl)}`;
       document.getElementById('stat-invoiced').textContent = money(totals.invoiced);
       document.getElementById('stat-pending').textContent = money(totals.pending);
 
@@ -149,7 +156,7 @@
                 <td data-label="Client">${p.client_name || '-'}</td>
                 <td class="num" data-label="Signed">${p.isSigned ? money(p.signed) : '<span class="subtitle">Not signed</span>'}</td>
                 <td class="num" data-label="Pending">${p.isSigned ? '<span class="subtitle">-</span>' : money(p.pending)}</td>
-                <td class="num" data-label="Cost outlayed">${money(p.costOutlayed)}</td>
+                <td class="num" data-label="Cost outlayed">${money(p.costOutlayed)}${p.costInclOverheads > p.costOutlayed ? `<div class="subtitle" style="font-size:11px;">incl. overheads ${money(p.costInclOverheads)}</div>` : ''}</td>
                 <td class="num" data-label="Partial invoiced">${money(p.invoiced)}</td>
               </tr>`).join('')}
           </tbody>
