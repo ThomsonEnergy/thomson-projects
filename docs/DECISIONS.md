@@ -3,6 +3,8 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 18 Oct 2026
+- Team chat built with Sparky (job tagging, voice transcripts, @Sparky answers): migration 20261020000000 on staging, code on PR `claude/team-chat`, waiting on owner's yes for production. Defaults used: company feed stays as is, only admins make channels, staff only (no subcontractors). (`docs/PROJECT_SPEC.md` A19a, `docs/AI_AGENTS_PLAN.md`)
+- AI in chat goes live per person on signing: staff can agree to a shorter notice period than 14 days (Workplace Surveillance Act allows it), added to the AI Features Consent wording. Anyone who doesn't sign stays on WhatsApp until the 14 days are up. (`policies and Contracts/Thomson Energy AI Features Consent.txt`)
 - invoice@ supplier bill agent LIVE on production (suggest only): reads emailed bills, matches supplier and PO, Emailed bills page to check and save. Migration 20261019000000 applied straight to production at the owner's request (staging skipped). Turn on auto-save after 2 weeks if matches are right. (`docs/PROJECT_SPEC.md` A11a, `docs/IDEAS_BACKLOG.md` item 8)
 - invoice@ goes to sales@ with a Gmail filter (skip inbox, label Supplier Bills); TEops agent reads it from there. Not accounts@. (`docs/IDEAS_BACKLOG.md` item 8)
 - invoice@ is supplier bills only, currently delivers to jasper@, accounts@, jade@; agent to read accounts@ (or sales@ with a skip-inbox filter) so sales@ stays clean. (`docs/IDEAS_BACKLOG.md` item 8)

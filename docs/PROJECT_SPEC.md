@@ -198,6 +198,15 @@ Manual steps only a person can do (the code is live):
 - Meetings: record, transcribe, analyse; follow-up tasks with reminders.
 - Installer summary on the job card; recent jobs for the same client; search within a job.
 
+### A19a. Team chat (migration 20261020000000, on staging, not yet production)
+- Chat page (`chat.html`, `js/chat.js`, `css/chat.css`) and a chat icon with unread count in the top bar. Replaces WhatsApp.
+- Channels: General and Social for everyone; admins make more (everyone or chosen people), rename, archive. DMs: one to one or groups up to 12, anyone can start.
+- Messages: text, photos (through `compressImage()`), files up to 50 MB, voice messages (tap the mic, tap Send), @mentions, threads, edit and delete your own (admins delete any). Private `chat` bucket, folder per chat.
+- Job tags: type # (or the # button) to pick a J or Q number. Tagged messages show on the job's Feed tab under "From team chat" (only to people in that chat).
+- Instant delivery by Supabase Realtime; `chat-after-send.js` pushes notifications straight away. Notification types chat_dm, chat_mention, chat_reply, chat_message, each switchable; mute per chat. Thread replies only notify people in the thread.
+- Offline: every message saves to an IndexedDB outbox first (time = when Send was pressed), shows "Waiting for signal", sends when back online; `client_id` stops duplicates.
+- Sparky in chat (only for people with AI consent, and only messages sent after it): tags messages to jobs (explicit J or Q number straight away, otherwise Haiku 5.5 tags when sure and suggests with Yes / No when guessing, "tagged by Sparky" with Undo, can tag the earlier question a J number answers); turns voice messages into text (AssemblyAI then a cleanup pass); answers @Sparky with read-only lookups run with the asker's own access (Opus 5.5). In Social it only tags work talk and never sees the chat history. Code: `_shared/chat-ai.js`, `chat-ai-background.js`, `chat-ai-sweep.js` (every 2 minutes, catches anything missed). Sparky's lookup tools now live in `_shared/sparky-tools.js`, shared with the Ask AI widget.
+
 ### A20. Notifications
 - Bell plus Web Push to phones (per device, app badge), per-type switches. `send-notifications.js` runs every minute.
 - Types: tagged, comments, tasks, task reminders, meeting follow-ups, schedule bookings, new emails, reviews, call reminders.
@@ -253,6 +262,7 @@ Manual steps only a person can do (the code is live):
 |---|---|
 | send-notifications | every minute |
 | warm-pdf | every 4 minutes |
+| chat-ai-sweep | every 2 minutes (team chat job tagging and voice transcripts, A19a) |
 | sync-gmail | every 5 minutes (also starts process-supplier-bills-background, A11a) |
 | archive-completed-jobs | daily |
 | sync-overheads-nightly | daily |

@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 18 Oct 2026
+Last updated 18 Oct 2026 (team chat)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -9,7 +9,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | # | Item | Status | High lead time | Depends on |
 |---|------|--------|----------------|------------|
 | 1 | Payment reconciliation, receipts, tools register | Partly built | N | Airwallex read-only key, accountant sign-off |
-| 2 | Voice messages in team chat + Siri Shortcut | Not started | N | Team chat channels, tagger agent, policy sign-off (6) |
+| 2 | Voice messages in team chat + Siri Shortcut | Voice messages built with team chat (PROJECT_SPEC A19a), Siri not started | N | Personal tokens for the Siri Shortcut |
 | 3 | Native iPhone app (TEgo, Capacitor) | Stage 1 built, waiting on Apple | Y | Apple Developer enrolment approval, then `docs/IOS_APP.md` setup; offline sync design for stage 2 |
 | 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
@@ -72,6 +72,8 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 **Goal:** Siri dictation in WhatsApp mangles job numbers, names and trade terms; some staff dictate while driving. Part of the team chat build (docs/AI_AGENTS_PLAN.md). iPhone only.
 
 **Reuse:** `meeting-recorder.js` (browser recording) and `transcribe-meeting.js` (AssemblyAI; key already in `api_keys`).
+
+**Built 18 Oct 2026 with team chat (PROJECT_SPEC A19a):** tap the mic to record, tap Send. The audio sends straight away and the cleaned transcript appears under it a few seconds later (no review-before-send step, so it also works with no signal). Job numbers in the transcript are tagged like any message. Not built: the editable vocabulary list (staff names and trade words are boosted automatically) and Siri.
 
 ### In-app voice messages (hold to talk)
 - Mic button in chat: hold, talk, release.
