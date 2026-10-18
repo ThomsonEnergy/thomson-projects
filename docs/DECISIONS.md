@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 18 Oct 2026
+- Fixed: sales@ sync had failed every run since at least 00:00 UTC 18 Oct (a message deleted from Gmail stopped each run), so no new mail and no invoice@ bills came in. The sync now skips messages Gmail no longer has. Found through the new ops manager log. (`netlify/functions/_shared/gmail-sync.js`)
 - Ops manager version 1 built: workers report to it, Needs me list, 5am Sydney digest to Jasper only, Ops manager page, assistant acts as manager in chat. Agents run as Netlify functions, not Supabase Edge Functions. LIVE: migration 20261019010000 applied to production (staging skipped, owner gave database permission for the session). (`docs/PROJECT_SPEC.md` A30, `docs/AI_AGENTS_PLAN.md`)
 - invoice@ supplier bill agent LIVE on production (suggest only): reads emailed bills, matches supplier and PO, Emailed bills page to check and save. Migration 20261019000000 applied straight to production at the owner's request (staging skipped). Turn on auto-save after 2 weeks if matches are right. (`docs/PROJECT_SPEC.md` A11a, `docs/IDEAS_BACKLOG.md` item 8)
 - invoice@ goes to sales@ with a Gmail filter (skip inbox, label Supplier Bills); TEops agent reads it from there. Not accounts@. (`docs/IDEAS_BACKLOG.md` item 8)
