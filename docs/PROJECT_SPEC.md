@@ -208,7 +208,7 @@ Manual steps only a person can do (the code is live):
 - Meetings: record, transcribe, analyse; follow-up tasks with reminders.
 - Installer summary on the job card; recent jobs for the same client; search within a job.
 
-### A19a. Team chat (migration 20261020000000, on staging, not yet production)
+### A19a. Team chat (migration 20261020000000, live 18 Oct 2026)
 - Chat page (`chat.html`, `js/chat.js`, `css/chat.css`) and a chat icon with unread count in the top bar. Replaces WhatsApp.
 - Channels: General and Social for everyone; admins make more (everyone or chosen people), rename, archive. DMs: one to one or groups up to 12, anyone can start.
 - Messages: text, photos (through `compressImage()`), files up to 50 MB, voice messages (tap the mic, tap Send), @mentions, threads, edit and delete your own (admins delete any). Private `chat` bucket, folder per chat.
