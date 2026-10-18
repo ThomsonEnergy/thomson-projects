@@ -1,0 +1,18 @@
+{
+  "name": "tego-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TEgo iPhone app: a Capacitor wrap of the live TEops site. See docs/IOS_APP.md.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "sync": "cap sync ios"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/ios": "8.5.2",
+    "@capacitor/push-notifications": "8.1.3"
+  }
+}

@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 18 Oct 2026
+- TEgo iPhone app stage 1 built: Capacitor wrap of the live site, native Apple push, black icon, GitHub Actions builds; migration 20261018000000 on production. Waiting on Apple approval for signing and install. Name TEgo can change; bundle ID au.com.thomsonenergy.app cannot. (`docs/IOS_APP.md`, `docs/IDEAS_BACKLOG.md` item 3)
 - Twilio Business Profile and AU Mobile bundle approved; test number 0468 085 277 active. (`docs/EXTERNAL_ACCOUNTS.md`)
 - Rule added: every chat writes its notes back to the repo and gets them onto `main` the same session. (`CLAUDE.md`)
 - This log started. (`docs/DECISIONS.md`)

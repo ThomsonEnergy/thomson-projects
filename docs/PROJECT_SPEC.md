@@ -20,7 +20,7 @@ Internal operations app for Thomson Energy Australia (electrical and solar contr
 - **AI agents:** `docs/AI_AGENTS_PLAN.md` (ops manager agent, workers, team chat).
 - **High lead time, start now (external, weeks of waiting):**
   Live status: `docs/EXTERNAL_ACCOUNTS.md`.
-  1. **Apple Developer organisation account:** D-U-N-S 17 Oct 2026, enrolment submitted 17 Oct, Apple verifying. Blocks the native iPhone app, and so SMS and calls.
+  1. **Apple Developer organisation account:** D-U-N-S 17 Oct 2026, enrolment submitted 17 Oct, Apple verifying. Blocks the native iPhone app, and so SMS and calls. TEgo app stage 1 is built and waiting on this: `docs/IOS_APP.md`.
   2. **Port 0455 415 464 from Telstra to our own Twilio account:** Twilio bundle approved 18 Oct 2026, test number 0468 085 277 active. Port after SMS and calls are built and tested. Today SM8 only uses the number as a Twilio verified caller ID.
   3. **NSW Workplace Surveillance notice:** adviser review of the notice and policy, then 14 days' written notice before any AI reading of chat/email/voice or location tracking starts.
 
