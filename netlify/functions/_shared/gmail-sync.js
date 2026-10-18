@@ -208,7 +208,13 @@ async function runSync({ budgetMs = 8000 } = {}) {
   let synced = 0, done = true, bills = 0;
   for (const id of messageIds) {
     if (Date.now() - startedAt > budgetMs) { done = false; break; }
-    if (await processMessageId(supabaseAdmin, id, billLabelId)) bills += 1;
+    try {
+      if (await processMessageId(supabaseAdmin, id, billLabelId)) bills += 1;
+    } catch (err) {
+      // deleted from Gmail after it was listed: skip it, or the sync gets stuck on it every run
+      if (!/not found|404/i.test(err.message || '')) throw err;
+      console.log('sync-gmail: skipped a message Gmail no longer has:', id);
+    }
     synced += 1;
   }
 
