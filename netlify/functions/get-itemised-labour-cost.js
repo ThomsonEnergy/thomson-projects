@@ -6,9 +6,12 @@
 // is functionally the same thing as revealing that employee's pay rate
 // for that shift (cost ÷ hours = their rate) - not appropriate for Sales,
 // who can otherwise see aggregate $ figures fine.
+// Cost per entry is wages plus direct overhead, same as everywhere else;
+// indirect overhead per entry comes back separately for the
+// "incl. overheads" line.
 
 const { requireFinanceRole } = require('./_shared/require-finance-role');
-const { computeEntryLabourCosts } = require('./_shared/compute-labour-cost');
+const { computeEntryLabourCosts, computeEntryOverheads, loadOverheadRates } = require('./_shared/compute-labour-cost');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -34,10 +37,20 @@ exports.handler = async (event) => {
       .not('clock_out', 'is', null);
     if (error) throw error;
 
-    const costById = await computeEntryLabourCosts(supabaseAdmin, timeEntries || []);
-    const costByEntryId = Object.fromEntries(costById);
+    const [costById, rates] = await Promise.all([
+      computeEntryLabourCosts(supabaseAdmin, timeEntries || []),
+      loadOverheadRates(supabaseAdmin),
+    ]);
+    const overheadById = computeEntryOverheads(timeEntries || [], rates);
+    const costByEntryId = {};
+    const indirectByEntryId = {};
+    costById.forEach((wages, id) => {
+      const oh = overheadById.get(id);
+      costByEntryId[id] = wages + (oh ? oh.direct : 0);
+      if (oh) indirectByEntryId[id] = oh.indirect;
+    });
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, costByEntryId }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, costByEntryId, indirectByEntryId }) };
   } catch (err) {
     console.error('get-itemised-labour-cost error:', err.message);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
