@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 17 Oct 2026
+Last updated 18 Oct 2026
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -10,18 +10,18 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 |---|------|--------|----------------|------------|
 | 1 | Payment reconciliation, receipts, tools register | Partly built | N | Airwallex read-only key, accountant sign-off |
 | 2 | Voice messages in team chat + Siri Shortcut | Not started | N | Team chat channels, tagger agent, policy sign-off (6) |
-| 3 | Native iPhone app (TEgo, Capacitor) | Stage 1 built, waiting on Apple | Y | Apple Developer org account approval, then `docs/IOS_APP.md` setup; offline sync design for stage 2 |
+| 3 | Native iPhone app (TEgo, Capacitor) | Stage 1 built, waiting on Apple | Y | Apple Developer enrolment approval, then `docs/IOS_APP.md` setup; offline sync design for stage 2 |
 | 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
-| 7 | SMS and calls via Twilio | Parked (18 Oct 2026) | Y | Build as an in-app Phone console after the iPhone app (item 3); Telstra port |
+| 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
 
 ## High lead time, start now
 
 Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in `docs/EXTERNAL_ACCOUNTS.md`.
 
-- **Apple Developer organisation account:** needs a D-U-N-S number for Thomson Energy Australia Pty Ltd. D-U-N-S can take weeks. Blocks item 3 and in-app call ringing (item 7 phase 2).
-- **Twilio:** open our own Twilio account, lodge the AU regulatory bundle now (approval takes days to weeks), then port 0455 415 464 from Telstra once the build is tested. Blocks item 7.
+- **Apple Developer organisation account:** D-U-N-S received 17 Oct 2026; enrolment submitted 17 Oct, Apple is verifying. Blocks item 3, and so item 7.
+- **Twilio:** Business Profile and AU Mobile bundle approved 18 Oct 2026, test number active. Next: port 0455 415 464 from Telstra once the build is tested. Item 7 is built after the native app.
 - **NSW surveillance notice:** get the notice and policy reviewed by Formby or an HR adviser, then 14 days' written notice before AI reading or tracking starts. Blocks AI on chat, email, voice and location (items 2, 5, 6).
 - **Google OAuth app:** internal Google Workspace app, no Google verification needed, so this is fast. The shared inbox already uses one; per-user Gmail scopes are an extension.
 
@@ -100,14 +100,14 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 
 **Today:** stage 1 built 18 Oct 2026 as **TEgo** (`tego-app/`, bundle ID `au.com.thomsonenergy.app`): loads the live site, native Apple push, black icon, cloud builds on GitHub. Waiting on Apple to approve the Developer account before it can be signed and installed. Setup steps, how it works and known gaps: `docs/IOS_APP.md`. Browsers keep the PWA and web push.
 
-**Stage 1 decisions:** load the live site rather than bundling pages (one codebase, instant updates; bundle when offline mode is built); iPhone only, portrait; GitHub Actions on macOS for builds (free on this public repo), no Mac needed.
+**Stage 1 decisions:** load the live site rather than bundling pages (one codebase, instant updates; bundle when offline mode is built); iPhone only, portrait; GitHub Actions on macOS for builds (free on this public repo), no Mac needed. Name TEgo can change any time; the bundle ID cannot.
 
 **Decision:** wrap the existing web app with Capacitor, no rewrite. iOS only (whole team on iPhone). Keep the web app Capacitor-ready.
 
 ### What native unlocks
 - **Offline (main reason):** on-device SQLite iOS won't clear, proper photo file storage, background upload/sync after the app closes.
 - **Push:** more reliable than web push; needed for team chat replacing WhatsApp.
-- **CallKit + PushKit:** in-app ringing for SMS/calls phase 2 (item 7).
+- **CallKit + PushKit:** TEops calls ring like normal phone calls, even when locked (item 7).
 - Home screen widgets, Siri App Intents.
 - Custom voice keyboard (iOS keyboards cannot use the mic, needs the "hop to the app" workaround). Lowest priority.
 
@@ -125,10 +125,10 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 3. CallKit/PushKit for calls, widgets, Siri App Intents.
 4. Voice keyboard.
 
-**Dependencies:** Apple Developer organisation account (D-U-N-S, high lead time); offline design decisions.
+**Dependencies:** Apple Developer organisation account (D-U-N-S 17 Oct 2026, enrolment submitted, Apple verifying); offline design decisions.
 
 **Open questions**
-- [x] Organisation vs individual account: organisation (Enrollment 58NBR3V7K9)
+- [x] Organisation account (D-U-N-S 17 Oct 2026)
 - [x] Cloud build service: GitHub Actions (macOS runner)
 - [x] Buy a Mac now or later: later, only if debugging gets painful
 - [ ] Final app name (TEgo for now, can change any time)
@@ -255,11 +255,13 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 
 **Goal:** text and call customers from TEops and receive calls and texts in the app, instead of personal phones or the ServiceM8 setup.
 
-**Today:** parked 18 Oct 2026 until the iPhone app (item 3) is in. Decision: skip the "Phase 1" call forwarding and build one in-app **Phone console** (calls and texts together) so nothing is built twice. Twilio account, Business Profile, AU Mobile bundle and test number 0468 085 277 are ready (`docs/EXTERNAL_ACCOUNTS.md`). 0455 415 464 is still on Telstra; ServiceM8 only uses it as a Twilio verified caller ID.
+**Today:** not built. 0455 415 464 is on Telstra; ServiceM8 only uses it as a Twilio verified caller ID.
+
+**Decision (17 Oct 2026):** no interim phase. The forward-to-mobile and click-to-call bridge is dropped; SMS and calls are built in one go after the native app (item 3), with TEops itself as the phone. Keep using the current setup until then.
 
 **Plan**
-1. Open our own Twilio account; lodge the AU regulatory bundle now.
-2. Build and test on a temporary Twilio number.
+1. Own Twilio account and AU regulatory bundle: done 18 Oct 2026 (`docs/EXTERNAL_ACCOUNTS.md`).
+2. After the native app ships: build and test on the test number 0468 085 277.
 3. Port 0455 415 464 from Telstra to Twilio once tested.
 
 ### Outbound
@@ -270,6 +272,20 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 ### Inbound
 - **Texts:** SMS tab in the inbox (beside Sales / Mine), matched by phone number, auto-tagged by the tagger. Push to opted-in staff inside their hours.
 - **Calls:** ring all opted-in staff inside their hours; first to answer wins. Caller ID shows customer and open J numbers if known.
+
+### Incoming call screen (owner requirement, 17 Oct 2026)
+Staff must see at a glance: (1) it is a work call, (2) which client is calling, (3) that client's jobs, so they have the info ready.
+- **Ringing (iPhone lock screen, CallKit):** iOS only allows one line of caller text. Shows "Thomson Energy" as the calling app, plus the client name and their main open J number, e.g. "Jane Smith, J7006". Distinct TEops ringtone. Unknown number: "New caller" plus the number.
+- **Ringing (desktop):** a TEops pop-up with the full card below, plus Answer and Decline.
+- **Once answered (iPhone and desktop):** TEops opens a call screen with the client card: name, phone, address, and each job (J number, site address, stage, next booking, assigned crew, balance owing), plus open quotes (Q) and unpaid invoices (SI). One tap opens a job. Unknown caller: one tap to create a lead.
+- **Matching:** the incoming number is normalised and matched to clients (and leads); the server looks it up before ringing so the details arrive with the push. Several clients sharing a number: show all.
+
+### Ringtones (decided 17 Oct 2026)
+- A branded Thomson Energy default plus 4 to 6 alternatives. Each user picks theirs in Settings (calls and texts section); the admin sets the company default.
+- iPhone apps cannot use the iPhone's built-in ringtones, so every ringtone is a sound file bundled in the native app (CallKit). Adding one needs an app update.
+- Each file under 30 seconds (longer falls back to the iOS default), loops while ringing, small file size. The silent switch and Focus modes still apply.
+- Desktop plays the same files in the browser, so both match.
+- Sources: branded default made in GarageBand or by a sound designer; alternatives from Pixabay (free for commercial use), Zapsplat or Freesound (CC0 only). Keep a note of each file's source and licence.
 - **Nobody available:** voicemail, transcribed, logged, pushed. Optional auto-reply SMS.
 
 ### Opt-in and hours (Settings, per user)
@@ -279,8 +295,7 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 - Admin view: who is opted in, hours, warning if a business-hours slot is uncovered.
 
 ### How calls reach the phone
-- **Phase 1 (web app):** Twilio forwards to the staff mobile showing the business number. Call button is click-to-call (Twilio rings staff first, then connects the customer).
-- **Phase 2:** Twilio Voice SDK in-app softphone. Reliable iPhone ringing needs the native app (CallKit + PushKit, item 3).
+- **In-app softphone** (Twilio Voice SDK): calls go straight out of and ring inside TEops, no personal mobiles. The iPhone app uses CallKit + PushKit so calls ring when locked or closed (item 3); desktop uses the same SDK in the browser.
 
 ### Under the hood
 - Twilio Messaging + Voice webhooks to Netlify functions (signature-verified). Supabase tables: messages, calls, voicemails, per-user availability (fast RLS, indexed FKs).
@@ -288,7 +303,7 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 - New push notification types (new SMS, missed call) on the existing per-type prefs.
 - AI tagging/summaries only for users with an AI start date.
 
-**Dependencies:** Twilio account + regulatory bundle + port (high lead time); staff mobiles on employee records; native app for phase 2.
+**Dependencies:** native app (item 3); Twilio account + regulatory bundle + port (high lead time).
 
 **Open questions**
 - [ ] Record calls? Needs a "may be recorded" message and staff notice coverage.
