@@ -15,7 +15,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
-| 8 | invoice@ supplier bill intake agent | Built, waiting on migration approval, then 2 weeks suggest-only | N | Migration 20261019000000 on staging then production |
+| 8 | invoice@ supplier bill intake agent | Live 18 Oct 2026, suggest-only for 2 weeks | N | Owner checks matches, then auto-save on |
 
 ## High lead time, start now
 
@@ -322,6 +322,6 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 **Built 18 Oct 2026:** see `docs/PROJECT_SPEC.md` A11a. Google side done by the owner 18 Oct: invoice@ (Google Group) delivers to sales@, Gmail filter skips the inbox and labels `Supplier Bills` ("Bills" is reserved by Gmail). Only supplier bills go to invoice@ ("Hola Supply" was voice typing for "only supply"). accounts@ not used: TEops reads sales@ only.
 
 **Next:**
-- Apply migration 20261019000000 to staging, test, then production after the owner's yes.
+- Migration 20261019000000 applied to production 18 Oct 2026 (staging skipped at the owner's request).
 - 2 weeks suggest-only on production. If the confident matches are right, turn on auto-save (`api_keys` `supplier_bill_auto_save` = `on`).
 - Later: credit notes and statements emailed to invoice@ (today they land in To check as "not a bill"), add to stock from an emailed bill, Xero bill push.
