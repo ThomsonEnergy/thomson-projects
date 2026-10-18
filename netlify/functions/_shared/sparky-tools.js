@@ -25,6 +25,8 @@ const QUERYABLE_TABLES = [
   'payment_milestones', 'project_photos', 'project_field_notes', 'billable_rate_tiers',
   'public_holidays', 'bug_reports', 'bug_report_comments', 'dnsp_records', 'supplier_statements',
   'daily_greetings', 'profile_licences',
+  'supplier_bill_inbox', 'agent_runs', 'agent_heartbeats', 'agent_tasks',
+  'price_list_imports', 'price_changes', 'supplier_price_items', 'material_supplier_links',
 ];
 
 // Team chat passes a longer list (adds emails and chat) to queryTool / runQuery.

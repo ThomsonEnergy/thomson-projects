@@ -1808,6 +1808,8 @@ const MAIN_NAV_ITEMS = [
   { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;' },
   { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;' },
   { key: 'supplier-bills', label: 'Emailed bills', href: '/supplier-bills.html', icon: '&#129534;', pricingOnly: true },
+  { key: 'price-lists', label: 'Price lists', href: '/price-lists.html', icon: '&#127991;', pricingOnly: true },
+  { key: 'ops', label: 'Ops manager', href: '/ops.html', icon: '&#129302;', adminOnly: true },
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;' },
   { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;' },
   { key: 'reviews', label: 'Reviews', href: '/reviews.html', icon: '&#11088;' },
@@ -2012,7 +2014,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=6';
+  s.src = '/js/notifications.js?v=8';
   document.head.appendChild(s);
 }
 
@@ -2190,6 +2192,8 @@ function renderAIChatWidget() {
     if (show) { renderMessages(); input.focus(); }
   }
   wrap.querySelector('#ai-chat-toggle').addEventListener('click', () => togglePanel(!panel.classList.contains('open')));
+  // Lets a page ask the assistant something with one tap (the Ops page's "Ask the manager" buttons).
+  window.askAssistant = (text) => { togglePanel(true); input.value = text; send(); };
   wrap.querySelector('#ai-chat-close').addEventListener('click', () => togglePanel(false));
   wrap.querySelector('#ai-chat-clear').addEventListener('click', () => {
     _aiChatHistory = [];

@@ -16,13 +16,16 @@ AI agents run as much admin as possible. Jasper directs them from his phone and 
 
 ## How agents run
 
-- Each agent is a **Supabase Edge Function**. None exist yet; this adds a `supabase/functions/` folder.
+- Agents run as **Netlify functions** (decided 18 Oct 2026, instead of Supabase Edge Functions, so there is one place to look when something breaks). Long work runs as background functions (up to 15 minutes). Every worker reports through `_shared/agent-log.js`.
 - Prompts live as files in `agents/prompts/`, separate from logic.
 - Triggered by pg_cron schedules or database webhooks (event-driven preferred). Secrets in Supabase secrets, never in code.
 - Edge Functions have per-run time limits. Long jobs are split into steps, or moved to a small cloud server later if needed.
 - Least privilege: each agent gets only the access its job needs.
 
 ## Ops manager agent
+
+**Version 1 built 18 Oct 2026** (`docs/PROJECT_SPEC.md` A30): worker log, Needs me list, 5am Sydney digest to Jasper only (more people later via `company_settings.ops_manager_user_ids`), Ops manager page, and the assistant acts as the manager in chat with Confirm-only actions. Not yet: Phase 2 (requesting new workers via GitHub issues), per-agent token budgets.
+
 
 - Workers report to it, not to Jasper. It handles what it can within set rules and escalates the rest.
 - Jasper talks to it inside TEops: a chat screen, a questions/approvals inbox, and a daily digest (done, stuck, needs me), delivered via existing Web Push.
@@ -36,7 +39,7 @@ AI agents run as much admin as possible. Jasper directs them from his phone and 
 3. Scheduling and job allocation (suggestions only, a human confirms)
 4. Compliance docs and certificates (AI prepares, the licensed signatory reviews and signs every one)
 
-Already built: **supplier bill intake** (invoice@ emails read, matched to POs, suggest-only until proven; `docs/PROJECT_SPEC.md` A11a).
+Already built: **price list reader** (emailed price lists keep material costs current, `docs/PROJECT_SPEC.md` A11b), **supplier bill intake** (invoice@ emails read, matched to POs, suggest-only until proven; `docs/PROJECT_SPEC.md` A11a).
 
 Drafts, not sends, for the first few weeks. Later workers: payment reconciliation, weather (see docs/IDEAS_BACKLOG.md items 1 and 4).
 

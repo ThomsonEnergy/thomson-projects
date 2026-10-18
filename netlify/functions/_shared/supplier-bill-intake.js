@@ -17,7 +17,7 @@ const fetch = require('node-fetch');
 const { getAdminClient } = require('./require-admin');
 const { gmailRequest } = require('./google-client');
 const { selfBaseUrl } = require('./site-url');
-const { extractSupplierInvoice } = require('./supplier-invoice-ai');
+const { extractSupplierInvoiceWithUsage } = require('./supplier-invoice-ai');
 
 const INVOICE_ADDRESS = 'invoice@thomsonenergy.com.au';
 const BILL_LABEL = 'Supplier Bills';
@@ -318,9 +318,14 @@ async function analyse(supabaseAdmin, row, { supplierId = null } = {}) {
   } else if (waitingTwin) {
     status = 'duplicate';
     reason = `Bill ${ex.bill_number} from ${supplierMatch.supplier.name} was emailed twice; the other copy is waiting to be checked`;
+  } else if (docType === 'other' && /price|pricing|catalog/i.test(`${row.file_name || ''} ${row.email_subject || ''}`)) {
+    // the price list reader (_shared/price-list-intake.js) picks these up
+    status = 'not_a_bill';
+    reason = 'Looks like a price list: read on the Price lists page';
   } else if (docType !== 'invoice') {
     confidence = 'guess';
-    reason = `This looks like a ${docType.replace('_', ' ')}, not a bill. ${po.reason}`;
+    const looksLike = { credit_note: 'a credit note', statement: 'a statement' }[docType] || 'something other than a bill (price list, quote, remittance or similar)';
+    reason = `This looks like ${looksLike}, not a bill. ${po.reason}`;
   } else if (!sid) {
     confidence = po.confidence === 'none' ? 'none' : 'guess';
     reason = `Supplier "${ex.supplier || 'unknown'}" not recognised. ${po.reason}`;
@@ -444,7 +449,7 @@ async function autoSaveIsOn(supabaseAdmin) {
   return (data?.key_value || '').toLowerCase() === 'on';
 }
 
-async function processOne(supabaseAdmin, row, autoSave) {
+async function processOne(supabaseAdmin, row, autoSave, usage) {
   const mime = (row.mime_type || '').toLowerCase();
   const mediaType = /\.pdf$/i.test(row.file_name || '') ? 'application/pdf' : mime;
   const buffer = await downloadAttachment(row.gmail_message_id, row.attachment_part_id);
@@ -465,7 +470,10 @@ async function processOne(supabaseAdmin, row, autoSave) {
     return 'to_check';
   }
 
-  const extracted = await extractSupplierInvoice({ fileBase64: buffer.toString('base64'), mediaType });
+  const read = await extractSupplierInvoiceWithUsage({ fileBase64: buffer.toString('base64'), mediaType });
+  const extracted = read.extracted;
+  usage.input_tokens += read.usage.input_tokens || 0;
+  usage.output_tokens += read.usage.output_tokens || 0;
   const withExtract = { ...row, file_path: filePath, extracted };
   const result = await analyse(supabaseAdmin, withExtract);
   await supabaseAdmin.from('supplier_bill_inbox').update({ ...result, extracted, processed_at: new Date().toISOString(), error: null }).eq('id', row.id);
@@ -497,6 +505,7 @@ async function processSupplierBills({ budgetMs = 10 * 60 * 1000, extractAttachme
   const { data: pending } = await supabaseAdmin.from('supplier_bill_inbox').select('*').eq('status', 'pending').order('created_at').limit(25);
 
   const counts = {};
+  const usage = { input_tokens: 0, output_tokens: 0 };
   for (const row of pending || []) {
     if (Date.now() - startedAt > budgetMs) break;
     const { data: claimed } = await supabaseAdmin.from('supplier_bill_inbox')
@@ -504,7 +513,7 @@ async function processSupplierBills({ budgetMs = 10 * 60 * 1000, extractAttachme
       .eq('id', row.id).eq('status', 'pending').select('*').maybeSingle();
     if (!claimed) continue;
     try {
-      const outcome = await processOne(supabaseAdmin, claimed, autoSave);
+      const outcome = await processOne(supabaseAdmin, claimed, autoSave, usage);
       counts[outcome] = (counts[outcome] || 0) + 1;
     } catch (err) {
       console.error('supplier bill', row.id, 'failed:', err.message);
@@ -515,10 +524,11 @@ async function processSupplierBills({ budgetMs = 10 * 60 * 1000, extractAttachme
     }
   }
   console.log(`supplier bills: queued ${queued}, processed`, JSON.stringify(counts), autoSave ? '(auto-save on)' : '(suggest only)');
-  return { queued, ...counts };
+  const { count: waiting } = await supabaseAdmin.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).in('status', ['to_check', 'failed']);
+  return { queued, counts, usage, waiting: waiting || 0, autoSave };
 }
 
 module.exports = {
   INVOICE_ADDRESS, getBillLabelId, isSupplierBillMessage, findPart, startSupplierBillProcessing,
-  processSupplierBills, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore,
+  processSupplierBills, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore, downloadAttachment,
 };
