@@ -14,6 +14,7 @@
 const { getAdminClient } = require('./require-admin');
 const { gmailRequest, GMAIL_MAILBOX } = require('./google-client');
 const { getBillLabelId, isSupplierBillMessage, startSupplierBillProcessing } = require('./supplier-bill-intake');
+const { looksLikePriceListEmail, startPriceListProcessing } = require('./price-list-intake');
 
 function headerValue(headers, name) {
   return (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || null;
@@ -96,10 +97,11 @@ async function findClientIdForAddress(supabaseAdmin, address) {
   return contact?.client_id || null;
 }
 
-// Returns true when the message came in through invoice@ (a supplier bill).
+// Returns { bill, priceList }: whether the message came in through invoice@ (a supplier bill),
+// and whether it looks like it carries a supplier price list.
 async function processMessageId(supabaseAdmin, messageId, billLabelId) {
   const { data: alreadyHave } = await supabaseAdmin.from('emails').select('id').eq('gmail_message_id', messageId).maybeSingle();
-  if (alreadyHave) return false; // already synced (includes ones we sent ourselves via send-gmail.js)
+  if (alreadyHave) return {}; // already synced (includes ones we sent ourselves via send-gmail.js)
 
   const msg = await gmailRequest(`messages/${messageId}?format=full`);
   const headers = msg.payload?.headers;
@@ -150,7 +152,7 @@ async function processMessageId(supabaseAdmin, messageId, billLabelId) {
     subject: thread.subject || subject,
     is_read: direction === 'inbound' ? false : thread.is_read,
   }).eq('id', thread.id);
-  return isBill;
+  return { bill: isBill, priceList: direction === 'inbound' && looksLikePriceListEmail(subject, attachments) };
 }
 
 
@@ -205,11 +207,13 @@ async function runSync({ budgetMs = 8000 } = {}) {
 
   messageIds = [...new Set(messageIds)];
   const billLabelId = messageIds.length ? await getBillLabelId() : null;
-  let synced = 0, done = true, bills = 0;
+  let synced = 0, done = true, bills = 0, priceLists = 0;
   for (const id of messageIds) {
     if (Date.now() - startedAt > budgetMs) { done = false; break; }
     try {
-      if (await processMessageId(supabaseAdmin, id, billLabelId)) bills += 1;
+      const seen = await processMessageId(supabaseAdmin, id, billLabelId);
+      if (seen.bill) bills += 1;
+      if (seen.priceList) priceLists += 1;
     } catch (err) {
       // deleted from Gmail after it was listed: skip it, or the sync gets stuck on it every run
       if (!/not found|404/i.test(err.message || '')) throw err;
@@ -227,8 +231,11 @@ async function runSync({ budgetMs = 8000 } = {}) {
   // Started when a bill came in, when some are still waiting, and once an hour as a safety net.
   const { count: waiting } = await supabaseAdmin.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'pending');
   if (bills || waiting || new Date().getMinutes() < 5) await startSupplierBillProcessing();
+  // emailed price lists (from sales@ or invoice@): same idea, started on a likely one, while any are part read, and hourly
+  const { count: listsWaiting } = await supabaseAdmin.from('price_list_imports').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+  if (priceLists || listsWaiting || new Date().getMinutes() < 5) await startPriceListProcessing();
   console.log(`sync-gmail: processed ${synced} of ${messageIds.length} message(s)${done ? '' : ' (out of time, will carry on next run)'}, ${bills} supplier bill(s), filled in ${backfilled} older email(s).`);
-  return { synced, done, total: messageIds.length, backfilled, bills };
+  return { synced, done, total: messageIds.length, backfilled, bills, priceLists };
 }
 
 module.exports = { runSync, extractHtml, extractAttachments, extractPlainText };

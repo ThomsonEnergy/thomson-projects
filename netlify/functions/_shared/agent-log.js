@@ -14,6 +14,7 @@ const { getAdminClient } = require('./require-admin');
 
 const AGENTS = {
   'supplier-bills': { label: 'Supplier bill reader (invoice@)', every: 60 },
+  'price-lists': { label: 'Price list reader (sales@ and invoice@)', every: 60 },
   'sync-gmail': { label: 'sales@ email sync', every: 5 },
   'send-notifications': { label: 'Phone notifications', every: 1 },
   'sync-overheads-nightly': { label: 'Xero overheads sync (nightly)', every: 1440 },

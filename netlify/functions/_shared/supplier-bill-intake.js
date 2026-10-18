@@ -318,6 +318,10 @@ async function analyse(supabaseAdmin, row, { supplierId = null } = {}) {
   } else if (waitingTwin) {
     status = 'duplicate';
     reason = `Bill ${ex.bill_number} from ${supplierMatch.supplier.name} was emailed twice; the other copy is waiting to be checked`;
+  } else if (docType === 'other' && /price|pricing|catalog/i.test(`${row.file_name || ''} ${row.email_subject || ''}`)) {
+    // the price list reader (_shared/price-list-intake.js) picks these up
+    status = 'not_a_bill';
+    reason = 'Looks like a price list: read on the Price lists page';
   } else if (docType !== 'invoice') {
     confidence = 'guess';
     const looksLike = { credit_note: 'a credit note', statement: 'a statement' }[docType] || 'something other than a bill (price list, quote, remittance or similar)';
@@ -526,5 +530,5 @@ async function processSupplierBills({ budgetMs = 10 * 60 * 1000, extractAttachme
 
 module.exports = {
   INVOICE_ADDRESS, getBillLabelId, isSupplierBillMessage, findPart, startSupplierBillProcessing,
-  processSupplierBills, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore,
+  processSupplierBills, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore, downloadAttachment,
 };

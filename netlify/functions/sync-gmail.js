@@ -12,7 +12,7 @@ exports.handler = () => runAgent('sync-gmail', async () => {
   const result = await runSync({ budgetMs: 22000 });
   return {
     quiet: !result.synced,
-    summary: `${result.synced} email${result.synced === 1 ? '' : 's'} synced${result.bills ? `, ${result.bills} supplier bill${result.bills === 1 ? '' : 's'}` : ''}${result.done ? '' : ' (more next run)'}`,
+    summary: `${result.synced} email${result.synced === 1 ? '' : 's'} synced${result.bills ? `, ${result.bills} supplier bill${result.bills === 1 ? '' : 's'}` : ''}${result.priceLists ? `, ${result.priceLists} possible price list${result.priceLists === 1 ? '' : 's'}` : ''}${result.done ? '' : ' (more next run)'}`,
     details: result,
     response: { statusCode: 200, body: JSON.stringify({ ok: true, ...result }) },
   };

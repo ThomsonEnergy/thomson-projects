@@ -20,18 +20,22 @@ const sydneyDate = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Aus
 
 async function buildDigest(admin) {
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const [runsRes, beatsRes, tasksRes, billsRes, savedRes] = await Promise.all([
+  const [runsRes, beatsRes, tasksRes, billsRes, savedRes, pricesRes] = await Promise.all([
     admin.from('agent_runs').select('agent, status, summary, input_tokens, output_tokens').gte('started_at', since),
     admin.from('agent_heartbeats').select('*'),
     admin.from('agent_tasks').select('title').eq('status', 'open').order('created_at'),
     admin.from('supplier_bill_inbox').select('status').in('status', ['to_check', 'failed']),
     admin.from('supplier_bill_inbox').select('resolved_by').eq('status', 'saved').gte('resolved_at', since),
+    admin.from('price_changes').select('status, kind, change_pct, resolved_by').or(`status.eq.waiting,resolved_at.gte.${since}`),
   ]);
   const runs = runsRes.data || [], beats = beatsRes.data || [], tasks = tasksRes.data || [];
   const toCheck = (billsRes.data || []).filter(b => b.status === 'to_check').length;
   const failedBills = (billsRes.data || []).filter(b => b.status === 'failed').length;
   const saved = savedRes.data || [];
   const savedAuto = saved.filter(s => !s.resolved_by).length;
+  const prices = pricesRes.data || [];
+  const priceWaiting = prices.filter(p => p.status === 'waiting').length;
+  const priceAuto = prices.filter(p => p.status === 'applied' && !p.resolved_by).length;
 
   // a worker is down if it has not worked for 3 of its usual gaps
   const down = beats.filter(b => b.agent !== 'ops-digest' && (!b.last_ok_at || Date.now() - new Date(b.last_ok_at).getTime() > 3 * b.expected_every_minutes * 60000));
@@ -43,17 +47,18 @@ async function buildDigest(admin) {
   const needs = [];
   if (toCheck) needs.push(`${plural(toCheck, 'emailed bill')} to check`);
   if (failedBills) needs.push(`${plural(failedBills, 'bill')} that could not be read`);
+  if (priceWaiting) needs.push(`${plural(priceWaiting, 'price list change')} to check`);
   tasks.forEach(t => needs.push(t.title));
 
   const lines = [];
   lines.push(needs.length ? `Needs you: ${needs.join('; ')}.` : 'Nothing needs you.');
-  lines.push(`Last 24 hours: ${plural(saved.length, 'bill')} saved${savedAuto ? ` (${savedAuto} automatically)` : ''}, email sync brought mail in ${plural(emails, 'time')}.`);
+  lines.push(`Last 24 hours: ${plural(saved.length, 'bill')} saved${savedAuto ? ` (${savedAuto} automatically)` : ''}, email sync brought mail in ${plural(emails, 'time')}${priceAuto ? `, ${plural(priceAuto, 'material price')} updated from price lists` : ''}.`);
   if (down.length) lines.push(`Not working: ${down.map(d => d.label).join(', ')}.`);
   else lines.push('All workers OK.');
   if (failedRuns.length) lines.push(`${plural(failedRuns.length, 'failed run')} in the last 24 hours.`);
   if (tokensIn || tokensOut) lines.push(`AI used: ${tokensIn.toLocaleString('en-AU')} tokens in, ${tokensOut.toLocaleString('en-AU')} out.`);
 
-  const needCount = toCheck + failedBills + tasks.length;
+  const needCount = toCheck + failedBills + tasks.length + priceWaiting;
   const title = down.length ? `Morning: ${down[0].label} is not working`
     : needCount ? `Morning: ${plural(needCount, 'thing')} need${needCount === 1 ? 's' : ''} you`
     : 'Morning: all clear';
