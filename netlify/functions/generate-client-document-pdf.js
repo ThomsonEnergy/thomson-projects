@@ -99,7 +99,32 @@ async function getBrowser() {
   return browser;
 }
 
+// Unpacking Chromium (into /tmp) is shared by every caller in this instance and always finished
+// before use. The warm ping used to start it without waiting, so the instance could be frozen
+// mid-write once it answered, and the next PDF then found a half-written file and failed with
+// "spawn ETXTBSY". A failed unpack is forgotten so the next caller tries again.
+let chromiumPathPromise = null;
+function chromiumPath() {
+  if (!chromiumPathPromise) {
+    chromiumPathPromise = require('@sparticuz/chromium').executablePath();
+    chromiumPathPromise.catch(() => { chromiumPathPromise = null; });
+  }
+  return chromiumPathPromise;
+}
+
 async function launchBrowser() {
+  try {
+    return await launchBrowserOnce();
+  } catch (err) {
+    // the file can still be busy for a moment after it is written: wait and try once more
+    if (!/ETXTBSY/.test(String(err && (err.code || err.message)))) throw err;
+    console.warn('Chromium file busy (ETXTBSY), retrying once:', err.message);
+    await new Promise((res) => setTimeout(res, 1500));
+    return launchBrowserOnce();
+  }
+}
+
+async function launchBrowserOnce() {
   // Required lazily, inside the function, rather than at module top level -
   // requiring puppeteer-core at module load time meant simply IMPORTING
   // this file (which Netlify's function bundler/router does for every
@@ -133,7 +158,7 @@ async function launchBrowser() {
     // /tmp disk-backed memory instead, which is the documented fix for
     // exactly this failure mode in a Lambda-style container.
     args: [...chromium.args, '--disable-dev-shm-usage'],
-    executablePath: await chromium.executablePath(),
+    executablePath: await chromiumPath(),
     headless: chromium.headless,
     // Puppeteer's default connects to the browser over a WebSocket to
     // its remote-debugging port, which needs a native WebSocket global
@@ -240,7 +265,7 @@ async function handle(event) {
     // warm-pdf.js pings this every few minutes so the function stays loaded and Chromium is already
     // unpacked when someone really asks for a PDF (unpacking it is a few seconds on a cold start).
     if (doc_type === 'warm') {
-      require('@sparticuz/chromium').executablePath().catch(() => {});
+      await chromiumPath().catch(() => {}); // finish unpacking before answering, see chromiumPath
       return { statusCode: 200, body: JSON.stringify({ ok: true, warm: true }) };
     }
 
