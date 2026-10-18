@@ -452,6 +452,13 @@ async function autoSaveIsOn(supabaseAdmin) {
 async function processOne(supabaseAdmin, row, autoSave, usage) {
   const mime = (row.mime_type || '').toLowerCase();
   const mediaType = /\.pdf$/i.test(row.file_name || '') ? 'application/pdf' : mime;
+  // a price list or catalogue (by its file name) goes to the price list reader unread here,
+  // so a long catalogue is not read twice
+  if (/price|pricing|catalog/i.test(row.file_name || '')) {
+    await supabaseAdmin.from('supplier_bill_inbox').update({ status: 'not_a_bill', match_confidence: 'none', match_reason: 'Looks like a price list: read on the Price lists page', extracted: { document_type: 'other' }, processed_at: new Date().toISOString(), error: null }).eq('id', row.id);
+    return 'not_a_bill';
+  }
+
   const buffer = await downloadAttachment(row.gmail_message_id, row.attachment_part_id);
 
   let filePath = row.file_path;
