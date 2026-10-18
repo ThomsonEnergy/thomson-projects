@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
+const { threadForUser } = require('./_shared/mailboxes');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 
 // POST { thread_id }   (any signed-in staff member)
@@ -130,7 +131,8 @@ exports.handler = async (event) => {
   try {
     const { thread_id: threadId } = JSON.parse(event.body || '{}');
     if (!threadId) return json(400, { ok: false, error: 'thread_id is required' });
-    const { data: thread } = await supabaseAdmin.from('email_threads').select('id, subject, client_id').eq('id', threadId).maybeSingle();
+    const seen = await threadForUser(supabaseAdmin, threadId, auth.user.id);
+    const thread = seen && seen.thread;
     if (!thread) return json(404, { ok: false, error: 'Conversation not found' });
     const { data: emails } = await supabaseAdmin.from('emails')
       .select('id, direction, from_address, to_addresses, sent_at, body_text, body_html, attachments')

@@ -14,12 +14,35 @@
 <link rel="stylesheet" href="/css/style.css?v=16" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  .inbox-layout { display:flex; gap:16px; align-items:flex-start; }
-  .inbox-thread-list { width:400px; flex-shrink:0; max-height:calc(100vh - 220px); overflow-y:auto; }
-  .inbox-thread-item { display:block; padding:12px; border-bottom:1px solid var(--border); cursor:pointer; }
+  .inbox-head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+  .inbox-head-left { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .box-toggle { display:inline-flex; border:1px solid var(--border); border-radius:20px; overflow:hidden; }
+  .box-toggle button { border:0; border-radius:0; font-size:13px; padding:6px 14px; background:transparent; color:var(--text); }
+  .box-toggle button.on { background:var(--accent); color:var(--accent-contrast, #fff); }
+  .drafts-btn { position:relative; }
+  .drafts-btn .count { display:inline-block; min-width:18px; padding:0 6px; margin-left:6px; border-radius:10px; background:var(--accent-contrast, #fff); color:var(--accent); font-size:11px; font-weight:700; }
+  .inbox-layout { display:flex; gap:14px; align-items:flex-start; }
+  .inbox-side { width:200px; flex-shrink:0; }
+  .side-item { display:flex; justify-content:space-between; align-items:center; gap:6px; padding:7px 10px; border-radius:8px; cursor:pointer; font-size:14px; color:var(--text); text-decoration:none; }
+  .side-item:hover { background:var(--surface-2); }
+  .side-item.on { background:var(--surface-2); font-weight:700; border-left:3px solid var(--accent); }
+  .side-item .n { font-size:12px; color:var(--muted); }
+  .side-item.on .n, .side-item .n.hot { color:var(--accent); font-weight:700; }
+  .side-head { display:flex; justify-content:space-between; align-items:center; margin:14px 10px 4px; font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); }
+  .side-head a { font-size:12px; text-transform:none; letter-spacing:0; font-weight:400; }
+  .label-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent); margin-right:6px; vertical-align:1px; }
+  .inbox-thread-list { width:380px; flex-shrink:0; max-height:calc(100vh - 220px); overflow-y:auto; }
+  .inbox-thread-item { display:block; padding:11px 12px; border-bottom:1px solid var(--border); cursor:pointer; color:var(--text); text-decoration:none; }
   .inbox-thread-item:hover { background:var(--surface-2); }
   .inbox-thread-item.active { background:var(--surface-2); border-left:3px solid var(--accent); }
   .inbox-thread-item.unread .inbox-subject { font-weight:700; }
+  .inbox-thread-item.sent-last { border-right:3px solid var(--accent); }
+  .inbox-thread-item.recv-last { border-right:3px solid #3fb97a; }
+  .inbox-who { font-size:12px; color:var(--text); margin:3px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .inbox-reason { font-size:12px; font-style:italic; color:var(--accent); margin:3px 0 0; }
+  .chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; padding:1px 8px; border:1px solid var(--border); border-radius:20px; margin:4px 4px 0 0; white-space:nowrap; }
+  .chip.draft { border-color:var(--accent); color:var(--accent); font-weight:700; }
+  .chip.ai { border-style:dashed; }
   .inbox-detail { flex:1; min-width:0; }
   .inbox-message { border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px; white-space:pre-wrap; }
   .inbox-message.inbound { margin-right:48px; border-left:4px solid #3fb97a; }
@@ -27,16 +50,40 @@
   .dir-badge { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:1px 7px; border-radius:20px; margin-right:6px; vertical-align:1px; }
   .dir-badge.inbound { color:#3fb97a; border:1px solid #3fb97a; }
   .dir-badge.outbound { color:var(--accent); border:1px solid var(--accent); }
-  .inbox-filters { display:flex; gap:6px; flex-wrap:wrap; align-items:center; padding:8px 4px 10px; position:sticky; top:0; background:var(--surface); z-index:1; }
-  .inbox-filters button { font-size:12px; padding:5px 12px; }
-  .inbox-filters button.on { background:var(--accent); color:var(--accent-contrast, #fff); border-color:var(--accent); }
-  .inbox-thread-item.sent-last { border-right:3px solid var(--accent); }
-  .inbox-thread-item.recv-last { border-right:3px solid #3fb97a; }
-  .inbox-who { font-size:12px; color:var(--text); margin:3px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .list-filters { display:flex; gap:6px; flex-wrap:wrap; align-items:center; padding:8px 4px 10px; position:sticky; top:0; background:var(--surface); z-index:1; }
+  .list-filters h3 { margin:0; font-size:15px; }
   .email-body { white-space:normal; }
-  @media (max-width: 800px) {
+  .thread-bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 10px; }
+  .thread-bar button, .thread-bar select { font-size:12px; padding:4px 10px; width:auto; }
+  .suggest { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:13px; padding:8px 10px; border:1px dashed var(--accent); border-radius:8px; margin:0 0 10px; }
+  .suggest button { font-size:12px; padding:3px 10px; }
+  .section-pill { display:inline-block; font-size:12px; padding:2px 10px; border-radius:20px; background:var(--surface-2); }
+  .section-pill.priority { background:var(--accent); color:var(--accent-contrast, #fff); }
+  .menu { position:absolute; z-index:50; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; min-width:240px; max-height:320px; overflow-y:auto; box-shadow:0 6px 24px rgba(0,0,0,.35); }
+  .menu label { display:flex; align-items:center; gap:8px; margin:0 0 4px; font-weight:400; font-size:13px; }
+  .drafts-panel { position:fixed; top:0; right:0; bottom:0; width:380px; max-width:100%; background:var(--surface); border-left:1px solid var(--border); z-index:110; display:flex; flex-direction:column; box-shadow:-8px 0 30px rgba(0,0,0,.35); }
+  .drafts-panel .list { overflow-y:auto; flex:1; }
+  .draft-row { display:block; padding:12px 16px; border-bottom:1px solid var(--border); cursor:pointer; color:var(--text); text-decoration:none; }
+  .draft-row:hover { background:var(--surface-2); }
+  .notice { white-space:pre-line; font-size:14px; line-height:1.5; max-height:55vh; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:12px; }
+  .cleanup-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .cleanup-table td, .cleanup-table th { padding:8px 6px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  .cleanup-table button { font-size:12px; padding:3px 8px; margin:0 4px 4px 0; }
+  .progress { height:8px; border-radius:4px; background:var(--surface-2); overflow:hidden; }
+  .progress > div { height:100%; background:var(--accent); }
+  .back-btn { display:none; }
+  @media (max-width: 1000px) {
     .inbox-layout { flex-direction:column; }
-    .inbox-thread-list { width:100%; max-height:300px; }
+    .inbox-side { width:100%; display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; }
+    .inbox-side .side-head { display:none; }
+    .side-item { white-space:nowrap; border:1px solid var(--border); border-radius:20px; padding:5px 12px; }
+    .side-item.on { border-left:1px solid var(--accent); }
+    .inbox-thread-list { width:100%; max-height:none; }
+    .inbox-layout.reading .inbox-thread-list, .inbox-layout.reading .inbox-side { display:none; }
+    .inbox-layout:not(.reading) .inbox-detail { display:none; }
+    .back-btn { display:inline-block; }
+    .inbox-message.inbound { margin-right:0; }
+    .inbox-message.outbound { margin-left:0; }
   }
 </style>
 </head>
@@ -54,20 +101,29 @@
   </div>
 
   <div class="wrap wide">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-      <h1 style="margin:0;">Inbox</h1>
-      <div>
+    <div class="inbox-head">
+      <div class="inbox-head-left">
+        <h1 style="margin:0;" id="inbox-title">Sales inbox</h1>
+        <div class="box-toggle" id="box-toggle">
+          <button type="button" data-box="sales" class="on">Sales inbox</button>
+          <button type="button" data-box="mine">My inbox</button>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="drafts-btn" id="drafts-btn">Drafts<span class="count" id="drafts-count">0</span></button>
         <button type="button" class="secondary" id="sync-now-btn">Sync now</button>
         <button type="button" id="compose-btn">Compose</button>
       </div>
     </div>
-    <p class="subtitle">Shared inbox for sales@thomsonenergy.com.au - visible to every staff member.</p>
+    <p class="subtitle" id="inbox-subtitle">Shared inbox for sales@thomsonenergy.com.au, visible to every staff member.</p>
+    <div id="inbox-banner"></div>
 
-    <div class="card">
-      <div class="inbox-layout">
+    <div class="card" id="inbox-card">
+      <div class="inbox-layout" id="inbox-layout">
+        <div class="inbox-side" id="inbox-side"></div>
         <div class="inbox-thread-list" id="thread-list"><p class="subtitle">Loading...</p></div>
         <div class="inbox-detail" id="thread-detail">
-          <p class="subtitle">Select a conversation on the left, or click Compose to start a new one.</p>
+          <p class="subtitle">Select a conversation, or click Compose to start a new one.</p>
         </div>
       </div>
     </div>
@@ -76,32 +132,36 @@
   <script src="/js/supabase-client.js?v=81"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=4"></script>
+  <script src="/js/email-compose.js?v=5"></script>
   <script>
+    // Sales inbox (sales@, shared) and My inbox (the logged-in person's own Gmail, private).
+    // The email agent sorts conversations into Priority (needs a reply), Other and
+    // Subscriptions and updates; labels hold non-job matters; drafts wait in the Drafts
+    // list and at the bottom of their conversation. See docs/PROJECT_SPEC.md A18.
+
+    const NOTICE_VERSION = 1;
+    const SECTION_NAMES = { priority: 'Priority', other: 'Other', updates: 'Subscriptions and updates' };
+    const S = {
+      me: null, assistant: 'Sparky', box: 'sales', view: 'priority', unreadOnly: false,
+      shared: null, mine: null, labels: [], drafts: [], activeThreadId: null, cleanupFilter: 'archive', cleanupTimer: null,
+    };
+    const mb = () => (S.box === 'mine' ? S.mine : S.shared);
+    const mineConnected = () => !!(S.mine && S.mine.connected_at);
+
     function timeAgo(dateStr) {
       if (!dateStr) return '';
-      const diffMs = Date.now() - new Date(dateStr).getTime();
-      const mins = Math.floor(diffMs / 60000);
+      const mins = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
       if (mins < 1) return 'just now';
       if (mins < 60) return `${mins}m ago`;
       const hours = Math.floor(mins / 60);
       if (hours < 24) return `${hours}h ago`;
-      const days = Math.floor(hours / 24);
-      return `${days}d ago`;
+      return `${Math.floor(hours / 24)}d ago`;
     }
-
-    let activeThreadId = null;
-    let inboxBox = 'inbox';   // inbox | sent | all
-    let unreadOnly = false;
-    let loadedThreads = [], loadedLatest = {}, loadedRecent = [];
-
     // "Bob Jones <bob@x.com>" -> "Bob Jones"; a bare address stays as it is
     function addrName(raw) {
       const m = String(raw || '').match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
       return m ? (m[1].trim() || m[2]) : String(raw || '').trim();
     }
-
-    // "Bob Jones <bob@x.com>" -> "Bob Jones <bob@x.com>" with a bare address kept as is, for the message header
     function addrFull(raw) {
       const m = String(raw || '').match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
       if (!m) return String(raw || '').trim();
@@ -116,82 +176,217 @@
       const dom = (m[2].split('@')[1] || '').trim();
       return dom && !/^(gmail|hotmail|outlook|yahoo|bigpond|icloud)\./i.test(dom) && !name.toLowerCase().includes(dom.split('.')[0].toLowerCase()) ? name + ' (' + dom + ')' : name;
     }
-
-    async function loadThreadList() {
-      const listEl = document.getElementById('thread-list');
-      const { data: threads, error } = await supabaseClient
-        .from('email_threads')
-        .select('*, clients(name)')
-        .eq('is_supplier_bill', false) // invoice@ bills live on the Emailed bills page
-        .order('last_message_at', { ascending: false, nullsFirst: false })
-        .limit(100);
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-
-      if (!threads.length) {
-        listEl.innerHTML = `<p class="subtitle">No emails yet - click "Sync now" once sales@ is connected in Settings.</p>`;
-        return;
-      }
-
-      // each conversation's messages tell us what we sent and what we received
-      const { data: recent } = await supabaseClient.from('emails')
-        .select('thread_id, direction, from_address, to_addresses, sent_at')
-        .in('thread_id', threads.map(t => t.id)).order('sent_at', { ascending: false }).limit(1500);
-      const latest = {};
-      (recent || []).forEach(e => { if (!latest[e.thread_id]) latest[e.thread_id] = e; });
-      loadedThreads = threads; loadedLatest = latest; loadedRecent = recent || [];
-      renderThreadList();
+    const addrOnlyOf = (full) => { const m = String(full).match(/<([^>]+)>/); return m ? m[1] : full; };
+    const canMirror = (m) => !!m && String(m.scopes || '').includes('gmail.modify');
+    async function act(action, body) { return emailAction(action, body); }
+    function setUrl() {
+      const p = new URLSearchParams();
+      if (S.box === 'mine') p.set('box', 'mine');
+      if (S.activeThreadId) p.set('thread', S.activeThreadId);
+      history.replaceState(null, '', '/inbox.html' + (p.toString() ? '?' + p : ''));
     }
 
-    // Three boxes: Inbox (conversations with mail we have received), Sent (every email we
-    // sent) and All. Each row says whether it was sent or received, and to / from whom.
-    function renderThreadList() {
+    // ---------- loading ----------
+
+    async function loadMailboxes() {
+      const { data } = await supabaseClient.from('mailboxes').select('*');
+      S.shared = (data || []).find(m => m.kind === 'shared') || null;
+      S.mine = (data || []).find(m => m.kind === 'personal' && m.owner_id === S.me.id) || null;
+    }
+
+    async function loadLabels() {
+      const m = mb();
+      if (!m) { S.labels = []; return; }
+      const { data: labels } = await supabaseClient.from('email_labels').select('*').eq('mailbox_id', m.id).order('name');
+      S.labels = labels || [];
+      if (!S.labels.length) return;
+      const { data: links } = await supabaseClient.from('email_thread_labels').select('label_id, email_threads!inner(is_done)').in('label_id', S.labels.map(l => l.id)).limit(5000);
+      const open = {}, all = {};
+      (links || []).forEach(l => { all[l.label_id] = (all[l.label_id] || 0) + 1; if (!l.email_threads.is_done) open[l.label_id] = (open[l.label_id] || 0) + 1; });
+      S.labels.forEach(l => { l.count = all[l.id] || 0; l.openCount = open[l.id] || 0; });
+    }
+
+    async function loadDrafts() {
+      const m = mb();
+      if (!m) { S.drafts = []; renderDraftsCount(); return; }
+      const { data } = await supabaseClient.from('email_drafts').select('*, email_threads(subject)').eq('mailbox_id', m.id).eq('status', 'draft').order('updated_at', { ascending: false }).limit(200);
+      S.drafts = data || [];
+      renderDraftsCount();
+    }
+    function renderDraftsCount() { document.getElementById('drafts-count').textContent = S.drafts.length; }
+
+    function baseThreads(select) {
+      return supabaseClient.from('email_threads').select(select || '*, clients(name)').eq('mailbox_id', mb().id).eq('is_supplier_bill', false);
+    }
+    const viewFilter = {
+      priority: (q) => q.eq('section', 'priority').eq('last_direction', 'inbound').eq('is_done', false),
+      other: (q) => q.eq('is_done', false).or('section.is.null,section.eq.other,and(section.eq.priority,last_direction.eq.outbound)'),
+      updates: (q) => q.eq('section', 'updates').eq('is_done', false),
+      done: (q) => q.eq('is_done', true),
+      all: (q) => q,
+    };
+
+    // Priority: everything waiting on a reply. Other and updates: unread only.
+    async function loadCounts() {
+      const count = (view, unread) => {
+        let q = viewFilter[view](supabaseClient.from('email_threads').select('id', { count: 'exact', head: true }).eq('mailbox_id', mb().id).eq('is_supplier_bill', false));
+        if (unread) q = q.eq('is_read', false);
+        return q.then(r => r.count || 0);
+      };
+      const [priority, other, updates] = await Promise.all([count('priority'), count('other', true), count('updates', true)]);
+      return { priority, other, updates };
+    }
+
+    // ---------- page shell ----------
+
+    async function showBox(box) {
+      S.box = box;
+      S.activeThreadId = null;
+      clearInterval(S.cleanupTimer);
+      document.querySelectorAll('#box-toggle button').forEach(b => b.classList.toggle('on', b.dataset.box === box));
+      document.getElementById('inbox-title').textContent = box === 'mine' ? 'My inbox' : 'Sales inbox';
+      document.getElementById('inbox-layout').classList.remove('reading');
+      const banner = document.getElementById('inbox-banner');
+      banner.innerHTML = '';
+      setUrl();
+      if (box === 'mine' && !mineConnected()) {
+        document.getElementById('inbox-subtitle').textContent = 'Your own work email, private to you.';
+        S.drafts = []; renderDraftsCount();
+        return renderConnect();
+      }
+      const m = mb();
+      document.getElementById('inbox-subtitle').textContent = box === 'mine'
+        ? `${m.address}: private to you. Conversations you tag to a job show on that job for the team.`
+        : 'Shared inbox for sales@thomsonenergy.com.au, visible to every staff member.';
+      if (box === 'mine' && !m.backfill_done_at) {
+        banner.innerHTML = '<div class="card" style="padding:10px 14px; margin-bottom:10px;">Loading your last 60 days of email. This runs in the background and can take 10 to 30 minutes; refresh to see more.</div>';
+      } else if (box === 'sales' && !canMirror(m)) {
+        banner.innerHTML = '<p class="subtitle" style="font-size:12px;">Labels, drafts and Done stay in TEops only until an admin connects sales@ again in Settings (one click) to give the new Gmail permission.</p>';
+      }
+      if (m.last_error && box === 'mine') banner.innerHTML += `<div class="error-box" style="margin-bottom:10px;">Gmail said: ${escapeHtml(m.last_error)}. If it keeps happening, disconnect and connect again below.</div>`;
+      await Promise.all([loadLabels(), loadDrafts()]);
+      await renderSide();
+      if (S.view === 'cleanup') return renderCleanup();
+      await loadList();
+    }
+
+    async function renderSide() {
+      const side = document.getElementById('inbox-side');
+      const counts = await loadCounts();
+      const item = (view, label, n, hot) => `<a class="side-item ${S.view === view ? 'on' : ''}" data-view="${view}"><span>${label}</span>${n ? `<span class="n ${hot ? 'hot' : ''}">${n}</span>` : ''}</a>`;
+      const open = S.labels.filter(l => l.status === 'open'), finished = S.labels.filter(l => l.status === 'done');
+      side.innerHTML = item('priority', 'Priority', counts.priority, true)
+        + item('other', 'Other', counts.other)
+        + item('updates', 'Subscriptions and updates', counts.updates)
+        + item('sent', 'Sent') + item('done', 'Done') + item('all', 'All')
+        + `<div class="side-head"><span>Labels</span><a href="#" id="new-label-link">+ New</a></div>`
+        + open.map(l => `<a class="side-item ${S.view === 'label:' + l.id ? 'on' : ''}" data-view="label:${l.id}" title="${escapeHtml(l.description || '')}"><span><span class="label-dot"></span>${escapeHtml(l.name)}</span>${l.openCount ? `<span class="n">${l.openCount}</span>` : ''}</a>`).join('')
+        + (open.length ? '' : '<p class="subtitle" style="font-size:12px; margin:2px 10px;">For matters that are not a job, like a supplier dispute or a licence application.</p>')
+        + (finished.length ? `<div class="side-head"><span>Finished</span></div>` + finished.map(l => `<a class="side-item ${S.view === 'label:' + l.id ? 'on' : ''}" data-view="label:${l.id}"><span style="color:var(--muted);">${escapeHtml(l.name)}</span></a>`).join('') : '')
+        + `<div class="side-head"><span>Tools</span></div>` + item('cleanup', 'Clean up')
+        + (S.box === 'mine' ? `<a class="side-item" id="disconnect-link"><span style="color:var(--muted); font-size:13px;">Disconnect my Gmail</span></a>` : '');
+      side.querySelectorAll('[data-view]').forEach(a => a.addEventListener('click', () => { S.view = a.dataset.view; S.activeThreadId = null; clearInterval(S.cleanupTimer); renderSide(); S.view === 'cleanup' ? renderCleanup() : loadList(); }));
+      document.getElementById('new-label-link').addEventListener('click', (e) => { e.preventDefault(); openLabelEditor(null); });
+      const dl = document.getElementById('disconnect-link');
+      if (dl) dl.addEventListener('click', disconnectMine);
+    }
+
+    // ---------- the list ----------
+
+    async function loadList() {
       const listEl = document.getElementById('thread-list');
-      const threads = loadedThreads, latest = loadedLatest;
-      const byId = Object.fromEntries(threads.map(t => [t.id, t]));
-      const hasInbound = new Set(loadedRecent.filter(e => e.direction === 'inbound').map(e => e.thread_id));
-      const unreadCount = threads.filter(t => !t.is_read && hasInbound.has(t.id)).length;
-      const tab = (key, label, extra) => '<button type="button" class="secondary ' + (inboxBox === key ? 'on' : '') + '" data-box="' + key + '">' + label + (extra || '') + '</button>';
+      listEl.style.display = '';
+      listEl.style.width = '';
+      document.getElementById('thread-detail').style.display = '';
+      const m = mb();
+      let threads = [], header = '', latest = {}, sentRows = null;
+      const label = S.view.startsWith('label:') ? S.labels.find(l => l.id === S.view.slice(6)) : null;
+
+      if (S.view === 'sent') {
+        const { data, error } = await supabaseClient.from('emails')
+          .select('id, thread_id, to_addresses, sent_at, email_threads!inner(id, subject, mailbox_id, is_supplier_bill, clients(name))')
+          .eq('direction', 'outbound').eq('email_threads.mailbox_id', m.id).eq('email_threads.is_supplier_bill', false)
+          .order('sent_at', { ascending: false }).limit(150);
+        if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        sentRows = data || [];
+      } else {
+        let q = baseThreads();
+        if (label) {
+          const { data: links } = await supabaseClient.from('email_thread_labels').select('thread_id').eq('label_id', label.id).limit(1000);
+          q = q.in('id', (links || []).map(l => l.thread_id).concat(['00000000-0000-0000-0000-000000000000']));
+        } else {
+          q = viewFilter[S.view](q);
+        }
+        if (S.unreadOnly) q = q.eq('is_read', false);
+        const { data, error } = await q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(200);
+        if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        threads = data || [];
+        if (threads.length) {
+          const { data: recent } = await supabaseClient.from('emails').select('thread_id, direction, from_address, to_addresses, sent_at')
+            .in('thread_id', threads.map(t => t.id)).order('sent_at', { ascending: false }).limit(1500);
+          (recent || []).forEach(e => { if (!latest[e.thread_id]) latest[e.thread_id] = e; });
+        }
+      }
+
+      const threadIds = sentRows ? [...new Set(sentRows.map(r => r.thread_id))] : threads.map(t => t.id);
+      const labelsBy = {};
+      if (threadIds.length && S.labels.length) {
+        const { data: tl } = await supabaseClient.from('email_thread_labels').select('thread_id, label_id, by_ai').in('thread_id', threadIds);
+        (tl || []).forEach(x => { (labelsBy[x.thread_id] = labelsBy[x.thread_id] || []).push(x); });
+      }
+      const draftBy = Object.fromEntries(S.drafts.filter(d => d.thread_id).map(d => [d.thread_id, d]));
+      const chips = (id) => (labelsBy[id] || []).map(x => { const l = S.labels.find(y => y.id === x.label_id); return l ? `<span class="chip ${x.by_ai ? 'ai' : ''}"><span class="label-dot"></span>${escapeHtml(l.name)}</span>` : ''; }).join('')
+        + (draftBy[id] ? `<span class="chip draft">${draftBy[id].by_ai ? escapeHtml(S.assistant) + ' drafted a reply' : 'Draft'}</span>` : '');
       const sub = (t, when) => '<p class="subtitle" style="margin:2px 0 0; font-size:12px;">' + (t.clients?.name ? escapeHtml(t.clients.name) + ' &middot; ' : '') + when + '</p>';
 
+      if (label) {
+        header = `<h3>${escapeHtml(label.name)}</h3><span class="chip">${label.status === 'done' ? 'Finished' : 'Open'}</span><button type="button" class="secondary" id="edit-label-btn" style="font-size:12px; padding:4px 10px; margin-left:auto;">Edit</button>`
+          + (label.description ? `<p class="subtitle" style="width:100%; margin:4px 0 0; font-size:12px;">${escapeHtml(label.description)}</p>` : '');
+      } else {
+        const titles = { priority: 'Needs a reply', other: 'Other', updates: 'Subscriptions and updates', sent: 'Sent', done: 'Done', all: 'All' };
+        header = `<h3>${titles[S.view]}</h3>` + (S.view === 'sent' ? '' : `<label style="margin:0 0 0 auto; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="unread-only" style="width:auto;" ${S.unreadOnly ? 'checked' : ''} /> Unread only</label>`);
+        if (S.view === 'updates') header += `<p class="subtitle" style="width:100%; margin:4px 0 0; font-size:12px;">Skim when you have time to check ${escapeHtml(S.assistant)} did not miss anything. Wrong place? Open it and move it.</p>`;
+      }
+
       let body;
-      if (inboxBox === 'sent') {
-        body = loadedRecent.filter(e => e.direction === 'outbound' && byId[e.thread_id]).map(e => {
-          const t = byId[e.thread_id];
-          return '<a class="inbox-thread-item sent-last ' + (t.id === activeThreadId ? 'active' : '') + '" data-id="' + t.id + '">'
-            + '<div class="inbox-subject">' + escapeHtml(t.subject || '(no subject)') + '</div>'
-            + '<div class="inbox-who"><span class="dir-badge outbound">Sent</span>To ' + escapeHtml(addrName((e.to_addresses || [])[0]) || 'unknown') + '</div>'
-            + sub(t, timeAgo(e.sent_at)) + '</a>';
+      if (sentRows) {
+        body = sentRows.map(e => {
+          const t = e.email_threads;
+          return `<a class="inbox-thread-item sent-last ${t.id === S.activeThreadId ? 'active' : ''}" data-id="${t.id}">`
+            + `<div class="inbox-subject">${escapeHtml(t.subject || '(no subject)')}</div>`
+            + `<div class="inbox-who"><span class="dir-badge outbound">Sent</span>To ${escapeHtml(addrName((e.to_addresses || [])[0]) || 'unknown')}</div>`
+            + chips(t.id) + sub(t, timeAgo(e.sent_at)) + '</a>';
         }).join('') || '<p class="subtitle" style="padding:8px 4px;">Nothing sent yet.</p>';
       } else {
-        body = threads.filter(t => (inboxBox === 'all' || hasInbound.has(t.id)) && (!unreadOnly || !t.is_read)).map(t => {
+        body = threads.map(t => {
           const l = latest[t.id];
           const out = !!l && l.direction === 'outbound';
           const who = !l ? '' : out
             ? '<span class="dir-badge outbound">Sent</span>To ' + escapeHtml(addrName((l.to_addresses || [])[0]) || 'unknown')
             : '<span class="dir-badge inbound">Received</span>From ' + escapeHtml(addrShort(l.from_address) || 'unknown');
-          return '<a class="inbox-thread-item ' + (t.id === activeThreadId ? 'active' : '') + ' ' + (!t.is_read ? 'unread' : '') + ' ' + (l ? (out ? 'sent-last' : 'recv-last') : '') + '" data-id="' + t.id + '">'
-            + '<div class="inbox-subject">' + escapeHtml(t.subject || '(no subject)') + '</div>'
-            + '<div class="inbox-who">' + who + '</div>' + sub(t, timeAgo(t.last_message_at)) + '</a>';
-        }).join('') || '<p class="subtitle" style="padding:8px 4px;">Nothing here.</p>';
+          const reason = t.section === 'priority' && t.section_reason && !out ? `<div class="inbox-reason">${escapeHtml(t.section_reason)}</div>` : '';
+          return `<a class="inbox-thread-item ${t.id === S.activeThreadId ? 'active' : ''} ${!t.is_read ? 'unread' : ''} ${l ? (out ? 'sent-last' : 'recv-last') : ''}" data-id="${t.id}">`
+            + `<div class="inbox-subject">${escapeHtml(t.subject || '(no subject)')}</div>`
+            + `<div class="inbox-who">${who}</div>${reason}${chips(t.id)}${sub(t, timeAgo(t.last_message_at))}</a>`;
+        }).join('') || `<p class="subtitle" style="padding:8px 4px;">${S.view === 'priority' ? 'Nothing waiting on a reply.' : 'Nothing here.'}</p>`;
       }
-      listEl.innerHTML = '<div class="inbox-filters">' + tab('inbox', 'Inbox', unreadCount ? ' (' + unreadCount + ')' : '') + tab('sent', 'Sent') + tab('all', 'All')
-        + (inboxBox === 'sent' ? '' : '<label style="margin:0 0 0 auto; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="unread-only" style="width:auto;" ' + (unreadOnly ? 'checked' : '') + ' /> Unread only</label>')
-        + '</div>' + body;
+      listEl.innerHTML = `<div class="list-filters">${header}</div>` + body;
 
-      listEl.querySelectorAll('[data-box]').forEach(b => b.addEventListener('click', () => { inboxBox = b.dataset.box; renderThreadList(); }));
       const uo = document.getElementById('unread-only');
-      if (uo) uo.addEventListener('change', () => { unreadOnly = uo.checked; renderThreadList(); });
-      listEl.querySelectorAll('.inbox-thread-item').forEach(el => {
-        el.addEventListener('click', () => openThread(el.dataset.id));
-      });
+      if (uo) uo.addEventListener('change', () => { S.unreadOnly = uo.checked; loadList(); });
+      const el = document.getElementById('edit-label-btn');
+      if (el) el.addEventListener('click', () => openLabelEditor(label));
+      listEl.querySelectorAll('.inbox-thread-item').forEach(a => a.addEventListener('click', () => openThread(a.dataset.id)));
+      if (!S.activeThreadId) document.getElementById('thread-detail').innerHTML = '<p class="subtitle">Select a conversation, or click Compose to start a new one.</p>';
     }
 
-    const addrOnlyOf = (full) => { const m = String(full).match(/<([^>]+)>/); return m ? m[1] : full; };
+    // ---------- one conversation ----------
 
-    function messageHtml(m, myUserId, staffName) {
+    function messageHtml(m, staffName) {
       const out = m.direction === 'outbound';
+      const as = S.box === 'mine' ? '' : ' (as sales@)';
       const senderLabel = out
-        ? (m.created_by ? (m.created_by === myUserId ? 'You' : staffName(m.created_by)) + ' (as sales@)' : 'sales@ (sent from Gmail)')
+        ? (m.created_by ? (m.created_by === S.me.id ? 'You' : staffName(m.created_by)) + as : (S.box === 'mine' ? 'You (sent from Gmail)' : 'sales@ (sent from Gmail)'))
         : (addrName(m.from_address) || 'Client');
       const fromFull = out ? '' : addrFull(m.from_address);
       const toLine = (m.to_addresses || []).map(addrName).filter(Boolean).join(', ');
@@ -207,9 +402,9 @@
       const el = document.getElementById('thread-tags');
       if (!el) return;
       const { data: links } = await supabaseClient.from('email_job_links')
-        .select('id, kind, note, projects(id, name, job_number, quote_number)').eq('thread_id', threadId);
-      el.innerHTML = (links || []).map(l => `<span style="font-size:12px; padding:3px 10px; border:1px solid var(--accent); border-radius:20px; display:inline-flex; gap:6px; align-items:center;">
-          <a href="/project.html?id=${l.projects.id}&tab=emails" class="link-quiet" title="${escapeHtml(l.note || '')}">${escapeHtml(projectRef(l.projects))} &middot; ${EMAIL_KINDS[l.kind] || 'Other'}</a>
+        .select('id, kind, note, by_ai, projects(id, name, job_number, quote_number)').eq('thread_id', threadId);
+      el.innerHTML = (links || []).map(l => `<span style="font-size:12px; padding:3px 10px; border:1px ${l.by_ai ? 'dashed' : 'solid'} var(--accent); border-radius:20px; display:inline-flex; gap:6px; align-items:center;">
+          <a href="/project.html?id=${l.projects.id}&tab=emails" class="link-quiet" title="${escapeHtml(l.note || '')}">${escapeHtml(projectRef(l.projects))} &middot; ${EMAIL_KINDS[l.kind] || 'Other'}${l.by_ai ? ' &middot; tagged by ' + escapeHtml(S.assistant) : ''}</a>
           <a href="#" data-untag="${l.id}" title="Remove this tag">&times;</a></span>`).join('')
         + '<button type="button" class="secondary" id="tag-email-btn" style="font-size:12px; padding:4px 10px;">+ Tag to a job</button>'
         + '<button type="button" id="create-from-email-btn" style="font-size:12px; padding:4px 10px;">Create quote / job from this email</button>';
@@ -223,123 +418,427 @@
       document.getElementById('tag-email-btn').addEventListener('click', () => openTagEmailModal({ threadId, onSaved: () => loadThreadTags(threadId) }));
     }
 
+    async function loadThreadLabels(thread) {
+      const el = document.getElementById('thread-labels');
+      if (!el) return;
+      const { data: tl } = await supabaseClient.from('email_thread_labels').select('label_id, by_ai').eq('thread_id', thread.id);
+      const on = new Set((tl || []).map(x => x.label_id));
+      el.innerHTML = (tl || []).map(x => { const l = S.labels.find(y => y.id === x.label_id); return l ? `<span class="chip ${x.by_ai ? 'ai' : ''}" style="font-size:12px; padding:3px 10px;" title="${x.by_ai ? 'Added by ' + escapeHtml(S.assistant) : ''}"><span class="label-dot"></span>${escapeHtml(l.name)} <a href="#" data-unlabel="${l.id}" title="Remove label">&times;</a></span>` : ''; }).join('')
+        + '<span style="position:relative;"><button type="button" class="secondary" id="label-btn" style="font-size:12px; padding:4px 10px;">+ Label</button></span>';
+      el.querySelectorAll('[data-unlabel]').forEach(a => a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await act('remove_label', { thread_id: thread.id, label_id: a.dataset.unlabel });
+        await loadLabels(); loadThreadLabels(thread); renderSide();
+      }));
+      document.getElementById('label-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.menu').forEach(x => x.remove());
+        const menu = document.createElement('div');
+        menu.className = 'menu';
+        menu.style.top = '30px'; menu.style.left = '0';
+        menu.innerHTML = S.labels.filter(l => l.status === 'open' || on.has(l.id)).map(l => `<label><input type="checkbox" data-l="${l.id}" style="width:auto;" ${on.has(l.id) ? 'checked' : ''} /> ${escapeHtml(l.name)}</label>`).join('')
+          + `<div style="border-top:1px solid var(--border); margin-top:6px; padding-top:6px;"><input id="menu-new-label" placeholder="New label, e.g. Supplier dispute: Middys" style="font-size:13px;" /><button type="button" id="menu-new-btn" style="font-size:12px; padding:4px 10px; margin-top:6px;">Create and add</button></div>`;
+        e.target.parentElement.appendChild(menu);
+        menu.addEventListener('click', ev => ev.stopPropagation());
+        menu.querySelectorAll('[data-l]').forEach(c => c.addEventListener('change', async () => {
+          await act(c.checked ? 'add_label' : 'remove_label', { thread_id: thread.id, label_id: c.dataset.l });
+          await loadLabels(); loadThreadLabels(thread); renderSide();
+        }));
+        menu.querySelector('#menu-new-btn').addEventListener('click', async () => {
+          const name = menu.querySelector('#menu-new-label').value.trim();
+          if (!name) return;
+          try { await act('create_label', { mailbox_id: mb().id, name, thread_id: thread.id }); } catch (err) { alert(err.message); return; }
+          menu.remove(); await loadLabels(); loadThreadLabels(thread); renderSide();
+        });
+        setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0);
+      });
+    }
+
     async function openThread(threadId) {
-      activeThreadId = threadId;
+      S.activeThreadId = threadId;
+      setUrl();
+      document.getElementById('inbox-layout').classList.add('reading');
       document.querySelectorAll('.inbox-thread-item').forEach(el => el.classList.toggle('active', el.dataset.id === threadId));
-
       const detailEl = document.getElementById('thread-detail');
-      detailEl.innerHTML = `<p class="subtitle">Loading...</p>`;
+      detailEl.style.display = '';
+      detailEl.innerHTML = '<p class="subtitle">Loading...</p>';
 
-      const [{ data: thread }, { data: emails }, { data: staff }, { data: { user } }] = await Promise.all([
-        supabaseClient.from('email_threads').select('*, clients(name)').eq('id', threadId).single(),
+      const [{ data: thread }, { data: emails }, { data: staff }, { data: drafts }] = await Promise.all([
+        supabaseClient.from('email_threads').select('*, clients(name), projects:suggested_project_id(id, name, job_number, quote_number)').eq('id', threadId).single(),
         supabaseClient.from('emails').select('*').eq('thread_id', threadId).order('sent_at', { ascending: true }),
         supabaseClient.from('profiles').select('id, full_name'),
-        supabaseClient.auth.getUser(),
+        supabaseClient.from('email_drafts').select('*').eq('thread_id', threadId).eq('status', 'draft').order('updated_at', { ascending: false }).limit(1),
       ]);
+      if (!thread) { detailEl.innerHTML = '<p class="subtitle">That conversation is not available.</p>'; return; }
       const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'A team member';
+      const draft = (drafts || [])[0] || null;
+      const lastOut = (emails || []).slice(-1)[0]?.direction === 'outbound';
+      const sec = thread.section || 'other';
+      const gmailUrl = `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(mb().address)}#all/${thread.gmail_thread_id}`;
 
       detailEl.innerHTML = `
-        <h2 style="margin:0 0 4px;">${escapeHtml(thread.subject || '(no subject)')}</h2>
+        <button type="button" class="secondary back-btn" id="back-btn" style="font-size:12px; padding:4px 10px; margin-bottom:8px;">&larr; Back</button>
+        <h2 style="margin:0 0 6px;">${escapeHtml(thread.subject || '(no subject)')}</h2>
         ${thread.clients?.name ? `<p class="subtitle" style="margin:0 0 6px;">${escapeHtml(thread.clients.name)}</p>` : ''}
+        <div class="thread-bar">
+          <span class="section-pill ${sec === 'priority' && !lastOut ? 'priority' : ''}">${sec === 'priority' && lastOut ? 'Replied, waiting on them' : SECTION_NAMES[sec]}${thread.section_reason && sec === 'priority' && !lastOut ? ': ' + escapeHtml(thread.section_reason) : ''}</span>
+          <select id="move-section" title="Move to">
+            <option value="">Move to...</option>
+            ${Object.entries(SECTION_NAMES).filter(([k]) => k !== sec).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
+          </select>
+          <label style="margin:0; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="move-always" style="width:auto;" /> always for this sender</label>
+          <button type="button" class="secondary" id="done-btn">${thread.is_done ? 'Move back to inbox' : 'Done'}</button>
+          <a href="${gmailUrl}" target="_blank" rel="noopener" style="font-size:12px; margin-left:auto;">Open in Gmail</a>
+        </div>
+        ${thread.suggested_label ? `<div class="suggest">${escapeHtml(S.assistant)} suggests a new label: <strong>${escapeHtml(thread.suggested_label)}</strong><button type="button" id="accept-label">Add</button><button type="button" class="secondary" id="dismiss-label">No</button></div>` : ''}
+        ${thread.projects ? `<div class="suggest">${escapeHtml(S.assistant)} thinks this is about <strong>${escapeHtml(projectRef(thread.projects))} ${escapeHtml(thread.projects.name || '')}</strong><button type="button" id="accept-job">Tag it</button><button type="button" class="secondary" id="dismiss-job">No</button></div>` : ''}
+        <div id="thread-labels" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 8px;"></div>
         <div id="thread-tags" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 14px;"></div>
-        <div id="thread-messages">${(emails || []).map(m => messageHtml(m, user.id, staffName)).join('')}</div>
-        <div class="card" style="margin-top:16px;">
-          <label style="margin-top:0">Reply</label>
-          <textarea id="reply-body" style="min-height:120px;" placeholder="Type your reply..."></textarea>
+        <div id="thread-messages">${(emails || []).map(m => messageHtml(m, staffName)).join('')}</div>
+        <div class="card" style="margin-top:16px;" id="reply-card">
+          <label style="margin-top:0">${draft ? (draft.by_ai ? `Reply drafted by ${escapeHtml(S.assistant)}: check it, fill any [gaps], then send` : 'Your draft reply') : 'Reply'}</label>
+          <textarea id="reply-body" style="min-height:${draft ? 200 : 120}px;" placeholder="Type your reply...">${escapeHtml(draft ? draft.body_text : '')}</textarea>
           <div id="reply-attach" style="margin-top:8px;"></div>
-          <button type="button" id="reply-send-btn" style="margin-top:10px;">Send reply</button>
+          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" id="reply-send-btn">Send reply</button>
+            <button type="button" class="secondary" id="reply-save-btn">Save draft</button>
+            ${draft ? '<button type="button" class="secondary" id="reply-discard-btn">Discard draft</button>' : ''}
+          </div>
           <div id="reply-msg"></div>
         </div>`;
 
       const replyPicker = emailLocalFilePicker(document.getElementById('reply-attach'));
       loadThreadTags(threadId);
+      loadThreadLabels(thread);
       (emails || []).forEach(m => mountEmailBody(detailEl.querySelector(`.email-body[data-email-id="${m.id}"]`), m, { fetchAttachment: fetchEmailAttachment, fetchStored: fetchStoredAttachment }));
 
       if (!thread.is_read) {
         await supabaseClient.from('email_threads').update({ is_read: true }).eq('id', threadId);
-        await loadThreadList();
+        if (S.box === 'mine') act('mark_read', { thread_id: threadId }).catch(() => {});
+        renderSide();
       }
 
+      const reload = async (keepOpen) => { await Promise.all([loadLabels(), loadDrafts()]); await renderSide(); await loadList(); if (keepOpen) openThread(threadId); };
+      document.getElementById('back-btn').addEventListener('click', () => { S.activeThreadId = null; setUrl(); document.getElementById('inbox-layout').classList.remove('reading'); });
+      document.getElementById('move-section').addEventListener('change', async (e) => {
+        if (!e.target.value) return;
+        try { await act('set_section', { thread_id: threadId, section: e.target.value, always: document.getElementById('move-always').checked }); } catch (err) { alert(err.message); }
+        reload(true);
+      });
+      document.getElementById('done-btn').addEventListener('click', async () => {
+        try { await act('done', { thread_id: threadId, done: !thread.is_done }); } catch (err) { alert(err.message); return; }
+        S.activeThreadId = null; setUrl(); document.getElementById('inbox-layout').classList.remove('reading'); reload(false);
+      });
+      const bind = (id, action) => { const b = document.getElementById(id); if (b) b.addEventListener('click', async () => { try { await act(action, { thread_id: threadId }); } catch (err) { alert(err.message); } reload(true); }); };
+      bind('accept-label', 'accept_label'); bind('dismiss-label', 'dismiss_label'); bind('accept-job', 'accept_job'); bind('dismiss-job', 'dismiss_job');
+
+      const lastInbound = (emails || []).filter(m => m.direction === 'inbound').slice(-1)[0];
+      const replyTo = draft?.to_addresses || emailAddressOnly((lastInbound || (emails || []).slice(-1)[0])?.from_address || '');
+      const subject = thread.subject || '';
+      document.getElementById('reply-save-btn').addEventListener('click', async () => {
+        const msg = document.getElementById('reply-msg');
+        try {
+          await act('save_draft', { draft_id: draft ? draft.id : undefined, mailbox_id: mb().id, thread_id: threadId, to: replyTo, subject: /^re:/i.test(subject) ? subject : 'Re: ' + subject, body: document.getElementById('reply-body').value });
+          msg.innerHTML = '<p class="subtitle" style="font-size:12px;">Draft saved' + (canMirror(mb()) ? ', also in Gmail.' : '.') + '</p>';
+          await loadDrafts();
+        } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+      });
+      const discard = document.getElementById('reply-discard-btn');
+      if (discard) discard.addEventListener('click', async () => {
+        if (!confirm('Discard this draft?')) return;
+        await act('discard_draft', { draft_id: draft.id });
+        reload(true);
+      });
       document.getElementById('reply-send-btn').addEventListener('click', async () => {
         const btn = document.getElementById('reply-send-btn');
         const msg = document.getElementById('reply-msg');
         const bodyText = document.getElementById('reply-body').value.trim();
-        if (!bodyText) { msg.innerHTML = `<div class="error-box">Enter a reply first.</div>`; return; }
-
-        const lastInbound = (emails || []).filter(m => m.direction === 'inbound').slice(-1)[0];
-        const lastAny = (emails || []).slice(-1)[0];
-        const toAddress = (lastInbound || lastAny)?.from_address;
-        if (!toAddress) { msg.innerHTML = `<div class="error-box">Couldn't work out who to reply to.</div>`; return; }
-
+        if (!bodyText) { msg.innerHTML = '<div class="error-box">Enter a reply first.</div>'; return; }
+        if (/\[[^\]]{1,40}\]/.test(bodyText) && !confirm('The reply still has a [gap] in square brackets. Send anyway?')) return;
+        if (!replyTo) { msg.innerHTML = '<div class="error-box">Couldn\'t work out who to reply to.</div>'; return; }
         btn.disabled = true;
         btn.textContent = replyPicker.files().length ? 'Uploading...' : 'Sending...';
         try {
           const uploaded = await emailUploadFiles(replyPicker.files());
           btn.textContent = 'Sending...';
-          await emailSendNow({ to: emailAddressOnly(toAddress), subject: thread.subject || '', bodyText, replyToThreadId: threadId, attachments: uploaded.map(u => ({ bucket: u.bucket, path: u.path, name: u.name })) });
-          await loadThreadList();
-          await openThread(threadId);
+          await emailSendNow({ to: replyTo, subject, bodyText, replyToThreadId: threadId, draftId: draft ? draft.id : undefined, attachments: uploaded.map(u => ({ bucket: u.bucket, path: u.path, name: u.name })) });
+          reload(true);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           btn.disabled = false;
           btn.textContent = 'Send reply';
         }
       });
     }
 
-    function openComposePanel() {
+    // ---------- labels ----------
+
+    function openLabelEditor(label) {
       const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:120; padding:16px;';
       overlay.innerHTML = `
-        <div class="card" style="max-width:520px; width:100%;">
-          <h2>New email</h2>
-          <label style="margin-top:0">To</label>
-          <input id="compose-to" placeholder="client@example.com" />
-          <label>Subject</label>
-          <input id="compose-subject" />
-          <label>Message</label>
-          <textarea id="compose-body" style="min-height:160px;"></textarea>
-          <div style="margin-top:14px;">
-            <button id="compose-send-btn">Send</button>
-            <button type="button" class="secondary" id="compose-cancel-btn">Cancel</button>
+        <div class="card" style="max-width:480px; width:100%;">
+          <h2 style="margin-top:0;">${label ? 'Edit label' : 'New label'}</h2>
+          <p class="subtitle" style="font-size:12px; margin:0 0 8px;">For a matter that is not a job, so its emails stay together and nothing gets missed. ${S.box === 'mine' ? 'Only you see labels in My inbox.' : 'Labels in the Sales inbox are shared with the team.'}</p>
+          <label style="margin-top:0">Name</label>
+          <input id="lb-name" value="${escapeHtml(label ? label.name : '')}" placeholder="Supplier dispute: Middys" />
+          <label>What belongs here (helps ${escapeHtml(S.assistant)} file new emails)</label>
+          <textarea id="lb-desc" style="min-height:70px;" placeholder="Emails with Middys about the overcharged switchboard order in September">${escapeHtml(label?.description || '')}</textarea>
+          <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" id="lb-save">Save</button>
+            ${label ? `<button type="button" class="secondary" id="lb-status">${label.status === 'done' ? 'Reopen' : 'Matter finished'}</button><button type="button" class="secondary" id="lb-delete">Delete label</button>` : ''}
+            <button type="button" class="secondary" id="lb-cancel">Cancel</button>
           </div>
-          <div id="compose-msg"></div>
+          <div id="lb-msg" style="margin-top:8px;"></div>
         </div>`;
       document.body.appendChild(overlay);
-      overlay.querySelector('#compose-cancel-btn').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#compose-send-btn').addEventListener('click', async () => {
-        const btn = overlay.querySelector('#compose-send-btn');
-        const msg = overlay.querySelector('#compose-msg');
-        const to = overlay.querySelector('#compose-to').value.trim();
-        const subject = overlay.querySelector('#compose-subject').value.trim();
-        const bodyText = overlay.querySelector('#compose-body').value.trim();
-        if (!to || !subject || !bodyText) { msg.innerHTML = `<div class="error-box">Fill in all fields.</div>`; return; }
+      const close = async (refresh) => { overlay.remove(); if (refresh) { await loadLabels(); await renderSide(); await loadList(); } };
+      const run = async (fn) => { try { await fn(); close(true); } catch (err) { overlay.querySelector('#lb-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; } };
+      overlay.querySelector('#lb-cancel').addEventListener('click', () => close(false));
+      overlay.querySelector('#lb-save').addEventListener('click', () => run(async () => {
+        const name = overlay.querySelector('#lb-name').value.trim(), description = overlay.querySelector('#lb-desc').value.trim();
+        if (label) await act('update_label', { label_id: label.id, name, description });
+        else { const r = await act('create_label', { mailbox_id: mb().id, name, description }); S.view = 'label:' + r.label.id; }
+      }));
+      if (label) {
+        overlay.querySelector('#lb-status').addEventListener('click', () => run(() => act('update_label', { label_id: label.id, status: label.status === 'done' ? 'open' : 'done' })));
+        overlay.querySelector('#lb-delete').addEventListener('click', () => {
+          if (!confirm('Delete this label? The emails stay, only the label goes.')) return;
+          run(async () => { await act('delete_label', { label_id: label.id }); S.view = 'priority'; });
+        });
+      }
+    }
 
-        btn.disabled = true;
-        btn.textContent = 'Sending...';
-        try {
-          const { data: { session } } = await supabaseClient.auth.getSession();
-          const res = await fetch('/.netlify/functions/send-gmail', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-            body: JSON.stringify({ to, subject, bodyText }),
-          });
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.error);
-          overlay.remove();
-          await loadThreadList();
-        } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-          btn.disabled = false;
-          btn.textContent = 'Send';
+    // ---------- drafts (top corner) ----------
+
+    function openDraftsPanel() {
+      document.querySelectorAll('.drafts-panel').forEach(p => p.remove());
+      const panel = document.createElement('div');
+      panel.className = 'drafts-panel';
+      panel.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--border);">
+          <h2 style="margin:0;">Drafts <span class="subtitle" style="font-size:13px;">${escapeHtml(S.box === 'mine' ? 'My inbox' : 'Sales inbox')}</span></h2>
+          <button type="button" class="secondary" id="dp-close">Close</button>
+        </div>
+        <div class="list">${S.drafts.map(d => `
+          <a class="draft-row" data-id="${d.id}">
+            <div style="font-weight:700;">${escapeHtml(d.subject || d.email_threads?.subject || '(no subject)')}</div>
+            <div class="inbox-who">To ${escapeHtml(d.to_addresses || 'nobody yet')}</div>
+            <div class="subtitle" style="font-size:12px; margin:3px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(String(d.body_text || '').replace(/\s+/g, ' ').slice(0, 120))}</div>
+            ${d.by_ai ? `<span class="chip draft">By ${escapeHtml(S.assistant)}</span>` : ''}<span class="chip">${timeAgo(d.updated_at)}</span>
+          </a>`).join('') || '<p class="subtitle" style="padding:16px;">No drafts. ' + escapeHtml(S.assistant) + ' drafts replies to Priority emails here.</p>'}</div>`;
+      document.body.appendChild(panel);
+      panel.querySelector('#dp-close').addEventListener('click', () => panel.remove());
+      panel.querySelectorAll('.draft-row').forEach(a => a.addEventListener('click', () => {
+        const d = S.drafts.find(x => x.id === a.dataset.id);
+        panel.remove();
+        if (d.thread_id) { if (S.view === 'cleanup') { S.view = 'all'; renderSide(); loadList(); } openThread(d.thread_id); }
+        else openEmailComposer({ title: 'Draft', to: d.to_addresses, cc: d.cc_addresses, subject: d.subject, body: d.body_text, mailbox: mb(), draftId: d.id, onDraftSaved: loadDrafts, onSent: async (tid) => { await loadDrafts(); await loadList(); openThread(tid); } });
+      }));
+    }
+
+    // ---------- My inbox: connect (Workplace Surveillance Act notice) ----------
+
+    const NOTICE_TEXT = `Connecting your work Gmail to TEops
+
+What happens if you connect
+- TEops copies your work email (your @thomsonenergy.com.au inbox): the last 60 days, then new email as it arrives, so you can read, sort and reply from TEops.
+- ${'{assistant}'} (the AI in TEops) reads your work email to sort it (needs a reply, other, subscriptions and updates), file it under labels, match it to jobs and draft replies for you to check. Nothing is ever sent without you pressing Send.
+- Emails tagged to a job show on that job for the team. Everything else in your inbox stays private to you: other staff, directors included, do not see it in TEops.
+- You can disconnect any time in Inbox > My inbox. Your private emails are then removed from TEops straight away; emails tagged to a job stay on the job as business records.
+
+Your rights under the Workplace Surveillance Act 2005 (NSW)
+- TEops reading your work email this way is computer surveillance under the Act. The law says you must get written notice at least 14 days before it starts. This is that notice.
+- You can agree to it starting now. Agreeing waives the 14 days notice for this. It is your choice.
+- If you do not agree, nothing is connected now and nothing changes for your job or pay. Connect becomes available 14 days from today, and only if you choose to press it then.
+
+Please also read the Notice of Workplace Surveillance and Computer Surveillance Policy in your signed documents.`;
+
+    async function renderConnect() {
+      document.getElementById('inbox-side').innerHTML = '';
+      document.getElementById('thread-detail').style.display = 'none';
+      const listEl = document.getElementById('thread-list');
+      listEl.style.display = '';
+      listEl.style.width = '100%';
+      const { data: notices } = await supabaseClient.from('gmail_connect_notices').select('*').eq('profile_id', S.me.id).order('created_at');
+      const agreed = (notices || []).some(n => n.response === 'agree');
+      const first = (notices || [])[0];
+      const allowedFrom = agreed ? new Date() : first ? new Date(new Date(first.created_at).getTime() + 14 * 86400000) : null;
+      const locked = allowedFrom && allowedFrom > new Date();
+      let html = `<div style="max-width:620px; padding:8px 4px;">
+        <h2 style="margin-top:0;">Bring your own work email into TEops</h2>
+        <p>See your work Gmail next to the Sales inbox, with ${escapeHtml(S.assistant)} sorting it into what needs a reply, what can wait and subscriptions, filing it under labels and jobs, and drafting replies for you. Private to you.</p>`;
+      if (S.mine && S.mine.disconnected_at && !S.mine.connected_at) html += `<p class="subtitle">You disconnected ${escapeHtml(S.mine.address)} on ${new Date(S.mine.disconnected_at).toLocaleDateString('en-AU')}.</p>`;
+      if (locked) {
+        html += `<div class="card" style="padding:12px 14px;">You chose not to agree on ${new Date(first.created_at).toLocaleDateString('en-AU')}. Connect is available from <strong>${allowedFrom.toLocaleDateString('en-AU')}</strong> (14 days after the notice).</div>
+          <p style="margin-top:12px;"><button type="button" class="secondary" id="read-notice-btn">Read the notice again (and agree now if you have changed your mind)</button></p>`;
+      } else {
+        html += `<p><button type="button" id="connect-btn">Connect my Gmail</button></p>`;
+      }
+      listEl.innerHTML = html + '</div>';
+      const btn = document.getElementById('connect-btn') || document.getElementById('read-notice-btn');
+      btn.addEventListener('click', () => (allowedFrom && !locked ? startConnect() : openNotice()));
+    }
+
+    function openNotice() {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:120; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:640px; width:100%; max-height:92vh; overflow-y:auto;">
+          <h2 style="margin-top:0;">Before you connect: workplace surveillance notice</h2>
+          <div class="notice">${escapeHtml(NOTICE_TEXT.replace('{assistant}', S.assistant))}</div>
+          <div style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
+            <button type="button" id="nt-agree">I agree and waive the 14 days notice: connect now</button>
+            <button type="button" class="secondary" id="nt-disagree">I don't agree</button>
+            <button type="button" class="secondary" id="nt-cancel">Not now</button>
+          </div>
+          <div id="nt-msg" style="margin-top:8px;"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const record = async (response) => {
+        const { error } = await supabaseClient.from('gmail_connect_notices').insert({ profile_id: S.me.id, response, notice_version: NOTICE_VERSION });
+        if (error) throw error;
+      };
+      overlay.querySelector('#nt-cancel').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#nt-disagree').addEventListener('click', async () => {
+        try { await record('disagree'); } catch (err) { overlay.querySelector('#nt-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; return; }
+        overlay.remove(); renderConnect();
+      });
+      overlay.querySelector('#nt-agree').addEventListener('click', async (e) => {
+        e.target.disabled = true; e.target.textContent = 'Opening Google...';
+        try { await record('agree'); await startConnect(); } catch (err) {
+          overlay.querySelector('#nt-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          e.target.disabled = false; e.target.textContent = 'I agree and waive the 14 days notice: connect now';
         }
       });
     }
 
-    document.getElementById('compose-btn').addEventListener('click', () => openEmailComposer({
-      title: 'New email',
-      onSent: async (threadId) => { await loadThreadList(); await openThread(threadId); },
-    }));
+    async function startConnect() {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/google-oauth-start?mailbox=mine', { headers: { Authorization: `Bearer ${session.access_token}` } });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) { alert(data.error || 'Could not start the Google sign in.'); return; }
+      window.location.href = data.url;
+    }
+
+    async function disconnectMine() {
+      if (!confirm('Disconnect your Gmail from TEops? Your private emails are removed from TEops straight away. Emails tagged to a job stay on the job. Your Gmail itself is not changed.')) return;
+      try {
+        const r = await act('disconnect', { mailbox_id: S.mine.id });
+        alert(`Disconnected. ${r.removed} conversations removed from TEops, ${r.kept} kept on their jobs.`);
+      } catch (err) { alert(err.message); return; }
+      await loadMailboxes();
+      S.view = 'priority';
+      showBox('mine');
+    }
+
+    // ---------- clean up ----------
+
+    async function renderCleanup() {
+      clearInterval(S.cleanupTimer);
+      document.getElementById('thread-detail').style.display = 'none';
+      const listEl = document.getElementById('thread-list');
+      listEl.style.width = '100%';
+      const { data: m } = await supabaseClient.from('mailboxes').select('*').eq('id', mb().id).single();
+      if (!canMirror(m)) {
+        listEl.innerHTML = `<div style="padding:8px 4px; max-width:620px;"><h3>Clean up</h3><p>Clean up needs the newer Gmail permission. ${S.box === 'sales' ? 'An admin connects sales@ again in Settings (Google Workspace, Connect).' : 'Disconnect and connect your Gmail again.'}</p></div>`;
+        return;
+      }
+      let html = `<div class="list-filters"><h3>Clean up ${escapeHtml(m.address)}</h3></div>`;
+      if (!m.cleanup_started_at) {
+        html += `<div style="max-width:620px; padding:0 4px;">
+          <p>Clears out years of old email without reading it one by one. ${escapeHtml(S.assistant)} goes through <strong>everything</strong> in your Gmail inbox (however far back), groups it by who sent it, and suggests what is safe to archive, what to keep and which senders are worth a look in case something important is hiding.</p>
+          <p>Then you archive, mark read or unsubscribe a whole sender in one tap. Archived email stays in Gmail under All Mail, nothing is deleted.</p>
+          <p class="subtitle">The scan takes about 10 minutes for 25,000 emails and runs in the background.</p>
+          <button type="button" id="scan-btn">Start the scan</button></div>`;
+        listEl.innerHTML = html;
+        document.getElementById('scan-btn').addEventListener('click', async () => { await act('cleanup_scan', { mailbox_id: m.id }); renderCleanup(); });
+        return;
+      }
+      const est = Math.max(m.cleanup_estimate || 0, m.cleanup_scanned || 0);
+      const scanning = !m.cleanup_done_at;
+      const { data: rows } = await supabaseClient.from('mailbox_cleanup_senders').select('*').eq('mailbox_id', m.id).order('inbox_count', { ascending: false }).limit(2000);
+      const all = rows || [];
+      const live = all.filter(r => r.inbox_count > 0 && !r.done_action);
+      const groups = {
+        archive: live.filter(r => r.suggestion === 'archive'),
+        look: live.filter(r => r.suggestion === 'look' || (!r.suggestion && !scanning)),
+        keep: live.filter(r => r.suggestion === 'keep'),
+        working: all.filter(r => r.queued_action),
+        done: all.filter(r => r.done_action && !r.queued_action),
+      };
+      const total = (list) => list.reduce((n, r) => n + r.inbox_count, 0);
+      html += `<div style="padding:0 4px 10px;">
+        ${scanning ? `<p>Scanning: ${(m.cleanup_scanned || 0).toLocaleString()} of about ${est.toLocaleString()} emails in the inbox.</p><div class="progress"><div style="width:${est ? Math.min(100, Math.round((m.cleanup_scanned || 0) / est * 100)) : 0}%;"></div></div>`
+          : `<p>Scanned ${(m.cleanup_scanned || 0).toLocaleString()} emails from ${all.length.toLocaleString()} senders. ${all.some(r => !r.suggestion) ? escapeHtml(S.assistant) + ' is still sorting senders...' : ''} <a href="#" id="rescan-link" style="font-size:12px;">Scan again</a></p>`}
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px;">
+          <span style="font-size:13px;">Mark everything older than</span>
+          <input id="older-days" type="number" min="1" value="30" style="width:80px;" />
+          <span style="font-size:13px;">days as read</span>
+          <button type="button" class="secondary" id="older-btn" style="font-size:12px;">${m.cleanup_read_older_days ? 'Working...' : 'Go'}</button>
+        </div></div>`;
+      const tab = (k, label, list) => `<button type="button" class="secondary ${S.cleanupFilter === k ? 'on' : ''}" data-cf="${k}" style="font-size:12px; padding:5px 12px; ${S.cleanupFilter === k ? 'background:var(--accent); color:var(--accent-contrast, #fff);' : ''}">${label} (${list.length}${k === 'working' || k === 'done' ? '' : ', ' + total(list).toLocaleString() + ' emails'})</button>`;
+      html += `<div style="display:flex; gap:6px; flex-wrap:wrap; padding:0 4px 8px;">${tab('archive', escapeHtml(S.assistant) + ' says archive', groups.archive)}${tab('look', 'Worth a look', groups.look)}${tab('keep', 'Keep', groups.keep)}${tab('working', 'Working', groups.working)}${tab('done', 'Done', groups.done)}</div>`;
+      const list = groups[S.cleanupFilter] || [];
+      const actionable = ['archive', 'look', 'keep'].includes(S.cleanupFilter);
+      if (actionable && list.length) {
+        html += `<div style="display:flex; gap:6px; flex-wrap:wrap; padding:0 4px 8px; align-items:center;">
+          <label style="margin:0; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="cu-all" style="width:auto;" /> Select all</label>
+          <button type="button" class="cu-bulk" data-q="archive" style="font-size:12px;">Archive selected</button>
+          <button type="button" class="secondary cu-bulk" data-q="unsubscribe" style="font-size:12px;">Unsubscribe and archive selected</button>
+          <button type="button" class="secondary cu-bulk" data-q="read" style="font-size:12px;">Mark selected read</button>
+          <button type="button" class="secondary cu-bulk" data-q="keep" style="font-size:12px;">Keep selected</button></div>`;
+      }
+      html += `<table class="cleanup-table"><tbody>${list.slice(0, 400).map(r => {
+        const link = String(r.done_action || '').startsWith('link:') ? r.done_action.slice(5) : null;
+        return `<tr>
+          ${actionable ? `<td style="width:24px;"><input type="checkbox" class="cu-pick" data-s="${escapeHtml(r.sender)}" style="width:auto;" /></td>` : ''}
+          <td><strong>${escapeHtml(r.sender_name || r.sender)}</strong><div class="subtitle" style="font-size:12px;">${escapeHtml(r.sender)}</div>
+            <div class="subtitle" style="font-size:12px;">${escapeHtml((r.sample_subjects || []).join(' / ')).slice(0, 160)}</div></td>
+          <td style="white-space:nowrap;">${r.inbox_count.toLocaleString()} emails<div class="subtitle" style="font-size:12px;">${r.unread_count.toLocaleString()} unread${r.latest_at ? ', last ' + new Date(r.latest_at).toLocaleDateString('en-AU') : ''}</div></td>
+          <td style="font-size:12px;">${escapeHtml(r.suggestion_reason || '')}${r.queued_action ? '<div><em>Working...</em></div>' : ''}${r.done_action ? `<div>${link ? `Open the <a href="${escapeHtml(link)}" target="_blank" rel="noopener">unsubscribe page</a>, archived` : escapeHtml(r.done_action)}</div>` : ''}</td>
+          ${actionable ? `<td style="white-space:nowrap;"><button type="button" class="cu-one" data-s="${escapeHtml(r.sender)}" data-q="archive">Archive all</button>${r.list_unsubscribe ? `<button type="button" class="secondary cu-one" data-s="${escapeHtml(r.sender)}" data-q="unsubscribe">Unsubscribe</button>` : ''}<button type="button" class="secondary cu-one" data-s="${escapeHtml(r.sender)}" data-q="read">Mark read</button>${S.cleanupFilter !== 'keep' ? `<button type="button" class="secondary cu-one" data-s="${escapeHtml(r.sender)}" data-q="keep">Keep</button>` : ''}</td>` : ''}
+        </tr>`;
+      }).join('') || `<tr><td class="subtitle">${scanning ? 'Senders show here as the scan goes.' : 'Nothing here.'}</td></tr>`}</tbody></table>`;
+      listEl.innerHTML = html;
+
+      const queue = async (senders, q) => {
+        if (!senders.length) return;
+        if (q !== 'keep' && senders.length > 1 && !confirm(`${q === 'read' ? 'Mark as read' : q === 'unsubscribe' ? 'Unsubscribe from and archive' : 'Archive'} everything in the inbox from ${senders.length} senders?`)) return;
+        try { await act('cleanup_queue', { mailbox_id: m.id, senders, queue: q }); } catch (err) { alert(err.message); return; }
+        renderCleanup();
+      };
+      listEl.querySelectorAll('[data-cf]').forEach(b => b.addEventListener('click', () => { S.cleanupFilter = b.dataset.cf; renderCleanup(); }));
+      listEl.querySelectorAll('.cu-one').forEach(b => b.addEventListener('click', () => queue([b.dataset.s], b.dataset.q)));
+      listEl.querySelectorAll('.cu-bulk').forEach(b => b.addEventListener('click', () => queue([...listEl.querySelectorAll('.cu-pick:checked')].map(c => c.dataset.s), b.dataset.q)));
+      const allBox = document.getElementById('cu-all');
+      if (allBox) allBox.addEventListener('change', () => listEl.querySelectorAll('.cu-pick').forEach(c => { c.checked = allBox.checked; }));
+      const rescan = document.getElementById('rescan-link');
+      if (rescan) rescan.addEventListener('click', async (e) => { e.preventDefault(); if (!confirm('Scan the whole inbox again?')) return; await act('cleanup_scan', { mailbox_id: m.id }); renderCleanup(); });
+      document.getElementById('older-btn').addEventListener('click', async () => {
+        const days = parseInt(document.getElementById('older-days').value, 10) || 30;
+        if (!confirm(`Mark every unread email in the inbox older than ${days} days as read? They stay in the inbox.`)) return;
+        await act('cleanup_read_older', { mailbox_id: m.id, days });
+        renderCleanup();
+      });
+      if (scanning || groups.working.length || m.cleanup_read_older_days || all.some(r => !r.suggestion)) {
+        S.cleanupTimer = setInterval(() => { if (S.view === 'cleanup' && !document.querySelector('.cu-pick:checked')) renderCleanup(); }, 8000);
+      }
+    }
+
+    // ---------- buttons ----------
+
+    document.querySelectorAll('#box-toggle button').forEach(b => b.addEventListener('click', () => { S.view = 'priority'; showBox(b.dataset.box); }));
+    document.getElementById('drafts-btn').addEventListener('click', openDraftsPanel);
+    document.getElementById('compose-btn').addEventListener('click', () => {
+      if (S.box === 'mine' && !mineConnected()) { alert('Connect your Gmail first.'); return; }
+      openEmailComposer({
+        title: S.box === 'mine' ? 'New email from ' + S.mine.address : 'New email',
+        mailbox: mb(),
+        onDraftSaved: loadDrafts,
+        onSent: async (threadId) => { await loadList(); await openThread(threadId); },
+      });
+    });
 
     document.getElementById('sync-now-btn').addEventListener('click', async () => {
       const btn = document.getElementById('sync-now-btn');
@@ -347,15 +846,13 @@
       btn.textContent = 'Syncing...';
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/sync-gmail-now', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
+        const res = await fetch('/.netlify/functions/sync-gmail-now', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } });
         const text = await res.text();
         let data;
         try { data = JSON.parse(text); } catch (e) { throw new Error(`The sync did not answer properly (status ${res.status}). Try again in a minute.`); }
         if (!data.ok) throw new Error(data.error || 'The sync failed.');
-        await loadThreadList();
+        await loadMailboxes();
+        await showBox(S.box);
         if (data.done === false) alert('Pulled in some of the mail so far. Press Sync now again to bring in the rest.');
       } catch (err) {
         alert(err.message);
@@ -374,8 +871,19 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
-      await loadThreadList();
-      const deepThread = new URLSearchParams(window.location.search).get('thread');
+      S.me = (await supabaseClient.auth.getUser()).data.user;
+      const { data: cs } = await supabaseClient.from('company_settings').select('ai_assistant_name').eq('id', 1).maybeSingle();
+      S.assistant = (cs && cs.ai_assistant_name && cs.ai_assistant_name.trim()) || 'Sparky';
+      await loadMailboxes();
+      const params = new URLSearchParams(window.location.search);
+      const deepThread = params.get('thread');
+      if (deepThread && !params.get('box')) {
+        // a link to a conversation: open it in whichever inbox it is in
+        const { data: t } = await supabaseClient.from('email_threads').select('mailbox_id').eq('id', deepThread).maybeSingle();
+        if (t && S.mine && t.mailbox_id === S.mine.id) params.set('box', 'mine');
+      }
+      if (deepThread) S.view = 'all';
+      await showBox(params.get('box') === 'mine' ? 'mine' : 'sales');
       if (deepThread) openThread(deepThread);
     })();
   </script>

@@ -208,11 +208,19 @@ Manual steps only a person can do (the code is live):
 - Summary: stat cards, budget bars, "Quoted split" and "Job split" donuts, "On this job now". Cost tiles include overheads for Finance and Admin (`get_project_overheads`).
 - Cost centre cards show labour plus materials quoted vs actual and GP%.
 
-### A18. Shared inbox (sales@ Gmail)
-- `sync-gmail.js` every 5 minutes, Sync now via `sync-gmail-now.js`. HTML viewer, inline pictures, attachments, Inbox / Sent / All.
-- Reply and compose with attachments; tag conversations to jobs; Emails tab on every job with "Email the client".
+### A18. Sales inbox and My inbox (Gmail)
+- `inbox.html`: toggle **Sales inbox** (sales@, every staff member) | **My inbox** (the logged-in person's own work Gmail, private to them). Migration 20261021000000 (`mailboxes`, `mailbox_tokens`, labels, drafts, sender rules, clean up, Gmail notice).
+- `sync-gmail.js` every 5 minutes (sales@ first, then each My inbox from Gmail history, including read and archive changes made in Gmail), Sync now via `sync-gmail-now.js`. HTML viewer, inline pictures, attachments.
+- Sections sorted by the email agent (`_shared/email-agent.js`, run by `mailbox-work-background.js`): **Priority** (someone waiting on our reply, with a one-line reason; drops off once we reply), **Other**, **Subscriptions and updates**, plus Sent, Done, All. Order: the person's "always for this sender" rule, Gmail's Promotions/Social/Updates/Forums tabs and unsubscribe headers, then Claude Haiku 5.5. Move any conversation; Done archives (in Gmail too).
+- Labels (Gmail style) for non-job matters (a supplier dispute, a licence application): sidebar with counts, Open or Finished, description tells the agent what belongs. The agent applies existing labels and suggests new ones (a person confirms). Sales inbox labels are shared, My inbox labels are private. Mirrored to Gmail as `TEops/<name>`.
+- Jobs: the agent tags when sure ("tagged by Sparky", dashed, one tap to remove) and suggests when guessing. Tagged conversations show on the job for everyone, including from My inbox; untagged My inbox mail stays private.
+- Drafts: the agent (Claude Opus 5.5) drafts replies to Priority mail from the last 7 days, with [gaps] for facts it doesn't have. Draft shows at the bottom of its conversation and in the **Drafts** list (top right, with a count), and in Gmail drafts. Nothing sends without a person pressing Send.
+- **Clean up** (sidebar): scans the whole Gmail inbox however far back by sender (count, unread, unsubscribe link), the agent suggests Archive / Worth a look / Keep per sender (clients always Worth a look), then one tap archives, marks read or unsubscribes (one-click link or unsubscribe email) a whole sender. Also "mark everything older than N days as read". Nothing is deleted.
+- My inbox connect: anyone, from Inbox > My inbox. A Workplace Surveillance Act 2005 (NSW) notice pops up first: "I agree and waive the 14 days notice" connects now; "I don't agree" locks Connect for 14 days from the notice (checked on the server, `gmail_connect_allowed_from()`). Recorded in `gmail_connect_notices`. Loads the last 60 days, then new mail. Disconnect removes private mail from TEops, keeps job-tagged conversations.
+- Reply and compose with attachments (My inbox replies go from the person's own address, signature shows that address); tag conversations to jobs; Emails tab on every job with "Email the client" (a reply there to someone else's My inbox conversation goes from sales@ as a new email).
 - Create a quote or job from an email (AI reads client, site and work).
-- Signatures always show sales@thomsonenergy.com.au and 0455 415 464.
+- Signatures show sales@thomsonenergy.com.au (or the person's own address from My inbox) and 0455 415 464.
+- Gmail permission: gmail.modify + gmail.send. sales@ must be connected once more in Settings for labels, drafts, Done and Clean up to reach Gmail; until then they stay in TEops only.
 
 ### A19. Feeds, meetings, job extras
 - Company feed and per-job feed (likes, comments, tags).

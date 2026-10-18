@@ -166,7 +166,9 @@ async function emailSafeLogoUrl(uploadedUrl) {
 // Loads the signed-in staff member's profile plus company details and
 // builds their signature - shared by the send path and the Settings preview
 // so what's previewed is exactly what gets sent.
-async function signatureForUser(supabaseAdmin, user) {
+// email: the address shown in the signature. sales@ unless the email goes out from the
+// person's own inbox (My inbox), when it is their own address.
+async function signatureForUser(supabaseAdmin, user, { email } = {}) {
   const [{ data: profile }, { data: company }] = await Promise.all([
     supabaseAdmin.from('profiles')
       .select('full_name, job_title, photo_url, email_signature, email_signature_include_photo')
@@ -181,7 +183,7 @@ async function signatureForUser(supabaseAdmin, user) {
     jobTitle: profile?.job_title,
     credentials: profile?.email_signature,
     mobile: SIGNATURE_PHONE,
-    email: SIGNATURE_EMAIL,
+    email: email || SIGNATURE_EMAIL,
     photoUrl: profile?.photo_url,
     includePhoto: profile?.email_signature_include_photo,
   }, { ...(company || {}), logo_url });

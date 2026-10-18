@@ -1,10 +1,13 @@
 // POST /.netlify/functions/send-gmail
-// Body: { to, cc, subject, bodyText, replyToThreadId?, attachments?, tagProjectId?, tagKind? }
+// Body: { to, cc, subject, bodyText, replyToThreadId?, attachments?, tagProjectId?, tagKind?, mailboxId?, draftId? }
+//   mailboxId: send a new email from your own inbox (My inbox) instead of sales@
+//   draftId:   the draft this came from: marked sent, and removed from Gmail's drafts
 //   attachments: [{ bucket: 'email-attachments' | 'project-documents', path, name }]
 //                (files are uploaded to storage by the browser first - never sent through
 //                 here - and attached from there; up to 10 files, 20 MB in total)
 //   tagProjectId: also tag the conversation to that job (kind: materials_quote | client | supplier | other)
-// Any active staff member. Sends as sales@thomsonenergy.com.au, with the
+// Any active staff member. Sends as sales@thomsonenergy.com.au (or, for a reply in
+// your own My inbox or with your own mailboxId, as your own address), with the
 // sending user's own name in the From display name and their saved
 // signature appended to the body - so the client sees a real person's
 // name even though the address is always sales@, matching what Jasper
@@ -14,6 +17,7 @@
 
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { gmailRequest, gmailUploadSend, GMAIL_MAILBOX } = require('./_shared/google-client');
+const { sharedMailbox, mailboxById, canUseMailbox, deleteGmailDraft } = require('./_shared/mailboxes');
 const { buildMimeMessage, buildRfc822 } = require('./_shared/build-mime-message');
 const { signatureForUser, plainTextToHtml, plainTextWithoutButtons } = require('./_shared/build-email-signature');
 
@@ -53,23 +57,33 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { to, cc, subject, bodyText, replyToThreadId, attachments: attachmentRefs, tagProjectId, tagKind } = JSON.parse(event.body || '{}');
+    const { to, cc, subject, bodyText, replyToThreadId, attachments: attachmentRefs, tagProjectId, tagKind, mailboxId, draftId } = JSON.parse(event.body || '{}');
     if (!to || !subject || !bodyText) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'to, subject and bodyText are required' }) };
     }
 
     const { supabaseAdmin, user } = auth;
     const { data: profile } = await supabaseAdmin.from('profiles').select('full_name').eq('id', user.id).single();
-    const signature = await signatureForUser(supabaseAdmin, user);
-    const fullBody = `${plainTextWithoutButtons(bodyText)}\n\n${signature.text}`;
-    const fullHtml = `${plainTextToHtml(bodyText)}${signature.html}`;
+    const shared = await sharedMailbox(supabaseAdmin);
     const attachments = await loadAttachments(supabaseAdmin, attachmentRefs);
 
     let thread = null;
     let lastMessage = null;
+    let mailbox = shared;
     if (replyToThreadId) {
       const { data: t } = await supabaseAdmin.from('email_threads').select('*').eq('id', replyToThreadId).maybeSingle();
       thread = t;
+      if (thread && thread.mailbox_id !== shared.id) {
+        const own = await mailboxById(supabaseAdmin, thread.mailbox_id);
+        if (canUseMailbox(own, user.id)) {
+          mailbox = own;
+        } else {
+          // someone's own conversation, seen on a job: the reply goes from sales@ as a new email
+          const { count } = await supabaseAdmin.from('email_job_links').select('id', { count: 'exact', head: true }).eq('thread_id', thread.id);
+          if (!count) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Conversation not found' }) };
+          thread = null;
+        }
+      }
       if (thread) {
         const { data: last } = await supabaseAdmin
           .from('emails').select('*').eq('thread_id', thread.id).order('sent_at', { ascending: false }).limit(1).maybeSingle();
@@ -77,10 +91,21 @@ exports.handler = async (event) => {
       }
     }
 
-    const finalSubject = thread && !/^re:/i.test(subject) ? `Re: ${subject}` : subject;
+    if (!replyToThreadId && mailboxId) {
+      const own = await mailboxById(supabaseAdmin, mailboxId);
+      if (!canUseMailbox(own, user.id) || !own.connected_at) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'That inbox is not connected.' }) };
+      mailbox = own;
+    }
+    const personal = mailbox.kind === 'personal';
+    const fromAddress = personal ? mailbox.address : GMAIL_MAILBOX;
+    const signature = await signatureForUser(supabaseAdmin, user, { email: personal ? mailbox.address : undefined });
+    const fullBody = `${plainTextWithoutButtons(bodyText)}\n\n${signature.text}`;
+    const fullHtml = `${plainTextToHtml(bodyText)}${signature.html}`;
+
+    const finalSubject = (thread || replyToThreadId) && !/^re:/i.test(subject) ? `Re: ${subject}` : subject;
     const mail = {
       fromName: profile?.full_name || 'Thomson Energy Sales',
-      fromAddress: GMAIL_MAILBOX,
+      fromAddress,
       to,
       cc,
       subject: finalSubject,
@@ -93,17 +118,17 @@ exports.handler = async (event) => {
     let sent;
     if (attachments.length) {
       // the upload endpoint takes big messages; the ordinary one does not
-      sent = await gmailUploadSend(buildRfc822({ ...mail, attachments }), thread ? thread.gmail_thread_id : undefined);
+      sent = await gmailUploadSend(buildRfc822({ ...mail, attachments }), thread ? thread.gmail_thread_id : undefined, mailbox);
     } else {
       const sendBody = { raw: buildMimeMessage(mail) };
       if (thread) sendBody.threadId = thread.gmail_thread_id;
-      sent = await gmailRequest('messages/send', { method: 'POST', body: sendBody });
+      sent = await gmailRequest('messages/send', { method: 'POST', body: sendBody }, mailbox);
     }
 
     if (!thread) {
       const { data: newThread, error: threadErr } = await supabaseAdmin
         .from('email_threads')
-        .insert({ gmail_thread_id: sent.threadId, subject: finalSubject })
+        .insert({ gmail_thread_id: sent.threadId, subject: finalSubject, mailbox_id: mailbox.id, is_read: true, section: 'other', section_by: 'person', triaged_at: new Date().toISOString() })
         .select('*').single();
       if (threadErr) throw threadErr;
       thread = newThread;
@@ -114,7 +139,7 @@ exports.handler = async (event) => {
       thread_id: thread.id,
       gmail_message_id: sent.id,
       direction: 'outbound',
-      from_address: `${profile?.full_name || 'Thomson Energy Sales'} <${GMAIL_MAILBOX}>`,
+      from_address: `${profile?.full_name || 'Thomson Energy Sales'} <${fromAddress}>`,
       to_addresses: to.split(',').map(s => s.trim()),
       cc_addresses: cc ? cc.split(',').map(s => s.trim()) : [],
       subject: finalSubject,
@@ -127,7 +152,15 @@ exports.handler = async (event) => {
     });
     if (emailErr) throw emailErr;
 
-    await supabaseAdmin.from('email_threads').update({ last_message_at: nowIso, is_read: true }).eq('id', thread.id);
+    await supabaseAdmin.from('email_threads').update({ last_message_at: nowIso, last_direction: 'outbound', is_read: true }).eq('id', thread.id);
+
+    if (draftId && UUID.test(draftId)) {
+      const { data: draft } = await supabaseAdmin.from('email_drafts').select('*').eq('id', draftId).eq('mailbox_id', mailbox.id).maybeSingle();
+      if (draft) {
+        await supabaseAdmin.from('email_drafts').update({ status: 'sent', thread_id: draft.thread_id || thread.id, updated_at: nowIso }).eq('id', draft.id);
+        await deleteGmailDraft(mailbox, draft);
+      }
+    }
 
     if (tagProjectId && UUID.test(tagProjectId)) {
       // already tagged to that job? leave the existing tag as it is

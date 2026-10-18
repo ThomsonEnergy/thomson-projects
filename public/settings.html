@@ -700,7 +700,8 @@
             <p class="subtitle" style="margin-bottom:10px;">
               Save the Client ID/Secret above first (from a Google Cloud OAuth client - see docs/archive/SETUP.md for the one-time
               setup steps), then connect sales@thomsonenergy.com.au here. Once connected, every active staff member
-              can read and send from that mailbox in the Inbox tab.
+              can read and send from that mailbox in the Inbox tab (Sales inbox). Each person connects their own Gmail
+              themselves in Inbox &gt; My inbox.
             </p>
             <p>Status: <span id="google-connection-status">Checking...</span></p>
             <button type="button" class="secondary" id="google-connect-btn">Connect sales@thomsonenergy.com.au</button>
@@ -2159,6 +2160,11 @@
           googleStatusEl.innerHTML = data.status.google_refresh_token
             ? '<span style="color:var(--green); font-weight:600;">Connected</span>'
             : '<span style="color:var(--muted);">Not connected</span>';
+          // labels, drafts, Done and Clean up need the newer gmail.modify permission (Oct 2026)
+          const { data: shared } = await supabaseClient.from('mailboxes').select('scopes').eq('kind', 'shared').maybeSingle();
+          if (data.status.google_refresh_token && !String(shared?.scopes || '').includes('gmail.modify')) {
+            googleStatusEl.innerHTML += ' <span style="color:var(--red);">: press Connect once more to give the new permission (labels, drafts and Done in Gmail, Clean up)</span>';
+          }
         }
       } catch {
         // fails quietly - the fields still work, they just won't show a status
