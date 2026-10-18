@@ -50,15 +50,22 @@
     </div>
 
     <div class="card">
+      <div id="supplier-kind" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+        <button type="button" class="secondary" data-kind="all" style="font-size:13px; padding:6px 14px; border-radius:20px;">All</button>
+        <button type="button" class="secondary" data-kind="supplier" style="font-size:13px; padding:6px 14px; border-radius:20px;">Suppliers</button>
+        <button type="button" class="secondary" data-kind="contractor" style="font-size:13px; padding:6px 14px; border-radius:20px;">Contractors</button>
+        <button type="button" class="secondary" data-kind="review" style="font-size:13px; padding:6px 14px; border-radius:20px;">New, check details</button>
+      </div>
       <input id="supplier-search" placeholder="Search suppliers..." style="margin-bottom:14px; max-width:320px;" />
       <div id="suppliers-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=81"></script>
+  <script src="/js/supabase-client.js?v=82"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allSuppliers = [];
+    let kindFilter = 'all';
 
     async function loadSuppliers() {
       const listEl = document.getElementById('suppliers-list');
@@ -90,7 +97,13 @@
     function renderSuppliers() {
       const listEl = document.getElementById('suppliers-list');
       const q = document.getElementById('supplier-search').value.trim().toLowerCase();
-      const filtered = q ? allSuppliers.filter(s => s.name.toLowerCase().includes(q)) : allSuppliers;
+      const byKind = allSuppliers.filter(s => kindFilter === 'all' || (kindFilter === 'review' ? s.needs_review : (s.kind || 'supplier') === kindFilter));
+      const filtered = q ? byKind.filter(s => s.name.toLowerCase().includes(q)) : byKind;
+      document.querySelectorAll('#supplier-kind button').forEach(b => {
+        b.style.background = b.dataset.kind === kindFilter ? 'var(--accent)' : '';
+        b.style.color = b.dataset.kind === kindFilter ? '#fff' : '';
+        if (b.dataset.kind === 'review') { const n = allSuppliers.filter(s => s.needs_review).length; b.textContent = n ? `New, check details (${n})` : 'New, check details'; }
+      });
 
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No suppliers yet - add one to get started.</p>`; return; }
 
@@ -103,7 +116,7 @@
               const overdue = Number(s.summary.overdue);
               return `
                 <tr class="supplier-row-link" data-id="${s.id}" style="cursor:pointer;">
-                  <td data-label="Supplier"><strong>${s.name}</strong></td>
+                  <td data-label="Supplier"><strong>${s.name}</strong>${s.kind === 'contractor' ? ' <span class="badge draft">Contractor</span>' : ''}${s.needs_review ? ' <span class="badge" style="background:#d08a00; color:#fff;">New, check details</span>' : ''}</td>
                   <td data-label="Terms">${terms}</td>
                   <td class="num" data-label="Invoiced, not paid">${money(s.summary.invoiced_not_paid)}</td>
                   <td class="num" data-label="Overdue">${overdue > 0 ? `<span style="color:var(--red); font-weight:600;">${money(overdue)}</span>` : money(0)}</td>
@@ -118,6 +131,7 @@
     }
 
     document.getElementById('supplier-search').addEventListener('input', renderSuppliers);
+    document.querySelectorAll('#supplier-kind button').forEach(b => b.addEventListener('click', () => { kindFilter = b.dataset.kind; renderSuppliers(); }));
 
     function openSupplierPanel() {
       const overlay = document.createElement('div');
@@ -127,6 +141,8 @@
           <h2>Add supplier</h2>
           <label style="margin-top:0">Name</label>
           <input id="sup-name" />
+          <label>Type</label>
+          <select id="sup-kind"><option value="supplier">Supplier (goods, materials)</option><option value="contractor">Contractor (labour, services)</option></select>
           <div class="grid cols-2">
             <div><label>Contact email</label><input id="sup-email" type="email" /></div>
             <div><label>Contact phone</label><input id="sup-phone" /></div>
@@ -160,6 +176,7 @@
           contact_email: overlay.querySelector('#sup-email').value.trim() || null,
           contact_phone: overlay.querySelector('#sup-phone').value.trim() || null,
           credit_terms_type: overlay.querySelector('#sup-terms-type').value,
+          kind: overlay.querySelector('#sup-kind').value,
           credit_terms_days: parseInt(overlay.querySelector('#sup-terms-days').value) || 0,
           notes: overlay.querySelector('#sup-notes').value.trim() || null,
         }).select('id').single();

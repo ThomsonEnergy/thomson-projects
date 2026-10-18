@@ -82,7 +82,8 @@ async function checkBill(admin, billId) {
   if (['queried', 'resolved'].includes(bill.check_status) && status !== 'matches') status = bill.check_status;
   const update = { check_status: status, check_issues: issues, checked_at: new Date().toISOString() };
   // matches its PO and the goods are in: approved for payment, same as when a PO is marked received
-  if (status === 'matches' && poReceived && !bill.paid && !bill.approved_for_payment) { update.approved_for_payment = true; update.approved_at = update.checked_at; }
+  const { data: sup } = bill.supplier_id ? await admin.from('suppliers').select('needs_review').eq('id', bill.supplier_id).maybeSingle() : { data: null };
+  if (status === 'matches' && poReceived && !bill.paid && !bill.approved_for_payment && !sup?.needs_review) { update.approved_for_payment = true; update.approved_at = update.checked_at; }
   await admin.from('supplier_bills').update(update).eq('id', bill.id);
   return { status, issues };
 }

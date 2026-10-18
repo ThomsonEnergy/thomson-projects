@@ -295,7 +295,9 @@ async function findDuplicateBill(supabaseAdmin, supplierId, billNumber) {
 
 // Supplier, duplicate and PO matching for one inbox row that has been read. Returns the
 // fields to write back onto the row. Also used when someone picks the supplier by hand.
-async function analyse(supabaseAdmin, row, { supplierId = null } = {}) {
+// abnCheck: the ABN Lookup check from processOne (_shared/supplier-verify.js). allowCreate: make a
+// supplier from the bill when nobody matches (the first read of a bill, not a person picking one).
+async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null, allowCreate = false } = {}) {
   const ex = row.extracted || {};
   let supplierMatch = null;
   if (supplierId) {
@@ -304,6 +306,10 @@ async function analyse(supabaseAdmin, row, { supplierId = null } = {}) {
   } else {
     const { data: suppliers } = await supabaseAdmin.from('suppliers').select('*');
     supplierMatch = matchSupplier(suppliers, ex);
+    if (!supplierMatch && allowCreate && (ex.document_type || 'invoice') === 'invoice' && (ex.supplier || ex.abn)) {
+      const { createSupplierFromBill } = require('./supplier-verify'); // here, not at the top: it requires this file
+      supplierMatch = { supplier: await createSupplierFromBill(supabaseAdmin, ex, abnCheck), how: 'created' };
+    }
   }
   const sid = supplierMatch?.supplier.id || null;
 
@@ -347,7 +353,12 @@ async function analyse(supabaseAdmin, row, { supplierId = null } = {}) {
     confidence = po.confidence === 'none' ? 'none' : 'guess';
     reason = `Supplier "${ex.supplier || 'unknown'}" not recognised. ${po.reason}`;
   }
-  if (sid && supplierMatch.how !== 'picked by hand' && status === 'to_check') reason += ` (supplier matched by ${supplierMatch.how})`;
+  if (supplierMatch?.how === 'created' && status === 'to_check') reason = `New ${supplierMatch.supplier.kind === 'contractor' ? 'contractor' : 'supplier'} "${supplierMatch.supplier.name}" created from this bill: check their details. ${reason}`;
+  else if (sid && supplierMatch.how !== 'picked by hand' && status === 'to_check') reason += ` (supplier matched by ${supplierMatch.how})`;
+  if (abnCheck && abnCheck.problems.length && status === 'to_check') {
+    confidence = 'guess'; // never saved automatically
+    reason += `. ABN check: ${abnCheck.problems.join('; ')}`;
+  }
 
   return {
     status,
@@ -357,6 +368,7 @@ async function analyse(supabaseAdmin, row, { supplierId = null } = {}) {
     match_reason: reason,
     po_candidates: po.candidates,
     duplicate_of_bill_id: dupId,
+    ...(abnCheck ? { abn_check: abnCheck } : {}),
   };
 }
 
@@ -500,7 +512,12 @@ async function processOne(supabaseAdmin, row, autoSave, usage) {
   usage.input_tokens += read.usage.input_tokens || 0;
   usage.output_tokens += read.usage.output_tokens || 0;
   const withExtract = { ...row, file_path: filePath, extracted };
-  const result = await analyse(supabaseAdmin, withExtract);
+  // check the supplier details on the bill against the ABN Lookup before matching
+  const { checkSupplierDetails } = require('./supplier-verify');
+  const { data: allSuppliers } = await supabaseAdmin.from('suppliers').select('*');
+  const abnCheck = (extracted.document_type || 'invoice') === 'invoice'
+    ? await checkSupplierDetails(extracted, matchSupplier(allSuppliers, extracted)?.supplier || null) : null;
+  const result = await analyse(supabaseAdmin, withExtract, { abnCheck, allowCreate: true });
   await supabaseAdmin.from('supplier_bill_inbox').update({ ...result, extracted, processed_at: new Date().toISOString(), error: null }).eq('id', row.id);
 
   if (autoSave && result.status === 'to_check' && result.match_confidence === 'confident' && result.supplier_id && result.po_id && (extracted.document_type || 'invoice') === 'invoice') {
