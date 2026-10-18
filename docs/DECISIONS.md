@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 18 Oct 2026
+- Inbox plan: page renamed Sales inbox with a Sales / My inbox toggle (jasper@ first), Priority / Other / Subscriptions sections sorted by an agent, Gmail-style labels for non-job matters, agent drafts inline and in a Drafts corner list. Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 5)
 - Suppliers and contractors stay one list with a type (not a separate place). Unknown senders on bills become a new supplier automatically, marked "New, check details", no payment approval until a person saves it. Every bill's supplier details checked with the ABN Lookup (ABN valid and active, name matches, GST registered, bank or ABN changed). Migration 20261020010000. (`docs/PROJECT_SPEC.md` A11a)
 - Staff policy review done: 3 policies the contract references don't exist (Tool, Vehicle Incident, disciplinary), plus WHS, drugs and alcohol, harassment and 6 others recommended, and fixes to the 2024 policies. Waiting on the owner's pick. (`docs/IDEAS_BACKLOG.md` item 9)
 - Supabase SQL allowed without a popup in every session, staging and production; production writes still need the owner's yes in chat. Notes on the Supabase tool hanging on `drop` statements. (`.claude/settings.json`, `CLAUDE.md` Staging and production)
