@@ -57,6 +57,8 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 
 - Test migrations, features and agents on the `staging` Supabase branch first, never on production data. Cloud sessions use staging credentials by default.
 - Production changes (migrations, data fixes, settings) only after the owner approves.
+- Supabase SQL runs without a permission popup (`.claude/settings.json` allows `execute_sql`, `list_migrations`, `list_tables`) on staging and production alike, so asking in chat is the only check: get the owner's yes before any production write.
+- The Supabase MCP tool hangs and times out on `drop ...` statements (it waits for a confirmation it cannot show). Skip `drop ... if exists` when the object is known not to exist, send big migrations in small chunks, and record the repo's migration version in `supabase_migrations.schema_migrations` by hand.
 - New AI agents start read-only on production until proven.
 
 ## Migrations
