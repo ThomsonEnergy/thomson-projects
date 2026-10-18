@@ -24,7 +24,7 @@ async function requireActiveUser(event) {
 
   if (profileErr || !profile || !profile.active) return null;
 
-  return { supabaseAdmin, user: userData.user };
+  return { supabaseAdmin, user: userData.user, role: profile.role };
 }
 
 module.exports = { requireActiveUser };

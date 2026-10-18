@@ -127,24 +127,79 @@ async function computeEntryLabourCosts(supabaseAdmin, timeEntries) {
   return costById;
 }
 
-async function computeAccruedLabourCost(supabaseAdmin, projectIds) {
-  const { data: allTimeEntries } = await supabaseAdmin
-    .from('time_entries')
-    .select('id, project_id, cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out')
-    .in('project_id', projectIds)
-    .not('clock_out', 'is', null);
+// Overhead rates per billable hour, from the Overheads page's own
+// calculation (compute_overhead_rates / overhead_people_calc). Direct
+// overhead (leave, training, on-costs) is part of what an hour of labour
+// really costs, so it is added to labour cost everywhere; indirect
+// (non-billable time, office staff) is only ever shown underneath as
+// "incl. overheads". Each person's own direct rate where they have one,
+// else the company average. Zeros if the rates can't be read, so labour
+// falls back to wages only rather than failing.
+async function loadOverheadRates(supabaseAdmin) {
+  try {
+    const [{ data: rates }, { data: people }] = await Promise.all([
+      supabaseAdmin.rpc('compute_overhead_rates'),
+      supabaseAdmin.rpc('overhead_people_calc'),
+    ]);
+    const r = (Array.isArray(rates) ? rates[0] : rates) || {};
+    const directByProfile = {};
+    (people || []).forEach(p => { if (p.direct_rate !== null && p.direct_rate !== undefined) directByProfile[p.profile_id] = Number(p.direct_rate) || 0; });
+    return { directRate: Number(r.direct_rate) || 0, indirectRate: Number(r.indirect_rate) || 0, directByProfile };
+  } catch (err) {
+    console.error('Overhead rates load failed:', err.message);
+    return { directRate: 0, indirectRate: 0, directByProfile: {} };
+  }
+}
+
+// Direct and indirect overhead per time entry, keyed by time_entries.id.
+function computeEntryOverheads(timeEntries, rates) {
+  const byId = new Map();
+  (timeEntries || []).forEach(te => {
+    const hours = entryHours(te);
+    const direct = rates.directByProfile[te.staff_id] ?? rates.directRate;
+    byId.set(te.id, { direct: hours * direct, indirect: hours * rates.indirectRate });
+  });
+  return byId;
+}
+
+// Labour cost here (actualLabourCost / totalActualLabourCost) is wages
+// plus direct overhead. Wages and indirect overhead are returned alongside.
+// labourBudgetPercent (per stage and per project) is worked out here from
+// estimated_labour_cost, because Staff can't read that column and were
+// seeing 0% used. Pass rates (from loadOverheadRates) if already loaded.
+async function computeAccruedLabourCost(supabaseAdmin, projectIds, { rates: preloadedRates } = {}) {
+  const [{ data: allTimeEntries }, { data: centres }, rates] = await Promise.all([
+    supabaseAdmin
+      .from('time_entries')
+      .select('id, project_id, cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out')
+      .in('project_id', projectIds)
+      .not('clock_out', 'is', null),
+    supabaseAdmin.from('cost_centres').select('id, project_id, estimated_labour_cost').in('project_id', projectIds),
+    preloadedRates || loadOverheadRates(supabaseAdmin),
+  ]);
 
   const costById = await computeEntryLabourCosts(supabaseAdmin, allTimeEntries || []);
+  const overheadById = computeEntryOverheads(allTimeEntries || [], rates);
 
+  const emptyCentre = () => ({ actualHours: 0, actualLabourCost: 0, actualWages: 0, actualIndirectOverhead: 0 });
   const byProject = {};
-  projectIds.forEach(pid => { byProject[pid] = { totalActualLabourCost: 0, totalActualHours: 0, byCentre: {} }; });
+  projectIds.forEach(pid => { byProject[pid] = { totalActualLabourCost: 0, totalActualWages: 0, totalIndirectOverhead: 0, totalActualHours: 0, byCentre: {} }; });
+  const quotedByCentre = {};
+  (centres || []).forEach(c => {
+    quotedByCentre[c.id] = Number(c.estimated_labour_cost) || 0;
+    if (byProject[c.project_id]) byProject[c.project_id].byCentre[c.id] = emptyCentre();
+  });
 
   (allTimeEntries || []).forEach(te => {
-    const cost = costById.get(te.id) || 0;
+    const wages = costById.get(te.id) || 0;
+    const oh = overheadById.get(te.id) || { direct: 0, indirect: 0 };
+    const cost = wages + oh.direct;
     const hours = entryHours(te);
     const proj = byProject[te.project_id];
     if (!proj) return;
     proj.totalActualLabourCost += cost;
+    proj.totalActualWages += wages;
+    proj.totalIndirectOverhead += oh.indirect;
     proj.totalActualHours += hours;
 
     const centreIds = (te.selected_cost_centre_ids && te.selected_cost_centre_ids.length)
@@ -157,18 +212,29 @@ async function computeAccruedLabourCost(supabaseAdmin, projectIds) {
     // stages were ticked.
     const share = centreIds.length > 1 ? 1 / centreIds.length : 1;
     centreIds.forEach(cid => {
-      if (!proj.byCentre[cid]) proj.byCentre[cid] = { actualHours: 0, actualLabourCost: 0 };
+      if (!proj.byCentre[cid]) proj.byCentre[cid] = emptyCentre();
       proj.byCentre[cid].actualHours += hours * share;
       proj.byCentre[cid].actualLabourCost += cost * share;
+      proj.byCentre[cid].actualWages += wages * share;
+      proj.byCentre[cid].actualIndirectOverhead += oh.indirect * share;
     });
   });
 
+  const pct = (actual, quoted) => (quoted > 0 ? Math.round((actual / quoted) * 100) : 0);
   Object.values(byProject).forEach(proj => {
     proj.totalActualHours = Math.round(proj.totalActualHours * 100) / 100;
-    Object.values(proj.byCentre).forEach(c => { c.actualHours = Math.round(c.actualHours * 100) / 100; });
+    let stageActual = 0, stageQuoted = 0;
+    Object.entries(proj.byCentre).forEach(([cid, c]) => {
+      c.actualHours = Math.round(c.actualHours * 100) / 100;
+      const quoted = quotedByCentre[cid] || 0;
+      c.labourBudgetPercent = pct(c.actualLabourCost, quoted);
+      stageActual += c.actualLabourCost;
+      stageQuoted += quoted;
+    });
+    proj.labourBudgetPercent = pct(stageActual, stageQuoted);
   });
 
   return byProject;
 }
 
-module.exports = { computeAccruedLabourCost, computeEntryLabourCosts, dayBands, localDateKey, entryHours };
+module.exports = { computeAccruedLabourCost, computeEntryLabourCosts, computeEntryOverheads, loadOverheadRates, dayBands, localDateKey, entryHours };

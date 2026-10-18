@@ -206,7 +206,8 @@ Manual steps only a person can do (the code is live):
 
 ### A17. Job page
 - Tabs: Summary · Cost Centres · Purchase Orders · Variations · Invoices · STCs · Details · Feed · Emails · Documents · Site Photos, plus the Activity sidebar.
-- Summary: stat cards, budget bars, "Quoted split" and "Job split" donuts, "On this job now". Cost tiles include overheads for Finance and Admin (`get_project_overheads`).
+- Summary: stat cards, budget bars, "Quoted split" and "Job split" donuts, "On this job now".
+- Labour cost everywhere (job page, Projects list, timesheet drilldown, warranty cost) is wages plus **direct** overhead (each person's direct rate from Overheads, company average for the estimate). Underneath, pricing roles see "incl. overheads $X", which adds **indirect** overhead (plus company overhead on the cost tiles for Finance and Admin). Labour budget % is worked out server-side in `get-accrued-labour-cost.js` so Staff see the same % as Sales (they cannot read `estimated_labour_cost`).
 - Cost centre cards show labour plus materials quoted vs actual and GP%.
 
 ### A18. Sales inbox and My inbox (Gmail)

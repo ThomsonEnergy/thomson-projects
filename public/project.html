@@ -50,6 +50,11 @@
     // so an individual's ordinary_rate/rate_1_5x/rate_2x never has to
     // reach any browser, no matter who's viewing this page. Pay rates stay
     // visible only to admin/finance (Settings > Users & Roles).
+    // Labour cost is wages plus direct overhead; indirect overhead comes
+    // back per stage for the "incl. overheads" lines. Pricing roles also
+    // get the average overhead rates per hour (kept in overheadRates) for
+    // the estimate side.
+    let overheadRates = null;
     async function fetchAccruedLabourCost(projectIds) {
       const { data: { session } } = await supabaseClient.auth.getSession();
       const res = await fetch('/.netlify/functions/get-accrued-labour-cost', {
@@ -59,6 +64,7 @@
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Could not load accrued labour cost');
+      if (data.overheadRates) overheadRates = data.overheadRates;
       return data.byProject;
     }
 
@@ -95,12 +101,15 @@
       try {
         const byProject = await fetchAccruedLabourCost([projectId]);
         accruedByCentre = byProject[projectId]?.byCentre || {};
+        project.labour_budget_percent = byProject[projectId]?.labourBudgetPercent;
       } catch (err) {
         console.error('Accrued labour cost fetch failed:', err.message);
       }
       for (const centre of project.cost_centres || []) {
         centre.actual_hours = accruedByCentre[centre.id]?.actualHours || 0;
         centre.actual_labour_cost = accruedByCentre[centre.id]?.actualLabourCost || 0;
+        centre.actual_indirect_overhead = accruedByCentre[centre.id]?.actualIndirectOverhead || 0;
+        centre.labour_budget_percent = accruedByCentre[centre.id]?.labourBudgetPercent;
         centre.quoted_hours = (centre.cost_centre_line_items || [])
           .filter(li => li.item_type === 'labour')
           .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
@@ -2791,10 +2800,15 @@
       // the cost/profit breakdown below we need an actual cost, so it's
       // backed out using the same cost->sell relationship materials use
       // (sell = cost x (1 + markup%)), per stage since markup% varies.
+      // Labour cost always includes direct overhead (average direct rate x
+      // quoted hours here; each person's own rate on the actual side), and
+      // indirect overhead only ever shows underneath as "incl. overheads".
+      const directRate = Number(overheadRates?.directRate) || 0;
+      const indirectRate = Number(overheadRates?.indirectRate) || 0;
       const labourSellTotal = centres.reduce((s, c) => s + Number(c.estimated_labour_cost || 0), 0);
       const labourCostTotal = centres.reduce((s, c) => {
         const markupFactor = 1 + (Number(c.markup_percent) || 45) / 100;
-        return s + (Number(c.estimated_labour_cost) || 0) / markupFactor;
+        return s + (Number(c.estimated_labour_cost) || 0) / markupFactor + (Number(c.quoted_hours) || 0) * directRate;
       }, 0);
       const materialCostTotal = centres.reduce((s, c) => s + Number(c.estimated_material_cost || 0), 0);
       const cost = labourCostTotal + materialCostTotal;
@@ -2806,6 +2820,9 @@
       const actualLabourTotal = centres.reduce((s, c) => s + Number(c.actual_labour_cost || 0), 0);
       const quotedHoursTotal = centres.reduce((s, c) => s + Number(c.quoted_hours || 0), 0);
       const actualHoursTotal = centres.reduce((s, c) => s + Number(c.actual_hours || 0), 0);
+      const actualIndirectTotal = centres.reduce((s, c) => s + Number(c.actual_indirect_overhead || 0), 0);
+      const quotedIndirectTotal = quotedHoursTotal * indirectRate;
+      const inclOverheads = (amt) => `<div class="subtitle" style="margin:2px 0 0; font-size:12px;">incl. overheads ${money(amt)}</div>`;
 
       // "Cost allocated" and "Profit" on jobs must always reflect real
       // spend, never the estimate - accrued labour comes from logged
@@ -2865,7 +2882,9 @@
       }
       const actualProfitPct = jobDonutOk ? Math.max(0, Math.round((100 - actualMaterialsPct - actualLabourPct) * 10) / 10) : 0;
 
-      const overallBudgetPercent = labourSellTotal > 0 ? Math.round((actualLabourTotal / labourSellTotal) * 100) : 0;
+      // Worked out server-side (Staff can't read estimated_labour_cost, so
+      // working it out here gave them 0% used); local sum only as a fallback.
+      const overallBudgetPercent = project.labour_budget_percent ?? (labourSellTotal > 0 ? Math.round((actualLabourTotal / labourSellTotal) * 100) : 0);
       const overallIsOver = overallBudgetPercent > 100;
 
       content.innerHTML = `
@@ -2938,20 +2957,20 @@
               ${!editMode ? '<div id="meetings-card"></div><div id="assets-card"></div><div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
-                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-actual="1" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
                   <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
                 </div>
               ` : `
                 <div class="grid cols-${project.job_number ? '4' : '3'}">
                   <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
-                  <div class="stat" data-oh-cost="${cost}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
+                  <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
                   <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
                   ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
                 </div>
 
                 ${project.job_number ? `
                 <div class="grid cols-2" style="margin-top:10px;">
-                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
                   <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
                 </div>
                 ` : ''}
@@ -3078,6 +3097,7 @@
                         <div>
                           <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent); margin-right:8px;"></span>Materials - ${money(materialCostTotal)} (${materialsPct}%)</p>
                           <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--green); margin-right:8px;"></span>Labour - ${money(labourCostTotal)} (${labourPct}%)</p>
+                          <div style="margin:-4px 0 6px 18px;">${inclOverheads(labourCostTotal + quotedIndirectTotal)}</div>
                           <p style="margin:0;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--muted); margin-right:8px;"></span>Profit - ${money(profit)} (${profitPct}%)</p>
                         </div>
                       </div>
@@ -3094,6 +3114,7 @@
                         <div>
                           <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent); margin-right:8px;"></span>Materials - ${money(accruedMaterialTotal)} (${actualMaterialsPct}%)</p>
                           <p style="margin:0 0 6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--green); margin-right:8px;"></span>Labour - ${money(actualLabourTotal)} (${actualLabourPct}%)</p>
+                          <div style="margin:-4px 0 6px 18px;">${inclOverheads(actualLabourTotal + actualIndirectTotal)}</div>
                           <p style="margin:0;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--muted); margin-right:8px;"></span>Profit - ${money(accruedProfit)} (${actualProfitPct}%)</p>
                         </div>
                       </div>
@@ -3115,6 +3136,7 @@
                     <div style="background:${overallIsOver ? 'var(--red)' : 'var(--green)'}; width:${Math.min(100, overallBudgetPercent)}%; height:100%; border-radius:999px;"></div>
                   </div>
                   <p class="subtitle" style="margin-top:8px; color:${overallIsOver ? 'var(--red)' : 'var(--green)'};">${overallIsOver ? (overallBudgetPercent - 100) + '% over' : (100 - overallBudgetPercent) + '% remaining'}</p>
+                  ${pricingVisible ? `<p style="margin:10px 0 0; font-size:14px;">Labour so far ${money(actualLabourTotal)} <span class="subtitle">(wages + direct overheads)</span></p>${inclOverheads(actualLabourTotal + actualIndirectTotal)}` : ''}
                 </div>
               ` : ''}
             </div>
@@ -3165,7 +3187,7 @@
                 const actualLabour = Number(c.actual_labour_cost) || 0;
                 const quotedHours = Number(c.quoted_hours) || 0;
                 const actualHours = Number(c.actual_hours) || 0;
-                const budgetPercent = quotedLabour > 0 ? Math.round((actualLabour / quotedLabour) * 100) : 0;
+                const budgetPercent = c.labour_budget_percent ?? (quotedLabour > 0 ? Math.round((actualLabour / quotedLabour) * 100) : 0);
                 const isOver = budgetPercent > 100;
 
                 if (pricingVisible) {
@@ -3173,7 +3195,7 @@
                   // split above), backed out to cost the same way; estimated_material_cost
                   // is already stored as a cost, no back-out needed.
                   const markupFactor = 1 + (Number(c.markup_percent) || 45) / 100;
-                  const quotedLabourCost = quotedLabour / markupFactor;
+                  const quotedLabourCost = quotedLabour / markupFactor + quotedHours * directRate;
                   const quotedMaterialCost = Number(c.estimated_material_cost) || 0;
                   const actualMaterial = Number(c.actual_material_cost) || 0;
                   const quotedTotalCost = quotedLabourCost + quotedMaterialCost;
@@ -3203,6 +3225,7 @@
                       <div>
                         <p class="subtitle" style="margin:0 0 4px;">Labour margin</p>
                         <p style="font-size:15px; font-weight:600; margin:0; color:${marginPercent === null ? 'inherit' : marginPercent >= 0 ? 'var(--green)' : 'var(--red)'};">${marginPercent === null ? '-' : marginPercent + '%'} <span class="subtitle" style="font-weight:400;">(${money(actualLabour)} of ${money(quotedLabourCost)})</span></p>
+                        ${inclOverheads(actualLabour + (Number(c.actual_indirect_overhead) || 0))}
                       </div>
                       <div>
                         <p class="subtitle" style="margin:0 0 4px;">Materials margin</p>
@@ -5210,6 +5233,7 @@
         if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No timesheet entries logged against this job yet.</p>`; return; }
 
         let costById = new Map();
+        let indirectById = new Map();
         if (isFinanceOrAdmin) {
           try {
             const { data: { session } } = await supabaseClient.auth.getSession();
@@ -5219,7 +5243,10 @@
               body: JSON.stringify({ projectId: project.id }),
             });
             const data = await res.json();
-            if (res.ok && data.ok) costById = new Map(Object.entries(data.costByEntryId));
+            if (res.ok && data.ok) {
+              costById = new Map(Object.entries(data.costByEntryId));
+              indirectById = new Map(Object.entries(data.indirectByEntryId || {}));
+            }
           } catch (err) {
             console.error('Itemised labour cost fetch failed:', err.message);
           }
@@ -5230,6 +5257,7 @@
         // correctly), which would otherwise inflate this total past what
         // the rows above it actually show.
         const totalCost = entries.reduce((s, e) => s + (costById.get(e.id) || 0), 0);
+        const totalIndirect = entries.reduce((s, e) => s + (indirectById.get(e.id) || 0), 0);
 
         listEl.innerHTML = `
           <table class="responsive-stack">
@@ -5250,7 +5278,7 @@
                 <tr class="td-edit-row" data-edit-for="${e.id}" style="display:none;"><td colspan="${colCount}"></td></tr>`;
               }).join('')}
             </tbody>
-            ${isFinanceOrAdmin ? `<tfoot><tr><td colspan="${colCount - 1 - (isAdmin ? 1 : 0)}" style="text-align:right; font-weight:600;">Total labour cost</td><td class="num" style="font-weight:600;">${money(totalCost)}</td>${isAdmin ? '<td></td>' : ''}</tr></tfoot>` : ''}
+            ${isFinanceOrAdmin ? `<tfoot><tr><td colspan="${colCount - 1 - (isAdmin ? 1 : 0)}" style="text-align:right; font-weight:600;">Total labour cost (wages + direct overheads)</td><td class="num" style="font-weight:600;">${money(totalCost)}</td>${isAdmin ? '<td></td>' : ''}</tr><tr><td colspan="${colCount - 1 - (isAdmin ? 1 : 0)}" class="subtitle" style="text-align:right;">incl. overheads</td><td class="num subtitle">${money(totalCost + totalIndirect)}</td>${isAdmin ? '<td></td>' : ''}</tr></tfoot>` : ''}
           </table>`;
 
         if (!isAdmin) return;
@@ -5511,36 +5539,37 @@
       });
     }
 
-    // Finance and Admin see a note under the Summary cost tiles with overheads added: employee overhead (direct plus
-    // indirect, see the Overheads page) and company overhead (company_pct of the job's profit, or of its
-    // price if the Overheads page is set to price). The estimate uses the average employee overhead per
-    // quoted hour; the actual uses each person's own rate on the job hours they logged. Deliberately no
+    // Pricing roles see a note under the Summary cost tiles: "incl. overheads $X". The tile itself is the
+    // cash cost plus direct overhead (labour always carries direct overhead, see fetchAccruedLabourCost);
+    // the note adds indirect overhead (data-oh-indirect, worked out in render()) and, for Finance and
+    // Admin only, company overhead (company_pct of the job's profit, or of its price if the Overheads
+    // page is set to price; get_project_overheads returns no rows for anyone else). Deliberately no
     // "net profit" figure on the job page; that lives only on the Overheads page.
-    // get_project_overheads returns no rows for anyone else, so their tiles stay exactly as they were.
     let projectOverheadsPromise = null;
     async function applyOverheadsToCosts(project) {
       const tiles = document.querySelectorAll('[data-oh-cost]');
-      if (!tiles.length || !isFinanceRole(await getMyRole())) return;
-      if (!projectOverheadsPromise) {
-        projectOverheadsPromise = supabaseClient.rpc('get_project_overheads', { p_project_id: project.id })
-          .then(({ data }) => (Array.isArray(data) ? data[0] : data) || null)
-          .catch(() => null);
+      const role = await getMyRole();
+      if (!tiles.length || !isPricingRole(role)) return;
+      let pct = 0, byPrice = false;
+      if (isFinanceRole(role)) {
+        if (!projectOverheadsPromise) {
+          projectOverheadsPromise = supabaseClient.rpc('get_project_overheads', { p_project_id: project.id })
+            .then(({ data }) => (Array.isArray(data) ? data[0] : data) || null)
+            .catch(() => null);
+        }
+        const r = await projectOverheadsPromise;
+        pct = Number(r?.company_pct) || 0;
+        byPrice = r?.company_basis === 'revenue';
       }
-      const r = await projectOverheadsPromise;
-      if (!r) return;
-      const est = Number(r.est_rate) || 0, actual = Number(r.actual_amount) || 0, pct = Number(r.company_pct) || 0;
-      if (!est && !pct) return;
-      const byPrice = r.company_basis === 'revenue';
       tiles.forEach(tile => {
         const valueEl = tile.querySelector('.value');
         if (!valueEl || !tile.isConnected) return;
         const d = tile.dataset, base = Number(d.ohCost) || 0;
-        const empCost = d.ohActual ? actual : est * (Number(d.ohHours) || 0);
+        const indirect = Number(d.ohIndirect) || 0;
         const coCost = (pct / 100) * Math.max(0, Number(byPrice ? d.ohPrice : d.ohProfit) || 0);
-        // The tile itself stays the true cash cost (materials and wages, same as the Projects
-        // dashboard); the overheads-loaded figure is only a note underneath.
+        if (!indirect && !coCost) return;
         tile.querySelector('.oh-note')?.remove();
-        valueEl.insertAdjacentHTML('afterend', `<div class="subtitle oh-note" style="margin:2px 0 0; font-size:12px;" title="${money(base)} materials and wages + ${money(empCost)} employee overhead + ${money(coCost)} company overhead">${money(base + empCost + coCost)} incl. overheads</div>`);
+        valueEl.insertAdjacentHTML('afterend', `<div class="subtitle oh-note" style="margin:2px 0 0; font-size:12px;" title="${money(base)} materials, wages and direct overheads + ${money(indirect)} indirect overheads${coCost ? ' + ' + money(coCost) + ' company overhead' : ''}">incl. overheads ${money(base + indirect + coCost)}</div>`);
       });
     }
 
