@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 17 Oct 2026
+Last updated 18 Oct 2026
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -10,16 +10,18 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 |---|------|--------|----------------|------------|
 | 1 | Payment reconciliation, receipts, tools register | Partly built | N | Airwallex read-only key, accountant sign-off |
 | 2 | Voice messages in team chat + Siri Shortcut | Not started | N | Team chat channels, tagger agent, policy sign-off (6) |
-| 3 | Native iPhone app (Capacitor) | Not started | Y | Apple Developer org enrolment (D-U-N-S received), offline sync design |
+| 3 | Native iPhone app (Capacitor) | Not started | Y | Apple Developer enrolment (submitted 17 Oct), offline sync design |
 | 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
 | 5 | Per-user inboxes with job tagging | Partly built | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
-| 7 | SMS and calls via Twilio | Not started | Y | Native app (3), own Twilio account, AU regulatory bundle, Telstra port |
+| 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
 
 ## High lead time, start now
 
-- **Apple Developer organisation account:** D-U-N-S number for Thomson Energy Australia Pty Ltd received 16 Oct 2026. Next: enrol in the Apple Developer Program as an organisation (Apple verifies the D-U-N-S, can take a few days). Blocks item 3, and so item 7.
-- **Twilio:** open our own Twilio account, lodge the AU regulatory bundle now (approval takes days to weeks), then port 0455 415 464 from Telstra once the build is tested. Blocks item 7 (built after the native app).
+Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in `docs/EXTERNAL_ACCOUNTS.md`.
+
+- **Apple Developer organisation account:** D-U-N-S received 17 Oct 2026; enrolment submitted 17 Oct, Apple is verifying. Blocks item 3, and so item 7.
+- **Twilio:** Business Profile and AU Mobile bundle approved 18 Oct 2026, test number active. Next: port 0455 415 464 from Telstra once the build is tested. Item 7 is built after the native app.
 - **NSW surveillance notice:** get the notice and policy reviewed by Formby or an HR adviser, then 14 days' written notice before AI reading or tracking starts. Blocks AI on chat, email, voice and location (items 2, 5, 6).
 - **Google OAuth app:** internal Google Workspace app, no Google verification needed, so this is fast. The shared inbox already uses one; per-user Gmail scopes are an extension.
 
@@ -121,10 +123,10 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 3. CallKit/PushKit for calls, widgets, Siri App Intents.
 4. Voice keyboard.
 
-**Dependencies:** Apple Developer organisation account (D-U-N-S received 16 Oct 2026, enrolment next); offline design decisions.
+**Dependencies:** Apple Developer organisation account (D-U-N-S 17 Oct 2026, enrolment submitted, Apple verifying); offline design decisions.
 
 **Open questions**
-- [x] Organisation account (D-U-N-S received 16 Oct 2026)
+- [x] Organisation account (D-U-N-S 17 Oct 2026)
 - [ ] Cloud build service
 - [ ] Buy a Mac now or later
 - [ ] Offline conflicts: last write wins, or flag for review?
@@ -255,8 +257,8 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 **Decision (17 Oct 2026):** no interim phase. The forward-to-mobile and click-to-call bridge is dropped; SMS and calls are built in one go after the native app (item 3), with TEops itself as the phone. Keep using the current setup until then.
 
 **Plan**
-1. Open our own Twilio account; lodge the AU regulatory bundle now.
-2. After the native app ships: build and test on a temporary Twilio number.
+1. Own Twilio account and AU regulatory bundle: done 18 Oct 2026 (`docs/EXTERNAL_ACCOUNTS.md`).
+2. After the native app ships: build and test on the test number 0468 085 277.
 3. Port 0455 415 464 from Telstra to Twilio once tested.
 
 ### Outbound

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-TEops: the live operations app for Thomson Energy Australia (electrical and solar). See README.md for the stack and folder layout, and `docs/` for the spec, backlog, agents plan, env vars and staging.
+TEops: the live operations app for Thomson Energy Australia (electrical and solar). See README.md for the stack and folder layout, and `docs/` for the spec, backlog, agents plan, env vars, staging and external accounts (Twilio, Apple, Telstra, Google).
 
 **The app is live and used on real jobs every day.** Code is the source of truth; if a doc disagrees, fix the doc.
 
@@ -11,7 +11,31 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
 - Numbers over names everywhere: J, Q, PO, SI numbers, migration numbers.
 - State the plan and wait for "yes" / "let's build" before building.
 - One consolidated delivery, not lots of small ones.
-- Owner is also the bookkeeper (does Xero payroll). Xero entity is Thomson Energy Australia only, never Thomson Energy Solutions, and use the real account codes.
+- Talk plainly, one step at a time: say exactly what to click and what they should see, especially in dashboards (Netlify, Supabase, Twilio, Apple, Google). No "see line 6 of seed.sql": test-only staging logins can be stated in chat directly. Real keys and passwords never go in chat.
+- Owner is also the bookkeeper (does Xero payroll). Give Xero steps directly, never "ask your bookkeeper". Xero entity is Thomson Energy Australia only, never Thomson Energy Solutions, and use the real account codes (see `docs/BUSINESS_FACTS.md`).
+
+## Working across devices (phone and laptop)
+
+The owner switches between Claude Code on the laptop and cloud sessions on the phone. Cloud sessions only see GitHub, and the laptop's local Claude memory does not travel. So:
+
+- **GitHub is the only shared memory.** Anything worth remembering (rules, decisions, account progress, business facts) goes in this file or `docs/`, never only in local memory or chat.
+- **Never leave work only on one device.** Before ending a turn that changed files: commit, push, and open (or update) a PR. Merge to `main` once the owner approves, so the next session on any device starts from it.
+- **Start of every session:** pull the latest `main` (or sync the worktree with the base branch) before working, and check open PRs/branches from the other device.
+- Decisions and progress from planning chats go in `docs/` the same day (for example `docs/EXTERNAL_ACCOUNTS.md`).
+
+## Keep every chat in the loop (every chat, no exceptions)
+
+Other chats only know what is on `main`. So in every session, before the final reply:
+
+1. **Write it back.** Anything finished, decided, added as an idea, or changed in scope (including talk-only planning chats with no code) goes in the repo:
+   - one dated line at the top of `docs/DECISIONS.md` saying what changed and where the detail lives;
+   - the detail in the right doc: `docs/PROJECT_SPEC.md` (built or in scope), `docs/IDEAS_BACKLOG.md` (ideas and plans), `docs/AI_AGENTS_PLAN.md` (agents), `docs/EXTERNAL_ACCOUNTS.md` (outside accounts), `docs/BUSINESS_FACTS.md` (business facts).
+2. **Get it onto `main`.** Commit, push, open a PR. Docs-only PRs (`docs/`, `CLAUDE.md`, `README.md`) are merged straight away so the next chat sees them. Code and migrations still wait for the owner's "yes".
+3. **Say so.** End the reply with one line naming the docs updated, or "no repo notes needed".
+
+At the start of every session: pull `main` and read `docs/DECISIONS.md` before answering questions about plans or status. If the owner says something that contradicts the docs, ask, then fix the doc.
+
+Chats that cannot write to GitHub (for example Claude Projects): end with a short "Notes for the repo" list for the owner to paste into a Claude Code session.
 
 ## Delivery standards
 
