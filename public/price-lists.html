@@ -108,7 +108,7 @@
       const b = [];
       if (i.file_path) b.push(`<button type="button" class="secondary" data-open="${i.id}">Open file</button>`);
       if (i.status === 'to_check' && !i.supplier_id && (i.item_count || (i.items || []).length)) {
-        b.push(`<select data-supplier-for="${i.id}"><option value="">Pick the supplier...</option>${suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><button type="button" data-set-supplier="${i.id}">Use this supplier</button>`);
+        b.push(`<select data-supplier-for="${i.id}"><option value="">Pick the supplier...</option>${suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><button type="button" data-set-supplier="${i.id}">Use this supplier</button>${i.supplier_name_read ? `<button type="button" class="secondary" data-new-supplier="${i.id}">Create supplier "${esc(i.supplier_name_read)}"</button>` : ''}`);
       }
       if (i.status === 'too_large') b.push(`<button type="button" data-read-all="${i.id}">Read all pages</button>`);
       if (i.status === 'failed') b.push(`<button type="button" data-retry="${i.id}">Try again</button>`);
@@ -142,6 +142,9 @@
       body.querySelectorAll('[data-read-all]').forEach(b => b.addEventListener('click', () => act(b, { action: 'read_all', id: b.dataset.readAll }, 'Starting...')));
       body.querySelectorAll('[data-retry]').forEach(b => b.addEventListener('click', () => act(b, { action: 'retry', id: b.dataset.retry }, 'Starting...')));
       body.querySelectorAll('[data-not]').forEach(b => b.addEventListener('click', () => act(b, { action: 'not_price_list', id: b.dataset.not }, '...')));
+      body.querySelectorAll('[data-new-supplier]').forEach(b => b.addEventListener('click', () => {
+        if (confirm('Create this supplier (net 30 days terms, edit anything later on their page) and compare the list?')) act(b, { action: 'new_supplier', id: b.dataset.newSupplier }, 'Creating...');
+      }));
       body.querySelectorAll('[data-set-supplier]').forEach(b => b.addEventListener('click', () => {
         const sid = body.querySelector(`[data-supplier-for="${b.dataset.setSupplier}"]`).value;
         if (!sid) { alert('Pick the supplier first.'); return; }
