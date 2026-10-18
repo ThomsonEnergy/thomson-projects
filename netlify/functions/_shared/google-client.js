@@ -46,8 +46,16 @@ async function exchangeRefreshToken(refreshToken) {
   return data.access_token;
 }
 
+// Kept for 45 minutes per mailbox while the function stays warm (tokens last an hour):
+// a 60 day first load makes thousands of calls, and a fresh token each time doubled them.
+const tokenCache = new Map();
 async function getGoogleAccessToken(mailbox) {
-  return exchangeRefreshToken(await refreshTokenFor(mailbox));
+  const key = mailbox && mailbox.kind === 'personal' ? mailbox.id : 'shared';
+  const hit = tokenCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.token;
+  const token = await exchangeRefreshToken(await refreshTokenFor(mailbox));
+  tokenCache.set(key, { token, expires: Date.now() + 45 * 60000 });
+  return token;
 }
 
 const GMAIL_MAILBOX = 'sales@thomsonenergy.com.au';

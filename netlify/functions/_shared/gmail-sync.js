@@ -141,8 +141,15 @@ async function processMessageId(supabaseAdmin, messageId, billLabelId, mailbox =
       .from('email_threads')
       .insert({ gmail_thread_id: msg.threadId, subject, client_id: clientId, is_supplier_bill: isBill, mailbox_id: mailbox ? mailbox.id : undefined, is_read: personal ? !labels.includes('UNREAD') : false, is_done: personal ? !labels.includes('INBOX') : false })
       .select('*').single();
-    if (threadErr) throw threadErr;
-    thread = newThread;
+    if (threadErr && threadErr.code === '23505') {
+      // another message in the same conversation was being saved at the same moment
+      ({ data: thread } = await threadQuery.maybeSingle());
+      if (!thread) throw threadErr;
+    } else if (threadErr) {
+      throw threadErr;
+    } else {
+      thread = newThread;
+    }
   } else if (isBill && !thread.is_supplier_bill) {
     await supabaseAdmin.from('email_threads').update({ is_supplier_bill: true }).eq('id', thread.id);
   }
