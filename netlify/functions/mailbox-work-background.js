@@ -39,10 +39,10 @@ async function backfill(admin, mailbox, startedAt) {
   let loaded = 0;
   while (Date.now() - startedAt < BUDGET_MS) {
     const list = await gmailRequest(`messages?q=${encodeURIComponent(BACKFILL_QUERY)}&maxResults=100${mb.backfill_page_token ? `&pageToken=${mb.backfill_page_token}` : ''}`, {}, mb);
-    // 5 at a time: a 60 day load is thousands of emails
+    // 3 at a time: a 60 day load is thousands of emails (more trips Gmail's per minute limit)
     const ids = (list.messages || []).map((m) => m.id);
     let next = 0;
-    await Promise.all(Array.from({ length: Math.min(5, ids.length) }, async () => {
+    await Promise.all(Array.from({ length: Math.min(3, ids.length) }, async () => {
       while (next < ids.length) {
         const id = ids[next++];
         try { await processMessageId(admin, id, null, mb); } catch (err) {
@@ -100,6 +100,7 @@ exports.handler = () => runAgent('mailbox-work', async () => {
         usage.input_tokens += r.usage.input_tokens; usage.output_tokens += r.usage.output_tokens;
         if (r.sorted) parts.push(`${mb.address}: ${r.sorted} sorted, ${r.priority} need a reply, ${r.drafted} drafted`);
       }
+      if (mb.last_error) await admin.from('mailboxes').update({ last_error: null }).eq('id', mb.id);
     } catch (err) {
       console.error(`mailbox work for ${mb.address} failed:`, err.message);
       await admin.from('mailboxes').update({ last_error: String(err.message).slice(0, 300) }).eq('id', mb.id);

@@ -65,7 +65,23 @@ const userPath = (mailbox) => encodeURIComponent(mailbox && mailbox.kind === 'pe
 // `path` is anything after /users/{mailbox}/, e.g. 'messages' or
 // 'messages/send'. Errors carry .status (403 with a scope message means the mailbox
 // needs connecting again with the newer permissions).
+// Gmail says "slow down" (429, or 403 with a rate or quota reason) when a mailbox is read
+// quickly, for example a first 60 day load: wait and try again, up to 4 times.
+const isRateLimit = (status, json) => status === 429
+  || (status === 403 && /rate|quota/i.test(JSON.stringify(json?.error?.errors || json?.error?.message || '')));
+
 async function gmailRequest(path, { method = 'GET', body = null, token: givenToken } = {}, mailbox = null) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await gmailRequestOnce(path, { method, body, token: givenToken }, mailbox);
+    } catch (err) {
+      if (!err.rateLimited || attempt >= 4) throw err;
+      await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt + Math.random() * 1000));
+    }
+  }
+}
+
+async function gmailRequestOnce(path, { method = 'GET', body = null, token: givenToken } = {}, mailbox = null) {
   const token = givenToken || await getGoogleAccessToken(mailbox);
 
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/${userPath(mailbox)}/${path}`, {
@@ -86,6 +102,7 @@ async function gmailRequest(path, { method = 'GET', body = null, token: givenTok
     console.error('Gmail API error, full response:', JSON.stringify(json));
     const err = new Error(message);
     err.status = res.status;
+    err.rateLimited = isRateLimit(res.status, json);
     throw err;
   }
 
