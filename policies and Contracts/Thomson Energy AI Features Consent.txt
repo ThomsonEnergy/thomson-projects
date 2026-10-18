@@ -24,5 +24,6 @@ I understand that:
 - AI is not used to score, rate or rank me.
 - I can withdraw this consent at any time in TEops or by telling a director, and it stops straight away.
 - AI processing starts on the later of the date I sign this and the start date in the surveillance notice.
+- I agree to a shorter notice period than the 14 days in the Workplace Surveillance Act 2005 (NSW): if I sign before the start date in the surveillance notice, AI processing of my messages can start on the day I sign.
 
 By signing, I consent to the AI features described above.

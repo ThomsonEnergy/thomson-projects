@@ -53,7 +53,7 @@ Drafts, not sends, for the first few weeks. Later workers: payment reconciliatio
 
 ## Team chat (replaces WhatsApp entirely, including social chat)
 
-**Built today:** company feed and per-job feeds with posts, likes, comments and @mentions (migrations 019, 123, 124), Web Push, Sparky AI chat. **Not built:** channels, DMs, threaded replies as a chat view, Realtime delivery, offline queue.
+**Built 18 Oct 2026 (on staging, not yet production):** channels, DMs, threads, photos, files, voice messages, # job tags, Realtime, instant push, offline queue, plus the tagger, voice transcripts and @Sparky in chat. Detail: `docs/PROJECT_SPEC.md` A19a. **Not built:** Siri Shortcut (backlog item 2), Sparky answering questions without being @mentioned (left out on purpose to keep it quiet), editable vocabulary list.
 
 Build on the existing feeds:
 - Channels (General, Social, others) and DMs, threaded replies, photos and files to Supabase Storage (compressed), Supabase Realtime for instant delivery.
