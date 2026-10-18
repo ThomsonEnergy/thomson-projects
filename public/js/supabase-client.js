@@ -1807,6 +1807,7 @@ const MAIN_NAV_ITEMS = [
   { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;' },
   { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;' },
   { key: 'supplier-bills', label: 'Emailed bills', href: '/supplier-bills.html', icon: '&#129534;', pricingOnly: true },
+  { key: 'price-lists', label: 'Price lists', href: '/price-lists.html', icon: '&#127991;', pricingOnly: true },
   { key: 'ops', label: 'Ops manager', href: '/ops.html', icon: '&#129302;', adminOnly: true },
   { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;' },
   { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;' },
@@ -1977,7 +1978,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=6';
+  s.src = '/js/notifications.js?v=7';
   document.head.appendChild(s);
 }
 

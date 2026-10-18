@@ -324,4 +324,5 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 **Next:**
 - Migration 20261019000000 applied to production 18 Oct 2026 (staging skipped at the owner's request).
 - 2 weeks suggest-only on production. If the confident matches are right, turn on auto-save (`api_keys` `supplier_bill_auto_save` = `on`).
+- Price lists emailed to sales@ or invoice@ built 18 Oct 2026 (spec A11b): auto-update under 20% on known parts, the rest waits.
 - Later: credit notes and statements emailed to invoice@ (today they land in To check as "not a bill"), add to stock from an emailed bill, Xero bill push.

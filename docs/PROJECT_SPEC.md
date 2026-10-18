@@ -150,6 +150,16 @@ Manual steps only a person can do (the code is live):
 - Push notification `supplier_bill` to Admin and Finance when one needs checking (per-person switch on the bell).
 - Auto-save is **off** (suggest only). With `api_keys` row `supplier_bill_auto_save` = `on`, confident matches are saved against the PO without a person. Never approves for payment, never touches Xero, stock or material prices.
 
+### A11b. Emailed price lists (keeps material costs accurate)
+- Price lists emailed to sales@ or invoice@ (invoice@ lands in sales@). Found by the Gmail sync (subject or file name says price / pricing / catalogue, with a PDF or spreadsheet), an hourly sweep of sales@, and anything the bill reader set aside as not a bill. Migration 20261019020000.
+- `process-price-lists-background` (`_shared/price-list-intake.js`, `_shared/price-list-ai.js`): spreadsheets read row by row (AI only picks the columns, our nett/trade price, ex-GST); PDFs read 4 pages at a time across runs, a cut-off reply is re-read in halves; over 60 pages waits for "Read all pages".
+- Every line kept per supplier in `supplier_price_items` (searchable on the page, with the previous price).
+- Our materials are linked to supplier parts in `material_supplier_links`, confirmed once by a person ("Yes, same item"); after that matching is exact.
+- Linked part moved under 20%: `materials.cost_price` updated automatically. 20% or more: waits. Part gone from the list, material not used in 6 months (PO lines, bill lines, job usage) and a similar new item on the list: "Looks replaced", switch (relinks, renames, new cost) or keep. Never deletes.
+- Every change in `price_changes` with old and new cost, can be undone. Activity logged on the material.
+- **Price lists page** (`price-lists.html`, Admin/Finance/Sales): To check, Price lists, Changes made (Undo), Supplier lists (search). `price_list` push to Admin and Finance. Reports to the ops manager; the 5am digest counts prices updated and changes to check.
+- The manual price list upload on a supplier page (A11) still works as before.
+
 ### A12. Stock locations
 - Warehouse plus each `holds_stock` vehicle as separate rows; `materials.quantity_on_hand` is a trigger-kept total. Stock page: total cost, minimums, location breakdown, "Suggest restock PO". Vehicle stock pages.
 
