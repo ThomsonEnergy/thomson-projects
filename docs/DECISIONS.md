@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 19 Oct 2026
+- Job tasks: a task can't be ticked until all its subtasks are (no more ticking every subtask at once). J7002: 6 subtasks ticked by accident put back to not done. LIVE: migration 20261025000000 on production. (`docs/PROJECT_SPEC.md` A13)
 - Job tasks: subtasks can be moved to another task or made their own task; a task can be put under another. ServiceM8 re-runs no longer move tasks someone moved. (`docs/PROJECT_SPEC.md` A13)
 - Planned: purchase order upgrades: stock PO on a job (pull from Warehouse or a vehicle, fix the count on the spot), job POs stay on their job, move unused lines to another job / Warehouse / vehicle, undo received (note needed once approved), Open / Closed POs (closed = nothing added, approved for payment), email a PO as a PDF. Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 10)
 - Nightly Job Booked check: just after midnight Sydney, any job in Job Booked whose last booking has passed with nobody clocked in goes back to Ready to Book (or Awaiting Action). Shows on the ops page as "Job Booked check (nightly)". LIVE: migration 20261024000000 applied to production. (`docs/PROJECT_SPEC.md` A6)

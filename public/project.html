@@ -4899,11 +4899,16 @@
         const { data: { user } } = await supabaseClient.auth.getUser();
         const now = new Date().toISOString();
         const fields = done ? { completed: true, completed_by: user.id, completed_at: now } : { completed: false, completed_by: null, completed_at: null };
-        if (!(await patch(t.id, fields))) { await reload(); return; }
-        if (done && !t.parent_task_id) {
-          // ticking a task finishes its subtasks too
-          await supabaseClient.from('job_tasks').update(fields).eq('parent_task_id', t.id).eq('completed', false);
+        // A task is only done once every subtask is ticked (the database
+        // enforces this too, for every other place tasks get ticked).
+        const openSubs = done && !t.parent_task_id ? tasks.filter(x => x.parent_task_id === t.id && !x.completed) : [];
+        if (openSubs.length) {
+          alert(`Tick off its ${openSubs.length} open subtask${openSubs.length === 1 ? '' : 's'} first.`);
+          jtExpanded.add(t.id);
+          await reload();
+          return;
         }
+        if (!(await patch(t.id, fields))) { await reload(); return; }
         if (!done && t.parent_task_id) {
           const parent = tasks.find(p => p.id === t.parent_task_id);
           if (parent && parent.completed) await patch(parent.id, fields);
