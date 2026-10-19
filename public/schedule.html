@@ -299,8 +299,8 @@
           html += `
             <div class="cal-day ${isOtherMonth ? 'other-month' : ''} ${dateStr === todayStr ? 'today' : ''} ${isHoliday ? 'holiday' : ''}" data-date="${dateStr}">
               <div class="day-num">${cellDate.getDate()}${isHoliday ? '<span class="holiday-badge">Public holiday</span>' : ''}</div>
-              ${dayLeave.map(l => `<span class="cal-chip leave">${(l.profiles && l.profiles.full_name) || 'Staff'} (leave)</span>`).join('')}
-              ${dayAssignments.map(a => `<span class="cal-chip">${(a.profiles && a.profiles.full_name) || 'Staff'} &middot; ${a.projects ? projectRef(a.projects) : 'Job'}</span>`).join('')}
+              ${dayLeave.map(l => `<span class="cal-chip leave">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff')} (leave)</span>`).join('')}
+              ${dayAssignments.map(a => `<span class="cal-chip">${escapeHtml((a.profiles && a.profiles.full_name) || 'Staff')} &middot; ${escapeHtml(a.projects ? projectRef(a.projects) : 'Job')}</span>`).join('')}
             </div>`;
         }
         document.getElementById('cal-grid').innerHTML = html;
@@ -338,6 +338,8 @@
       document.getElementById('schedule-msg').innerHTML = '';
       setScheduleLoading(true);
       try {
+        // A failed staff list at start up is fetched again here, so Retry recovers it
+        if (!staffList.length) await loadPickerData();
         const dateStr = dateToStr(dayViewDate);
         const todayStr = dateToStr(new Date());
         const isPastDay = dateStr < todayStr;
@@ -430,7 +432,7 @@
 
           let blocksHtml = '';
           if (staffLeave) {
-            blocksHtml += `<div class="day-block leave" style="left:0; width:${timelineWidth}px;">${staff.full_name} - leave (${staffLeave.leave_type || 'approved'})</div>`;
+            blocksHtml += `<div class="day-block leave" style="left:0; width:${timelineWidth}px;">${escapeHtml(staff.full_name)} - leave (${escapeHtml(staffLeave.leave_type || 'approved')})</div>`;
           }
           staffAssignments.forEach(a => {
             const reconciled = reconciledById[a.id];
@@ -451,7 +453,7 @@
             blocksHtml += `
               <div class="day-block ${reconciled ? 'reconciled' : ''} ${siteVisitClass}" data-id="${a.id}" data-project-id="${a.project_id || ''}" data-inspection-id="${a.site_inspection_id || ''}" data-reconciled="${reconciled ? '1' : ''}" style="left:${left}px; width:${width}px; ${noteStyle}">
                 ${!reconciled ? `<div class="block-resize-handle" data-edge="left" style="position:absolute; left:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
-                <span class="block-label">${label}${reconciled ? ' &#10003;' : ''}</span>
+                <span class="block-label">${escapeHtml(label)}${reconciled ? ' &#10003;' : ''}</span>
                 ${!reconciled ? `<div class="block-resize-handle" data-edge="right" style="position:absolute; right:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
               </div>`;
           });
@@ -1148,7 +1150,8 @@
     });
 
     async function loadPickerData() {
-      const { data: profiles } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
+      const { data: profiles, error } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
+      if (error) throw error;
       staffList = profiles || [];
       // Viewer first so field staff never scroll to find their own row.
       const mine = staffList.findIndex(p => p.id === myId);
@@ -1179,7 +1182,7 @@
 
       renderDowRow();
       renderClockedInNowCard(document.getElementById('clocked-in-now'));
-      await loadPickerData();
+      try { await loadPickerData(); } catch (e) { /* loadDay fetches it again and shows the error with Retry */ }
       setView('day');
     })();
   </script>
