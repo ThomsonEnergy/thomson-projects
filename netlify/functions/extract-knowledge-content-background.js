@@ -3,7 +3,7 @@ const XLSX = require('xlsx');
 const { PDFDocument } = require('pdf-lib');
 const pdfParse = require('pdf-parse');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
-const { getAdminClient } = require('./_shared/require-admin');
+const { requireActiveUser } = require('./_shared/require-active-user');
 
 // Reads whatever a staff member added to the Knowledge Base - a pasted
 // website URL, or an uploaded PDF/image/spreadsheet - into plain
@@ -71,7 +71,7 @@ async function extractDocumentOrImage(buffer, mediaType, apiKey, maxTokens) {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-5-5',
       max_tokens: maxTokens || 4000,
       messages: [{ role: 'user', content: [{ type: 'text', text: promptText }, block] }],
     }),
@@ -186,7 +186,9 @@ function extractSpreadsheet(buffer) {
 }
 
 exports.handler = async (event) => {
-  const supabaseAdmin = getAdminClient();
+  const auth = await requireActiveUser(event);
+  if (!auth) return { statusCode: 202, body: '' };
+  const { supabaseAdmin } = auth;
   let entryId;
   let readWarning = null;
   const saveProgress = async (partialContent) => {
@@ -219,7 +221,7 @@ exports.handler = async (event) => {
         // only some pages had readable text (e.g. tables in fonts with no text
         // mapping) - say so rather than quietly storing a fraction of it.
         if (meta.pageCount > 5 && meta.textChars / meta.pageCount < 400) {
-          readWarning = `Only ${meta.textChars} characters were readable across ${meta.pageCount} pages - some pages (often tables) probably couldn't be read. Use "Read with OCR" to read them.`;
+          readWarning = `Only ${meta.textChars} characters were readable across ${meta.pageCount} pages - some pages (often tables) probably couldn't be read. Use Read again on the Knowledge page to read them page by page.`;
         }
       } else {
         const mediaType = mimeFor(file_name);

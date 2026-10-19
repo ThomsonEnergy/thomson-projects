@@ -23,6 +23,7 @@ const NOTIF_KINDS = [
   ['agent_alert', 'A background worker has stopped working (ops manager people)'],
   ['review', 'Client reviews received'],
   ['licence', 'Licence and insurance expiry reminders, and requests to update my licences'],
+  ['knowledge', 'Knowledge Base reads I started (finished or stopped)'],
 ];
 
 (function () {

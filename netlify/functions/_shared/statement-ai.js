@@ -41,7 +41,7 @@ If a field genuinely isn't visible, use null rather than guessing. Respond with 
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-5-5',
       max_tokens: 8000,
       messages: [{
         role: 'user',

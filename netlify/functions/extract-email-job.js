@@ -150,7 +150,7 @@ exports.handler = async (event) => {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 1500, messages: [{ role: 'user', content: buildPrompt(thread.subject, transcript) }] }),
+      body: JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 1500, messages: [{ role: 'user', content: buildPrompt(thread.subject, transcript) }] }),
     });
     if (!res.ok) throw new Error(`Anthropic API error: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
     const data = await res.json();
