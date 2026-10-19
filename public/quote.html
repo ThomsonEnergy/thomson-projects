@@ -216,7 +216,7 @@
     <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading your proposal...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=92"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
@@ -694,17 +694,17 @@
       // 4. Investment and payment schedule
       const milestones = data.payment_milestones || [];
       const milestoneRowsHtml = milestones.length
-        ? milestones.map(m => `<tr><td>${esc(m.label)}</td><td class="num">${money(baseTotal * (Number(m.percent) / 100))}</td></tr>`).join('')
+        ? milestones.map(m => `<tr><td>${esc(m.label)}</td><td class="num">${money(baseTotal * 1.1 * (Number(m.percent) / 100))}</td></tr>`).join('')
         : `
-          <tr><td>Deposit (${depositPercent}%), due on acceptance</td><td class="num">${money(depositAmount)}</td></tr>
-          ${baseCentres.map(c => `<tr><td>${esc(c.name)}, due on completion</td><td class="num">${money(c.quoted_amount * (1 - depositPercent / 100))}</td></tr>`).join('')}
+          <tr><td>Deposit (${depositPercent}%), due on acceptance</td><td class="num">${money(depositAmount * 1.1)}</td></tr>
+          ${baseCentres.map(c => `<tr><td>${esc(c.name)}, due on completion</td><td class="num">${money(c.quoted_amount * 1.1 * (1 - depositPercent / 100))}</td></tr>`).join('')}
         `;
       // Approved variations are invoiced on their own, once that work is done.
-      const variationScheduleRows = centres.filter(c => c.is_variation).map(c => `<tr><td>${esc(c.name)}, invoiced when the work is done</td><td class="num">${money(c.quoted_amount)}</td></tr>`).join('');
+      const variationScheduleRows = centres.filter(c => c.is_variation).map(c => `<tr><td>${esc(c.name)}, invoiced when the work is done</td><td class="num">${money(c.quoted_amount * 1.1)}</td></tr>`).join('');
       const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials') ? '' : `
         <div class="sec-title">Payment schedule</div>
         <table class="qtable">
-          <thead><tr><th>Milestone</th><th class="num">Amount</th></tr></thead>
+          <thead><tr><th>Milestone</th><th class="num">Amount (inc GST)</th></tr></thead>
           <tbody>${milestoneRowsHtml}${variationScheduleRows}</tbody>
         </table>
         <p class="note-line">For projects that span multiple months, we reserve the right to invoice each milestone in part at the end of the month, based on the percentage of that stage completed at the time, rather than waiting until it is fully finished.</p>`;
