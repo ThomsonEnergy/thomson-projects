@@ -209,7 +209,7 @@ exports.handler = async (event) => {
           draft = data;
         }
         let inReplyTo = null;
-        if (t) inReplyTo = (await admin.from('emails').select('message_id_header').eq('thread_id', t.thread.id).order('sent_at', { ascending: false }).limit(1).maybeSingle()).data?.message_id_header;
+        if (t) inReplyTo = (await admin.from('emails').select('message_id_header').eq('thread_id', t.thread.id).not('message_id_header', 'is', null).order('sent_at', { ascending: false }).limit(1).maybeSingle()).data?.message_id_header;
         await saveGmailDraft(admin, mailbox, draft, { fromName: await fromName(), inReplyTo, gmailThreadId: t ? t.thread.gmail_thread_id : null });
         return json(200, { ok: true, draft_id: draft.id });
       }

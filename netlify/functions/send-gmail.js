@@ -86,7 +86,7 @@ exports.handler = async (event) => {
       }
       if (thread) {
         const { data: last } = await supabaseAdmin
-          .from('emails').select('*').eq('thread_id', thread.id).order('sent_at', { ascending: false }).limit(1).maybeSingle();
+          .from('emails').select('*').eq('thread_id', thread.id).not('message_id_header', 'is', null).order('sent_at', { ascending: false }).limit(1).maybeSingle();
         lastMessage = last;
       }
     }
@@ -134,10 +134,19 @@ exports.handler = async (event) => {
       thread = newThread;
     }
 
+    // Keep the Message-ID Gmail gave this email, so the next reply in the thread can point at it
+    // (In-Reply-To / References) and stays threaded for the client. Best effort.
+    let sentMessageId = null;
+    try {
+      const meta = await gmailRequest(`messages/${sent.id}?format=metadata&metadataHeaders=Message-ID`, {}, mailbox);
+      sentMessageId = ((meta.payload && meta.payload.headers) || []).find(h => /^message-id$/i.test(h.name))?.value || null;
+    } catch (e) { console.error('send-gmail: could not read the Message-ID', e.message); }
+
     const nowIso = new Date().toISOString();
     const { error: emailErr } = await supabaseAdmin.from('emails').insert({
       thread_id: thread.id,
       gmail_message_id: sent.id,
+      message_id_header: sentMessageId,
       direction: 'outbound',
       from_address: `${profile?.full_name || 'Thomson Energy Sales'} <${fromAddress}>`,
       to_addresses: to.split(',').map(s => s.trim()),

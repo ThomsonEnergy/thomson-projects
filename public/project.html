@@ -3564,7 +3564,7 @@
               <div class="card">
                 <h2>Variations</h2>
                 <p class="subtitle" style="margin-bottom:14px;">Changes made to this job's stages after the quote was approved - edit a stage under Cost Centres to add another.</p>
-                <div id="variations-list"><p class="subtitle">Loading...</p></div>
+                <div id="variation-records-list"><p class="subtitle">Loading...</p></div>
               </div>
               ` : ''}
               `}
@@ -3641,7 +3641,7 @@
 
       if (project.job_number) loadPurchaseOrders(project.id, centres);
       if (document.getElementById('job-invoices-list')) { loadJobInvoices(project); loadSm8Invoices(project.id); }
-      if (document.getElementById('variations-list')) loadVariations(project.id);
+      if (document.getElementById('variation-records-list')) loadVariations(project.id);
       loadJobTasks(project.id);
       initJobSearch(project, pricingVisible);
       initJobEmails(project);
@@ -4244,7 +4244,7 @@
     }
 
     async function loadVariations(projectId) {
-      const listEl = document.getElementById('variations-list');
+      const listEl = document.getElementById('variation-records-list');
       const [{ data: variations, error }, { data: staff }] = await Promise.all([
         supabaseClient.from('variations').select('*').eq('project_id', projectId).order('created_at', { ascending: false }),
         supabaseClient.from('profiles').select('id, full_name'),

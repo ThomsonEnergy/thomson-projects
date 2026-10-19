@@ -300,8 +300,7 @@
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: destType === 'job' ? selectedJob.id : null,
             vehicle_id: destType === 'vehicle' ? vehicleId : null,
-            supplier_id: supplierId, supplier_name: supplierName,
-            po_number: await drawNextPoNumber(),
+            supplier_id: supplierId, supplier_name: supplierName || 'Warehouse', // supplier_name is required
             po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
             ...readPoNotesFields(overlay, 'np'),
             show_prices: overlay.querySelector('#np-show-prices').checked,

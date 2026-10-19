@@ -718,7 +718,6 @@
               project_id: assignType === 'job' ? selectedJobForNewPO.id : null,
               supplier_id: supplierId,
               supplier_name: currentSupplier.name,
-              po_number: await drawNextPoNumber(),
               po_type: 'fixed',
               locked: false,
               status: 'ordered',

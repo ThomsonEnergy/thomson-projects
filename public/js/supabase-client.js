@@ -5280,10 +5280,9 @@ function openBackorderPanel(lineItem, onComplete) {
   overlay.querySelector('#bo-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#bo-save-btn').addEventListener('click', async () => {
     const msg = overlay.querySelector('#bo-msg');
-    const { error } = await supabaseClient.from('purchase_order_line_items')
-      .update({ is_backordered: true, backorder_eta: overlay.querySelector('#bo-eta').value || null })
-      .eq('id', lineItem.id);
-    if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+    // po_set_backorder (not a plain update): PO line updates are pricing roles only, so Staff got 0 rows and no error
+    const { error } = await supabaseClient.rpc('po_set_backorder', { p_line_id: lineItem.id, p_backordered: true, p_eta: overlay.querySelector('#bo-eta').value || null });
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
     overlay.remove();
     await onComplete();
   });
