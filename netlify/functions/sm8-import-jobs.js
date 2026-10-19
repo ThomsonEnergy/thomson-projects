@@ -87,7 +87,10 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
   if (!sm8JobUuid) throw new Error('Missing ServiceM8 job id');
   const name = str(row.name, 300);
   if (!name) throw new Error('Job name is required');
-  const jobType = row.jobType === 'do_and_charge' ? 'do_and_charge' : 'quoted';
+  // A ServiceM8 quote comes across as a TEops quote: Q number, no job
+  // number, Draft quote or Quote sent by whether ServiceM8 sent it.
+  const isQuote = row.kind === 'quote';
+  const jobType = !isQuote && row.jobType === 'do_and_charge' ? 'do_and_charge' : 'quoted';
   const s = row.stage || {};
   const stageName = str(s.name, 200) || 'Labour & Materials';
   const rawLines = Array.isArray(s.lines) ? s.lines : [];
@@ -103,7 +106,7 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
   // With line items the value is theirs (ServiceM8's sell prices); without,
   // it is the figure typed on the review screen.
   const quoted = lines.length ? r2(lines.reduce((t, l) => t + r2(l.quantity * l.price), 0)) : r2(s.quotedExGst);
-  const invoiced = r2(s.invoicedExGst);
+  const invoiced = isQuote ? 0 : r2(s.invoicedExGst);
   // ServiceM8's STC rebate lines, kept for staff to enter by hand.
   const stcs = (Array.isArray(s.stcs) ? s.stcs : []).slice(0, 10).map(x => ({
     type: ['pv', 'bstc', 'swh'].includes(x.type) ? x.type : 'pv',
@@ -118,10 +121,20 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
   const groupDescriptions = new Map((Array.isArray(s.groups) ? s.groups : []).map(g => [str(g.key, 100), str(g.description, 5000)]));
 
   const { data: existing } = await supabaseAdmin
-    .from('projects').select('id, job_number').eq('sm8_job_uuid', sm8JobUuid).maybeSingle();
-  if (existing) return { skipped: true, projectId: existing.id, jobNumber: existing.job_number };
+    .from('projects').select('id, job_number, quote_number').eq('sm8_job_uuid', sm8JobUuid).maybeSingle();
+  // Includes a ServiceM8 quote that became a Work Order after its quote was
+  // brought across: approve the TEops quote to make it the job.
+  if (existing) return { skipped: true, projectId: existing.id, jobNumber: existing.job_number, quoteNumber: existing.quote_number };
 
   const client = await resolveClient(supabaseAdmin, row);
+
+  let quoteNumber = null;
+  if (isQuote) {
+    const { data: qn, error: qErr } = await supabaseAdmin.rpc('get_next_number_serverside', { counter_name: 'quote' });
+    if (qErr) throw qErr;
+    quoteNumber = qn;
+  }
+  const sentAt = isQuote && row.quoteSent ? (/^\d{4}-\d{2}-\d{2}$/.test(String(row.quoteSentDate || '')) ? `${row.quoteSentDate}T09:00:00+10:00` : new Date().toISOString()) : null;
 
   const { data: project, error: projectErr } = await supabaseAdmin
     .from('projects')
@@ -140,13 +153,14 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
       // actual time and materials.
       proposal_template: jobType === 'quoted' ? 'new_build' : 'direct_job',
       // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
-      pipeline_stage: 'ready_to_book',
-      status: 'in_progress',
+      pipeline_stage: isQuote ? (sentAt ? 'quote_sent' : 'draft_quote') : 'ready_to_book',
+      status: isQuote ? (sentAt ? 'sent' : 'draft') : 'in_progress',
+      ...(isQuote ? { quote_number: quoteNumber, sent_at: sentAt } : {}),
       created_by: userId,
       sm8_job_uuid: sm8JobUuid,
       sm8_job_number: str(row.sm8JobNumber, 50) || null,
     })
-    .select('id, job_number')
+    .select('id, job_number, quote_number')
     .single();
   if (projectErr) {
     // Unique index on sm8_job_uuid: another tab got there first.
@@ -202,7 +216,7 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
     throw err;
   }
 
-  return { projectId: project.id, jobNumber: project.job_number };
+  return { projectId: project.id, jobNumber: project.job_number, quoteNumber: project.quote_number };
 }
 
 exports.handler = async (event) => {

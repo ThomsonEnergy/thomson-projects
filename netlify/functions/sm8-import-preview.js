@@ -1,6 +1,7 @@
 // POST /.netlify/functions/sm8-import-preview
+// Body: { quotesSinceMonths } (default 6).
 // Admin only. The dry run for the ServiceM8 open-jobs import: reads every
-// active Work Order job from ServiceM8 and shows how each would come
+// active Work Order job (and recent open quotes) from ServiceM8 and shows how each would come
 // across (client match, job name, quoted and invoiced to date, notes).
 // Writes nothing, here or in ServiceM8 - see _shared/sm8-import.js.
 
@@ -18,7 +19,9 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { rows, summary } = await loadSm8OpenJobs(auth.supabaseAdmin);
+    const { quotesSinceMonths } = JSON.parse(event.body || '{}');
+    const months = Number.isFinite(Number(quotesSinceMonths)) ? Math.min(120, Math.max(0, Number(quotesSinceMonths))) : 6;
+    const { rows, summary } = await loadSm8OpenJobs(auth.supabaseAdmin, { quotesSinceMonths: months });
     return { statusCode: 200, body: JSON.stringify({ ok: true, rows, summary }) };
   } catch (err) {
     console.error('sm8-import-preview error:', err.message);
