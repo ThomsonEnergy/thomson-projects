@@ -438,3 +438,7 @@ Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261030000000).
 - [ ] Which roles need two-factor (Admin and Finance proposed)
 - [ ] Outside penetration test after the sweep, or not
 
+
+## 16. Make `npm run check` enforce the build rules (planned 19 Oct 2026, waiting on owner's yes)
+
+The bug review's patterns become failing checks, so they can't ship: duplicate element ids in a page; `toISOString().slice(0, 10)`; a SQL function without `set search_path` or a `security definer` one without its `revoke`; a Netlify function with no `require*` login check and not on the allowed public list (token or webhook signature); known user fields interpolated into HTML without `escapeHtml`. Plus a whole-site review like `docs/BUG_REVIEW.md` after each big build, for the one-off slips rules can't catch.
