@@ -23,6 +23,12 @@
 [functions.archive-completed-jobs]
   schedule = "@daily"
 
+# Just after midnight Sydney time: moves jobs out of Job Booked when their last booking has passed
+# and nobody is clocked in - see sweep-job-booked.js. Runs at 13:05 and 14:05 UTC so it lands on
+# 00:05 with and without daylight saving; a second run finds nothing to do.
+[functions.sweep-job-booked]
+  schedule = "5 13,14 * * *"
+
 # Once a day: refreshes the overhead lines from the Xero Profit and Loss report - see
 # sync-overheads-nightly.js. Does nothing until accounts are mapped on the Overheads page.
 [functions.sync-overheads-nightly]
