@@ -522,7 +522,7 @@ Why: the owner wants every mailbox and every person to write in his voice by def
 
 Built 19 Oct 2026, migration 20261103030000. jasper@ set as the company voice in the migration. The script lives in `js/writing-help.js` (loaded by `supabase-client.js`). Detail in `docs/PROJECT_SPEC.md` A18 and A33. Later idea: a shared company word list (trade words, client names) instead of the per-device Undo list.
 
-## 21. Schedule tab, staff and client booking emails, client picks a time (planned 19 Oct 2026, replaces the first item 21 plan)
+## 21. Schedule tab, client booking emails, client picks a time (built 19 Oct 2026)
 
 Why: the owner books jobs tentatively about 3 weeks out (staff see it in My Day, no staff email), then confirms with the client about 3 days before once the job is sure to go ahead; moves and cancels need the same; and the client should be able to pick from time options we offer.
 
@@ -538,4 +538,4 @@ Why: the owner books jobs tentatively about 3 weeks out (staff see it in My Day,
 
 Later: nothing yet.
 
-Waiting on owner's yes. Best model: Fable 5.1 (migration, RLS and a public client page together).
+Built 19 Oct 2026, migration 20261104020000. Detail in `docs/PROJECT_SPEC.md` A34. Later ideas: SMS the booking instead of email for clients with no email address; a company word list for the spell check.

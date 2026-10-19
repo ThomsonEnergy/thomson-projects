@@ -39,7 +39,7 @@ exports.handler = async (event) => {
     const link = `/project.html?id=${project.id}&tab=schedule`;
 
     if (body.decline) {
-      const message = String(body.message || '').replace(/—/g, ',').trim().slice(0, 1000);
+      const message = String(body.message || '').replace(/\u2014/g, ',').trim().slice(0, 1000);
       const { data: upd } = await admin.from('schedule_time_offers').update({ status: 'declined', client_message: message || null }).eq('id', offer.id).eq('status', 'open').select('id').maybeSingle();
       if (!upd) return json(409, { ok: false, error: 'These options are no longer open. Please contact us.' });
       await admin.from('activity_log').insert({ entity_type: 'project', entity_id: project.id, action: 'time_offer_declined', description: `Client: none of the offered times work${message ? `. "${message}"` : ''}`, changed_by: null });

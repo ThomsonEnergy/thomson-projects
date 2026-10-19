@@ -93,7 +93,7 @@ async function draftFor(admin, project, body, user) {
 }
 
 function cleanBody(body) {
-  const text = String(body || '').replace(/—/g, ',').replace(/\r/g, '').trim();
+  const text = String(body || '').replace(/\u2014/g, ',').replace(/\r/g, '').trim();
   if (!text) throw new Refused('The email has no text.');
   if (text.length > 20000) throw new Refused('The email is too long.');
   // the pick-a-time button is added by the server, never typed in
@@ -105,7 +105,7 @@ function cleanTo(to) {
   return addr;
 }
 function cleanSubject(subject, fallback) {
-  return String(subject || '').replace(/—/g, ',').replace(/[\r\n]+/g, ' ').trim().slice(0, 200) || fallback;
+  return String(subject || '').replace(/\u2014/g, ',').replace(/[\r\n]+/g, ' ').trim().slice(0, 200) || fallback;
 }
 
 async function log(admin, projectId, action, description, userId) {

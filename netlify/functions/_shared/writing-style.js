@@ -135,7 +135,7 @@ async function learnWritingStyle(admin, mailbox, usage) {
   const picked = [...new Set((out.example_numbers || []).map((n) => Number(n)).filter((n) => n >= 1 && n <= replies.length))].slice(0, MAX_EXAMPLES);
   const examples = picked.map((n) => replies[n - 1]).map((r) => ({ subject: r.subject, they_said: r.they_said ? r.they_said.text.slice(0, 800) : '', we_replied: r.text, sent_at: r.sent_at }));
   await admin.from('mailboxes').update({
-    writing_style: String(out.guide || '').replace(/—/g, ',').trim(),
+    writing_style: String(out.guide || '').replace(/\u2014/g, ',').trim(),
     writing_style_examples: examples,
     writing_style_learned_at: new Date().toISOString(),
     writing_style_requested_at: null,
