@@ -52,13 +52,12 @@ const looksAutomatic = (text) => /^(fyi|see below|see attached|please see below)
 
 // The sent replies worth learning from, newest first, each with the email it answered when known.
 async function sentReplies(admin, mailbox) {
-  const { data: threads } = await admin.from('email_threads').select('id').eq('mailbox_id', mailbox.id);
-  const threadIds = (threads || []).map((t) => t.id);
-  if (!threadIds.length) return [];
-  const { data: outbound } = await admin.from('emails')
-    .select('id, thread_id, from_address, to_addresses, subject, body_text, sent_at')
-    .in('thread_id', threadIds).eq('direction', 'outbound')
+  // joined through the thread (a My inbox has thousands of threads: an id list would not fit in a request)
+  const { data: outbound, error } = await admin.from('emails')
+    .select('id, thread_id, from_address, to_addresses, subject, body_text, sent_at, email_threads!inner(mailbox_id)')
+    .eq('email_threads.mailbox_id', mailbox.id).eq('direction', 'outbound')
     .order('sent_at', { ascending: false }).limit(400);
+  if (error) throw new Error(`Could not read the sent emails: ${error.message}`);
   const seen = new Set();
   const replies = [];
   for (const e of (outbound || [])) {
@@ -71,10 +70,11 @@ async function sentReplies(admin, mailbox) {
     if (replies.length >= MAX_REPLIES) break;
   }
   if (!replies.length) return [];
-  const { data: inbound } = await admin.from('emails')
+  const { data: inbound, error: inErr } = await admin.from('emails')
     .select('thread_id, from_address, body_text, sent_at')
     .in('thread_id', [...new Set(replies.map((r) => r.thread_id))]).eq('direction', 'inbound')
     .order('sent_at', { ascending: false }).limit(600);
+  if (inErr) throw new Error(`Could not read the emails answered: ${inErr.message}`);
   for (const r of replies) {
     const before = (inbound || []).find((m) => m.thread_id === r.thread_id && new Date(m.sent_at) < new Date(r.sent_at));
     if (before) r.they_said = { from: nameOf(before.from_address), text: ownWords(before.body_text).slice(0, 1200) };
