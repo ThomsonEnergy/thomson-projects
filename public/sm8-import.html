@@ -63,7 +63,7 @@
 
   <div class="wrap">
     <h1>ServiceM8 Import</h1>
-    <p class="subtitle">Brings the jobs still open in ServiceM8 (status Work Order) across as jobs, and open quotes (status Quote) from the last few months as quotes: Quote sent if ServiceM8 sent it, otherwise Draft quote. Loading the list is a dry run: it only reads from ServiceM8 and saves nothing. Check each job, untick any you would rather finish in ServiceM8, then press Import. Jobs already brought across are skipped, so this can be run again on cutover day.</p>
+    <p class="subtitle">Brings the jobs still open in ServiceM8 (status Work Order) across as jobs, and open quotes (status Quote) from the last few months as quotes: Quote sent if ServiceM8 sent it, otherwise Draft quote. Loading the list is a dry run: it only reads from ServiceM8 and saves nothing. Nothing is ticked to start: search a ServiceM8 number, check it, tick it and press Import, one at a time or several. Jobs already brought across are skipped, so this can be run again on cutover day.</p>
 
     <div class="card">
       <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
@@ -87,7 +87,10 @@
       <p class="subtitle" style="margin:0 0 12px;">All amounts are ex GST, like everywhere else in the app. Each job comes across with its ServiceM8 line items: every bundle as a prebuild with its real parts and labour, at the prices the client was quoted, so labour and materials split properly when it is invoiced to Xero. Lettered jobs (4515A deposit, 4515B progress claim, and so on) are not imported as jobs: a Completed one counts toward 4515's invoiced to date, and the app only lets you invoice what is left. Check the Labour/Material choice on any line that is not part of a prebuild.</p>
       <div id="orphan-claims"></div>
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
-        <div class="imp-filters" id="filters"></div>
+        <div>
+          <input type="search" id="imp-search" placeholder="Search ServiceM8 number, client, name or address" style="margin:0 0 8px; max-width:420px;" />
+          <div class="imp-filters" id="filters"></div>
+        </div>
         <div class="imp-filters">
           <button type="button" class="secondary" id="tick-all-btn">Tick all</button>
           <button type="button" class="secondary" id="untick-all-btn">Untick all</button>
@@ -236,7 +239,8 @@
         rows = data.rows;
         edits.clear();
         rows.forEach(r => edits.set(r.sm8JobUuid, {
-          include: !r.alreadyImported,
+          // Nothing ticked to start: search a number and tick what to bring.
+          include: false,
           name: r.suggestedName,
           clientId: r.clientMatch ? r.clientMatch.clientId : 'new',
           jobType: 'quoted',
@@ -284,8 +288,15 @@
       }));
     }
 
+    let search = '';
     function visibleRows() {
+      const q = search.trim().toLowerCase().replace(/^#/, '');
       return rows.filter(r => {
+        if (q) {
+          const e = edits.get(r.sm8JobUuid);
+          const hay = [r.sm8JobNumber, r.companyName, r.siteAddress, r.description, e && e.name].join(' ').toLowerCase();
+          if (!q.split(/\s+/).every(w => hay.includes(w))) return false;
+        }
         const e = edits.get(r.sm8JobUuid);
         if (filter === 'jobs') return r.kind !== 'quote';
         if (filter === 'quotes') return r.kind === 'quote';
@@ -709,6 +720,7 @@
     document.getElementById('tick-all-btn').addEventListener('click', () => setAllIncluded(true));
     document.getElementById('untick-all-btn').addEventListener('click', () => setAllIncluded(false));
     document.getElementById('load-btn').addEventListener('click', loadPreview);
+    document.getElementById('imp-search').addEventListener('input', (ev) => { search = ev.target.value; renderList(); });
     document.getElementById('import-btn').addEventListener('click', runImport);
 
     (async function () {
