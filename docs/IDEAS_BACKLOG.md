@@ -501,3 +501,21 @@ Why: Postie's drafts sound generic and parrot the sender's email back before ans
 4. **Later (needs draft edit tracking):** learn from edits. Keep the AI draft and what was actually sent, feed the differences into the next refresh.
 
 Built 19 Oct 2026, migration 20261103020000: items 1 to 3 as above (Settings > Email Agent, tab now visible to everyone, auto replies card still pricing roles only). Item 4 (learn from edits) stays an idea. Detail in `docs/PROJECT_SPEC.md` A18.
+
+## 20. Company voice, spell check and Polish everywhere (planned 19 Oct 2026)
+
+Why: the owner wants every mailbox and every person to write in his voice by default, with the option of their own learned style later, and spelling fixed everywhere with a Polish option that restructures sentences in the company voice.
+
+**A. Company voice**
+1. Admin picks the company voice in Settings > Email Agent (dropdown of mailboxes with a learned style): `company_settings.writing_style_mailbox_id`.
+2. Every mailbox has `writing_style_source` ('company' default, or 'own'). sales@ and every My inbox start on company voice; a person switches to their own after pressing Learn on their row.
+3. Postie drafts with whichever is picked; greeting and sign off still belong to the mailbox in use.
+
+**B. Spell check and Polish everywhere**
+1. One shared script (in `supabase-client.js`, already on every page) attaches to every multi-line text box, including ones created later. Single-line fields (names, addresses, amounts) and serial number boxes are left alone.
+2. Spelling fix, automatic by default: on leaving a text box, Claude Haiku 5.5 fixes spelling and obvious typos only (never wording or meaning, keeps line breaks, Australian spelling, trade words untouched). If anything changed: "Spelling fixed, Undo" under the box for a few seconds. Chat runs it just before sending.
+3. Polish button on any text box with 5+ words: Claude Sonnet 5.5 restructures the sentences in the company voice (answer first, shorter sentences, clear order), keeps every fact, never adds. "Polished, Undo".
+4. Per person setting (Settings > Email Agent, everyone): `profiles.spellcheck_mode` = auto (default) / button / off.
+5. Server: new `polish-text` function (login check). `cleanup-text.js` gets a login check too (it has none today).
+
+One migration (three columns), `supabase-client.js` version bump on every page. Waiting on owner's yes. Best model: Opus 5.5.
