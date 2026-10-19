@@ -179,6 +179,7 @@ Manual steps only a person can do (the code is live):
 - Added at quote stage or later; assign to a person, a role or anyone. Tasks page; Home "Needs attention" count.
 - **"Required before scheduling" is enforced** on every Schedule entry point and drives awaiting_action (A6).
 - Take photo on any task (open the task): saved as a site photo captioned "#task <task>" (`project_photos.task_id`), thumbnails and count on the task. Ticked tasks show who ticked them and when.
+- Move a subtask to another task or out on its own, or put a task (with no subtasks) under another task: "Move to" in the open task.
 
 ### A13a. Activity log
 - One `activity_log` table (`logActivity()` / `renderActivityLog()`), shown as a sidebar on the job page. Covers POs, jobs/quotes (stage edits), invoices, suppliers, materials, clients, tasks, documents, variations, timesheets. Not yet: settings changes, schedule changes.

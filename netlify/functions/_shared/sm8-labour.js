@@ -155,7 +155,9 @@ async function copyJobChecklist(supabaseAdmin, userId, project, items, profileBy
   async function upsertTask(sm8Uuid, row, isItem) {
     const had = existingByUuid.get(sm8Uuid);
     if (had) {
-      const fields = { parent_task_id: row.parent_task_id ?? null };
+      // Grouped once (tasks copied before grouping existed); after that a
+      // task someone moved stays where they put it.
+      const fields = had.parent_task_id ? {} : { parent_task_id: row.parent_task_id ?? null };
       // Ticked in ServiceM8 since the last run: tick it here too.
       if (row.completed && !had.completed) { Object.assign(fields, { completed: true, completed_at: row.completed_at, completed_by: row.completed_by }); if (isItem) summary.checklistTicked++; }
       else if (isItem) summary.checklistAlready++;
