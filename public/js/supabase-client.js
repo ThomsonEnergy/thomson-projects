@@ -4866,6 +4866,54 @@ function renderPoBadges(po) {
   return `<span class="badge ${po.closed_at ? 'accepted' : 'draft'}" style="margin-left:6px;">${po.closed_at ? 'Closed' : 'Open'}</span>${stock}`;
 }
 
+// The two notes on a PO: for the supplier (printed on po.html) and internal (staff only).
+function renderPoNotes(po) {
+  const block = (label, text) => text ? `<div style="font-size:13px; margin-top:6px;"><span class="subtitle" style="font-size:12px;">${label}</span><div style="white-space:pre-wrap;">${escapeHtml(text)}</div></div>` : '';
+  return block('Notes for supplier (on the PO)', po.supplier_notes) + block('Internal notes', po.internal_notes);
+}
+
+// Two notes boxes for a Create PO panel; read them back with readPoNotesFields.
+function poNotesFieldsHtml(prefix) {
+  return `<label>Notes for supplier (optional, printed on the PO)</label>
+    <textarea id="${prefix}-supplier-notes" style="min-height:50px;" placeholder="e.g. Deliver to site, call Sean on arrival"></textarea>
+    <label>Internal notes (optional, staff only)</label>
+    <textarea id="${prefix}-internal-notes" style="min-height:50px;"></textarea>`;
+}
+
+function readPoNotesFields(root, prefix) {
+  return {
+    supplier_notes: root.querySelector(`#${prefix}-supplier-notes`).value.trim() || null,
+    internal_notes: root.querySelector(`#${prefix}-internal-notes`).value.trim() || null,
+  };
+}
+
+function openPoNotesPanel(po, onComplete) {
+  const overlay = poOverlay(`
+    <h2>Notes on PO ${escapeHtml(po.po_number || '')}</h2>
+    ${poNotesFieldsHtml('pn')}
+    <div style="margin-top:14px;">
+      <button id="pn-save-btn">Save notes</button>
+      <button type="button" class="secondary" id="pn-cancel-btn">Cancel</button>
+    </div>
+    <div id="pn-msg"></div>`, 480);
+  overlay.querySelector('#pn-supplier-notes').value = po.supplier_notes || '';
+  overlay.querySelector('#pn-internal-notes').value = po.internal_notes || '';
+  overlay.querySelector('#pn-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#pn-save-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#pn-msg');
+    const next = readPoNotesFields(overlay, 'pn');
+    const changed = [];
+    if ((po.supplier_notes || null) !== next.supplier_notes) changed.push('notes for supplier');
+    if ((po.internal_notes || null) !== next.internal_notes) changed.push('internal notes');
+    if (!changed.length) { overlay.remove(); return; }
+    const { error } = await supabaseClient.from('purchase_orders').update(next).eq('id', po.id);
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+    await logActivity('purchase_order', po.id, 'notes_edited', `PO ${po.po_number || ''}: ${changed.join(' and ')} changed`);
+    overlay.remove();
+    if (onComplete) await onComplete();
+  });
+}
+
 function renderPoControls(po, role) {
   const b = (cls, text) => `<button type="button" class="secondary ${cls}" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">${text}</button>`;
   const open = !po.closed_at;
@@ -4874,6 +4922,7 @@ function renderPoControls(po, role) {
     open && isPricingRole(role) && (po.purchase_order_line_items || []).length ? b('po-edit-lines-btn', 'Edit lines') : '',
     po.supplier_id ? b('po-email-btn', 'Email PO') : '',
     !po.stock_source ? b('po-view-pdf-btn', 'View PO') : '',
+    b('po-notes-btn', po.supplier_notes || po.internal_notes ? 'Edit notes' : '+ Notes'),
     open ? b('po-close-btn', 'Close PO') : '',
     !open && isFinanceRole(role) ? b('po-reopen-btn', 'Reopen') : '',
   ].join('');
@@ -4884,6 +4933,7 @@ function wirePoControls(containerEl, allPos, onComplete) {
   const wire = (cls, fn) => containerEl.querySelectorAll(cls).forEach(btn => btn.addEventListener('click', () => { const po = find(btn.dataset.poId); if (po) fn(po, btn); }));
   wire('.po-add-item-btn', (po) => openAddPoItemPanel(po, onComplete));
   wire('.po-edit-lines-btn', (po) => openEditPoLinesPanel(po, onComplete));
+  wire('.po-notes-btn', (po) => openPoNotesPanel(po, onComplete));
   wire('.po-email-btn', (po, btn) => emailPurchaseOrder(po, btn));
   wire('.po-view-pdf-btn', (po) => window.open(`/po.html?token=${po.po_token}`, '_blank'));
   wire('.po-close-btn', async (po) => {

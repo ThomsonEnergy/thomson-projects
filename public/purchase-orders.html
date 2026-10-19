@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=88"></script>
+  <script src="/js/supabase-client.js?v=89"></script>
   <script src="/js/email-compose.js?v=5"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -138,6 +138,7 @@
           </div>
           <p class="subtitle" style="margin:6px 0;">${po.description || ''}</p>
           ${renderPoLineItemsReceivable(po, true)}
+          ${renderPoNotes(po)}
           <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
             ${renderPoControls(po, myRole)}
             ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">Upload invoice for this PO</button>` : ''}
@@ -213,6 +214,7 @@
           <label style="margin-top:14px;">Items</label>
           <div id="np-items-container"></div>
           <button type="button" class="secondary" id="np-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
+          ${poNotesFieldsHtml('np')}
 
           <div style="margin-top:14px;">
             <button id="np-save-btn">Create PO</button>
@@ -300,6 +302,7 @@
             supplier_id: supplierId, supplier_name: supplierName,
             po_number: await drawNextPoNumber(),
             po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
+            ...readPoNotesFields(overlay, 'np'),
             description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? 'PO for vehicle' : 'Stock purchase order',
           }).select('id, po_number').single();
           if (poErr) throw poErr;

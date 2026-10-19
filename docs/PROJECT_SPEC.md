@@ -142,6 +142,7 @@ Manual steps only a person can do (the code is live):
 - **Move** (`po_move_line`): any line, received or not, all or part (part splits the line), to another job (with stage), the Warehouse or a vehicle. Comes off where it was first; refused if that job already invoiced it or the stock is no longer there. Logged on the PO and both jobs. A job's PO list also shows other POs with a line moved onto it; job material cost counts lines received to the job, whichever PO they are on.
 - **Undo received** (`po_undo_receive`): reverses the receive (off the job, out of the stock count; a stock PO's gear goes back where it came from). Option "It's back ordered" with ETA. Note required once the PO is closed or a bill on it is approved for payment.
 - **Email PO**: `po.html` (invoice layout: letterhead, supplier, job number and delivery address, lines ex GST, GST, total; no payment parts), PDF via `generate-client-document-pdf` type `po`, opened in the normal email window to the supplier's contact email with the PDF attached. **View PO** opens the page.
+- **Notes** (migration 20261026000000): every PO has "Notes for supplier" (printed on `po.html` and the PDF) and "Internal notes" (staff only), set when creating the PO or later with **+ Notes / Edit notes**, editable even when closed, changes logged on the PO.
 - "Generate PO suggestions from quote" button on the job page (manual).
 
 ### A11. Supplier invoice upload (AI extraction)
