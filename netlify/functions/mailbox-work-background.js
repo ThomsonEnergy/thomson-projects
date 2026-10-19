@@ -6,7 +6,9 @@
 //   1. A newly connected My inbox: its last 60 days of mail into TEops.
 //   2. Clean up: the whole-inbox scan by sender, Sparky's suggestions, then the archive /
 //      read / unsubscribe taps (_shared/mailbox-cleanup.js).
-//   3. The email agent: sections, labels, job tags and drafts (_shared/email-agent.js).
+//   3. Writing style: learn it from the sent replies when asked (Settings > Email Agent) or
+//      every 30 days (_shared/writing-style.js), before the drafts below use it.
+//   4. The email agent: sections, labels, job tags and drafts (_shared/email-agent.js).
 // One run per mailbox at a time (mailboxes.busy_until). Starts itself again if time runs out.
 
 const { getAdminClient } = require('./_shared/require-admin');
@@ -14,6 +16,7 @@ const { gmailRequest } = require('./_shared/google-client');
 const { processMessageId, startMailboxWork } = require('./_shared/gmail-sync');
 const { scanInbox, suggestForSenders, runQueuedActions } = require('./_shared/mailbox-cleanup');
 const { runEmailAgent } = require('./_shared/email-agent');
+const { learnWritingStyle, wantsLearning } = require('./_shared/writing-style');
 const { runAgent } = require('./_shared/agent-log');
 
 const BUDGET_MS = 12 * 60 * 1000;
@@ -94,6 +97,16 @@ exports.handler = () => runAgent('mailbox-work', async () => {
         if (q.done) parts.push(`${mb.address}: ${q.done} clean up actions`);
         const { count } = await admin.from('mailbox_cleanup_senders').select('sender', { count: 'exact', head: true }).eq('mailbox_id', mb.id).not('queued_action', 'is', null);
         if (count || (await admin.from('mailboxes').select('cleanup_read_older_days').eq('id', mb.id).single()).data?.cleanup_read_older_days) more = true;
+      }
+      if (wantsLearning(mb) && Date.now() - startedAt < BUDGET_MS) {
+        try {
+          const r = await learnWritingStyle(admin, mb, usage);
+          parts.push(`${mb.address}: writing style learned from ${r.replies} sent replies`);
+        } catch (err) {
+          console.error(`writing style for ${mb.address} failed:`, err.message);
+          await admin.from('mailboxes').update({ writing_style_requested_at: null, writing_style_error: String(err.message).slice(0, 300) }).eq('id', mb.id);
+          parts.push(`${mb.address}: writing style failed, ${String(err.message).slice(0, 120)}`);
+        }
       }
       if (Date.now() - startedAt < BUDGET_MS) {
         const r = await runEmailAgent(admin, mb, { budgetMs: Math.max(0, BUDGET_MS - (Date.now() - startedAt)) });

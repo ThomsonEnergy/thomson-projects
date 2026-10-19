@@ -55,7 +55,7 @@
         <button class="settings-tab" data-panel="numbering" data-admin-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
         <button class="settings-tab" data-panel="billable-rates" data-pricing-only="1">Billable Rates</button>
-        <button class="settings-tab" data-panel="auto-replies" data-pricing-only="1">Email Auto Replies</button>
+        <button class="settings-tab" data-panel="auto-replies">Email Agent</button>
         <button class="settings-tab" data-panel="inspections" data-pricing-only="1">Inspection Checklists</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
         <button class="settings-tab" data-panel="terms" data-admin-only="1">Payment Terms &amp; T&amp;Cs</button>
@@ -403,9 +403,14 @@
           <div id="save-quoting-msg"></div>
         </div>
 
-        <!-- Email auto replies (company_settings.routing_reply_mode, migration 20261103010000) -->
+        <!-- Email agent: writing style (mailboxes.writing_style, migration 20261103020000) and auto replies (company_settings.routing_reply_mode, migration 20261103010000) -->
         <div class="settings-panel" id="panel-auto-replies">
           <div class="card">
+            <h2>Writing style</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Postie drafts replies in the mailbox owner's own voice. <b>Learn</b> reads the replies already sent from the mailbox (the ones TEops holds), writes a short guide and keeps up to 8 real replies as examples. Edit the guide any time ("never say reach out", "always give a price range"): Learn again keeps your edits and refreshes the examples, and it refreshes by itself every 30 days. Drafts answer what was asked instead of repeating the sender's email back.</p>
+            <div id="writing-style-list"><p class="subtitle">Loading...</p></div>
+          </div>
+          <div class="card" data-pricing-only="1">
             <h2>Email auto replies</h2>
             <p class="subtitle" style="margin-bottom:10px;">Two replies that point people to the right mailbox:</p>
             <p class="subtitle" style="margin-bottom:6px;"><b>Postie (sales@):</b> a supplier emails an invoice to sales@. The invoice is passed to invoice@ for reading, and the reply asks them to send invoices to invoice@ next time with our PO number on it.</p>
@@ -418,7 +423,7 @@
             </select>
             <p class="subtitle" style="margin:6px 0 0; font-size:12px;">One reply per conversation, and no more than one per sender every 14 days. Never to our own addresses, no-reply senders or automatic mail.</p>
           </div>
-          <button id="save-auto-replies-btn">Save auto replies</button>
+          <button id="save-auto-replies-btn" data-pricing-only="1">Save auto replies</button>
           <div id="save-auto-replies-msg"></div>
         </div>
 
@@ -1019,6 +1024,80 @@
         ? `<div class="error-box">${escapeHtml(error.message)}</div>`
         : `<div class="success-box">Saved.</div>`;
     });
+
+    // Writing style per mailbox (mailboxes.writing_style, migration 20261103020000). sales@ for
+    // pricing roles, plus the person's own My inbox. Learn runs in the mailbox worker, so poll.
+    const WS_COLS = 'id, address, kind, owner_id, writing_style, writing_style_examples, writing_style_learned_at, writing_style_edited_at, writing_style_requested_at, writing_style_error';
+    let wsPollTimer = null;
+    async function wsCall(mailbox, action, text) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/learn-writing-style', {
+        method: 'POST', headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mailbox, action, text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+      return data;
+    }
+    const wsWhen = (iso) => new Date(iso).toLocaleString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+    async function loadWritingStyles() {
+      const listEl = document.getElementById('writing-style-list');
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const { data: rows, error } = await supabaseClient.from('mailboxes').select(WS_COLS).not('connected_at', 'is', null).order('kind', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const mine = (rows || []).filter((m) => m.kind === 'personal' && m.owner_id === session.user.id);
+      const shared = isPricingRoleLocal(myRole) ? (rows || []).filter((m) => m.kind === 'shared') : [];
+      const boxes = [...mine, ...shared];
+      if (!boxes.length) {
+        listEl.innerHTML = '<p class="subtitle">Connect your Gmail in Inbox &gt; My inbox first, then come back here.</p>';
+        return;
+      }
+      let anyLearning = false;
+      listEl.innerHTML = boxes.map((m) => {
+        const key = m.kind === 'shared' ? 'sales' : 'mine';
+        const learning = !!m.writing_style_requested_at;
+        if (learning) anyLearning = true;
+        const examples = Array.isArray(m.writing_style_examples) ? m.writing_style_examples : [];
+        let status = '';
+        if (learning) status = '<span style="color:var(--muted);">Reading sent replies, this takes a minute or two...</span>';
+        else if (m.writing_style_error) status = `<span style="color:var(--red);">${escapeHtml(m.writing_style_error)}</span>`;
+        else if (m.writing_style_learned_at) status = `Learned ${escapeHtml(wsWhen(m.writing_style_learned_at))}${m.writing_style_edited_at ? `, edited ${escapeHtml(wsWhen(m.writing_style_edited_at))}` : ''}. Refreshes by itself every 30 days.`;
+        else status = 'Not learned yet. Drafts use the standard rules only.';
+        return `<div class="ws-box" data-mailbox="${key}" style="margin-top:14px; padding:12px; background:var(--surface-2); border-radius:8px;">
+          <label style="margin-top:0;">${escapeHtml(m.address)}${m.kind === 'shared' ? ' (shared, written as the office team)' : ' (your own replies)'}</label>
+          <textarea class="ws-text" rows="10" style="width:100%; font-size:13px;" ${learning ? 'disabled' : ''} placeholder="Press Learn from sent mail, or write the guide yourself: how you greet, how long you write, how you say no, phrases you use, things you never say.">${escapeHtml(m.writing_style || '')}</textarea>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;">
+            <button type="button" class="ws-learn" ${learning ? 'disabled' : ''}>${m.writing_style_learned_at ? 'Learn again' : 'Learn from sent mail'}</button>
+            <button type="button" class="secondary ws-save" ${learning ? 'disabled' : ''}>Save</button>
+            <span class="ws-status subtitle" style="font-size:12px;">${status}</span>
+          </div>
+          ${examples.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer; font-size:13px;">${examples.length} real repl${examples.length === 1 ? 'y' : 'ies'} kept as examples</summary>
+            ${examples.map((e) => `<div style="margin-top:10px; font-size:12px; white-space:pre-wrap; border-left:3px solid var(--border); padding-left:10px;"><b>${escapeHtml(e.subject || '(no subject)')}</b>${e.they_said ? `\n<span style="color:var(--muted);">They wrote: ${escapeHtml(e.they_said.slice(0, 300))}${e.they_said.length > 300 ? '...' : ''}</span>` : ''}\n${escapeHtml(e.we_replied || '')}</div>`).join('')}
+          </details>` : ''}
+        </div>`;
+      }).join('');
+      listEl.querySelectorAll('.ws-box').forEach((box) => {
+        const key = box.dataset.mailbox;
+        const status = box.querySelector('.ws-status');
+        box.querySelector('.ws-learn').addEventListener('click', async () => {
+          const btn = box.querySelector('.ws-learn');
+          btn.disabled = true;
+          try {
+            await wsCall(key, 'learn');
+            await loadWritingStyles();
+          } catch (err) { btn.disabled = false; status.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+        });
+        box.querySelector('.ws-save').addEventListener('click', async () => {
+          try {
+            await wsCall(key, 'save', box.querySelector('.ws-text').value);
+            status.textContent = 'Saved.';
+            setTimeout(loadWritingStyles, 1500);
+          } catch (err) { status.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+        });
+      });
+      clearTimeout(wsPollTimer);
+      if (anyLearning) wsPollTimer = setTimeout(loadWritingStyles, 4000);
+    }
 
     // Schedule of Rates review date (company_settings.rates_reviewed_on, migration 20261022000000)
     const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
@@ -2648,6 +2727,7 @@
       await loadMyProfile(session.user.id);
       await loadSettings();
       await applyAdminGating();
+      loadWritingStyles();
       if (myRole === 'admin') {
         await loadUsers();
         await loadOnboardingDocs();
