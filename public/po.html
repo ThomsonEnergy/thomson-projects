@@ -10,8 +10,8 @@
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/document-fonts.css?v=1" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="/js/vendor/supabase-2.js"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   /* Same A4 sheets as invoice.html (794 x 1123 px at 96 dpi), without the payment parts. */
   @page { size: A4; margin: 0; }
@@ -88,7 +88,7 @@
     <div id="content"><p class="subtitle">Loading the purchase order...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';

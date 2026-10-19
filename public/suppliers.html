@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -61,7 +61,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allSuppliers = [];
@@ -171,6 +171,11 @@
         const msg = overlay.querySelector('#sup-msg');
         const name = overlay.querySelector('#sup-name').value.trim();
         if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
+        const btn = overlay.querySelector('#sup-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const { data: newSupplier, error } = await supabaseClient.from('suppliers').insert({
           name,
           contact_email: overlay.querySelector('#sup-email').value.trim() || null,
@@ -184,6 +189,10 @@
         await logActivity('supplier', newSupplier.id, 'created', `Supplier "${name}" added`);
         overlay.remove();
         await loadSuppliers();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 

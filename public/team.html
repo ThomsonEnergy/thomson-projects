@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
   .team-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
@@ -85,7 +85,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/licence-share.js?v=1"></script>
   <script>
@@ -207,6 +207,10 @@
           file_path: filePath,
           file_name: fileName,
         };
+        const btn = overlay.querySelector('#cred-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
         try {
           const { error } = existing
             ? await supabaseClient.from('company_credentials').update(payload).eq('id', existing.id)
@@ -215,7 +219,10 @@
           overlay.remove();
           await loadCompanyCredentials();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
         }
       });
     }
@@ -522,6 +529,10 @@
           file_path: filePath,
           file_name: fileName,
         };
+        const btn = overlay.querySelector('#elic-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
         try {
           const { error } = existing
             ? await supabaseClient.from('profile_licences').update(payload).eq('id', existing.id)
@@ -530,7 +541,10 @@
           overlay.remove();
           await loadEmployeeLicencesSummary(); await loadTeam();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
         }
       });
     }

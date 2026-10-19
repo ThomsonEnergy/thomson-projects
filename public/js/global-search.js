@@ -81,7 +81,8 @@
           .order('created_at', { ascending: false }).limit(PER_GROUP);
         return (data || []).map(inv => {
           const projectId = inv.project_id || inv.cost_centres?.project_id;
-          return { title: inv.invoice_number || 'Invoice', sub: inv.projects ? projectRef(inv.projects) : (inv.description || ''), href: projectId ? `/project.html?id=${projectId}` : '/invoices.html' };
+          const href = inv.invoice_number ? `/invoices.html?q=${enc(inv.invoice_number)}` : (projectId ? `/project.html?id=${projectId}` : '/invoices.html');
+          return { title: inv.invoice_number || 'Invoice', sub: inv.projects ? projectRef(inv.projects) : (inv.description || ''), href };
         });
       },
     },
@@ -214,7 +215,7 @@
   const PAGE_SEARCH_INPUTS = {
     '/clients.html': 'client-search', '/stock.html': 'stock-search', '/purchase-orders.html': 'po-search',
     '/knowledge.html': 'kb-search', '/projects.html': 'project-search', '/meetings.html': 'mt-search',
-    '/assets.html': 'asset-search', '/suppliers.html': 'supplier-search',
+    '/assets.html': 'asset-search', '/suppliers.html': 'supplier-search', '/invoices.html': 'invoice-search',
   };
   const prefill = new URLSearchParams(window.location.search).get('q');
   const pageInput = prefill && document.getElementById(PAGE_SEARCH_INPUTS[window.location.pathname]);

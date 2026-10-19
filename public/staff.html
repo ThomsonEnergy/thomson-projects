@@ -11,9 +11,9 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
+<link rel="stylesheet" href="/css/style.css?v=20" />
 <link rel="stylesheet" href="/css/hr.css?v=1" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .staff-head { display: flex; gap: 16px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
   .staff-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: var(--surface-2); }
@@ -38,10 +38,10 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/hr-templates.js?v=2"></script>
-  <script src="/js/hr-shared.js?v=2"></script>
+  <script src="/js/hr-shared.js?v=3"></script>
   <script src="/js/staff-editor.js?v=5"></script>
   <script>
     // Staff profile: everything about one team member in one place, laid out
@@ -613,6 +613,11 @@
           notes: orNull(val(o, '#k-notes')), updated_at: new Date().toISOString(),
         };
         if (!payload.title) { o.querySelector('#k-msg').innerHTML = '<div class="error-box">Give the KPI a name.</div>'; return; }
+        const btn = o.querySelector('#k-save');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const q = existing
           ? supabaseClient.from('staff_kpis').update(payload).eq('id', existing.id).select().single()
           : supabaseClient.from('staff_kpis').insert(payload).select().single();
@@ -620,6 +625,10 @@
         if (error) { o.querySelector('#k-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         kpis = existing ? kpis.map(x => (x.id === data.id ? data : x)) : [data, ...kpis];
         o.remove(); refreshAll();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 

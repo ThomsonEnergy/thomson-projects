@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/email-compose.js?v=5"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -275,6 +275,11 @@
       overlay.querySelector('#np-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#np-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#np-msg');
+        const btn = overlay.querySelector('#np-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+        try {
         const destType = overlay.querySelector('#np-dest-type').value;
         if (destType === 'job' && !selectedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
         const vehicleId = destType === 'vehicle' ? overlay.querySelector('#np-vehicle-select').value : null;
@@ -293,7 +298,6 @@
           return;
         }
 
-        try {
           const { data: { user } } = await supabaseClient.auth.getUser();
           const { supplierId, supplierName } = await resolveSupplier();
 
@@ -324,6 +328,9 @@
           await loadAllPOs();
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
         }
       });
     }

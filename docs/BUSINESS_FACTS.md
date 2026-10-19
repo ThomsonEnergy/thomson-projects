@@ -45,9 +45,9 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
 
 ## Performance backlog (deferred, owner chose "later" on 16 Oct 2026)
 
-- `/js` and `/css` are cached for 10 minutes, so bump `?v=` on every changed file reference. Unversioned scripts (theme.js, template-questions.js, formbay-advice-parser.js, vendor/supabase-2.js) can lag up to 10 minutes after a deploy.
+- `/js` and `/css` are cached for 10 minutes, so bump `?v=` on every changed file reference. Unversioned scripts (theme.js, template-questions.js, formbay-advice-parser.js) can lag up to 10 minutes after a deploy.
 - **DB cleanup:** 51 per-row `auth.uid()` RLS policies, 105 duplicate permissive policies and 135 unindexed FKs (worst: time_entries, projects, job_tasks). Do this before time_entries or activity_log reach tens of thousands of rows. New work must not add to the debt: see the fast RLS rules in CLAUDE.md, and run the Supabase performance advisor after DDL.
-- **Supabase JS library:** 43 pages load the floating `cdn.jsdelivr.net/npm/@supabase/supabase-js@2`, and a local copy exists at `public/js/vendor/supabase-2.js`. Switch to self-hosting immediately if an upstream release ever breaks the app.
+- **Supabase JS library:** every page loads the pinned local copy `public/js/vendor/supabase-2.js` (2.45.4) with `?v=` (since 19 Oct 2026, UX 93). To upgrade, replace the file with a newer UMD build and bump `?v=` on all 54 pages.
 - **Large files:** splitting project.html (458 KB) and supabase-client.js (299 KB) is low priority.
 
 ## Images

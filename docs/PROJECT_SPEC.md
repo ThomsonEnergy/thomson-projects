@@ -229,6 +229,10 @@ Manual steps only a person can do (the code is live):
 - Summary: stat cards, budget bars, "Quoted split" and "Job split" donuts, "On this job now".
 - Labour cost everywhere (job page, Projects list, timesheet drilldown, warranty cost) is wages plus **direct** overhead (each person's direct rate from Overheads, company average for the estimate). Underneath, pricing roles see "incl. overheads $X", which adds **indirect** overhead (plus company overhead on the cost tiles for Finance and Admin). Labour budget % is worked out server-side in `get-accrued-labour-cost.js` so Staff see the same % as Sales (they cannot read `estimated_labour_cost`).
 - Cost centre cards show labour plus materials quoted vs actual and GP%.
+- Header shows the site address (maps link), client phone (tap to call) and email under the subtitle (19 Oct 2026, UX 31).
+- Compliance (CCEW) and Installed equipment cards sit on the Summary tab for every job with a J number, from the day it is booked; Needs attention shows "No CCEW uploaded yet" until a certificate is uploaded or a not-required reason saved (UX 19).
+- Site photo upload shows "Uploading n of N...", saves each photo as it lands, keeps the good ones on a failure with a Retry for the failed files (`wireSitePhotoInput`, `uploadPhotosBatch` in `supabase-client.js`, also used by the clock-out photos) (UX 35).
+- Documents and PO files open on iPhone through `openSignedDocInNewTab` (blank tab opened on the tap, then pointed at the signed link); same helper on Knowledge, Documents and HR files (UX 33).
 
 ### A18. Sales inbox and My inbox (Gmail)
 - `inbox.html`: toggle **Sales inbox** (sales@, every staff member) | **My inbox** (the logged-in person's own work Gmail, private to them). Migration 20261021020000 (`mailboxes`, `mailbox_tokens`, labels, drafts, sender rules, clean up, Gmail notice).
@@ -292,6 +296,7 @@ Manual steps only a person can do (the code is live):
 ### A26. HR, incidents and letters
 - **Staff profile** (`staff.html`, admin/finance, plus staff self-view of their own): overview, signed and HR documents, photos, written warnings, KPIs (migration 147, private `staff-files` bucket).
 - **Incidents** (`incidents.html`, `incident.html`, migration 148): hub with people tagged by role, evidence, corrective actions, SafeWork and workers comp tracking; WHS Form 10.
+- **Report from site** (migration 20261104000000, UX 5): every staff member has "Report an incident or near miss" on My Day (type, what happened, where, job prefilled from the clock-in, Sydney date and time, "I was hurt", camera photos). One database function `report_incident` creates the incident (open, reporter listed as Reported it or Injured), attaches the photos (`staff-files/incidents/<id>/`, staff can insert there only) and notifies Admin and Finance (kind `incident`, bell and push). Staff still cannot read incidents.
 - **Letters** (`letter.html`, migration 148): warning and counselling letters signed in the app by manager and employee, with active period and resolution.
 - Onboarding: staff enter their details, which fill their employment contract (rates and start date from Settings); contracts flip to signed when signed (migration 149).
 - **Policy versions and consent** (migration 20261018120000): onboarding documents have a version and an optional type (Policy, AI consent, Location consent). Settings > Onboarding "Publish new version" makes everyone re-sign; `policy-update.html` is shown on login to anyone who finished onboarding but has an unsigned current version ("Remind me later" once per login or day, then a banner). Consent forms need I agree / I don't agree plus a signature; the answer sets `profiles.ai_consent_at` / `location_consent_at` by trigger (staff cannot edit them directly). My Profile has on/off switches (off is instant via `withdraw_consent()`, on means signing again); the staff editor shows versions signed and consent. Optional documents (Required unticked) no longer block onboarding. Shared signing panel: `public/js/document-signing.js`.
@@ -310,6 +315,7 @@ Manual steps only a person can do (the code is live):
 - File size: no bucket has its own limit, so Supabase's project-wide limit applies (Storage > Settings, default 50 MB). SM8 videos over it fail with "The object exceeded the maximum allowed size"; raise it to 500 MB and press the copy button again (failed files are retried).
 
 ### A28. Other built features
+- Invoices page: search (invoice number, job number, job name, client) and a status select (Unpaid, Overdue, Paid, Not yet in Xero, All), opens on Unpaid; `/invoices.html?q=` prefills the search (19 Oct 2026, UX 123). Stat tiles count every invoice.
 - **Leads and call requests** from the website forms (`leads.html`), converted to quotes or jobs.
 - **Site inspections** (migration 104): "Needs a site visit" on a lead, quote or job; checklist filled on site (`site-inspection.html`); templates in Settings > Inspection Checklists.
 - **Customer assets** with warranty and service reminders (`assets.html`).

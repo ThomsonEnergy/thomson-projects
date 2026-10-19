@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .ob-steps { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
   .ob-step-pill {
@@ -46,7 +46,7 @@
     <div id="ob-content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/document-signing.js?v=1"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -148,7 +148,11 @@
           msg.innerHTML = `<div class="error-box">Fill in your full residential address, including suburb, state, and postcode.</div>`;
           return;
         }
-
+        const btn = document.getElementById('ob-details-next-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const updates = {
           date_of_birth: document.getElementById('ob-dob').value || null,
           residential_address: document.getElementById('ob-address').value.trim() || null,
@@ -160,9 +164,13 @@
           emergency_contact_relationship: document.getElementById('ob-em-relationship').value.trim() || null,
         };
         const { error } = await supabaseClient.from('profiles').update(updates).eq('id', myUserId);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         Object.assign(profile, updates);
         goToStep(2);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 
@@ -357,13 +365,26 @@
         </div>`;
       document.getElementById('ob-finish-btn').addEventListener('click', async () => {
         const msg = document.getElementById('ob-finish-msg');
+        const btn = document.getElementById('ob-finish-btn');
+        const label = btn.textContent;
+        let navigated = false;
+        btn.disabled = true;
+        btn.textContent = 'Finishing...';
+        try {
         const { error } = await supabaseClient.from('profiles').update({
           onboarding_completed_at: new Date().toISOString(),
           onboarding_reissue_reason: null,
           onboarding_reissue_note: null,
         }).eq('id', myUserId);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        navigated = true;
         window.location.href = '/home.html';
+        } finally {
+          if (!navigated) {
+            btn.disabled = false;
+            btn.textContent = label;
+          }
+        }
       });
     }
 

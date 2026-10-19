@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -39,14 +39,25 @@
     </div>
 
     <div class="card">
-      <h2 style="margin:0 0 14px;">All invoices</h2>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+        <input id="invoice-search" placeholder="Search by invoice, job number, job or client..." style="max-width:340px;" />
+        <select id="invoice-filter">
+          <option value="unpaid" selected>Unpaid</option>
+          <option value="overdue">Overdue</option>
+          <option value="paid">Paid</option>
+          <option value="no_xero">Not yet in Xero</option>
+          <option value="all">All</option>
+        </select>
+      </div>
       <div id="invoices-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/theme.js"></script>
   <script>
+    let allInvoices = null, allMappings = [];
+
     async function loadInvoices() {
       const listEl = document.getElementById('invoices-list');
       const [{ data, error }, { data: mappings }] = await Promise.all([
@@ -108,11 +119,43 @@
         document.getElementById('stat-overdue').textContent = money(overdue);
       });
 
+      allInvoices = data;
+      allMappings = mappings || [];
+      renderInvoiceList();
+    }
+
+    function renderInvoiceList() {
+      if (!allInvoices) return;
+      const listEl = document.getElementById('invoices-list');
+      const q = document.getElementById('invoice-search').value.trim().toLowerCase();
+      const filter = document.getElementById('invoice-filter').value;
+      const now = new Date();
+      const isOverdue = (inv) => !inv.paid_at && inv.due_date && new Date(inv.due_date + 'T00:00:00') < now;
+
+      let rows = allInvoices;
+      if (filter === 'unpaid') rows = rows.filter(inv => !inv.paid_at);
+      else if (filter === 'overdue') rows = rows.filter(inv => isOverdue(inv));
+      else if (filter === 'paid') rows = rows.filter(inv => !!inv.paid_at);
+      else if (filter === 'no_xero') rows = rows.filter(inv => !inv.xero_invoice_id);
+
+      if (q) {
+        rows = rows.filter(inv => {
+          const project = inv.cost_centres?.projects || inv.projects;
+          return [inv.invoice_number, project?.job_number, project?.name, project?.client_name]
+            .some(v => v != null && String(v).toLowerCase().includes(q));
+        });
+      }
+
+      if (!rows.length) {
+        listEl.innerHTML = `<p class="subtitle">No invoices match. ${allInvoices.length} in total; try All or clear the search.</p>`;
+        return;
+      }
+
       listEl.innerHTML = `
         <table class="responsive-stack">
           <thead><tr><th>Invoice</th><th>Job</th><th>Stage</th><th class="num">Amount</th><th>Sent</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            ${data.map(inv => {
+            ${rows.map(inv => {
               const cc = inv.cost_centres;
               const claimStages = (inv.invoice_claims || []).map(ic => ic.cost_centres?.name).filter(Boolean);
               const project = cc?.projects || inv.projects;
@@ -120,17 +163,17 @@
               const clientType = project?.clients?.client_type || 'individual';
               const stageLabel = cc ? (cc.name || '-') : (claimStages.length ? (claimStages.length > 1 ? `${claimStages.length} stages` : claimStages[0]) : '-');
               const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
-              const isOverdue = !inv.paid_at && inv.due_date && new Date(inv.due_date + 'T00:00:00') < now;
+              const overdue = isOverdue(inv);
               return `
                 <tr>
-                  <td data-label="Invoice">${inv.invoice_number}</td>
-                  <td data-label="Job">${project ? `#${project.job_number || '-'} ${project.name}` : '-'}</td>
-                  <td data-label="Stage" title="${claimStages.join(', ')}">${stageLabel}</td>
+                  <td data-label="Invoice">${escapeHtml(inv.invoice_number)}</td>
+                  <td data-label="Job">${project ? `#${escapeHtml(project.job_number || '-')} ${escapeHtml(project.name)}` : '-'}</td>
+                  <td data-label="Stage" title="${escapeHtml(claimStages.join(', '))}">${escapeHtml(stageLabel)}</td>
                   <td class="num" data-label="Amount">${money(amount)}</td>
                   <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
                   <td data-label="Status">
                     ${inv.paid_at ? '<span class="badge accepted">Paid</span>'
-                      : isOverdue ? '<span class="badge draft" style="color:var(--red);">Overdue</span>'
+                      : overdue ? '<span class="badge draft" style="color:var(--red);">Overdue</span>'
                       : '<span class="badge sent">Awaiting payment</span>'}
                     ${inv.xero_invoice_id ? '' : '<span class="subtitle" style="font-size:11px; display:block;">Not yet in Xero</span>'}
                   </td>
@@ -141,7 +184,7 @@
                   </td>
                 </tr>
                 <tr class="xero-row" data-for="${inv.id}" style="display:none;">
-                  <td colspan="7" style="background:var(--surface-2);">${xeroBreakdownHtml(inv, mappings, clientType)}</td>
+                  <td colspan="7" style="background:var(--surface-2);">${xeroBreakdownHtml(inv, allMappings, clientType)}</td>
                 </tr>`;
             }).join('')}
           </tbody>
@@ -162,6 +205,10 @@
       if (!session) return;
       syncThemeFromProfile();
       renderMainNav('invoices');
+      // Opened from a search link: show every match, not just unpaid ones
+      if (new URLSearchParams(window.location.search).get('q')) document.getElementById('invoice-filter').value = 'all';
+      document.getElementById('invoice-search').addEventListener('input', renderInvoiceList);
+      document.getElementById('invoice-filter').addEventListener('change', renderInvoiceList);
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();
