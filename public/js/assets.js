@@ -14,6 +14,27 @@ const ASSET_TYPES = [
 ];
 const assetTypeInfo = (key) => ASSET_TYPES.find(t => t.key === key) || ASSET_TYPES[ASSET_TYPES.length - 1];
 
+// One-way sync (UX 27): serials recorded on solar / inverter assets flow onto
+// the job's handover fields so the handover checklist passes. Nothing flows
+// back the other way. Combines every active asset of that type on the job so
+// two panel types do not overwrite each other. Never blanks the job field.
+const ASSET_SERIAL_PROJECT_COLUMN = { solar: 'panel_serial_numbers', inverter: 'inverter_serial_numbers' };
+async function syncAssetSerialsToProject(projectId, assetType) {
+  const column = ASSET_SERIAL_PROJECT_COLUMN[assetType];
+  if (!projectId || !column) return null;
+  const { data: rows, error } = await supabaseClient.from('customer_assets').select('serial_numbers')
+    .eq('project_id', projectId).eq('asset_type', assetType).neq('status', 'decommissioned').order('created_at');
+  if (error) return null;
+  const seen = new Set();
+  (rows || []).forEach(r => String(r.serial_numbers || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean).forEach(s => seen.add(s)));
+  if (!seen.size) return null;
+  const value = Array.from(seen).join('\n');
+  const { error: upErr } = await supabaseClient.from('projects').update({ [column]: value }).eq('id', projectId);
+  if (upErr) return null;
+  if (typeof checkAndAdvanceHandover === 'function') await checkAndAdvanceHandover(projectId);
+  return { [column]: value };
+}
+
 // ---------- dates ----------
 function assetIsoDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -87,40 +108,60 @@ async function logAssetEmail({ asset, clientId, kind, outcome = 'sent', campaign
   });
 }
 
-// Marks an asset serviced on `dateIso` and works out the next due date.
-async function recordAssetService(asset, dateIso, note) {
-  const update = { last_serviced_at: dateIso };
-  if (asset.service_interval_months) update.next_service_due = assetAddMonths(dateIso, asset.service_interval_months);
-  if (note) update.notes = [asset.notes, `Serviced ${assetFmtDate(dateIso)}: ${note}`].filter(Boolean).join('\n');
-  const { error } = await supabaseClient.from('customer_assets').update(update).eq('id', asset.id);
-  if (error) throw error;
+// The form payload marked serviced on `dateIso`, with the next due date worked
+// out, so Log service saves the form edits and the service in one write.
+function assetServiceFields(payload, dateIso, note) {
+  return {
+    ...payload,
+    last_serviced_at: dateIso,
+    next_service_due: payload.service_interval_months ? assetAddMonths(dateIso, payload.service_interval_months) : null,
+    notes: note ? [payload.notes, `Serviced ${assetFmtDate(dateIso)}: ${note}`].filter(Boolean).join('\n') : payload.notes,
+  };
 }
 
 // ---------- add / edit panel ----------
-// opts: { asset (existing, or null), prefill ({...fields} for a new one), onSaved }
+// opts: { asset (existing, or null), prefill ({...fields} for a new one),
+//   onSaved(synced) (synced: the job handover fields written by syncAssetSerialsToProject, or null),
+//   trigger (the button tapped, disabled while the panel loads),
+//   progress ({ n, total } for a chain, shows 'Equipment n of total'),
+//   onCancel (chain only: called after Cancel closes the panel, so the next form opens) }
+let assetPanelOpening = false;
 async function openAssetPanel(opts = {}) {
+  if (assetPanelOpening || document.getElementById('asset-panel')) return;
+  assetPanelOpening = true;
+  const trigger = opts.trigger || null;
+  if (trigger) trigger.disabled = true;
   const existing = opts.asset || null;
   const a = { ...(opts.prefill || {}), ...(existing || {}) };
   let clientId = a.client_id || null;
+  const fromJob = !existing && !!(opts.prefill && opts.prefill.client_id && opts.prefill.project_id);
   let clientInfo = null;
-  if (clientId) {
-    const { data } = await supabaseClient.from('clients').select('id, name, email, address').eq('id', clientId).maybeSingle();
-    clientInfo = data;
-  }
   let history = [];
-  if (existing) {
-    const { data } = await supabaseClient.from('asset_reminder_log').select('kind, outcome, subject, sent_to, sent_at, campaign_name').eq('asset_id', existing.id).order('sent_at', { ascending: false }).limit(15);
-    history = data || [];
+  try {
+    if (clientId) {
+      const { data } = await supabaseClient.from('clients').select('id, name, email, address').eq('id', clientId).maybeSingle();
+      clientInfo = data;
+    }
+    if (existing) {
+      const { data } = await supabaseClient.from('asset_reminder_log').select('kind, outcome, subject, sent_to, sent_at, campaign_name').eq('asset_id', existing.id).order('sent_at', { ascending: false }).limit(15);
+      history = data || [];
+    }
+  } finally {
+    assetPanelOpening = false;
+    if (trigger) trigger.disabled = false;
   }
 
   const overlay = document.createElement('div');
+  overlay.id = 'asset-panel';
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px; overflow-y:auto;';
   const v = (k) => escapeHtml(a[k] === null || a[k] === undefined ? '' : a[k]);
+  const progress = (!existing && opts.progress && opts.progress.total > 1) ? opts.progress : null;
   const warrantyYears = (a.installed_at && a.warranty_expires) ? (Math.round(((new Date(a.warranty_expires) - new Date(a.installed_at)) / 86400000 / 365.25) * 10) / 10) : '';
   overlay.innerHTML = `
     <div class="card" style="max-width:640px; width:100%; max-height:92vh; overflow-y:auto;">
-      <h2>${existing ? 'Edit' : 'Add'} customer asset</h2>
+      <h2>${existing ? 'Edit customer asset' : (progress ? `Equipment ${progress.n} of ${progress.total}` : 'Add customer asset')}</h2>${progress ? `<p class="subtitle" style="margin:-6px 0 10px; font-size:12px;">Pre-filled from this job. Add it, or skip to the next one.</p>` : ''}
 
+      ${fromJob ? `<p id="as-for" style="margin:0 0 4px;">For <strong>${escapeHtml((clientInfo && clientInfo.name) || a.client_name || '')}</strong>${a.site_address ? ', ' + escapeHtml(a.site_address) : ''}</p>${clientInfo && !clientInfo.email ? '<p class="subtitle" style="margin:0 0 8px; font-size:12px;"><strong>No email on file</strong> for this customer, so reminders can\'t be sent.</p>' : ''}` : `
       <label style="margin-top:0;">Customer</label>
       <div style="position:relative;">
         <input id="as-client-search" placeholder="Search clients by name, email or phone..." autocomplete="off" value="${escapeHtml(clientInfo ? clientInfo.name : (a.client_name || ''))}" />
@@ -129,7 +170,7 @@ async function openAssetPanel(opts = {}) {
       <p class="subtitle" id="as-client-note" style="margin:4px 0 0; font-size:12px;">${clientInfo ? `Linked to ${escapeHtml(clientInfo.name)}${clientInfo.email ? ' - ' + escapeHtml(clientInfo.email) : ' - <strong>no email on file</strong>, so reminders can\'t be sent'}` : 'Pick an existing client so reminders know where to go, or just type a name.'}</p>
 
       <label>Site address</label>
-      <input id="as-address" value="${v('site_address')}" placeholder="Where it's installed" />
+      <input id="as-address" value="${v('site_address')}" placeholder="Where it's installed" />`}
 
       <div class="grid cols-2">
         <div><label>Type</label><select id="as-type">${ASSET_TYPES.map(t => `<option value="${t.key}" ${a.asset_type === t.key ? 'selected' : ''}>${t.label}</option>`).join('')}</select></div>
@@ -142,7 +183,7 @@ async function openAssetPanel(opts = {}) {
         <div><label>Model</label><input id="as-model" value="${v('model')}" /></div>
       </div>
       <label>Serial numbers</label>
-      <textarea id="as-serials" style="min-height:60px;" placeholder="One per line, or comma separated">${v('serial_numbers')}</textarea>
+      <textarea id="as-serials" autocapitalize="characters" autocorrect="off" spellcheck="false" autocomplete="off" style="min-height:60px;" placeholder="One per line, or comma separated">${v('serial_numbers')}</textarea>
 
       <div class="grid cols-3">
         <div><label>Installed on</label><input id="as-installed" type="date" value="${v('installed_at')}" /></div>
@@ -185,7 +226,7 @@ async function openAssetPanel(opts = {}) {
       <div id="as-msg"></div>
       <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
         <button type="button" id="as-save">${existing ? 'Save changes' : 'Add asset'}</button>
-        <button type="button" class="secondary" id="as-cancel">Cancel</button>
+        <button type="button" class="secondary" id="as-cancel">${opts.onCancel ? 'Skip this one' : 'Cancel'}</button>
         ${existing ? `<button type="button" class="secondary" id="as-delete" style="margin-left:auto;">Delete</button>` : ''}
       </div>
     </div>`;
@@ -193,29 +234,31 @@ async function openAssetPanel(opts = {}) {
   const $ = (id) => overlay.querySelector('#' + id);
   const msg = (html) => { $('as-msg').innerHTML = html; };
 
-  // client search
-  let searchTimer;
-  $('as-client-search').addEventListener('input', () => {
-    clientId = null; clientInfo = null;
-    clearTimeout(searchTimer);
-    const q = $('as-client-search').value.trim();
-    if (q.length < 2) { $('as-client-results').style.display = 'none'; return; }
-    searchTimer = setTimeout(async () => {
-      const { data } = await supabaseClient.from('clients').select('id, name, email, phone, address')
-        .or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(8);
-      const box = $('as-client-results');
-      box.innerHTML = (data || []).map(c => `<div class="as-client-pick" data-id="${c.id}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(c.name)} <span class="subtitle">${escapeHtml(c.email || c.phone || '')}</span></div>`).join('') || `<div style="padding:8px 12px;" class="subtitle">No matching clients - the name you typed will be used.</div>`;
-      box.style.display = 'block';
-      box.querySelectorAll('.as-client-pick').forEach(row => row.addEventListener('click', () => {
-        const c = data.find(x => x.id === row.dataset.id);
-        clientId = c.id; clientInfo = c;
-        $('as-client-search').value = c.name;
-        if (!$('as-address').value.trim() && c.address) $('as-address').value = c.address;
-        $('as-client-note').innerHTML = `Linked to ${escapeHtml(c.name)}${c.email ? ' - ' + escapeHtml(c.email) : ' - <strong>no email on file</strong>, so reminders can\'t be sent'}`;
-        box.style.display = 'none';
-      }));
-    }, 250);
-  });
+  // client search (not shown when adding from a job with a linked client)
+  if (!fromJob) {
+    let searchTimer;
+    $('as-client-search').addEventListener('input', () => {
+      clientId = null; clientInfo = null;
+      clearTimeout(searchTimer);
+      const q = $('as-client-search').value.trim();
+      if (q.length < 2) { $('as-client-results').style.display = 'none'; return; }
+      searchTimer = setTimeout(async () => {
+        const { data } = await supabaseClient.from('clients').select('id, name, email, phone, address')
+          .or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(8);
+        const box = $('as-client-results');
+        box.innerHTML = (data || []).map(c => `<div class="as-client-pick" data-id="${c.id}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(c.name)} <span class="subtitle">${escapeHtml(c.email || c.phone || '')}</span></div>`).join('') || `<div style="padding:8px 12px;" class="subtitle">No matching clients - the name you typed will be used.</div>`;
+        box.style.display = 'block';
+        box.querySelectorAll('.as-client-pick').forEach(row => row.addEventListener('click', () => {
+          const c = data.find(x => x.id === row.dataset.id);
+          clientId = c.id; clientInfo = c;
+          $('as-client-search').value = c.name;
+          if (!$('as-address').value.trim() && c.address) $('as-address').value = c.address;
+          $('as-client-note').innerHTML = `Linked to ${escapeHtml(c.name)}${c.email ? ' - ' + escapeHtml(c.email) : ' - <strong>no email on file</strong>, so reminders can\'t be sent'}`;
+          box.style.display = 'none';
+        }));
+      }, 250);
+    });
+  }
 
   // dates: warranty years <-> end date, service interval -> next due
   const recomputeWarranty = () => {
@@ -232,38 +275,28 @@ async function openAssetPanel(opts = {}) {
   }
   $('as-interval').addEventListener('change', recomputeNext);
   $('as-last-serviced').addEventListener('change', recomputeNext);
-  $('as-type').addEventListener('change', () => {
+  // A new asset gets its type's default service interval, on open too (a type
+  // prefilled from the job never fires 'change').
+  const applyTypeDefault = () => {
     const t = assetTypeInfo($('as-type').value);
     if (!$('as-interval').value && t.defaultInterval && !existing) { $('as-interval').value = String(t.defaultInterval); recomputeNext(); }
-  });
+  };
+  $('as-type').addEventListener('change', applyTypeDefault);
+  if (!existing) applyTypeDefault();
 
-  $('as-cancel').addEventListener('click', () => overlay.remove());
-  if (existing) {
-    $('as-delete').addEventListener('click', async () => {
-      if (!confirm('Delete this asset and its email history?')) return;
-      const { error } = await supabaseClient.from('customer_assets').delete().eq('id', existing.id);
-      if (error) { msg(`<div class="error-box">${error.message}</div>`); return; }
-      overlay.remove(); if (opts.onSaved) await opts.onSaved();
-    });
-    $('as-service-btn').addEventListener('click', async () => {
-      const date = $('as-service-date').value;
-      if (!date) { msg(`<div class="error-box">Pick the service date.</div>`); return; }
-      try {
-        await recordAssetService({ ...existing, service_interval_months: parseInt($('as-interval').value, 10) || null, notes: $('as-notes').value.trim() || null }, date, $('as-service-note').value.trim());
-        overlay.remove(); if (opts.onSaved) await opts.onSaved();
-      } catch (err) { msg(`<div class="error-box">${err.message}</div>`); }
-    });
-  }
-  $('as-save').addEventListener('click', async () => {
+  $('as-cancel').addEventListener('click', () => { overlay.remove(); if (opts.onCancel) opts.onCancel(); });
+
+  // Checks the form and builds the row, or shows the error and returns null.
+  const readForm = () => {
     const name = $('as-name').value.trim();
-    const typedClient = $('as-client-search').value.trim();
-    if (!name) { msg(`<div class="error-box">Say what was installed.</div>`); return; }
-    if (!clientId && !typedClient) { msg(`<div class="error-box">Pick or type a customer.</div>`); return; }
+    const typedClient = fromJob ? ((clientInfo && clientInfo.name) || a.client_name || '') : $('as-client-search').value.trim();
+    if (!name) { msg(`<div class="error-box">Say what was installed.</div>`); return null; }
+    if (!clientId && !typedClient) { msg(`<div class="error-box">Pick or type a customer.</div>`); return null; }
     const interval = parseInt($('as-interval').value, 10) || null;
-    const payload = {
+    return {
       client_id: clientId, client_name: clientId ? (clientInfo && clientInfo.name) || typedClient : typedClient,
       project_id: a.project_id || null,
-      site_address: $('as-address').value.trim() || null,
+      site_address: fromJob ? (a.site_address || null) : ($('as-address').value.trim() || null),
       asset_type: $('as-type').value, name,
       make: $('as-make').value.trim() || null, model: $('as-model').value.trim() || null,
       serial_numbers: $('as-serials').value.trim() || null,
@@ -278,16 +311,51 @@ async function openAssetPanel(opts = {}) {
       status: $('as-status').value,
       reminders_paused: $('as-paused').checked,
     };
-    const btn = $('as-save'); btn.disabled = true;
-    let res;
-    if (existing) res = await supabaseClient.from('customer_assets').update(payload).eq('id', existing.id);
-    else {
-      const { data: { user } } = await supabaseClient.auth.getUser();
-      res = await supabaseClient.from('customer_assets').insert({ ...payload, created_by: user.id });
+  };
+
+  // Saves the row (busy button while it runs), copies solar / inverter serials
+  // onto the job, then closes and hands the synced fields to onSaved.
+  const writeAsset = async (btn, payload) => {
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      let res;
+      try {
+        if (existing) res = await supabaseClient.from('customer_assets').update(payload).eq('id', existing.id);
+        else {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          res = await supabaseClient.from('customer_assets').insert({ ...payload, created_by: user.id });
+        }
+      } catch (err) { res = { error: err }; }
+      if (res.error) { msg(`<div class="error-box">${escapeHtml(res.error.message)}</div>`); return false; }
+      let synced = null;
+      try { synced = await syncAssetSerialsToProject(payload.project_id, payload.asset_type); } catch (e) { synced = null; }
+      overlay.remove();
+      if (opts.onSaved) await opts.onSaved(synced);
+      return true;
+    } finally {
+      btn.disabled = false; btn.textContent = label;
     }
-    btn.disabled = false;
-    if (res.error) { msg(`<div class="error-box">${res.error.message}</div>`); return; }
-    overlay.remove();
-    if (opts.onSaved) await opts.onSaved();
+  };
+
+  if (existing) {
+    $('as-delete').addEventListener('click', async () => {
+      if (!confirm('Delete this asset and its email history?')) return;
+      const { error } = await supabaseClient.from('customer_assets').delete().eq('id', existing.id);
+      if (error) { msg(`<div class="error-box">${escapeHtml(error.message)}</div>`); return; }
+      overlay.remove(); if (opts.onSaved) await opts.onSaved();
+    });
+    $('as-service-btn').addEventListener('click', async () => {
+      const date = $('as-service-date').value;
+      if (!date) { msg(`<div class="error-box">Pick the service date.</div>`); return; }
+      const payload = readForm();
+      if (!payload) return;
+      await writeAsset($('as-service-btn'), assetServiceFields(payload, date, $('as-service-note').value.trim()));
+    });
+  }
+  $('as-save').addEventListener('click', async () => {
+    const payload = readForm();
+    if (!payload) return;
+    await writeAsset($('as-save'), payload);
   });
 }

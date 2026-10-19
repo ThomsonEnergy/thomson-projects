@@ -2781,41 +2781,63 @@ async function clockOutActiveEntry(entry, opts = {}) {
 // this clock-out (and its before-you-go step) is done - see
 // openJobSwitchModal.
 async function openClockOutModal(entry, onDone, opts = {}) {
-  let project = null, centres = [];
-  if (entry.project_id) {
-    const [{ data: proj }, { data: cc }] = await Promise.all([
-      supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved, pipeline_stage').eq('id', entry.project_id).maybeSingle(),
-      supabaseClient.from('cost_centres').select('id, name, variation_entry_id').eq('project_id', entry.project_id).order('sort_order'),
-    ]);
-    project = proj;
-    // A variation is a stage here too, but only while there is still work to do on it (see My Day);
-    // a stage this shift was already ticked against always stays.
-    let usable = cc || [];
-    const variationIds = usable.map(c => c.variation_entry_id).filter(Boolean);
-    if (variationIds.length) {
-      const { data: vEntries } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
-      const open = new Set((vEntries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
-      const already = new Set([...(entry.selected_cost_centre_ids || []), entry.cost_centre_id].filter(Boolean));
-      usable = usable.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id) || already.has(c.id));
-    }
-    centres = usable.map((c, i) => ({ id: c.id, name: c.name, number: costCentreNumber(proj ? proj.job_number : null, i + 1) }));
-  }
+  // Overlay first, before any await, so a second tap on poor signal lands
+  // on it instead of stacking a second modal.
+  if (document.getElementById('clock-modal-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'clock-modal-overlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><p class="subtitle">Loading...</p></div>`;
+  document.body.appendChild(overlay);
+
+  let project = null, centres = [], recentEntries = [], loadError = null;
   let chosenCentres = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
     ? entry.selected_cost_centre_ids.slice()
     : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
   let splitPercentages = [];
+  try {
+    if (entry.project_id) {
+      const [{ data: proj, error: projErr }, { data: cc, error: ccErr }] = await Promise.all([
+        supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved, pipeline_stage, ccew_file_path, ccew_not_required_reason').eq('id', entry.project_id).maybeSingle(),
+        supabaseClient.from('cost_centres').select('id, name, variation_entry_id').eq('project_id', entry.project_id).order('sort_order'),
+      ]);
+      loadError = projErr || ccErr || null;
+      project = proj;
+      // A variation is a stage here too, but only while there is still work to do on it (see My Day);
+      // a stage this shift was already ticked against always stays.
+      let usable = cc || [];
+      const variationIds = usable.map(c => c.variation_entry_id).filter(Boolean);
+      if (variationIds.length) {
+        const { data: vEntries, error: vErr } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
+        if (vErr) loadError = vErr;
+        const open = new Set((vEntries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
+        const already = new Set([...(entry.selected_cost_centre_ids || []), entry.cost_centre_id].filter(Boolean));
+        usable = usable.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id) || already.has(c.id));
+      }
+      centres = usable.map((c, i) => ({ id: c.id, name: c.name, number: costCentreNumber(proj ? proj.job_number : null, i + 1) }));
+    }
 
-  // Has today's mandatory break already been answered against another
-  // entry today? Generous UTC window, exact Sydney-date match in JS -
-  // same pattern used server-side for day banding. The same fetch also
-  // gives us everything ELSE clocked today, to check the 6-hour
-  // threshold below.
-  const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
-  const { data: recentEntries } = await supabaseClient
-    .from('time_entries')
-    .select('id, project_id, clock_in, clock_out, break_taken, stayed_overnight')
-    .eq('staff_id', entry.staff_id)
-    .gte('clock_in', windowStart.toISOString());
+    // Has today's mandatory break already been answered against another
+    // entry today? Generous UTC window, exact Sydney-date match in JS -
+    // same pattern used server-side for day banding. The same fetch also
+    // gives us everything ELSE clocked today, to check the 6-hour
+    // threshold below.
+    const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
+    const { data: recent, error: recentErr } = await supabaseClient
+      .from('time_entries')
+      .select('id, project_id, clock_in, clock_out, break_taken, stayed_overnight')
+      .eq('staff_id', entry.staff_id)
+      .gte('clock_in', windowStart.toISOString());
+    if (recentErr) loadError = recentErr;
+    recentEntries = recent || [];
+  } catch (e) {
+    loadError = e;
+  }
+  if (loadError) {
+    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load your clock-out. Check your signal and try again.${loadError.message ? ` (${escapeHtml(loadError.message)})` : ''}</div><button type="button" class="secondary" id="cko-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+    overlay.querySelector('#cko-close-btn').addEventListener('click', () => overlay.remove());
+    return;
+  }
   const todayKey = sydneyDateKey(new Date());
   const todaysEntries = (recentEntries || []).filter(r => sydneyDateKey(new Date(r.clock_in)) === todayKey);
   const breakAlreadyLogged = todaysEntries.some(r => r.break_taken !== null && r.break_taken !== undefined);
@@ -2828,14 +2850,18 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   // once per day even if it's clocked in and out of more than once.
   const lahaAlreadyLogged = todaysEntries.some(r => r.project_id === entry.project_id && r.stayed_overnight !== null && r.stayed_overnight !== undefined);
 
-  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '', stayedOvernight: null };
-
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
-  document.body.appendChild(overlay);
+  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '', stayedOvernight: null, markedComplete: false };
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function timePartLocal(d) { return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+  // Sensible break-start default so Yes then Continue works without the
+  // picker: 12:00 when it falls inside the shift, else the shift midpoint.
+  function defaultBreakStart() {
+    const inD = new Date(entry.clock_in), outD = new Date(state.outIso);
+    const noon = new Date(outD); noon.setHours(12, 0, 0, 0);
+    if (noon > inD && noon < outD) return '12:00';
+    return timePartLocal(roundToQuarterHour(new Date((inD.getTime() + outD.getTime()) / 2)));
+  }
   function totalMinutesForSplit() {
     const mins = Math.round((new Date(state.outIso) - new Date(entry.clock_in)) / 60000);
     return mins > 0 ? mins : 0;
@@ -2973,6 +2999,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   }
 
   function renderStep2() {
+    if (!state.breakStart) state.breakStart = defaultBreakStart();
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Did you take your break today?</h2>
@@ -3485,12 +3512,30 @@ async function loadClockableCostCentres(projectId) {
 // clocked in somewhere, use openClockOutModal with switchTo instead.
 // `project` needs id/name/job_number/quote_number. Calls `onDone` once in.
 async function openJobClockInModal(project, onDone) {
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  const centres = await loadClockableCostCentres(project.id);
+  // Overlay first, before any await (see openClockOutModal).
+  if (document.getElementById('clock-modal-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'clock-modal-overlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><p class="subtitle">Loading...</p></div>`;
+  document.body.appendChild(overlay);
+
+  let user = null, centres = [], loadError = null;
+  try {
+    const { data, error } = await supabaseClient.auth.getUser();
+    user = data ? data.user : null;
+    if (error) loadError = error;
+    centres = await loadClockableCostCentres(project.id);
+  } catch (e) {
+    loadError = e;
+  }
+  if (loadError || !user) {
+    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load the job. Check your signal and try again.${loadError && loadError.message ? ` (${escapeHtml(loadError.message)})` : ''}</div><button type="button" class="secondary" id="jci-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+    overlay.querySelector('#jci-close-btn').addEventListener('click', () => overlay.remove());
+    return;
+  }
   let chosen = centres.length === 1 ? [centres[0].id] : [];
 
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
   overlay.innerHTML = `
     <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
       <h2>Clock in</h2>
@@ -3508,7 +3553,6 @@ async function openJobClockInModal(project, onDone) {
         <button type="button" class="secondary" id="jci-cancel">Cancel</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
 
   const hint = overlay.querySelector('#jci-hint');
   overlay.querySelectorAll('.cc-chip').forEach(chip => chip.addEventListener('click', () => {
