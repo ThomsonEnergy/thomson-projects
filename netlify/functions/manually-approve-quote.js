@@ -46,7 +46,7 @@ exports.handler = async (event) => {
     });
     await supabaseAdmin.from('projects').update({
       approval_method: method, approval_email_thread_id: method === 'email' ? emailThreadId : null,
-      declined_at: null, declined_by: null, decline_reason: null,
+      declined_at: null, declined_by: null, decline_reason: null, expired: false,
     }).eq('id', quoteId);
     return { statusCode: 200, body: JSON.stringify({ ok: true, jobId, jobNumber, invoiceToken }) };
   } catch (err) {

@@ -29,6 +29,11 @@
 [functions.sweep-job-booked]
   schedule = "5 13,14 * * *"
 
+# Just after midnight Sydney time: quote and variation reminders (3 days before they run out) and
+# auto decline as Expired - see sweep-quote-expiry.js. Same two runs as above; the second finds nothing.
+[functions.sweep-quote-expiry]
+  schedule = "10 13,14 * * *"
+
 # Once a day: refreshes the overhead lines from the Xero Profit and Loss report - see
 # sync-overheads-nightly.js. Does nothing until accounts are mapped on the Overheads page.
 [functions.sync-overheads-nightly]

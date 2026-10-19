@@ -2900,7 +2900,8 @@
         <h1>${project.name}</h1>
         <p class="subtitle">${project.client_name} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
         ${isFrozenQuote && project.approved_at ? `<p class="subtitle" style="margin-top:2px;">Approved ${new Date(project.approved_at).toLocaleDateString('en-AU')}${project.approval_note ? ' - ' + escapeHtml(project.approval_note) : ' - approved online by the client'}${project.approval_email_thread_id ? ` &middot; <a class="link-quiet" href="/inbox.html?thread=${project.approval_email_thread_id}">View the email</a>` : ''}</p>` : ''}
-        ${!project.job_number && project.status === 'declined' ? `<div class="error-box" style="margin:6px 0 12px;">${approvalProofHtml(project)}${pricingVisible ? ' <button type="button" class="secondary" id="quote-reopen-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Reopen quote</button>' : ''}</div>` : ''}
+        ${!project.job_number && project.status === 'declined' ? `<div class="error-box" style="margin:6px 0 12px;">${approvalProofHtml(project)}${pricingVisible ? (project.expired ? ' <button type="button" class="secondary vu-extend" data-key="quote" style="font-size:12px; padding:4px 10px; margin-left:6px;">Extend...</button>' : ' <button type="button" class="secondary" id="quote-reopen-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Reopen quote</button>') : ''}</div>` : ''}
+        ${!project.job_number && project.status === 'sent' ? `<div id="quote-valid-until">${validUntilHtml(project, 'quote', pricingVisible)}</div>` : ''}
         <div style="margin-bottom:20px;">
           ${pricingVisible && !editMode ? `
             ${!isFrozenQuote ? `<button id="edit-toggle-btn" class="secondary">${project.job_number ? 'Edit stages' : 'Edit quote'}</button>` : ''}
@@ -3842,6 +3843,10 @@
       if (markApprovedBtn) markApprovedBtn.addEventListener('click', () => openApprovalPanel({ kind: 'quote', mode: 'approve', project, onDone: async () => location.reload() }));
       const markDeclinedBtn = document.getElementById('mark-declined-btn');
       if (markDeclinedBtn) markDeclinedBtn.addEventListener('click', () => openApprovalPanel({ kind: 'quote', mode: 'decline', project, onDone: async () => location.reload() }));
+      if (!project.job_number) {
+        wireValidUntil(content, project, () => ({ kind: 'quote', row: project }), async () => location.reload(), 'quote');
+        if (pricingVisible && new URLSearchParams(window.location.search).get('extend') === 'quote' && ['sent', 'declined'].includes(project.status) && (project.status === 'sent' || project.expired)) openExtendPanel('quote', project, project, async () => location.reload());
+      }
       const quoteReopenBtn = document.getElementById('quote-reopen-btn');
       if (quoteReopenBtn) quoteReopenBtn.addEventListener('click', () => reopenDeclined('quote', project.id, async () => location.reload()));
 
@@ -4048,6 +4053,124 @@
       });
     }
 
+    // ---------- Valid until / Extend (migration 20261030000000) ----------
+    const validUntilText = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+    const ymdPlus = (ymd, n) => { const d = new Date(ymd + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const sydneyYmd = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+
+    // "Valid until 18 Nov 2026 · Extend... · [ ] Don't auto decline this one" for a quote or variation.
+    // row: the quote or variation; key: 'quote' or the variation's id.
+    function validUntilHtml(row, key, canEdit) {
+      const open = row.status === 'sent' || row.approval_status === 'sent';
+      const expired = row.expired && (row.status === 'declined' || row.approval_status === 'declined');
+      if (!open && !expired) return '';
+      const past = row.valid_until && row.valid_until < sydneyYmd();
+      return `<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:12px; margin:6px 0 0;">
+        <span class="subtitle" style="font-size:12px;${expired || past ? ' color:var(--red);' : ''}">${row.valid_until ? (expired ? 'Expired ' : 'Valid until ') + validUntilText(row.valid_until) : 'No valid until date'}</span>
+        ${canEdit ? `<button type="button" class="secondary vu-extend" data-key="${key}" style="font-size:11px; padding:3px 9px;">Extend...</button>` : ''}
+        ${canEdit && open ? `<label style="display:flex; align-items:center; gap:5px; margin:0; font-weight:400; font-size:12px;"><input type="checkbox" class="vu-noauto" data-key="${key}" ${row.no_auto_decline ? 'checked' : ''} style="width:auto; margin:0;" /> Don't auto decline this one</label>` : ''}
+      </div>`;
+    }
+
+    // Wires the Extend buttons and "Don't auto decline" boxes inside el. find(key) -> { kind, row }.
+    function wireValidUntil(el, project, find, onDone, onlyKey) {
+      const sel = (c) => onlyKey ? `${c}[data-key="${onlyKey}"]` : c;
+      el.querySelectorAll(sel('.vu-extend')).forEach(b => b.addEventListener('click', () => { const f = find(b.dataset.key); openExtendPanel(f.kind, project, f.row, onDone); }));
+      el.querySelectorAll(sel('.vu-noauto')).forEach(cb => cb.addEventListener('change', async () => {
+        const f = find(cb.dataset.key);
+        const { error } = await supabaseClient.from(f.kind === 'quote' ? 'projects' : 'job_variation_entries').update({ no_auto_decline: cb.checked }).eq('id', f.row.id);
+        if (error) { alert(error.message); cb.checked = !cb.checked; return; }
+        f.row.no_auto_decline = cb.checked;
+        await logActivity('project', project.id, 'auto_decline_changed', `${f.kind === 'quote' ? 'Quote' : 'Variation ' + (f.row.variation_number || '')}: auto decline turned ${cb.checked ? 'off' : 'on'}`);
+      }));
+    }
+
+    // Extend a quote's or variation's valid until date (Sales, Admin, Finance). One that expired is
+    // reopened. Optionally emails the client the new date with a fresh PDF.
+    function openExtendPanel(kind, project, row, onDone) {
+      const today = sydneyYmd();
+      const from = row.valid_until && row.valid_until >= today ? row.valid_until : today;
+      const what = kind === 'quote' ? (project.quote_number ? `quote Q${project.quote_number}` : 'this quote') : `Variation ${row.variation_number || ''}`.trim();
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:440px; width:100%;">
+          <h2>Extend ${escapeHtml(what)}</h2>
+          <p class="subtitle" style="margin-bottom:10px;">${row.valid_until ? (row.expired ? 'Expired ' : 'Valid until ') + validUntilText(row.valid_until) : 'No valid until date yet'}.${row.expired ? ' Extending it reopens it, so the client can accept it again.' : ''}</p>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
+            ${[7, 14, 30].map(n => `<button type="button" class="secondary ex-plus" data-n="${n}" style="font-size:12px; padding:5px 10px;">+${n} days</button>`).join('')}
+          </div>
+          <label style="margin-top:0;">New valid until date</label>
+          <input type="date" id="ex-date" min="${today}" value="${ymdPlus(from, 14)}" />
+          <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400;"><input type="checkbox" id="ex-email" style="width:auto;" /> Email the client the new date</label>
+          <div style="margin-top:14px;"><button type="button" id="ex-save">Extend</button> <button type="button" class="secondary" id="ex-cancel">Cancel</button></div>
+          <div id="ex-msg"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelectorAll('.ex-plus').forEach(b => b.addEventListener('click', () => { overlay.querySelector('#ex-date').value = ymdPlus(from, Number(b.dataset.n)); }));
+      overlay.querySelector('#ex-cancel').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#ex-save').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#ex-msg');
+        const validUntil = overlay.querySelector('#ex-date').value;
+        if (!validUntil || validUntil < today) { msg.innerHTML = '<div class="error-box">Pick a date from today on.</div>'; return; }
+        const btn = overlay.querySelector('#ex-save');
+        btn.disabled = true; btn.textContent = 'Saving...';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/approval-actions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ kind, id: row.id, action: 'extend', validUntil }),
+          });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok || !d.ok) throw new Error(d.error || 'Could not extend it');
+          const wantEmail = overlay.querySelector('#ex-email').checked;
+          overlay.remove();
+          if (wantEmail) await emailExtension(kind, project, { ...row, valid_until: validUntil });
+          await onDone();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false; btn.textContent = 'Extend';
+        }
+      });
+    }
+
+    // Tells the client the new valid until date: a fresh PDF attached and the accept / sign button.
+    async function emailExtension(kind, project, row) {
+      const first = String(project.client_name || '').trim().split(/\s+/)[0] || 'there';
+      const dateText = new Date(row.valid_until + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+      try {
+        if (kind === 'quote') {
+          await generateClientPdf('quote', project.id);
+          const { data: fresh } = await supabaseClient.from('projects').select('quote_pdf_path').eq('id', project.id).single();
+          const qLabel = project.quote_number ? `Q${project.quote_number}` : '';
+          openEmailComposer({
+            title: `Email the new date for ${qLabel || 'the quote'}`, to: project.client_email || '',
+            subject: `Quote ${qLabel}: ${project.name} - now valid until ${dateText}`.replace('Quote :', 'Quote:'),
+            body: `Hi ${first},\n\nJust letting you know we've extended your quote for ${project.name}. It is now valid until ${dateText}.\n\nThe updated quote is attached, and you can accept it online with the button below.\n\nLet me know if you have any questions.`,
+            projectId: project.id, tagKind: 'client',
+            quoteLink: project.quote_token ? { url: `${shareOrigin()}/quote.html?token=${project.quote_token}`, label: 'Include a button to view and accept the quote online', checked: true } : undefined,
+            attachOptions: fresh?.quote_pdf_path ? [{ group: 'Quote', label: 'Quote PDF', bucket: 'project-documents', path: fresh.quote_pdf_path, name: `${projectRef(project)} - Quote.pdf`, checked: true }] : [],
+            onSent: async () => { await logActivity('project', project.id, 'quote_emailed', `New valid until date (${dateText}) emailed to the client`); },
+          });
+        } else {
+          const pdfPath = await makeVariationPdf(row.id);
+          const vName = `Variation ${row.variation_number || ''}`.trim();
+          const fileName = `${projectRef(project)} - ${vName}.pdf`;
+          openEmailComposer({
+            title: `Email the new date for ${vName}`, to: project.client_email || '',
+            subject: `${vName} for approval - ${projectRef(project)}: now valid until ${dateText}`,
+            body: `Hi ${first},\n\nJust letting you know we've extended ${vName} (${row.description}). It is now valid until ${dateText}.\n\nIt is attached, and you can approve it by signing online at the link below.\n\nLet me know if you have any questions.`,
+            projectId: project.id, tagKind: 'client',
+            quoteLink: { url: `${shareOrigin()}/quote.html?variation=${row.variation_token}`, label: 'Include a button to view and sign the variation online', buttonText: 'Click to view and sign your variation', checked: true },
+            attachOptions: [{ group: 'Variation', label: fileName, bucket: 'project-documents', path: pdfPath, name: fileName, checked: true }],
+            onSent: async () => { await logActivity('project', project.id, 'variation_sent', `${vName}: new valid until date (${dateText}) emailed to the client`); },
+          });
+        }
+      } catch (err) {
+        alert('Extended, but the email could not be set up: ' + err.message);
+      }
+    }
+
     // Reopens a declined quote (back to Sent) or variation (back to Draft).
     async function reopenDeclined(kind, id, onDone) {
       if (!confirm(kind === 'quote' ? 'Reopen this quote? It goes back to Sent and the client can accept it again.' : 'Reopen this variation? It goes back to Draft so you can edit and resend it.')) return;
@@ -4066,6 +4189,7 @@
       const METHOD = { email: 'by email', phone: 'by phone call', in_person: 'in person', online: 'online' };
       const dt = (d) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
       const emailLink = row.approval_email_thread_id ? ` <a class="link-quiet" href="/inbox.html?thread=${row.approval_email_thread_id}">View the email</a>` : '';
+      if (row.declined_at && row.expired) return `Expired: not accepted by ${row.valid_until ? validUntilText(row.valid_until) : 'its valid until date'}. Extend it to reopen it.`;
       if (row.declined_at) return `Declined ${row.declined_by ? '(marked by us)' : 'by the client online'} on ${dt(row.declined_at)}${row.decline_reason ? ': ' + escapeHtml(row.decline_reason) : ''}.${emailLink}`;
       if (row.approval_method && row.approval_method !== 'online') return `Approved ${METHOD[row.approval_method] || ''}${row.approved_at ? ' on ' + dt(row.approved_at) : ''}${row.approval_note ? ' - ' + escapeHtml(row.approval_note) : ''}.${emailLink}`;
       return '';
@@ -5877,6 +6001,7 @@
               <div class="subtitle" style="display:flex; justify-content:space-between; font-size:12px;"><span>Inc GST</span><span>${money(linesTotal(r) * 1.1)}</span></div>
             ` : `<p class="subtitle" style="margin:0; font-size:12px;">Fixed-price variation, priced by the office.</p>`}
             ${r.approval_status === 'declined' ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px; color:var(--red);">${approvalProofHtml(r)} It won't go on an invoice.</p>` : ''}
+            ${validUntilHtml(r, r.id, pricingVisible)}
             ${r.approval_status === 'approved' && r.approval_method && r.approval_method !== 'online' ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px;">${approvalProofHtml(r)} It is now a stage on the job${r.status === 'billed' ? ' and has been invoiced' : ' - invoice it from Invoice project'}.</p>` : ''}
             ${r.approval_status === 'approved' && !(r.approval_method && r.approval_method !== 'online') ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px;">Signed by ${escapeHtml(r.signed_by_name || '')} on ${new Date(r.approved_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}. It is now a stage on the job${r.status === 'billed' ? ' and has been invoiced' : ' - invoice it from Invoice project'}.</p>` : ''}
             ${r.approval_status === 'sent' ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px;">Sent ${new Date(r.sent_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} - waiting for the client to sign.</p>` : ''}
@@ -5887,7 +6012,7 @@
                 ${r.approval_status === 'draft' || !r.approval_status ? `<button type="button" class="secondary var-fixed-marksent" data-id="${r.id}" style="${btnStyle}">I've sent it myself</button>` : ''}
                 ${r.approval_status === 'sent' ? `<button type="button" class="secondary var-fixed-withdraw" data-id="${r.id}" style="${btnStyle}">Back to draft</button>` : ''}
                 ${!['approved', 'declined'].includes(r.approval_status) ? `<button type="button" class="secondary var-fixed-approve" data-id="${r.id}" style="${btnStyle}">Mark approved...</button><button type="button" class="secondary var-fixed-decline" data-id="${r.id}" style="${btnStyle}">Mark declined...</button>` : ''}
-                ${r.approval_status === 'declined' ? `<button type="button" class="secondary var-fixed-reopen" data-id="${r.id}" style="${btnStyle}">Reopen</button>` : ''}
+                ${r.approval_status === 'declined' && !r.expired ? `<button type="button" class="secondary var-fixed-reopen" data-id="${r.id}" style="${btnStyle}">Reopen</button>` : ''}
                 ${r.pdf_path ? `<button type="button" class="secondary var-fixed-pdf" data-id="${r.id}" style="${btnStyle}">View PDF</button>` : ''}
                 <button type="button" class="secondary var-fixed-makepdf" data-id="${r.id}" style="${btnStyle}">${r.pdf_path ? 'Regenerate PDF' : 'Make PDF'}</button>
                 <button type="button" class="secondary var-fixed-copy" data-link="${linkFor(r)}" style="${btnStyle}">Copy link</button>
@@ -6024,6 +6149,17 @@
       listEl.querySelectorAll('.var-fixed-send').forEach(btn => btn.addEventListener('click', () => sendFixedVariationEmail(project, rowById(btn.dataset.id), reload, btn)));
       listEl.querySelectorAll('.var-fixed-approve').forEach(btn => btn.addEventListener('click', () => openApprovalPanel({ kind: 'variation', mode: 'approve', project, entry: rowById(btn.dataset.id), onDone: reload })));
       listEl.querySelectorAll('.var-fixed-decline').forEach(btn => btn.addEventListener('click', () => openApprovalPanel({ kind: 'variation', mode: 'decline', project, entry: rowById(btn.dataset.id), onDone: reload })));
+      wireValidUntil(listEl, project, (key) => ({ kind: 'variation', row: rowById(key) }), reload);
+      const extendParam = new URLSearchParams(window.location.search).get('extend');
+      if (pricingVisible && extendParam && extendParam !== 'quote' && !loadVariationEntries.extendOpened) {
+        const er = rowById(extendParam);
+        if (er && (er.approval_status === 'sent' || (er.approval_status === 'declined' && er.expired))) {
+          loadVariationEntries.extendOpened = true;
+          const vt = document.querySelector('#job-tabs .settings-tab[data-panel="variations"]');
+          if (vt) vt.click();
+          openExtendPanel('variation', project, er, reload);
+        }
+      }
       listEl.querySelectorAll('.var-fixed-reopen').forEach(btn => btn.addEventListener('click', () => reopenDeclined('variation', btn.dataset.id, reload)));
       listEl.querySelectorAll('.var-fixed-pdf').forEach(btn => btn.addEventListener('click', () => {
         const r = rowById(btn.dataset.id);

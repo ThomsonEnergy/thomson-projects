@@ -388,7 +388,15 @@
                 <label>Default deposit %</label>
                 <input id="default-deposit" type="number" step="0.1" placeholder="10" />
               </div>
+              <div>
+                <label>Quotes and variations valid for (days)</label>
+                <input id="quote-valid-days" type="number" step="1" min="1" placeholder="30" />
+              </div>
             </div>
+            <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400;">
+              <input type="checkbox" id="auto-decline-expired" style="width:auto;" /> Auto decline expired quotes and variations
+            </label>
+            <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Checked just after midnight. A quote or variation still waiting past its valid until date is declined as Expired, and whoever made it is told (they get a reminder 3 days before). Untick to keep the date and reminder but never decline. Sales can extend any one, even after it expired, and each can be set to "Don't auto decline this one".</p>
           </div>
           <button id="save-quoting-btn">Save quoting defaults</button>
           <div id="save-quoting-msg"></div>
@@ -824,6 +832,8 @@
       document.getElementById('google-review-url').value = data.google_review_url || '';
       document.getElementById('default-markup').value = data.default_markup_percent ?? 45;
       document.getElementById('default-deposit').value = data.default_deposit_percent ?? 10;
+      document.getElementById('quote-valid-days').value = data.quote_valid_days ?? 30;
+      document.getElementById('auto-decline-expired').checked = data.auto_decline_expired !== false;
       document.getElementById('next-quote-number').value = data.next_quote_number ?? 1000;
       document.getElementById('next-job-number').value = data.next_job_number ?? 7000;
       document.getElementById('next-invoice-number').value = data.next_invoice_number ?? 3000;
@@ -969,6 +979,8 @@
         .update({
           default_markup_percent: parseFloat(document.getElementById('default-markup').value) || 45,
           default_deposit_percent: parseFloat(document.getElementById('default-deposit').value) || 10,
+          quote_valid_days: Math.max(1, parseInt(document.getElementById('quote-valid-days').value, 10) || 30),
+          auto_decline_expired: document.getElementById('auto-decline-expired').checked,
         })
         .eq('id', 1);
       msg.innerHTML = error

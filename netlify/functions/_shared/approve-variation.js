@@ -44,7 +44,7 @@ async function approveVariation(supabaseAdmin, entry, how) {
     approval_method: how.method, approval_note: how.note || null, approved_by: how.approvedBy || null,
     approval_email_thread_id: how.emailThreadId || null,
     signed_by_name: online ? how.signedName : null, signature_data_url: online ? how.signature : null,
-    declined_at: null, declined_by: null, decline_reason: null,
+    declined_at: null, declined_by: null, decline_reason: null, expired: false,
   }).eq('id', entry.id).in('approval_status', how.fromStatuses || ['sent']);
   if (upErr) throw upErr;
 
