@@ -35,10 +35,11 @@ exports.handler = async (event) => {
 
     const { data: quote, error: quoteErr } = await supabaseAdmin
       .from('projects')
-      .select('id, status')
+      .select('id, status, job_number')
       .eq('quote_token', token)
       .maybeSingle();
-    if (quoteErr || !quote) {
+    // A job's own token (a Direct Job's, shown on its variation pages) is not a quote to accept.
+    if (quoteErr || !quote || quote.job_number) {
       return { statusCode: 404, body: JSON.stringify({ error: 'Quote not found' }) };
     }
 
@@ -47,15 +48,17 @@ exports.handler = async (event) => {
     }
 
     // Keep the signature on the quote itself (the frozen approved record).
-    const signedName = String(name || '').trim();
-    if (signedName && typeof signature === 'string' && signature.startsWith('data:image/png;base64,') && signature.length <= 600000) {
+    // Only a plain PNG data URL is kept (it is shown in an <img>), and an approved quote's
+    // signature is never replaced by a second signing.
+    const signedName = String(name || '').trim().slice(0, 200);
+    if (quote.status !== 'approved' && signedName && typeof signature === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(signature) && signature.length <= 600000) {
       await supabaseAdmin.from('projects').update({ accepted_signed_by_name: signedName, accepted_signature_data_url: signature }).eq('id', quote.id);
     }
 
     const { jobId, jobNumber, invoiceToken } = await createJobFromQuote(supabaseAdmin, { quoteId: quote.id });
-    await supabaseAdmin.from('projects').update({ approval_method: 'online' }).eq('id', quote.id);
+    if (quote.status !== 'approved') await supabaseAdmin.from('projects').update({ approval_method: 'online' }).eq('id', quote.id);
     // The signed quote becomes the job's quote PDF (made in the background).
-    await startFinalizeDocuments({ kind: 'quote_accepted', quoteId: quote.id, jobId });
+    if (quote.status !== 'approved') await startFinalizeDocuments({ kind: 'quote_accepted', quoteId: quote.id, jobId });
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, jobNumber, invoiceToken }) };
   } catch (err) {

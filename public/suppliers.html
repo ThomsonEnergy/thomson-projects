@@ -61,7 +61,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allSuppliers = [];
@@ -70,7 +70,7 @@
     async function loadSuppliers() {
       const listEl = document.getElementById('suppliers-list');
       const { data: suppliers, error } = await supabaseClient.from('suppliers').select('*').order('name');
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
       const { data: summaries } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: null });
       const summaryBySupplier = Object.fromEntries((summaries || []).map(s => [s.supplier_id, s]));
@@ -116,8 +116,8 @@
               const overdue = Number(s.summary.overdue);
               return `
                 <tr class="supplier-row-link" data-id="${s.id}" style="cursor:pointer;">
-                  <td data-label="Supplier"><strong>${s.name}</strong>${s.kind === 'contractor' ? ' <span class="badge draft">Contractor</span>' : ''}${s.needs_review ? ' <span class="badge" style="background:#d08a00; color:#fff;">New, check details</span>' : ''}</td>
-                  <td data-label="Terms">${terms}</td>
+                  <td data-label="Supplier"><strong>${escapeHtml(s.name)}</strong>${s.kind === 'contractor' ? ' <span class="badge draft">Contractor</span>' : ''}${s.needs_review ? ' <span class="badge" style="background:#d08a00; color:#fff;">New, check details</span>' : ''}</td>
+                  <td data-label="Terms">${escapeHtml(terms)}</td>
                   <td class="num" data-label="Invoiced, not paid">${money(s.summary.invoiced_not_paid)}</td>
                   <td class="num" data-label="Overdue">${overdue > 0 ? `<span style="color:var(--red); font-weight:600;">${money(overdue)}</span>` : money(0)}</td>
                 </tr>`;
@@ -180,7 +180,7 @@
           credit_terms_days: parseInt(overlay.querySelector('#sup-terms-days').value) || 0,
           notes: overlay.querySelector('#sup-notes').value.trim() || null,
         }).select('id').single();
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         await logActivity('supplier', newSupplier.id, 'created', `Supplier "${name}" added`);
         overlay.remove();
         await loadSuppliers();
@@ -224,7 +224,7 @@
         overlay.remove();
         await resolveSupplierAndHandoff(data.extracted, 'bill', data.extracted, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="ub-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="ub-close">Close</button>`;
         overlay.querySelector('#ub-close').addEventListener('click', () => overlay.remove());
       }
     }));
@@ -239,7 +239,7 @@
         overlay.remove();
         await resolveSupplierAndHandoff(data.supplier, 'pricelist', { items: data.items }, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="up-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="up-close">Close</button>`;
         overlay.querySelector('#up-close').addEventListener('click', () => overlay.remove());
       }
     }));
@@ -254,7 +254,7 @@
         overlay.remove();
         await resolveSupplierAndHandoff(data, 'statement', data, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that statement</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="us-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that statement</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="us-close">Close</button>`;
         overlay.querySelector('#us-close').addEventListener('click', () => overlay.remove());
       }
     }));
@@ -288,7 +288,7 @@
             <tbody>
               ${data.preview.map(p => `
                 <tr>
-                  <td>${p.supplierName}${!p.hasBankDetails ? ' <span class="badge draft" style="color:var(--red);">No bank details</span>' : ''}</td>
+                  <td>${escapeHtml(p.supplierName)}${!p.hasBankDetails ? ' <span class="badge draft" style="color:var(--red);">No bank details</span>' : ''}</td>
                   <td class="num">${p.billCount}</td>
                   <td class="num">${money(p.total)}</td>
                 </tr>`).join('')}
@@ -315,19 +315,19 @@
             const data2 = await res2.json();
             if (!res2.ok || !data2.ok) throw new Error(data2.error || 'Payment run failed');
             msg.innerHTML = data2.results.map(r => r.ok
-              ? `<div class="success-box">${r.supplier}: ${money(r.amount)} sent to Airwallex.</div>`
-              : `<div class="error-box">${r.supplier}: ${r.error}</div>`).join('');
+              ? `<div class="success-box">${escapeHtml(r.supplier)}: ${money(r.amount)} sent to Airwallex.</div>`
+              : `<div class="error-box">${escapeHtml(r.supplier)}: ${escapeHtml(r.error)}</div>`).join('');
             confirmBtn.style.display = 'none';
             overlay.querySelector('#rp-cancel-btn').textContent = 'Close';
             await loadSuppliers();
           } catch (err) {
-            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+            msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
             confirmBtn.disabled = false;
             confirmBtn.textContent = 'Confirm & send to Airwallex';
           }
         });
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't check payments</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="rp-err-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't check payments</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="rp-err-close">Close</button>`;
         overlay.querySelector('#rp-err-close').addEventListener('click', () => overlay.remove());
       }
     });

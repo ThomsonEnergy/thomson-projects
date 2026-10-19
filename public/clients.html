@@ -167,7 +167,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allClients = [];
@@ -205,9 +205,9 @@
           <option value="sales" ${contact_type === 'sales' ? 'selected' : ''}>Sales contact</option>
           <option value="project_manager" ${contact_type === 'project_manager' ? 'selected' : ''}>Project manager</option>
         </select>
-        <input class="ct-name" placeholder="Name" value="${name || ''}" style="font-size:13px;" />
-        <input class="ct-phone" placeholder="Phone" value="${phone || ''}" style="font-size:13px;" />
-        <input class="ct-email" placeholder="Email" value="${email || ''}" style="font-size:13px;" />
+        <input class="ct-name" placeholder="Name" value="${escapeHtml(name)}" style="font-size:13px;" />
+        <input class="ct-phone" placeholder="Phone" value="${escapeHtml(phone)}" style="font-size:13px;" />
+        <input class="ct-email" placeholder="Email" value="${escapeHtml(email)}" style="font-size:13px;" />
         <button type="button" class="secondary ct-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
       row.querySelector('.ct-remove').addEventListener('click', () => row.remove());
@@ -306,7 +306,7 @@
           <div style="flex:1;">
             <strong>${escapeHtml(row.client.name)}</strong> ${row.confident ? '<span class="badge accepted" style="font-size:10px;">Confident match</span>' : '<span class="badge draft" style="font-size:10px;">Check this one</span>'}
             <select class="abn-row-select" data-i="${i}" style="margin-top:6px;">
-              ${row.results.map((r, ri) => `<option value="${ri}" ${ri === row.chosenIndex ? 'selected' : ''}>${escapeHtml(r.name)} - ABN ${r.abn || 'none'}${r.status ? ' (' + escapeHtml(r.status) + ')' : ''}</option>`).join('')}
+              ${row.results.map((r, ri) => `<option value="${ri}" ${ri === row.chosenIndex ? 'selected' : ''}>${escapeHtml(r.name)} - ABN ${escapeHtml(r.abn || 'none')}${r.status ? ' (' + escapeHtml(r.status) + ')' : ''}</option>`).join('')}
             </select>
           </div>
         </div>`;
@@ -336,7 +336,7 @@
           applyMsg.innerHTML = `<div class="success-box">Updated ${checkedIndexes.length} client${checkedIndexes.length === 1 ? '' : 's'}.</div>`;
           await loadClients();
         } catch (err) {
-          applyMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          applyMsg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         }
         applyBtn.disabled = false;
         applyBtn.textContent = 'Apply selected';
@@ -357,7 +357,7 @@
       const listEl = document.getElementById('clients-list');
       const { data, error } = await supabaseClient.from('clients').select('*, client_contacts(*)').order('name');
       if (error) {
-        listEl.innerHTML = `<div class="error-box">${error.message}</div>`;
+        listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
         return;
       }
       allClients = data;
@@ -373,11 +373,11 @@
       listEl.innerHTML = clients.map(c => `
         <div class="project-list-item" data-id="${c.id}" style="cursor:pointer;">
           <div>
-            <div class="name">${c.name}</div>
-            <div class="meta">${[c.email, c.phone, mapsLink(c.address)].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}</div>
+            <div class="name">${escapeHtml(c.name)}</div>
+            <div class="meta">${[escapeHtml(c.email), escapeHtml(c.phone), mapsLink(c.address)].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}</div>
           </div>
           <div style="text-align:right;">
-            <span class="badge draft">${(c.payment_terms || 'cod').replace('_', ' ').toUpperCase()}</span>
+            <span class="badge draft">${escapeHtml((c.payment_terms || 'cod').replace('_', ' ').toUpperCase())}</span>
             <div class="subtitle" style="font-size:11px; margin-top:4px;">${c.client_type === 'company' ? 'Company' : 'Individual'}</div>
           </div>
         </div>
@@ -437,12 +437,12 @@
       let clientId = editingClientId;
       if (editingClientId) {
         const { error } = await supabaseClient.from('clients').update(clientFields).eq('id', editingClientId);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         await supabaseClient.from('client_contacts').delete().eq('client_id', editingClientId);
         await logActivity('client', editingClientId, 'updated', `Client "${name}" updated`);
       } else {
         const { data: inserted, error } = await supabaseClient.from('clients').insert(clientFields).select().single();
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         clientId = inserted.id;
         await logActivity('client', clientId, 'created', `Client "${name}" added`);
       }
@@ -458,7 +458,7 @@
 
       if (contacts.length) {
         const { error: contactErr } = await supabaseClient.from('client_contacts').insert(contacts);
-        if (contactErr) { msg.innerHTML = `<div class="error-box">${contactErr.message}</div>`; return; }
+        if (contactErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(contactErr.message)}</div>`; return; }
       }
 
       await loadClients();
@@ -490,7 +490,7 @@
           renderCsvMapping();
         },
         error: (err) => {
-          document.getElementById('import-msg').innerHTML = `<div class="error-box">${err.message}</div>`;
+          document.getElementById('import-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         },
       });
     });
@@ -565,7 +565,7 @@
             <div>
               <label style="margin-top:0">${f.label} <span class="subtitle" style="font-size:11px;">(ctrl/cmd-click to add fallback columns)</span></label>
               <select class="csv-map-select" data-field="${f.key}" multiple size="4">
-                ${csvHeaders.map(h => `<option value="${h}" ${preselect.includes(h) ? 'selected' : ''}>${h}</option>`).join('')}
+                ${csvHeaders.map(h => `<option value="${escapeHtml(h)}" ${preselect.includes(h) ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}
               </select>
             </div>`;
         }
@@ -574,7 +574,7 @@
             <label style="margin-top:0">${f.label}</label>
             <select class="csv-map-select" data-field="${f.key}">
               <option value="">-- Not in file --</option>
-              ${csvHeaders.map(h => `<option value="${h}" ${h === mapping[f.key] ? 'selected' : ''}>${h}</option>`).join('')}
+              ${csvHeaders.map(h => `<option value="${escapeHtml(h)}" ${h === mapping[f.key] ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}
             </select>
           </div>`;
       }).join('');
@@ -586,7 +586,7 @@
           <label style="margin-top:0">${f.label}</label>
           <select class="csv-map-select-optional" data-field="${f.key}">
             <option value="">-- Not in file --</option>
-            ${csvHeaders.map(h => `<option value="${h}" ${h === guessColumn(f.guesses) ? 'selected' : ''}>${h}</option>`).join('')}
+            ${csvHeaders.map(h => `<option value="${escapeHtml(h)}" ${h === guessColumn(f.guesses) ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}
           </select>
         </div>`).join('');
       optionalEl.querySelectorAll('.csv-map-select-optional').forEach(sel => sel.addEventListener('change', () => { findIncomplete(); }));
@@ -635,7 +635,7 @@
         <table>
           <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th></tr></thead>
           <tbody>
-            ${preview.map(r => `<tr><td>${r.name || ''}</td><td>${r.email || ''}</td><td>${r.phone || ''}</td><td>${r.address || ''}</td></tr>`).join('')}
+            ${preview.map(r => `<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.email)}</td><td>${escapeHtml(r.phone)}</td><td>${escapeHtml(r.address)}</td></tr>`).join('')}
           </tbody>
         </table>
         <p class="subtitle" style="margin-top:8px;">Showing first 8 of ${csvRows.length} rows.</p>`;
@@ -693,7 +693,7 @@
           const fields = ['name', 'email', 'phone', 'address'];
           return `
           <div class="card" style="background:var(--surface-2); margin-bottom:14px;">
-            <h3 style="margin:0 0 10px;">${group.candidates[0].name} <span class="subtitle">(${group.candidates.length} version${group.candidates.length === 1 ? '' : 's'} found)</span></h3>
+            <h3 style="margin:0 0 10px;">${escapeHtml(group.candidates[0].name)} <span class="subtitle">(${group.candidates.length} version${group.candidates.length === 1 ? '' : 's'} found)</span></h3>
             <table>
               <thead><tr><th>Source</th>${fields.map(f => `<th style="text-transform:capitalize;">${f}</th>`).join('')}</tr></thead>
               <tbody>
@@ -704,7 +704,7 @@
                       <td>
                         <label style="display:flex; align-items:center; gap:6px; font-weight:400; margin:0;">
                           <input type="radio" name="dupe-${gIdx}-${f}" value="${cIdx}" ${cIdx === 0 ? 'checked' : ''} />
-                          ${c[f] || '<span class="subtitle">(empty)</span>'}
+                          ${c[f] ? escapeHtml(c[f]) : '<span class="subtitle">(empty)</span>'}
                         </label>
                       </td>`).join('')}
                   </tr>`).join('')}
@@ -750,7 +750,7 @@
               ${incomplete.map(r => `
                 <tr>
                   <td data-label=""><input type="checkbox" class="incomplete-exclude-checkbox" data-index="${r.index}" /></td>
-                  <td data-label="Name">${r.name}</td>
+                  <td data-label="Name">${escapeHtml(r.name)}</td>
                   <td data-label="Email"><input type="email" class="incomplete-email-input" data-index="${r.index}" placeholder="Add an email" /></td>
                   <td data-label="Phone"><input class="incomplete-phone-input" data-index="${r.index}" placeholder="Add a phone number" /></td>
                 </tr>`).join('')}
@@ -876,7 +876,7 @@
         document.getElementById('csv-file').value = '';
         await loadClients();
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       }
       btn.disabled = false;
       btn.textContent = 'Import clients';

@@ -41,7 +41,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     (async function () {
@@ -97,13 +97,13 @@
         return rowProjects.map((p, i) => {
           const stageCount = p.cost_centres.length;
           const stageLabel = `${stageCount} stage${stageCount === 1 ? '' : 's'}`;
-          const nameDisplay = `${p.quote_number ? '#' + p.quote_number + ' - ' : ''}${p.name}`;
+          const nameDisplay = `${p.quote_number ? '#' + p.quote_number + ' - ' : ''}${escapeHtml(p.name)}`;
           const isLast = i === rowProjects.length - 1;
           const rowInner = !pricingVisible ? `
                 <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
                   <div>
                     <div class="name">${nameDisplay}</div>
-                    <div class="meta">${p.client_name} &middot; ${stageLabel}</div>
+                    <div class="meta">${escapeHtml(p.client_name)} &middot; ${stageLabel}</div>
                   </div>
                   <div style="text-align:right; min-width:160px;">
                     <span class="badge ${p.status}">${p.expired && p.status === 'declined' ? 'expired' : p.status.replace('_',' ')}</span>${p.status === 'sent' && p.valid_until ? ` <span class="subtitle" style="font-size:11px;">until ${new Date(p.valid_until + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span>` : ''}
@@ -116,7 +116,7 @@
                 <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
                   <div>
                     <div class="name">${nameDisplay}</div>
-                    <div class="meta">${p.client_name} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
+                    <div class="meta">${escapeHtml(p.client_name)} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
                   </div>
                   <div style="text-align:right; min-width:160px;">
                     <span class="badge ${p.status}">${p.expired && p.status === 'declined' ? 'expired' : p.status.replace('_',' ')}</span>${p.status === 'sent' && p.valid_until ? ` <span class="subtitle" style="font-size:11px;">until ${new Date(p.valid_until + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span>` : ''}
@@ -238,7 +238,7 @@
 
         const parts = [];
         if (blocked.length) {
-          parts.push(`<div class="error-box">Not deleted, has real activity against it:<ul style="margin:6px 0 0 18px;">${blocked.map(b => `<li>${b.project.name} - ${b.reasons.join(', ')}</li>`).join('')}</ul></div>`);
+          parts.push(`<div class="error-box">Not deleted, has real activity against it:<ul style="margin:6px 0 0 18px;">${blocked.map(b => `<li>${escapeHtml(b.project.name)} - ${b.reasons.join(', ')}</li>`).join('')}</ul></div>`);
         }
         if (!clear.length) {
           msg.innerHTML = parts.join('');

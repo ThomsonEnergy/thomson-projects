@@ -216,7 +216,7 @@
     <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading your proposal...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
@@ -550,6 +550,8 @@
       // On the variation page "accepted" means this variation is signed, not the original quote.
       const isAccepted = vInfo ? thisVariation.approval_status === 'approved' : ['accepted', 'approved', 'in_progress', 'complete'].includes(project.status);
       const isDeclined = !vInfo && project.status === 'declined';
+      // a stored signature is only drawn when it is a plain PNG data URL
+      const safeSig = (u) => (typeof u === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(u)) ? u : '';
       // valid until (YYYY-MM-DD, migration 20261030000000), shown while it is still open
       const validText = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
       const validLine = (d, noun) => d ? `<p class="note-line" style="margin:10px 0 0;"><strong>This ${noun} is valid until ${esc(validText(d))}.</strong></p>` : '';
@@ -796,7 +798,7 @@
             : `This ${docNoun} was declined${project.declined_at ? ' on ' + esc(longDate(project.declined_at)) : ''}. If you would like to go ahead after all, please contact us.`}</div>` : (isAccepted ? `
           <div class="accepted-box" id="accept-section">${template === 'quick_estimate' ? 'Estimate accepted, thank you.' : 'Quote accepted, thank you.'} Work will begin as scheduled.</div>
           ${!project.accepted_signature_data_url && project.approval_method && project.approval_method !== 'online' ? `<p class="note-line" style="margin-top:8px;">${esc(project.approval_note || 'Approved')}${project.approved_at ? ', ' + esc(longDate(project.approved_at)) : ''}</p>` : ''}
-          ${project.accepted_signature_data_url ? `<div><img src="${project.accepted_signature_data_url}" alt="Signature" style="max-width:280px; max-height:90px; margin-top:10px; border-bottom:1px solid #0a0a0a;" /><p class="note-line" style="margin-top:4px;">Signed by ${esc(project.accepted_signed_by_name || '')}${project.approved_at ? ' on ' + esc(new Date(project.approved_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })) : ''}</p></div>` : ''}`
+          ${safeSig(project.accepted_signature_data_url) ? `<div><img src="${safeSig(project.accepted_signature_data_url)}" alt="Signature" style="max-width:280px; max-height:90px; margin-top:10px; border-bottom:1px solid #0a0a0a;" /><p class="note-line" style="margin-top:4px;">Signed by ${esc(project.accepted_signed_by_name || '')}${project.approved_at ? ' on ' + esc(new Date(project.approved_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })) : ''}</p></div>` : ''}`
         : `
           <div class="sign-form" id="var-sign-section" style="break-inside:avoid;">
             <div class="sec-title">Accept this ${docNoun}</div>
@@ -848,7 +850,7 @@
           <div class="accepted-box">${v.approval_method && v.approval_method !== 'online'
             ? `Approved ${METHOD_TEXT[v.approval_method] || ''}${v.approved_at ? ' on ' + esc(dateText(v.approved_at)) : ''}${v.approval_note ? ' (' + esc(v.approval_note) + ')' : ''}. Thank you.`
             : `Approved and signed by ${esc(v.signed_by_name || '')} on ${v.approved_at ? esc(dateText(v.approved_at)) : ''}. Thank you.`}</div>
-          ${v.signature_data_url ? `<div><img src="${v.signature_data_url}" alt="Signature" style="max-width:280px; max-height:90px; margin-top:10px; border-bottom:1px solid #0a0a0a;" /></div>` : ''}`
+          ${safeSig(v.signature_data_url) ? `<div><img src="${safeSig(v.signature_data_url)}" alt="Signature" style="max-width:280px; max-height:90px; margin-top:10px; border-bottom:1px solid #0a0a0a;" /></div>` : ''}`
           : (v.approval_status === 'declined' ? `<div class="accepted-box" style="background:#fdf2f2; border-color:#f5c2c0; color:#7a271a;">${v.expired
             ? `This variation expired${v.valid_until ? ' on ' + esc(validText(v.valid_until)) : ''}. Please contact us if you would like to go ahead.`
             : `This variation was declined${v.declined_at ? ' on ' + esc(dateText(v.declined_at)) : ''}. If you would like to go ahead after all, please contact us.`}</div>` : (v.approval_status !== 'sent' ? '' : `

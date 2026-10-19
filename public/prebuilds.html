@@ -82,7 +82,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     const PREBUILD_SUBCATEGORIES = {
@@ -105,15 +105,15 @@
       row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.7fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
       row.innerHTML = `
         <div style="position:relative;">
-          <input class="pbc-desc" placeholder="e.g. Downlight fitting" value="${description}" style="font-size:13px;" autocomplete="off" />
+          <input class="pbc-desc" placeholder="e.g. Downlight fitting" value="${escapeHtml(description)}" style="font-size:13px;" autocomplete="off" />
           <div class="pbc-results" style="position:absolute; top:100%; left:0; right:0; z-index:10; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:none;"></div>
         </div>
         <select class="pbc-type" style="font-size:13px;">
           <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
           <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
         </select>
-        <input class="pbc-qty" type="number" step="0.01" value="${quantity}" placeholder="Qty/hrs" style="font-size:13px;" />
-        <input class="pbc-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px;" />
+        <input class="pbc-qty" type="number" step="0.01" value="${escapeHtml(quantity)}" placeholder="Qty/hrs" style="font-size:13px;" />
+        <input class="pbc-cost" type="number" step="0.01" value="${escapeHtml(unit_cost)}" placeholder="Unit cost $" style="font-size:13px;" />
         <button type="button" class="secondary pbc-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
       row.querySelector('.pbc-remove').addEventListener('click', () => row.remove());
@@ -133,7 +133,7 @@
         const materials = await getMaterials();
         const matches = materials.filter(m => matchesAllWords(m.name, q)).slice(0, 8);
         if (!matches.length) { resultsEl.style.display = 'none'; return; }
-        resultsEl.innerHTML = matches.map(m => `<div class="pbc-pick" data-name="${m.name}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${m.name} <span class="subtitle">(${money(m.cost_price)})</span></div>`).join('');
+        resultsEl.innerHTML = matches.map(m => `<div class="pbc-pick" data-name="${escapeHtml(m.name)}" data-cost="${escapeHtml(m.cost_price)}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(m.name)} <span class="subtitle">(${money(m.cost_price)})</span></div>`).join('');
         resultsEl.style.display = 'block';
         resultsEl.querySelectorAll('.pbc-pick').forEach(pick => {
           pick.addEventListener('click', () => {
@@ -189,7 +189,7 @@
         if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate a description');
         document.getElementById('pb-client-desc').value = data.description;
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       }
       btn.disabled = false;
       btn.textContent = '✨ Generate with AI';
@@ -219,7 +219,7 @@
         document.getElementById('pb-client-desc').value = data.text;
         msg.innerHTML = `<div class="success-box">Cleaned up.</div>`;
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       }
       btn.disabled = false;
       btn.textContent = '🧹 Cleanup with AI';
@@ -232,7 +232,7 @@
         .select('*, prebuild_components(*)')
         .order('category').order('name');
       if (error) {
-        listEl.innerHTML = `<div class="error-box">${error.message}</div>`;
+        listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
         return;
       }
       allPrebuilds = data || [];
@@ -259,8 +259,8 @@
         return `
         <div class="project-list-item" data-id="${pb.id}">
           <div>
-            <div class="name">${pb.name}</div>
-            <div class="meta">${pb.category}${pb.subcategory ? ' / ' + pb.subcategory : ''} &middot; ${(pb.prebuild_components || []).length} component${(pb.prebuild_components || []).length === 1 ? '' : 's'} &middot; ${money(total)} base cost</div>
+            <div class="name">${escapeHtml(pb.name)}</div>
+            <div class="meta">${escapeHtml(pb.category)}${pb.subcategory ? ' / ' + escapeHtml(pb.subcategory) : ''} &middot; ${(pb.prebuild_components || []).length} component${(pb.prebuild_components || []).length === 1 ? '' : 's'} &middot; ${money(total)} base cost</div>
           </div>
           <div>
             <button class="secondary pb-edit-btn" data-id="${pb.id}">Edit</button>
@@ -322,11 +322,11 @@
       let prebuildId = editingPrebuildId;
       if (editingPrebuildId) {
         const { error } = await supabaseClient.from('prebuilds').update(prebuildFields).eq('id', editingPrebuildId);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         await supabaseClient.from('prebuild_components').delete().eq('prebuild_id', editingPrebuildId);
       } else {
         const { data: inserted, error } = await supabaseClient.from('prebuilds').insert(prebuildFields).select().single();
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         prebuildId = inserted.id;
       }
 
@@ -334,7 +334,7 @@
         const { error: compErr } = await supabaseClient
           .from('prebuild_components')
           .insert(components.map(c => ({ ...c, prebuild_id: prebuildId })));
-        if (compErr) { msg.innerHTML = `<div class="error-box">${compErr.message}</div>`; return; }
+        if (compErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(compErr.message)}</div>`; return; }
       }
 
       msg.innerHTML = `<div class="success-box">Saved.</div>`;

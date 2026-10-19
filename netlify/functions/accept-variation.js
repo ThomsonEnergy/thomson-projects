@@ -22,7 +22,8 @@ exports.handler = async (event) => {
     if (!token) return { statusCode: 400, body: JSON.stringify({ error: 'token is required' }) };
     const signedName = String(name || '').trim();
     if (!signedName) return { statusCode: 400, body: JSON.stringify({ error: 'Please type your full name.' }) };
-    if (typeof signature !== 'string' || !/^data:image\/png;base64,/.test(signature) || signature.length > 600000) {
+    // A plain PNG data URL only: it is shown in an <img> on the variation page and staff pages.
+    if (typeof signature !== 'string' || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(signature) || signature.length > 600000) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Please draw your signature.' }) };
     }
 

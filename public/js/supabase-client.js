@@ -900,7 +900,7 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
       ${urls.length > 1 ? `<div style="position:absolute; bottom:${editable ? '70px' : '20px'}; left:0; right:0; text-align:center; color:#fff; font-size:13px;">${index + 1} / ${urls.length}</div>` : ''}
       ${editable ? `
         <div style="position:absolute; bottom:14px; left:50%; transform:translateX(-50%); display:flex; gap:8px; align-items:center; width:min(560px, 92vw);">
-          ${opts.onRename ? `<input id="lb-name" placeholder="Name this photo..." value="${String((opts.captions && opts.captions[index]) || '').replace(/"/g, '&quot;')}" style="flex:1; margin:0;" />` : '<span style="flex:1;"></span>'}
+          ${opts.onRename ? `<input id="lb-name" placeholder="Name this photo..." value="${escapeHtml((opts.captions && opts.captions[index]) || '')}" style="flex:1; margin:0;" />` : '<span style="flex:1;"></span>'}
           ${opts.onMarkup ? `<button type="button" id="lb-markup" style="white-space:nowrap;">Mark up</button>` : ''}
         </div>
         <div id="lb-msg" style="position:absolute; bottom:56px; left:0; right:0; text-align:center; color:#fca5a5; font-size:12px;"></div>` : ''}
@@ -1710,7 +1710,7 @@ function moneyOrHidden(n) {
 // whatever the row itself does.
 function mapsLink(address) {
   if (!address) return '';
-  return `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" rel="noopener" class="link-quiet" onclick="event.stopPropagation()">${address}</a>`;
+  return `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" rel="noopener" class="link-quiet" onclick="event.stopPropagation()">${escapeHtml(address)}</a>`;
 }
 
 // Dev Mode - a time-limited unlock (20 min) for the most dangerous admin
@@ -2033,11 +2033,16 @@ function loadNotificationBell() {
 // to whatever this logged-in staff member is allowed to see) to answer
 // with real numbers instead of guessing.
 // Shared HTML-escape for dropping any plain text (AI output, anything not
-// already known-safe) into an innerHTML template literal.
+// already known-safe) into an innerHTML template literal. Quotes are
+// escaped too, so it is also safe inside value="..." / data-x="..." attributes
+// (text like Olex "TPS" 2.5mm is not cut off).
 function escapeHtml(s) {
-  const div = document.createElement('div');
-  div.textContent = s == null ? '' : String(s);
-  return div.innerHTML;
+  return (s == null ? '' : String(s))
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // Proxies abn-lookup.js (which itself proxies abr.business.gov.au - needs
@@ -2601,12 +2606,12 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Confirm clock-out</h2>
-        <p class="subtitle" style="margin-bottom:12px;">${project ? projectRef(project) : 'General / Office'}</p>
+        <p class="subtitle" style="margin-bottom:12px;">${project ? escapeHtml(projectRef(project)) : 'General / Office'}</p>
         ${centres.length ? `
           <label style="margin-top:0">Stage(s) this time counts against</label>
           <div id="cko-cc-chips">${centres.map(c => `
             <button type="button" class="cc-chip ${chosenCentres.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
-              <span class="cc-chip-num">${c.number}</span> ${c.name}
+              <span class="cc-chip-num">${escapeHtml(c.number)}</span> ${escapeHtml(c.name)}
             </button>`).join('')}</div>
         ` : ''}
         <div id="cko-split-section" style="display:none; margin-top:10px;"></div>
@@ -2684,7 +2689,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       ${splitCentres.map((c, i) => `
         <div style="margin-bottom:10px;">
           <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:3px; gap:8px;">
-            <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${c.number}</strong> ${c.name}</span>
+            <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${escapeHtml(c.number)}</strong> ${escapeHtml(c.name)}</span>
             <span style="display:flex; align-items:center; gap:4px;">
               <input type="number" min="0" max="100" value="${splitPercentages[i]}" class="cko-split-number" data-index="${i}" style="width:50px; padding:3px 5px; text-align:right;" />%
               <span class="cko-split-label subtitle" data-index="${i}" style="min-width:60px; text-align:right;">${fmtDuration(Math.round(totalMin * splitPercentages[i] / 100) * 60000)}</span>
@@ -2967,7 +2972,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     overlay.innerHTML = `
       <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Before you go...</h2>
-        <p class="subtitle" style="margin-bottom:12px;">You're clocked out of ${projectRef(project)}.${opts.switchTo ? ` Next up: ${opts.switchTo.label}.` : ''}</p>
+        <p class="subtitle" style="margin-bottom:12px;">You're clocked out of ${escapeHtml(projectRef(project))}.${opts.switchTo ? ` Next up: ${escapeHtml(opts.switchTo.label)}.` : ''}</p>
 
         <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
           <label style="margin-top:0">Site photos</label>
@@ -2987,7 +2992,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         </div>
 
         <a href="/project.html?id=${project.id}" class="link-quiet" style="display:block; text-align:center; margin-bottom:10px; font-size:13px;">Go to job page</a>
-        <button type="button" id="cko-finish-btn" style="width:100%;">${opts.switchTo ? `Clock into ${opts.switchTo.label}` : 'Done'}</button>
+        <button type="button" id="cko-finish-btn" style="width:100%;">${opts.switchTo ? `Clock into ${escapeHtml(opts.switchTo.label)}` : 'Done'}</button>
       </div>`;
 
     let sigCanvas = null, sigCtx = null, hasSignature = false;
@@ -3088,7 +3093,7 @@ async function openJobSwitchModal(entry, onDone) {
     resultsEl.innerHTML = `
       ${label ? `<p class="subtitle" style="margin:0 0 4px; font-size:12px;">${label}</p>` : ''}
       <div style="border:1px solid var(--border); border-radius:8px;">
-        ${results.filter(p => p.id !== entry.project_id).map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p).replace(/"/g, '&quot;')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+        ${results.filter(p => p.id !== entry.project_id).map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${escapeHtml(projectRef(p))}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))} <span class="subtitle">${escapeHtml(p.client_name || '')}</span></div>`).join('')}
       </div>`;
     resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
       row.addEventListener('click', () => {
@@ -3357,7 +3362,7 @@ function openQuickJobPanel(onCreated) {
       const resultsEl = overlay.querySelector('#qj-client-results');
       if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - fill in the fields below to add them as a new client.</p>`; return; }
       resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-        ${data.map(c => `<div class="client-pick-row" data-id="${c.id}" data-name="${c.name}" data-email="${c.email || ''}" data-phone="${c.phone || ''}" data-address="${c.address || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${c.name} <span class="subtitle">${c.email || ''}</span></div>`).join('')}
+        ${data.map(c => `<div class="client-pick-row" data-id="${c.id}" data-name="${escapeHtml(c.name)}" data-email="${escapeHtml(c.email || '')}" data-phone="${escapeHtml(c.phone || '')}" data-address="${escapeHtml(c.address || '')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(c.name)} <span class="subtitle">${escapeHtml(c.email || '')}</span></div>`).join('')}
       </div>`;
       resultsEl.querySelectorAll('.client-pick-row').forEach(row => {
         row.addEventListener('click', () => {
@@ -3557,9 +3562,9 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
     <div class="card" style="max-width:460px; width:100%; max-height:88vh; overflow-y:auto;">
       <h2>Schedule inspection</h2>
       <label style="margin-top:0">Checklist</label>
-      <select id="si-template">${templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}</select>
+      <select id="si-template">${templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}</select>
       <label>Assign to</label>
-      <select id="si-staff">${(staff || []).map(s => `<option value="${s.id}">${s.full_name || 'Unnamed'}</option>`).join('')}</select>
+      <select id="si-staff">${(staff || []).map(s => `<option value="${s.id}">${escapeHtml(s.full_name || 'Unnamed')}</option>`).join('')}</select>
       <div class="grid cols-3">
         <div>
           <label>Date</label>
@@ -3614,7 +3619,7 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
     const labelFor = (a) => a.block_type === 'site_inspection' ? 'Inspection' + (a.projects?.name ? ': ' + a.projects.name : '')
       : a.projects ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects.name}${a.projects.job_number ? ' #' + a.projects.job_number : ''}`
       : `${{ training: 'Training', office: 'Office / admin', other: 'Other' }[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
-    previewEl.innerHTML = existing.map(a => `<p style="margin:2px 0;">${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${labelFor(a)}</p>`).join('');
+    previewEl.innerHTML = existing.map(a => `<p style="margin:2px 0;">${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${escapeHtml(labelFor(a))}</p>`).join('');
   }
   overlay.querySelector('#si-staff').addEventListener('change', refreshDayPreview);
   overlay.querySelector('#si-date').addEventListener('change', refreshDayPreview);
@@ -4158,7 +4163,7 @@ function wireSupplierPicker(overlay, suppliers, ids) {
       const matches = (suppliers || []).filter(s => s.name.toLowerCase().includes(q.toLowerCase()));
       if (matches.length) {
         resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-          ${matches.map(s => `<div class="supplier-pick-row" data-id="${s.id}" data-name="${s.name.replace(/"/g, '&quot;')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${s.name}</div>`).join('')}
+          ${matches.map(s => `<div class="supplier-pick-row" data-id="${s.id}" data-name="${escapeHtml(s.name)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(s.name)}</div>`).join('')}
         </div>`;
         resultsEl.querySelectorAll('.supplier-pick-row').forEach(row => {
           row.addEventListener('click', () => {
@@ -4291,13 +4296,13 @@ async function openStockPicker(stageRow) {
     resultsEl.innerHTML = [
       ...prebuildMatches.map(p => `
         <div class="stock-pick-row" data-kind="prebuild" data-id="${p.id}" style="padding:10px; border-radius:8px; cursor:pointer; border-bottom:0.5px solid var(--border);">
-          <div style="font-weight:600;">${p.name} <span class="subtitle" style="font-weight:400;">Prebuild</span></div>
-          <div class="subtitle" style="font-size:12px;">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''}</div>
+          <div style="font-weight:600;">${escapeHtml(p.name)} <span class="subtitle" style="font-weight:400;">Prebuild</span></div>
+          <div class="subtitle" style="font-size:12px;">${escapeHtml(p.category)}${p.subcategory ? ' / ' + escapeHtml(p.subcategory) : ''}</div>
         </div>`),
       ...materialMatches.map(m => `
         <div class="stock-pick-row" data-kind="material" data-id="${m.id}" style="padding:10px; border-radius:8px; cursor:pointer; border-bottom:0.5px solid var(--border);">
-          <div style="font-weight:600;">${m.name} <span class="subtitle" style="font-weight:400;">Material - ${money(m.cost_price)}</span></div>
-          <div class="subtitle" style="font-size:12px;">${m.category || ''}</div>
+          <div style="font-weight:600;">${escapeHtml(m.name)} <span class="subtitle" style="font-weight:400;">Material - ${money(m.cost_price)}</span></div>
+          <div class="subtitle" style="font-size:12px;">${escapeHtml(m.category || '')}</div>
         </div>`),
     ].join('');
     resultsEl.querySelectorAll('.stock-pick-row').forEach(row => {
@@ -4535,9 +4540,9 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
 
   if (match) {
     overlay.querySelector('.card').innerHTML = `
-      <h2>Is this ${match.name}?</h2>
-      <p class="subtitle" style="margin-bottom:14px;">${matchFields.ourAccountNumber ? `Matched by account number ${matchFields.ourAccountNumber}.` : (matchFields.abn ? `Matched by ABN.` : `The document says "${extractedSupplierName}".`)}</p>
-      <button id="rs-yes-btn">Yes, that's ${match.name}</button>
+      <h2>Is this ${escapeHtml(match.name)}?</h2>
+      <p class="subtitle" style="margin-bottom:14px;">${matchFields.ourAccountNumber ? `Matched by account number ${matchFields.ourAccountNumber}.` : (matchFields.abn ? `Matched by ABN.` : `The document says "${escapeHtml(extractedSupplierName)}".`)}</p>
+      <button id="rs-yes-btn">Yes, that's ${escapeHtml(match.name)}</button>
       <button type="button" class="secondary" id="rs-no-btn">No, pick a different supplier</button>`;
     overlay.querySelector('#rs-yes-btn').addEventListener('click', () => proceedTo(match.id));
     overlay.querySelector('#rs-no-btn').addEventListener('click', () => showManualPick());
@@ -4549,7 +4554,7 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
     const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
     overlay.querySelector('.card').innerHTML = `
       <h2>Pick the supplier</h2>
-      <select id="rs-manual-select"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+      <select id="rs-manual-select"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select>
       <p class="subtitle" style="margin:10px 0;">Or</p>
       <button type="button" class="secondary" id="rs-new-instead-btn">This is actually a new supplier</button>
       <div style="margin-top:14px;"><button id="rs-manual-continue-btn">Continue</button></div>`;
@@ -5255,7 +5260,7 @@ function openBackorderPanel(lineItem, onComplete) {
   overlay.innerHTML = `
     <div class="card" style="max-width:360px; width:100%;">
       <h2>Backorder</h2>
-      <p class="subtitle" style="margin-bottom:10px;">${lineItem.description} x${lineItem.quantity}</p>
+      <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}</p>
       <label style="margin-top:0">Expected date</label>
       <input type="date" id="bo-eta" value="${lineItem.backorder_eta || ''}" />
       <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -5384,8 +5389,8 @@ function buildMaterialSearchRow(materials, containerId) {
     const materialMatches = materials.filter(m => matchesAllWords(m.name, q)).slice(0, 8);
     if (!prebuildMatches.length && !materialMatches.length) { resultsEl.style.display = 'none'; return; }
     resultsEl.innerHTML = [
-      ...prebuildMatches.map(p => `<div class="po-line-pick" data-kind="prebuild" data-id="${p.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${p.name} <span class="subtitle">(Prebuild - adds each material)</span></div>`),
-      ...materialMatches.map(m => `<div class="po-line-pick" data-kind="material" data-id="${m.id}" data-name="${m.name}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${m.name} <span class="subtitle">(${money(m.cost_price)})</span></div>`),
+      ...prebuildMatches.map(p => `<div class="po-line-pick" data-kind="prebuild" data-id="${p.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(p.name)} <span class="subtitle">(Prebuild - adds each material)</span></div>`),
+      ...materialMatches.map(m => `<div class="po-line-pick" data-kind="material" data-id="${m.id}" data-name="${escapeHtml(m.name)}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(m.name)} <span class="subtitle">(${money(m.cost_price)})</span></div>`),
     ].join('');
     resultsEl.style.display = 'block';
     resultsEl.querySelectorAll('.po-line-pick').forEach(pick => {
@@ -5515,8 +5520,8 @@ async function createPoFollowUpTask(projectId, poNumber, supplierName) {
 function activityEntryHtml(text, e) {
   return `
     <div class="activity-entry">
-      <div>${text}</div>
-      <div class="subtitle">${e.profiles?.full_name || 'Someone'} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+      <div>${escapeHtml(text)}</div>
+      <div class="subtitle">${escapeHtml(e.profiles?.full_name || 'Someone')} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
     </div>`;
 }
 
@@ -5863,7 +5868,7 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
           <span>${g.label}</span>
           <span style="text-align:right; font-weight:400;">${g.map ? `${g.map.xero_account_code} (${g.map.xero_tax_type})` : '<span style="color:var(--red);">Not mapped - set this in Settings &gt; Xero Mapping</span>'}</span>
         </div>
-        ${g.lines.length > 1 ? g.lines.map(l => `<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); padding-left:12px;"><span>${l.stageName}</span><span>${money(l.amount)}</span></div>`).join('') : ''}
+        ${g.lines.length > 1 ? g.lines.map(l => `<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); padding-left:12px;"><span>${escapeHtml(l.stageName)}</span><span>${money(l.amount)}</span></div>`).join('') : ''}
         <div style="display:flex; justify-content:space-between; font-size:13px; ${g.lines.length > 1 ? 'border-top:1px solid var(--border); margin-top:2px; padding-top:2px;' : ''}"><span>${g.lines.length === 1 ? g.lines[0].stageName : 'Subtotal'}</span><span>${money(total)}</span></div>
       </div>`;
   }).join('');
