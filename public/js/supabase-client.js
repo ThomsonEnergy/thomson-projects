@@ -2666,6 +2666,20 @@ function sydneyMidnightUtc(dateKey) {
   const guess = new Date(naive.getTime() - sydneyOffsetMinutesAt(naive) * 60000);
   return new Date(naive.getTime() - sydneyOffsetMinutesAt(guess) * 60000);
 }
+// The day a tradie is next back on site: the day after dateKey (a Sydney
+// YYYY-MM-DD), with Saturday and Sunday rolled to Monday. Works at UTC
+// noon so daylight saving cannot shift the date.
+function nextWorkingDayKey(dateKey) {
+  const d = new Date(`${dateKey}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  if (d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 2);
+  else if (d.getUTCDay() === 0) d.setUTCDate(d.getUTCDate() + 1);
+  return sydneyDateKey(d);
+}
+// 'Tue 20 Oct' for a YYYY-MM-DD key.
+function dayKeyLabel(dateKey) {
+  return new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', '');
+}
 function splitAtSydneyMidnight(clockInIso, clockOutIso) {
   const segments = [];
   let cursor = new Date(clockInIso);
@@ -3163,22 +3177,27 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     else await finishAndMaybeSwitch();
   }
 
-  // "Complete" moves the job on to Client Handover. "Not complete - back
-  // tomorrow" is the routine, no-note-needed case for an ordinary
+  // "Complete" moves the job on to Client Handover. "Not complete, back
+  // <next working day>" is the routine, no-note-needed case for an ordinary
   // multi-day job - it auto-books the same person on the same job for
-  // the next calendar day and flags (doesn't block) if that slot's
-  // already got something else on it. This is separate from the
-  // Job Not Complete a PM can still set by hand from the pipeline board
-  // for something genuinely stuck, not just "see you tomorrow".
+  // the next working day (Sat/Sun roll to Mon) and flags (doesn't block)
+  // if that slot's already got something else on it, keeping the warning
+  // up until Continue. The quiet "Not finished, do not book me" link sets
+  // Job Not Complete with no booking, for the PM to schedule. This is
+  // separate from the Job Not Complete a PM can still set by hand from
+  // the pipeline board for something genuinely stuck.
   function renderStepJobStatus() {
+    const backKey = nextWorkingDayKey(sydneyDateKey(new Date(state.outIso)));
+    const backLabel = dayKeyLabel(backKey);
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>How's the job?</h2>
-        <p class="subtitle" style="margin-bottom:12px;">${projectRef(project)}</p>
-        <div style="display:flex; flex-direction:column; gap:10px;">
+        <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))}</p>
+        <div id="cko-job-status-buttons" style="display:flex; flex-direction:column; gap:10px;">
           <button type="button" id="cko-job-complete">Complete</button>
-          <button type="button" class="secondary" id="cko-job-not-complete">Not complete - back tomorrow</button>
+          <button type="button" class="secondary" id="cko-job-not-complete">Not complete, back ${backLabel}</button>
         </div>
+        <a href="#" id="cko-job-no-book" class="link-quiet" style="display:block; text-align:center; font-size:13px; padding:10px; margin-top:6px;">Not finished, do not book me</a>
         <div id="cko-job-status-msg" style="margin-top:10px;"></div>
       </div>`;
 
@@ -3198,45 +3217,66 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         return;
       }
       await logActivity('project', project.id, 'job_complete', 'Marked complete at clock-out - moved to Client Handover');
+      state.markedComplete = true;
       renderStep3();
     });
 
     overlay.querySelector('#cko-job-not-complete').addEventListener('click', async () => {
       const msgEl = overlay.querySelector('#cko-job-status-msg');
       const btn = overlay.querySelector('#cko-job-not-complete');
+      const label = btn.textContent;
       btn.disabled = true;
+      btn.textContent = 'Booking...';
       try {
         const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
         if (ncErr) throw ncErr;
 
-        // Sydney day after the clock-out, via UTC noon so it can't drift.
-        const tomorrow = new Date(`${sydneyDateKey(new Date(state.outIso))}T12:00:00Z`);
-        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-        const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-
-        const { data: existingTomorrow } = await supabaseClient
+        const { data: existingOnBackDay } = await supabaseClient
           .from('schedule_assignments')
           .select('id, project_id, projects(name, job_number)')
           .eq('staff_id', entry.staff_id)
-          .eq('assignment_date', tomorrowStr);
-        const doubleBooked = (existingTomorrow || []).filter(a => a.project_id !== project.id);
+          .eq('assignment_date', backKey);
+        const doubleBooked = (existingOnBackDay || []).filter(a => a.project_id !== project.id);
 
         await supabaseClient.from('schedule_assignments').insert({
           staff_id: entry.staff_id, project_id: project.id, block_type: 'job',
-          assignment_date: tomorrowStr, start_time: '07:00', end_time: '15:00',
+          assignment_date: backKey, start_time: '07:00', end_time: '15:00',
         });
-        await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - booked back in for ${tomorrowStr}`);
+        await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - booked back in for ${backKey}`);
 
         if (doubleBooked.length) {
-          await logActivity('project', project.id, 'schedule_conflict', `Also booked on ${tomorrowStr} against: ${doubleBooked.map(a => a.projects?.name || 'another job').join(', ')}`);
-          msgEl.innerHTML = `<div class="error-box">Heads up - you're already booked on something else for ${tomorrowStr} too. Let your PM know.</div>`;
-          setTimeout(renderStep3, 2500);
+          await logActivity('project', project.id, 'schedule_conflict', `Also booked on ${backKey} against: ${doubleBooked.map(a => a.projects?.name || 'another job').join(', ')}`);
+          const others = doubleBooked.map(a => a.projects ? projectRef(a.projects) : 'another job').join(', ');
+          // Hide the choices: the booking is already in, nothing else to tap.
+          overlay.querySelector('#cko-job-status-buttons').style.display = 'none';
+          overlay.querySelector('#cko-job-no-book').style.display = 'none';
+          msgEl.innerHTML = `<div class="error-box">Heads up: you're booked back on this job for ${backLabel}, but you're already booked that day on ${escapeHtml(others)} too. Let your PM know.</div><button type="button" id="cko-job-status-continue" style="width:100%; margin-top:10px;">Continue</button>`;
+          overlay.querySelector('#cko-job-status-continue').addEventListener('click', renderStep3);
         } else {
           renderStep3();
         }
       } catch (err) {
-        msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        btn.textContent = label;
         btn.disabled = false;
+      }
+    });
+
+    // Not finished, but leave the booking to the PM: no schedule row.
+    // Does not set state.markedComplete, so no CCEW ask follows.
+    overlay.querySelector('#cko-job-no-book').addEventListener('click', async (e) => {
+      e.preventDefault();
+      const link = e.currentTarget;
+      const msgEl = overlay.querySelector('#cko-job-status-msg');
+      link.style.pointerEvents = 'none'; link.style.opacity = '0.6';
+      try {
+        const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+        if (ncErr) throw ncErr;
+        await logActivity('project', project.id, 'job_not_complete', 'Not complete at clock-out - not rebooked, PM to schedule');
+        renderStep3();
+      } catch (err) {
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        link.style.pointerEvents = ''; link.style.opacity = '';
       }
     });
   }
@@ -3257,14 +3297,24 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   }
 
   function renderStep3() {
+    // Only after Complete actually moved the job, and only while no CCEW
+    // (or not-required reason) is on file, same test as the job page.
+    const askCcew = state.markedComplete && project && project.job_number && !project.ccew_file_path && !project.ccew_not_required_reason;
     overlay.innerHTML = `
       <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Before you go...</h2>
         <p class="subtitle" style="margin-bottom:12px;">You're clocked out of ${escapeHtml(projectRef(project))}.${opts.switchTo ? ` Next up: ${escapeHtml(opts.switchTo.label)}.` : ''}</p>
 
+        ${askCcew ? `
+        <div id="cko-ccew-block" style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
+          <label style="margin-top:0">CCEW (optional, while you have it in hand)</label>
+          <label class="btn secondary" style="width:100%; justify-content:center; margin:0; cursor:pointer;">&#128247; Take photo of the CCEW<input type="file" id="cko-ccew-file" accept="image/*" capture="environment" style="display:none;" /></label>
+          <div id="cko-ccew-msg"></div>
+        </div>` : ''}
+
         <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
           <label style="margin-top:0">Site photos</label>
-          <input type="file" id="cko-photo-file" accept="image/*" multiple capture="environment" />
+          <input type="file" id="cko-photo-file" accept="image/*" multiple />
           <div id="cko-photo-msg"></div>
         </div>
 
@@ -3313,6 +3363,43 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     // "Upload" click that staff often skipped, assuming picking the file
     // was already the whole job done.
     wireSitePhotoInput(overlay.querySelector('#cko-photo-file'), overlay.querySelector('#cko-photo-msg'), { projectId: project.id, staffId: entry.staff_id });
+
+    // CCEW photo: same store as the job page's Compliance - CCEW card
+    // (ccew/<project id> in project-documents, projects.ccew_file_path).
+    const ccewInput = overlay.querySelector('#cko-ccew-file');
+    if (ccewInput) ccewInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const msg = overlay.querySelector('#cko-ccew-msg');
+      const labelBtn = ccewInput.parentElement;
+      const labelText = labelBtn.firstChild.textContent;
+      ccewInput.disabled = true;
+      labelBtn.style.opacity = '0.5';
+      labelBtn.firstChild.textContent = 'Uploading...';
+      msg.innerHTML = '';
+      try {
+        const path = await uploadPrivateFile(file, `ccew/${project.id}`);
+        // Never overwrite one someone uploaded from the job page meanwhile.
+        const { data: upd, error } = await supabaseClient.from('projects').update({ ccew_file_path: path, ccew_not_required_reason: null }).eq('id', project.id).is('ccew_file_path', null).select('id');
+        if (error) throw error;
+        if (!upd || !upd.length) {
+          msg.innerHTML = `<div class="success-box">A CCEW was already uploaded for this job, nothing more to do.</div>`;
+          labelBtn.style.display = 'none';
+          return;
+        }
+        project.ccew_file_path = path;
+        await logActivity('project', project.id, 'ccew_uploaded', 'CCEW photo uploaded at clock-out');
+        labelBtn.style.display = 'none';
+        msg.innerHTML = `<div class="success-box">CCEW uploaded. You can view or replace it under Compliance - CCEW on the job page.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message || String(err))}</div>`;
+      } finally {
+        ccewInput.disabled = false;
+        ccewInput.value = '';
+        labelBtn.style.opacity = '';
+        labelBtn.firstChild.textContent = labelText;
+      }
+    });
 
     overlay.querySelector('#cko-note-save-btn').addEventListener('click', async () => {
       const msg = overlay.querySelector('#cko-note-msg');
