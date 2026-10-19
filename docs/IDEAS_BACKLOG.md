@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 18 Oct 2026 (team chat)
+Last updated 19 Oct 2026 (user-friendliness review)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -19,6 +19,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
+| 17 | User-friendliness upgrades (whole-app review) | Suggestions only, waiting on owner's pick (`docs/UX_REVIEW.md`) | N | None |
 
 ## High lead time, start now
 
@@ -442,3 +443,31 @@ Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261030000000).
 ## 16. Build rule checks in `npm run check` (decided against, 19 Oct 2026)
 
 Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/BUG_REVIEW.md`) after each big chunk of features is added; the build rules in `CLAUDE.md` guide each build.
+
+## 17. User-friendliness upgrades (whole-app review, 19 Oct 2026)
+
+**Status:** suggestions only, waiting on the owner's pick. Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
+
+**Do first (top ten, best first):**
+62. Inputs are 14px so iPhones zoom on every tap
+93. Every page blocks on an unpinned CDN copy of supabase-js
+2. My Day shows Clock in before it knows you are clocked in
+31. Site address and client phone never shown on the job page
+33. Word, Excel and knowledge files do not open on iPhone (window.open after await)
+19. CCEW and Installed equipment cards are hidden on the day the job is finished
+49. Save buttons stay live while saving, double taps make duplicates
+35. Site photo upload: no count, a failure loses the batch
+123. Invoices list has no unpaid filter or search
+5. Field staff cannot report an incident from site
+
+**Themes (item numbers in docs/UX_REVIEW.md):**
+- Clock in, My Day, schedule, timesheets and tasks: items 1 to 18
+- Finishing a job on site: CCEW and installed equipment: items 19 to 30
+- Job page: items 31 to 48
+- Feedback and saving: items 49 to 61
+- Phone layout, tap targets, forms and keyboards: items 62 to 82
+- Navigation and findability: items 83 to 92
+- Speed: items 93 to 109
+- Invoicing, Xero and payroll: items 110 to 119
+- Office and public pages: quotes, leads, clients, POs, stock, price lists, STCs, assets and licences: items 120 to 146
+- Login, policy update, Chat, Inbox, Settings and HR: items 147 to 168
