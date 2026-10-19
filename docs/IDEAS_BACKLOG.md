@@ -488,3 +488,14 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 
 One migration (tables, indexes, RLS to authenticated for reads, server-only writes, search function with fixed search path). Cost: a few cents a page read as an image, well under $20 for all four standards.
 
+
+## 19. Email drafts in the owner's own tone, answers not recaps (planned 19 Oct 2026)
+
+Why: Postie's drafts sound generic and parrot the sender's email back before answering. The owner's sent mail is already in TEops (`emails` rows with `direction = 'outbound'`, 60 days of backfill, about 200 for jasper@ and 50 for sales@), so the agent can learn the tone without any new Gmail access.
+
+1. **Learn from sent mail.** A server function pulls a mailbox's outbound emails from TEops, strips signatures, quoted text and forwards, keeps the top 80 real replies, and asks Opus 5.5 for a short style guide (greeting, sign off, sentence length, how we say no, how prices and travel are quoted, usual phrases, never-dos) plus 6 to 8 real replies verbatim, each paired with the email it answered. Saved per mailbox: `mailboxes.writing_style`, `mailboxes.writing_style_learned_at` (one small migration).
+2. **Settings > Email.** "Learn from my sent mail" button, the guide in an editable text box, Refresh. sales@ has its own guide (Admin edits). Re-learned every 30 days.
+3. **Drafting prompt.** Never repeat or summarise what they wrote; first sentence is the answer; one line per question asked; nothing asked means say what happens next; three to six sentences unless more is truly needed. The style guide and paired examples go into the prompt. Square bracket gaps stay, one gap in the answer line, no hedge paragraph.
+4. **Later (needs draft edit tracking):** learn from edits. Keep the AI draft and what was actually sent, feed the differences into the next refresh.
+
+Waiting on owner's yes. Best model: Opus 5.5.
