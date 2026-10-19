@@ -524,17 +524,17 @@ Built 19 Oct 2026, migration 20261103030000. jasper@ set as the company voice in
 
 ## 21. Schedule tab, staff and client booking emails, client picks a time (planned 19 Oct 2026, replaces the first item 21 plan)
 
-Why: the owner books jobs tentatively about 3 weeks out and tells the staff, then confirms with the client about 3 days before once the job is sure to go ahead; moves and cancels need the same; and the client should be able to pick from time options we offer.
+Why: the owner books jobs tentatively about 3 weeks out (staff see it in My Day, no staff email), then confirms with the client about 3 days before once the job is sure to go ahead; moves and cancels need the same; and the client should be able to pick from time options we offer.
 
-1. **Schedule tab** on every job: bookings by day (who, time, "Staff told <date>" / "Staff not told", "Client informed <date>" green / "Client not informed" amber), Move and Cancel per day; buttons Book people (current Book form), Email staff, Email client booking, Ask client to pick a time; time options sent (what, picked or not, Copy link, Withdraw); every schedule email sent (date, sender, link to the email).
-2. **Email staff**: each booked person gets a "tentatively booked" email (job number and name, dates, times, address, who else). Marks "Staff told".
+1. **Schedule tab** on every job: bookings by day (who, time, "Client informed <date>" green / "Client not informed" amber), Move and Cancel per day; buttons Book people (current Book form), Email client booking, Ask client to pick a time; time options sent (what, picked or not, Copy link, Withdraw); every schedule email sent (date, sender, link to the email).
+2. **No staff emails** (owner, 19 Oct 2026): staff see their bookings in My Day as now. My Day and Schedule mark a booking "Tentative" until the client is informed.
 3. **Email client booking**: editable email (job name and number, when, where, who) to the job contact, else the job client email, from sales@ under the sender's name, tagged to the job. Marks "Client informed".
 4. **7am reminder** (phone notification) to whoever made a booking that starts within 3 days with the client still not informed. Bookings record who made them from now on.
-5. **Move**: new date or time, tick boxes "Email the client the new time" and "Email the staff" (ticked if they were told before). **Cancel**: tick boxes "Email the client" and "Offer new times" (opens the time options form with the same people and times).
-6. Book form gets "Email staff" and "Email client" tick boxes too.
+5. **Move**: new date or time, tick box "Email the client the new time" (ticked if the client was informed before). **Cancel**: tick boxes "Email the client" and "Offer new times" (opens the time options form with the same people and times).
+6. Book form gets an "Email the client" tick box too.
 7. **Ask client to pick a time**: people, time of day, number of days, 2 to 6 date options; options clashing with a chosen person's bookings are greyed out ("Guy is booked 7:00 to 3:30"). The client gets a private link to a simple page (job number and name, address, options as buttons, "None of these work" with a message to the office). Picking one: server re-checks the people are free and books them all or nothing (already "Client informed"), confirmation email to the client, phone notification to the person who sent it, other options close; a slot taken meanwhile is greyed out and they pick again.
-8. Schedule page: bookings with the client not informed get a dashed outline.
-9. One migration: `schedule_assignments` gets staff told, client informed and made by; new tables for time options sent to clients and the schedule email log (fast RLS, FK indexes). The client page is the only new public page, through one server function with the private link as its check.
+8. Schedule page: bookings with the client not informed get a dashed outline and "Tentative".
+9. One migration: `schedule_assignments` gets client informed and made by; new tables for time options sent to clients and the schedule email log (fast RLS, FK indexes). The client page is the only new public page, through one server function with the private link as its check.
 
 Later: nothing yet.
 
