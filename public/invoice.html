@@ -108,7 +108,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=98"></script>
+  <script src="/js/supabase-client.js?v=99"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -223,10 +223,12 @@
       const detailRows = [
         !isStandalone && project.job_number ? ['Job No.', `J${project.job_number}`] : null,
         !isStandalone && project.quote_number ? ['Quote No.', `Q${project.quote_number}`] : null,
-        project.client_address ? ['Site', project.client_address] : null,
+        !isStandalone && project.client_address ? ['Site', project.client_address] : null,
         !isStandalone && project.name ? ['Job Name', project.name] : null,
       ].filter(Boolean);
 
+      // Bill to: the client's office / billing address; the job site is in the details rows.
+      const billAddress = project.client_office_address || project.client_address;
       const sheetHtml = (first) => `
         <section class="inv-sheet">
           ${isOverdue ? '<div class="inv-stamp">OVERDUE</div>' : (isPaid ? '<div class="inv-stamp paid">PAID</div>' : '')}
@@ -238,7 +240,7 @@
             <div class="inv-contact">${contactLines.join('<br>')}</div>
           </div>
           <div class="inv-meta-row">
-            <div class="inv-bill">${first ? `${esc(project.client_name || '')}${project.client_address ? '<br>' + esc(project.client_address).replace(/,\s*/g, '<br>') : ''}` : ''}</div>
+            <div class="inv-bill">${first ? `${esc(project.client_name || '')}${billAddress ? '<br>' + esc(billAddress).replace(/,\s*/g, '<br>') : ''}` : ''}</div>
             <div class="inv-right">
               <div class="inv-strip">
                 <div><div class="k">Please pay by</div><div class="v">${dueDate ? dateText(dueDate) : 'On receipt'}</div></div>
