@@ -66,3 +66,9 @@ Progress on the outside accounts that gate SMS/calls (backlog item 7) and the na
 - sales@ Gmail filter: To invoice@, skip the inbox, label `Supplier Bills`, never spam.
 - TEops sends supplier queries FROM invoice@ through the sales@ connection. Needs invoice@ as a "Send mail as" address on sales@ (Gmail, signed in as sales@: Settings > See all settings > Accounts > Send mail as > Add another email address > invoice@thomsonenergy.com.au (leave "Treat as an alias" ticked), verify with the code emailed to invoice@). Until that is done Gmail sends them as sales@. Status: owner to do (18 Oct 2026).
 
+
+## Netlify (hosting, team "Thomson Energy", project `thomsonprojects`)
+
+- Pro plan, billed in credits. **19 Oct 2026: the credits ran out mid afternoon, so every merge to `main` after 3:09pm (PRs #85 to #104) was skipped and the live site stayed on the old version for about 6 hours.** The owner upgraded to 5,000 credits that night. Netlify does not build the skipped commits by itself: the next merge to `main` (or Deploys > Trigger deploy > Deploy project) builds the latest code.
+- If the site stops picking up merges: open https://app.netlify.com/projects/thomsonprojects/deploys and look at the top rows and any banner. "Skipped" or a credits banner means credits; "Failed" means read the log. Check credits under Team > Billing before anything else.
+- Each deploy uses credits, so docs-only changes are merged in one go where possible rather than one PR per line.
