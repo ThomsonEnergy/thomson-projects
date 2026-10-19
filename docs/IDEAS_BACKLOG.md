@@ -19,7 +19,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
-| 17 | User-friendliness upgrades (whole-app review) | Suggestions only, waiting on owner's pick (`docs/UX_REVIEW.md`) | N | None |
+| 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; delivery 1 (top ten) LIVE 19 Oct 2026, next delivery 2 (`docs/UX_REVIEW.md`) | N | None |
 | 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Planned 19 Oct 2026, waiting on owner's yes | N | None |
 
 ## High lead time, start now
@@ -447,7 +447,7 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 
 ## 17. User-friendliness upgrades (whole-app review, 19 Oct 2026)
 
-**Status:** suggestions only, waiting on the owner's pick. Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
+**Status:** owner said yes to building all 168 (19 Oct 2026). Delivery 1 (the top ten) LIVE 19 Oct 2026; next is delivery 2. Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
 
 **Do first (top ten, best first):**
 62. Inputs are 14px so iPhones zoom on every tap
@@ -460,6 +460,8 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 35. Site photo upload: no count, a failure loses the batch
 123. Invoices list has no unpaid filter or search
 5. Field staff cannot report an incident from site
+
+**Delivery plan (agreed 19 Oct 2026):** build all 168, in about six deliveries by theme so each lands and gets tested on its own: (1) the top ten plus the shared pieces later items reuse; (2) items 1 to 30 (clock in, My Day, schedule, tasks, finishing a job); (3) 31 to 82 (job page, feedback and saving, phone layout); (4) 83 to 109 (navigation, speed); (5) 110 to 146 (invoicing and Xero, office and public pages); (6) 147 to 168 (login, chat, inbox, settings, HR). Delivery 1 LIVE 19 Oct 2026 (migration 20261104000000_report_incident.sql for item 5). Next: delivery 2, plan then owner's yes.
 
 **Themes (item numbers in docs/UX_REVIEW.md):**
 - Clock in, My Day, schedule, timesheets and tasks: items 1 to 18
@@ -488,3 +490,14 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 
 One migration (tables, indexes, RLS to authenticated for reads, server-only writes, search function with fixed search path). Cost: a few cents a page read as an image, well under $20 for all four standards.
 
+
+## 19. Email drafts in the owner's own tone, answers not recaps (built 19 Oct 2026)
+
+Why: Postie's drafts sound generic and parrot the sender's email back before answering. The owner's sent mail is already in TEops (`emails` rows with `direction = 'outbound'`, 60 days of backfill, about 200 for jasper@ and 50 for sales@), so the agent can learn the tone without any new Gmail access.
+
+1. **Learn from sent mail.** A server function pulls a mailbox's outbound emails from TEops, strips signatures, quoted text and forwards, keeps the top 80 real replies, and asks Opus 5.5 for a short style guide (greeting, sign off, sentence length, how we say no, how prices and travel are quoted, usual phrases, never-dos) plus 6 to 8 real replies verbatim, each paired with the email it answered. Saved per mailbox: `mailboxes.writing_style`, `mailboxes.writing_style_learned_at` (one small migration).
+2. **Settings > Email.** "Learn from my sent mail" button, the guide in an editable text box, Refresh. sales@ has its own guide (Admin edits). Re-learned every 30 days.
+3. **Drafting prompt.** Never repeat or summarise what they wrote; first sentence is the answer; one line per question asked; nothing asked means say what happens next; three to six sentences unless more is truly needed. The style guide and paired examples go into the prompt. Square bracket gaps stay, one gap in the answer line, no hedge paragraph.
+4. **Later (needs draft edit tracking):** learn from edits. Keep the AI draft and what was actually sent, feed the differences into the next refresh.
+
+Built 19 Oct 2026, migration 20261103020000: items 1 to 3 as above (Settings > Email Agent, tab now visible to everyone, auto replies card still pricing roles only). Item 4 (learn from edits) stays an idea. Detail in `docs/PROJECT_SPEC.md` A18.

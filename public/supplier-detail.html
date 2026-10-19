@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=96"></script>
+  <script src="/js/supabase-client.js?v=97"></script>
   <script src="/js/theme.js"></script>
   <script>
     const supplierId = new URLSearchParams(window.location.search).get('id');
@@ -161,11 +161,19 @@
       renderActivityLog('supplier', supplier.id, 'supplier-activity-log');
       document.querySelectorAll('.approve-bill-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
+          const label = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Approving...';
+          try {
           const { error } = await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('id', btn.dataset.id);
           if (error) { alert(error.message); return; }
           const bill = bills.find(b => b.id === btn.dataset.id);
           await logActivity('supplier', supplierId, 'bill_approved', `Bill ${bill?.bill_number || ''} approved for payment`);
           await loadSupplier();
+          } finally {
+            btn.disabled = false;
+            btn.textContent = label;
+          }
         });
       });
 
@@ -475,6 +483,11 @@
       overlay.querySelector('#ed-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#ed-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#ed-msg');
+        const btn = overlay.querySelector('#ed-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const { error } = await supabaseClient.from('suppliers').update({
           name: overlay.querySelector('#ed-name').value.trim(),
           kind: overlay.querySelector('#ed-kind').value,
@@ -496,6 +509,10 @@
         await logActivity('supplier', supplier.id, 'updated', `Supplier "${overlay.querySelector('#ed-name').value.trim()}" updated`);
         overlay.remove();
         await loadSupplier();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 

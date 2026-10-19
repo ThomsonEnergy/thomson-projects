@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -56,7 +56,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=96"></script>
+  <script src="/js/supabase-client.js?v=97"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allMaterials = [];
@@ -223,6 +223,11 @@
         const msg = overlay.querySelector('#mat-msg');
         const name = overlay.querySelector('#mat-name').value.trim();
         if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
+        const btn = overlay.querySelector('#mat-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const quantityValue = parseFloat(overlay.querySelector('#mat-qty').value) || 0;
         // only the Warehouse row, and only when the person changed it (vehicles are counted separately)
         const warehouseChanged = quantityValue !== startWarehouseQty;
@@ -248,6 +253,10 @@
         }
         overlay.remove();
         await loadMaterials();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
 
       if (material) {
@@ -296,6 +305,10 @@
       overlay.querySelector('#csp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#csp-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#csp-msg');
+        const btn = overlay.querySelector('#csp-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
 
         try {
           const { supplierId, supplierName } = await resolveSupplier();
@@ -324,6 +337,9 @@
           await loadStockPOs();
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
         }
       });
     }

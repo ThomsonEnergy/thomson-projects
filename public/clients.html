@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
 </head>
 <body>
@@ -51,6 +51,7 @@
                 <button id="new-client-btn">+ New client</button>
               </div>
             </div>
+            <div id="clients-list-msg"></div>
             <div id="clients-list"><p class="subtitle">Loading...</p></div>
           </div>
         </div>
@@ -167,7 +168,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=96"></script>
+  <script src="/js/supabase-client.js?v=97"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allClients = [];
@@ -422,7 +423,11 @@
       const msg = document.getElementById('save-client-msg');
       const name = document.getElementById('c-name').value.trim();
       if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
-
+      const btn = document.getElementById('save-client-btn');
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      try {
       const clientFields = {
         name,
         email: document.getElementById('c-email').value.trim(),
@@ -463,6 +468,13 @@
 
       await loadClients();
       document.querySelector('.settings-tab[data-panel="list"]').click();
+      const listMsg = document.getElementById('clients-list-msg');
+      listMsg.innerHTML = '<div class="success-box">Client saved.</div>';
+      setTimeout(() => { listMsg.innerHTML = ''; }, 4000);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
     });
 
     document.getElementById('delete-client-btn').addEventListener('click', async () => {
