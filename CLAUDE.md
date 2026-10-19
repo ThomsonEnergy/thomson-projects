@@ -53,6 +53,7 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 - Compress images: static images squashed before committing; every upload goes through `compressImage()`.
 - Keep the app Capacitor-ready (native iPhone wrap is planned): no web-only tricks that break inside a native WebView; anything that must work offline uses save-locally-then-sync (local queue, temp IDs, timestamps at the moment of the action).
 - If something breaks after a deploy, check the Netlify deploy status and the Supabase migration status first.
+- After each big chunk of features, run a whole-site review pass (read only, every area, like `docs/BUG_REVIEW.md` on 19 Oct 2026), list what it finds worst first, then fix in consolidated deliveries. The owner chose these manual passes over automatic rule checks.
 
 ## Secrets
 
