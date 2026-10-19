@@ -12,7 +12,7 @@ AI agents run as much admin as possible. Jasper directs them from his phone and 
 - **Claude API** (pay-as-you-go via Claude Console, separate from the Pro plan) powers the agents. Monthly spend caps and alerts from day one.
 - Build and ship with Claude Code cloud sessions from phone or laptop. Claude Projects (TE Projects) is for planning and reads `docs/` via GitHub.
 
-**Already live and reused:** Xero (accounting + payroll), Web Push notifications (`sw.js`, `notifications.js`, `send-notifications.js`, per-type prefs, badge), shared sales@ Gmail inbox (`sync-gmail` every 5 min), company and per-job feeds, Sparky AI chat (`ai-chat.js`), meeting transcription (`transcribe-meeting.js`, AssemblyAI).
+**Already live and reused:** Xero (accounting + payroll), Web Push notifications (`sw.js`, `notifications.js`, `send-notifications.js`, per-type prefs, badge), shared sales@ Gmail inbox (`sync-gmail` every 5 min), company and per-job feeds, Sparky AI chat (`ai-chat.js`), meeting transcription (`transcribe-meeting.js`, AssemblyAI), Knowledge Base reader (`read-knowledge-background.js`, `read-knowledge-sweep.js` every 2 minutes, spec A32).
 
 ## How agents run
 

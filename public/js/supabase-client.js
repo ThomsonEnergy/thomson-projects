@@ -2179,7 +2179,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=11';
+  s.src = '/js/notifications.js?v=12';
   document.head.appendChild(s);
 }
 

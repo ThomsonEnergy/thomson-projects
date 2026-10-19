@@ -74,3 +74,14 @@
 # job yet (normally done the moment it is sent) - see chat-ai-sweep.js.
 [functions.chat-ai-sweep]
   schedule = "*/2 * * * *"
+
+# Every 2 minutes: starts the Knowledge Base reader if a read is queued, or a run died and left a job
+# locked past its time - see read-knowledge-sweep.js.
+[functions.read-knowledge-sweep]
+  schedule = "*/2 * * * *"
+
+# Renders PDF pages itself (pdf.js plus @napi-rs/canvas, no browser), so it needs pdf.js's worker, font and
+# CMap files on disk and more memory (and so CPU) than the default - see _shared/knowledge-reader.js.
+[functions.read-knowledge-background]
+  memory = "2048mb"
+  included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.js", "node_modules/pdfjs-dist/standard_fonts/**", "node_modules/pdfjs-dist/cmaps/**"]
