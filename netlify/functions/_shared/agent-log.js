@@ -13,11 +13,11 @@
 const { getAdminClient } = require('./require-admin');
 
 const AGENTS = {
-  'supplier-bills': { label: 'Supplier bill reader (invoice@)', every: 60 },
+  'supplier-bills': { label: 'Tally: supplier bill reader (invoice@)', every: 60 },
   'price-lists': { label: 'Price list reader (sales@ and invoice@)', every: 60 },
   'statements': { label: 'Bill checks and statement reconciler', every: 60 },
   'sync-gmail': { label: 'Email sync (sales@ and My inbox)', every: 5 },
-  'mailbox-work': { label: 'Email agent (sorting, labels, drafts, clean up)', every: 60 },
+  'mailbox-work': { label: 'Postie: email agent (sorting, labels, drafts, clean up)', every: 60 },
   'send-notifications': { label: 'Phone notifications', every: 1 },
   'sync-overheads-nightly': { label: 'Xero overheads sync (nightly)', every: 1440 },
   'archive-completed-jobs': { label: 'Archive completed jobs (nightly)', every: 1440 },

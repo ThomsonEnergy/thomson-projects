@@ -1796,31 +1796,54 @@ function fuzzyMatchScore(a, b) {
 // last resort, fuzzy business name matching. Returns null if nothing
 // matches confidently enough - the caller should offer to create a new
 // supplier rather than silently guessing wrong.
+// Supplier names without the words every company has. Same list and rules as matchSupplier()
+// in netlify/functions/_shared/supplier-bill-intake.js: account number, then ABN, then bank
+// details, and a name only when nothing on the bill disagrees. MMEM's Haymans and Greentech
+// share an ABN and bank account, so only our account number tells them apart.
+const SUPPLIER_NAME_FILLER = new Set(['pty', 'ltd', 'limited', 'australia', 'australian', 'aust', 'group', 'company', 'the', 'and', 'trading', 'holdings', 'services', 'supplies', 'supply', 'wholesale', 'wholesalers', 'electrical', 'electric', 'solar', 'energy', 'nsw', 'sydney']);
+function supplierNameScore(a, b) {
+  const words = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !SUPPLIER_NAME_FILLER.has(w));
+  const wordsA = new Set(words(a));
+  const wordsB = words(b);
+  if (!wordsA.size || !wordsB.length) return 0;
+  return wordsB.filter(w => wordsA.has(w)).length / Math.max(wordsA.size, wordsB.length);
+}
+
+// Returns { supplier, how }, { supplier: null, shared: [suppliers], how } when the ABN or bank
+// details belong to more than one supplier and our account number is missing, or null.
 async function findMatchingSupplier(fields) {
   const { name, ourAccountNumber, abn, bsb, bankAccountNumber } = typeof fields === 'string' ? { name: fields } : fields;
   const { data: suppliers } = await supabaseClient.from('suppliers').select('*');
   const list = suppliers || [];
+  const digits = (v) => String(v || '').replace(/\D/g, '');
 
-  if (ourAccountNumber) {
-    const match = list.find(s => s.our_account_number && s.our_account_number.trim() === String(ourAccountNumber).trim());
-    if (match) return match;
+  const acct = String(ourAccountNumber || '').trim();
+  if (acct) {
+    const hits = list.filter(s => s.our_account_number && s.our_account_number.trim().toLowerCase() === acct.toLowerCase());
+    if (hits.length === 1) return { supplier: hits[0], how: 'account number' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'account number' };
   }
-  if (abn) {
-    const normalizedAbn = String(abn).replace(/\s/g, '');
-    const match = list.find(s => s.abn && s.abn.replace(/\s/g, '') === normalizedAbn);
-    if (match) return match;
+  const abnDigits = digits(abn);
+  if (abnDigits) {
+    const hits = list.filter(s => digits(s.abn) === abnDigits);
+    if (hits.length === 1) return { supplier: hits[0], how: 'ABN' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'ABN' };
   }
-  if (bsb && bankAccountNumber) {
-    const match = list.find(s => s.bsb === bsb && s.bank_account_number === bankAccountNumber);
-    if (match) return match;
+  const bsbDigits = digits(bsb), bankDigits = digits(bankAccountNumber);
+  if (bsbDigits && bankDigits) {
+    const hits = list.filter(s => digits(s.bsb) === bsbDigits && digits(s.bank_account_number) === bankDigits);
+    if (hits.length === 1) return { supplier: hits[0], how: 'bank details' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'bank details' };
   }
 
   let best = null, bestScore = 0;
   list.forEach(s => {
-    const score = fuzzyMatchScore(s.name, name);
+    if (abnDigits && digits(s.abn) && digits(s.abn) !== abnDigits) return; // the bill's ABN is someone else's
+    if (bsbDigits && bankDigits && digits(s.bank_account_number) && (digits(s.bsb) !== bsbDigits || digits(s.bank_account_number) !== bankDigits)) return;
+    const score = supplierNameScore(s.name, name);
     if (score > bestScore) { bestScore = score; best = s; }
   });
-  return bestScore >= 0.5 ? best : null;
+  return bestScore >= 0.5 ? { supplier: best, how: 'name' } : null;
 }
 
 // Single source of truth for the main nav - every page calls
@@ -4578,7 +4601,8 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
   overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><p class="subtitle">Working out which supplier this is...</p></div>`;
   document.body.appendChild(overlay);
 
-  const match = await findMatchingSupplier(matchFields);
+  const found = await findMatchingSupplier(matchFields);
+  const match = found?.supplier || null;
   const fileBase64 = await fileToBase64(file);
 
   function proceedTo(supplierId) {
@@ -4588,10 +4612,12 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
     window.location.href = `/supplier-detail.html?id=${supplierId}&resume_upload=1`;
   }
 
-  if (match) {
+  if (found?.shared) {
+    showManualPick(`${found.shared.map(s => escapeHtml(s.name)).join(' and ')} share this ${found.how}. Pick the one whose account number is on the document${matchFields.ourAccountNumber ? ` (it says ${escapeHtml(matchFields.ourAccountNumber)})` : ''}.`, found.shared);
+  } else if (match) {
     overlay.querySelector('.card').innerHTML = `
       <h2>Is this ${escapeHtml(match.name)}?</h2>
-      <p class="subtitle" style="margin-bottom:14px;">${matchFields.ourAccountNumber ? `Matched by account number ${matchFields.ourAccountNumber}.` : (matchFields.abn ? `Matched by ABN.` : `The document says "${escapeHtml(extractedSupplierName)}".`)}</p>
+      <p class="subtitle" style="margin-bottom:14px;">${found.how === 'name' ? `Matched by name only (no ABN or bank details to confirm). The document says "${escapeHtml(extractedSupplierName)}".` : `Matched by ${found.how === 'account number' ? `account number ${escapeHtml(matchFields.ourAccountNumber)}` : found.how}.`}</p>
       <button id="rs-yes-btn">Yes, that's ${escapeHtml(match.name)}</button>
       <button type="button" class="secondary" id="rs-no-btn">No, pick a different supplier</button>`;
     overlay.querySelector('#rs-yes-btn').addEventListener('click', () => proceedTo(match.id));
@@ -4600,10 +4626,12 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
     showNewSupplierPrompt();
   }
 
-  async function showManualPick() {
-    const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
+  // note: trusted HTML (already escaped); only: the suppliers to offer (default all)
+  async function showManualPick(note = '', only = null) {
+    const suppliers = only || (await supabaseClient.from('suppliers').select('id, name').order('name')).data;
     overlay.querySelector('.card').innerHTML = `
       <h2>Pick the supplier</h2>
+      ${note ? `<p class="subtitle" style="margin-bottom:10px;">${note}</p>` : ''}
       <select id="rs-manual-select"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select>
       <p class="subtitle" style="margin:10px 0;">Or</p>
       <button type="button" class="secondary" id="rs-new-instead-btn">This is actually a new supplier</button>
@@ -4616,7 +4644,7 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
   }
 
   async function showNewSupplierPrompt() {
-    overlay.querySelector('.card').innerHTML = `<h2>Creating supplier</h2><p class="subtitle">Setting up "${extractedSupplierName}" - you can add or adjust anything anytime from their page.</p>`;
+    overlay.querySelector('.card').innerHTML = `<h2>Creating supplier</h2><p class="subtitle">Setting up "${escapeHtml(extractedSupplierName)}" - you can add or adjust anything anytime from their page.</p>`;
     const { data: created, error } = await supabaseClient.from('suppliers').insert({
       name: extractedSupplierName || 'Unknown supplier',
       credit_terms_type: 'net_days',
