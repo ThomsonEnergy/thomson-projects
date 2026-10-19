@@ -101,7 +101,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=92"></script>
+  <script src="/js/supabase-client.js?v=93"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -477,8 +477,20 @@
         entry.selected_cost_centre_ids = selectedClockCostCentres;
       }
 
+      // Double tap guard, and never two open clock-ins (another tab, Home, a job page).
+      const clockBtn = document.getElementById('clock-in-btn');
+      if (clockBtn.disabled) return;
+      clockBtn.disabled = true;
+      const { data: already, error: openErr } = await supabaseClient.from('time_entries').select('id').eq('staff_id', myUserId).is('clock_out', null).limit(1);
+      if (openErr || (already && already.length)) {
+        msg.innerHTML = `<div class="error-box">${openErr ? escapeHtml(openErr.message) : 'You are already clocked in. Clock out (or switch job) first.'}</div>`;
+        clockBtn.disabled = false;
+        await checkActiveClock();
+        return;
+      }
       const { error } = await supabaseClient.from('time_entries').insert(entry);
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      clockBtn.disabled = false;
+      if (error) { msg.innerHTML = `<div class="error-box">${error.code === '23505' ? 'You are already clocked in.' : error.message}</div>`; await checkActiveClock(); return; }
       msg.innerHTML = '';
       selectedClockCostCentres = [];
       selectedClockJobId = null;
@@ -545,9 +557,14 @@
 
       document.querySelectorAll('.complete-task-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          await supabaseClient.from('job_tasks').update({
+          const task = allTasks.find(t => t.id === btn.dataset.id);
+          btn.disabled = true;
+          const { error: doneErr } = await supabaseClient.from('job_tasks').update({
             completed: true, completed_by: myUserId, completed_at: new Date().toISOString(),
           }).eq('id', btn.dataset.id);
+          if (doneErr) { btn.disabled = false; alert('Could not tick that off: ' + doneErr.message); return; }
+          // Same gate as the job page: the last required task moves the job out of Awaiting Action.
+          if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
           await loadTasks();
         });
       });

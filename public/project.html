@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=92"></script>
+  <script src="/js/supabase-client.js?v=93"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -3112,11 +3112,11 @@
                 <h2>Handover / STC details</h2>
                 <p class="subtitle" style="margin-bottom:10px;">Recorded once install is done - feeds the handover checklist and, eventually, the Formbay STC lodgement.</p>
                 <label style="margin-top:0">NMI</label>
-                <input id="hd-nmi" value="${project.nmi || ''}" placeholder="National Metering Identifier" />
+                <input id="hd-nmi" value="${escapeHtml(project.nmi || '')}" placeholder="National Metering Identifier" />
                 <label>Panel serial numbers (one per line)</label>
-                <textarea id="hd-panel-serials" style="min-height:70px;">${project.panel_serial_numbers || ''}</textarea>
+                <textarea id="hd-panel-serials" style="min-height:70px;">${escapeHtml(project.panel_serial_numbers || '')}</textarea>
                 <label>Inverter serial numbers (one per line)</label>
-                <textarea id="hd-inverter-serials" style="min-height:70px;">${project.inverter_serial_numbers || ''}</textarea>
+                <textarea id="hd-inverter-serials" style="min-height:70px;">${escapeHtml(project.inverter_serial_numbers || '')}</textarea>
                 <label>Formbay STC lodgement status</label>
                 <select id="hd-formbay-status">
                   <option value="" ${!project.formbay_lodgement_status ? 'selected' : ''}>-- Not lodged yet --</option>
@@ -3564,7 +3564,7 @@
               <div class="card">
                 <h2>Variations</h2>
                 <p class="subtitle" style="margin-bottom:14px;">Changes made to this job's stages after the quote was approved - edit a stage under Cost Centres to add another.</p>
-                <div id="variations-list"><p class="subtitle">Loading...</p></div>
+                <div id="variation-records-list"><p class="subtitle">Loading...</p></div>
               </div>
               ` : ''}
               `}
@@ -3641,7 +3641,7 @@
 
       if (project.job_number) loadPurchaseOrders(project.id, centres);
       if (document.getElementById('job-invoices-list')) { loadJobInvoices(project); loadSm8Invoices(project.id); }
-      if (document.getElementById('variations-list')) loadVariations(project.id);
+      if (document.getElementById('variation-records-list')) loadVariations(project.id);
       loadJobTasks(project.id);
       initJobSearch(project, pricingVisible);
       initJobEmails(project);
@@ -3906,7 +3906,7 @@
         try {
           const { data: fullProject, error: loadErr } = await supabaseClient
             .from('projects')
-            .select('*, cost_centres(*, cost_centre_line_items(*), cost_centre_photo_groups(*))')
+            .select('*, cost_centres(*, cost_centre_line_items(*), cost_centre_photo_groups(*)), payment_milestones(*)')
             .eq('id', project.id)
             .single();
           if (loadErr) throw loadErr;
@@ -3924,14 +3924,28 @@
             .insert({
               name: `${fullProject.name} (copy)`,
               quote_number: quoteNum,
+              // A fresh draft quote: status, quote_token, valid_until and the
+              // approval / decline fields are left to their defaults.
+              pipeline_stage: 'draft_quote',
+              // Keep the client link, so the next save in new-project.html
+              // updates the same client record instead of creating another.
+              client_id: fullProject.client_id,
               client_name: fullProject.client_name,
               client_email: fullProject.client_email,
+              client_phone: fullProject.client_phone,
               client_address: fullProject.client_address,
+              project_manager_contact_id: fullProject.project_manager_contact_id,
+              site_contact_id: fullProject.site_contact_id,
+              job_contact_id: fullProject.job_contact_id,
+              sales_contact_id: fullProject.sales_contact_id,
+              accounts_contact_id: fullProject.accounts_contact_id,
               sow_text: fullProject.sow_text,
               proposal_subtitle: fullProject.proposal_subtitle,
               terms_text: fullProject.terms_text,
+              estimate_disclaimer_text: fullProject.estimate_disclaimer_text,
               deposit_percent: fullProject.deposit_percent,
               pylon_link: fullProject.pylon_link,
+              pylon_project_id: fullProject.pylon_project_id,
               reference_photos: fullProject.reference_photos,
               cover_photos: fullProject.cover_photos,
               proposal_template: fullProject.proposal_template,
@@ -3984,6 +3998,7 @@
                 quantity: li.quantity,
                 unit_cost: li.unit_cost,
                 sort_order: li.sort_order,
+                rate_tier_id: li.rate_tier_id,
                 prebuild_group_id: newGroupId,
                 prebuild_client_description: li.prebuild_client_description,
                 prebuild_base_quantity: li.prebuild_base_quantity,
@@ -4006,12 +4021,22 @@
             const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(allPhotoGroups);
             if (pgErr) throw pgErr;
           }
+          const milestones = (fullProject.payment_milestones || []).map(m => ({
+            project_id: newProject.id,
+            label: m.label,
+            percent: m.percent,
+            sort_order: m.sort_order,
+          }));
+          if (milestones.length) {
+            const { error: msErr } = await supabaseClient.from('payment_milestones').insert(milestones);
+            if (msErr) throw msErr;
+          }
 
           window.location.href = `/new-project.html?id=${newProject.id}`;
         } catch (err) {
           document.getElementById('action-msg').innerHTML = `<div class="error-box">${err.message}</div>`;
           btn.disabled = false;
-          btn.textContent = 'Duplicate as new project';
+          btn.textContent = 'Duplicate as new quote';
         }
       });
 
@@ -4244,7 +4269,7 @@
     }
 
     async function loadVariations(projectId) {
-      const listEl = document.getElementById('variations-list');
+      const listEl = document.getElementById('variation-records-list');
       const [{ data: variations, error }, { data: staff }] = await Promise.all([
         supabaseClient.from('variations').select('*').eq('project_id', projectId).order('created_at', { ascending: false }),
         supabaseClient.from('profiles').select('id, full_name'),
@@ -7255,14 +7280,13 @@
             if (!groupEl.querySelector('.sp-include').checked) continue;
             const supplierId = groupEl.dataset.supplierId;
             const group = matched[supplierId];
-            const poNumber = await drawNextPoNumber();
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: group.supplierName,
-              po_number: poNumber,
               po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials',
-            }).select('id').single();
+            }).select('id, po_number').single(); // the number is filled in by the database
             if (poErr) throw poErr;
+            const poNumber = newPo.po_number;
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${group.supplierName} (auto-suggested from quote)`);
             await logActivity('project', projectId, 'po_created', `PO ${poNumber || ''} created for ${group.supplierName} (auto-suggested from quote)`);
             await createPoFollowUpTask(projectId, poNumber, group.supplierName);
@@ -7285,14 +7309,13 @@
           }
           for (const [supplierId, group] of Object.entries(manualGroups)) {
             const { supplierName, items } = group;
-            const poNumber = await drawNextPoNumber();
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: supplierName,
-              po_number: poNumber,
               po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials (manually assigned)',
-            }).select('id').single();
+            }).select('id, po_number').single(); // the number is filled in by the database
             if (poErr) throw poErr;
+            const poNumber = newPo.po_number;
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${supplierName} (auto-suggested, manually assigned)`);
             await logActivity('project', projectId, 'po_created', `PO ${poNumber || ''} created for ${supplierName} (auto-suggested, manually assigned)`);
             await createPoFollowUpTask(projectId, poNumber, supplierName);
@@ -7393,7 +7416,6 @@
             cost_centre_id: overlay.querySelector('#cp-stage').value || null,
             supplier_id: supplierId,
             supplier_name: supplierName,
-            po_number: await drawNextPoNumber(),
             description: overlay.querySelector('#cp-description').value.trim() || null,
             po_type: budgetCap ? 'open' : 'fixed', // bill checks compare against the cap when there is one
             locked: false,

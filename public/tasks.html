@@ -52,7 +52,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=92"></script>
+  <script src="/js/supabase-client.js?v=93"></script>
   <script src="/js/theme.js"></script>
   <script>
     function taskRow(task, showPickUp) {
@@ -106,9 +106,13 @@
       document.querySelectorAll('.complete-task-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const task = allTasks.find(t => t.id === btn.dataset.id);
-          await supabaseClient.from('job_tasks').update({
+          btn.disabled = true;
+          const { error: doneErr } = await supabaseClient.from('job_tasks').update({
             completed: true, completed_by: user.id, completed_at: new Date().toISOString(),
           }).eq('id', btn.dataset.id);
+          if (doneErr) { btn.disabled = false; alert('Could not tick that off: ' + doneErr.message); return; }
+          // Same gate as the job page: the last required task moves the job out of Awaiting Action.
+          if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
           if (task?.project_id) await logActivity('project', task.project_id, 'task_completed', `Task completed: ${task.description || ''}`);
           await loadTasks();
         });
