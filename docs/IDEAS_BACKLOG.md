@@ -19,7 +19,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
-| 17 | User-friendliness upgrades (whole-app review) | Suggestions only, waiting on owner's pick (`docs/UX_REVIEW.md`) | N | None |
+| 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; delivery 1 (top ten) LIVE 19 Oct 2026, next delivery 2 (`docs/UX_REVIEW.md`) | N | None |
 
 ## High lead time, start now
 
@@ -446,7 +446,7 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 
 ## 17. User-friendliness upgrades (whole-app review, 19 Oct 2026)
 
-**Status:** suggestions only, waiting on the owner's pick. Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
+**Status:** owner said yes to building all 168 (19 Oct 2026). Delivery 1 (the top ten) LIVE 19 Oct 2026; next is delivery 2. Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
 
 **Do first (top ten, best first):**
 62. Inputs are 14px so iPhones zoom on every tap
@@ -460,7 +460,7 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 123. Invoices list has no unpaid filter or search
 5. Field staff cannot report an incident from site
 
-**Delivery plan (proposed 19 Oct 2026, owner asked "why not do everything"):** build all 168, in about six deliveries by theme so each lands and gets tested on its own: (1) the top ten plus the shared pieces later items reuse; (2) items 1 to 30 (clock in, My Day, schedule, tasks, finishing a job); (3) 31 to 82 (job page, feedback and saving, phone layout); (4) 83 to 109 (navigation, speed); (5) 110 to 146 (invoicing and Xero, office and public pages); (6) 147 to 168 (login, chat, inbox, settings, HR). Delivery 1 plan is drafted on branch `claude/ux-top-ten` (migration 20261104000000_report_incident.sql for item 5), waiting on the owner's yes.
+**Delivery plan (agreed 19 Oct 2026):** build all 168, in about six deliveries by theme so each lands and gets tested on its own: (1) the top ten plus the shared pieces later items reuse; (2) items 1 to 30 (clock in, My Day, schedule, tasks, finishing a job); (3) 31 to 82 (job page, feedback and saving, phone layout); (4) 83 to 109 (navigation, speed); (5) 110 to 146 (invoicing and Xero, office and public pages); (6) 147 to 168 (login, chat, inbox, settings, HR). Delivery 1 LIVE 19 Oct 2026 (migration 20261104000000_report_incident.sql for item 5). Next: delivery 2, plan then owner's yes.
 
 **Themes (item numbers in docs/UX_REVIEW.md):**
 - Clock in, My Day, schedule, timesheets and tasks: items 1 to 18

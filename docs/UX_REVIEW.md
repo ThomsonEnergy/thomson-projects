@@ -6,7 +6,7 @@ Read-only review of every page in `public/` for things that make the app harder 
 
 **Picking:** quote the item number (for example "UX 3, 7 and 24"). Impact is high (daily pain or blocks work), medium or low. Effort is small (under an hour), medium (a few hours) or large (a day or more, or needs a migration).
 
-**Do first (top ten, best first):**
+**Do first (top ten, best first):** all ten shipped 19 Oct 2026 as delivery 1 (PR on branch `claude/ux-top-ten`, migration 20261104000000).
 62. Inputs are 14px so iPhones zoom on every tap
 93. Every page blocks on an unpinned CDN copy of supabase-js
 2. My Day shows Clock in before it knows you are clocked in
