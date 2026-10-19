@@ -17,7 +17,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
 | 8 | invoice@ supplier bill intake agent | Live 18 Oct 2026, suggest-only for 2 weeks | N | Owner checks matches, then auto-save on |
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
-| 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Planned 19 Oct 2026, waiting on owner's yes | N | None |
+| 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 
 ## High lead time, start now
 
@@ -378,46 +378,6 @@ Reviewed 18 Oct 2026 against `policies and Contracts/`. Have: Code of Conduct, C
 
 **Delivery:** each policy goes into Settings > Onboarding as a versioned document (PROJECT_SPEC A26), so staff sign on login.
 
-## 10. Purchase order upgrades (planned 19 Oct 2026, waiting on owner's yes)
+## 10. Purchase order upgrades (built 19 Oct 2026)
 
-### Stock PO on a job
-
-Grab gear from the Warehouse or a vehicle for a job, and fix the stock count at the same time when the app is wrong (app says 0, there are really 3: take 1, say 2 left).
-
-**Today:** a job PO must have a supplier. A PO with no supplier only takes stock out when it goes to a vehicle; to a job it costs the job without taking anything out of stock. Staff cannot cost stock to a job at all (`job_material_usage` is pricing roles only).
-
-**Plan:**
-- Job page "Create purchase order" and the Purchase Orders page (when "A job" is picked) get **Where from**: Supplier (as today), Warehouse stock, or a vehicle (only `holds_stock` vehicles).
-- Stock PO lines are Stock materials only. Each line shows what the app has there ("App says 0 in Warehouse"). Staff do not see costs.
-- Each line has **Left after you take it** (filled in as app count minus taken). If they take more than the app has, this box must be filled in. Whatever they type becomes the real count at that spot.
-- On Create: one server step (migration, `create_stock_pull_po`) makes the PO (supplier name "Warehouse" or the vehicle), takes the stock out, sets the corrected counts, costs every line to the job at the material's cost (`job_material_usage`, `from_stock`), marks the lines and PO received. All or nothing, works for every role.
-- No follow-up task, no bill, no invoice upload, no Xero on a stock PO. Shown on the job's PO list as "Stock PO, from Warehouse / <vehicle>".
-- Activity log: on the PO and the job ("PO 2101 pulled 1 x 6mm TPS from Warehouse"), and on the material when the count was corrected ("Warehouse count corrected: app 0, actually 3, took 1, 2 left").
-- A job's PO stays on that job: receiving a line on a job PO no longer has a job search, so it can only go to this job (or back to the Warehouse or a vehicle). For another job, open that job and make the PO there. POs for Stock or a vehicle keep the job search. (Owner, 19 Oct 2026)
-- Migration adds `purchase_orders.stock_source` (warehouse or vehicle) and `stock_source_vehicle_id` (indexed).
-
-### Move unused lines (reconciling)
-- Every PO line, received or not, gets **Move**: to another job, the Warehouse or a vehicle, for all or part of the quantity (part splits the line).
-- Moving off a job takes it off that job's costs and puts it on the new one; moving into the Warehouse or a vehicle adds it to that count; moving out of the Warehouse or a vehicle needs it still there.
-- Blocked if that job has already invoiced it to the client.
-- This is the deliberate way to put a line on another job; receiving on a job PO still only goes to its own job. Logged on the PO and both jobs.
-
-### Undo received
-- Every received line gets **Undo received**: puts back what receiving did (off the job's costs, or out of the Warehouse or vehicle count).
-- Undo received has **Back ordered instead** (with an optional ETA), for a line ticked received by mistake: one tap undoes it and marks it back ordered.
-- If the PO is closed or a bill on it is approved for payment, a note saying why is required; the note goes on the PO's activity log. Approval stays as it was.
-
-### Open and closed
-- Every PO is Open or Closed (replaces Fixed / Open-ended, Locked and the Override button).
-- Open: anyone can add lines. Closed: nothing can be added or changed, and the PO and its bills that match it (or were accepted) are approved for payment. Bills with problems still wait on Bill checks.
-- New POs start Open. Stock POs are made Closed. Existing POs: fully received or approved go Closed, the rest Open. Budget cap stays.
-- Admin and Finance can reopen a closed PO, with a note why.
-
-### Email a PO as a PDF
-- New PO page (`po.html`) built on the invoice layout: letterhead, PO number, date, supplier, deliver to (job number and site address, or Warehouse / vehicle), lines with qty, unit price ex GST, GST and total, notes. No pay button, bank details, due date or payment terms.
-- PDF made the same way as invoices (`generate-client-document-pdf`, new type `po`).
-- **Email PO** button opens the normal email window with the supplier's email, subject "Purchase order PO2101 from Thomson Energy" and the PDF attached. Logged on the PO. Not on stock POs (no supplier).
-
-### Migration
-- `purchase_orders`: `stock_source`, `stock_source_vehicle_id` (indexed), `closed_at`, `closed_by` (indexed), `po_token`, `pdf_path`, `pdf_generated_at`.
-- Server steps (all or nothing, every role): create stock PO, move line, undo received, close and reopen PO; PO page read by token.
+Live: see `docs/PROJECT_SPEC.md` A10 (migration 20261025000000).
