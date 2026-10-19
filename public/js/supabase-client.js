@@ -5055,9 +5055,18 @@ async function createPoFollowUpTask(projectId, poNumber, supplierName) {
   }
 }
 
+function activityEntryHtml(text, e) {
+  return `
+    <div class="activity-entry">
+      <div>${text}</div>
+      <div class="subtitle">${e.profiles?.full_name || 'Someone'} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+    </div>`;
+}
+
 async function renderActivityLog(entityType, entityId, containerId) {
   const containerEl = document.getElementById(containerId);
   if (!containerEl) return;
+  containerEl.classList.add('activity-log-scroll');
   containerEl.innerHTML = `<p class="subtitle">Loading...</p>`;
 
   const { data: entries, error } = await supabaseClient
@@ -5070,11 +5079,102 @@ async function renderActivityLog(entityType, entityId, containerId) {
   if (error) { containerEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
   if (!entries.length) { containerEl.innerHTML = `<p class="subtitle">No activity logged yet.</p>`; return; }
 
-  containerEl.innerHTML = entries.map(e => `
-    <div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
-      <div>${e.description}</div>
-      <div class="subtitle" style="font-size:12px; margin-top:2px;">${e.profiles?.full_name || 'Someone'} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
-    </div>`).join('');
+  containerEl.innerHTML = entries.map(e => activityEntryHtml(e.description, e)).join('');
+}
+
+// Job activity log, split by tab so it stays short. Summary shows one line
+// per action (a run of changes by the same person on the same thing, close
+// together, becomes one line like "Edited PO 1234 (3 changes)"); every
+// other tab shows only its own entries in full detail. The tab comes from
+// the action, so entries logged before this sort the same way.
+const JOB_ACTIVITY_GROUPS = [
+  { tab: 'costcentres', actions: ['timesheet_added', 'timesheet_edited', 'timesheet_removed', 'timesheet_moved', 'timesheet_split'],
+    label: (n) => n === 1 ? 'Edited a timesheet' : `Edited timesheets (${n} changes)` },
+  { tab: 'costcentres', actions: ['stage_updated', 'cost_centre_added'],
+    label: (n) => n === 1 ? 'Edited the cost centres' : `Edited the cost centres (${n} changes)` },
+  { tab: 'pos', actions: ['po_item_added', 'po_item_edited'], byPo: true,
+    label: (n, po) => `Edited ${po ? 'PO ' + po : 'a PO'}${n === 1 ? '' : ` (${n} changes)`}` },
+  { tab: 'pos', actions: ['material_received'], byPo: true,
+    label: (n, po) => `Received ${n} item${n === 1 ? '' : 's'} on ${po ? 'PO ' + po : 'a PO'}` },
+  { tab: 'variations', actions: ['variation_hours_logged', 'variation_materials_added'],
+    label: (n) => n === 1 ? 'Logged work on a variation' : `Logged work on variations (${n} entries)` },
+  { tab: 'documents', actions: ['documents_uploaded', 'document_deleted'],
+    label: (n, po, e) => n === 1 ? e.description : `Changed documents (${n} changes)` },
+  { tab: 'summary', actions: ['task_added', 'task_completed', 'task_reopened', 'task_deleted', 'task_picked_up'],
+    label: (n, po, e) => n === 1 ? e.description : `Updated ${n} tasks` },
+];
+const JOB_ACTIVITY_TABS = {
+  po_created: 'pos',
+  variation_logged: 'variations', variation_sent: 'variations', variation_recorded: 'variations', variation_approved: 'variations',
+  invoice_created: 'invoices', invoice_edited: 'invoices', credit_note_created: 'invoices', sm8_invoice_deleted: 'invoices',
+};
+const JOB_ACTIVITY_GROUP_GAP_MS = 30 * 60 * 1000;
+
+function jobActivityGroupOf(action) {
+  return JOB_ACTIVITY_GROUPS.find(g => g.actions.includes(action)) || null;
+}
+
+function jobActivityTab(action) {
+  const group = jobActivityGroupOf(action);
+  return group ? group.tab : (JOB_ACTIVITY_TABS[action] || 'summary');
+}
+
+function poNumberFromLog(description) {
+  const m = /\bPO\s+([A-Za-z0-9-]+)/.exec(description || '');
+  return m ? m[1] : '';
+}
+
+// Entries arrive newest first. Neighbours join a run while the person and
+// group (and PO, where it matters) match and the gap stays under 30 min.
+function groupJobActivity(entries) {
+  const runs = [];
+  entries.forEach(e => {
+    const group = jobActivityGroupOf(e.action);
+    const po = group?.byPo ? poNumberFromLog(e.description) : '';
+    const last = runs[runs.length - 1];
+    if (group && last && last.group === group && last.po === po && last.changedBy === e.changed_by
+      && new Date(last.oldest.created_at) - new Date(e.created_at) <= JOB_ACTIVITY_GROUP_GAP_MS) {
+      last.count++;
+      last.oldest = e;
+      return;
+    }
+    runs.push({ group, po, changedBy: e.changed_by, count: 1, newest: e, oldest: e });
+  });
+  return runs.map(r => ({ entry: r.newest, text: r.group ? r.group.label(r.count, r.po, r.newest) : r.newest.description }));
+}
+
+// Loads the job's log once; setTab() redraws it for the tab that is open.
+async function renderJobActivityLog(projectId, containerId, titleId) {
+  const containerEl = document.getElementById(containerId);
+  if (!containerEl) return { setTab() {} };
+  containerEl.classList.add('activity-log-scroll');
+  containerEl.innerHTML = `<p class="subtitle">Loading...</p>`;
+  let entries = null;
+  let tab = 'summary';
+
+  const draw = () => {
+    const titleEl = titleId && document.getElementById(titleId);
+    if (titleEl) titleEl.textContent = tab === 'summary' ? 'Activity log' : 'Activity on this tab';
+    if (!entries) return;
+    if (tab === 'summary') {
+      const lines = groupJobActivity(entries);
+      containerEl.innerHTML = lines.length ? lines.map(l => activityEntryHtml(l.text, l.entry)).join('') : `<p class="subtitle">No activity logged yet.</p>`;
+      return;
+    }
+    const mine = entries.filter(e => jobActivityTab(e.action) === tab);
+    containerEl.innerHTML = mine.length ? mine.map(e => activityEntryHtml(e.description, e)).join('') : `<p class="subtitle">Nothing logged on this tab yet.</p>`;
+  };
+
+  const { data, error } = await supabaseClient
+    .from('activity_log')
+    .select('*, profiles(full_name)')
+    .eq('entity_type', 'project')
+    .eq('entity_id', projectId)
+    .order('created_at', { ascending: false });
+  if (error) { containerEl.innerHTML = `<div class="error-box">${error.message}</div>`; return { setTab() {} }; }
+  entries = data || [];
+  draw();
+  return { setTab(next) { tab = next; draw(); } };
 }
 
 // Shared safety check before deleting a quote/job - blocks (rather than

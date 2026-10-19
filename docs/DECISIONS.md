@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 19 Oct 2026
+- Job activity log split by tab: Summary shows one line per action ("Edited PO 1234 (3 changes)"), each tab shows its own full detail; PO line item edits now logged. Inner scroll boxes (log, lists, popups) scroll on their own app wide without moving the page. Job tab cards (Summary, Details, Documents, Variations, Invoices) sit 2 across on a laptop like Team/Home. Code only, no migration. (`docs/PROJECT_SPEC.md` A13a, A17)
 - Links no longer show the browser's default dark blue on the black theme: every plain link uses a light blue (`--link` #6cc4f5) on Dark, the indigo on Navy. (`public/css/style.css` v17)
 
 ## 18 Oct 2026

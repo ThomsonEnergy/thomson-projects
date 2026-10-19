@@ -54,6 +54,15 @@ img, video, iframe { max-width: 100%; }
 .grid > *, .card { min-width: 0; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* Scrolling: with the mouse over a box that scrolls on its own (activity
+   log, lists, modals, wide tables), only that box scrolls; it never hands
+   the scroll on to the page behind. With the mouse on the page, the page
+   scrolls. Not set on html/body so phones keep pull to refresh. */
+body * { overscroll-behavior: contain; }
+/* While a popup (dark full-screen overlay) is open, the page behind stays put */
+html:has(> body > div[style*="position:fixed; inset:0; background:rgba(0,0,0"]),
+html:has(> body > div[style*="position: fixed"][style*="inset: 0"][style*="background: rgba(0, 0, 0"]) { overflow: hidden; }
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -586,10 +595,24 @@ html[data-theme="navy"] .success-box {
 .job-tab-layout { display: flex; gap: 20px; align-items: flex-start; }
 .job-tab-main { flex: 1; min-width: 0; }
 .job-activity-sidebar { width: 320px; flex-shrink: 0; position: sticky; top: 20px; }
+.job-activity-sidebar .card { margin-bottom: 0; }
+/* Activity log: fits the screen and scrolls inside its own box */
+.activity-log-scroll { max-height: calc(100vh - 150px); overflow-y: auto; overscroll-behavior: contain; margin-right: -8px; padding-right: 8px; }
+.activity-entry { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.activity-entry .subtitle { font-size: 12px; margin: 2px 0 0; }
 @media (max-width: 900px) {
-  .job-tab-layout { flex-direction: column; }
+  .job-tab-layout { flex-direction: column; align-items: stretch; }
   .job-activity-sidebar { width: 100%; position: static; }
+  .activity-log-scroll { max-height: 60vh; }
 }
+
+/* Job tab cards sit side by side like the Team and Home pages: 2 across on
+   a laptop, 1 on a phone. Stat rows and other grids take the full width. */
+.settings-panel.active.job-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 20px; align-items: start; margin-bottom: 20px; }
+.job-card-grid > * { min-width: 0; }
+.job-card-grid > :empty { display: none; }
+.job-card-grid > .card, .job-card-grid > div > .card { margin: 0 !important; }
+.job-card-grid > .grid { grid-column: 1 / -1; }
 
 .theme-options {
   display: grid;
