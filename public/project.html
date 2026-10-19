@@ -6039,7 +6039,10 @@
           <textarea id="fv-reason" style="min-height:80px;" placeholder="e.g. The builder moved the meter location after the quote was accepted, which needs a longer cable run.">${escapeHtml(entry ? entry.reason || '' : '')}</textarea>
           <label>Priced lines (ex GST)</label>
           <div id="fv-lines"></div>
-          <button type="button" class="secondary" id="fv-add-line" style="font-size:12px; padding:6px 10px; margin-top:6px;">+ Add a line</button>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+            <button type="button" class="secondary" id="fv-add-line" style="font-size:12px; padding:6px 10px;">+ Add a line</button>
+            <button type="button" class="secondary" id="fv-add-stock" style="font-size:12px; padding:6px 10px;">+ From Stock or prebuild</button>
+          </div>
           <p style="margin:12px 0 0; font-size:14px;">Total: <strong id="fv-total">$0.00</strong> ex GST <span class="subtitle" id="fv-total-gst"></span></p>
           <div id="fv-msg"></div>
           <div style="margin-top:12px;"><button type="button" id="fv-save">Save draft</button> <button type="button" class="secondary" id="fv-cancel">Cancel</button></div>
@@ -6066,6 +6069,35 @@
       };
       renderLines(); refreshTotal();
       overlay.querySelector('#fv-add-line').addEventListener('click', () => { lines.push({ description: '', item_type: 'material', amount: '' }); renderLines(); });
+      // Priced like a quote: Stock at cost plus the default markup; a prebuild's labour at its
+      // own (sell) rates and its materials marked up. Price only, nothing leaves Stock.
+      overlay.querySelector('#fv-add-stock').addEventListener('click', async () => {
+        const pick = await openVariationStockPicker(true, true); // price only: no low-stock warning
+        if (!pick) return;
+        const { data: cs } = await supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle();
+        const factor = 1 + (Number(cs?.default_markup_percent) || 45) / 100;
+        const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+        const qty = Number(pick.quantity) || 1;
+        const name = `${pick.name} x ${r2(qty)}`;
+        let added = [];
+        if (pick.kind === 'material') {
+          const { data: m } = await supabaseClient.from('materials').select('cost_price').eq('id', pick.id).maybeSingle();
+          added.push({ description: name, item_type: 'material', amount: r2((Number(m?.cost_price) || 0) * factor * qty) });
+        } else {
+          const pb = (await getPrebuilds()).find(p => p.id === pick.id);
+          const comps = (pb && pb.prebuild_components) || [];
+          const part = (type) => comps.filter(c => (c.item_type === 'labour') === (type === 'labour'))
+            .reduce((t, c) => t + (Number(c.quantity) || 0) * (Number(c.unit_cost) || 0), 0) * qty;
+          const lab = r2(part('labour')), mat = r2(part('material') * factor);
+          if (lab > 0) added.push({ description: `${name} (labour)`, item_type: 'labour', amount: lab });
+          if (mat > 0) added.push({ description: `${name} (materials)`, item_type: 'material', amount: mat });
+          if (!added.length) added.push({ description: name, item_type: 'material', amount: '' });
+        }
+        // fill the blank starting line rather than leaving it empty above
+        if (lines.length === 1 && !lines[0].description && !(parseFloat(lines[0].amount) > 0)) lines.splice(0, 1);
+        lines.push(...added);
+        renderLines(); refreshTotal();
+      });
       overlay.querySelector('#fv-cancel').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#fv-save').addEventListener('click', async () => {
         const msg = overlay.querySelector('#fv-msg');
@@ -6148,7 +6180,7 @@
     // Picks a Stock material or a prebuild for a variation. Resolves to
     // { kind: 'material' | 'prebuild', id, name, quantity }, or null if cancelled.
     // Costs only show to pricing roles.
-    async function openVariationStockPicker(pricingVisible) {
+    async function openVariationStockPicker(pricingVisible, priceOnly) {
       const [{ data: materialsData }, prebuilds] = await Promise.all([
         supabaseClient.from('materials').select('id, name, category, cost_price, quantity_on_hand').order('name'),
         getPrebuilds(),
@@ -6191,7 +6223,7 @@
             if (!(qty > 0)) { alert('Enter a quantity first.'); return; }
             if (row.dataset.kind === 'material') {
               const m = materials.find(x => x.id === row.dataset.id);
-              if (Number(m.quantity_on_hand) < qty && !confirm(`Only ${qtyOnHand(m)} of ${m.name} in stock. Add ${qty} anyway? Stock will go to zero.`)) return;
+              if (!priceOnly && Number(m.quantity_on_hand) < qty && !confirm(`Only ${qtyOnHand(m)} of ${m.name} in stock. Add ${qty} anyway? Stock will go to zero.`)) return;
               done({ kind: 'material', id: m.id, name: m.name, quantity: qty });
             } else {
               const p = prebuilds.find(x => x.id === row.dataset.id);
