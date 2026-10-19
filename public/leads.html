@@ -57,7 +57,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=98"></script>
+  <script src="/js/supabase-client.js?v=99"></script>
   <script src="/js/theme.js"></script>
   <script>
     function timeAgo(dateStr) {
@@ -265,6 +265,9 @@
           const { data: existing } = await supabaseClient.from('clients').select('id').or(orClauses.join(',')).limit(1).maybeSingle();
           if (existing) clientId = existing.id;
         }
+        // An existing client's job at a new address becomes a saved site; a new client's
+        // first address doubles as their office address until it is set on the Clients page.
+        const clientSiteId = clientId ? await resolveClientSite(clientId, lead.address_formatted || lead.address_line) : null;
         if (!clientId) {
           const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({
             name: lead.name || 'New client', email: lead.email || null, phone: lead.phone || null, address: lead.address_formatted || lead.address_line || null,
@@ -282,6 +285,7 @@
           client_email: lead.email,
           client_phone: lead.phone,
           client_address: lead.address_formatted || lead.address_line,
+          client_site_id: clientSiteId,
           proposal_template: 'direct_job',
           pipeline_stage: 'job_booked',
           status: 'in_progress',

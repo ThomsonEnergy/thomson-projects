@@ -1847,6 +1847,89 @@ function mapsLink(address) {
   return `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" rel="noopener" class="link-quiet" onclick="event.stopPropagation()">${escapeHtml(address)}</a>`;
 }
 
+// ---------- Client sites ----------
+// A client has one office / billing address (clients.address, used on formal documents) and
+// any number of job sites (client_sites). A job keeps the site address it uses in
+// projects.client_address and links to the saved site through projects.client_site_id.
+
+function sameAddress(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+async function loadClientSites(clientId) {
+  if (!clientId) return [];
+  const { data } = await supabaseClient.from('client_sites').select('id, label, address, notes').eq('client_id', clientId).order('created_at');
+  return data || [];
+}
+
+// Which saved site a job address is. The office address is not a site (null). A new address
+// is saved as a site for the client (unless save is false) and its id returned. Pass the
+// client's office address when it is to hand; otherwise it is looked up.
+async function resolveClientSite(clientId, address, officeAddress, { save = true } = {}) {
+  address = String(address || '').trim();
+  if (!clientId || !address) return null;
+  if (officeAddress === undefined) {
+    const { data: c } = await supabaseClient.from('clients').select('address').eq('id', clientId).maybeSingle();
+    officeAddress = c ? c.address : null;
+  }
+  if (sameAddress(address, officeAddress)) return null;
+  const sites = await loadClientSites(clientId);
+  const found = sites.find(s => sameAddress(s.address, address));
+  if (found) return found.id;
+  if (!save) return null;
+  const { data, error } = await supabaseClient.from('client_sites').insert({ client_id: clientId, address }).select('id').single();
+  if (error) {
+    // Two people saving the same new site at once: the unique index keeps one row, use it.
+    const again = (await loadClientSites(clientId)).find(s => sameAddress(s.address, address));
+    return again ? again.id : null;
+  }
+  return data.id;
+}
+
+// Site picker above a job's address box: the client's office address, their saved sites, or
+// another address typed below. The text box always holds the address the job uses; the
+// picker is hidden until a client is chosen.
+function attachSitePicker(selectEl, inputEl) {
+  let client = null, sites = [];
+  const render = () => {
+    if (!client) { selectEl.style.display = 'none'; selectEl.innerHTML = ''; return; }
+    const cur = inputEl.value.trim();
+    const opts = [];
+    if (client.address) opts.push({ v: 'office', t: `Office address: ${client.address}` });
+    sites.forEach(s => opts.push({ v: s.id, t: (s.label ? s.label + ': ' : '') + s.address }));
+    opts.push({ v: 'new', t: sites.length || client.address ? 'Another site (type the address below)' : 'Site address (type it below)' });
+    let selected = 'new';
+    const match = sites.find(s => sameAddress(s.address, cur));
+    if (cur && client.address && sameAddress(cur, client.address)) selected = 'office';
+    else if (match) selected = match.id;
+    else if (!cur && client.address) selected = 'office';
+    selectEl.innerHTML = opts.map(o => `<option value="${escapeHtml(o.v)}"${o.v === selected ? ' selected' : ''}>${escapeHtml(o.t)}</option>`).join('');
+    selectEl.style.display = '';
+  };
+  selectEl.addEventListener('change', () => {
+    const v = selectEl.value;
+    if (v === 'office') inputEl.value = client.address || '';
+    else if (v === 'new') { inputEl.value = ''; inputEl.focus(); }
+    else { const s = sites.find(x => x.id === v); if (s) inputEl.value = s.address; }
+  });
+  inputEl.addEventListener('input', () => { if (client) render(); });
+  inputEl.addEventListener('change', () => { if (client) render(); });
+  return {
+    client: () => client,
+    // Fills an empty address box with the office address (a home owner's site is their home).
+    async setClient(c) {
+      // Switching client: an address that came from the old client's picker goes with them.
+      const cur = inputEl.value.trim();
+      if (client && cur && (sameAddress(cur, client.address) || sites.some(s => sameAddress(s.address, cur)))) inputEl.value = '';
+      client = c || null;
+      sites = client ? await loadClientSites(client.id) : [];
+      if (client && !inputEl.value.trim() && client.address) inputEl.value = client.address;
+      render();
+    },
+    refresh: render,
+  };
+}
+
 // Dev Mode - a time-limited unlock (20 min) for the most dangerous admin
 // actions (API keys, company details, Xero mapping, bulk-delete). The
 // password is verified server-side by verify-dev-mode.js, never shipped to
@@ -3573,6 +3656,7 @@ function openQuickJobPanel(onCreated) {
         if (clientErr) throw clientErr;
         clientId = newClient.id;
       }
+      const clientSiteId = selectedClientId ? await resolveClientSite(clientId, clientAddress) : null;
 
       const { data: project, error } = await supabaseClient.from('projects').insert({
         name,
@@ -3582,6 +3666,7 @@ function openQuickJobPanel(onCreated) {
         client_email: clientEmail,
         client_phone: clientPhone,
         client_address: clientAddress,
+        client_site_id: clientSiteId,
         proposal_template: 'direct_job',
         // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
         pipeline_stage: 'ready_to_book',
@@ -3892,6 +3977,7 @@ function openWarrantyJobPanel(originalProject, onCreated) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Creating...';
     try {
+      const clientSiteId = await resolveClientSite(originalProject.client_id, clientAddress);
       const { data: project, error } = await supabaseClient.from('projects').insert({
         name,
         sow_text: brief || null,
@@ -3900,6 +3986,7 @@ function openWarrantyJobPanel(originalProject, onCreated) {
         client_email: clientEmail,
         client_phone: clientPhone,
         client_address: clientAddress,
+        client_site_id: clientSiteId,
         proposal_template: 'direct_job',
         // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
         pipeline_stage: 'ready_to_book',

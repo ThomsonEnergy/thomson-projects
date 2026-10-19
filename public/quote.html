@@ -216,7 +216,7 @@
     <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading your proposal...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=98"></script>
+  <script src="/js/supabase-client.js?v=99"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
@@ -630,7 +630,7 @@
           ${darkHeadHtml('logo-cover')}
           <div class="pg-body">
             <h1 class="pg-title">${esc(docLabel)}${coverSub ? `<br><span style="font-size:0.42em; letter-spacing:0; opacity:0.9;">${esc(coverSub)}</span>` : ''}</h1>
-            <div class="cover-tag">${esc(project.name)}<small>Prepared for ${esc(project.client_name)}${project.client_address ? ' &middot; ' + esc(project.client_address) : ''}</small></div>
+            <div class="cover-tag">${esc(project.name)}<small>Prepared for ${esc(project.client_name)}${(project.client_office_address || project.client_address) ? ' &middot; ' + esc(project.client_office_address || project.client_address) : ''}</small></div>
           </div>
           <div class="cover-meta">
             <div class="lbl">Prepared by:</div>

@@ -360,9 +360,10 @@ function openCreateFromEmailModal(threadId) {
           if (ce) throw ce;
           clientId = nc.id;
         }
+        const clientSiteId = useExisting ? await resolveClientSite(clientId, form.address) : null;
         const { data: project, error } = await supabaseClient.from('projects').insert({
           name: form.name, sow_text: form.work || null, notes, client_id: clientId, client_name: form.client_name,
-          client_email: form.client_email || null, client_phone: form.client_phone || null, client_address: form.address || null,
+          client_email: form.client_email || null, client_phone: form.client_phone || null, client_address: form.address || null, client_site_id: clientSiteId,
           proposal_template: 'direct_job', pipeline_stage: 'job_booked', status: 'in_progress',
         }).select('id').single();
         if (error) throw error;

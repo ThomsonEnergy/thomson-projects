@@ -31,11 +31,11 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=98"></script>
+  <script src="/js/supabase-client.js?v=99"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=5"></script>
+  <script src="/js/email-compose.js?v=6"></script>
   <script src="/js/assets.js?v=1"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js"></script>
@@ -243,6 +243,7 @@
     let RATE_TIERS = [];
     let companySettings = {};
     let selectedClientId = null;
+    let sitePicker = null; // attached when the quote edit form is on screen
     let referencePhotos = [];
     let sowDocs = [];
     let assignedContactIds = {};
@@ -603,11 +604,11 @@
         document.getElementById('p-client').value = client.name || '';
         document.getElementById('p-email').value = client.email || '';
         document.getElementById('p-phone').value = client.phone || '';
-        document.getElementById('p-address').value = client.address || '';
         document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
       } else {
         note.textContent = 'No client selected - search above, or just fill in the fields below to create one when you save.';
       }
+      if (sitePicker) sitePicker.setClient(client);
       document.getElementById('client-search-results').style.display = 'none';
     }
 
@@ -736,7 +737,12 @@
             <div><label style="margin-top:0">Client phone</label><input id="p-phone" /></div>
           </div>
           <div class="grid cols-3">
-            <div style="grid-column: span 2;"><label>Site address</label><input id="p-address" /></div>
+            <div style="grid-column: span 2;">
+              <label>Site address</label>
+              <select id="p-site-pick" style="display:none; margin-bottom:6px;"></select>
+              <input id="p-address" placeholder="Where the work is done" />
+              <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new address is saved as a site for this client. The client's office address stays as it is (Clients page).</p>
+            </div>
             <div>
               <label>Payment terms</label>
               <select id="p-payment-terms">
@@ -896,6 +902,7 @@
       if (isQuoteEdit) {
       document.querySelectorAll('.template-option').forEach(btn => btn.addEventListener('click', () => applyEditTemplate(btn.dataset.template, true)));
 
+      sitePicker = attachSitePicker(document.getElementById('p-site-pick'), document.getElementById('p-address'));
       document.getElementById('clear-client-btn').addEventListener('click', () => {
         document.getElementById('client-search-input').value = '';
         setSelectedEditClient(null);
@@ -1133,6 +1140,7 @@
             document.getElementById('client-search-input').value = client.name;
             document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
             document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${escapeHtml(client.name)}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+            await sitePicker.setClient(client);
           }
           await loadEditJobContactPickers(project.client_id, {
             project_manager_contact_id: project.project_manager_contact_id,
@@ -1380,15 +1388,18 @@
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving...';
         try {
+          // The job's site address never overwrites the client's office address; a new client's
+          // first site is the best guess for their office address until it is set on the Clients page.
           let clientId = selectedClientId;
-          const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, address: client_address || null, payment_terms };
+          const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
           if (clientId) {
             await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
           } else {
-            const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert(clientFields).select().single();
+            const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({ ...clientFields, address: client_address || null }).select().single();
             if (clientErr) throw clientErr;
             clientId = newClient.id;
           }
+          const client_site_id = await resolveClientSite(clientId, client_address, selectedClientId ? (sitePicker.client() || {}).address : client_address);
 
           const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
           const allPhotos = (settings && settings.portfolio_photos) || [];
@@ -1396,7 +1407,7 @@
           const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
 
           const projectFields = {
-            name, client_id: clientId, client_name, client_email, client_phone, client_address, notes,
+            name, client_id: clientId, client_name, client_email, client_phone, client_address, client_site_id, notes,
             sow_text, proposal_subtitle, terms_text, deposit_percent, pylon_link, pylon_project_id,
             reference_photos: referencePhotos.map(url => ({ url })),
             cover_photos: coverPhotos,
