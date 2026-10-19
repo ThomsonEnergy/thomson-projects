@@ -13,7 +13,7 @@ const XLSX = require('xlsx');
 const { PDFDocument } = require('pdf-lib');
 const { getIntegrationKey } = require('./get-integration-key');
 
-const MODEL = 'claude-sonnet-5';
+const MODEL = 'claude-sonnet-5-5';
 
 async function callClaude(content, maxTokens) {
   const apiKey = await getIntegrationKey('anthropic');

@@ -1,4 +1,4 @@
-// Spell check and Polish on every multi-line text box (docs/PROJECT_SPEC.md A32).
+// Spell check and Polish on every multi-line text box (docs/PROJECT_SPEC.md A33).
 // Loaded by supabase-client.js on every page; does nothing until someone is signed in.
 //
 // - Spelling: with the person's setting on Automatic (profiles.spellcheck_mode, the default),

@@ -50,7 +50,7 @@ If a field genuinely isn't visible or determinable, use null rather than guessin
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-5-5',
       max_tokens: 4000,
       messages: [{
         role: 'user',

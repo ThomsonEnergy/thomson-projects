@@ -81,104 +81,123 @@ async function runQuery(userClient, input, tables = QUERYABLE_TABLES) {
 
 const KB_TOOL = {
   name: 'search_knowledge_base',
-  description: 'Search the internal Knowledge Base - install guides, best practices, AUS standards, and other reference material staff have added (pasted text, linked websites, or uploaded PDFs/images/spreadsheets). Use this for "how do I...", "what does the standard say about...", procedure/reference questions - as opposed to query_database, which is for live business records like jobs and invoices. Returns matching entries (with an id) and, for a long document, short excerpts around your search words rather than the whole thing - use read_knowledge_entry with that id to dig further into one specific document, e.g. re-searching it for a more specific clause/term once you know which document has what you need.',
+  description: 'Search the internal Knowledge Base - install guides, best practices, AUS standards, and other reference material staff have added (pasted text, linked websites, uploaded PDFs/images/spreadsheets). Use this for "how do I...", "what does the standard say about...", procedure/reference questions - as opposed to query_database, which is for live business records like jobs and invoices. Every document is stored page by page (a PDF\'s real page numbers; other text in parts). Returns the best matching pages: the entry id, title, page number, how the page was read (text or ocr = as printed; notes = a write-up of the page, not its exact wording, say so if you quote it) and an excerpt with the matched words in [brackets]. Plain words work best (e.g. "switchboard clearance" or "cable in roof space"); clause or table numbers like 2.5.4.2 or "Table 3.4" also work. Use read_knowledge_entry with the id and page number to read a whole page or the pages around it.',
   input_schema: {
     type: 'object',
-    properties: { query: { type: 'string', description: 'Keywords to search for in the entry title and content.' } },
+    properties: { query: { type: 'string', description: 'What to look for: a few plain words, a clause number or a table number.' } },
     required: ['query'],
   },
 };
 
 const READ_ENTRY_TOOL = {
   name: 'read_knowledge_entry',
-  description: 'Read more of one specific Knowledge Base entry by id (the id comes from a search_knowledge_base result). Use this to dig into a large document - e.g. a full AUS standard - that search_knowledge_base only returned a short excerpt of. Pass search_term to get excerpts from within that entry around a more specific clause/topic than your original search; omit it to read from the start of the document instead.',
+  description: 'Read one Knowledge Base entry by id (the id comes from a search_knowledge_base result). Give page_from (and optionally page_to, up to 6 pages at once) to read whole pages, e.g. the page a search matched on and the next one when a table or clause runs over. Give search_term instead to find the pages inside this one entry that match a more specific term. With neither, it reads from the start of the document.',
   input_schema: {
     type: 'object',
     properties: {
       id: { type: 'string', description: 'The knowledge_entries id from a search_knowledge_base result.' },
-      search_term: { type: 'string', description: 'Optional - narrows to excerpts around this term within the entry, instead of reading from the start.' },
+      page_from: { type: 'integer', description: 'First page to read in full (as numbered in search results).' },
+      page_to: { type: 'integer', description: 'Last page to read in full (at most 5 after page_from).' },
+      search_term: { type: 'string', description: 'Find pages within this entry matching this term, instead of reading pages in full.' },
     },
     required: ['id'],
   },
 };
 
-const KB_CONTENT_CHAR_LIMIT = 4000;
+const PAGE_CHARS = 12000;
 const READ_ENTRY_CHAR_LIMIT = 8000;
 
-function extractExcerpts(content, words, { windowSize = 1200, maxExcerpts = 4, maxMatchesPerWord = 3 } = {}) {
-  if (!content) return '';
-  const lower = content.toLowerCase();
-  const windows = [];
-  for (const w of words) {
-    const wl = w.toLowerCase();
-    if (!wl) continue;
-    let searchFrom = 0;
-    for (let found = 0; found < maxMatchesPerWord; found++) {
-      const pos = lower.indexOf(wl, searchFrom);
-      if (pos === -1) break;
-      windows.push([Math.max(0, pos - windowSize / 2), Math.min(content.length, pos + wl.length + windowSize / 2)]);
-      searchFrom = pos + wl.length;
-    }
-  }
-  if (!windows.length) return content.slice(0, 2000);
+function pageLabel(row) {
+  const isPdf = row.entry_type === 'file' && /\.pdf$/i.test(row.file_name || '');
+  return isPdf ? 'page' : 'part';
+}
 
-  windows.sort((a, b) => a[0] - b[0]);
-  const merged = [];
-  for (const w of windows) {
-    const last = merged[merged.length - 1];
-    if (last && w[0] <= last[1] + 200) last[1] = Math.max(last[1], w[1]);
-    else merged.push(w);
-  }
+function clip(text, max) {
+  text = text || '';
+  return text.length > max ? text.slice(0, max) + '... (cut, read fewer pages at once)' : text;
+}
 
-  return merged.slice(0, maxExcerpts).map(([start, end]) => {
-    const prefix = start > 0 ? '...' : '';
-    const suffix = end < content.length ? '...' : '';
-    return prefix + content.slice(start, end).trim() + suffix;
-  }).join('\n\n[...]\n\n');
+// Full text search over knowledge_pages (migration 20261104010000). Falls back to a plain substring match
+// for things the word search cannot do, like a clause number.
+async function searchKnowledgePages(userClient, query, entryId, limit) {
+  const { data, error } = await userClient.rpc('search_knowledge_pages', { p_query: query, p_entry_id: entryId || null, p_limit: limit });
+  if (error) return { error };
+  if (data && data.length) {
+    return { data: data.map((r) => ({ id: r.entry_id, title: r.title, category: r.category, [pageLabel(r)]: r.page_no, read_as: r.read_as, excerpt: r.snippet })), error: null };
+  }
+  const needle = query.trim().replace(/[%_,()]/g, ' ').trim().slice(0, 80);
+  if (!needle) return { data: [], error: null };
+  let q = userClient.from('knowledge_pages').select('entry_id, page_no, read_as, text, knowledge_entries!inner(title, category, entry_type, file_name)')
+    .neq('read_as', 'failed').ilike('text', `%${needle}%`).order('page_no').limit(limit);
+  if (entryId) q = q.eq('entry_id', entryId);
+  const { data: rows, error: err2 } = await q;
+  if (err2) return { error: err2 };
+  return {
+    data: (rows || []).map((r) => {
+      const e = r.knowledge_entries || {};
+      const pos = (r.text || '').toLowerCase().indexOf(needle.toLowerCase());
+      const from = Math.max(0, pos - 500);
+      return { id: r.entry_id, title: e.title, category: e.category, [pageLabel(e)]: r.page_no, read_as: r.read_as, excerpt: (from > 0 ? '...' : '') + (r.text || '').slice(from, pos + needle.length + 700) + '...' };
+    }),
+    error: null,
+  };
 }
 
 async function searchKnowledgeBase(userClient, input) {
   const query = ((input && input.query) || '').trim();
   if (!query) return { error: { message: 'query is required' } };
-
-  const words = query.split(/\s+/).map((w) => w.replace(/[%,()]/g, '')).filter(Boolean).slice(0, 6);
-  let q = userClient.from('knowledge_entries').select('id, title, category, content, source_url, file_name');
-  for (const w of words) {
-    q = q.or(`title.ilike.%${w}%,content.ilike.%${w}%`);
+  const pages = await searchKnowledgePages(userClient, query, null, 8);
+  if (pages.error) return pages;
+  // Titles too, so "what do we have on generators" finds the AS 3010 entry even before its pages match.
+  const words = query.split(/\s+/).map((w) => w.replace(/[%_,()]/g, '')).filter((w) => w.length > 2).slice(0, 4);
+  if (words.length) {
+    const seen = new Set(pages.data.map((p) => p.id));
+    let q = userClient.from('knowledge_entries').select('id, title, category, entry_type, file_name');
+    q = q.or(words.map((w) => `title.ilike.%${w}%`).join(','));
+    const { data: titles } = await q.limit(5);
+    for (const t of titles || []) if (!seen.has(t.id)) pages.data.push({ id: t.id, title: t.title, category: t.category, excerpt: '(title match, search inside it with read_knowledge_entry and a search_term)' });
   }
-  const { data, error } = await q.limit(5);
-  if (error) return { error };
-  const trimmed = (data || []).map((row) => ({
-    ...row,
-    content: row.content && row.content.length > KB_CONTENT_CHAR_LIMIT
-      ? extractExcerpts(row.content, words)
-      : row.content,
-  }));
-  return { data: trimmed, error: null };
+  return pages;
 }
 
 async function readKnowledgeEntry(userClient, input) {
   const id = ((input && input.id) || '').trim();
   if (!id) return { error: { message: 'id is required' } };
-  const { data, error } = await userClient
+  const { data: entry, error } = await userClient
     .from('knowledge_entries')
-    .select('id, title, category, content, source_url, file_name')
+    .select('id, title, category, entry_type, file_name, source_url, extraction_error')
     .eq('id', id)
     .maybeSingle();
   if (error) return { error };
-  if (!data) return { data: null, error: null };
+  if (!entry) return { data: null, error: null };
+  const label = pageLabel(entry);
 
   const searchTerm = ((input && input.search_term) || '').trim();
-  let content = data.content || '';
-  if (content.length > READ_ENTRY_CHAR_LIMIT) {
-    if (searchTerm) {
-      const words = searchTerm.split(/\s+/).map((w) => w.replace(/[%,()]/g, '')).filter(Boolean).slice(0, 4);
-      content = extractExcerpts(content, words, { windowSize: 2500, maxExcerpts: 4 });
-    } else {
-      content = content.slice(0, READ_ENTRY_CHAR_LIMIT) + '... (truncated - pass search_term to find a specific section instead)';
-    }
+  if (searchTerm) {
+    const found = await searchKnowledgePages(userClient, searchTerm, id, 6);
+    if (found.error) return found;
+    return { data: { ...entry, matches: found.data }, error: null };
   }
-  return { data: { ...data, content }, error: null };
+
+  const from = parseInt(input && input.page_from, 10);
+  if (from > 0) {
+    const to = Math.min(Math.max(parseInt(input && input.page_to, 10) || from, from), from + 5);
+    const { data: rows, error: pErr } = await userClient.from('knowledge_pages').select('page_no, read_as, text, error')
+      .eq('entry_id', id).gte('page_no', from).lte('page_no', to).order('page_no');
+    if (pErr) return { error: pErr };
+    const pages = (rows || []).map((r) => ({ [label]: r.page_no, read_as: r.read_as, text: r.read_as === 'failed' ? `(could not be read: ${r.error || 'unknown'})` : r.text }));
+    let total = 0;
+    for (const p of pages) { p.text = clip(p.text, Math.max(1000, PAGE_CHARS - total)); total += (p.text || '').length; }
+    return { data: { ...entry, pages, note: pages.length ? undefined : `No ${label} ${from} to ${to} stored for this entry.` }, error: null };
+  }
+
+  const { data: rows, error: pErr } = await userClient.from('knowledge_pages').select('page_no, read_as, text')
+    .eq('entry_id', id).neq('read_as', 'failed').order('page_no').limit(4);
+  if (pErr) return { error: pErr };
+  const { count } = await userClient.from('knowledge_pages').select('id', { count: 'exact', head: true }).eq('entry_id', id);
+  let text = (rows || []).map((r) => `--- ${label} ${r.page_no} (${r.read_as}) ---\n${r.text || ''}`).join('\n\n');
+  if (text.length > READ_ENTRY_CHAR_LIMIT) text = text.slice(0, READ_ENTRY_CHAR_LIMIT) + `... (cut: this entry has ${count || '?'} ${label}s, pass search_term or page_from to get to the right one)`;
+  return { data: { ...entry, [label + 's']: count, text }, error: null };
 }
 
 module.exports = {

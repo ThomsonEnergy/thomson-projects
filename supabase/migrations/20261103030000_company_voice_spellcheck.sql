@@ -1,4 +1,4 @@
--- Company voice, spell check and Polish (docs/IDEAS_BACKLOG.md item 20, docs/PROJECT_SPEC.md A18 and A32).
+-- Company voice, spell check and Polish (docs/IDEAS_BACKLOG.md item 20, docs/PROJECT_SPEC.md A18 and A33).
 --
 -- company_settings.writing_style_mailbox_id: the mailbox whose learned writing style is the
 -- company voice (jasper@ to start). Every mailbox drafts in it unless its writing_style_source

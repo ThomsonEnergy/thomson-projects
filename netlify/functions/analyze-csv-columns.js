@@ -46,7 +46,7 @@ Respond with ONLY a JSON object, no other text, no markdown fences, using the ex
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-5-5',
         max_tokens: 300,
         messages: [{ role: 'user', content: prompt }],
       }),

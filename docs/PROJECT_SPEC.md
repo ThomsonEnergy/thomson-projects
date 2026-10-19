@@ -321,7 +321,7 @@ Manual steps only a person can do (the code is live):
 - **Site inspections** (migration 104): "Needs a site visit" on a lead, quote or job; checklist filled on site (`site-inspection.html`); templates in Settings > Inspection Checklists.
 - **Customer assets** with warranty and service reminders (`assets.html`).
 - **Licence sharing:** a live link to a chosen set of company and employee licences (`share-licences.html`); licences and insurance with AI-extracted expiry on the Team page.
-- **Knowledge base** with OCR for scanned PDFs, **Tech Support** numbers, **Team**, **DNSP**, **Fleet**, **Bugs & Updates** board (synced to `BUGS_AND_UPDATES.md` by `sync-bugs-to-repo.js`).
+- **Knowledge base** (A32), **Tech Support** numbers, **Team**, **DNSP**, **Fleet**, **Bugs & Updates** board (synced to `BUGS_AND_UPDATES.md` by `sync-bugs-to-repo.js`).
 
 ### A30. Ops manager (AI agents, version 1)
 - Workers report through `_shared/agent-log.js` (`runAgent`): supplier bill reader, sales@ email sync, phone notifications, nightly Xero overheads sync, nightly job archiving. Migration 20261019010000.
@@ -339,12 +339,18 @@ Manual steps only a person can do (the code is live):
 - **6 monthly review:** the 5am ops digest opens a "Needs me" task (dedupe `rates_review`, one push) once 6 months have passed, and closes it when the date moves on.
 - **On a job:** Documents tab > Add from Documents. Files are copied into the job's "Company docs" folder; the Schedule of Rates is printed to a PDF at today's rates (`generate-client-document-pdf.js`, `doc_type: schedule_of_rates`, logged-in staff only). Then attach from the job's Emails tab as usual.
 
-### A32. Spell check and Polish (every multi-line text box, migration 20261103030000)
+### A33. Spell check and Polish (every multi-line text box, migration 20261103030000)
 - `js/writing-help.js`, loaded by `supabase-client.js` on every page once signed in. Attaches to every `textarea`, including ones added later. Single-line inputs are never touched; boxes whose id, name or class looks like keys, serials, codes or data, anything inside `[data-no-writing-help]` and the API keys panel are skipped. A parent with `data-wh-anchor` gets the bar after it (chat composer).
 - **Spelling** (`polish-text.js`, mode spell, Claude Haiku 5.5): Automatic by default, after a 2.5 second pause and on leaving a box the person typed in. Spelling and obvious typos only, Australian spelling, never names, numbers, part numbers, units or trade words; a result with a different word count is thrown away. "Spelling fixed, Undo" under the box; Undo also stores the changed words (this device, up to 200) and sends them as "leave these alone". Chat fixes before sending, waiting at most 1.5 seconds.
 - **Polish** (mode polish, Claude Sonnet 5.5): button under a box with 5+ words while it has focus. Restructures in the person's voice (their inbox's own style if set to own, else the company voice, A18), keeps every fact, adds nothing. "Polished, Undo".
 - Per person: Settings > Email Agent > Spell check: Automatic / Only when I press Fix spelling / Off (`profiles.spellcheck_mode`).
 - The text only changes in the box (input and change events fire), the page saves it as it always did. `cleanup-text.js` now checks the login too.
+### A32. Knowledge Base and its background reader (migration 20261104010000, 19 Oct 2026)
+- `knowledge.html`: pasted text, a linked website, or an uploaded file (PDF, image, spreadsheet, text). Every entry is stored page by page in `knowledge_pages` (a PDF's real pages; other text in parts of about 5,000 characters), kept in step with `knowledge_entries.content` by a trigger, so a hand edit (Edit button) rewrites the pages.
+- **Background reader** (`read-knowledge-background.js`, `_shared/knowledge-reader.js`, queue `knowledge_read_jobs`): a PDF upload, or **Read again** on a PDF entry, queues a read and the server does the rest, nothing has to stay open. Page by page: the PDF's own text layer first (free, exact); a page whose text is thin, has a table, or is full of unmapped glyphs is rendered on the server (pdf.js plus @napi-rs/canvas) and read by Claude (Sonnet 5.5) as a picture, one page per call. **Read again** offers: only the failed pages, every page (text first), or every page as pictures. The entry shows "Reading: 212 of 610 pages", Stop (the person who queued it), and the person gets a `knowledge` notification when it finishes. A run works for 11 minutes then calls itself for the rest; `read-knowledge-sweep.js` (every 2 minutes, in the ops manager's worker list) restarts a run that died.
+- **Copyright filter:** Anthropic blocks some word for word pages of a purchased standard ("Output blocked by content filtering policy": 172 pages of AS/NZS 3000 the first time). A blocked page is tried once more, then asked for as reference notes (clause numbers, requirements, table values) and marked `notes`; blocked even then it is marked `failed` with the reason, and the entry says which pages. Sparky says when an answer comes from a notes page.
+- **Sparky's search** (`_shared/sparky-tools.js`): `search_knowledge_base` is Postgres full text search over the pages (`search_knowledge_pages()`, GIN index, clause and table numbers work, substring fallback) and returns document, page number and an excerpt; `read_knowledge_entry` reads whole pages (page_from, page_to) or searches within one entry. Used by Sparky in chat and the Ask AI widget.
+- Non-PDF files and websites still go through `extract-knowledge-content-background.js` (logged-in staff only).
 
 ### A29. Scheduled functions (netlify.toml)
 | Function | Schedule |
@@ -353,6 +359,7 @@ Manual steps only a person can do (the code is live):
 | warm-pdf | every 4 minutes |
 | ops-digest | 18:00 and 19:00 UTC, sends only at 5am Sydney (A30) |
 | chat-ai-sweep | every 2 minutes (team chat job tagging and voice transcripts, A19a) |
+| read-knowledge-sweep | every 2 minutes (Knowledge Base reader, A32) |
 | sync-gmail | every 5 minutes (also starts process-supplier-bills-background, A11a) |
 | archive-completed-jobs | daily |
 | sweep-job-booked | 13:05 and 14:05 UTC (00:05 Sydney with and without daylight saving, A6) |

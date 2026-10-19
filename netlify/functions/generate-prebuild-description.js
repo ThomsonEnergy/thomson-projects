@@ -64,7 +64,7 @@ Respond with ONLY the description text (title line, blank line, paragraph) - no 
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-5-5',
         max_tokens: 400,
         messages: [{ role: 'user', content: prompt }],
       }),

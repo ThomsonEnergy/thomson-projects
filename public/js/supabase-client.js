@@ -2179,7 +2179,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=11';
+  s.src = '/js/notifications.js?v=12';
   document.head.appendChild(s);
 }
 
@@ -6096,7 +6096,7 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
   else start();
 })();
 
-// Spell check and Polish on every multi-line text box (js/writing-help.js, docs/PROJECT_SPEC.md A32).
+// Spell check and Polish on every multi-line text box (js/writing-help.js, docs/PROJECT_SPEC.md A33).
 (function loadWritingHelp() {
   if (typeof document === 'undefined' || document.querySelector('script[data-writing-help]')) return;
   const s = document.createElement('script');

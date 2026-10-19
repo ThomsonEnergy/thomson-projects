@@ -24,6 +24,7 @@ const NOTIF_KINDS = [
   ['review', 'Client reviews received'],
   ['licence', 'Licence and insurance expiry reminders, and requests to update my licences'],
   ['incident', 'Incidents reported from site (admin and finance)'],
+  ['knowledge', 'Knowledge Base reads I started (finished or stopped)'],
 ];
 
 (function () {
