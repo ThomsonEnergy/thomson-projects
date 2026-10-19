@@ -312,7 +312,8 @@
       const [{ data: assignments }, { data: leave }, { data: dayTimeEntries }] = await Promise.all([
         supabaseClient.from('schedule_assignments').select('*, profiles(id, full_name), projects(id, name, job_number, quote_number)').eq('assignment_date', dateStr),
         supabaseClient.from('leave_requests').select('*, profiles(id, full_name)').eq('status', 'approved').lte('start_date', dateStr).gte('end_date', dateStr),
-        supabaseClient.from('time_entries').select('staff_id, project_id, time_category, clock_in, clock_out').gte('clock_in', windowStart.toISOString()).lte('clock_in', windowEnd.toISOString()).not('clock_out', 'is', null),
+        // Open entries too: someone who forgot to clock out still worked that day.
+        supabaseClient.from('time_entries').select('staff_id, project_id, time_category, clock_in, clock_out').gte('clock_in', windowStart.toISOString()).lte('clock_in', windowEnd.toISOString()),
       ]);
       await fetchHolidays(dateStr, dateStr);
       const isHoliday = publicHolidaySet.has(dateStr);

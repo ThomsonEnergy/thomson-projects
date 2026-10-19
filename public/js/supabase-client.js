@@ -5290,24 +5290,24 @@ function openBackorderPanel(lineItem, onComplete) {
   if (clearBtn) {
     clearBtn.addEventListener('click', async () => {
       const msg = overlay.querySelector('#bo-msg');
-      const { error } = await supabaseClient.from('purchase_order_line_items')
-        .update({ is_backordered: false, backorder_eta: null })
-        .eq('id', lineItem.id);
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      const { error } = await supabaseClient.rpc('po_set_backorder', { p_line_id: lineItem.id, p_backordered: false, p_eta: null });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       overlay.remove();
       await onComplete();
     });
   }
 }
 
-// Draws the next sequential PO number (e.g. "PO2001") - same atomic
-// counter pattern already used for quotes/jobs/invoices, so two people
-// creating a PO at the same moment never collide.
+// Deprecated: new POs leave po_number out and read it back from the insert
+// (.select('id, po_number')); trigger trg_purchase_orders_fill_number fills
+// it for every role. get_next_number is pricing roles only, so on any error
+// this returns null and the trigger fills the number instead. Kept only
+// until the last callers (project.html) switch over.
 async function drawNextPoNumber() {
   const { data: settings } = await supabaseClient.from('company_settings').select('po_number_prefix').eq('id', 1).single();
   const prefix = settings?.po_number_prefix || 'PO';
   const { data: nextNum, error } = await supabaseClient.rpc('get_next_number', { counter_name: 'po' });
-  if (error) throw error;
+  if (error) return null;
   return `${prefix}${nextNum}`;
 }
 
