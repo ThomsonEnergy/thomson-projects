@@ -1,4 +1,4 @@
-// Auto replies that point a sender to the right mailbox (migration 20261103000000):
+// Auto replies that point a sender to the right mailbox (migration 20261103010000):
 //   Postie (the email agent, sales@): a supplier emailed an invoice to sales@. The invoice is
 //     passed into the invoice@ bill intake, and the reply asks them to use invoice@ next time
 //     with our PO number on it.

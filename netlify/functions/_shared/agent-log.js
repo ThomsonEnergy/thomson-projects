@@ -23,6 +23,7 @@ const AGENTS = {
   'archive-completed-jobs': { label: 'Archive completed jobs (nightly)', every: 1440 },
   'sweep-job-booked': { label: 'Job Booked check (nightly)', every: 1440 },
   'sweep-quote-expiry': { label: 'Quote and variation expiry (nightly)', every: 1440 },
+  'sweep-licence-expiry': { label: 'Licence and insurance expiry (nightly)', every: 1440 },
   'ops-digest': { label: 'Ops manager 5am digest', every: 1440 },
 };
 

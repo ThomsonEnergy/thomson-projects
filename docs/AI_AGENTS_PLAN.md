@@ -41,6 +41,8 @@ AI agents run as much admin as possible. Jasper directs them from his phone and 
 
 Already built: **price list reader** (emailed price lists keep material costs current, `docs/PROJECT_SPEC.md` A11b), **supplier bill intake** (invoice@ emails read, matched to POs, suggest-only until proven; `docs/PROJECT_SPEC.md` A11a).
 
+Also built: **licence and insurance expiry** (nightly, `sweep-licence-expiry.js`, reminders only; `docs/PROJECT_SPEC.md` B3).
+
 Drafts, not sends, for the first few weeks. Later workers: payment reconciliation, weather (see docs/IDEAS_BACKLOG.md items 1 and 4).
 
 ## Email (per-user opt-in)
