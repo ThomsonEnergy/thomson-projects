@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=18" />
+<link rel="stylesheet" href="/css/style.css?v=19" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -2899,7 +2899,8 @@
       content.innerHTML = `
         <h1>${project.name}</h1>
         <p class="subtitle">${project.client_name} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
-        ${isFrozenQuote && project.approved_at ? `<p class="subtitle" style="margin-top:2px;">Approved ${new Date(project.approved_at).toLocaleDateString('en-AU')}${project.approval_note ? ' - ' + project.approval_note : ' - approved online by the client'}</p>` : ''}
+        ${isFrozenQuote && project.approved_at ? `<p class="subtitle" style="margin-top:2px;">Approved ${new Date(project.approved_at).toLocaleDateString('en-AU')}${project.approval_note ? ' - ' + escapeHtml(project.approval_note) : ' - approved online by the client'}${project.approval_email_thread_id ? ` &middot; <a class="link-quiet" href="/inbox.html?thread=${project.approval_email_thread_id}">View the email</a>` : ''}</p>` : ''}
+        ${!project.job_number && project.status === 'declined' ? `<div class="error-box" style="margin:6px 0 12px;">${approvalProofHtml(project)}${pricingVisible ? ' <button type="button" class="secondary" id="quote-reopen-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Reopen quote</button>' : ''}</div>` : ''}
         <div style="margin-bottom:20px;">
           ${pricingVisible && !editMode ? `
             ${!isFrozenQuote ? `<button id="edit-toggle-btn" class="secondary">${project.job_number ? 'Edit stages' : 'Edit quote'}</button>` : ''}
@@ -2907,7 +2908,7 @@
             ${!project.job_number ? `<button id="duplicate-btn" class="secondary">Duplicate as new quote</button>` : ''}
             ${project.job_number && project.source_quote?.quote_token ? `<a class="btn secondary" href="/quote.html?token=${project.source_quote.quote_token}" target="_blank">Go to quote</a>` : ''}
             ${isFrozenQuote && project.resulting_job ? `<a class="btn secondary" href="/project.html?id=${project.resulting_job.id}">Go to job${project.resulting_job.job_number ? ' (J' + project.resulting_job.job_number + ')' : ''}</a>` : ''}
-            ${!project.job_number && !isAccepted ? `<button type="button" class="secondary" id="mark-approved-btn">Mark approved manually</button>` : ''}
+            ${!project.job_number && !isAccepted && project.status !== 'declined' ? `<button type="button" class="secondary" id="mark-approved-btn">Mark approved...</button><button type="button" class="secondary" id="mark-declined-btn">Mark declined...</button>` : ''}
           ` : ''}
           ${editMode ? `
             <button id="save-edit-btn">Save changes</button>
@@ -3838,7 +3839,11 @@
       if (scheduleStaffBtn) scheduleStaffBtn.addEventListener('click', () => openScheduleStaffPanel(project));
 
       const markApprovedBtn = document.getElementById('mark-approved-btn');
-      if (markApprovedBtn) markApprovedBtn.addEventListener('click', () => openMarkApprovedPanel(project));
+      if (markApprovedBtn) markApprovedBtn.addEventListener('click', () => openApprovalPanel({ kind: 'quote', mode: 'approve', project, onDone: async () => location.reload() }));
+      const markDeclinedBtn = document.getElementById('mark-declined-btn');
+      if (markDeclinedBtn) markDeclinedBtn.addEventListener('click', () => openApprovalPanel({ kind: 'quote', mode: 'decline', project, onDone: async () => location.reload() }));
+      const quoteReopenBtn = document.getElementById('quote-reopen-btn');
+      if (quoteReopenBtn) quoteReopenBtn.addEventListener('click', () => reopenDeclined('quote', project.id, async () => location.reload()));
 
       const duplicateBtn = document.getElementById('duplicate-btn');
       if (duplicateBtn) duplicateBtn.addEventListener('click', async () => {
@@ -3959,55 +3964,111 @@
 
     }
 
-    // For an approval that didn't happen through the client clicking
-    // Approve on their own quote page - a phone call, an email, an
-    // in-person signature. Requires a note recording how/when consent was
-    // actually given, since there's no client click to point to. Does
-    // exactly what online acceptance does otherwise: freezes this quote
-    // and creates the job as a separate record (manually-approve-quote.js).
-    function openMarkApprovedPanel(project) {
+    // Records what the client said outside the app, for a quote or a fixed-price variation:
+    //   approve  by email (pick the client's email tagged to the job / quote, linked as proof),
+    //            phone call or in person (note required). A quote is approved through
+    //            manually-approve-quote.js (makes the job); a variation through approval-actions.js
+    //            (made a stage on the job, same as signing).
+    //   decline  the reason is required; an email can be linked as proof.
+    // opts: { kind: 'quote' | 'variation', mode: 'approve' | 'decline', project, entry?, onDone }
+    async function openApprovalPanel(opts) {
+      const { kind, mode, project, entry } = opts;
+      const isApprove = mode === 'approve';
+      const what = kind === 'quote' ? (project.quote_number ? `quote Q${project.quote_number}` : 'this quote') : `Variation ${entry.variation_number || ''}`.trim();
+      const projectIds = [project.id, project.source_quote_id].filter(Boolean);
+      const { data: links } = await supabaseClient.from('email_job_links')
+        .select('thread_id, kind, email_threads(id, subject, last_message_at)').in('project_id', projectIds);
+      const threads = [...new Map((links || []).filter(l => l.email_threads).map(l => [l.thread_id, { ...l.email_threads, kind: l.kind }])).values()]
+        .sort((x, y) => (x.kind === 'client' ? 0 : 1) - (y.kind === 'client' ? 0 : 1) || String(y.last_message_at || '').localeCompare(String(x.last_message_at || '')));
+      const fmt = (d) => d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
       const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
       overlay.innerHTML = `
-        <div class="card" style="max-width:480px; width:100%;">
-          <h2>Mark this quote approved</h2>
-          <p class="subtitle" style="margin-bottom:12px;">For when the client agreed some other way - by phone, email, or in person - rather than clicking Approve on their own quote page. This does the same thing that would: the quote is frozen as approved, and a new job record is created from it.</p>
-          <label style="margin-top:0">How and when was this approved?</label>
-          <textarea id="ma-note" placeholder="e.g. Approved by phone call with Jane Smith, 28 Aug 2026" style="min-height:80px;"></textarea>
-          <div style="margin-top:14px;">
-            <button id="ma-confirm-btn">Mark approved</button>
-            <button type="button" class="secondary" id="ma-cancel-btn">Cancel</button>
+        <div class="card" style="max-width:520px; width:100%; max-height:90vh; overflow-y:auto;">
+          <h2>${isApprove ? 'Mark' : 'Mark'} ${escapeHtml(what)} ${isApprove ? 'approved' : 'declined'}</h2>
+          <p class="subtitle" style="margin-bottom:12px;">${isApprove
+            ? (kind === 'quote' ? 'For when the client agreed outside the quote page. The quote is frozen as approved and the job is created, the same as signing online.' : 'For when the client agreed outside the variation page. It is added to the job as a stage at this price, the same as signing online.')
+            : 'For when the client has said no. You can reopen it later.'}</p>
+          <label style="margin-top:0;">${isApprove ? 'How did they approve it?' : 'How did they tell you?'}</label>
+          <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:10px;">
+            ${[['email', 'Email'], ['phone', 'Phone call'], ['in_person', 'In person']].map(([v, l], i) => `<label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ap-method" value="${v}" ${i === 0 ? 'checked' : ''} style="width:auto;" /> ${l}</label>`).join('')}
           </div>
-          <div id="ma-msg"></div>
+          <div id="ap-email-wrap">
+            <label style="margin-top:0;">The client's email${isApprove ? '' : ' (optional)'}</label>
+            ${threads.length ? `<select id="ap-thread">${isApprove ? '' : '<option value="">No email</option>'}${threads.map(t => `<option value="${t.id}">${escapeHtml(t.subject || '(no subject)')}${t.last_message_at ? ' - ' + fmt(t.last_message_at) : ''}</option>`).join('')}</select>
+              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Emails tagged to this ${project.job_number ? 'job or its quote' : 'quote'}. Not there? Tag it from the Inbox first.</p>`
+            : `<p class="subtitle" style="margin:0;">No emails are tagged to this ${project.job_number ? 'job' : 'quote'} yet. Open the client's email in the Inbox, tag it to ${escapeHtml(projectRef(project))}, then come back.</p>`}
+          </div>
+          <label id="ap-note-label">${isApprove ? 'Note (who and when)' : 'Reason the client gave'}</label>
+          <textarea id="ap-note" style="min-height:70px;" placeholder="${isApprove ? 'e.g. Jane Smith approved by phone, 19 Oct' : 'e.g. Went with another quote, price too high'}"></textarea>
+          <div style="margin-top:14px;">
+            <button type="button" id="ap-confirm" ${isApprove ? '' : 'class="danger"'}>${isApprove ? 'Mark approved' : 'Mark declined'}</button>
+            <button type="button" class="secondary" id="ap-cancel">Cancel</button>
+          </div>
+          <div id="ap-msg"></div>
         </div>`;
       document.body.appendChild(overlay);
-
-      overlay.querySelector('#ma-cancel-btn').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#ma-confirm-btn').addEventListener('click', async () => {
-        const msg = overlay.querySelector('#ma-msg');
-        const note = overlay.querySelector('#ma-note').value.trim();
-        if (!note) { msg.innerHTML = `<div class="error-box">A note on how/when the client approved is required.</div>`; return; }
-
-        const confirmBtn = overlay.querySelector('#ma-confirm-btn');
-        confirmBtn.disabled = true;
-        confirmBtn.textContent = 'Marking approved...';
+      const method = () => overlay.querySelector('input[name="ap-method"]:checked').value;
+      const refresh = () => {
+        const isEmail = method() === 'email';
+        overlay.querySelector('#ap-email-wrap').style.display = isEmail || !isApprove ? '' : 'none';
+        if (isApprove) overlay.querySelector('#ap-note-label').textContent = isEmail ? 'Note (optional)' : 'Note (who and when)';
+      };
+      overlay.querySelectorAll('input[name="ap-method"]').forEach(r => r.addEventListener('change', refresh));
+      refresh();
+      overlay.querySelector('#ap-cancel').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#ap-confirm').addEventListener('click', async () => {
+        const msg = overlay.querySelector('#ap-msg');
+        const m = method();
+        const threadEl = overlay.querySelector('#ap-thread');
+        const emailThreadId = (m === 'email' || !isApprove) && threadEl ? (threadEl.value || null) : null;
+        const note = overlay.querySelector('#ap-note').value.trim();
+        if (isApprove && m === 'email' && !emailThreadId) { msg.innerHTML = '<div class="error-box">Pick the client\'s email (tag it to this job from the Inbox first).</div>'; return; }
+        if (isApprove && m !== 'email' && !note) { msg.innerHTML = '<div class="error-box">Add a note: who approved it and when.</div>'; return; }
+        if (!isApprove && !note) { msg.innerHTML = '<div class="error-box">Add the reason the client gave.</div>'; return; }
+        const btn = overlay.querySelector('#ap-confirm');
+        btn.disabled = true; btn.textContent = 'Saving...';
         try {
           const { data: { session } } = await supabaseClient.auth.getSession();
-          const res = await fetch('/.netlify/functions/manually-approve-quote', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-            body: JSON.stringify({ quoteId: project.id, note }),
+          const isQuoteApprove = kind === 'quote' && isApprove;
+          const res = await fetch(isQuoteApprove ? '/.netlify/functions/manually-approve-quote' : '/.netlify/functions/approval-actions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify(isQuoteApprove
+              ? { quoteId: project.id, method: m, note, emailThreadId }
+              : { kind, id: kind === 'quote' ? project.id : entry.id, action: mode, method: m, note, reason: note, emailThreadId }),
           });
-          const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not mark this quote approved');
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok || !d.ok) throw new Error(d.error || 'Could not save it');
           overlay.remove();
-          location.reload();
+          await opts.onDone();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-          confirmBtn.disabled = false;
-          confirmBtn.textContent = 'Mark approved';
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false; btn.textContent = isApprove ? 'Mark approved' : 'Mark declined';
         }
       });
+    }
+
+    // Reopens a declined quote (back to Sent) or variation (back to Draft).
+    async function reopenDeclined(kind, id, onDone) {
+      if (!confirm(kind === 'quote' ? 'Reopen this quote? It goes back to Sent and the client can accept it again.' : 'Reopen this variation? It goes back to Draft so you can edit and resend it.')) return;
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/approval-actions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ kind, id, action: 'reopen' }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.ok) { alert(d.error || 'Could not reopen it'); return; }
+      await onDone();
+    }
+
+    // How a quote or variation was approved / declined, for the job page. row: the quote or variation.
+    function approvalProofHtml(row) {
+      const METHOD = { email: 'by email', phone: 'by phone call', in_person: 'in person', online: 'online' };
+      const dt = (d) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      const emailLink = row.approval_email_thread_id ? ` <a class="link-quiet" href="/inbox.html?thread=${row.approval_email_thread_id}">View the email</a>` : '';
+      if (row.declined_at) return `Declined ${row.declined_by ? '(marked by us)' : 'by the client online'} on ${dt(row.declined_at)}${row.decline_reason ? ': ' + escapeHtml(row.decline_reason) : ''}.${emailLink}`;
+      if (row.approval_method && row.approval_method !== 'online') return `Approved ${METHOD[row.approval_method] || ''}${row.approved_at ? ' on ' + dt(row.approved_at) : ''}${row.approval_note ? ' - ' + escapeHtml(row.approval_note) : ''}.${emailLink}`;
+      return '';
     }
 
     async function loadVariations(projectId) {
@@ -5765,7 +5826,7 @@
       const fmtDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
       const today = new Date().toISOString().slice(0, 10);
       const STATUS = { to_bill: ['To bill', 'draft'], billed: ['Billed', 'accepted'], no_charge: ['No charge', 'sent'] };
-      const APPROVAL = { draft: ['Draft', 'draft'], sent: ['Sent to client', 'sent'], approved: ['Signed', 'accepted'], declined: ['Declined', 'draft'] };
+      const APPROVAL = { draft: ['Draft', 'draft'], sent: ['Sent to client', 'sent'], approved: ['Approved', 'accepted'], declined: ['Declined', 'declined'] };
       const qtyText = (n) => String(Math.round((Number(n) || 0) * 100) / 100);
       const btnStyle = 'font-size:12px; padding:5px 10px;';
       const linkFor = (r) => `${shareOrigin()}/quote.html?variation=${r.variation_token}`;
@@ -5815,18 +5876,22 @@
               <div style="display:flex; justify-content:space-between; font-weight:600; font-size:13px; padding-top:6px; margin-top:4px; border-top:0.5px solid var(--border);"><span>Total ex GST</span><span>${money(linesTotal(r))}</span></div>
               <div class="subtitle" style="display:flex; justify-content:space-between; font-size:12px;"><span>Inc GST</span><span>${money(linesTotal(r) * 1.1)}</span></div>
             ` : `<p class="subtitle" style="margin:0; font-size:12px;">Fixed-price variation, priced by the office.</p>`}
-            ${r.approval_status === 'approved' ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px;">Signed by ${escapeHtml(r.signed_by_name || '')} on ${new Date(r.approved_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}. It is now a stage on the job${r.status === 'billed' ? ' and has been invoiced' : ' - invoice it from Invoice project'}.</p>` : ''}
+            ${r.approval_status === 'declined' ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px; color:var(--red);">${approvalProofHtml(r)} It won't go on an invoice.</p>` : ''}
+            ${r.approval_status === 'approved' && r.approval_method && r.approval_method !== 'online' ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px;">${approvalProofHtml(r)} It is now a stage on the job${r.status === 'billed' ? ' and has been invoiced' : ' - invoice it from Invoice project'}.</p>` : ''}
+            ${r.approval_status === 'approved' && !(r.approval_method && r.approval_method !== 'online') ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px;">Signed by ${escapeHtml(r.signed_by_name || '')} on ${new Date(r.approved_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}. It is now a stage on the job${r.status === 'billed' ? ' and has been invoiced' : ' - invoice it from Invoice project'}.</p>` : ''}
             ${r.approval_status === 'sent' ? `<p class="subtitle" style="margin:8px 0 0; font-size:12px;">Sent ${new Date(r.sent_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} - waiting for the client to sign.</p>` : ''}
             ${pricingVisible ? `
               <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">
                 ${r.approval_status === 'draft' || !r.approval_status ? `<button type="button" class="secondary var-fixed-edit" data-id="${r.id}" style="${btnStyle}">Edit</button>` : ''}
-                ${r.approval_status !== 'approved' ? `<button type="button" class="var-fixed-send" data-id="${r.id}" style="${btnStyle}">${r.approval_status === 'sent' ? 'Resend to client...' : 'Email to client...'}</button>` : ''}
+                ${!['approved', 'declined'].includes(r.approval_status) ? `<button type="button" class="var-fixed-send" data-id="${r.id}" style="${btnStyle}">${r.approval_status === 'sent' ? 'Resend to client...' : 'Email to client...'}</button>` : ''}
                 ${r.approval_status === 'draft' || !r.approval_status ? `<button type="button" class="secondary var-fixed-marksent" data-id="${r.id}" style="${btnStyle}">I've sent it myself</button>` : ''}
                 ${r.approval_status === 'sent' ? `<button type="button" class="secondary var-fixed-withdraw" data-id="${r.id}" style="${btnStyle}">Back to draft</button>` : ''}
+                ${!['approved', 'declined'].includes(r.approval_status) ? `<button type="button" class="secondary var-fixed-approve" data-id="${r.id}" style="${btnStyle}">Mark approved...</button><button type="button" class="secondary var-fixed-decline" data-id="${r.id}" style="${btnStyle}">Mark declined...</button>` : ''}
+                ${r.approval_status === 'declined' ? `<button type="button" class="secondary var-fixed-reopen" data-id="${r.id}" style="${btnStyle}">Reopen</button>` : ''}
                 ${r.pdf_path ? `<button type="button" class="secondary var-fixed-pdf" data-id="${r.id}" style="${btnStyle}">View PDF</button>` : ''}
                 <button type="button" class="secondary var-fixed-makepdf" data-id="${r.id}" style="${btnStyle}">${r.pdf_path ? 'Regenerate PDF' : 'Make PDF'}</button>
                 <button type="button" class="secondary var-fixed-copy" data-link="${linkFor(r)}" style="${btnStyle}">Copy link</button>
-                <a class="btn secondary" target="_blank" href="${linkFor(r)}" style="${btnStyle}">${r.approval_status === 'approved' ? 'View signed copy' : 'Preview as client'}</a>
+                <a class="btn secondary" target="_blank" href="${linkFor(r)}" style="${btnStyle}">${r.approval_status === 'approved' ? 'View approved copy' : 'Preview as client'}</a>
               </div>` : ''}
           </div>` : `
           <div style="margin-top:12px; padding-top:10px; border-top:0.5px solid var(--border);">
@@ -5957,6 +6022,9 @@
       // ----- fixed-price variations -----
       listEl.querySelectorAll('.var-fixed-edit').forEach(btn => btn.addEventListener('click', () => openFixedVariationEditor(project, rowById(btn.dataset.id), reload)));
       listEl.querySelectorAll('.var-fixed-send').forEach(btn => btn.addEventListener('click', () => sendFixedVariationEmail(project, rowById(btn.dataset.id), reload, btn)));
+      listEl.querySelectorAll('.var-fixed-approve').forEach(btn => btn.addEventListener('click', () => openApprovalPanel({ kind: 'variation', mode: 'approve', project, entry: rowById(btn.dataset.id), onDone: reload })));
+      listEl.querySelectorAll('.var-fixed-decline').forEach(btn => btn.addEventListener('click', () => openApprovalPanel({ kind: 'variation', mode: 'decline', project, entry: rowById(btn.dataset.id), onDone: reload })));
+      listEl.querySelectorAll('.var-fixed-reopen').forEach(btn => btn.addEventListener('click', () => reopenDeclined('variation', btn.dataset.id, reload)));
       listEl.querySelectorAll('.var-fixed-pdf').forEach(btn => btn.addEventListener('click', () => {
         const r = rowById(btn.dataset.id);
         openPdfViewer(r.pdf_path, `${projectRef(project)} - Variation ${r.variation_number || ''}`, { projectId: project.id, folder: 'Variations' });

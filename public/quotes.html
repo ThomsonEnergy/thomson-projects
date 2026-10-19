@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=18" />
+<link rel="stylesheet" href="/css/style.css?v=19" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -90,7 +90,8 @@
       const pendingQuotes = projects.filter(p => p.status === 'draft');
       const sentQuotes = projects.filter(p => p.status === 'sent');
       const approvedQuotes = projects.filter(p => p.status === 'approved');
-      const archived = projects.filter(p => !['draft', 'sent', 'approved'].includes(p.status));
+      const declinedQuotes = projects.filter(p => p.status === 'declined'); // the client said no (on the quote page, or marked by us)
+      const archived = projects.filter(p => !['draft', 'sent', 'approved', 'declined'].includes(p.status));
 
       function buildRowsHtml(rowProjects) {
         return rowProjects.map((p, i) => {
@@ -153,6 +154,7 @@
           <button class="settings-tab active" data-panel="active">Active (${pendingQuotes.length})</button>
           <button class="settings-tab" data-panel="sent">Sent to Client (${sentQuotes.length})</button>
           <button class="settings-tab" data-panel="approved">Approved (${approvedQuotes.length})</button>
+          <button class="settings-tab" data-panel="declined">Declined (${declinedQuotes.length})</button>
           <button class="settings-tab" data-panel="archived">Archived (${archived.length})</button>
         </div>
         <div class="settings-panel active" id="panel-active">
@@ -166,6 +168,10 @@
         <div class="settings-panel" id="panel-approved">
           ${bulkBarHtml()}
           ${approvedQuotes.length ? buildRowsHtml(approvedQuotes) : `<p class="subtitle">No approved quotes yet - a quote stays here as a frozen record once accepted; the job it becomes is a separate record, in Projects.</p>`}
+        </div>
+        <div class="settings-panel" id="panel-declined">
+          ${bulkBarHtml()}
+          ${declinedQuotes.length ? buildRowsHtml(declinedQuotes) : `<p class="subtitle">No declined quotes. A quote lands here when the client declines it, or you mark it declined. Open it to reopen.</p>`}
         </div>
         <div class="settings-panel" id="panel-archived">
           ${bulkBarHtml()}
@@ -185,6 +191,7 @@
         wireBulkDelete(document.getElementById('panel-active'), projects);
         wireBulkDelete(document.getElementById('panel-sent'), projects);
         wireBulkDelete(document.getElementById('panel-approved'), projects);
+        wireBulkDelete(document.getElementById('panel-declined'), projects);
         wireBulkDelete(document.getElementById('panel-archived'), projects);
       }
     })();
