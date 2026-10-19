@@ -351,6 +351,7 @@ Manual steps only a person can do (the code is live):
 - **Copyright filter:** Anthropic blocks some word for word pages of a purchased standard ("Output blocked by content filtering policy": 172 pages of AS/NZS 3000 the first time). A blocked page is tried once more, then asked for as reference notes (clause numbers, requirements, table values) and marked `notes`; blocked even then it is marked `failed` with the reason, and the entry says which pages. Sparky says when an answer comes from a notes page.
 - **Sparky's search** (`_shared/sparky-tools.js`): `search_knowledge_base` is Postgres full text search over the pages (`search_knowledge_pages()`, GIN index, clause and table numbers work, substring fallback) and returns document, page number and an excerpt; `read_knowledge_entry` reads whole pages (page_from, page_to) or searches within one entry. Used by Sparky in chat and the Ask AI widget.
 - Non-PDF files and websites still go through `extract-knowledge-content-background.js` (logged-in staff only).
+- Left over: the old `knowledge_ocr_parts` table is still on production (the migration's drop timed out in the MCP tool); nothing uses it. Drop it from the Supabase SQL editor: `drop table if exists public.knowledge_ocr_parts;`
 
 ### A29. Scheduled functions (netlify.toml)
 | Function | Schedule |
