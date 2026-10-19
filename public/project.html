@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=85"></script>
+  <script src="/js/supabase-client.js?v=86"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -6373,7 +6373,7 @@
             })));
             const { error } = await supabaseClient.from('schedule_assignments').insert(rows);
             if (error) throw error;
-            if (isJob) await supabaseClient.from('projects').update({ pipeline_stage: 'job_booked' }).eq('id', project.id).eq('pipeline_stage', 'ready_to_book');
+            // The database moves Ready to Book to Job Booked on this booking (migration 20261023000000).
             await logActivity('project', project.id, 'staff_scheduled', `Scheduled ${staffIds.length} ${staffIds.length === 1 ? 'person' : 'people'} for ${dates.length} day${dates.length === 1 ? '' : 's'} from ${fmtDay(dates[0])}`);
             await render();
             overlay.querySelector('#sched-msg').innerHTML = `<div class="success-box">Booked ${rows.length} ${rows.length === 1 ? 'slot' : 'slots'}.</div>`;

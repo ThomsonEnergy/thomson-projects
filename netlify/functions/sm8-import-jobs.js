@@ -11,7 +11,7 @@
 // the page sends them in small batches so no single call runs past the
 // function time limit.
 //
-// Each job is created like a job from an approved quote (job_booked, job
+// Each job is created like a job from an approved quote (ready_to_book, job
 // number from the usual trigger) with one stage holding:
 //   * every ServiceM8 bundle as a prebuild group of its real components,
 //     plus the standalone lines - labour at ServiceM8's sell rate (on the
@@ -139,7 +139,8 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
       // of its quoted value ("Invoice project"). direct_job: invoiced from
       // actual time and materials.
       proposal_template: jobType === 'quoted' ? 'new_build' : 'direct_job',
-      pipeline_stage: 'job_booked',
+      // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
+      pipeline_stage: 'ready_to_book',
       status: 'in_progress',
       created_by: userId,
       sm8_job_uuid: sm8JobUuid,

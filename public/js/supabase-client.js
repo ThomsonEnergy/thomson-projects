@@ -3300,7 +3300,7 @@ function openQuickJobPanel(onCreated) {
   overlay.innerHTML = `
     <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
       <h2>New job - no quote</h2>
-      <p class="subtitle" style="margin-bottom:12px;">Skips the quote/proposal step entirely and goes straight to Job Booked. Time and materials get logged against it as normal (timesheets, POs, or manually); invoice it for whatever's actually been spent once it's done.</p>
+      <p class="subtitle" style="margin-bottom:12px;">Skips the quote/proposal step entirely and goes straight to Ready to Book (Job Booked once someone is scheduled or clocks in). Time and materials get logged against it as normal (timesheets, POs, or manually); invoice it for whatever's actually been spent once it's done.</p>
 
       <label style="margin-top:0">Job name</label>
       <input id="qj-name" placeholder="e.g. 14 Miller St - Switchboard Repair" />
@@ -3412,7 +3412,8 @@ function openQuickJobPanel(onCreated) {
         client_phone: clientPhone,
         client_address: clientAddress,
         proposal_template: 'direct_job',
-        pipeline_stage: 'job_booked',
+        // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
+        pipeline_stage: 'ready_to_book',
         status: 'in_progress',
         laha_approved: overlay.querySelector('#qj-laha-approved').checked,
       }).select('id, name, job_number').single();
@@ -3729,7 +3730,8 @@ function openWarrantyJobPanel(originalProject, onCreated) {
         client_phone: clientPhone,
         client_address: clientAddress,
         proposal_template: 'direct_job',
-        pipeline_stage: 'job_booked',
+        // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
+        pipeline_stage: 'ready_to_book',
         status: 'in_progress',
         warranty_of_project_id: originalProject.id,
       }).select('id, name, job_number').single();

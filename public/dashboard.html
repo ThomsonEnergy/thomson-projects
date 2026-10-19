@@ -31,7 +31,7 @@
     <div style="display:flex; justify-content:space-between; align-items:start; flex-wrap:wrap; gap:12px;">
       <div>
         <h1>Job pipeline</h1>
-        <p class="subtitle">Every project, left to right through its lifecycle. Quote Approved through Job Booked now move automatically (quote approval, deposit paid, mandatory tasks, scheduling) - Job Not Complete onward still moves by hand until later phases land.</p>
+        <p class="subtitle">Every project, left to right through its lifecycle. Quote Approved through Job Booked move automatically (quote approval, deposit paid, mandatory tasks, scheduling). A job is only Job Booked while someone is scheduled to it or clocked into it.</p>
       </div>
       <button class="secondary" id="new-direct-job-btn">+ New job (no quote)</button>
     </div>
@@ -41,7 +41,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=85"></script>
+  <script src="/js/supabase-client.js?v=86"></script>
   <script src="/js/theme.js"></script>
   <script>
     const STAGES = [
@@ -166,6 +166,7 @@
         sel.addEventListener('change', async () => {
           const id = sel.dataset.id;
           const newStage = sel.value;
+          const oldStage = sel.querySelector('option[selected]')?.value;
           sel.disabled = true;
           const { error: updateErr } = await supabaseClient
             .from('projects')
@@ -173,6 +174,7 @@
             .eq('id', id);
           if (updateErr) {
             alert('Could not move this card: ' + updateErr.message);
+            if (oldStage) sel.value = oldStage;
             sel.disabled = false;
             return;
           }
