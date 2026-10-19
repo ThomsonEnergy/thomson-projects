@@ -391,4 +391,5 @@ Grab gear from the Warehouse or a vehicle for a job, and fix the stock count at 
 - On Create: one server step (migration, `create_stock_pull_po`) makes the PO (supplier name "Warehouse" or the vehicle), takes the stock out, sets the corrected counts, costs every line to the job at the material's cost (`job_material_usage`, `from_stock`), marks the lines and PO received. All or nothing, works for every role.
 - No follow-up task, no bill, no invoice upload, no Xero on a stock PO. Shown on the job's PO list as "Stock PO, from Warehouse / <vehicle>".
 - Activity log: on the PO and the job ("PO 2101 pulled 1 x 6mm TPS from Warehouse"), and on the material when the count was corrected ("Warehouse count corrected: app 0, actually 3, took 1, 2 left").
+- A job's PO stays on that job: receiving a line on a job PO no longer has a job search, so it can only go to this job (or back to the Warehouse or a vehicle). For another job, open that job and make the PO there. POs for Stock or a vehicle keep the job search. (Owner, 19 Oct 2026)
 - Migration adds `purchase_orders.stock_source` (warehouse or vehicle) and `stock_source_vehicle_id` (indexed).
