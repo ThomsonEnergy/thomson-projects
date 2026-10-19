@@ -602,7 +602,7 @@
       <div class="cc-pop" style="display:none;"></div>
       <div class="cc-chips"></div>
       <div class="cc-recbar" style="display:none;"></div>
-      <div class="cc-row">
+      <div class="cc-row" data-wh-anchor>
         <button type="button" class="cc-icon cc-attach" title="Photo or file">&#128206;</button>
         <input type="file" class="cc-file-input" multiple style="display:none;" />
         <button type="button" class="cc-icon cc-job" title="Tag a job">#</button>
@@ -744,8 +744,16 @@
       }
     });
 
+    let sending = false;
     async function send() {
+      if (sending) return;
+      sending = true;
+      try { await sendNow(); } finally { sending = false; }
+    }
+    async function sendNow() {
       if (state.rec) { const v = await stopRec(true); if (v) state.files.push(v); }
+      // spelling fixed first (js/writing-help.js), at most a second and a half
+      if (window.teWriting && ta.value.trim()) await window.teWriting.beforeSend(ta);
       const body = ta.value.trim();
       if (!body && !state.files.length) return;
       const mentionIds = S.staff.filter(s => s.full_name && body.includes('@' + s.full_name)).map(s => s.id);

@@ -6095,3 +6095,13 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
 })();
+
+// Spell check and Polish on every multi-line text box (js/writing-help.js, docs/PROJECT_SPEC.md A32).
+(function loadWritingHelp() {
+  if (typeof document === 'undefined' || document.querySelector('script[data-writing-help]')) return;
+  const s = document.createElement('script');
+  s.src = '/js/writing-help.js?v=1';
+  s.defer = true;
+  s.dataset.writingHelp = '1';
+  document.head.appendChild(s);
+})();

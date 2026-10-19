@@ -10,8 +10,10 @@
 // A guide the owner edited by hand is passed back in so their corrections survive
 // a refresh. The result lands on mailboxes.writing_style / writing_style_examples.
 //
-// stylePrompt(mailbox, writer) turns the saved guide and examples into the block
-// the drafting prompt uses (_shared/email-agent.js).
+// resolveStyle(admin, mailbox) picks the voice a mailbox drafts in (its own, or the company
+// voice set in Settings), voiceForUser(admin, userId) the voice for a person's Polish
+// (polish-text.js), and stylePrompt(style, writer) turns it into the block the drafting
+// prompt uses (_shared/email-agent.js).
 
 const { getIntegrationKey } = require('./get-integration-key');
 
@@ -149,19 +151,50 @@ function wantsLearning(mailbox) {
   return Date.now() - new Date(mailbox.writing_style_learned_at).getTime() > REFRESH_DAYS * 86400000;
 }
 
+// The voice a mailbox drafts in. Its own learned style when it is set to 'own' (or it is the
+// company voice mailbox itself) and has one; otherwise the company voice
+// (company_settings.writing_style_mailbox_id); otherwise its own style if it has one; else null.
+// The company voice used by another mailbox or person carries only the writer's own words from
+// the examples, never the emails they were answering (those came from a private inbox).
+async function companyVoice(admin, exceptId) {
+  const { data: cs } = await admin.from('company_settings').select('writing_style_mailbox_id').eq('id', 1).maybeSingle();
+  const id = cs?.writing_style_mailbox_id;
+  if (!id || id === exceptId) return { id, style: null };
+  const { data: mb } = await admin.from('mailboxes').select('writing_style, writing_style_examples').eq('id', id).maybeSingle();
+  const guide = String(mb?.writing_style || '').trim();
+  if (!guide) return { id, style: null };
+  const examples = (Array.isArray(mb.writing_style_examples) ? mb.writing_style_examples : []).map((e) => ({ we_replied: e.we_replied }));
+  return { id, style: { guide, examples, house: true } };
+}
+
+async function resolveStyle(admin, mailbox) {
+  const { data: mb } = await admin.from('mailboxes').select('id, writing_style, writing_style_examples, writing_style_source').eq('id', mailbox.id).maybeSingle();
+  const ownGuide = String(mb?.writing_style || '').trim();
+  const own = ownGuide ? { guide: ownGuide, examples: Array.isArray(mb.writing_style_examples) ? mb.writing_style_examples : [], house: false } : null;
+  const company = await companyVoice(admin, mb?.id);
+  if (own && (mb.writing_style_source === 'own' || company.id === mb.id)) return own;
+  return company.style || own;
+}
+
+// The voice for a person's Polish: their own inbox's choice when they have one, else the company voice.
+async function voiceForUser(admin, userId) {
+  const { data: mb } = await admin.from('mailboxes').select('id').eq('kind', 'personal').eq('owner_id', userId).maybeSingle();
+  if (mb) return resolveStyle(admin, mb);
+  return (await companyVoice(admin, null)).style;
+}
+
 // The block for the drafting prompt: the guide plus the real replies as examples.
-function stylePrompt(mailbox, writer) {
-  const guide = String(mailbox.writing_style || '').trim();
-  const examples = Array.isArray(mailbox.writing_style_examples) ? mailbox.writing_style_examples : [];
-  if (!guide && !examples.length) return '';
-  let s = '';
-  if (guide) s += `\nHow ${writer} writes (match this voice; where it differs from the rules above on wording, this wins):\n${guide}\n`;
+function stylePrompt(style, writer) {
+  if (!style) return '';
+  const who = style.house ? 'we write at Thomson Energy (the house voice)' : `${writer} writes`;
+  let s = `\nHow ${who}. Match this voice; where it differs from the rules above on wording, this wins:\n${style.guide}\n`;
+  const examples = (style.examples || []).filter((e) => e && e.we_replied);
   if (examples.length) {
-    s += `\nReal replies ${writer} sent earlier. Match the voice, length and shape, never the facts (different jobs, different people):\n`;
-    s += examples.map((e, i) => `Example ${i + 1}${e.they_said ? `\nThey wrote: ${e.they_said.slice(0, 500)}` : ''}\n${writer} replied:\n${e.we_replied}`).join('\n---\n');
+    s += `\nReal replies in this voice. Match the voice, length and shape, never the facts (different jobs, different people):\n`;
+    s += examples.map((e, i) => `Example ${i + 1}${e.they_said ? `\nThey wrote: ${e.they_said.slice(0, 500)}` : ''}\nReply:\n${e.we_replied}`).join('\n---\n');
     s += '\n';
   }
   return s;
 }
 
-module.exports = { learnWritingStyle, wantsLearning, stylePrompt, ownWords, LEARN_MODEL };
+module.exports = { learnWritingStyle, wantsLearning, stylePrompt, resolveStyle, voiceForUser, ownWords, LEARN_MODEL };

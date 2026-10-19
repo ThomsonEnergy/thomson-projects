@@ -502,7 +502,7 @@ Why: Postie's drafts sound generic and parrot the sender's email back before ans
 
 Built 19 Oct 2026, migration 20261103020000: items 1 to 3 as above (Settings > Email Agent, tab now visible to everyone, auto replies card still pricing roles only). Item 4 (learn from edits) stays an idea. Detail in `docs/PROJECT_SPEC.md` A18.
 
-## 20. Company voice, spell check and Polish everywhere (planned 19 Oct 2026)
+## 20. Company voice, spell check and Polish everywhere (built 19 Oct 2026)
 
 Why: the owner wants every mailbox and every person to write in his voice by default, with the option of their own learned style later, and spelling fixed everywhere with a Polish option that restructures sentences in the company voice.
 
@@ -518,4 +518,4 @@ Why: the owner wants every mailbox and every person to write in his voice by def
 4. Per person setting (Settings > Email Agent, everyone): `profiles.spellcheck_mode` = auto (default) / button / off.
 5. Server: new `polish-text` function (login check). `cleanup-text.js` gets a login check too (it has none today).
 
-One migration (three columns), `supabase-client.js` version bump on every page. Waiting on owner's yes. Best model: Opus 5.5.
+Built 19 Oct 2026, migration 20261103030000. jasper@ set as the company voice in the migration. The script lives in `js/writing-help.js` (loaded by `supabase-client.js`). Detail in `docs/PROJECT_SPEC.md` A18 and A32. Later idea: a shared company word list (trade words, client names) instead of the per-device Undo list.
