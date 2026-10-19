@@ -394,15 +394,6 @@ Live: see `docs/PROJECT_SPEC.md` A3 Variations. Code only.
 
 Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261029000000).
 
-## 14. Quotes and variations expire (auto decline) (planned 19 Oct 2026, waiting on owner's yes)
+## 14. Quotes and variations expire (auto decline) (built 19 Oct 2026)
 
-1. **Valid for 30 days by default.** Settings > Company: "Quotes and variations valid for (days)", default 30. Each quote and fixed-price variation gets a "Valid until" date, set when it is first sent (email from the app or "I've sent it myself" / Mark sent) as sent date + 30. Editable on the quote's Details tab and the variation card.
-2. **Shown to the client:** "Valid until 18 November 2026" on the quote (investment summary and sign block) and the variation page.
-3. **Reminder:** 3 days before, whoever made it gets a notification to follow up.
-4. **Nightly auto decline** (just after midnight Sydney, like the Job Booked check): anything still Sent past its date becomes Declined with reason "Expired: not accepted by 18 Nov 2026" (shown as "Expired"), creator notified, listed on the ops page. Client page then says it expired and to contact us; accepting is blocked.
-5. **Turn it off:** Settings > Company "Auto decline expired quotes and variations" (on by default); off = the date still shows and the reminder still comes, nothing is declined. Each quote and variation also has "Don't auto decline this one".
-6. **Extend** (Sales, Admin, Finance): "Extend..." on the quote and the variation card: +7, +14, +30 days or pick a date, also from the 3-day reminder. Works after it has expired too (it reopens it). Optional tick "Email the client the new date" opens the in-app email with the PDF. Logged in the activity log.
-7. **Reopen** sets a fresh valid until (today + 30).
-8. **Existing sent quotes** get today + 30 (nothing expires the first night).
-
-Migration: `valid_until` and `no_auto_decline` on quotes and variations, `quote_valid_days` and `auto_decline_expired` in company settings, `expired` flag on the decline.
+Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261030000000).
