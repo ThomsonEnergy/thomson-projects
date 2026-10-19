@@ -389,3 +389,9 @@ Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261028000000).
 ## 12. Stock and prebuilds on fixed-price variations (built 19 Oct 2026)
 
 Live: see `docs/PROJECT_SPEC.md` A3 Variations. Code only.
+
+## 13. Approve by phone or email (with the email as proof) and Decline, for quotes and variations (planned 19 Oct 2026, waiting on owner's yes)
+
+1. **Mark approved (staff), quotes and fixed-price variations.** Pick how: Email (pick the client's email from the job's / quote's Emails tab, it is linked as proof and shown on the record), Phone call or In person (note required). Variations do exactly what signing does (stage added, PDFs remade) with "Approved by email from Jane, 19 Oct" instead of a signature. Quotes: the existing Mark approved gets the same picker.
+2. **Decline.** Client: "Decline" button on the quote page and the variation page, optional reason, staff notified. Staff: "Mark declined" with a reason (and optional email as proof). Declined quotes get their own Declined tab on Quotes; declined variations show "Declined" on the card and never reach an invoice. Both can be reopened (quote back to Sent, variation back to Draft).
+3. **Migration:** `approval_method`, `approval_email_thread_id`, `declined_at`, `declined_by` (empty = the client), `decline_reason` on quotes and variations; `approval_note` on variations.
