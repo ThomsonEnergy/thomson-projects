@@ -7280,14 +7280,13 @@
             if (!groupEl.querySelector('.sp-include').checked) continue;
             const supplierId = groupEl.dataset.supplierId;
             const group = matched[supplierId];
-            const poNumber = await drawNextPoNumber();
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: group.supplierName,
-              po_number: poNumber,
               po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials',
-            }).select('id').single();
+            }).select('id, po_number').single(); // the number is filled in by the database
             if (poErr) throw poErr;
+            const poNumber = newPo.po_number;
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${group.supplierName} (auto-suggested from quote)`);
             await logActivity('project', projectId, 'po_created', `PO ${poNumber || ''} created for ${group.supplierName} (auto-suggested from quote)`);
             await createPoFollowUpTask(projectId, poNumber, group.supplierName);
@@ -7310,14 +7309,13 @@
           }
           for (const [supplierId, group] of Object.entries(manualGroups)) {
             const { supplierName, items } = group;
-            const poNumber = await drawNextPoNumber();
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: supplierName,
-              po_number: poNumber,
               po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials (manually assigned)',
-            }).select('id').single();
+            }).select('id, po_number').single(); // the number is filled in by the database
             if (poErr) throw poErr;
+            const poNumber = newPo.po_number;
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${supplierName} (auto-suggested, manually assigned)`);
             await logActivity('project', projectId, 'po_created', `PO ${poNumber || ''} created for ${supplierName} (auto-suggested, manually assigned)`);
             await createPoFollowUpTask(projectId, poNumber, supplierName);
@@ -7418,7 +7416,6 @@
             cost_centre_id: overlay.querySelector('#cp-stage').value || null,
             supplier_id: supplierId,
             supplier_name: supplierName,
-            po_number: await drawNextPoNumber(),
             description: overlay.querySelector('#cp-description').value.trim() || null,
             po_type: budgetCap ? 'open' : 'fixed', // bill checks compare against the cap when there is one
             locked: false,
