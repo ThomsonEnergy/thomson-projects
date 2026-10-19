@@ -2854,13 +2854,23 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         cursor = segEnd;
       });
 
-      const inserts = rows.map((r, i) => ({
+      // The open entry becomes the first stage's segment (updated, never
+      // deleted: deleting an open entry fires sync_project_booked and can
+      // unbook the job, migration 20261023000000). The rest are inserted.
+      const { error: upErr } = await supabaseClient.from('time_entries').update({
+        cost_centre_id: rows[0].cost_centre_id, selected_cost_centre_ids: null,
+        clock_in: rows[0].clock_in, clock_out: rows[0].clock_out, ...onceFields,
+      }).eq('id', entry.id);
+      if (upErr) saveError = upErr;
+
+      const inserts = rows.slice(1).map(r => ({
         staff_id: entry.staff_id, project_id: entry.project_id, cost_centre_id: r.cost_centre_id,
         time_category: entry.time_category, clock_in: r.clock_in, clock_out: r.clock_out,
-        ...(i === 0 ? onceFields : {}),
       }));
-      const { error: insErr } = await supabaseClient.from('time_entries').insert(inserts);
-      if (insErr) saveError = insErr;
+      if (!saveError && inserts.length) {
+        const { error: insErr } = await supabaseClient.from('time_entries').insert(inserts);
+        if (insErr) saveError = insErr;
+      }
 
       if (!saveError && segments.length > 1) {
         const extra = segments.slice(1).map(seg => ({
@@ -2870,10 +2880,6 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         }));
         const { error: e2 } = await supabaseClient.from('time_entries').insert(extra);
         if (e2) saveError = e2;
-      }
-      if (!saveError) {
-        const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', entry.id);
-        if (delErr) saveError = delErr;
       }
     }
 
@@ -2909,8 +2915,21 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         <div id="cko-job-status-msg" style="margin-top:10px;"></div>
       </div>`;
 
-    overlay.querySelector('#cko-job-complete').addEventListener('click', async () => {
-      await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+    overlay.querySelector('#cko-job-complete').addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      const { data: moved, error: mvErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']).select('id');
+      const statusMsg = overlay.querySelector('#cko-job-status-msg');
+      if (mvErr) {
+        statusMsg.innerHTML = `<div class="error-box">${escapeHtml(mvErr.message)}</div>`;
+        e.target.disabled = false;
+        return;
+      }
+      if (!moved || !moved.length) {
+        // Nothing moved (the job left Job Booked meanwhile): say so, don't log it as done.
+        statusMsg.innerHTML = `<div class="error-box">The job is no longer in Job Booked, so it was not moved to Client Handover. Your clock-out is saved, let your PM know.</div>`;
+        setTimeout(renderStep3, 3000);
+        return;
+      }
       await logActivity('project', project.id, 'job_complete', 'Marked complete at clock-out - moved to Client Handover');
       renderStep3();
     });
@@ -2920,7 +2939,8 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       const btn = overlay.querySelector('#cko-job-not-complete');
       btn.disabled = true;
       try {
-        await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+        const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+        if (ncErr) throw ncErr;
 
         // Sydney day after the clock-out, via UTC noon so it can't drift.
         const tomorrow = new Date(`${sydneyDateKey(new Date(state.outIso))}T12:00:00Z`);

@@ -51,6 +51,8 @@ Read-only review of the whole app (job page, quotes and sales, invoices and Xero
 
 ## F. Features not working as intended
 
+**Fixed 19 Oct 2026 (migrations 20261102010000 and 20261102020000):** F1 to F14 (F8 in the money delivery). F15 (Supabase advisor warnings: security definer views, function search paths, leaked password protection) is left for the security sweep, `docs/IDEAS_BACKLOG.md` item 15.
+
 | # | Problem | Where |
 |---|---|---|
 | F1 | Variations tab and Details "Variations" card share one id: the tab can show the wrong list with no buttons, the card stays "Loading..." **(checked)** | `project.html` 3351, 3519 |
