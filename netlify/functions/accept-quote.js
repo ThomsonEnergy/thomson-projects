@@ -42,6 +42,10 @@ exports.handler = async (event) => {
       return { statusCode: 404, body: JSON.stringify({ error: 'Quote not found' }) };
     }
 
+    if (quote.status === 'declined') {
+      return { statusCode: 400, body: JSON.stringify({ error: 'This quote was declined. Please contact us if you would like to go ahead.' }) };
+    }
+
     // Keep the signature on the quote itself (the frozen approved record).
     const signedName = String(name || '').trim();
     if (signedName && typeof signature === 'string' && signature.startsWith('data:image/png;base64,') && signature.length <= 600000) {
@@ -49,6 +53,7 @@ exports.handler = async (event) => {
     }
 
     const { jobId, jobNumber, invoiceToken } = await createJobFromQuote(supabaseAdmin, { quoteId: quote.id });
+    await supabaseAdmin.from('projects').update({ approval_method: 'online' }).eq('id', quote.id);
     // The signed quote becomes the job's quote PDF (made in the background).
     await startFinalizeDocuments({ kind: 'quote_accepted', quoteId: quote.id, jobId });
 

@@ -10,7 +10,7 @@
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/document-fonts.css?v=1" />
-<link rel="stylesheet" href="/css/style.css?v=18" />
+<link rel="stylesheet" href="/css/style.css?v=19" />
 <script src="/js/vendor/supabase-2.js"></script>
 <style>
   /* The proposal is a set of A4 "pages" (black cover, white content pages
@@ -447,8 +447,26 @@
     document.addEventListener('pointerup', sigStop);
     document.addEventListener('pointercancel', sigStop);
     document.addEventListener('click', async (e) => {
-      const t = e.target.closest ? e.target.closest('#vs-jump, #vs-clear, #vs-sign') : null;
+      const t = e.target.closest ? e.target.closest('#vs-jump, #vs-clear, #vs-sign, #vs-decline-open, #vs-decline') : null;
       if (!t) return;
+      if (t.id === 'vs-decline-open') { document.getElementById('vs-decline-form').style.display = 'block'; t.style.display = 'none'; return; }
+      if (t.id === 'vs-decline') {
+        if (!confirm(`Decline this ${variationToken ? 'variation' : 'quote'}?`)) return;
+        t.disabled = true; t.textContent = 'Declining...';
+        try {
+          const res = await fetch('/.netlify/functions/decline-by-client', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quoteToken: variationToken ? undefined : token, variationToken: variationToken || undefined, reason: document.getElementById('vs-decline-reason').value }),
+          });
+          const d = await res.json();
+          if (!res.ok || !d.ok) throw new Error(d.error || 'Could not decline this');
+          window.location.reload();
+        } catch (err) {
+          document.getElementById('vs-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          t.disabled = false; t.textContent = 'Decline';
+        }
+        return;
+      }
       if (t.id === 'vs-jump') { const s = document.getElementById('var-sign-section'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
       const canvas = document.getElementById('vs-canvas');
       if (t.id === 'vs-clear') { canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); sigHasInk = false; return; }
@@ -531,6 +549,7 @@
       const totalAfterStc = totalIncGst - stcTotal;
       // On the variation page "accepted" means this variation is signed, not the original quote.
       const isAccepted = vInfo ? thisVariation.approval_status === 'approved' : ['accepted', 'approved', 'in_progress', 'complete'].includes(project.status);
+      const isDeclined = !vInfo && project.status === 'declined';
       const ownPhotos = (project.cover_photos || []).map(p => p.url || p).filter(Boolean);
       const referencePhotos = (project.reference_photos || []).map(p => p.url || p);
       const depositPercent = Number(project.deposit_percent) || 0;
@@ -725,7 +744,7 @@
               ${stcTotal > 0 ? `<div class="note-line">The STC credit is applied against your invoice once the system is installed and registered - not a separate payment.</div>` : ''}
             </div>
             ${paymentScheduleHtml}
-            ${isAccepted || vInfo ? '' : `<p style="margin-top:24px;"><a class="q-btn" href="${shareOrigin()}/quote.html?token=${encodeURIComponent(token)}">View and approve this quote online &rarr;</a></p>`}
+            ${isAccepted || isDeclined || vInfo ? '' : `<p style="margin-top:24px;"><a class="q-btn" href="${shareOrigin()}/quote.html?token=${encodeURIComponent(token)}">View and approve this quote online &rarr;</a></p>`}
           </div>
         </section>`;
 
@@ -766,8 +785,11 @@
       // The client signs the quote to accept it: their name and a drawn signature, kept on the quote.
       const docNoun = template === 'quick_estimate' ? 'estimate' : 'quote';
       const quoteSignInputStyle = 'width:100%; padding:10px 12px; border:1px solid #c9ced8; border-radius:6px; background:#fff; color:#0a0a0a; font-size:14px;';
-      const quoteSignHtml = vInfo ? '' : (isAccepted ? `
+      const longDate = (d) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+      const quoteSignHtml = vInfo ? '' : isDeclined ? `
+          <div class="accepted-box" style="background:#fdf2f2; border-color:#f5c2c0; color:#7a271a;">This ${docNoun} was declined${project.declined_at ? ' on ' + esc(longDate(project.declined_at)) : ''}. If you would like to go ahead after all, please contact us.</div>` : (isAccepted ? `
           <div class="accepted-box" id="accept-section">${template === 'quick_estimate' ? 'Estimate accepted, thank you.' : 'Quote accepted, thank you.'} Work will begin as scheduled.</div>
+          ${!project.accepted_signature_data_url && project.approval_method && project.approval_method !== 'online' ? `<p class="note-line" style="margin-top:8px;">${esc(project.approval_note || 'Approved')}${project.approved_at ? ', ' + esc(longDate(project.approved_at)) : ''}</p>` : ''}
           ${project.accepted_signature_data_url ? `<div><img src="${project.accepted_signature_data_url}" alt="Signature" style="max-width:280px; max-height:90px; margin-top:10px; border-bottom:1px solid #0a0a0a;" /><p class="note-line" style="margin-top:4px;">Signed by ${esc(project.accepted_signed_by_name || '')}${project.approved_at ? ' on ' + esc(new Date(project.approved_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })) : ''}</p></div>` : ''}`
         : `
           <div class="sign-form" id="var-sign-section" style="break-inside:avoid;">
@@ -782,6 +804,14 @@
               <button type="button" id="vs-clear" style="background:#fff; color:#0a0a0a; border:1px solid #c9ced8; padding:10px 16px; font-weight:600; font-size:13px; cursor:pointer;">Clear signature</button>
             </div>
             <div id="vs-msg" style="margin-top:10px;"></div>
+            <div class="decline-box" style="margin-top:18px; padding-top:14px; border-top:1px solid #e3e6ec;">
+              <button type="button" id="vs-decline-open" style="background:none; border:0; padding:0; color:var(--q-grey); font-size:13px; text-decoration:underline; cursor:pointer;">Not going ahead? Decline this ${docNoun}</button>
+              <div id="vs-decline-form" style="display:none; margin-top:10px;">
+                <label style="display:block; font-size:12px; color:var(--q-grey); margin-bottom:4px;">Reason (optional, it helps us)</label>
+                <textarea id="vs-decline-reason" style="width:100%; min-height:70px; padding:10px 12px; border:1px solid #c9ced8; border-radius:6px; background:#fff; color:#0a0a0a; font-size:14px;"></textarea>
+                <button type="button" id="vs-decline" style="margin-top:8px; background:#fff; color:#b42318; border:1px solid #b42318; padding:10px 16px; font-weight:600; font-size:13px; cursor:pointer;">Decline ${docNoun}</button>
+              </div>
+            </div>
           </div>`);
       const termsPageHtml = (project.terms_text || !vInfo) ? `
         <section class="pg">
@@ -806,10 +836,13 @@
         const inputStyle = 'width:100%; padding:10px 12px; border:1px solid #c9ced8; border-radius:6px; background:#fff; color:#0a0a0a; font-size:14px;';
         const origDate = project.approved_at ? dateText(project.approved_at) : '';
         const origLink = project.quote_token ? `${shareOrigin()}/quote.html?token=${encodeURIComponent(project.quote_token)}` : '';
+        const METHOD_TEXT = { email: 'by email', phone: 'by phone', in_person: 'in person' };
         const signHtml = v.approval_status === 'approved' ? `
-          <div class="accepted-box">Approved and signed by ${esc(v.signed_by_name || '')} on ${v.approved_at ? esc(dateText(v.approved_at)) : ''}. Thank you.</div>
+          <div class="accepted-box">${v.approval_method && v.approval_method !== 'online'
+            ? `Approved ${METHOD_TEXT[v.approval_method] || ''}${v.approved_at ? ' on ' + esc(dateText(v.approved_at)) : ''}${v.approval_note ? ' (' + esc(v.approval_note) + ')' : ''}. Thank you.`
+            : `Approved and signed by ${esc(v.signed_by_name || '')} on ${v.approved_at ? esc(dateText(v.approved_at)) : ''}. Thank you.`}</div>
           ${v.signature_data_url ? `<div><img src="${v.signature_data_url}" alt="Signature" style="max-width:280px; max-height:90px; margin-top:10px; border-bottom:1px solid #0a0a0a;" /></div>` : ''}`
-          : (v.approval_status === 'declined' ? `<p class="note-line">This variation was declined.</p>` : `
+          : (v.approval_status === 'declined' ? `<div class="accepted-box" style="background:#fdf2f2; border-color:#f5c2c0; color:#7a271a;">This variation was declined${v.declined_at ? ' on ' + esc(dateText(v.declined_at)) : ''}. If you would like to go ahead after all, please contact us.</div>` : (v.approval_status !== 'sent' ? '' : `
           <div class="sign-form" id="var-sign-section">
             <div class="sec-title">Approve this variation</div>
             <p class="note-line" style="margin-bottom:12px;">By signing you approve this variation at the price above. It is then added to your original quote and invoiced when the work is done.</p>
@@ -822,7 +855,15 @@
               <button type="button" id="vs-clear" style="background:#fff; color:#0a0a0a; border:1px solid #c9ced8; padding:10px 16px; font-weight:600; font-size:13px; cursor:pointer;">Clear signature</button>
             </div>
             <div id="vs-msg" style="margin-top:10px;"></div>
-          </div>`);
+            <div class="decline-box" style="margin-top:18px; padding-top:14px; border-top:1px solid #e3e6ec;">
+              <button type="button" id="vs-decline-open" style="background:none; border:0; padding:0; color:var(--q-grey); font-size:13px; text-decoration:underline; cursor:pointer;">Not going ahead? Decline this variation</button>
+              <div id="vs-decline-form" style="display:none; margin-top:10px;">
+                <label style="display:block; font-size:12px; color:var(--q-grey); margin-bottom:4px;">Reason (optional, it helps us)</label>
+                <textarea id="vs-decline-reason" style="width:100%; min-height:70px; padding:10px 12px; border:1px solid #c9ced8; border-radius:6px; background:#fff; color:#0a0a0a; font-size:14px;"></textarea>
+                <button type="button" id="vs-decline" style="margin-top:8px; background:#fff; color:#b42318; border:1px solid #b42318; padding:10px 16px; font-weight:600; font-size:13px; cursor:pointer;">Decline variation</button>
+              </div>
+            </div>
+          </div>`));
         variationPageHtml = `
         <section class="pg" id="variation-page">
           ${slabsSvg('light')}
@@ -885,8 +926,8 @@
         <p style="margin:0; font-weight:700; font-size:16px;">${money(vInfo ? varLinesTotal(thisVariation.lines) * 1.1 : (stcTotal > 0 ? totalAfterStc : totalIncGst))}</p>
       `;
       document.getElementById('topbar-accept').innerHTML = vInfo
-        ? (isAccepted ? `<span class="badge accepted">Variation signed</span>` : (thisVariation.approval_status === 'sent' ? `<button type="button" id="vs-jump">Review &amp; sign</button>` : ''))
-        : isAccepted
+        ? (isAccepted ? `<span class="badge accepted">Variation approved</span>` : thisVariation.approval_status === 'declined' ? `<span class="badge">Declined</span>` : (thisVariation.approval_status === 'sent' ? `<button type="button" id="vs-jump">Review &amp; sign</button>` : ''))
+        : isDeclined ? `<span class="badge">Declined</span>` : isAccepted
           ? `<span class="badge accepted">${template === 'quick_estimate' ? 'Estimate accepted' : 'Quote accepted'}</span>`
           : `<button type="button" id="vs-jump">${template === 'quick_estimate' ? 'Approve estimate' : 'Approve quote'}</button>`;
 
