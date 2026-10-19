@@ -6054,6 +6054,8 @@
         const total = queue.length;
         const next = (trigger) => {
           if (!queue.length) return;
+          // A panel is already open or opening (Skip tapped during a save): do not drop the next item
+          if ((typeof assetPanelOpening !== 'undefined' && assetPanelOpening) || document.getElementById('asset-panel')) return;
           const prefill = queue.shift();
           openAssetPanel({
             prefill,

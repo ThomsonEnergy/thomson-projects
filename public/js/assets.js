@@ -25,9 +25,14 @@ async function syncAssetSerialsToProject(projectId, assetType) {
   const { data: rows, error } = await supabaseClient.from('customer_assets').select('serial_numbers')
     .eq('project_id', projectId).eq('asset_type', assetType).neq('status', 'decommissioned').order('created_at');
   if (error) return null;
-  const seen = new Set();
-  (rows || []).forEach(r => String(r.serial_numbers || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean).forEach(s => seen.add(s)));
-  if (!seen.size) return null;
+  // Additive: serials already on the job (typed on the Handover card) are kept, asset serials are added
+  const { data: proj, error: projErr } = await supabaseClient.from('projects').select(column).eq('id', projectId).maybeSingle();
+  if (projErr) return null;
+  const split = (v) => String(v || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+  const before = split(proj && proj[column]);
+  const seen = new Set(before);
+  (rows || []).forEach(r => split(r.serial_numbers).forEach(s => seen.add(s)));
+  if (seen.size === before.length) return null;
   const value = Array.from(seen).join('\n');
   const { error: upErr } = await supabaseClient.from('projects').update({ [column]: value }).eq('id', projectId);
   if (upErr) return null;
@@ -273,13 +278,20 @@ async function openAssetPanel(opts = {}) {
     if (months && base) $('as-next-service').value = assetAddMonths(base, months);
     if (!months) $('as-next-service').value = '';
   }
+  let autoInterval = false; // true while the interval is the type default, so a type change can swap it
+  $('as-interval').addEventListener('change', () => { autoInterval = false; });
   $('as-interval').addEventListener('change', recomputeNext);
   $('as-last-serviced').addEventListener('change', recomputeNext);
   // A new asset gets its type's default service interval, on open too (a type
   // prefilled from the job never fires 'change').
   const applyTypeDefault = () => {
+    if (existing) return;
     const t = assetTypeInfo($('as-type').value);
-    if (!$('as-interval').value && t.defaultInterval && !existing) { $('as-interval').value = String(t.defaultInterval); recomputeNext(); }
+    if (!$('as-interval').value || autoInterval) {
+      $('as-interval').value = t.defaultInterval ? String(t.defaultInterval) : '';
+      autoInterval = !!t.defaultInterval;
+      recomputeNext();
+    }
   };
   $('as-type').addEventListener('change', applyTypeDefault);
   if (!existing) applyTypeDefault();
@@ -317,7 +329,9 @@ async function openAssetPanel(opts = {}) {
   // onto the job, then closes and hands the synced fields to onSaved.
   const writeAsset = async (btn, payload) => {
     const label = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Saving...';
+    const panelBtns = ['as-save', 'as-cancel', 'as-service-btn', 'as-delete'].map(id => $(id)).filter(Boolean);
+    panelBtns.forEach(b => { b.disabled = true; });
+    btn.textContent = 'Saving...';
     try {
       let res;
       try {
@@ -329,12 +343,15 @@ async function openAssetPanel(opts = {}) {
       } catch (err) { res = { error: err }; }
       if (res.error) { msg(`<div class="error-box">${escapeHtml(res.error.message)}</div>`); return false; }
       let synced = null;
-      try { synced = await syncAssetSerialsToProject(payload.project_id, payload.asset_type); } catch (e) { synced = null; }
+      const serialsTouched = !existing || payload.serial_numbers !== (existing.serial_numbers || null)
+        || payload.asset_type !== existing.asset_type || payload.status !== existing.status;
+      if (serialsTouched) { try { synced = await syncAssetSerialsToProject(payload.project_id, payload.asset_type); } catch (e) { synced = null; } }
       overlay.remove();
       if (opts.onSaved) await opts.onSaved(synced);
       return true;
     } finally {
-      btn.disabled = false; btn.textContent = label;
+      panelBtns.forEach(b => { b.disabled = false; });
+      btn.textContent = label;
     }
   };
 
