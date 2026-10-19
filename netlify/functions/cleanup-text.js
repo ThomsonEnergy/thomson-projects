@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { requireActiveUser } = require('./_shared/require-active-user');
 
 // Shared "clean this up" pass for any AI-generated text a staff member has
 // since hand-edited (added, removed, or reworded parts of an AI draft, or
@@ -10,6 +11,9 @@ const { getIntegrationKey } = require('./_shared/get-integration-key');
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
+  }
+  if (!(await requireActiveUser(event))) {
+    return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not signed in.' }) };
   }
 
   try {

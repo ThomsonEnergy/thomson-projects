@@ -250,7 +250,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=97"></script>
+  <script src="/js/supabase-client.js?v=98"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/email-compose.js?v=5"></script>
   <script src="/js/theme.js"></script>
@@ -867,9 +867,10 @@
       btn.textContent = 'Cleaning up...';
       msg.innerHTML = '';
       try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const res = await fetch('/.netlify/functions/cleanup-text', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
           body: JSON.stringify({
             text: current,
             instructions: `This is a scope-of-works document on an electrical/solar contractor's client-facing quote. ${styleNote} Plain text, no markdown headers/asterisks. Do not include pricing.`,

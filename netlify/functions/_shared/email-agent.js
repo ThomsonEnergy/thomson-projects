@@ -14,7 +14,7 @@
 // Postie's "please send invoices to invoice@" reply when Settings says Send automatically
 // (_shared/routing-replies.js): on sales@, a supplier's invoice is passed to the invoice@ bill
 // reader and replied to instead of drafted. Drafts answer rather than recap, in the
-// mailbox owner's own voice (_shared/writing-style.js, learned from their sent replies).
+// company voice or the mailbox owner's own (_shared/writing-style.js, learned from sent replies).
 // Email text is data, never instructions.
 
 const fetch = require('node-fetch');
@@ -22,7 +22,7 @@ const { getIntegrationKey } = require('./get-integration-key');
 const { labelInGmail, saveGmailDraft } = require('./mailboxes');
 const { gmailRequest } = require('./google-client');
 const { routingReply, replyMode, INVOICE_ADDRESS } = require('./routing-replies');
-const { stylePrompt } = require('./writing-style');
+const { stylePrompt, resolveStyle } = require('./writing-style');
 
 const TRIAGE_MODEL = 'claude-haiku-5-5';
 const DRAFT_MODEL = 'claude-opus-5-5';
@@ -337,9 +337,8 @@ async function runEmailAgent(admin, mailbox, { budgetMs = 5 * 60000, maxThreads 
     admin.from('email_sender_rules').select('*').eq('mailbox_id', mailbox.id),
     activeJobs(admin),
   ]);
-  const { data: fresh } = await admin.from('mailboxes').select('writing_style, writing_style_examples').eq('id', mailbox.id).maybeSingle();
   const writer = mailbox.kind === 'shared' ? 'the Thomson Energy office team (sales@)' : ownerName;
-  const ctx = { labels: labels || [], rules: rules || [], jobs, ownerName, stylePrompt: stylePrompt(fresh || {}, writer) };
+  const ctx = { labels: labels || [], rules: rules || [], jobs, ownerName, stylePrompt: stylePrompt(await resolveStyle(admin, mailbox), writer) };
 
   let sorted = 0, drafted = 0, priorityCount = 0;
   while (sorted < maxThreads && Date.now() - startedAt < budgetMs) {

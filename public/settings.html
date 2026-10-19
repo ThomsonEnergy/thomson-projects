@@ -407,8 +407,21 @@
         <div class="settings-panel" id="panel-auto-replies">
           <div class="card">
             <h2>Writing style</h2>
-            <p class="subtitle" style="margin-bottom:10px;">Postie drafts replies in the mailbox owner's own voice. <b>Learn</b> reads the replies already sent from the mailbox (the ones TEops holds), writes a short guide and keeps up to 8 real replies as examples. Edit the guide any time ("never say reach out", "always give a price range"): Learn again keeps your edits and refreshes the examples, and it refreshes by itself every 30 days. Drafts answer what was asked instead of repeating the sender's email back.</p>
+            <p class="subtitle" style="margin-bottom:10px;">Postie drafts replies in the <b>company voice</b> (one person's learned style, set by an admin) unless a mailbox is switched to its own. <b>Learn</b> reads the replies already sent from a mailbox (the ones TEops holds), writes a short guide and keeps up to 8 real replies as examples. Edit the guide any time ("never say reach out", "always give a price range"): Learn again keeps your edits and refreshes the examples, and it refreshes by itself every 30 days. Other mailboxes using the company voice get the guide and the writer's own words from the examples, never the emails they were answering. Drafts answer what was asked instead of repeating the sender's email back.</p>
+            <div id="company-voice-box" style="margin-bottom:6px;"></div>
             <div id="writing-style-list"><p class="subtitle">Loading...</p></div>
+          </div>
+          <!-- Spell check and Polish (profiles.spellcheck_mode, migration 20261103030000, js/writing-help.js) -->
+          <div class="card">
+            <h2>Spell check and Polish</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Works in every multi-line text box in TEops (notes, replies, briefs, chat). Names, addresses, amounts and serial numbers are never touched. <b>Polish</b> shows under a box with 5 or more words while you type in it, and rewrites the sentences in the company voice (or your own, if your inbox is set to it), keeping every fact. Every change has an Undo; undoing a spelling fix tells it to leave those words alone from then on.</p>
+            <label>Spell check</label>
+            <select id="spellcheck-mode">
+              <option value="auto">Automatic (fixes spelling when you pause or leave the box)</option>
+              <option value="button">Only when I press Fix spelling</option>
+              <option value="off">Off (no Fix spelling or Polish buttons)</option>
+            </select>
+            <div style="margin-top:10px;"><button type="button" id="save-spellcheck-btn">Save</button> <span id="save-spellcheck-msg" class="subtitle" style="font-size:12px;"></span></div>
           </div>
           <div class="card" data-pricing-only="1">
             <h2>Email auto replies</h2>
@@ -778,7 +791,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=97"></script>
+  <script src="/js/supabase-client.js?v=98"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -1027,13 +1040,47 @@
 
     // Writing style per mailbox (mailboxes.writing_style, migration 20261103020000). sales@ for
     // pricing roles, plus the person's own My inbox. Learn runs in the mailbox worker, so poll.
-    const WS_COLS = 'id, address, kind, owner_id, writing_style, writing_style_examples, writing_style_learned_at, writing_style_edited_at, writing_style_requested_at, writing_style_error';
+    const WS_COLS = 'id, address, kind, owner_id, writing_style, writing_style_examples, writing_style_learned_at, writing_style_edited_at, writing_style_requested_at, writing_style_error, writing_style_source';
+    // The company voice (company_settings.writing_style_mailbox_id, migration 20261103030000): Admin picks it.
+    async function loadCompanyVoice() {
+      const el = document.getElementById('company-voice-box');
+      let info;
+      try { info = await wsCall(null, 'info'); } catch (err) { el.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; return null; }
+      const c = info.company;
+      const line = c
+        ? `<b>Company voice:</b> ${escapeHtml(c.address)}${c.learned ? (c.learned_at ? `, learned ${escapeHtml(wsWhen(c.learned_at))}` : '') : ' <span style="color:var(--red);">(not learned yet: press Learn on that mailbox. Until then drafts use the standard rules)</span>'}`
+        : '<b>Company voice:</b> none set. Drafts use each mailbox\'s own style, or the standard rules.';
+      let pick = '';
+      if (info.isAdmin) {
+        const opts = (info.options || []).slice();
+        if (c && !opts.some((o) => o.id === c.id)) opts.unshift({ id: c.id, address: c.address });
+        pick = `<div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:6px;">
+          <select id="company-voice-select" style="max-width:340px;">
+            <option value="">None</option>
+            ${opts.map((o) => `<option value="${escapeHtml(o.id)}" ${c && c.id === o.id ? 'selected' : ''}>${escapeHtml(o.address)}</option>`).join('')}
+          </select>
+          <button type="button" class="secondary" id="company-voice-save">Set company voice</button>
+          <span id="company-voice-msg" class="subtitle" style="font-size:12px;"></span>
+        </div>`;
+      }
+      el.innerHTML = `<p style="margin:0;">${line}</p>${pick}`;
+      const btn = document.getElementById('company-voice-save');
+      if (btn) btn.addEventListener('click', async () => {
+        const msg = document.getElementById('company-voice-msg');
+        try {
+          await wsCall(null, 'company_voice', null, { mailbox_id: document.getElementById('company-voice-select').value || null });
+          msg.textContent = 'Saved.';
+          loadWritingStyles();
+        } catch (err) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+      });
+      return info;
+    }
     let wsPollTimer = null;
-    async function wsCall(mailbox, action, text) {
+    async function wsCall(mailbox, action, text, extra) {
       const { data: { session } } = await supabaseClient.auth.getSession();
       const res = await fetch('/.netlify/functions/learn-writing-style', {
         method: 'POST', headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mailbox, action, text }),
+        body: JSON.stringify({ mailbox, action, text, ...(extra || {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
@@ -1045,6 +1092,8 @@
       const { data: { session } } = await supabaseClient.auth.getSession();
       const { data: rows, error } = await supabaseClient.from('mailboxes').select(WS_COLS).not('connected_at', 'is', null).order('kind', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const info = await loadCompanyVoice();
+      const companyId = info && info.company ? info.company.id : null;
       const mine = (rows || []).filter((m) => m.kind === 'personal' && m.owner_id === session.user.id);
       const shared = isPricingRoleLocal(myRole) ? (rows || []).filter((m) => m.kind === 'shared') : [];
       const boxes = [...mine, ...shared];
@@ -1065,6 +1114,12 @@
         else status = 'Not learned yet. Drafts use the standard rules only.';
         return `<div class="ws-box" data-mailbox="${key}" style="margin-top:14px; padding:12px; background:var(--surface-2); border-radius:8px;">
           <label style="margin-top:0;">${escapeHtml(m.address)}${m.kind === 'shared' ? ' (shared, written as the office team)' : ' (your own replies)'}</label>
+          ${m.id === companyId
+            ? '<p class="subtitle" style="margin:0 0 8px; font-size:12px;">This is the company voice: every mailbox set to Company voice drafts like this, and Polish uses it.</p>'
+            : `<div style="display:flex; gap:16px; flex-wrap:wrap; margin:0 0 8px; font-size:13px;">
+                <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ws-src-${key}" class="ws-src" value="company" style="width:auto;" ${m.writing_style_source !== 'own' ? 'checked' : ''} /> Draft in the company voice</label>
+                <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ws-src-${key}" class="ws-src" value="own" style="width:auto;" ${m.writing_style_source === 'own' ? 'checked' : ''} /> Use this mailbox's own style (below)</label>
+              </div>${m.writing_style_source === 'own' && !String(m.writing_style || '').trim() ? '<p class="subtitle" style="margin:0 0 8px; font-size:12px; color:var(--red);">No style learned yet, so drafts still use the company voice. Press Learn from sent mail.</p>' : ''}`}
           <textarea class="ws-text" rows="10" style="width:100%; font-size:13px;" ${learning ? 'disabled' : ''} placeholder="Press Learn from sent mail, or write the guide yourself: how you greet, how long you write, how you say no, phrases you use, things you never say.">${escapeHtml(m.writing_style || '')}</textarea>
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;">
             <button type="button" class="ws-learn" ${learning ? 'disabled' : ''}>${m.writing_style_learned_at ? 'Learn again' : 'Learn from sent mail'}</button>
@@ -1087,6 +1142,13 @@
             await loadWritingStyles();
           } catch (err) { btn.disabled = false; status.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
         });
+        box.querySelectorAll('.ws-src').forEach((r) => r.addEventListener('change', async () => {
+          try {
+            await wsCall(key, 'source', null, { value: r.value });
+            status.textContent = 'Saved.';
+            setTimeout(loadWritingStyles, 800);
+          } catch (err) { status.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+        }));
         box.querySelector('.ws-save').addEventListener('click', async () => {
           try {
             await wsCall(key, 'save', box.querySelector('.ws-text').value);
@@ -1098,6 +1160,22 @@
       clearTimeout(wsPollTimer);
       if (anyLearning) wsPollTimer = setTimeout(loadWritingStyles, 4000);
     }
+
+    // Spell check and Polish setting (profiles.spellcheck_mode, migration 20261103030000)
+    async function loadSpellcheckMode() {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const { data } = await supabaseClient.from('profiles').select('spellcheck_mode').eq('id', session.user.id).maybeSingle();
+      document.getElementById('spellcheck-mode').value = (data && data.spellcheck_mode) || 'auto';
+    }
+    document.getElementById('save-spellcheck-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('save-spellcheck-msg');
+      const value = document.getElementById('spellcheck-mode').value;
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const { error } = await supabaseClient.from('profiles').update({ spellcheck_mode: value }).eq('id', session.user.id);
+      if (error) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(error.message)}</span>`; return; }
+      if (window.teWriting) window.teWriting.setMode(value);
+      msg.textContent = 'Saved.';
+    });
 
     // Schedule of Rates review date (company_settings.rates_reviewed_on, migration 20261022000000)
     const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
@@ -2728,6 +2806,7 @@
       await loadSettings();
       await applyAdminGating();
       loadWritingStyles();
+      loadSpellcheckMode();
       if (myRole === 'admin') {
         await loadUsers();
         await loadOnboardingDocs();
