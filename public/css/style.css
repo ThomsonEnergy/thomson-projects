@@ -394,6 +394,11 @@ h2 { font-size: 17px; margin: 0 0 12px; }
 @media (max-width: 800px) {
   .grid.cols-4, .grid.cols-3 { grid-template-columns: 1fr 1fr; }
 }
+@media (max-width: 560px) {
+  .grid.cols-3 { grid-template-columns: 1fr; }
+  /* children with an inline grid-column: span 2 (My Day clock-in, incident, new job, client forms) would otherwise force a squashed second column */
+  .grid.cols-3 > * { grid-column: auto !important; }
+}
 
 .stat {
   background: var(--surface-2);
@@ -447,6 +452,10 @@ button.secondary, .btn.secondary {
 }
 button.danger { background: var(--red); color: #ffffff; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Task row buttons (Tasks page): full-height tap target on touch screens. */
+@media (pointer: coarse) {
+  .task-actions button { min-height: 44px; }
+}
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
@@ -556,6 +565,8 @@ html[data-theme="navy"] .success-box {
   border: 1px solid #bfe9cb;
   color: #14532d;
 }
+/* Dim a container and block taps while its data reloads (schedule, later any card) */
+.is-loading { opacity: 0.55; pointer-events: none; transition: opacity 0.15s; }
 
 /* ===================================================================
    Settings tabs
