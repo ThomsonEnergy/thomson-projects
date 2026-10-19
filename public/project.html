@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=17" />
+<link rel="stylesheet" href="/css/style.css?v=18" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=86"></script>
+  <script src="/js/supabase-client.js?v=87"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -2373,7 +2373,7 @@
           await supabaseClient.storage.from('project-documents').remove([d.file_path]);
           const { error: delErr } = await supabaseClient.from('project_documents').delete().eq('id', d.id);
           if (delErr) throw delErr;
-          await logActivity('project', projectId, 'document_deleted', `Deleted ServiceM8 invoice copy ${d.file_name}`);
+          await logActivity('project', projectId, 'sm8_invoice_deleted', `Deleted ServiceM8 invoice copy ${d.file_name}`);
           await loadSm8Invoices(projectId);
         } catch (err) { alert(err.message); }
       }));
@@ -2943,7 +2943,7 @@
         <div class="job-tab-layout">
           <div class="job-tab-main">
 
-            <div class="settings-panel active" id="panel-summary">
+            <div class="settings-panel active${!editMode ? ' job-card-grid' : ''}" id="panel-summary">
               ${!editMode ? '<div id="clock-here-card"></div>' : ''}
               ${!editMode && (project.notes || (TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length)) ? `
               <div class="card">
@@ -3326,7 +3326,7 @@
             ` : ''}
 
             ${project.job_number && !editMode ? `
-            <div class="settings-panel" id="panel-variations">
+            <div class="settings-panel${!editMode ? ' job-card-grid' : ''}" id="panel-variations">
               <div class="card">
                 <h2>Variations - work outside the scope</h2>
                 <p class="subtitle" style="margin-bottom:6px;"><strong>Do and charge:</strong> log it here, then clock time to it on My Day (it shows up like a stage) and add materials from Stock as you use them. It's billed for what it took.</p>
@@ -3355,7 +3355,7 @@
             ` : ''}
 
             ${project.job_number && !editMode && pricingVisible ? `
-            <div class="settings-panel" id="panel-invoices">
+            <div class="settings-panel${!editMode ? ' job-card-grid' : ''}" id="panel-invoices">
               ${isQuoteFree ? `
               <div class="card">
                 <h2>Invoice actual costs</h2>
@@ -3430,7 +3430,7 @@
               </div>
             </div>` : ''}
 
-            <div class="settings-panel" id="panel-details">
+            <div class="settings-panel${!editMode ? ' job-card-grid' : ''}" id="panel-details">
               ${editMode && !project.job_number ? editorPanelHtml(project) : `
               ${TEMPLATE_QUESTIONS[project.proposal_template] ? `
               <div class="card">
@@ -3524,7 +3524,7 @@
             </div>
 
             ${!editMode ? `
-            <div class="settings-panel" id="panel-documents">
+            <div class="settings-panel${!editMode ? ' job-card-grid' : ''}" id="panel-documents">
               <div class="card">
                 <h2>Documents</h2>
                 <p class="subtitle" style="margin-bottom:14px;">Shared between the quote and the job - it's the same list either way, since they're the same underlying record.</p>
@@ -3568,7 +3568,7 @@
 
           <div class="job-activity-sidebar">
             <div class="card">
-              <h2>Activity log</h2>
+              <h2 id="job-activity-title">Activity log</h2>
               <div id="job-activity-log"><p class="subtitle">Loading...</p></div>
             </div>
           </div>
@@ -3581,10 +3581,11 @@
           document.querySelectorAll('.job-tab-main .settings-panel').forEach(p => p.classList.remove('active'));
           btn.classList.add('active');
           document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+          jobActivityLog.then(log => log.setTab(btn.dataset.panel));
         });
       });
 
-      renderActivityLog('project', project.id, 'job-activity-log');
+      const jobActivityLog = renderJobActivityLog(project.id, 'job-activity-log', 'job-activity-title');
 
       if (editMode) {
         wireEditForm(project);
@@ -6725,7 +6726,7 @@
         });
       });
       listEl.querySelectorAll('.add-po-item-btn').forEach(btn => {
-        btn.addEventListener('click', () => openAddPoItemPanel(btn.dataset.poId, projectId, centres));
+        btn.addEventListener('click', () => openAddPoItemPanel(pos.find(p => p.id === btn.dataset.poId), projectId, centres));
       });
       listEl.querySelectorAll('.override-po-btn').forEach(btn => {
         btn.addEventListener('click', () => openOverridePoPanel(pos.find(p => p.id === btn.dataset.poId), projectId, centres));
@@ -6883,6 +6884,7 @@
             }).select('id').single();
             if (poErr) throw poErr;
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${group.supplierName} (auto-suggested from quote)`);
+            await logActivity('project', projectId, 'po_created', `PO ${poNumber || ''} created for ${group.supplierName} (auto-suggested from quote)`);
             await createPoFollowUpTask(projectId, poNumber, group.supplierName);
             await supabaseClient.from('purchase_order_line_items').insert(
               group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
@@ -6912,6 +6914,7 @@
             }).select('id').single();
             if (poErr) throw poErr;
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${supplierName} (auto-suggested, manually assigned)`);
+            await logActivity('project', projectId, 'po_created', `PO ${poNumber || ''} created for ${supplierName} (auto-suggested, manually assigned)`);
             await createPoFollowUpTask(projectId, poNumber, supplierName);
             await supabaseClient.from('purchase_order_line_items').insert(
               items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
@@ -7043,7 +7046,7 @@
       });
     }
 
-    function openAddPoItemPanel(poId, projectId, centres) {
+    function openAddPoItemPanel(po, projectId, centres) {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
@@ -7069,14 +7072,17 @@
         const description = overlay.querySelector('#ap-desc').value.trim();
         if (!description) { msg.innerHTML = `<div class="error-box">Enter a description.</div>`; return; }
         const { data: { user } } = await supabaseClient.auth.getUser();
+        const quantity = parseFloat(overlay.querySelector('#ap-qty').value) || 1;
+        const unitCost = parseFloat(overlay.querySelector('#ap-cost').value) || 0;
         const { error } = await supabaseClient.from('purchase_order_line_items').insert({
-          po_id: poId,
+          po_id: po.id,
           description,
-          quantity: parseFloat(overlay.querySelector('#ap-qty').value) || 1,
-          unit_cost: parseFloat(overlay.querySelector('#ap-cost').value) || 0,
+          quantity,
+          unit_cost: unitCost,
           added_by: user.id,
         });
         if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        await logActivity('project', projectId, 'po_item_added', `PO ${po.po_number || ''}: added ${description} x${quantity} at ${money(unitCost)}`);
         overlay.remove();
         await loadPurchaseOrders(projectId, centres);
       });
@@ -7112,11 +7118,20 @@
         try {
           const rows = [...overlay.querySelectorAll('.ov-line')];
           for (const row of rows) {
-            await supabaseClient.from('purchase_order_line_items').update({
+            const next = {
               description: row.querySelector('.ov-desc').value.trim(),
               quantity: parseFloat(row.querySelector('.ov-qty').value) || 0,
               unit_cost: parseFloat(row.querySelector('.ov-cost').value) || 0,
-            }).eq('id', row.dataset.id);
+            };
+            const { error } = await supabaseClient.from('purchase_order_line_items').update(next).eq('id', row.dataset.id);
+            if (error) throw error;
+            // One detail line per changed item, shown on the PO tab
+            const was = items.find(li => li.id === row.dataset.id) || {};
+            const changes = [];
+            if ((was.description || '') !== next.description) changes.push(`name "${was.description || ''}" to "${next.description}"`);
+            if (Number(was.quantity) !== next.quantity) changes.push(`qty ${Number(was.quantity)} to ${next.quantity}`);
+            if (Math.abs(Number(was.unit_cost) - next.unit_cost) >= 0.01) changes.push(`cost ${money(Number(was.unit_cost))} to ${money(next.unit_cost)}`);
+            if (changes.length) await logActivity('project', projectId, 'po_item_edited', `PO ${po.po_number || ''}: ${next.description} ${changes.join(', ')}`);
           }
           overlay.remove();
           await loadPurchaseOrders(projectId, centres);

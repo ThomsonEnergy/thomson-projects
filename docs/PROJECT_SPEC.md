@@ -183,6 +183,8 @@ Manual steps only a person can do (the code is live):
 ### A13a. Activity log
 - One `activity_log` table (`logActivity()` / `renderActivityLog()`), shown as a sidebar on the job page. Covers POs, jobs/quotes (stage edits), invoices, suppliers, materials, clients, tasks, documents, variations, timesheets. Not yet: settings changes, schedule changes.
 - Timesheet lines name the day the entry was for and read "was X, now Y" (e.g. `Timesheet edited for Fri 16 Oct: was 7:00 am - 8:45 am, now 1:00 pm - 3:00 pm`). Added entries on a job are logged, and an entry moved between jobs is logged on both jobs. Description sits full width with name and time underneath.
+- Split by job tab (`renderJobActivityLog()`, code only, tab worked out from the action so old entries sort too). **Summary** shows one short line per action: a run of changes by the same person on the same thing within 30 min becomes one line (`Edited PO 1234 (3 changes)`, `Edited timesheets (20 changes)`, `Updated 4 tasks`). **Every other tab** shows only its own entries in full (PO tab: `PO 1234: Cable qty 10 to 15`; Cost Centres: timesheets and stages; Variations; Invoices; Documents). PO line items added or overridden on the job are logged per item.
+- The log box fits the screen and scrolls on its own: mouse over the log scrolls only the log, mouse on the page scrolls the page. Same rule app wide for every inner scroll box (`overscroll-behavior: contain`), and the page behind a popup stays put while it is open.
 
 ### A13b. Number-first references
 - `projectRef()`: `J{job} - {name}`, or `Q{quote} - {name}` before approval, everywhere.
