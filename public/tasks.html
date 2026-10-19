@@ -55,26 +55,31 @@
   <script src="/js/supabase-client.js?v=99"></script>
   <script src="/js/theme.js"></script>
   <script>
+    const TODAY = sydneyDateKey(new Date());
+
     function taskRow(task, showPickUp) {
       const jobLabel = task.project_id
-        ? (task.projects?.job_number ? 'J' + task.projects.job_number : (task.projects?.name || ''))
+        ? (task.projects?.job_number ? 'J' + task.projects.job_number : escapeHtml(task.projects?.name || ''))
         : 'Office / General';
+      const dueFmt = task.due_date ? new Date(task.due_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+      const dueHtml = !task.due_date ? '' : (task.due_date < TODAY ? ` &middot; <span style="color:var(--red); font-weight:600;">Overdue: ${dueFmt}</span>` : (task.due_date === TODAY ? ' &middot; <span style="font-weight:600;">Due today</span>' : ` &middot; Due ${dueFmt}`));
       return `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px solid var(--border);">
           <div>
-            ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>` : `<span>${task.description}</span>`}
+            ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${escapeHtml(task.description)}</a>` : `<span>${escapeHtml(task.description)}</span>`}
             <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
               ${jobLabel}
-              ${task.due_date ? ` &middot; Due ${task.due_date}` : ''}
+              ${dueHtml}
               ${task.meetings ? ` &middot; <a href="/meetings.html?id=${task.meeting_id}" class="link-quiet">Meeting: ${escapeHtml(task.meetings.title)}</a>` : ''}
               ${task.remind_at && new Date(task.remind_at) <= new Date() ? ' &middot; <span style="color:var(--red);">Reminder due</span>' : ''}
-              ${task.recurrence ? ` &middot; Repeats ${task.recurrence}` : ''}
+              ${task.recurrence ? ` &middot; Repeats ${escapeHtml(task.recurrence)}` : ''}
               ${task.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
             </p>
           </div>
-          <div style="display:flex; gap:6px; flex-shrink:0;">
-            ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">Pick up</button>` : ''}
-            <button type="button" class="secondary complete-task-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">Done</button>
+          <div class="task-actions" style="display:flex; gap:8px; flex-shrink:0;">
+            ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}">Pick up</button>` : ''}
+            <button type="button" class="secondary edit-task-btn" data-id="${task.id}">Edit</button>
+            <button type="button" class="secondary complete-task-btn" data-id="${task.id}">Done</button>
           </div>
         </div>`;
     }
@@ -88,6 +93,7 @@
         .select('*, projects(name, job_number), meetings(id, title)')
         .eq('completed', false)
         .order('required_before_scheduling', { ascending: false })
+        .order('due_date', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true });
 
       if (error) {
@@ -106,38 +112,63 @@
       document.querySelectorAll('.complete-task-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const task = allTasks.find(t => t.id === btn.dataset.id);
+          const label = btn.textContent;
           btn.disabled = true;
-          const { error: doneErr } = await supabaseClient.from('job_tasks').update({
-            completed: true, completed_by: user.id, completed_at: new Date().toISOString(),
-          }).eq('id', btn.dataset.id);
-          if (doneErr) { btn.disabled = false; alert('Could not tick that off: ' + doneErr.message); return; }
-          // Same gate as the job page: the last required task moves the job out of Awaiting Action.
-          if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
-          if (task?.project_id) await logActivity('project', task.project_id, 'task_completed', `Task completed: ${task.description || ''}`);
-          await loadTasks();
+          btn.textContent = 'Saving...';
+          try {
+            const { error: doneErr } = await supabaseClient.from('job_tasks').update({
+              completed: true, completed_by: user.id, completed_at: new Date().toISOString(),
+            }).eq('id', btn.dataset.id);
+            if (doneErr) throw doneErr;
+            // Same gate as the job page: the last required task moves the job out of Awaiting Action.
+            if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
+            if (task?.project_id) await logActivity('project', task.project_id, 'task_completed', `Task completed: ${task.description || ''}`);
+            await loadTasks();
+          } catch (err) {
+            alert('Could not tick that off: ' + (err.message || err));
+          } finally {
+            btn.disabled = false;
+            btn.textContent = label;
+          }
         });
       });
       document.querySelectorAll('.pick-up-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const task = allTasks.find(t => t.id === btn.dataset.id);
-          await supabaseClient.from('job_tasks').update({ assigned_to_user_id: user.id }).eq('id', btn.dataset.id);
-          if (task?.project_id) await logActivity('project', task.project_id, 'task_picked_up', `Task picked up: ${task.description || ''}`);
-          await loadTasks();
+          const label = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Saving...';
+          try {
+            const { error: pickErr } = await supabaseClient.from('job_tasks').update({ assigned_to_user_id: user.id }).eq('id', btn.dataset.id);
+            if (pickErr) throw pickErr;
+            if (task?.project_id) await logActivity('project', task.project_id, 'task_picked_up', `Task picked up: ${task.description || ''}`);
+            await loadTasks();
+          } catch (err) {
+            alert('Could not pick that up: ' + (err.message || err));
+          } finally {
+            btn.disabled = false;
+            btn.textContent = label;
+          }
         });
       });
+      document.querySelectorAll('.edit-task-btn').forEach(btn => btn.addEventListener('click', () => {
+        const t = allTasks.find(x => x.id === btn.dataset.id);
+        if (t) openAddTaskPanel({ id: t.id, description: t.description, task_type: t.task_type, assignee_id: t.assigned_to_user_id, assigned_to_role: t.assigned_to_role, due_date: t.due_date, recurrence: t.recurrence, project_id: t.project_id, project_label: projectRef(t.projects), required_before_scheduling: t.required_before_scheduling });
+      }));
     }
 
     // Job is optional here (unlike the "+ Add task" on a project's own
     // page) - leave it blank for an office/general task like "take the
     // bins out" that isn't tied to any job.
     async function openAddTaskPanel(prefill) {
+      const editing = !!(prefill && prefill.id);
       const { data: { user } } = await supabaseClient.auth.getUser();
       const { data: staff } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Add task</h2>
+          <h2>${editing ? 'Edit task' : 'Add task'}</h2>
           <label style="margin-top:0">Job (optional - leave blank for an office/general task)</label>
           <input id="at-job-search" placeholder="Search job number, name, client..." autocomplete="off" />
           <div id="at-job-results"></div>
@@ -157,7 +188,7 @@
             <option value="role">A role</option>
           </select>
           <div id="at-person-section" style="display:none; margin-top:8px;">
-            <select id="at-person">${(staff || []).map(s => `<option value="${s.id}">${s.full_name}</option>`).join('')}</select>
+            <select id="at-person">${(staff || []).map(s => `<option value="${s.id}">${escapeHtml(s.full_name)}</option>`).join('')}</select>
           </div>
           <div id="at-role-section" style="display:none; margin-top:8px;">
             <select id="at-role">
@@ -183,9 +214,10 @@
           <label id="at-required-row" style="margin-top:14px; display:none; align-items:center; gap:8px;">
             <input type="checkbox" id="at-required" style="width:auto;" /> Required before this job can be scheduled
           </label>
-          <div style="margin-top:14px;">
-            <button id="at-save-btn">Add task</button>
+          <div style="margin-top:14px; display:flex; gap:8px; align-items:center;">
+            <button id="at-save-btn">${editing ? 'Save' : 'Add task'}</button>
             <button type="button" class="secondary" id="at-cancel-btn">Cancel</button>
+            ${editing ? '<button type="button" class="danger" id="at-delete-btn" style="margin-left:auto;">Delete</button>' : ''}
           </div>
           <div id="at-msg"></div>
         </div>`;
@@ -202,16 +234,29 @@
       overlay.querySelector('#at-recurring').addEventListener('change', refreshRecurrenceHint);
       overlay.querySelector('#at-due-date').addEventListener('input', refreshRecurrenceHint);
 
+      overlay.querySelector('#at-assign-type').addEventListener('change', (e) => {
+        overlay.querySelector('#at-person-section').style.display = e.target.value === 'person' ? 'block' : 'none';
+        overlay.querySelector('#at-role-section').style.display = e.target.value === 'role' ? 'block' : 'none';
+      });
+
       let selectedJobId = null;
       let jobSearchTimeout;
       if (prefill) {
         // from the AI assistant: fill in what it knew, the person finishes and adds it
         if (typeof prefill.description === 'string') overlay.querySelector('#at-desc').value = prefill.description;
-        if (['prejob', 'onsite'].includes(prefill.task_type)) overlay.querySelector('#at-task-type').value = prefill.task_type;
+        if (['quote', 'prejob', 'onsite', 'handover'].includes(prefill.task_type)) {
+          const typeSel = overlay.querySelector('#at-task-type');
+          if (![...typeSel.options].some(o => o.value === prefill.task_type)) typeSel.insertAdjacentHTML('beforeend', `<option value="${prefill.task_type}">${prefill.task_type.charAt(0).toUpperCase() + prefill.task_type.slice(1)}</option>`);
+          typeSel.value = prefill.task_type;
+        }
         if (prefill.assignee_id && (staff || []).some(s => s.id === prefill.assignee_id)) {
           overlay.querySelector('#at-assign-type').value = 'person';
           overlay.querySelector('#at-assign-type').dispatchEvent(new Event('change'));
           overlay.querySelector('#at-person').value = prefill.assignee_id;
+        } else if (['admin', 'finance', 'sales', 'staff'].includes(prefill.assigned_to_role)) {
+          overlay.querySelector('#at-assign-type').value = 'role';
+          overlay.querySelector('#at-assign-type').dispatchEvent(new Event('change'));
+          overlay.querySelector('#at-role').value = prefill.assigned_to_role;
         }
         if (typeof prefill.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(prefill.due_date)) overlay.querySelector('#at-due-date').value = prefill.due_date;
         if (['daily', 'weekly', 'monthly'].includes(prefill.recurrence)) {
@@ -224,6 +269,7 @@
           overlay.querySelector('#at-job-search').value = String(prefill.project_label || '').slice(0, 120);
           overlay.querySelector('#at-job-selected').textContent = prefill.project_label ? 'Selected: ' + String(prefill.project_label).slice(0, 120) : '';
           overlay.querySelector('#at-required-row').style.display = 'flex';
+          overlay.querySelector('#at-required').checked = !!prefill.required_before_scheduling;
         }
       }
       overlay.querySelector('#at-job-search').addEventListener('input', (e) => {
@@ -238,7 +284,7 @@
           const results = await searchProjects(q);
           if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-            ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+            ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${escapeHtml(projectRef(p))}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))} <span class="subtitle">${escapeHtml(p.client_name || '')}</span></div>`).join('')}
           </div>`;
           resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
             row.addEventListener('click', () => {
@@ -252,12 +298,26 @@
         }, 250);
       });
 
-      overlay.querySelector('#at-assign-type').addEventListener('change', (e) => {
-        overlay.querySelector('#at-person-section').style.display = e.target.value === 'person' ? 'block' : 'none';
-        overlay.querySelector('#at-role-section').style.display = e.target.value === 'role' ? 'block' : 'none';
-      });
-
       overlay.querySelector('#at-cancel-btn').addEventListener('click', () => overlay.remove());
+      const delBtn = overlay.querySelector('#at-delete-btn');
+      if (delBtn) delBtn.addEventListener('click', async () => {
+        if (!confirm('Delete this task?')) return;
+        const msg = overlay.querySelector('#at-msg');
+        delBtn.disabled = true;
+        delBtn.textContent = 'Deleting...';
+        try {
+          const { error } = await supabaseClient.from('job_tasks').delete().eq('id', prefill.id);
+          if (error) throw error;
+          overlay.remove();
+          if (prefill.project_id && prefill.required_before_scheduling) await refreshPipelineTaskGate(prefill.project_id);
+          if (prefill.project_id) await logActivity('project', prefill.project_id, 'task_deleted', `Task deleted: ${prefill.description || ''}`);
+          await loadTasks();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          delBtn.disabled = false;
+          delBtn.textContent = 'Delete';
+        }
+      });
       overlay.querySelector('#at-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#at-msg');
         const description = overlay.querySelector('#at-desc').value.trim();
@@ -267,10 +327,11 @@
         const isRecurring = overlay.querySelector('#at-recurring').checked;
         if (isRecurring && !dueDate) { msg.innerHTML = `<div class="error-box">A repeating task needs a due date to count forward from.</div>`; return; }
         const saveBtn = overlay.querySelector('#at-save-btn');
+        const saveLabel = saveBtn.textContent;
         saveBtn.disabled = true;
-        saveBtn.textContent = 'Adding...';
+        saveBtn.textContent = editing ? 'Saving...' : 'Adding...';
         try {
-          const { error } = await supabaseClient.from('job_tasks').insert({
+          const fields = {
             project_id: selectedJobId,
             description,
             task_type: overlay.querySelector('#at-task-type').value,
@@ -279,15 +340,25 @@
             due_date: dueDate,
             recurrence: isRecurring ? overlay.querySelector('#at-recurrence').value : null,
             required_before_scheduling: selectedJobId ? overlay.querySelector('#at-required').checked : false,
-            created_by: user.id,
-          });
+          };
+          // Edit leaves meeting_id, remind_at, notes, parent_task_id and sort_order untouched (not in fields).
+          const { error } = editing
+            ? await supabaseClient.from('job_tasks').update(fields).eq('id', prefill.id)
+            : await supabaseClient.from('job_tasks').insert({ ...fields, created_by: user.id });
           if (error) throw error;
+          if (editing) {
+            if (prefill.required_before_scheduling || fields.required_before_scheduling) {
+              if (prefill.project_id) await refreshPipelineTaskGate(prefill.project_id);
+              if (selectedJobId && selectedJobId !== prefill.project_id) await refreshPipelineTaskGate(selectedJobId);
+            }
+            if (selectedJobId) await logActivity('project', selectedJobId, 'task_updated', `Task updated: ${description}`);
+          }
           overlay.remove();
           await loadTasks();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           saveBtn.disabled = false;
-          saveBtn.textContent = 'Add task';
+          saveBtn.textContent = saveLabel;
         }
       });
     }
