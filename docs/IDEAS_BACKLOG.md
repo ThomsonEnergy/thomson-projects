@@ -401,7 +401,8 @@ Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261029000000).
 3. **Reminder:** 3 days before, whoever made it gets a notification to follow up.
 4. **Nightly auto decline** (just after midnight Sydney, like the Job Booked check): anything still Sent past its date becomes Declined with reason "Expired: not accepted by 18 Nov 2026" (shown as "Expired"), creator notified, listed on the ops page. Client page then says it expired and to contact us; accepting is blocked.
 5. **Turn it off:** Settings > Company "Auto decline expired quotes and variations" (on by default); off = the date still shows and the reminder still comes, nothing is declined. Each quote and variation also has "Don't auto decline this one".
-6. **Reopen** sets a fresh valid until (today + 30).
-7. **Existing sent quotes** get today + 30 (nothing expires the first night).
+6. **Extend** (Sales, Admin, Finance): "Extend..." on the quote and the variation card: +7, +14, +30 days or pick a date, also from the 3-day reminder. Works after it has expired too (it reopens it). Optional tick "Email the client the new date" opens the in-app email with the PDF. Logged in the activity log.
+7. **Reopen** sets a fresh valid until (today + 30).
+8. **Existing sent quotes** get today + 30 (nothing expires the first night).
 
 Migration: `valid_until` and `no_auto_decline` on quotes and variations, `quote_valid_days` and `auto_decline_expired` in company settings, `expired` flag on the decline.
