@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 19 Oct 2026 (user-friendliness review)
+Last updated 19 Oct 2026 (Knowledge Base background reader plan)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -20,6 +20,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
 | 17 | User-friendliness upgrades (whole-app review) | Suggestions only, waiting on owner's pick (`docs/UX_REVIEW.md`) | N | None |
+| 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Planned 19 Oct 2026, waiting on owner's yes | N | None |
 
 ## High lead time, start now
 
@@ -471,3 +472,19 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 - Invoicing, Xero and payroll: items 110 to 119
 - Office and public pages: quotes, leads, clients, POs, stock, price lists, STCs, assets and licences: items 120 to 146
 - Login, policy update, Chat, Inbox, Settings and HR: items 147 to 168
+
+## 18. Knowledge Base background reader (planned 19 Oct 2026)
+
+**Problem found:** "Read with OCR" renders PDF pages in the browser, so the phone has to stay on the page with the screen on. On AS/NZS 3000 (610 pages) 438 pages were read and 43 batches (about 172 pages) failed, every one with the same Anthropic error: `Output blocked by content filtering policy` (the copyright output filter, triggered by asking for 4 pages of a standard word for word). Re-running the same way would fail on the same pages. Other standards are worse: AS 3012 has no text at all, AS 1768 has 2k characters, AS 3008 has 10k characters across 148 pages. Putting the PDFs in the GitHub repo does not help Sparky (he reads the database through Netlify, not GitHub) and purchased standards in GitHub is a licence problem.
+
+**Proven 19 Oct 2026:** a Netlify function can render PDF pages itself (`pdfjs-dist` 3.11.174 legacy build plus `@napi-rs/canvas`, no native compile, about 0.3 s a page, handles the owner-password encryption purchased standards use). So the whole read can run on the server with nothing open on the phone.
+
+**Plan:**
+1. **Queue, not screen.** Tables `knowledge_read_jobs` (one per read: entry, mode, total pages, next page, done, failed list, status) and `knowledge_pages` (entry, page number, text, how it was read: text layer / ocr / notes, error). Uploading a PDF, or "Read again" on an entry, creates a job. `read-knowledge-background` works through pages for up to 12 minutes, saving each page as it goes, then calls itself for the next stretch; a 2-minute sweep restarts anything stalled. The Knowledge page shows "Read 212 of 610 pages, 3 failed", and a phone notification lands when the read finishes.
+2. **Cheapest reliable read per page.** Text layer first (free, exact). A page whose text layer is thin (tables in fonts with no text mapping, the AS 3008 case), or any page when "read every page as pictures" is chosen, is rendered and read by Claude as an image, one page per API call (shorter answers get past the filter far more often than 4-page batches).
+3. **Filter fallback.** A blocked page is retried once; blocked again, Claude is asked for structured reference notes instead (every clause number, requirement and table value as data, not word for word) and the page is marked "notes"; still blocked, the page is marked failed with the reason and a "Retry failed pages" button re-queues just those. Sparky says when an answer comes from a notes page.
+4. **Sparky searches pages, not blobs.** Postgres full text search (`tsvector` column, GIN index) over `knowledge_pages`; `search_knowledge_base` returns "AS 3000, page 212: ..." snippets and `read_knowledge_entry` takes a page range. Replaces the per-word `ilike` over an 884k-character column. `knowledge_entries.content` stays stitched from the pages so nothing else changes.
+5. **Catch-up.** AS 3000's existing text is split into pages by its `--- Page N ---` markers (no API cost) and only the 172 failed pages are re-read; AS 3008, AS 3012 and AS 1768 are queued in full. The old browser OCR panel and `knowledge_ocr_parts` go.
+
+One migration (tables, indexes, RLS to authenticated for reads, server-only writes, search function with fixed search path). Cost: a few cents a page read as an image, well under $20 for all four standards.
+
