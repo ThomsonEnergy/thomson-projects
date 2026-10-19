@@ -17,6 +17,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
 | 8 | invoice@ supplier bill intake agent | Live 18 Oct 2026, suggest-only for 2 weeks | N | Owner checks matches, then auto-save on |
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
+| 10 | Stock PO on a job (pull from Warehouse or a vehicle, fix the count) | Planned 19 Oct 2026, waiting on owner's yes | N | None |
 
 ## High lead time, start now
 
@@ -377,3 +378,17 @@ Reviewed 18 Oct 2026 against `policies and Contracts/`. Have: Code of Conduct, C
 
 **Delivery:** each policy goes into Settings > Onboarding as a versioned document (PROJECT_SPEC A26), so staff sign on login.
 
+## 10. Stock PO on a job (planned 19 Oct 2026, waiting on owner's yes)
+
+Grab gear from the Warehouse or a vehicle for a job, and fix the stock count at the same time when the app is wrong (app says 0, there are really 3: take 1, say 2 left).
+
+**Today:** a job PO must have a supplier. A PO with no supplier only takes stock out when it goes to a vehicle; to a job it costs the job without taking anything out of stock. Staff cannot cost stock to a job at all (`job_material_usage` is pricing roles only).
+
+**Plan:**
+- Job page "Create purchase order" and the Purchase Orders page (when "A job" is picked) get **Where from**: Supplier (as today), Warehouse stock, or a vehicle (only `holds_stock` vehicles).
+- Stock PO lines are Stock materials only. Each line shows what the app has there ("App says 0 in Warehouse"). Staff do not see costs.
+- Each line has **Left after you take it** (filled in as app count minus taken). If they take more than the app has, this box must be filled in. Whatever they type becomes the real count at that spot.
+- On Create: one server step (migration, `create_stock_pull_po`) makes the PO (supplier name "Warehouse" or the vehicle), takes the stock out, sets the corrected counts, costs every line to the job at the material's cost (`job_material_usage`, `from_stock`), marks the lines and PO received. All or nothing, works for every role.
+- No follow-up task, no bill, no invoice upload, no Xero on a stock PO. Shown on the job's PO list as "Stock PO, from Warehouse / <vehicle>".
+- Activity log: on the PO and the job ("PO 2101 pulled 1 x 6mm TPS from Warehouse"), and on the material when the count was corrected ("Warehouse count corrected: app 0, actually 3, took 1, 2 left").
+- Migration adds `purchase_orders.stock_source` (warehouse or vehicle) and `stock_source_vehicle_id` (indexed).
