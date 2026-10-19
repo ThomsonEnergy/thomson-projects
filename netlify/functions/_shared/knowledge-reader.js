@@ -286,6 +286,9 @@ async function runJob(admin, jobId) {
 
     if (readAs === 'failed') failed++;
     done++;
+    // Postgres text cannot hold a NUL byte (a stray glyph in some PDFs' text layers): found for real on page 51
+    // of AS/NZS 3012, which failed the save with "unsupported Unicode escape sequence".
+    if (text) text = text.replace(/\u0000/g, '');
     const { error: upErr } = await admin.from('knowledge_pages').upsert(
       { entry_id: entry.id, page_no: n, text, read_as: readAs, error: pageError, updated_at: new Date().toISOString() },
       { onConflict: 'entry_id,page_no' });
