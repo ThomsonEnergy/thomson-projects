@@ -910,7 +910,9 @@ async function uploadPhotos(fileList, folder, bucket = 'proposal-photos', opts =
 // the logged-in user. onAdded(urls) runs after each run that added anything.
 function wireSitePhotoInput(fileInput, msgEl, { projectId, staffId, onAdded } = {}) {
   let pending = [];
+  let clearTimer = null;
   async function run(files) {
+    if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
     const total = files.length;
     if (!total) return;
     fileInput.disabled = true;
@@ -939,7 +941,7 @@ function wireSitePhotoInput(fileInput, msgEl, { projectId, staffId, onAdded } = 
     if (urls.length && onAdded) await onAdded(urls);
     if (!failed.length) {
       msgEl.innerHTML = `<div class="success-box">${urls.length} photo${urls.length === 1 ? '' : 's'} added.</div>`;
-      setTimeout(() => { if (!pending.length) msgEl.innerHTML = ''; }, 4000);
+      clearTimer = setTimeout(() => { if (!pending.length) msgEl.innerHTML = ''; }, 4000);
       return;
     }
     msgEl.innerHTML = `<div class="error-box">${urls.length} of ${total} added. ${failed.length} failed: ${failed.map(f => escapeHtml(f.file.name)).join(', ')} (${escapeHtml(failed[0].message)}). <button type="button" class="secondary site-photo-retry-btn" style="margin-left:8px;">Retry ${failed.length}</button></div>`;

@@ -69,8 +69,8 @@ begin
   values (p_id, me.id, coalesce(me.full_name, 'Staff member'), me.mobile_number, case when p_injured then 'injured' else 'reported' end);
 
   insert into incident_files (incident_id, kind, category, title, file_path, file_name, uploaded_by)
-  select p_id, 'photo', 'Photo', ph->>'name', ph->>'path', ph->>'name', me.id
-  from jsonb_array_elements(p_photos) ph;
+  select p_id, 'photo', 'Photo', e->>'name', e->>'path', e->>'name', me.id
+  from jsonb_array_elements(p_photos) e;
 
   for r in select id from profiles where active and role in ('admin', 'finance') loop
     perform create_notification(
@@ -86,8 +86,8 @@ begin
   return n;
 end $$;
 
-revoke execute on function public.report_incident(uuid, text, text, text, uuid, time without time zone, boolean, jsonb) from public, anon;
-grant execute on function public.report_incident(uuid, text, text, text, uuid, time without time zone, boolean, jsonb) to authenticated;
+revoke execute on function public.report_incident(uuid, text, text, text, uuid, date, time without time zone, boolean, jsonb) from public, anon;
+grant execute on function public.report_incident(uuid, text, text, text, uuid, date, time without time zone, boolean, jsonb) to authenticated;
 
 -- Staff can put photos into staff-files/incidents/<incident id>/ only. Read and delete stay admin/finance.
 drop policy if exists "staff upload incident photos" on storage.objects;

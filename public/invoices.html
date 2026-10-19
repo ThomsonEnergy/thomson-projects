@@ -205,6 +205,8 @@
       if (!session) return;
       syncThemeFromProfile();
       renderMainNav('invoices');
+      // Opened from a search link: show every match, not just unpaid ones
+      if (new URLSearchParams(window.location.search).get('q')) document.getElementById('invoice-filter').value = 'all';
       document.getElementById('invoice-search').addEventListener('input', renderInvoiceList);
       document.getElementById('invoice-filter').addEventListener('change', renderInvoiceList);
       document.getElementById('logout-link').addEventListener('click', async (e) => {

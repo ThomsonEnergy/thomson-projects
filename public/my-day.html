@@ -279,7 +279,7 @@
           </div>
           <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="ri-hurt" style="width:auto; margin:0;" /> I was hurt</label>
           <label>Photos</label>
-          <input type="file" id="ri-photos" accept="image/*" multiple capture="environment" />
+          <input type="file" id="ri-photos" accept="image/*" multiple />
           <p class="subtitle" id="ri-photo-count" style="margin:4px 0 0;"></p>
           <div id="ri-msg"></div>
           <div style="display:flex; gap:8px; margin-top:14px;">
@@ -345,6 +345,7 @@
         msgEl.innerHTML = '';
         btn.disabled = true;
         btn.textContent = 'Sending...';
+        overlay.querySelector('#ri-cancel-btn').disabled = true;
         try {
           const id = crypto.randomUUID();
           const files = Array.from(overlay.querySelector('#ri-photos').files || []);
@@ -376,6 +377,7 @@
         } catch (err) {
           msgEl.innerHTML = `<div class="error-box">${escapeHtml((err && err.message) || String(err))}</div>`;
           btn.disabled = false;
+          overlay.querySelector('#ri-cancel-btn').disabled = false;
           btn.textContent = 'Send';
         }
       });

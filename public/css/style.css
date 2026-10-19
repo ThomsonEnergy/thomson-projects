@@ -423,7 +423,7 @@ textarea { min-height: 70px; resize: vertical; }
 /* 16px stops iOS Safari and the WKWebView zooming the page in when a field is tapped.
    Touch screens only (pointer: coarse), so laptops keep 14px. */
 @media (pointer: coarse) {
-  input, textarea, select { font-size: 16px; }
+  input, textarea, select { font-size: 16px !important; }
 }
 
 button, .btn {
