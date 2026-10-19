@@ -753,7 +753,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=93"></script>
+  <script src="/js/supabase-client.js?v=94"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -1402,13 +1402,15 @@
 
     // --- My Profile (self-service, every role) ---
     let myProfileUserId = null;
+    let myLicenceIds = [];
 
     function myLicenceRowHtml(l) {
       return `
-        <div class="my-licence-row" data-id="${l.id || ''}" data-file-path="${l.file_path || ''}" data-file-name="${l.file_name || ''}" style="margin-bottom:12px; padding:10px; background:var(--surface-2); border-radius:8px;">
+        <div class="my-licence-row" data-id="${escapeHtml(l.id || '')}" data-file-path="${escapeHtml(l.file_path || '')}" data-file-name="${escapeHtml(l.file_name || '')}" style="margin-bottom:12px; padding:10px; background:var(--surface-2); border-radius:8px;">
+          ${l.update_requested_at ? `<div class="error-box" style="margin:0 0 8px; font-size:13px;">Please update this licence: upload the current one and its expiry date, then Save licences.</div>` : ''}
           <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
-            <input class="my-licence-name" value="${l.licence_name || ''}" placeholder="Licence name" style="flex:2; margin:0;" />
-            <input class="my-licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1; margin:0;" />
+            <input class="my-licence-name" value="${escapeHtml(l.licence_name || '')}" placeholder="Licence name" style="flex:2; margin:0;" />
+            <input class="my-licence-number" value="${escapeHtml(l.licence_number || '')}" placeholder="Number" style="flex:1; margin:0;" />
             <input class="my-licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1; margin:0;" />
             <button type="button" class="secondary remove-my-licence-btn" style="padding:8px 10px;">&times;</button>
           </div>
@@ -1416,6 +1418,7 @@
           <input type="file" class="my-licence-file" accept="image/*,.pdf" style="margin:0;" />
           <button type="button" class="secondary my-licence-view" style="font-size:12px; padding:4px 10px; margin-left:8px; ${l.file_path ? '' : 'display:none;'}">View uploaded file</button>
           <div class="my-licence-scan-msg" style="margin-top:4px;"></div>
+          <textarea class="my-licence-notes" rows="1" placeholder="Notes, e.g. Paid for renewal, waiting on card" style="margin:6px 0 0;">${escapeHtml(l.notes || '')}</textarea>
         </div>`;
     }
     function wireMyLicenceRows() {
@@ -1474,8 +1477,13 @@
       document.getElementById('my-rate-2x').textContent = rates?.rate_2x != null ? money(rates.rate_2x) : 'Not set';
       document.getElementById('my-rate-2-5x').textContent = rates?.rate_2_5x != null ? money(rates.rate_2_5x) : 'Not set';
 
+      myLicenceIds = (licences || []).map(l => l.id);
       document.getElementById('my-licence-rows').innerHTML = (licences || []).map(myLicenceRowHtml).join('');
       wireMyLicenceRows();
+      // ?licence=<id>: from an "update your licence" notification
+      const askedLicence = new URLSearchParams(location.search).get('licence');
+      const askedRow = askedLicence && [...document.querySelectorAll('.my-licence-row')].find(r => r.dataset.id === askedLicence);
+      if (askedRow) { askedRow.style.outline = '2px solid var(--accent)'; askedRow.scrollIntoView({ block: 'center' }); }
 
       await loadMySignedDocs(userId);
       await loadMyLetters(userId);
@@ -1655,24 +1663,20 @@
     document.getElementById('my-licences-save-btn').addEventListener('click', async () => {
       const msg = document.getElementById('my-licences-msg');
       try {
-        // Replace-all, same approach the admin panel uses - simplest way
-        // to handle add/edit/remove in one save given how few licences a
-        // person typically has.
-        await supabaseClient.from('profile_licences').delete().eq('profile_id', myProfileUserId);
-        const newLicences = [...document.querySelectorAll('.my-licence-row')]
+        // Rows keep their id, so notes, update requests and reminders stay with the licence.
+        const rows = [...document.querySelectorAll('.my-licence-row')]
           .map(row => ({
+            id: row.dataset.id || null,
             profile_id: myProfileUserId,
             licence_name: row.querySelector('.my-licence-name').value.trim(),
             licence_number: row.querySelector('.my-licence-number').value.trim() || null,
             expiry_date: row.querySelector('.my-licence-expiry').value || null,
+            notes: row.querySelector('.my-licence-notes').value.trim() || null,
             file_path: row.dataset.filePath || null,
             file_name: row.dataset.fileName || null,
           }))
           .filter(l => l.licence_name);
-        if (newLicences.length) {
-          const { error } = await supabaseClient.from('profile_licences').insert(newLicences);
-          if (error) throw error;
-        }
+        await saveLicenceRows(myLicenceIds, rows);
         msg.innerHTML = `<div class="success-box">Licences saved.</div>`;
         await loadMyProfile(myProfileUserId);
       } catch (err) {

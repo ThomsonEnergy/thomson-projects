@@ -34,6 +34,11 @@
 [functions.sweep-quote-expiry]
   schedule = "10 13,14 * * *"
 
+# Just after midnight Sydney time: licence and insurance expiry reminders to the employee and Admin
+# (30, 14, 7 days, on the day, weekly after) - see sweep-licence-expiry.js. Same two runs as above.
+[functions.sweep-licence-expiry]
+  schedule = "15 13,14 * * *"
+
 # Once a day: refreshes the overhead lines from the Xero Profit and Loss report - see
 # sync-overheads-nightly.js. Does nothing until accounts are mapped on the Overheads page.
 [functions.sync-overheads-nightly]

@@ -81,11 +81,14 @@ async function openStaffEditor(userId, opts = {}) {
 
   function renderLicenceRows(list) {
     return (list || []).map(l => `
-      <div class="licence-row" data-id="${l.id}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <input class="licence-name" value="${staffEditorEscAttr(l.licence_name)}" placeholder="Licence name" style="flex:2;" />
-        <input class="licence-number" value="${staffEditorEscAttr(l.licence_number)}" placeholder="Number" style="flex:1;" />
-        <input class="licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1;" />
-        <button type="button" class="secondary remove-licence-btn" style="padding:8px 10px;">&times;</button>
+      <div class="licence-row" data-id="${staffEditorEscAttr(l.id)}" style="margin-bottom:8px;">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input class="licence-name" value="${staffEditorEscAttr(l.licence_name)}" placeholder="Licence name" style="flex:2;" />
+          <input class="licence-number" value="${staffEditorEscAttr(l.licence_number)}" placeholder="Number" style="flex:1;" />
+          <input class="licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1;" />
+          <button type="button" class="secondary remove-licence-btn" style="padding:8px 10px;">&times;</button>
+        </div>
+        <input class="licence-notes" value="${staffEditorEscAttr(l.notes)}" placeholder="Notes, e.g. Paid for renewal, waiting on card" style="margin-top:4px;" />
       </div>`).join('');
   }
 
@@ -343,26 +346,19 @@ async function openStaffEditor(userId, opts = {}) {
       const { error: updErr } = await supabaseClient.from('profiles').update(updates).eq('id', userId);
       if (updErr) throw updErr;
 
-      // Replace all licences with whatever's currently in the form -
-      // simplest way to handle add/edit/remove in one save, given how
-      // few licences a person typically has.
-      // Keep each licence's uploaded file (added on the Team page) across the
-      // replace - the rows here only edit name, number and expiry.
-      const keptFiles = Object.fromEntries((licences || []).map(l => [l.id, { file_path: l.file_path || null, file_name: l.file_name || null }]));
-      await supabaseClient.from('profile_licences').delete().eq('profile_id', userId);
-      const newLicences = [...overlay.querySelectorAll('.licence-row')]
+      // Rows keep their id (saveLicenceRows), so the uploaded file, notes and
+      // update requests stay with each licence.
+      const licenceRows = [...overlay.querySelectorAll('.licence-row')]
         .map(row => ({
-          ...(keptFiles[row.dataset.id] || {}),
+          id: row.dataset.id || null,
           profile_id: userId,
           licence_name: row.querySelector('.licence-name').value.trim(),
           licence_number: row.querySelector('.licence-number').value.trim() || null,
           expiry_date: row.querySelector('.licence-expiry').value || null,
+          notes: row.querySelector('.licence-notes').value.trim() || null,
         }))
         .filter(l => l.licence_name);
-      if (newLicences.length) {
-        const { error: licErr } = await supabaseClient.from('profile_licences').insert(newLicences);
-        if (licErr) throw licErr;
-      }
+      await saveLicenceRows((licences || []).map(l => l.id), licenceRows);
 
       // Same replace-all approach for allowances.
       await supabaseClient.from('employee_allowances').delete().eq('profile_id', userId);

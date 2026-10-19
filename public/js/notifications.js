@@ -22,6 +22,7 @@ const NOTIF_KINDS = [
   ['ops_digest', 'Ops manager 5am digest (ops manager people)'],
   ['agent_alert', 'A background worker has stopped working (ops manager people)'],
   ['review', 'Client reviews received'],
+  ['licence', 'Licence and insurance expiry reminders, and requests to update my licences'],
 ];
 
 (function () {

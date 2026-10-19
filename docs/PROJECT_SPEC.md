@@ -359,6 +359,7 @@ Manual steps only a person can do (the code is live):
 
 ### B3. User management
 - Built: names and roles, licences and insurance with AI expiry extraction, admin-set passwords, archived (deactivated) staff list, contract pay rates pushed to Xero (A1), HR profile (A26).
+- Licence notes, update requests and expiry reminders (migration 20261103000000, 19 Oct 2026): every company licence / insurance and staff licence has a Notes field (who and when shown under it; edited on Team, the staff profile editor and Settings, My licences). Admin presses "Ask to update" on a staff licence (Team or staff profile): the employee gets a `licence` notification opening Settings with that licence highlighted, and the licence shows "Update asked" until a new expiry or file is saved. Nightly agent `sweep-licence-expiry` (00:15 Sydney): employee reminded 30, 14, 7 days before, on the day, then every 7 days while expired; a note written in the last 30 days pauses the employee's reminders; Admin gets one notification a night listing every company and staff item at a reminder point. Notes never show on the share link. Licence saves update rows in place (`saveLicenceRows`) instead of delete and re-add.
 - Still open (low priority): wage history over time, industry allowances beyond the profile.
 
 ### B4. Stay logged in and Face ID (not built)
