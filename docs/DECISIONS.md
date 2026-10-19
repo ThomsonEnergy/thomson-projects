@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 19 Oct 2026
+- Whole site bug review done (read only): 14 security, 19 money / data and 15 broken-feature items, worst first. Fix plan waiting on owner's yes. (`docs/BUG_REVIEW.md`)
 - LIVE: quotes and variations valid 30 days (Settings), shown to the client, 3 day reminder, nightly auto decline as Expired (off switch company wide and per quote / variation), Sales can Extend (reopens an expired one, optional email). A quote moving to Quote Sent now also gets status Sent (it never did before). Migration 20261030000000 applied to production. (`docs/PROJECT_SPEC.md` A3 Variations)
 - Planned as the last step once major additions stop: security sweep and hardening (re-enter password on admin pages, idle lock, two-factor for Admin and Finance, leaked password protection, RLS/function/key review, 2FA on outside accounts). (`docs/IDEAS_BACKLOG.md` item 15, `docs/PROJECT_SPEC.md` Part 0 Tier 5)
 - LIVE: quotes and variations can be marked approved by email (client's email linked as proof), phone or in person, and declined by the client (button on their page) or by us (with a reason); Declined tab on Quotes, reopen either. Migration 20261029000000 applied to production. (`docs/PROJECT_SPEC.md` A3 Variations)
