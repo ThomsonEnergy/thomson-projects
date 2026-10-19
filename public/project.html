@@ -3476,7 +3476,7 @@
                 <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
                 <input readonly value="${quoteUrl}" style="margin-bottom:10px;" onclick="this.select()" />
                 <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                  <a class="btn secondary" id="email-quote-btn" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Quote: ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your quote here:\n' + quoteUrl + '\n\nThanks,\nThomson Energy' })}">Email quote to client</a>
+                  <button type="button" class="secondary" id="email-quote-btn">Email quote to client</button>
                   ${project.quote_pdf_path ? `<button type="button" class="secondary" id="view-quote-pdf-btn">View PDF</button>` : ''}
                   <button type="button" class="secondary" id="generate-quote-pdf-btn" style="${project.quote_pdf_path ? 'font-size:12px; padding:6px 10px;' : ''}">${project.quote_pdf_path ? 'Regenerate' : 'Generate PDF'}</button>
                   ${project.quote_pdf_generated_at ? `<span class="subtitle" style="font-size:11px;">Generated ${new Date(project.quote_pdf_generated_at).toLocaleString('en-AU')}</span>` : ''}
@@ -3776,13 +3776,23 @@
         if (!project.installer_summary && project.sow_text && project.sow_text.trim()) run({ onlyIfStale: true }, true);
       }
 
+      // Emails the quote from sales@ through the app: makes a fresh quote PDF first (so it
+      // matches the quote as it stands) and attaches it, with the view-and-accept button.
       const emailQuoteBtn = document.getElementById('email-quote-btn');
-      if (emailQuoteBtn && !project.job_number) emailQuoteBtn.addEventListener('click', () => {
-        // Doesn't block the mailto/Gmail-compose link's own navigation -
-        // just also records that it's been sent. Only advances a quote
-        // still sitting at draft_quote, so re-sending an already-approved
-        // (or since-progressed) quote can't push it backwards.
-        supabaseClient.from('projects').update({ pipeline_stage: 'quote_sent' }).eq('id', project.id).eq('pipeline_stage', 'draft_quote');
+      if (emailQuoteBtn) emailQuoteBtn.addEventListener('click', async () => {
+        const msgEl = document.getElementById('quote-pdf-msg');
+        const label = emailQuoteBtn.textContent;
+        emailQuoteBtn.disabled = true; emailQuoteBtn.textContent = 'Making the PDF...';
+        msgEl.innerHTML = '';
+        try {
+          await generateClientPdf('quote', project.id);
+          const { data: fresh } = await supabaseClient.from('projects').select('quote_pdf_path, quote_pdf_generated_at').eq('id', project.id).single();
+          if (fresh) Object.assign(project, fresh);
+          await openJobEmailComposer(project, null, { withQuote: true });
+        } catch (err) {
+          msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        }
+        emailQuoteBtn.disabled = false; emailQuoteBtn.textContent = label;
       });
 
       const viewQuotePdfBtn = document.getElementById('view-quote-pdf-btn');
@@ -4204,28 +4214,37 @@
     }
 
     // ---------- Emails tab: conversations tagged to this job, and emailing from the job ----------
-    async function jobEmailAttachOptions(project) {
+    async function jobEmailAttachOptions(project, withQuote) {
       const opts = [];
-      if (project.quote_pdf_path) opts.push({ group: 'Quote', label: 'Quote PDF', bucket: 'project-documents', path: project.quote_pdf_path, name: `${projectRef(project)} - Quote.pdf`, checked: !project.job_number });
+      if (project.quote_pdf_path) opts.push({ group: 'Quote', label: 'Quote PDF', bucket: 'project-documents', path: project.quote_pdf_path, name: `${projectRef(project)} - Quote.pdf`, checked: !project.job_number || !!withQuote });
       const { data: docs } = await supabaseClient.from('project_documents').select('folder, file_path, file_name').eq('project_id', project.id).order('created_at', { ascending: false });
       (docs || []).forEach(d => opts.push({ group: 'Job documents - ' + d.folder, label: d.file_name, bucket: 'project-documents', path: d.file_path, name: d.file_name }));
       return opts;
     }
 
-    async function openJobEmailComposer(project, reply) {
+    async function openJobEmailComposer(project, reply, opts) {
       const first = String(project.client_name || '').trim().split(/\s+/)[0] || 'there';
-      const isQuote = !project.job_number;
+      const withQuote = !!(opts && opts.withQuote);
+      const isQuote = !project.job_number || withQuote;
+      const qNumber = project.quote_number || (project.source_quote && project.source_quote.quote_number) || '';
       openEmailComposer({
         title: reply ? 'Reply' : 'Email about ' + projectRef(project),
         to: reply ? reply.to : (project.client_email || ''),
-        subject: reply ? reply.subject : (isQuote ? `Quote Q${project.quote_number}: ${project.name}` : projectRef(project)),
+        subject: reply ? reply.subject : (isQuote ? `Quote${qNumber ? ' Q' + qNumber : ''}: ${project.name}` : projectRef(project)),
         body: reply ? '' : (isQuote ? `Hi ${first},\n\nPlease find the quote for ${project.name} attached.\n\nLet me know if you have any questions.` : `Hi ${first},\n\n`),
         replyToThreadId: reply ? reply.threadId : undefined,
         projectId: project.id, tagKind: 'client',
         reviewRequest: (!isQuote && !reply) ? { projectId: project.id, clientName: project.client_name, clientEmail: project.client_email } : undefined,
         quoteLink: (isQuote && project.quote_token) ? { url: `${shareOrigin()}/quote.html?token=${project.quote_token}`, label: 'Include a button to view and accept the quote online' } : undefined,
-        attachOptions: await jobEmailAttachOptions(project),
-        onSent: async () => { await loadJobEmails(project); },
+        attachOptions: await jobEmailAttachOptions(project, withQuote),
+        onSent: async () => {
+          // Only moves a quote still at draft_quote, so re-sending can't push it backwards.
+          if (isQuote && !reply && !project.job_number) {
+            await supabaseClient.from('projects').update({ pipeline_stage: 'quote_sent' }).eq('id', project.id).eq('pipeline_stage', 'draft_quote');
+            await logActivity('project', project.id, 'quote_emailed', `Quote${project.quote_number ? ' Q' + project.quote_number : ''} emailed to the client`);
+          }
+          await loadJobEmails(project);
+        },
       });
     }
 
@@ -5804,6 +5823,8 @@
                 ${r.approval_status !== 'approved' ? `<button type="button" class="var-fixed-send" data-id="${r.id}" style="${btnStyle}">${r.approval_status === 'sent' ? 'Resend to client...' : 'Email to client...'}</button>` : ''}
                 ${r.approval_status === 'draft' || !r.approval_status ? `<button type="button" class="secondary var-fixed-marksent" data-id="${r.id}" style="${btnStyle}">I've sent it myself</button>` : ''}
                 ${r.approval_status === 'sent' ? `<button type="button" class="secondary var-fixed-withdraw" data-id="${r.id}" style="${btnStyle}">Back to draft</button>` : ''}
+                ${r.pdf_path ? `<button type="button" class="secondary var-fixed-pdf" data-id="${r.id}" style="${btnStyle}">View PDF</button>` : ''}
+                <button type="button" class="secondary var-fixed-makepdf" data-id="${r.id}" style="${btnStyle}">${r.pdf_path ? 'Regenerate PDF' : 'Make PDF'}</button>
                 <button type="button" class="secondary var-fixed-copy" data-link="${linkFor(r)}" style="${btnStyle}">Copy link</button>
                 <a class="btn secondary" target="_blank" href="${linkFor(r)}" style="${btnStyle}">${r.approval_status === 'approved' ? 'View signed copy' : 'Preview as client'}</a>
               </div>` : ''}
@@ -5935,7 +5956,17 @@
 
       // ----- fixed-price variations -----
       listEl.querySelectorAll('.var-fixed-edit').forEach(btn => btn.addEventListener('click', () => openFixedVariationEditor(project, rowById(btn.dataset.id), reload)));
-      listEl.querySelectorAll('.var-fixed-send').forEach(btn => btn.addEventListener('click', () => sendFixedVariationEmail(project, rowById(btn.dataset.id), reload)));
+      listEl.querySelectorAll('.var-fixed-send').forEach(btn => btn.addEventListener('click', () => sendFixedVariationEmail(project, rowById(btn.dataset.id), reload, btn)));
+      listEl.querySelectorAll('.var-fixed-pdf').forEach(btn => btn.addEventListener('click', () => {
+        const r = rowById(btn.dataset.id);
+        openPdfViewer(r.pdf_path, `${projectRef(project)} - Variation ${r.variation_number || ''}`, { projectId: project.id, folder: 'Variations' });
+      }));
+      listEl.querySelectorAll('.var-fixed-makepdf').forEach(btn => btn.addEventListener('click', async () => {
+        const label = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Making the PDF...';
+        try { await makeVariationPdf(btn.dataset.id); await reload(); }
+        catch (err) { alert(err.message); btn.disabled = false; btn.textContent = label; }
+      }));
       listEl.querySelectorAll('.var-fixed-marksent').forEach(btn => btn.addEventListener('click', async () => {
         const { error: sErr } = await supabaseClient.from('job_variation_entries').update({ approval_status: 'sent', sent_at: new Date().toISOString() }).eq('id', btn.dataset.id);
         if (sErr) { alert(sErr.message); return; }
@@ -5943,7 +5974,7 @@
         await reload();
       }));
       listEl.querySelectorAll('.var-fixed-withdraw').forEach(btn => btn.addEventListener('click', async () => {
-        if (!confirm('Take this back to a draft? The link the client was sent will stop working until you send it again.')) return;
+        if (!confirm('Take this back to a draft? The client cannot sign it until you send it again.')) return;
         const { error: wErr } = await supabaseClient.from('job_variation_entries').update({ approval_status: 'draft' }).eq('id', btn.dataset.id);
         if (wErr) { alert(wErr.message); return; }
         await reload();
@@ -6001,7 +6032,7 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:600px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>${entry ? 'Edit fixed-price variation' : 'New fixed-price variation'}</h2>
-          <p class="subtitle" style="margin-bottom:10px;">The client sees this next to their original quote, then signs to approve it. Once signed it's added to the job as a stage at this price.</p>
+          <p class="subtitle" style="margin-bottom:10px;">The client gets this as its own variation document (referencing their original quote), then signs to approve it. Once signed it's added to the job as a stage at this price.</p>
           <label style="margin-top:0;">What is the extra work?</label>
           <input id="fv-desc" value="${escapeHtml(entry ? entry.description : '')}" placeholder="e.g. Move meter box and run new sub-main" />
           <label>Reason for the variation (the client reads this)</label>
@@ -6069,25 +6100,49 @@
       });
     }
 
-    // Emails the client a link to the variation page (their original quote plus this
-    // variation and its reason, with a place to sign). It only becomes "Sent" once the
-    // email has actually gone.
-    function sendFixedVariationEmail(project, entry, onDone) {
+    // Makes (or remakes) a fixed-price variation's PDF: the variation document from
+    // quote.html?variation=... Resolves to its storage path.
+    async function makeVariationPdf(entryId) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/generate-client-document-pdf', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ doc_type: 'variation', record_id: entryId }),
+      });
+      const out = await res.json().catch(() => ({ ok: false, error: 'Unexpected reply from the server' }));
+      if (!res.ok || !out.ok) throw new Error(out.error || 'Could not make the variation PDF');
+      return out.path;
+    }
+
+    // Emails the client the variation: its PDF attached, plus a button to the variation page
+    // to view and sign it online. It only becomes "Sent" once the email has actually gone.
+    async function sendFixedVariationEmail(project, entry, onDone, btn) {
+      const label = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = 'Making the PDF...'; }
+      let pdfPath;
+      try { pdfPath = await makeVariationPdf(entry.id); }
+      catch (err) { alert(err.message); return; }
+      finally { if (btn) { btn.disabled = false; btn.textContent = label; } }
       const first = String(project.client_name || '').trim().split(/\s+/)[0] || 'there';
       const total = (entry.fixed_lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+      const vName = `Variation ${entry.variation_number || ''}`.trim();
+      const qRef = project.quote_number ? ` to quote Q${project.quote_number}` : '';
+      const fileName = `${projectRef(project)} - ${vName}.pdf`;
       openEmailComposer({
-        title: `Email variation ${entry.variation_number || ''} to the client`,
+        title: `Email ${vName} to the client`,
         to: project.client_email || '',
-        subject: `Variation ${entry.variation_number || ''} for approval - ${projectRef(project)}: ${entry.description}`,
-        body: `Hi ${first},\n\nWhile working on ${project.name} some extra work has come up that wasn't in the original quote: ${entry.description}.\n\n${entry.reason ? entry.reason + '\n\n' : ''}The price for this is ${money(total)} ex GST (${money(total * 1.1)} inc GST).\n\nYou can see it alongside your original quote and approve it by signing at the link below.\n\nLet me know if you have any questions.`,
+        subject: `${vName}${qRef} for approval - ${projectRef(project)}: ${entry.description}`,
+        body: `Hi ${first},\n\nWhile working on ${project.name} some extra work has come up that wasn't in the original quote: ${entry.description}.\n\n${entry.reason ? entry.reason + '\n\n' : ''}The price for this is ${money(total)} ex GST (${money(total * 1.1)} inc GST). ${vName}${qRef} is attached.\n\nYou can approve it by signing online at the link below.\n\nLet me know if you have any questions.`,
         projectId: project.id, tagKind: 'client',
         quoteLink: { url: `${shareOrigin()}/quote.html?variation=${entry.variation_token}`, label: 'Include a button to view and sign the variation online', buttonText: 'Click to view and sign your variation', checked: true },
+        attachOptions: [{ group: 'Variation', label: fileName, bucket: 'project-documents', path: pdfPath, name: fileName, checked: true }],
         onSent: async () => {
-          await supabaseClient.from('job_variation_entries').update({ approval_status: 'sent', sent_at: new Date().toISOString() }).eq('id', entry.id);
-          await logActivity('project', project.id, 'variation_sent', `Variation emailed to the client: ${entry.description}`);
+          await supabaseClient.from('job_variation_entries').update({ approval_status: 'sent', sent_at: new Date().toISOString() }).eq('id', entry.id).neq('approval_status', 'approved');
+          await logActivity('project', project.id, 'variation_sent', `${vName} emailed to the client: ${entry.description}`);
           await onDone();
         },
       });
+      // the PDF now exists: show its buttons on the card even if the email is cancelled
+      if (!entry.pdf_path) onDone();
     }
 
     // Picks a Stock material or a prebuild for a variation. Resolves to

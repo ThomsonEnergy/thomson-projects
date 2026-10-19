@@ -510,6 +510,7 @@
       });
       const storedCentres = data.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const thisVariation = vInfo ? vInfo.variation : null;
+      if (vInfo) document.title = `Variation ${thisVariation.number || ''}`.trim();
       // On the variation page the original quote is shown as the client accepted it, then the
       // variations they have already approved, then this one.
       const centres = vInfo
@@ -538,8 +539,13 @@
 
       const docLabel = vInfo ? 'Variation' : ({ quick_estimate: 'Estimate', service_work: 'Service quote' }[template] || 'Proposal');
       const qNum = project.quote_number ? `Q${project.quote_number}` : '';
-      const coverSub = vInfo ? `${thisVariation.number ? 'No. ' + thisVariation.number : ''}${qNum ? (thisVariation.number ? ' to ' : 'to ') + qNum : ''}` : qNum;
-      const docDate = new Date(project.sent_at || project.created_at || Date.now())
+      const jobNo = vInfo ? thisVariation.job_number : project.job_number; // the quote row has none once it became a job
+      const jNum = jobNo ? `J${jobNo}` : '';
+      const coverSub = vInfo
+        ? [`${thisVariation.number ? 'No. ' + thisVariation.number + ' ' : ''}to ${qNum ? 'Quote ' + qNum : 'your quote'}`, jNum].filter(Boolean).join(' \u00b7 ')
+        : qNum;
+      // A variation is dated when it was sent (today while it is still a draft), not the original quote.
+      const docDate = new Date((vInfo ? thisVariation.sent_at : project.sent_at) || (vInfo ? Date.now() : project.created_at) || Date.now())
         .toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
 
       // Photo mix for this quote: the job's own photos first, then showcase.
@@ -798,6 +804,8 @@
         const prevVars = (vInfo.other_variations || []).reduce((s, o) => s + varLinesTotal(o.lines), 0);
         const dateText = (d) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
         const inputStyle = 'width:100%; padding:10px 12px; border:1px solid #c9ced8; border-radius:6px; background:#fff; color:#0a0a0a; font-size:14px;';
+        const origDate = project.approved_at ? dateText(project.approved_at) : '';
+        const origLink = project.quote_token ? `${shareOrigin()}/quote.html?token=${encodeURIComponent(project.quote_token)}` : '';
         const signHtml = v.approval_status === 'approved' ? `
           <div class="accepted-box">Approved and signed by ${esc(v.signed_by_name || '')} on ${v.approved_at ? esc(dateText(v.approved_at)) : ''}. Thank you.</div>
           ${v.signature_data_url ? `<div><img src="${v.signature_data_url}" alt="Signature" style="max-width:280px; max-height:90px; margin-top:10px; border-bottom:1px solid #0a0a0a;" /></div>` : ''}`
@@ -821,6 +829,13 @@
           ${headHtml}
           <div class="pg-body">
             <h1 class="pg-title">Variation${v.number ? `<br>no. ${esc(v.number)}` : ''}</h1>
+            <div class="intro-facts">
+              <div><div class="k">Prepared for</div><div class="v">${esc(project.client_name)}</div></div>
+              <div><div class="k">Site</div><div class="v">${project.client_address ? mapsLink(project.client_address) : '&nbsp;'}</div></div>
+              <div><div class="k">Original ${esc(docNoun)}</div><div class="v">${esc(qNum || project.name)}${origDate ? ', accepted ' + esc(origDate) : ''}</div></div>
+              <div><div class="k">Job</div><div class="v">${esc([jNum, v.job_name || project.name].filter(Boolean).join(' '))}</div></div>
+            </div>
+            <p class="note-line" style="margin:0 0 18px;">This variation changes the work and price agreed in ${qNum ? 'quote ' + esc(qNum) : 'your original quote'}. Everything else in that ${esc(docNoun)}, including its terms and conditions, stays the same.${origLink ? ` <a href="${esc(origLink)}">View the original ${esc(docNoun)}</a>.` : ''}</p>
             <div class="sec-title" style="margin-top:0;">What is changing</div>
             <p class="pg-lead">${esc(v.description)}</p>
             ${v.reason ? `<div class="sec-title">Reason for the variation</div><p class="pg-lead" style="white-space:pre-wrap;">${esc(v.reason)}</p>` : ''}
@@ -848,7 +863,11 @@
         </section>`;
       }
 
-      content.innerHTML = coverHtml + introHtml + scopeHtml + investHtml + variationPageHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
+      // A variation is its own document: the cover, then the variation. It points back to the
+      // original quote rather than repeating it.
+      content.innerHTML = vInfo
+        ? coverHtml + variationPageHtml
+        : coverHtml + introHtml + scopeHtml + investHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
 
       content.querySelectorAll('.stage-summary-row').forEach(row => {
         row.addEventListener('click', () => {
@@ -862,8 +881,8 @@
       });
 
       document.getElementById('topbar-total').innerHTML = `
-        <p class="subtitle" style="margin:0 0 2px; font-size:10px; text-transform:uppercase; letter-spacing:0.04em;">Total</p>
-        <p style="margin:0; font-weight:700; font-size:16px;">${money(stcTotal > 0 ? totalAfterStc : totalIncGst)}</p>
+        <p class="subtitle" style="margin:0 0 2px; font-size:10px; text-transform:uppercase; letter-spacing:0.04em;">${vInfo ? 'This variation' : 'Total'}</p>
+        <p style="margin:0; font-weight:700; font-size:16px;">${money(vInfo ? varLinesTotal(thisVariation.lines) * 1.1 : (stcTotal > 0 ? totalAfterStc : totalIncGst))}</p>
       `;
       document.getElementById('topbar-accept').innerHTML = vInfo
         ? (isAccepted ? `<span class="badge accepted">Variation signed</span>` : (thisVariation.approval_status === 'sent' ? `<button type="button" id="vs-jump">Review &amp; sign</button>` : ''))
