@@ -460,6 +460,8 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 123. Invoices list has no unpaid filter or search
 5. Field staff cannot report an incident from site
 
+**Delivery plan (proposed 19 Oct 2026, owner asked "why not do everything"):** build all 168, in about six deliveries by theme so each lands and gets tested on its own: (1) the top ten plus the shared pieces later items reuse; (2) items 1 to 30 (clock in, My Day, schedule, tasks, finishing a job); (3) 31 to 82 (job page, feedback and saving, phone layout); (4) 83 to 109 (navigation, speed); (5) 110 to 146 (invoicing and Xero, office and public pages); (6) 147 to 168 (login, chat, inbox, settings, HR). Delivery 1 plan is drafted on branch `claude/ux-top-ten` (migration 20261104000000_report_incident.sql for item 5), waiting on the owner's yes.
+
 **Themes (item numbers in docs/UX_REVIEW.md):**
 - Clock in, My Day, schedule, timesheets and tasks: items 1 to 18
 - Finishing a job on site: CCEW and installed equipment: items 19 to 30
