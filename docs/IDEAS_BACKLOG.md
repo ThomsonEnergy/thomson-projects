@@ -18,6 +18,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 8 | invoice@ supplier bill intake agent | Live 18 Oct 2026, suggest-only for 2 weeks | N | Owner checks matches, then auto-save on |
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
+| 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
 
 ## High lead time, start now
 
@@ -397,3 +398,43 @@ Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261029000000).
 ## 14. Quotes and variations expire (auto decline) (built 19 Oct 2026)
 
 Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261030000000).
+
+---
+
+## 15. Security sweep and hardening (planned 19 Oct 2026, last step)
+
+**When:** at the end of the build sequence, once major additions stop (after Tier 4 in PROJECT_SPEC Part 0). One consolidated sweep, then fixes, so nothing new lands half-reviewed. Plan first, owner's yes, as usual.
+
+**Goal:** make sure TEops cannot be broken into, and limit the damage if an admin leaves a computer logged in or a password leaks.
+
+### Protect against a logged-in computer left open
+- **Re-enter password on admin-only pages** (Settings admin tabs, API Keys, Users and Roles, pay rates, Xero, HR letters, delete actions): asks for the password again before showing them, valid for about 15 minutes, then asks again.
+- **Idle lock:** after a set time with no activity (setting, e.g. 30 minutes on a laptop), the app locks and needs the password (or Face ID, see B4).
+- Sensitive actions (pushing pay rates, changing roles, deleting records, changing bank details, moving money) always ask again.
+
+### Protect against a leaked password
+- **Two-factor login for Admin and Finance** (authenticator app). This reverses the earlier "2FA deliberately left out" decision for those roles only; field staff keep simple logins plus Face ID.
+- Supabase **leaked password protection** on (blocks passwords known from breaches) and a minimum password strength.
+- Email alert to the person on a login from a new device; "Log out everywhere" (built) linked from that email.
+- Lock an account after repeated wrong passwords.
+
+### Sweep of the app itself
+- Every table: RLS on, policies checked role by role, nothing readable by `anon` that should not be. Supabase security and performance advisors run and cleared.
+- Every Netlify function: checks who is calling (logged in, right role) before doing anything; public ones (quote accept, webhooks) verify signatures or tokens and are rate limited.
+- Storage buckets: private where they should be, signed links expire.
+- Secrets: nothing in the repo or browser code; rotate keys in `api_keys` (Xero, Google, Airwallex, Anthropic, AssemblyAI, Formbay, Twilio) and Netlify env vars.
+- Security headers (Content-Security-Policy, frame blocking), dependency audit (`npm audit`), remove unused functions and pages (the ServiceM8 deletion candidates, `sales.html`).
+- AI agents: confirm least privilege and that none can move money, change permissions or deploy.
+- Admin action audit log reviewed (who changed roles, rates, keys).
+
+### Accounts around the app
+- 2FA on every outside account: GitHub, Netlify, Supabase, Google Workspace admin, Xero, Airwallex, Twilio, Apple, Formbay.
+- GitHub: protect `main`, review who has access. Supabase and Netlify: review team members.
+- Backup restore test (`docs/STAGING.md`, never run yet).
+
+**Open questions**
+- [ ] Re-enter password timeout: 15 minutes?
+- [ ] Idle lock time on laptops vs phones
+- [ ] Which roles need two-factor (Admin and Finance proposed)
+- [ ] Outside penetration test after the sweep, or not
+
