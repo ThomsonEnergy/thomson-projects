@@ -3,7 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 19 Oct 2026
-- Planned: Stock PO on a job, pull gear from the Warehouse or a vehicle and correct the stock count on the spot (app says 0, really 3, take 1, 2 left). Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 10)
+- Planned: Stock PO on a job, pull gear from the Warehouse or a vehicle and correct the stock count on the spot (app says 0, really 3, take 1, 2 left). Also: a job's PO can no longer be received to another job, open that job instead. Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 10)
 - Nightly Job Booked check: just after midnight Sydney, any job in Job Booked whose last booking has passed with nobody clocked in goes back to Ready to Book (or Awaiting Action). Shows on the ops page as "Job Booked check (nightly)". LIVE: migration 20261024000000 applied to production. (`docs/PROJECT_SPEC.md` A6)
 - Job activity log split by tab: Summary shows one line per action ("Edited PO 1234 (3 changes)"), each tab shows its own full detail; PO line item edits now logged. Inner scroll boxes (log, lists, popups) scroll on their own app wide without moving the page. Job tab cards (Summary, Details, Documents, Variations, Invoices) sit 2 across on a laptop like Team/Home. Code only, no migration. (`docs/PROJECT_SPEC.md` A13a, A17)
 - Links no longer show the browser's default dark blue on the black theme: every plain link uses a light blue (`--link` #6cc4f5) on Dark, the indigo on Navy. (`public/css/style.css` v17)
