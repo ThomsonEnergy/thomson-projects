@@ -88,7 +88,7 @@
     <div id="content"><p class="subtitle">Loading the purchase order...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=89"></script>
+  <script src="/js/supabase-client.js?v=90"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -118,16 +118,17 @@
       else if (s.company_name) document.getElementById('brand-mark').textContent = s.company_name;
       document.title = `Purchase order ${po.po_number} - ${s.company_name || 'Thomson Energy'}`;
 
+      const showPrices = !!po.show_prices; // off by default: the supplier sees items and quantities only
       const subtotal = lines.reduce((t, l) => t + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0);
       const gst = Math.round(subtotal * 0.10 * 100) / 100;
       const total = subtotal + gst;
       const orderDate = po.order_date ? new Date(po.order_date + 'T00:00:00') : new Date();
 
-      const rows = lines.map((l) => ({
+      const rows = lines.map((l) => showPrices ? {
         cells: [esc(l.description), (Number(l.quantity) || 0).toFixed(2), money(l.unit_cost), money((Number(l.quantity) || 0) * (Number(l.unit_cost) || 0))],
         cls: ['', 'ctr', 'num', 'num'],
-      }));
-      if (!rows.length) rows.push({ cells: ['Items to be confirmed', '', '', ''], cls: ['', 'ctr', 'num', 'num'] });
+      } : { cells: [esc(l.description), poQty(l.quantity)], cls: ['', 'ctr'] });
+      if (!rows.length) rows.push(showPrices ? { cells: ['Items to be confirmed', '', '', ''], cls: ['', 'ctr', 'num', 'num'] } : { cells: ['Items to be confirmed', ''], cls: ['', 'ctr'] });
       const sections = [{ title: po.description || 'Items', rows }];
 
       const link = (href, text) => `<a href="${esc(href)}" style="color:inherit; text-decoration:none;">${esc(text)}</a>`;
@@ -158,7 +159,7 @@
             <div class="inv-right">
               <div class="inv-strip">
                 <div><div class="k">Order date</div><div class="v">${dateText(orderDate)}</div></div>
-                <div class="amt"><div class="k">Total inc GST</div><div class="v">${money(total)}</div></div>
+                ${showPrices ? `<div class="amt"><div class="k">Total inc GST</div><div class="v">${money(total)}</div></div>` : `<div class="amt"><div class="k">PO number</div><div class="v">${esc(po.po_number)}</div></div>`}
               </div>
               <div class="inv-title">PURCHASE ORDER ${esc(po.po_number)}</div>
               ${first && detailRows.length ? `<div class="inv-details">${detailRows.map(([k, v]) => `<div><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>` : ''}
@@ -173,13 +174,13 @@
           <div class="inv-final-top">
             <div class="inv-terms">
               ${po.supplier_notes ? `<div style="font-weight:700;">Notes</div><div style="white-space:pre-wrap; margin-bottom:10px;">${esc(po.supplier_notes)}</div>` : ''}
-              Please quote <strong>${esc(po.po_number)}</strong> on your invoice and delivery docket, and email invoices to ${link('mailto:' + INVOICES_EMAIL, INVOICES_EMAIL)}. Prices are ex GST.
+              Please quote <strong>${esc(po.po_number)}</strong> on your invoice and delivery docket, and email invoices to ${link('mailto:' + INVOICES_EMAIL, INVOICES_EMAIL)}.${showPrices ? ' Prices are ex GST.' : ''}
             </div>
-            <div class="inv-totals">
+            ${showPrices ? `<div class="inv-totals">
               <div><span class="k">Sub-Total ex GST</span><span class="v">${money(subtotal)}</span></div>
               <div><span class="k">GST</span><span class="v">${money(gst)}</span></div>
               <div><span class="k">Total inc GST</span><span class="v">${money(total)}</span></div>
-            </div>
+            </div>` : ''}
           </div>
         </div>`;
 
@@ -198,9 +199,9 @@
       const limit = PAGE_H - FOOT_RESERVE;
       const makeSection = (sec) => {
         const box = document.createElement('div'); box.className = 'inv-sec';
-        const head = ['Item', 'Quantity', 'Unit Price', 'Total'];
-        const hcls = ['', 'ctr', 'num', 'num'];
-        const widths = ['52%', '14%', '17%', '17%'];
+        const head = showPrices ? ['Item', 'Quantity', 'Unit Price', 'Total'] : ['Item', 'Quantity'];
+        const hcls = showPrices ? ['', 'ctr', 'num', 'num'] : ['', 'ctr'];
+        const widths = showPrices ? ['52%', '14%', '17%', '17%'] : ['82%', '18%'];
         box.innerHTML = `<h3>${esc(sec.title)}</h3><table><colgroup>${widths.map((w) => `<col style="width:${w}">`).join('')}</colgroup><thead><tr>${head.map((h, i) => `<th class="${hcls[i]}">${esc(h)}</th>`).join('')}</tr></thead><tbody></tbody></table>`;
         return box;
       };

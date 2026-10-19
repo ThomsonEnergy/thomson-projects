@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=89"></script>
+  <script src="/js/supabase-client.js?v=90"></script>
   <script src="/js/email-compose.js?v=5"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -215,6 +215,7 @@
           <div id="np-items-container"></div>
           <button type="button" class="secondary" id="np-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
           ${poNotesFieldsHtml('np')}
+          ${poShowPricesHtml('np')}
 
           <div style="margin-top:14px;">
             <button id="np-save-btn">Create PO</button>
@@ -303,6 +304,7 @@
             po_number: await drawNextPoNumber(),
             po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
             ...readPoNotesFields(overlay, 'np'),
+            show_prices: overlay.querySelector('#np-show-prices').checked,
             description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? 'PO for vehicle' : 'Stock purchase order',
           }).select('id, po_number').single();
           if (poErr) throw poErr;

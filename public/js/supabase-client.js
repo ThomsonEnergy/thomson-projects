@@ -4606,6 +4606,9 @@ function poPlaceLabel(type) {
 function renderPoLineItemsReceivable(po, canEdit) {
   const items = po.purchase_order_line_items || [];
   const btn = (cls, li, text) => `<button type="button" class="secondary ${cls}" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">${text}</button>`;
+  // only the roles that can add Stock items (role not loaded yet: shown, and the server checks)
+  const canAddStock = canEdit && (!_cachedRole || isPricingRole(_cachedRole));
+  const addStock = (li) => (canAddStock && !li.material_id && Number(li.quantity) > 0) ? btn('add-line-to-stock-btn', li, '+ Add to Stock') : '';
   return items.map(li => {
     if (li.received) {
       return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
@@ -4613,6 +4616,7 @@ function renderPoLineItemsReceivable(po, canEdit) {
         <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
           <span class="badge accepted" style="font-size:11px;">Received - ${poPlaceLabel(li.destination_type)}</span>
           ${canEdit ? btn('move-line-item-btn', li, 'Move') + btn('undo-receive-line-item-btn', li, 'Undo received') : ''}
+          ${addStock(li)}
         </span>
       </div>`;
     }
@@ -4626,6 +4630,7 @@ function renderPoLineItemsReceivable(po, canEdit) {
           ${btn('receive-line-item-btn', li, 'Receive')}
           ${btn('backorder-line-item-btn', li, li.is_backordered ? 'Update backorder' : 'Mark backordered')}
           ${btn('move-line-item-btn', li, 'Move')}
+          ${addStock(li)}
         </span>` : '<span class="subtitle" style="font-size:11px;">Not yet received</span>'}
     </div>`;
   }).join('');
@@ -4651,6 +4656,7 @@ function wireReceiveLineItemButtons(containerEl, allPos, defaultDestinationFor, 
   wire('.backorder-line-item-btn', (li) => openBackorderPanel(li, onComplete));
   wire('.move-line-item-btn', (li, po) => openMoveLineItemPanel(li, po, onComplete));
   wire('.undo-receive-line-item-btn', (li, po) => openUndoReceivePanel(li, po, onComplete));
+  wire('.add-line-to-stock-btn', (li, po) => openAddLineToStockPanel(li, po, onComplete));
 }
 
 function poOverlay(innerHtml, maxWidth = 420) {
@@ -4860,6 +4866,62 @@ async function openMoveLineItemPanel(lineItem, po, onComplete) {
   });
 }
 
+// Turns a PO line that isn't in Stock into a Stock item (filled in from the line; sell = cost + default markup).
+async function openAddLineToStockPanel(lineItem, po, onComplete) {
+  const [{ data: suppliers }, { data: cats }, { data: settings }] = await Promise.all([
+    supabaseClient.from('suppliers').select('id, name').order('name'),
+    supabaseClient.from('materials').select('category').not('category', 'is', null),
+    supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
+  ]);
+  const markup = Number(settings?.default_markup_percent) || 45;
+  const categories = [...new Set((cats || []).map(c => c.category).filter(Boolean))].sort();
+  const cost = Number(lineItem.unit_cost) || 0;
+  const overlay = poOverlay(`
+    <h2>Add to Stock</h2>
+    <p class="subtitle" style="margin-bottom:10px;">From PO ${escapeHtml(po.po_number || '')}. ${lineItem.received && lineItem.destination_type !== 'job' ? `The ${poQty(lineItem.quantity)} already received to ${poPlaceLabel(lineItem.destination_type)} are added to that count.` : 'The line is linked to the new Stock item.'}</p>
+    <label style="margin-top:0">Name</label>
+    <input id="als-name" value="${escapeHtml(lineItem.description)}" />
+    <label>Category (optional)</label>
+    <input id="als-category" list="als-categories" />
+    <datalist id="als-categories">${categories.map(c => `<option value="${escapeHtml(c)}">`).join('')}</datalist>
+    <label>Supplier</label>
+    <select id="als-supplier"><option value="">None</option>${(suppliers || []).map(sp => `<option value="${sp.id}" ${sp.id === po.supplier_id ? 'selected' : ''}>${escapeHtml(sp.name)}</option>`).join('')}</select>
+    <div class="grid cols-3">
+      <div><label>Cost price</label><input id="als-cost" type="number" step="0.01" value="${cost}" /></div>
+      <div><label>Sell price</label><input id="als-sell" type="number" step="0.01" value="${Math.round(cost * (1 + markup / 100) * 100) / 100}" /></div>
+      <div><label>Minimum qty</label><input id="als-min" type="number" step="1" value="0" /></div>
+    </div>
+    <div style="margin-top:14px;">
+      <button id="als-save-btn">Add to Stock</button>
+      <button type="button" class="secondary" id="als-cancel-btn">Cancel</button>
+    </div>
+    <div id="als-msg"></div>`, 480);
+  overlay.querySelector('#als-cost').addEventListener('input', (e) => {
+    overlay.querySelector('#als-sell').value = Math.round((parseFloat(e.target.value) || 0) * (1 + markup / 100) * 100) / 100;
+  });
+  overlay.querySelector('#als-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#als-save-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#als-msg');
+    const { error } = await supabaseClient.rpc('po_line_add_to_stock', {
+      p_line_id: lineItem.id,
+      p_name: overlay.querySelector('#als-name').value.trim(),
+      p_category: overlay.querySelector('#als-category').value.trim() || null,
+      p_supplier_id: overlay.querySelector('#als-supplier').value || null,
+      p_cost: parseFloat(overlay.querySelector('#als-cost').value) || 0,
+      p_sell: parseFloat(overlay.querySelector('#als-sell').value) || 0,
+      p_minimum: parseFloat(overlay.querySelector('#als-min').value) || 0,
+    });
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+    overlay.remove();
+    if (onComplete) await onComplete();
+  });
+}
+
+// "Show prices on the PO" tick box for the Create PO panels (off by default).
+function poShowPricesHtml(prefix) {
+  return `<label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:10px;"><input type="checkbox" id="${prefix}-show-prices" style="width:auto;" /> Show prices on the PO sent to the supplier</label>`;
+}
+
 // Open / Closed and the rest of a PO's buttons. role decides Edit lines (pricing) and Reopen (Admin/Finance).
 function renderPoBadges(po) {
   const stock = po.stock_source ? `<span class="badge draft" style="margin-left:6px;">Stock PO, from ${escapeHtml(po.supplier_name || 'Warehouse')}</span>` : '';
@@ -4923,6 +4985,7 @@ function renderPoControls(po, role) {
     po.supplier_id ? b('po-email-btn', 'Email PO') : '',
     !po.stock_source ? b('po-view-pdf-btn', 'View PO') : '',
     b('po-notes-btn', po.supplier_notes || po.internal_notes ? 'Edit notes' : '+ Notes'),
+    !po.stock_source ? b('po-prices-btn', `Prices on PO: ${po.show_prices ? 'On' : 'Off'}`) : '',
     open ? b('po-close-btn', 'Close PO') : '',
     !open && isFinanceRole(role) ? b('po-reopen-btn', 'Reopen') : '',
   ].join('');
@@ -4934,6 +4997,12 @@ function wirePoControls(containerEl, allPos, onComplete) {
   wire('.po-add-item-btn', (po) => openAddPoItemPanel(po, onComplete));
   wire('.po-edit-lines-btn', (po) => openEditPoLinesPanel(po, onComplete));
   wire('.po-notes-btn', (po) => openPoNotesPanel(po, onComplete));
+  wire('.po-prices-btn', async (po) => {
+    const { error } = await supabaseClient.from('purchase_orders').update({ show_prices: !po.show_prices }).eq('id', po.id);
+    if (error) { alert(error.message); return; }
+    await logActivity('purchase_order', po.id, 'prices_toggled', `PO ${po.po_number || ''}: prices ${po.show_prices ? 'hidden on' : 'shown on'} the PO sent to the supplier`);
+    if (onComplete) await onComplete();
+  });
   wire('.po-email-btn', (po, btn) => emailPurchaseOrder(po, btn));
   wire('.po-view-pdf-btn', (po) => window.open(`/po.html?token=${po.po_token}`, '_blank'));
   wire('.po-close-btn', async (po) => {

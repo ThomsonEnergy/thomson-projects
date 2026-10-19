@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=89"></script>
+  <script src="/js/supabase-client.js?v=90"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -6986,6 +6986,7 @@
           <label>Budget cap (optional)</label>
           <input id="cp-budget-cap" type="number" step="0.01" placeholder="Flag when spending gets close to this" />
           ${poNotesFieldsHtml('cp')}
+          ${poShowPricesHtml('cp')}
 
           <label style="margin-top:14px;">Attach document (optional)</label>
           <input type="file" id="cp-file" />
@@ -7043,6 +7044,7 @@
             locked: false,
             budget_cap: budgetCap,
             ...readPoNotesFields(overlay, 'cp'),
+            show_prices: overlay.querySelector('#cp-show-prices').checked,
             status: 'ordered',
             amount: 0,
             file_path, file_name,
