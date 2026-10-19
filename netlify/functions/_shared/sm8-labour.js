@@ -193,11 +193,18 @@ async function copyJobChecklist(supabaseAdmin, userId, project, items, profileBy
       ...(heading ? (({ completed, completed_at, completed_by, ...rest }) => rest)(itemFields(heading)) : { created_by: userId }),
     };
     if (!subs.length && heading) Object.assign(parentRow, itemFields(heading));
-    const parentId = await upsertTask(heading ? heading.uuid : `group:${project.sm8_job_uuid}:${g.key}`, parentRow, !!heading);
+    // A task can't be ticked while a subtask is open (database rule), so an
+    // existing group task is ticked after its subtasks, not before.
+    const parentUuid = heading ? heading.uuid : `group:${project.sm8_job_uuid}:${g.key}`;
+    const parentExists = existingByUuid.has(parentUuid);
+    const parentId = await upsertTask(parentUuid, parentExists && subs.length ? { ...parentRow, completed: false } : parentRow, !!heading);
     let subOrder = 0;
     for (const item of subs) {
       subOrder++;
       await upsertTask(item.uuid, { description: clean(item.name), sort_order: subOrder, parent_task_id: parentId, ...itemFields(item) }, true);
+    }
+    if (parentExists && allDone) {
+      await supabaseAdmin.from('job_tasks').update({ completed: true, completed_at: lastDone, completed_by: null }).eq('id', parentId).eq('completed', false);
     }
   }
 }
