@@ -50,16 +50,20 @@
           <option value="pending">Pending only</option>
           <option value="needs_approval">Needs approval</option>
           <option value="received">Received only</option>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
         </select>
       </div>
       <div id="po-full-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=87"></script>
+  <script src="/js/supabase-client.js?v=88"></script>
+  <script src="/js/email-compose.js?v=5"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allPos = [];
+    let myRole = 'staff';
 
     async function loadAllPOs() {
       const listEl = document.getElementById('po-full-list');
@@ -69,6 +73,7 @@
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       allPos = data || [];
+      myRole = await getMyRole();
       renderStats();
       renderList();
     }
@@ -105,6 +110,8 @@
       let filtered = allPos;
       if (filter === 'pending') filtered = filtered.filter(po => !po.received);
       if (filter === 'received') filtered = filtered.filter(po => po.received);
+      if (filter === 'open') filtered = filtered.filter(po => !po.closed_at);
+      if (filter === 'closed') filtered = filtered.filter(po => po.closed_at);
       if (filter === 'needs_approval') filtered = filtered.filter(po => !po.received && (po.purchase_order_line_items || []).some(li => !li.received));
       if (q) {
         filtered = filtered.filter(po =>
@@ -122,6 +129,7 @@
             <div>
               <strong>${po.po_number || 'PO'}</strong> - ${po.suppliers?.name || po.supplier_name || 'Unknown supplier'}
               <span class="badge draft" style="margin-left:6px;">${destinationLabel(po)}</span>
+              ${renderPoBadges(po)}
             </div>
             <div>
               <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
@@ -130,8 +138,11 @@
           </div>
           <p class="subtitle" style="margin:6px 0;">${po.description || ''}</p>
           ${renderPoLineItemsReceivable(po, true)}
-          ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice for this PO</button>` : ''}
-          <button type="button" class="secondary view-log-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">View log</button>
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+            ${renderPoControls(po, myRole)}
+            ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">Upload invoice for this PO</button>` : ''}
+            <button type="button" class="secondary view-log-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">View log</button>
+          </div>
           <div id="log-${po.id}" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);"></div>
         </div>`).join('');
 
@@ -149,6 +160,7 @@
         btn.addEventListener('click', () => uploadInvoiceForPo(filtered.find(po => po.id === btn.dataset.poId)));
       });
 
+      wirePoControls(listEl, filtered, loadAllPOs);
       wireReceiveLineItemButtons(
         listEl,
         filtered,
@@ -186,6 +198,8 @@
             <input id="np-job-search" placeholder="Search for the job..." autocomplete="off" />
             <div id="np-job-results"></div>
             <div id="np-job-selected" class="subtitle" style="margin-top:4px;"></div>
+            <label>Where from</label>
+            <select id="np-source">${poSourceOptionsHtml(vehicles || [])}</select>
           </div>
           <div id="np-vehicle-section" style="display:none; margin-top:8px;">
             <select id="np-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}">${v.vehicle_name || v.rego}</option>`).join('')}</select>
@@ -261,6 +275,20 @@
         const destType = overlay.querySelector('#np-dest-type').value;
         if (destType === 'job' && !selectedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
         const vehicleId = destType === 'vehicle' ? overlay.querySelector('#np-vehicle-select').value : null;
+        const source = overlay.querySelector('#np-source').value;
+        if (destType === 'job' && source !== 'supplier') {
+          // a stock PO: pick the items and counts on the next panel
+          const srcVehicleId = source.startsWith('vehicle:') ? source.slice(8) : null;
+          const v = (vehicles || []).find(x => x.id === srcVehicleId);
+          const { data: centres } = await supabaseClient.from('cost_centres').select('id, name').eq('project_id', selectedJob.id).order('sort_order');
+          overlay.remove();
+          openStockPullPanel({
+            projectId: selectedJob.id, jobLabel: projectRef(selectedJob), centres: centres || [],
+            source: srcVehicleId ? 'vehicle' : 'warehouse', vehicleId: srcVehicleId, vehicleLabel: v ? (v.vehicle_name || v.rego) : null,
+            onDone: loadAllPOs,
+          });
+          return;
+        }
 
         try {
           const { data: { user } } = await supabaseClient.auth.getUser();
@@ -271,7 +299,7 @@
             vehicle_id: destType === 'vehicle' ? vehicleId : null,
             supplier_id: supplierId, supplier_name: supplierName,
             po_number: await drawNextPoNumber(),
-            po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+            po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
             description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? 'PO for vehicle' : 'Stock purchase order',
           }).select('id, po_number').single();
           if (poErr) throw poErr;
