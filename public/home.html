@@ -125,7 +125,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=93"></script>
+  <script src="/js/supabase-client.js?v=94"></script>
   <script src="/js/feed.js?v=9"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/circuit-background.js?v=17"></script>
@@ -629,22 +629,22 @@
 
         const { data: credentials } = await supabaseClient
           .from('company_credentials')
-          .select('name, expiry_date')
+          .select('name, expiry_date, notes')
           .not('expiry_date', 'is', null)
           .lte('expiry_date', in30Str);
         (credentials || []).forEach(c => {
           const isExpired = c.expiry_date < todayStr;
-          items.push({ group: 'licences', label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${escapeHtml(c.name)} (${new Date(c.expiry_date).toLocaleDateString('en-AU')})`, link: '/team.html' });
+          items.push({ group: 'licences', label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${escapeHtml(c.name)} (${new Date(c.expiry_date).toLocaleDateString('en-AU')})${c.notes ? `. Note: ${escapeHtml(c.notes)}` : ''}`, link: '/team.html' });
         });
 
         const [{ data: expiringLicences }, { data: staffForLicences }] = await Promise.all([
-          supabaseClient.from('profile_licences').select('profile_id, licence_name, expiry_date').not('expiry_date', 'is', null).lte('expiry_date', in30Str),
+          supabaseClient.from('profile_licences').select('profile_id, licence_name, expiry_date, notes').not('expiry_date', 'is', null).lte('expiry_date', in30Str),
           supabaseClient.from('profiles').select('id, full_name'),
         ]);
         (expiringLicences || []).forEach(l => {
           const isExpired = l.expiry_date < todayStr;
           const who = (staffForLicences || []).find(s => s.id === l.profile_id)?.full_name || 'a staff member';
-          items.push({ group: 'licences', label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${escapeHtml(who)}'s ${escapeHtml(l.licence_name)} (${new Date(l.expiry_date).toLocaleDateString('en-AU')})`, link: '/team.html' });
+          items.push({ group: 'licences', label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${escapeHtml(who)}'s ${escapeHtml(l.licence_name)} (${new Date(l.expiry_date).toLocaleDateString('en-AU')})${l.notes ? `. Note: ${escapeHtml(l.notes)}` : ''}`, link: '/team.html' });
         });
       }
 

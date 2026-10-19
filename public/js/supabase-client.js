@@ -181,6 +181,35 @@ function expiryBadge(dateStr) {
   return dateLabel;
 }
 
+// The note under a licence / insurance ("Paid renewal, waiting on card") and, for an
+// employee licence, the open "Ask to update" request. names: { profileId: full_name }.
+function licenceNoteHtml(rec, names) {
+  const who = (id) => (id && names && names[id]) ? ` by ${escapeHtml(names[id])}` : '';
+  const day = (ts) => new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'Australia/Sydney' });
+  let out = '';
+  if (rec.notes) out += `<span class="subtitle" style="display:block; font-size:12px; white-space:pre-wrap;">Note: ${escapeHtml(rec.notes)}${rec.notes_updated_at ? ` <span style="opacity:0.7;">(${day(rec.notes_updated_at)}${who(rec.notes_updated_by)})</span>` : ''}</span>`;
+  if (rec.update_requested_at) out += `<span style="display:block; font-size:12px; color:var(--accent); font-weight:600;">Update asked ${day(rec.update_requested_at)}${who(rec.update_requested_by)}</span>`;
+  return out;
+}
+
+// Saves a person's licence rows from an edit form: rows with an id are updated in place (so
+// notes, update requests and anything not in the form stay), new rows are added, and licences
+// no longer in the form are removed. oldIds: the ids loaded into the form.
+async function saveLicenceRows(oldIds, rows) {
+  for (const { id, ...fields } of rows) {
+    const { error } = id
+      ? await supabaseClient.from('profile_licences').update(fields).eq('id', id)
+      : await supabaseClient.from('profile_licences').insert(fields);
+    if (error) throw error;
+  }
+  const kept = new Set(rows.map(r => r.id).filter(Boolean));
+  const gone = (oldIds || []).filter(id => !kept.has(id));
+  if (gone.length) {
+    const { error } = await supabaseClient.from('profile_licences').delete().in('id', gone);
+    if (error) throw error;
+  }
+}
+
 async function runCredentialExtraction(file) {
   const base64 = await fileToBase64(file);
   const { data: { session } } = await supabaseClient.auth.getSession();
@@ -2022,7 +2051,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=9';
+  s.src = '/js/notifications.js?v=10';
   document.head.appendChild(s);
 }
 
