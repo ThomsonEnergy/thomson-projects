@@ -19,6 +19,7 @@
     padding:10px 0; border-bottom:1px solid var(--border);
   }
   .day-item:last-child { border-bottom:none; }
+  .day-item > div:first-child { flex:1 1 0; min-width:0; }
   .day-item-actions { display:flex; gap:6px; flex-shrink:0; }
   .day-item .task-error { flex-basis:100%; margin-top:0; }
   @media (max-width: 700px) {
@@ -508,7 +509,7 @@
       resultsEl.innerHTML = `
         ${label ? `<p class="subtitle" style="margin:6px 0 2px; font-size:12px;">${label}</p>` : ''}
         <div style="border:1px solid var(--border); border-radius:8px; ${label ? '' : 'margin-top:6px;'}">
-          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${escapeHtml(projectRef(p))}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))} <span class="subtitle">${escapeHtml(p.client_name || '')}</span></div>`).join('')}
         </div>`;
       resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
         row.addEventListener('click', () => {
@@ -554,6 +555,9 @@
       clearTimeout(clockJobSearchTimeout);
       const q = e.target.value.trim();
       selectedClockJobId = null;
+      selectedClockCostCentres = [];
+      ccChipsSeq++;
+      document.getElementById('clock-cost-centres').style.display = 'none';
       document.getElementById('clock-job-selected').textContent = '';
       document.getElementById('clock-category-row').style.display = 'block';
       if (q.length === 0) { showRecentJobSuggestions(); return; }
@@ -564,7 +568,9 @@
       }, 250);
     });
 
+    let ccChipsSeq = 0; // drops a slow stage list for a job that is no longer picked
     async function loadCostCentreChips(projectId) {
+      const seq = ++ccChipsSeq;
       selectedClockCostCentres = [];
       const wrap = document.getElementById('clock-cost-centres');
       const chipsEl = document.getElementById('clock-cc-chips');
@@ -574,6 +580,7 @@
 
       // Stages plus any variation that still has work to do (see loadClockableCostCentres).
       const centres = await loadClockableCostCentres(projectId);
+      if (seq !== ccChipsSeq) return;
       if (!centres.length) { wrap.style.display = 'none'; return; }
       if (centres.length === 1) selectedClockCostCentres = [centres[0].id];
 
@@ -653,7 +660,9 @@
         time_category: projectId ? 'job' : document.getElementById('clock-category').value,
         clock_in: roundToQuarterHour(new Date()).toISOString(),
       };
-      if (selectedClockCostCentres.length === 1) {
+      if (!projectId) {
+        // office / training time never carries a job stage
+      } else if (selectedClockCostCentres.length === 1) {
         entry.cost_centre_id = selectedClockCostCentres[0];
       } else if (selectedClockCostCentres.length > 1) {
         entry.selected_cost_centre_ids = selectedClockCostCentres;

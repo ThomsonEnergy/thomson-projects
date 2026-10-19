@@ -456,6 +456,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 @media (pointer: coarse) {
   .task-actions button { min-height: 44px; }
 }
+@media (max-width: 700px) {
+  .task-actions { flex-basis: 100%; }
+  .task-actions button { flex: 1; justify-content: center; }
+}
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
