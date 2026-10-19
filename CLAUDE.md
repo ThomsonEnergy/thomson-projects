@@ -10,6 +10,11 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
 - Short and concise.
 - Numbers over names everywhere: J, Q, PO, SI numbers, migration numbers.
 - State the plan and wait for "yes" / "let's build" before building.
+- **Plan mode: name the best model.** Every plan (plan mode, or any "here is the plan, yes?" reply) ends with one line: `Best model: <name>, because <one reason>`, and whether to switch with `/model` before saying yes. Pick by the job, not the question's length:
+  - Fable 5.1: anything that touches money, stock, RLS or migrations plus code in one go; whole-site review passes; a bug nobody has found the cause of; new agents. Slowest and dearest, worth it when a mistake hits live jobs.
+  - Opus 5.5: the default for building features, agent changes, fixes with a known cause, and most plans.
+  - Sonnet 5.5: small well-specified changes (one-file fixes, copy, `?v=` bumps), docs edits, reading logs and deploy status.
+  - Haiku 5.5: lookups and yes/no checks only, never code that ships.
 - After that "yes", carry the whole plan through without asking again: build, run production migrations, push, open the PR and merge to `main`. Only stop and ask the owner if there is a real question or a change of direction (new scope, a different migration, deleting data not in the plan, or a failure that changes the plan).
 - One consolidated delivery, not lots of small ones.
 - Talk plainly, one step at a time: say exactly what to click and what they should see, especially in dashboards (Netlify, Supabase, Twilio, Apple, Google). No "see line 6 of seed.sql": test-only staging logins can be stated in chat directly. Real keys and passwords never go in chat.
