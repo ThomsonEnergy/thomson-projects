@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 19 Oct 2026
+- Planned: + From Stock or prebuild on fixed-price variations, priced like the quote. Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 12)
 - LIVE: variations are their own document in the proposal look (cover "Variation No. N to Quote Q / J", references and links the original quote), emailed with their PDF from the Variations tab through the app; Details "Email quote to client" now sends through the app with a fresh quote PDF instead of opening Gmail. Migration 20261028000000 applied to production. (`docs/PROJECT_SPEC.md` A3 Variations)
 - LIVE: prices off the supplier's PO by default (toggle per PO), every PO gets a number (blank one fixed as PO2001, it came from the supplier page's create-from-bill), and + Add to Stock on PO lines not in Stock. Migration 20261027000000 applied to production. (`docs/PROJECT_SPEC.md` A10)
 - PO notes LIVE: "Notes for supplier" (on the PO PDF) and "Internal notes" (staff only) on every PO, editable any time. Migration 20261026000000 applied to production. (`docs/PROJECT_SPEC.md` A10)
