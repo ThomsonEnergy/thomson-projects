@@ -395,7 +395,8 @@
       overlay.innerHTML = `<div class="card" style="max-width:480px; width:100%;"><h2 style="margin-top:0;">Read again</h2><p class="subtitle">Checking the pages...</p></div>`;
       document.body.appendChild(overlay);
       const card = overlay.querySelector('.card');
-      const { count: failedCount } = await supabaseClient.from('knowledge_pages').select('id', { count: 'exact', head: true }).eq('entry_id', entry.id).eq('read_as', 'failed');
+      // Failed pages, plus pages where the picture read failed and only the thin text layer was kept.
+      const { count: failedCount } = await supabaseClient.from('knowledge_pages').select('id', { count: 'exact', head: true }).eq('entry_id', entry.id).or('read_as.eq.failed,error.not.is.null');
       const { count: pageCount } = await supabaseClient.from('knowledge_pages').select('id', { count: 'exact', head: true }).eq('entry_id', entry.id);
       card.innerHTML = `
         <h2 style="margin-top:0;">Read again</h2>
