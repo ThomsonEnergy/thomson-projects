@@ -79,6 +79,9 @@ Manual steps only a person can do (the code is live):
 3. Assistant (Sparky) upgrades and the agents in `docs/AI_AGENTS_PLAN.md`.
 4. Supplier bills to Xero as Bills, and Airwallex supplier payouts (moves real money, test first).
 
+**Tier 5: security sweep (last, once major additions stop)**
+1. Full security sweep and hardening: re-enter password on admin pages, idle lock, two-factor for Admin and Finance, leaked password protection, RLS and function checks, key rotation, 2FA on outside accounts. Detail: `docs/IDEAS_BACKLOG.md` item 15.
+
 ---
 
 ## PART A: Built and live
