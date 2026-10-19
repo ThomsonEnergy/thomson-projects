@@ -386,6 +386,6 @@ Live: see `docs/PROJECT_SPEC.md` A10 (migration 20261025000000).
 
 Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261028000000).
 
-## 12. Stock and prebuilds on fixed-price variations (planned 19 Oct 2026, waiting on owner's yes)
+## 12. Stock and prebuilds on fixed-price variations (built 19 Oct 2026)
 
-"+ From Stock or prebuild" in the fixed-price variation editor (same picker as do-and-charge). A material adds "Name x qty" priced at cost x (1 + default markup). A prebuild adds a labour line and a materials line from its components (labour at its labour price, materials marked up). Lines stay editable. Price only: nothing comes out of Stock until it is ordered or pulled. Code only.
+Live: see `docs/PROJECT_SPEC.md` A3 Variations. Code only.
