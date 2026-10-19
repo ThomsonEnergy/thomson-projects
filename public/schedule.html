@@ -505,7 +505,7 @@
           const cls = reconciled ? 'reconciled' : ((a.block_type === 'site_visit' || a.block_type === 'site_inspection') ? 'site-visit' : '');
           entriesHtml += `
             <div class="mobile-entry ${cls}" data-id="${a.id}">
-              <span>${label}${reconciled ? ' &#10003;' : ''}</span>
+              <span>${escapeHtml(label)}${reconciled ? ' &#10003;' : ''}</span>
               <span class="me-time">${fmtTime12(displayStart)} - ${fmtTime12(displayEnd)}</span>
             </div>`;
         });
@@ -525,31 +525,74 @@
         entry.addEventListener('click', () => {
           const assignment = liveAssignments.find(a => a.id === entry.dataset.id);
           if (!assignment) return;
-          const isReconciled = !!reconciledById[assignment.id];
-          if (isReconciled) {
-            if (!canEditSchedule()) return;
-            if (confirm('This reflects real clocked hours the employee was paid for. Remove it anyway?')) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
-            }
-            return;
-          }
-          if (assignment.project_id) {
-            if (canEditSchedule()) {
-              if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this block instead)`)) {
-                window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
-              } else if (confirm('Remove this schedule block?')) {
-                supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
-              }
-            } else if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now?`)) {
-              window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
-            }
-          } else if (canEditSchedule()) {
-            const categoryLabel = CATEGORY_LABELS[assignment.block_type] || 'this block';
-            if (confirm(`Remove this ${categoryLabel} block?`)) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
-            }
-          }
+          openBookingActions(assignment, reconciledById[assignment.id] || null);
         });
+      });
+    }
+
+    // Phone day list: one card with the actions for a booking, instead of a
+    // chain of confirm() popups where Cancel meant delete.
+    function openBookingActions(assignment, reconciled) {
+      const title = assignment.site_inspection_id
+        ? 'Inspection' + (assignment.projects ? ': ' + projectRef(assignment.projects) : '')
+        : assignment.projects
+          ? projectRef(assignment.projects)
+          : (CATEGORY_LABELS[assignment.block_type] || 'Admin') + (assignment.note ? ' - ' + assignment.note : '');
+      const start = reconciled ? reconciled.start : assignment.start_time.slice(0, 5);
+      const end = reconciled ? reconciled.end : assignment.end_time.slice(0, 5);
+      const fullWidth = 'width:100%; justify-content:center;';
+      const openJob = !!assignment.project_id;
+      const openInspection = !!assignment.site_inspection_id;
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:420px; width:100%;">
+          <h2 style="margin-top:0;">${escapeHtml(title)}</h2>
+          <p class="subtitle">${fmtTime12(start)} - ${fmtTime12(end)}</p>
+          ${reconciled ? '<p class="subtitle">Confirmed clocked hours the employee was paid for.</p>' : ''}
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:14px;">
+            ${assignment.project_id && !reconciled ? `<button type="button" id="ba-clockin" style="${fullWidth}">Clock in</button>` : ''}
+            ${openJob ? `<button type="button" class="secondary" id="ba-open" style="${fullWidth}">Open job</button>` : ''}
+            ${openInspection ? `<button type="button" class="secondary" id="${openJob ? 'ba-open-inspection' : 'ba-open'}" style="${fullWidth}">Open inspection</button>` : ''}
+            ${canEditSchedule() ? `<button type="button" class="secondary" id="ba-remove" style="${fullWidth} color:var(--red);">${reconciled ? 'Remove these paid hours' : 'Remove booking'}</button>` : ''}
+            <button type="button" class="secondary" id="ba-close" style="${fullWidth}">Close</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      function onKey(e) { if (e.key === 'Escape') close(); }
+      function close() {
+        document.removeEventListener('keydown', onKey);
+        overlay.remove();
+      }
+      document.addEventListener('keydown', onKey);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+      overlay.querySelector('#ba-close').addEventListener('click', close);
+
+      const clockBtn = overlay.querySelector('#ba-clockin');
+      if (clockBtn) clockBtn.addEventListener('click', () => { window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`; });
+      const goJob = () => { window.location.href = `/project.html?id=${assignment.project_id}`; };
+      const goInspection = () => { window.location.href = `/site-inspection.html?id=${assignment.site_inspection_id}`; };
+      const openBtn = overlay.querySelector('#ba-open');
+      if (openBtn) openBtn.addEventListener('click', openJob ? goJob : goInspection);
+      const inspBtn = overlay.querySelector('#ba-open-inspection');
+      if (inspBtn) inspBtn.addEventListener('click', goInspection);
+
+      const removeBtn = overlay.querySelector('#ba-remove');
+      if (removeBtn) removeBtn.addEventListener('click', async () => {
+        const label = removeBtn.textContent;
+        removeBtn.disabled = true;
+        removeBtn.textContent = 'Removing...';
+        let ok = false;
+        try {
+          ok = await deleteBooking(assignment, timelineBookingLabel(assignment));
+        } finally {
+          removeBtn.disabled = false;
+          removeBtn.textContent = label;
+        }
+        if (!ok) return; // deleteBooking already showed the error, keep the card open
+        close();
+        await loadDay();
       });
     }
 
@@ -558,7 +601,7 @@
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:420px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Add to ${staffName}'s day</h2>
+          <h2>Add to ${escapeHtml(staffName)}'s day</h2>
           <label style="margin-top:0">Job (leave blank for training/office time)</label>
           <input id="mobile-add-job-search" placeholder="Job number, name, client..." autocomplete="off" />
           <div id="mobile-add-job-results"></div>
@@ -795,7 +838,7 @@
       document.querySelectorAll('.undo-toast').forEach(t => t.remove());
       const toast = document.createElement('div');
       toast.className = 'undo-toast';
-      toast.innerHTML = `<span>${message}</span><button type="button">Undo</button>`;
+      toast.innerHTML = `<span>${escapeHtml(message)}</span><button type="button">Undo</button>`;
       document.body.appendChild(toast);
       const timer = setTimeout(() => toast.remove(), 9000);
       toast.querySelector('button').addEventListener('click', async () => {
@@ -821,6 +864,7 @@
 
     function timelineBookingLabel(assignment) {
       if (assignment.projects) return projectRef(assignment.projects);
+      if (assignment.site_inspection_id || assignment.block_type === 'site_inspection') return 'Site inspection';
       return CATEGORY_LABELS[assignment.block_type] || 'Booking';
     }
 
@@ -1011,7 +1055,7 @@
               return; // locked - these are confirmed, paid hours, not editable by Staff
             }
             if (confirm('This reflects real clocked hours the employee was paid for. Remove it anyway?')) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+              deleteBooking(assignment, timelineBookingLabel(assignment)).then(() => loadDay());
             }
             return;
           }
@@ -1021,7 +1065,7 @@
               if (confirm('Open this site inspection? (Cancel to remove this schedule block instead)')) {
                 window.location.href = `/site-inspection.html?id=${assignment.site_inspection_id}`;
               } else if (confirm('Remove this schedule block? The inspection itself stays, just unscheduled.')) {
-                supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+                deleteBooking(assignment, timelineBookingLabel(assignment)).then(() => loadDay());
               }
             } else {
               window.location.href = `/site-inspection.html?id=${assignment.site_inspection_id}`;
@@ -1035,7 +1079,7 @@
               if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this schedule block instead)`)) {
                 window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
               } else if (confirm('Remove this schedule block?')) {
-                supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+                deleteBooking(assignment, timelineBookingLabel(assignment)).then(() => loadDay());
               }
             } else if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now?`)) {
               window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
@@ -1043,7 +1087,7 @@
           } else if (canEditSchedule()) {
             const categoryLabel = CATEGORY_LABELS[assignment.block_type] || 'this block';
             if (confirm(`Remove this ${categoryLabel} block?`)) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+              deleteBooking(assignment, timelineBookingLabel(assignment)).then(() => loadDay());
             }
           }
         });

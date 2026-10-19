@@ -151,7 +151,7 @@
               </tr>`).join('')}
           </tbody>
         </table>`;
-      el.querySelectorAll('.asset-edit').forEach(b => b.addEventListener('click', () => openAssetPanel({ asset: allAssets.find(a => a.id === b.dataset.id), onSaved: loadAll })));
+      el.querySelectorAll('.asset-edit').forEach(b => b.addEventListener('click', (e) => openAssetPanel({ asset: allAssets.find(a => a.id === b.dataset.id), trigger: e.currentTarget, onSaved: loadAll })));
     }
 
     // ---------- Reminders due ----------
@@ -318,7 +318,7 @@
       document.querySelectorAll('.asset-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     }
     document.querySelectorAll('.asset-tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
-    document.getElementById('add-asset-btn').addEventListener('click', () => openAssetPanel({ onSaved: loadAll }));
+    document.getElementById('add-asset-btn').addEventListener('click', (e) => openAssetPanel({ trigger: e.currentTarget, onSaved: loadAll }));
     document.getElementById('asset-search').addEventListener('input', renderAssetList);
     document.getElementById('asset-type-filter').addEventListener('change', renderAssetList);
     document.getElementById('asset-status-filter').addEventListener('change', renderAssetList);
