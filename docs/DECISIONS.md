@@ -3,7 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 19 Oct 2026
-- Whole-app user-friendliness review done (read only): 171 suggestions in 10 themes, top ten starts with the clock in / clock out buttons, iPhone zoom on 14px inputs, double-tap saves, hidden CCEW card and UTC date defaults. Waiting on owner's pick. (`docs/UX_REVIEW.md`, `docs/IDEAS_BACKLOG.md` item 16)
+- Whole-app user-friendliness review done (read only): 168 suggestions in 10 themes, re-checked after today's bug review fixes landed (3 were already fixed by them). Top ten starts with iPhone zoom on 14px inputs, the unpinned supabase-js CDN load on every page, My Day showing Clock in before it knows, and site address / client phone missing from the job page. Waiting on owner's pick. (`docs/UX_REVIEW.md`, `docs/IDEAS_BACKLOG.md` item 17)
 - ServiceM8 import now brings open quotes too (last 6 months by default): Quote sent or Draft quote by SM8's sent flag, Q numbers, line items, files, proposal PDFs to Documents > ServiceM8 proposal. Code only, no migration. (`docs/PROJECT_SPEC.md` A27)
 - Netlify credits ran out about 3pm, so PRs #85 to #104 never deployed (database migrations did go live, the old code still worked with them). Owner upgraded to 5,000 credits; this merge triggers the catch-up build. (`docs/EXTERNAL_ACCOUNTS.md` Netlify)
 - Fixed: Greentech's account number was saved as Haymans' (246153). Now Greentech 248045, Haymans 246153, so MMEM bills match by account number. (`docs/BUSINESS_FACTS.md` Suppliers)

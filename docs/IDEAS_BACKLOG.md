@@ -446,28 +446,28 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 
 ## 17. User-friendliness upgrades (whole-app review, 19 Oct 2026)
 
-**Status:** suggestions only, waiting on the owner's pick. Full list with file and line references in `docs/UX_REVIEW.md` (171 items in 10 themes, 128 of them small effort). Quote item numbers to pick, for example "UX 1, 2 and 6".
+**Status:** suggestions only, waiting on the owner's pick. Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
 
 **Do first (top ten, best first):**
-1. Clock out and clock in modals: disable the button and show the overlay first
+62. Inputs are 14px so iPhones zoom on every tap
+93. Every page blocks on an unpinned CDN copy of supabase-js
 2. My Day shows Clock in before it knows you are clocked in
-3. Inputs are 14px so iPhones zoom on every tap
-4. Save buttons stay live while saving, double taps make duplicates
-5. CCEW and Installed equipment cards are hidden on the day the job is finished
-6. Invoice and job dates default to the UTC day, so morning work is dated yesterday
-7. Every page blocks on an unpinned CDN copy of supabase-js
-8. Job tabs: not in the URL, office tabs first, strip scrolls off the phone
-9. Site address and client phone never shown on the job page
-10. Buttons shrunk below 40px across the app
+31. Site address and client phone never shown on the job page
+33. Word, Excel and knowledge files do not open on iPhone (window.open after await)
+19. CCEW and Installed equipment cards are hidden on the day the job is finished
+49. Save buttons stay live while saving, double taps make duplicates
+35. Site photo upload: no count, a failure loses the batch
+123. Invoices list has no unpaid filter or search
+5. Field staff cannot report an incident from site
 
 **Themes (item numbers in docs/UX_REVIEW.md):**
-- Clock in, My Day, schedule, timesheets and tasks: items 1 to 19
-- Finishing a job on site: CCEW and installed equipment: items 20 to 31
-- Job page: items 32 to 50
-- Feedback and saving: items 51 to 63
-- Phone layout, tap targets, forms and keyboards: items 64 to 84
-- Navigation and findability: items 85 to 94
-- Speed: items 95 to 111
-- Invoicing, Xero and payroll: items 112 to 122
-- Office and public pages: quotes, leads, clients, POs, stock, price lists, STCs, assets and licences: items 123 to 149
-- Login, policy update, Chat, Inbox, Settings and HR: items 150 to 171
+- Clock in, My Day, schedule, timesheets and tasks: items 1 to 18
+- Finishing a job on site: CCEW and installed equipment: items 19 to 30
+- Job page: items 31 to 48
+- Feedback and saving: items 49 to 61
+- Phone layout, tap targets, forms and keyboards: items 62 to 82
+- Navigation and findability: items 83 to 92
+- Speed: items 93 to 109
+- Invoicing, Xero and payroll: items 110 to 119
+- Office and public pages: quotes, leads, clients, POs, stock, price lists, STCs, assets and licences: items 120 to 146
+- Login, policy update, Chat, Inbox, Settings and HR: items 147 to 168
