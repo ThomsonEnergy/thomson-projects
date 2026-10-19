@@ -404,6 +404,7 @@ Grab gear from the Warehouse or a vehicle for a job, and fix the stock count at 
 
 ### Undo received
 - Every received line gets **Undo received**: puts back what receiving did (off the job's costs, or out of the Warehouse or vehicle count).
+- Undo received has **Back ordered instead** (with an optional ETA), for a line ticked received by mistake: one tap undoes it and marks it back ordered.
 - If the PO is closed or a bill on it is approved for payment, a note saying why is required; the note goes on the PO's activity log. Approval stays as it was.
 
 ### Open and closed
