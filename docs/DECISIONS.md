@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 19 Oct 2026
+- PO notes LIVE: "Notes for supplier" (on the PO PDF) and "Internal notes" (staff only) on every PO, editable any time. Migration 20261026000000 applied to production. (`docs/PROJECT_SPEC.md` A10)
 - Purchase order upgrades LIVE: stock PO on a job (pull from Warehouse or a vehicle, fix the count on the spot), job POs receive only to their own job, Move lines (all or part) to another job / Warehouse / vehicle, Undo received (or switch to back ordered; note once approved), Open / Closed POs (closed = nothing added, approved for payment; Admin/Finance reopen with a note), Email PO as a PDF (`po.html`). Staff can now receive lines (server steps). Migration 20261025000000 applied to production. (`docs/PROJECT_SPEC.md` A10)
 - Job tasks: a task can't be ticked until all its subtasks are (no more ticking every subtask at once). J7002: 6 subtasks ticked by accident put back to not done. LIVE: migration 20261025000000 on production. (`docs/PROJECT_SPEC.md` A13)
 - Job tasks: subtasks can be moved to another task or made their own task; a task can be put under another. ServiceM8 re-runs no longer move tasks someone moved. (`docs/PROJECT_SPEC.md` A13)
