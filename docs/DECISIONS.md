@@ -3,7 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 19 Oct 2026
-- Planned: email drafts in the owner's own tone (style guide learned from sent mail already in TEops, editable in Settings, re-learned monthly) and a drafting prompt that answers instead of recapping the sender. Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 19)
+- LIVE: Postie drafts in the mailbox owner's own voice. Settings > Email Agent (tab now open to everyone) > Writing style: "Learn from sent mail" reads the replies already in TEops, writes an editable guide and keeps up to 8 real replies as examples; refreshed every 30 days. Drafting prompt now answers instead of recapping the sender. Migration 20261103020000 applied to production. (`docs/PROJECT_SPEC.md` A18, `docs/IDEAS_BACKLOG.md` item 19)
 - Rule: every plan ends with a "Best model" line (Fable 5.1 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5) and whether to switch before saying yes. (`CLAUDE.md`, How the owner works)
 - ServiceM8 import: search box and nothing ticked by default, to import one job or quote at a time. (`docs/PROJECT_SPEC.md` A27)
 - Planned: Knowledge Base background reader. AS 3000's 43 failed OCR batches (about 172 pages) all hit Anthropic's copyright output filter, not a phone problem; server-side page rendering proven; plan is a page queue on the server, text layer first then one-page OCR with a notes fallback, per-page full text search for Sparky, re-read of AS 3000's failed pages plus AS 3008, 3012, 1768. Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 18)

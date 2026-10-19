@@ -489,7 +489,7 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 One migration (tables, indexes, RLS to authenticated for reads, server-only writes, search function with fixed search path). Cost: a few cents a page read as an image, well under $20 for all four standards.
 
 
-## 19. Email drafts in the owner's own tone, answers not recaps (planned 19 Oct 2026)
+## 19. Email drafts in the owner's own tone, answers not recaps (built 19 Oct 2026)
 
 Why: Postie's drafts sound generic and parrot the sender's email back before answering. The owner's sent mail is already in TEops (`emails` rows with `direction = 'outbound'`, 60 days of backfill, about 200 for jasper@ and 50 for sales@), so the agent can learn the tone without any new Gmail access.
 
@@ -498,4 +498,4 @@ Why: Postie's drafts sound generic and parrot the sender's email back before ans
 3. **Drafting prompt.** Never repeat or summarise what they wrote; first sentence is the answer; one line per question asked; nothing asked means say what happens next; three to six sentences unless more is truly needed. The style guide and paired examples go into the prompt. Square bracket gaps stay, one gap in the answer line, no hedge paragraph.
 4. **Later (needs draft edit tracking):** learn from edits. Keep the AI draft and what was actually sent, feed the differences into the next refresh.
 
-Waiting on owner's yes. Best model: Opus 5.5.
+Built 19 Oct 2026, migration 20261103020000: items 1 to 3 as above (Settings > Email Agent, tab now visible to everyone, auto replies card still pricing roles only). Item 4 (learn from edits) stays an idea. Detail in `docs/PROJECT_SPEC.md` A18.
