@@ -17,6 +17,16 @@ async function approveVariation(supabaseAdmin, entry, how) {
   const total = r2(labour + material);
   if (!(total > 0)) { const e = new Error('This variation has no price on it.'); e.statusCode = 400; throw e; }
 
+  // Claim it first: only one approval can move it to approved, so two at the same moment (client
+  // signs while staff mark it approved, or a double tap) can't add two stages. Bug review M4.
+  const fromStatuses = how.fromStatuses || ['sent'];
+  const { data: claimed, error: claimErr } = await supabaseAdmin.from('job_variation_entries')
+    .update({ approval_status: 'approved', approved_at: new Date().toISOString() })
+    .eq('id', entry.id).in('approval_status', fromStatuses).select('id');
+  if (claimErr) throw claimErr;
+  if (!claimed || !claimed.length) { const e = new Error('This variation is already approved or is no longer open.'); e.statusCode = 409; throw e; }
+  const putBack = () => supabaseAdmin.from('job_variation_entries').update({ approval_status: entry.approval_status, approved_at: null }).eq('id', entry.id).then(() => {}, () => {});
+
   const name2 = `Variation ${entry.variation_number || ''}: ${entry.description}`.replace(/\s+:/, ':').slice(0, 90);
   const { data: last } = await supabaseAdmin.from('cost_centres').select('sort_order').eq('project_id', entry.project_id).order('sort_order', { ascending: false }).limit(1);
   const nextSort = ((last || [])[0]?.sort_order ?? -1) + 1;
@@ -27,13 +37,13 @@ async function approveVariation(supabaseAdmin, entry, how) {
     estimated_labour_cost: labour, estimated_material_cost: material, markup_percent: 0, quoted_amount: total,
     variation_entry_id: entry.id,
   }).select('id').single();
-  if (ccErr) throw ccErr;
+  if (ccErr) { await putBack(); throw ccErr; }
 
   const { error: liErr } = await supabaseAdmin.from('cost_centre_line_items').insert(lines.map((l, i) => ({
     cost_centre_id: centre.id, description: l.description, item_type: l.item_type === 'labour' ? 'labour' : 'material',
     quantity: 1, unit_cost: Number(l.amount) || 0, sort_order: i,
   })));
-  if (liErr) throw liErr;
+  if (liErr) { await supabaseAdmin.from('cost_centres').delete().eq('id', centre.id); await putBack(); throw liErr; }
 
   const online = how.method === 'online';
   const who = online ? how.signedName : (entry.client_name || 'the client');
@@ -45,7 +55,7 @@ async function approveVariation(supabaseAdmin, entry, how) {
     approval_email_thread_id: how.emailThreadId || null,
     signed_by_name: online ? how.signedName : null, signature_data_url: online ? how.signature : null,
     declined_at: null, declined_by: null, decline_reason: null, expired: false,
-  }).eq('id', entry.id).in('approval_status', how.fromStatuses || ['sent']);
+  }).eq('id', entry.id).eq('approval_status', 'approved');
   if (upErr) throw upErr;
 
   // The signed record, alongside the job's other variations.

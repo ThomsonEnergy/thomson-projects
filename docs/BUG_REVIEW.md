@@ -25,6 +25,8 @@ Read-only review of the whole app (job page, quotes and sales, invoices and Xero
 
 ## M. Money and data wrong
 
+**Fixed 19 Oct 2026 (migrations 20261101000000 and 20261101010000):** M1 to M19, and F8. Notes: M5 a never-sent (draft) quote can still be accepted from its link on purpose (a link can be shared by hand without emailing it); M12 a fully credited invoice is no longer marked paid (paid needs money received in Xero); M16 the quote's payment schedule now shows inc GST (milestones and deposit % still both come from the quote, unchanged).
+
 | # | Problem | Where |
 |---|---|---|
 | M1 | Xero timesheet push loses hours at the pay-week edge (UTC range) and still marks them pushed: those hours are never paid **(checked)** | `push-timesheets-to-xero.js` |

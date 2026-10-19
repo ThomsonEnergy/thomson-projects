@@ -67,7 +67,7 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
   const { data: client } = job.client_id
     ? await supabaseAdmin.from('clients').select('payment_terms').eq('id', job.client_id).maybeSingle()
     : { data: null };
-  const dueDate = computeDueDate(client?.payment_terms || 'cod', invoiceDate);
+  const dueDate = computeDueDate(client?.payment_terms || 'cod', new Date(invoiceDate).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }));
 
   const { data: insertedInvoice, error: insErr } = await supabaseAdmin
     .from('invoices')
@@ -175,12 +175,22 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
       sales_contact_id: quote.sales_contact_id,
       accounts_contact_id: quote.accounts_contact_id,
       source_quote_id: quote.id,
+      // the client's signature and how it was approved stay with the job's own quote PDF
+      accepted_signed_by_name: quote.accepted_signed_by_name,
+      accepted_signature_data_url: quote.accepted_signature_data_url,
+      approved_at: new Date().toISOString(),
+      approval_note: approvalNote,
       pipeline_stage: 'quote_approved',
       status: 'in_progress',
     })
     .select()
     .single();
-  if (jobErr) throw jobErr;
+  if (jobErr) {
+    // Two approvals at the same moment (double tap, client and staff together): the unique index on
+    // source_quote_id (migration 20261101000000) lets only one job in. Hand back that one.
+    if (jobErr.code === '23505') return createJobFromQuote(supabaseAdmin, { quoteId, approvedBy, approvalNote });
+    throw jobErr;
+  }
 
   const stages = (quote.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
   const { data: newStages, error: stagesErr } = await supabaseAdmin
@@ -215,6 +225,10 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
         unit_cost: li.unit_cost,
         rate_tier_id: li.rate_tier_id,
         sort_order: li.sort_order,
+        // prebuild grouping, so the job's quote shows the client line, not every component
+        prebuild_group_id: li.prebuild_group_id,
+        prebuild_client_description: li.prebuild_client_description,
+        prebuild_base_quantity: li.prebuild_base_quantity,
       });
     });
     (s.cost_centre_photo_groups || []).forEach(pg => {
@@ -233,6 +247,13 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
   if (allPhotoGroups.length) {
     const { error: pgErr } = await supabaseAdmin.from('cost_centre_photo_groups').insert(allPhotoGroups);
     if (pgErr) throw pgErr;
+  }
+
+  // The agreed payment milestones go with the job too.
+  const { data: milestones } = await supabaseAdmin.from('payment_milestones').select('label, percent, sort_order').eq('project_id', quote.id);
+  if (milestones && milestones.length) {
+    const { error: msErr } = await supabaseAdmin.from('payment_milestones').insert(milestones.map(m => ({ ...m, project_id: job.id })));
+    if (msErr) throw msErr;
   }
 
   // Best-effort, doesn't block job creation if it fails - see

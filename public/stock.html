@@ -56,7 +56,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=92"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allMaterials = [];
@@ -171,6 +171,7 @@
     document.getElementById('stock-search').addEventListener('input', renderMaterials);
 
     function openMaterialPanel(material) {
+      const startWarehouseQty = Number(material ? (locationRows.find(r => r.material_id === material.id && r.location_type === 'warehouse')?.quantity || 0) : 0);
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
@@ -198,8 +199,8 @@
               <input id="mat-sell" type="number" step="0.01" value="${escapeHtml(material?.sell_price || 0)}" />
             </div>
             <div>
-              <label>Qty on hand</label>
-              <input id="mat-qty" type="number" step="1" value="${escapeHtml(material?.quantity_on_hand || 0)}" />
+              <label>Warehouse qty</label>
+              <input id="mat-qty" type="number" step="1" value="${escapeHtml(startWarehouseQty)}" />
             </div>
           </div>
           <label>Minimum quantity - flags for restocking below this</label>
@@ -223,6 +224,8 @@
         const name = overlay.querySelector('#mat-name').value.trim();
         if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
         const quantityValue = parseFloat(overlay.querySelector('#mat-qty').value) || 0;
+        // only the Warehouse row, and only when the person changed it (vehicles are counted separately)
+        const warehouseChanged = quantityValue !== startWarehouseQty;
         const fields = {
           name,
           category: overlay.querySelector('#mat-category').value.trim() || null,
@@ -235,12 +238,12 @@
         if (material) {
           const { error } = await supabaseClient.from('materials').update(fields).eq('id', material.id);
           if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-          await setWarehouseStock(material.id, quantityValue);
+          if (warehouseChanged) await setWarehouseStock(material.id, quantityValue);
           await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
         } else {
           const { data: newMat, error } = await supabaseClient.from('materials').insert(fields).select('id').single();
           if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-          await setWarehouseStock(newMat.id, quantityValue);
+          if (warehouseChanged) await setWarehouseStock(newMat.id, quantityValue);
           await logActivity('material', newMat.id, 'created', `Material "${name}" added`);
         }
         overlay.remove();

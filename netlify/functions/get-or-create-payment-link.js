@@ -13,9 +13,10 @@
 // ever gets created for a client who just pays by bank transfer and
 // never clicks the button.
 //
-// If a link already exists for this invoice (a second click, or the
-// client re-opening the page later), the existing one is returned as-is
-// rather than creating a duplicate.
+// If a link already exists for this invoice for the same amount (a second
+// click, or the client re-opening the page later), the existing one is
+// returned rather than creating a duplicate. If the amount due has changed
+// since (invoice edited, credit note), a new link for the new amount is made.
 
 const { getAdminClient } = require('./_shared/require-admin');
 const { airwallexRequest } = require('./_shared/airwallex-client');
@@ -35,7 +36,7 @@ exports.handler = async (event) => {
 
     const { data: invoice, error: invErr } = await supabaseAdmin
       .from('invoices')
-      .select('id, invoice_number, description, paid_at, airwallex_payment_link_url, cost_centres(name, projects(job_number))')
+      .select('id, invoice_number, description, paid_at, airwallex_payment_link_url, airwallex_link_amount, cost_centres(name, projects(job_number))')
       .eq('invoice_token', token)
       .maybeSingle();
     if (invErr || !invoice) {
@@ -45,13 +46,14 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'This invoice is already paid.' }) };
     }
 
-    // Already generated on an earlier click - just hand back the same one.
-    if (invoice.airwallex_payment_link_url) {
-      return { statusCode: 200, body: JSON.stringify({ ok: true, url: invoice.airwallex_payment_link_url }) };
-    }
-
     const { data: amount, error: balanceErr } = await supabaseAdmin.rpc('get_invoice_balance_due', { p_invoice_id: invoice.id });
     if (balanceErr) throw balanceErr;
+    const due = Math.round(Number(amount) * 100) / 100;
+
+    // Already generated on an earlier click for this same amount - hand back the same one.
+    if (invoice.airwallex_payment_link_url && Number(invoice.airwallex_link_amount) === due) {
+      return { statusCode: 200, body: JSON.stringify({ ok: true, url: invoice.airwallex_payment_link_url }) };
+    }
     if (Number(amount) <= 0) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Nothing to charge on this invoice.' }) };
     }
@@ -63,7 +65,7 @@ exports.handler = async (event) => {
     const linkResult = await airwallexRequest('pa/payment_links/create', {
       method: 'POST',
       body: {
-        amount: Math.round(Number(amount) * 100) / 100,
+        amount: due,
         currency: 'AUD',
         title,
         reusable: false,
@@ -77,6 +79,7 @@ exports.handler = async (event) => {
       .update({
         airwallex_payment_link_id: linkResult.id,
         airwallex_payment_link_url: linkResult.url,
+        airwallex_link_amount: due,
       })
       .eq('id', invoice.id);
 

@@ -36,6 +36,7 @@ exports.handler = async (event) => {
   }
   const { supabaseAdmin, user } = auth;
 
+  const undo = { supabaseAdmin: null, invoiceId: null, usageIds: [], stock: [], added: [] };
   try {
     const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId, variationEntryIds } = JSON.parse(event.body || '{}');
 
@@ -67,6 +68,25 @@ exports.handler = async (event) => {
       .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount) > 0);
     if (!claimRows.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'At least one cost centre needs a non-zero claim amount' }) };
+    }
+    // Server-side limits (the panel limits them too): no negative parts, and a quoted stage can't
+    // be claimed past what is left of it (a cent of rounding allowed). Bug review M9.
+    if (claimRows.some(c => c.labour_amount < 0 || c.material_amount < 0 || c.stc_amount < 0)) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Claim amounts can not be negative.' }) };
+    }
+    // Stock / prebuild items added on the invoice are extra on top, so only the typed claim is limited.
+    // Estimates and time-and-materials jobs bill actuals, which can run past the estimate: not limited.
+    const { data: jobForCap } = await supabaseAdmin.from('projects').select('proposal_template').eq('id', projectId).maybeSingle();
+    const capped = !['quick_estimate', 'time_and_materials', 'direct_job'].includes(jobForCap?.proposal_template);
+    for (const { c } of (capped ? pricedClaims : [])) {
+      const centre = (allCentres || []).find(cc => cc.id === c.costCentreId);
+      const quoted = Number(centre?.quoted_amount) || 0;
+      if (centre && quoted > 0) {
+        const left = r2(quoted - (Number(centre.invoiced_amount) || 0));
+        if (r2((Number(c.labourAmount) || 0) + (Number(c.materialAmount) || 0)) > left + 0.01) {
+          return { statusCode: 400, body: JSON.stringify({ error: `${centre.name}: only $${left.toFixed(2)} is left to claim on this stage.` }) };
+        }
+      }
     }
 
     const totalLabour = claimRows.reduce((s, c) => s + c.labour_amount, 0);
@@ -135,9 +155,13 @@ exports.handler = async (event) => {
       const { data: client } = resolvedClientId
         ? await supabaseAdmin.from('clients').select('payment_terms').eq('id', resolvedClientId).maybeSingle()
         : { data: null };
-      dueDate = computeDueDate(client?.payment_terms || 'cod', invoiceDate);
+      // Count terms from the Sydney calendar date (the UTC date is yesterday before 10/11am).
+      dueDate = computeDueDate(client?.payment_terms || 'cod', new Date(invoiceDate).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }));
     }
 
+    // If anything after the invoice row fails, take back what was done so far (no half-made invoice
+    // with a used SI number and no claims, no stock taken out for nothing). Bug review M9.
+    undo.supabaseAdmin = supabaseAdmin;
     const { data: insertedInvoice, error: insErr } = await supabaseAdmin
       .from('invoices')
       .insert({
@@ -159,6 +183,7 @@ exports.handler = async (event) => {
       .select('id')
       .single();
     if (insErr) throw insErr;
+    undo.invoiceId = insertedInvoice.id;
 
     const { data: insertedClaims, error: claimsErr } = await supabaseAdmin
       .from('invoice_claims')
@@ -181,7 +206,9 @@ exports.handler = async (event) => {
           }).select('id').single();
           if (usageErr) throw usageErr;
           usageId = usage.id;
+          undo.usageIds.push(usage.id);
           await adjustWarehouseStockAdmin(supabaseAdmin, item.material_id, -Number(item.quantity));
+          undo.stock.push({ materialId: item.material_id, qty: Number(item.quantity) });
         }
         itemRows.push({
           ...item, invoice_id: insertedInvoice.id, invoice_claim_id: claimId, cost_centre_id: c.cost_centre_id,
@@ -192,14 +219,13 @@ exports.handler = async (event) => {
       if (itemsErr) throw itemsErr;
     }
 
-    const { data: centresBefore } = await supabaseAdmin
-      .from('cost_centres')
-      .select('id, invoiced_amount')
-      .in('id', claimRows.map(c => c.cost_centre_id));
-    await Promise.all(claimRows.map(c => {
-      const before = Number((centresBefore || []).find(cc => cc.id === c.cost_centre_id)?.invoiced_amount) || 0;
-      return supabaseAdmin.from('cost_centres').update({ invoiced_amount: before + c.labour_amount + c.material_amount }).eq('id', c.cost_centre_id);
-    }));
+    // Added in one step in the database, so two invoices raised at once can't lose one.
+    for (const c of claimRows) {
+      const { error: addErr } = await supabaseAdmin.rpc('add_invoiced_amount', { p_centre_id: c.cost_centre_id, p_amount: r2(c.labour_amount + c.material_amount) });
+      if (addErr) throw addErr;
+      undo.added.push({ centreId: c.cost_centre_id, amount: r2(c.labour_amount + c.material_amount) });
+    }
+    undo.invoiceId = null; // done: nothing to take back from here on
 
     // Logged variations (bill-variations.js made each one a stage, claimed above)
     // are now billed on this invoice.
@@ -231,6 +257,19 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error(err);
+    if (undo.invoiceId && undo.supabaseAdmin) {
+      const db = undo.supabaseAdmin;
+      try {
+        for (const a of undo.added) await db.rpc('add_invoiced_amount', { p_centre_id: a.centreId, p_amount: -a.amount });
+        for (const st of undo.stock) await adjustWarehouseStockAdmin(db, st.materialId, st.qty);
+        await db.from('invoice_line_items').delete().eq('invoice_id', undo.invoiceId);
+        if (undo.usageIds.length) await db.from('job_material_usage').delete().in('id', undo.usageIds);
+        await db.from('invoice_claims').delete().eq('invoice_id', undo.invoiceId);
+        await db.from('invoices').delete().eq('id', undo.invoiceId);
+      } catch (undoErr) {
+        console.error('create-invoice: could not take back the part-made invoice', undo.invoiceId, undoErr.message);
+      }
+    }
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
   }
 };

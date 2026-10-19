@@ -176,7 +176,9 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   }
 
   // Xero's Invoices endpoint takes plain YYYY-MM-DD strings for Date/DueDate.
-  const date = invoice.sent_at ? new Date(invoice.sent_at).toISOString().slice(0, 10) : undefined;
+  // Sydney calendar date of sent_at (a date-only pick is stored as UTC
+  // midnight, which is still the same Sydney day).
+  const date = invoice.sent_at ? new Date(invoice.sent_at).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }) : undefined;
   const dueDate = invoice.due_date || undefined;
 
   return { invoice, contactId, reference, lineItems, jobNumber, date, dueDate };

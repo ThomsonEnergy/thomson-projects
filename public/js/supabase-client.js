@@ -2922,8 +2922,9 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       try {
         await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
 
-        const tomorrow = new Date(state.outIso);
-        tomorrow.setDate(tomorrow.getDate() + 1);
+        // Sydney day after the clock-out, via UTC noon so it can't drift.
+        const tomorrow = new Date(`${sydneyDateKey(new Date(state.outIso))}T12:00:00Z`);
+        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
         const tomorrowStr = tomorrow.toISOString().slice(0, 10);
 
         const { data: existingTomorrow } = await supabaseClient
@@ -3568,7 +3569,7 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
       <div class="grid cols-3">
         <div>
           <label>Date</label>
-          <input type="date" id="si-date" value="${new Date().toISOString().slice(0, 10)}" />
+          <input type="date" id="si-date" value="${sydneyDateKey(new Date())}" />
         </div>
         <div>
           <label>Start time</label>
@@ -4878,7 +4879,8 @@ async function openAddLineToStockPanel(lineItem, po, onComplete) {
     supabaseClient.from('materials').select('category').not('category', 'is', null),
     supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
   ]);
-  const markup = Number(settings?.default_markup_percent) || 45;
+  const markupSetting = parseFloat(settings?.default_markup_percent);
+  const markup = Number.isFinite(markupSetting) ? markupSetting : 45;
   const categories = [...new Set((cats || []).map(c => c.category).filter(Boolean))].sort();
   const cost = Number(lineItem.unit_cost) || 0;
   const overlay = poOverlay(`
@@ -5066,8 +5068,9 @@ function openEditPoLinesPanel(po, onComplete) {
     ${items.map(li => `
       <div class="ov-line" data-id="${li.id}" style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:6px; margin-bottom:6px;">
         <input class="ov-desc" value="${escapeHtml(li.description)}" style="font-size:13px;" />
-        <input class="ov-qty" type="number" step="0.01" value="${li.quantity}" style="font-size:13px;" />
-        <input class="ov-cost" type="number" step="0.01" value="${li.unit_cost}" style="font-size:13px;" />
+        <input class="ov-qty" type="number" step="0.01" value="${li.quantity}" style="font-size:13px;" ${li.received ? 'disabled' : ''} />
+        <input class="ov-cost" type="number" step="0.01" value="${li.unit_cost}" style="font-size:13px;" ${li.received ? 'disabled' : ''} />
+        ${li.received ? '<div style="grid-column:1 / -1; font-size:11px; color:var(--muted);">Received. Undo received first to change the quantity or cost.</div>' : ''}
       </div>`).join('')}
     <div style="margin-top:14px;">
       <button id="ov-save-btn">Save changes</button>
@@ -5085,6 +5088,8 @@ function openEditPoLinesPanel(po, onComplete) {
           unit_cost: parseFloat(row.querySelector('.ov-cost').value) || 0,
         };
         const was = items.find(li => li.id === row.dataset.id) || {};
+        // received lines: qty and cost are locked (stock and job cost were set when it landed)
+        if (was.received) { next.quantity = Number(was.quantity); next.unit_cost = Number(was.unit_cost); }
         const changes = [];
         if ((was.description || '') !== next.description) changes.push(`name "${was.description || ''}" to "${next.description}"`);
         if (Number(was.quantity) !== next.quantity) changes.push(`qty ${Number(was.quantity)} to ${next.quantity}`);

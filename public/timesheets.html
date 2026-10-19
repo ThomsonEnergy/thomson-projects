@@ -154,7 +154,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=92"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId = null;
@@ -1211,10 +1211,9 @@
     function initNonbillableCard(myRole) {
       if (myRole !== 'admin' && myRole !== 'finance') return;
       document.getElementById('nonbillable-card').style.display = 'block';
-      const now = new Date();
-      const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      document.getElementById('nonbillable-start').value = firstOfMonth.toISOString().slice(0, 10);
-      document.getElementById('nonbillable-end').value = now.toISOString().slice(0, 10);
+      const todayKey = sydneyDateKey(new Date());
+      document.getElementById('nonbillable-start').value = todayKey.slice(0, 8) + '01';
+      document.getElementById('nonbillable-end').value = todayKey;
       loadNonbillableSummary();
     }
 
