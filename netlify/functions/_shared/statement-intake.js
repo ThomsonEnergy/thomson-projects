@@ -210,7 +210,7 @@ async function processStatements({ budgetMs = 12 * 60 * 1000, extractAttachments
         const match = claimed.supplier_id ? null : matchSupplier(suppliers, { supplier: ex.supplier, abn: ex.abn, our_account_number: ex.our_account_number });
         await admin.from('supplier_statements').update({
           file_path: path, lines: ex.invoices || [], statement_date: ex.statement_date || null, total_amount: Number(ex.total_amount) || 0,
-          supplier_name_read: ex.supplier || null, supplier_id: claimed.supplier_id || match?.supplier.id || null,
+          supplier_name_read: ex.supplier || null, supplier_id: claimed.supplier_id || match?.supplier?.id || null,
         }).eq('id', row.id);
       }
       const r = await reconcileStatement(admin, row.id);

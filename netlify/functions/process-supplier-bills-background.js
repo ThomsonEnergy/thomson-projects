@@ -23,8 +23,9 @@ exports.handler = () => runAgent('supplier-bills', async () => {
   if (c.to_check) parts.push(`${c.to_check} to check`);
   if (c.duplicate) parts.push(`${plural(c.duplicate, 'duplicate')}`);
   if (c.error) parts.push(`${c.error} could not be read yet`);
+  if (r.replies) parts.push(`${plural(r.replies, '"invoices only" reply')} (Tally)`);
   return {
-    quiet: !r.queued && !read,
+    quiet: !r.queued && !read && !r.replies,
     summary: parts.length ? parts.join(', ') : 'Nothing new',
     details: { ...r },
     needsMe: r.waiting,

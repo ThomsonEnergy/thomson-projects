@@ -112,46 +112,50 @@ async function enqueueNewBillEmails(supabaseAdmin, { extractAttachments, extract
   const { data: known } = await supabaseAdmin.from('supplier_bill_inbox').select('gmail_message_id').in('gmail_message_id', ids);
   const knownIds = new Set((known || []).map(r => r.gmail_message_id));
   let added = 0;
-  for (const id of ids.filter(i => !knownIds.has(i))) {
-    const msg = await gmailRequest(`messages/${id}?format=full`);
-    const headers = msg.payload?.headers;
-    const salesId = await sharedMailboxId(supabaseAdmin);
-    const { data: email } = await supabaseAdmin.from('emails').select('id, thread_id, email_threads!inner(mailbox_id)').eq('gmail_message_id', id).eq('email_threads.mailbox_id', salesId).maybeSingle();
-    if (email) await supabaseAdmin.from('email_threads').update({ is_supplier_bill: true }).eq('id', email.thread_id);
-    else await supabaseAdmin.from('email_threads').update({ is_supplier_bill: true }).eq('mailbox_id', salesId).eq('gmail_thread_id', msg.threadId);
-
-    const dateHeader = headerValue(headers, 'Date');
-    const base = {
-      email_id: email?.id || null,
-      gmail_message_id: id,
-      email_from: headerValue(headers, 'From'),
-      email_subject: headerValue(headers, 'Subject'),
-      received_at: dateHeader ? new Date(dateHeader).toISOString() : new Date(Number(msg.internalDate) || Date.now()).toISOString(),
-    };
-    const files = billFiles(extractAttachments(msg.payload));
-
-    // a supplier answering one of our queries (_shared/supplier-email.js): link the reply
-    const { data: queriedBills } = await supabaseAdmin.from('supplier_bills').select('id, bill_number').eq('query_gmail_thread_id', msg.threadId);
-    const { data: queriedStatements } = await supabaseAdmin.from('supplier_statements').select('id').eq('query_gmail_thread_id', msg.threadId);
-    if ((queriedBills || []).length || (queriedStatements || []).length) {
-      const now = new Date().toISOString();
-      for (const qb of queriedBills || []) await supabaseAdmin.from('supplier_bills').update({ query_reply_at: now }).eq('id', qb.id);
-      for (const qs of queriedStatements || []) await supabaseAdmin.from('supplier_statements').update({ query_reply_at: now }).eq('id', qs.id);
-      await notifyToCheck(supabaseAdmin, { gmail_message_id: id, email_from: base.email_from, match_reason: 'Open Bill checks to see the reply' }, `Supplier replied about ${queriedBills?.[0]?.bill_number ? 'bill ' + queriedBills[0].bill_number : 'a statement'}`);
-      if (!files.length) continue; // just a reply, nothing to read as a bill
-    }
-
-    const rows = files.length
-      ? files.map(f => ({ ...base, attachment_part_id: String(f.part_id), file_name: f.name, mime_type: f.mime }))
-      : [{ ...base, attachment_part_id: 'none', status: 'to_check', match_confidence: 'none', processed_at: new Date().toISOString(),
-          match_reason: 'No PDF or photo attached. Open the email in Gmail (Supplier Bills label) and upload the bill by hand.',
-          extracted: { email_text: (extractPlainText(msg.payload) || '').slice(0, 2000) } }];
-    const { error } = await supabaseAdmin.from('supplier_bill_inbox').upsert(rows, { onConflict: 'gmail_message_id,attachment_part_id', ignoreDuplicates: true });
-    if (error) throw error;
-    added += rows.length;
-    if (!files.length) await notifyToCheck(supabaseAdmin, rows[0], 'An emailed bill has no PDF attached');
-  }
+  for (const id of ids.filter(i => !knownIds.has(i))) added += await enqueueBillMessage(supabaseAdmin, id, { extractAttachments, extractPlainText });
   return added;
+}
+
+// Adds one Gmail message (in the sales@ connection) to the bill inbox: one row per file, or a
+// "no PDF" row. Also used by Postie for an invoice a supplier sent to sales@ (_shared/routing-replies.js).
+async function enqueueBillMessage(supabaseAdmin, id, { extractAttachments, extractPlainText }) {
+  const msg = await gmailRequest(`messages/${id}?format=full`);
+  const headers = msg.payload?.headers;
+  const salesId = await sharedMailboxId(supabaseAdmin);
+  const { data: email } = await supabaseAdmin.from('emails').select('id, thread_id, email_threads!inner(mailbox_id)').eq('gmail_message_id', id).eq('email_threads.mailbox_id', salesId).maybeSingle();
+  if (email) await supabaseAdmin.from('email_threads').update({ is_supplier_bill: true }).eq('id', email.thread_id);
+  else await supabaseAdmin.from('email_threads').update({ is_supplier_bill: true }).eq('mailbox_id', salesId).eq('gmail_thread_id', msg.threadId);
+
+  const dateHeader = headerValue(headers, 'Date');
+  const base = {
+    email_id: email?.id || null,
+    gmail_message_id: id,
+    email_from: headerValue(headers, 'From'),
+    email_subject: headerValue(headers, 'Subject'),
+    received_at: dateHeader ? new Date(dateHeader).toISOString() : new Date(Number(msg.internalDate) || Date.now()).toISOString(),
+  };
+  const files = billFiles(extractAttachments(msg.payload));
+
+  // a supplier answering one of our queries (_shared/supplier-email.js): link the reply
+  const { data: queriedBills } = await supabaseAdmin.from('supplier_bills').select('id, bill_number').eq('query_gmail_thread_id', msg.threadId);
+  const { data: queriedStatements } = await supabaseAdmin.from('supplier_statements').select('id').eq('query_gmail_thread_id', msg.threadId);
+  if ((queriedBills || []).length || (queriedStatements || []).length) {
+    const now = new Date().toISOString();
+    for (const qb of queriedBills || []) await supabaseAdmin.from('supplier_bills').update({ query_reply_at: now }).eq('id', qb.id);
+    for (const qs of queriedStatements || []) await supabaseAdmin.from('supplier_statements').update({ query_reply_at: now }).eq('id', qs.id);
+    await notifyToCheck(supabaseAdmin, { gmail_message_id: id, email_from: base.email_from, match_reason: 'Open Bill checks to see the reply' }, `Supplier replied about ${queriedBills?.[0]?.bill_number ? 'bill ' + queriedBills[0].bill_number : 'a statement'}`);
+    if (!files.length) return 0; // just a reply, nothing to read as a bill
+  }
+
+  const rows = files.length
+    ? files.map(f => ({ ...base, attachment_part_id: String(f.part_id), file_name: f.name, mime_type: f.mime }))
+    : [{ ...base, attachment_part_id: 'none', status: 'to_check', match_confidence: 'none', processed_at: new Date().toISOString(),
+        match_reason: 'No PDF or photo attached. Open the email in Gmail (Supplier Bills label) and upload the bill by hand.',
+        extracted: { email_text: (extractPlainText(msg.payload) || '').slice(0, 2000) } }];
+  const { error } = await supabaseAdmin.from('supplier_bill_inbox').upsert(rows, { onConflict: 'gmail_message_id,attachment_part_id', ignoreDuplicates: true });
+  if (error) throw error;
+  if (!files.length) await notifyToCheck(supabaseAdmin, rows[0], 'An emailed bill has no PDF attached');
+  return rows.length;
 }
 
 // ---------- matching ----------
@@ -166,25 +170,53 @@ function fuzzyMatchScore(a, b) {
   return matches / Math.max(wordsA.size, wordsB.length);
 }
 
-// Same order as findMatchingSupplier() in supabase-client.js. Returns { supplier, how } or null.
+// Supplier names without the words every company has ("Pty", "Ltd", "Australia", "Electrical"...),
+// so "WINAICO AUSTRALIA PTY LTD" no longer half matches every "X Pty Ltd". Same list as
+// SUPPLIER_NAME_FILLER in supabase-client.js.
+const SUPPLIER_NAME_FILLER = new Set(['pty', 'ltd', 'limited', 'australia', 'australian', 'aust', 'group', 'company', 'the', 'and', 'trading', 'holdings', 'services', 'supplies', 'supply', 'wholesale', 'wholesalers', 'electrical', 'electric', 'solar', 'energy', 'nsw', 'sydney']);
+function supplierNameScore(a, b) {
+  const words = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !SUPPLIER_NAME_FILLER.has(w));
+  const wordsA = new Set(words(a));
+  const wordsB = words(b);
+  if (!wordsA.size || !wordsB.length) return 0;
+  return wordsB.filter(w => wordsA.has(w)).length / Math.max(wordsA.size, wordsB.length);
+}
+const digits = (v) => String(v || '').replace(/\D/g, '');
+
+// Same rules as findMatchingSupplier() in supabase-client.js. Matches on ID details, not names:
+//   1. our account number with them, when only one supplier has it (wins over ABN: MMEM's Haymans and Greentech share one ABN and
+//      bank account, and only our account number says which one, docs/BUSINESS_FACTS.md);
+//   2. ABN, when only one supplier has it;
+//   3. bank details (BSB and account), when only one supplier has them;
+//   4. the name, only when no ABN or bank details on the bill disagree with that supplier, and
+//      only as a guess for a person to check (how 'name').
+// Returns { supplier, how }, { supplier: null, shared: [suppliers] } when the ABN or bank details
+// belong to more than one supplier and our account number is missing, or null.
 function matchSupplier(suppliers, ex) {
   const list = suppliers || [];
-  if (ex.our_account_number) {
-    const s = list.find(x => x.our_account_number && x.our_account_number.trim() === String(ex.our_account_number).trim());
-    if (s) return { supplier: s, how: `account number ${ex.our_account_number}` };
+  const acct = String(ex.our_account_number || '').trim();
+  if (acct) {
+    const hits = list.filter(x => x.our_account_number && x.our_account_number.trim().toLowerCase() === acct.toLowerCase());
+    if (hits.length === 1) return { supplier: hits[0], how: `account number ${acct}` };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'account number' };
   }
-  if (ex.abn) {
-    const abn = String(ex.abn).replace(/\s/g, '');
-    const s = list.find(x => x.abn && x.abn.replace(/\s/g, '') === abn);
-    if (s) return { supplier: s, how: 'ABN' };
+  const abn = digits(ex.abn);
+  if (abn) {
+    const hits = list.filter(x => digits(x.abn) === abn);
+    if (hits.length === 1) return { supplier: hits[0], how: 'ABN' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'ABN' };
   }
-  if (ex.bsb && ex.bank_account_number) {
-    const s = list.find(x => x.bsb === ex.bsb && x.bank_account_number === ex.bank_account_number);
-    if (s) return { supplier: s, how: 'bank details' };
+  const bsb = digits(ex.bsb), bank = digits(ex.bank_account_number);
+  if (bsb && bank) {
+    const hits = list.filter(x => digits(x.bsb) === bsb && digits(x.bank_account_number) === bank);
+    if (hits.length === 1) return { supplier: hits[0], how: 'bank details' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'bank details' };
   }
   let best = null, bestScore = 0;
   list.forEach(s => {
-    const score = fuzzyMatchScore(s.name, ex.supplier);
+    if (abn && digits(s.abn) && digits(s.abn) !== abn) return; // the bill's ABN is someone else's
+    if (bsb && bank && digits(s.bank_account_number) && (digits(s.bsb) !== bsb || digits(s.bank_account_number) !== bank)) return;
+    const score = supplierNameScore(s.name, ex.supplier);
     if (score > bestScore) { bestScore = score; best = s; }
   });
   return bestScore >= 0.5 ? { supplier: best, how: 'name' } : null;
@@ -302,13 +334,15 @@ async function findDuplicateBill(supabaseAdmin, supplierId, billNumber) {
 async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null, allowCreate = false } = {}) {
   const ex = row.extracted || {};
   let supplierMatch = null;
+  let sharedBy = null, sharedHow = ''; // suppliers sharing the bill's ABN or bank details (MMEM): a person picks
   if (supplierId) {
     const { data: s } = await supabaseAdmin.from('suppliers').select('*').eq('id', supplierId).maybeSingle();
     if (s) supplierMatch = { supplier: s, how: 'picked by hand' };
   } else {
     const { data: suppliers } = await supabaseAdmin.from('suppliers').select('*');
     supplierMatch = matchSupplier(suppliers, ex);
-    if (!supplierMatch && allowCreate && (ex.document_type || 'invoice') === 'invoice' && (ex.supplier || ex.abn)) {
+    if (supplierMatch && !supplierMatch.supplier) { sharedBy = supplierMatch.shared; sharedHow = supplierMatch.how; supplierMatch = null; }
+    if (!supplierMatch && !sharedBy && allowCreate && (ex.document_type || 'invoice') === 'invoice' && (ex.supplier || ex.abn)) {
       const { createSupplierFromBill } = require('./supplier-verify'); // here, not at the top: it requires this file
       supplierMatch = { supplier: await createSupplierFromBill(supabaseAdmin, ex, abnCheck), how: 'created' };
     }
@@ -351,12 +385,17 @@ async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null,
     confidence = 'guess';
     const looksLike = { credit_note: 'a credit note', statement: 'a statement' }[docType] || 'something other than a bill (price list, quote, remittance or similar)';
     reason = `This looks like ${looksLike}, not a bill. ${po.reason}`;
+  } else if (sharedBy) {
+    confidence = 'none';
+    reason = `${sharedBy.map(x => x.name).join(' and ')} share this ${sharedHow}${ex.our_account_number && sharedHow !== 'account number' ? ` and our account number ${ex.our_account_number} matches neither` : ''}${ex.our_account_number ? '' : ' and the bill has no account number'}: pick which account by the account number on the bill${sharedHow === 'account number' ? ' (two suppliers have the same account number saved: fix it on their pages)' : ''}. ${po.reason}`;
   } else if (!sid) {
     confidence = po.confidence === 'none' ? 'none' : 'guess';
     reason = `Supplier "${ex.supplier || 'unknown'}" not recognised. ${po.reason}`;
+  } else if (supplierMatch.how === 'name') {
+    confidence = 'guess'; // a name alone is never enough to save automatically
   }
   if (supplierMatch?.how === 'created' && status === 'to_check') reason = `New ${supplierMatch.supplier.kind === 'contractor' ? 'contractor' : 'supplier'} "${supplierMatch.supplier.name}" created from this bill: check their details. ${reason}`;
-  else if (sid && supplierMatch.how !== 'picked by hand' && status === 'to_check') reason += ` (supplier matched by ${supplierMatch.how})`;
+  else if (sid && supplierMatch.how !== 'picked by hand' && status === 'to_check') reason += ` (supplier matched by ${supplierMatch.how === 'name' ? 'name only, no ABN or bank details to confirm it: check' : supplierMatch.how})`;
   if (abnCheck && abnCheck.problems.length && status === 'to_check') {
     confidence = 'guess'; // never saved automatically
     reason += `. ABN check: ${abnCheck.problems.join('; ')}`;
@@ -568,11 +607,17 @@ async function processSupplierBills({ budgetMs = 10 * 60 * 1000, extractAttachme
     }
   }
   console.log(`supplier bills: queued ${queued}, processed`, JSON.stringify(counts), autoSave ? '(auto-save on)' : '(suggest only)');
+  // Tally's "this mailbox is for invoices only" replies; never stops the bill reading
+  let replies = 0;
+  try {
+    const { replyToNonBills } = require('./routing-replies'); // here, not at the top: keeps the require order simple
+    replies = await replyToNonBills(supabaseAdmin);
+  } catch (err) { console.error('invoice@ routing replies failed:', err.message); }
   const { count: waiting } = await supabaseAdmin.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).in('status', ['to_check', 'failed']);
-  return { queued, counts, usage, waiting: waiting || 0, autoSave };
+  return { queued, counts, usage, waiting: waiting || 0, autoSave, replies };
 }
 
 module.exports = {
   INVOICE_ADDRESS, getBillLabelId, isSupplierBillMessage, findPart, startSupplierBillProcessing,
-  processSupplierBills, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore, downloadAttachment,
+  processSupplierBills, enqueueBillMessage, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore, supplierNameScore, downloadAttachment,
 };
