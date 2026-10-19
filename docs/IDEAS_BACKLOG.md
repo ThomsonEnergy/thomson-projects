@@ -20,7 +20,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
 | 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; delivery 1 (top ten) LIVE 19 Oct 2026, next delivery 2 (`docs/UX_REVIEW.md`) | N | None |
-| 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Planned 19 Oct 2026, waiting on owner's yes | N | None |
+| 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Built 19 Oct 2026, LIVE (spec A32) | N | None |
 
 ## High lead time, start now
 
@@ -475,7 +475,9 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 - Office and public pages: quotes, leads, clients, POs, stock, price lists, STCs, assets and licences: items 120 to 146
 - Login, policy update, Chat, Inbox, Settings and HR: items 147 to 168
 
-## 18. Knowledge Base background reader (planned 19 Oct 2026)
+## 18. Knowledge Base background reader (built 19 Oct 2026, see PROJECT_SPEC.md A32)
+
+**Built as planned below, 19 Oct 2026.** Migration 20261104010000 on production. Left to watch: how many AS/NZS 3000 pages still fail after the one-page and notes fallbacks, and whether the "table on the page" rule sends too many pages to the picture read.
 
 **Problem found:** "Read with OCR" renders PDF pages in the browser, so the phone has to stay on the page with the screen on. On AS/NZS 3000 (610 pages) 438 pages were read and 43 batches (about 172 pages) failed, every one with the same Anthropic error: `Output blocked by content filtering policy` (the copyright output filter, triggered by asking for 4 pages of a standard word for word). Re-running the same way would fail on the same pages. Other standards are worse: AS 3012 has no text at all, AS 1768 has 2k characters, AS 3008 has 10k characters across 148 pages. Putting the PDFs in the GitHub repo does not help Sparky (he reads the database through Netlify, not GitHub) and purchased standards in GitHub is a licence problem.
 
