@@ -4841,6 +4841,18 @@
                     : `<img src="${supaImageVariant(p.url, 200, 60)}" class="jt-photo" data-act="task-photo-view" data-id="${t.id}" data-url="${escapeHtml(p.url)}" alt="" />`).join('')}</div>` : ''}
                   <label class="secondary jt-photo-btn" style="display:inline-block; margin-top:4px; cursor:pointer;">&#128247; Take photo<input type="file" accept="image/*" capture="environment" class="jt-photo-input" data-id="${t.id}" style="display:none;" /></label>
                 </div>
+                ${(() => {
+                  // Move: a subtask to another task (or out on its own); a
+                  // task with no subtasks of its own under another task.
+                  if (!isSub && subs.length) return '';
+                  const targets = tasks.filter(x => !x.parent_task_id && x.id !== t.id && x.id !== t.parent_task_id).sort(jtSort);
+                  if (!targets.length && !isSub) return '';
+                  return `<div><label>${isSub ? 'Move to another task' : 'Make it a subtask of'}</label><select class="jt-move" data-id="${t.id}">
+                    <option value="">${isSub ? 'Keep where it is' : 'Choose a task...'}</option>
+                    ${isSub ? '<option value="__top">Make it its own task</option>' : ''}
+                    ${targets.map(x => `<option value="${x.id}">${escapeHtml(x.description)}${x.completed ? ' (done)' : ''}</option>`).join('')}
+                  </select></div>`;
+                })()}
                 ${!isSub ? `<div><label>Subtasks</label>
                   <input class="jt-sub-add" data-parent="${t.id}" placeholder="Add a subtask and press Enter" style="margin-top:4px;" /></div>` : ''}
                 <div class="jt-actions">
@@ -5004,6 +5016,18 @@
         if (el.classList.contains('jt-check')) await setCompleted(t, el.checked);
         else if (el.classList.contains('jt-assign')) { await patch(t.id, { assigned_to_user_id: el.value || null, assigned_to_role: el.value ? null : t.assigned_to_role }); await reload(); }
         else if (el.classList.contains('jt-due')) { await patch(t.id, { due_date: el.value || null }); await reload(); }
+        else if (el.classList.contains('jt-move') && el.value) {
+          const parentId = el.value === '__top' ? null : el.value;
+          const siblings = state().tasks.filter(x => (x.parent_task_id || null) === parentId);
+          const fields = { parent_task_id: parentId, sort_order: Math.max(0, ...siblings.map(x => x.sort_order || 0)) + 1 };
+          // Out on its own it lands in the old parent's group (pre-job, on site...).
+          if (!parentId) { const old = find(t.parent_task_id); if (old) fields.task_type = old.task_type; }
+          if (await patch(t.id, fields)) {
+            if (parentId) jtExpanded.add(parentId);
+            jtExpanded.delete(t.id);
+            await reload();
+          }
+        }
       });
 
       listEl.addEventListener('keydown', async (e) => {
