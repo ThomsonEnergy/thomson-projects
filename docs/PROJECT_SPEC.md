@@ -117,7 +117,7 @@ Manual steps only a person can do (the code is live):
 - **Pipeline automation Phase 1:** accepting a quote runs `create-job-from-quote.js`, which creates the job at **quote_approved** and raises the deposit invoice (`is_deposit`). When the deposit is paid, the Airwallex and Xero webhooks move it on (`_shared/advance-job-stage.js`): to **awaiting_action** if any required-before-scheduling task is open, otherwise **ready_to_book**. No deposit needed: it moves on straight away. Later payments check for **complete**.
 - `archive-completed-jobs.js` (daily) moves jobs at complete for more than 2 days to archived.
 - Manual only: draft_quote, job_not_complete and Not Complete back to Booked.
-- **Job Booked gate (migration 20261023000000):** a job is only **job_booked** while someone is scheduled to it (a job booking today or later) or clocked into it now. A booking or clock-in moves Ready to Book to Job Booked; removing or moving the last booking moves it back (to Awaiting Action if required tasks are open); clocking out does not (the clock-out "How's the job?" step decides). Quick Job, Warranty Job and ServiceM8 imports start at Ready to Book. Moving a job to Job Booked by hand with nobody scheduled or clocked in is refused. A booking that slips into the past is only re-checked when something on the job changes (no nightly sweep).
+- **Job Booked gate (migration 20261023000000):** a job is only **job_booked** while someone is scheduled to it (a job booking today or later) or clocked into it now. A booking or clock-in moves Ready to Book to Job Booked; removing or moving the last booking moves it back (to Awaiting Action if required tasks are open); clocking out does not (the clock-out "How's the job?" step decides). Quick Job, Warranty Job and ServiceM8 imports start at Ready to Book. Moving a job to Job Booked by hand with nobody scheduled or clocked in is refused. `sweep-job-booked.js` (just after midnight Sydney, migration 20261024000000) moves back any job whose last booking has passed with nobody clocked in.
 
 ### A7. Navigation
 - One list, `MAIN_NAV_ITEMS` in `public/js/supabase-client.js`, rendered by `renderMainNav()`. On a computer the top bar shows starred pages (also the Home tiles) plus the current page, the rest under "More"; the phone menu lists everything. Schedule, Settings and notifications are top bar icons.
@@ -319,6 +319,7 @@ Manual steps only a person can do (the code is live):
 | chat-ai-sweep | every 2 minutes (team chat job tagging and voice transcripts, A19a) |
 | sync-gmail | every 5 minutes (also starts process-supplier-bills-background, A11a) |
 | archive-completed-jobs | daily |
+| sweep-job-booked | 13:05 and 14:05 UTC (00:05 Sydney with and without daylight saving, A6) |
 | sync-overheads-nightly | daily |
 
 ---

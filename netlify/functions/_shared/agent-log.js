@@ -21,6 +21,7 @@ const AGENTS = {
   'send-notifications': { label: 'Phone notifications', every: 1 },
   'sync-overheads-nightly': { label: 'Xero overheads sync (nightly)', every: 1440 },
   'archive-completed-jobs': { label: 'Archive completed jobs (nightly)', every: 1440 },
+  'sweep-job-booked': { label: 'Job Booked check (nightly)', every: 1440 },
   'ops-digest': { label: 'Ops manager 5am digest', every: 1440 },
 };
 
