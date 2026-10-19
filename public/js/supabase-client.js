@@ -169,6 +169,24 @@ async function getSignedDocUrl(path, bucket = 'project-documents') {
   return data.signedUrl;
 }
 
+// Opens a private file in a new tab the way iOS Safari and a WKWebView allow:
+// the blank tab is opened on the tap itself (synchronously, before any await),
+// then pointed at the signed link once it arrives. Call it synchronously from
+// the tap handler with no await before it in that branch, or the tab is blocked
+// as a popup. bucket undefined falls through to getSignedDocUrl's
+// project-documents default. Closes the blank tab and rethrows on failure.
+async function openSignedDocInNewTab(path, bucket) {
+  const win = window.open('', '_blank');
+  try {
+    const url = await getSignedDocUrl(path, bucket);
+    if (win) win.location.href = url;
+    else window.location.href = url;
+  } catch (err) {
+    if (win) win.close();
+    throw err;
+  }
+}
+
 // Expiry date display for licences / insurance: red when expired or within
 // 30 days. Shared by the Team page (company and employee licences) and
 // Settings > My Profile (a person's own licences).
@@ -830,21 +848,106 @@ async function compressImage(file, maxDimension = 1920, quality = 0.82) {
   }
 }
 
+// Uploads one or more files to a bucket one at a time and never throws for a
+// single bad file. Returns { urls, paths, failed: [{ file, message, error }] }.
+// onProgress(done, total) fires before each file and once at the end;
+// onUploaded(url, file, index, path) is awaited after each file lands (a
+// throw there counts the file as failed and removes the just-uploaded object
+// so a retry leaves no orphan). stopOnError stops at the first failure.
+async function uploadPhotosBatch(fileList, folder, bucket = 'proposal-photos', { onProgress, onUploaded, stopOnError = false } = {}) {
+  const files = Array.from(fileList || []);
+  const total = files.length;
+  const urls = [];
+  const paths = [];
+  const failed = [];
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    if (onProgress) onProgress(i, total);
+    let path = null;
+    try {
+      const compressed = await compressImage(file);
+      path = `${folder}/${Date.now()}-${compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const { error } = await supabaseClient.storage.from(bucket).upload(path, compressed);
+      if (error) throw error;
+      const { data } = supabaseClient.storage.from(bucket).getPublicUrl(path);
+      const url = data.publicUrl;
+      if (onUploaded) {
+        try {
+          await onUploaded(url, file, i, path);
+        } catch (err) {
+          try { await supabaseClient.storage.from(bucket).remove([path]); } catch (_) { /* best effort */ }
+          throw err;
+        }
+      }
+      urls.push(url);
+      paths.push(path);
+    } catch (err) {
+      failed.push({ file, message: (err && err.message) || String(err), error: err });
+      if (stopOnError) break;
+    }
+  }
+  if (onProgress) onProgress(total, total);
+  return { urls, paths, failed };
+}
+
 // Uploads one or more files to a public bucket and returns their public
 // URLs. `folder` keeps things tidy, e.g. 'portfolio' or a project id.
 // `bucket` defaults to proposal-photos (quotes/portfolio); site photos
 // taken from the clock-out flow use 'site-photos' instead.
-async function uploadPhotos(fileList, folder, bucket = 'proposal-photos') {
-  const urls = [];
-  for (const file of fileList) {
-    const compressed = await compressImage(file);
-    const path = `${folder}/${Date.now()}-${compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const { error } = await supabaseClient.storage.from(bucket).upload(path, compressed);
-    if (error) throw error;
-    const { data } = supabaseClient.storage.from(bucket).getPublicUrl(path);
-    urls.push(data.publicUrl);
-  }
+// Stops at the first failure and throws it (wrapper over uploadPhotosBatch).
+// opts.onProgress(done, total) is optional.
+async function uploadPhotos(fileList, folder, bucket = 'proposal-photos', opts = {}) {
+  const { urls, failed } = await uploadPhotosBatch(fileList, folder, bucket, { ...opts, stopOnError: true });
+  if (failed.length) throw failed[0].error;
   return urls;
+}
+
+// Wires a multi-file input to upload site photos into the 'site-photos'
+// bucket under `${projectId}/`, inserting one project_photos row per file as
+// it lands. Shows "Uploading n of N...", disables the input while running, then
+// "N photos added" or "x of N added. y failed: names (reason) [Retry y]" with
+// the failed File objects kept in memory for the retry. staffId defaults to
+// the logged-in user. onAdded(urls) runs after each run that added anything.
+function wireSitePhotoInput(fileInput, msgEl, { projectId, staffId, onAdded } = {}) {
+  let pending = [];
+  async function run(files) {
+    const total = files.length;
+    if (!total) return;
+    fileInput.disabled = true;
+    msgEl.innerHTML = `<p class="subtitle">Uploading 1 of ${total}...</p>`;
+    let uploader = staffId;
+    if (!uploader) {
+      try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        uploader = user.id;
+      } catch (err) {
+        fileInput.disabled = false;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message || String(err))}</div>`;
+        return;
+      }
+    }
+    const { urls, failed } = await uploadPhotosBatch(files, projectId, 'site-photos', {
+      onProgress: (done, t) => { if (done < t) msgEl.innerHTML = `<p class="subtitle">Uploading ${done + 1} of ${t}...</p>`; },
+      onUploaded: async (url) => {
+        const { error } = await supabaseClient.from('project_photos').insert({ project_id: projectId, staff_id: uploader, url });
+        if (error) throw error;
+      },
+    });
+    fileInput.disabled = false;
+    fileInput.value = '';
+    pending = failed.map(f => f.file);
+    if (urls.length && onAdded) await onAdded(urls);
+    if (!failed.length) {
+      msgEl.innerHTML = `<div class="success-box">${urls.length} photo${urls.length === 1 ? '' : 's'} added.</div>`;
+      setTimeout(() => { if (!pending.length) msgEl.innerHTML = ''; }, 4000);
+      return;
+    }
+    msgEl.innerHTML = `<div class="error-box">${urls.length} of ${total} added. ${failed.length} failed: ${failed.map(f => escapeHtml(f.file.name)).join(', ')} (${escapeHtml(failed[0].message)}). <button type="button" class="secondary site-photo-retry-btn" style="margin-left:8px;">Retry ${failed.length}</button></div>`;
+    msgEl.querySelector('.site-photo-retry-btn').addEventListener('click', () => run(pending));
+  }
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) run(Array.from(fileInput.files));
+  });
 }
 
 // Requests a resized, recompressed rendition of a Supabase Storage photo
@@ -2030,7 +2133,7 @@ function loadGlobalSearch() {
   if (window.__globalSearchScript || !document.querySelector('.topbar-right')) return;
   window.__globalSearchScript = true;
   const s = document.createElement('script');
-  s.src = '/js/global-search.js?v=1';
+  s.src = '/js/global-search.js?v=2';
   document.head.appendChild(s);
 }
 
@@ -2074,7 +2177,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=10';
+  s.src = '/js/notifications.js?v=11';
   document.head.appendChild(s);
 }
 
@@ -3097,19 +3200,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     // Fires the moment photos are chosen - previously needed a second
     // "Upload" click that staff often skipped, assuming picking the file
     // was already the whole job done.
-    overlay.querySelector('#cko-photo-file').addEventListener('change', async () => {
-      const fileInput = overlay.querySelector('#cko-photo-file');
-      const msg = overlay.querySelector('#cko-photo-msg');
-      if (!fileInput.files.length) return;
-      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
-      try {
-        const urls = await uploadPhotos(fileInput.files, project.id, 'site-photos');
-        const { error } = await supabaseClient.from('project_photos').insert(urls.map(url => ({ project_id: project.id, staff_id: entry.staff_id, url })));
-        if (error) throw error;
-        fileInput.value = '';
-        msg.innerHTML = `<div class="success-box">${urls.length} photo${urls.length === 1 ? '' : 's'} added.</div>`;
-      } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
-    });
+    wireSitePhotoInput(overlay.querySelector('#cko-photo-file'), overlay.querySelector('#cko-photo-msg'), { projectId: project.id, staffId: entry.staff_id });
 
     overlay.querySelector('#cko-note-save-btn').addEventListener('click', async () => {
       const msg = overlay.querySelector('#cko-note-msg');
@@ -4829,19 +4920,24 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
 
   overlay.querySelector('#rl-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#rl-confirm-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#rl-confirm-btn');
+    const label = btn.textContent;
     const msg = overlay.querySelector('#rl-msg');
     const dest = destSel.value;
     const vehicleId = dest === 'vehicle' ? overlay.querySelector('#rl-vehicle-select').value : null;
-    let error;
-    if (dest === 'otherjob') {
-      if (!pickedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
-      ({ error } = await supabaseClient.rpc('po_move_line', { p_line_id: lineItem.id, p_qty: Number(lineItem.quantity), p_dest: 'job', p_job_id: pickedJob.id, p_vehicle_id: null, p_cost_centre_id: null }));
-    } else {
-      ({ error } = await supabaseClient.rpc('po_receive_line', { p_line_id: lineItem.id, p_dest: dest, p_vehicle_id: vehicleId }));
-    }
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-    overlay.remove();
-    if (onComplete) await onComplete();
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      let error;
+      if (dest === 'otherjob') {
+        if (!pickedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
+        ({ error } = await supabaseClient.rpc('po_move_line', { p_line_id: lineItem.id, p_qty: Number(lineItem.quantity), p_dest: 'job', p_job_id: pickedJob.id, p_vehicle_id: null, p_cost_centre_id: null }));
+      } else {
+        ({ error } = await supabaseClient.rpc('po_receive_line', { p_line_id: lineItem.id, p_dest: dest, p_vehicle_id: vehicleId }));
+      }
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
   });
 }
 
@@ -4868,16 +4964,21 @@ function openUndoReceivePanel(lineItem, po, onComplete) {
   bo.addEventListener('change', () => { overlay.querySelector('#ur-eta-section').style.display = bo.checked ? 'block' : 'none'; });
   overlay.querySelector('#ur-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#ur-confirm-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#ur-confirm-btn');
+    const label = btn.textContent;
     const msg = overlay.querySelector('#ur-msg');
     const note = overlay.querySelector('#ur-note').value.trim();
     if (approved && !note) { msg.innerHTML = `<div class="error-box">Add a note saying why.</div>`; return; }
-    const { error } = await supabaseClient.rpc('po_undo_receive', {
-      p_line_id: lineItem.id, p_note: note || null, p_backorder: bo.checked,
-      p_eta: bo.checked ? (overlay.querySelector('#ur-eta').value || null) : null,
-    });
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-    overlay.remove();
-    if (onComplete) await onComplete();
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      const { error } = await supabaseClient.rpc('po_undo_receive', {
+        p_line_id: lineItem.id, p_note: note || null, p_backorder: bo.checked,
+        p_eta: bo.checked ? (overlay.querySelector('#ur-eta').value || null) : null,
+      });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
   });
 }
 
@@ -4932,20 +5033,25 @@ async function openMoveLineItemPanel(lineItem, po, onComplete) {
 
   overlay.querySelector('#mv-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#mv-confirm-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#mv-confirm-btn');
+    const label = btn.textContent;
     const msg = overlay.querySelector('#mv-msg');
     const qty = parseFloat(overlay.querySelector('#mv-qty').value);
     const dest = destSel.value;
     if (!(qty > 0)) { msg.innerHTML = `<div class="error-box">Enter how many to move.</div>`; return; }
     if (dest === 'job' && !pickedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
-    const { error } = await supabaseClient.rpc('po_move_line', {
-      p_line_id: lineItem.id, p_qty: qty, p_dest: dest,
-      p_job_id: dest === 'job' ? pickedJob.id : null,
-      p_vehicle_id: dest === 'vehicle' ? overlay.querySelector('#mv-vehicle').value : null,
-      p_cost_centre_id: dest === 'job' ? (overlay.querySelector('#mv-stage').value || null) : null,
-    });
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-    overlay.remove();
-    if (onComplete) await onComplete();
+    btn.disabled = true; btn.textContent = 'Moving...';
+    try {
+      const { error } = await supabaseClient.rpc('po_move_line', {
+        p_line_id: lineItem.id, p_qty: qty, p_dest: dest,
+        p_job_id: dest === 'job' ? pickedJob.id : null,
+        p_vehicle_id: dest === 'vehicle' ? overlay.querySelector('#mv-vehicle').value : null,
+        p_cost_centre_id: dest === 'job' ? (overlay.querySelector('#mv-stage').value || null) : null,
+      });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
   });
 }
 
@@ -4985,19 +5091,24 @@ async function openAddLineToStockPanel(lineItem, po, onComplete) {
   });
   overlay.querySelector('#als-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#als-save-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#als-save-btn');
+    const label = btn.textContent;
     const msg = overlay.querySelector('#als-msg');
-    const { error } = await supabaseClient.rpc('po_line_add_to_stock', {
-      p_line_id: lineItem.id,
-      p_name: overlay.querySelector('#als-name').value.trim(),
-      p_category: overlay.querySelector('#als-category').value.trim() || null,
-      p_supplier_id: overlay.querySelector('#als-supplier').value || null,
-      p_cost: parseFloat(overlay.querySelector('#als-cost').value) || 0,
-      p_sell: parseFloat(overlay.querySelector('#als-sell').value) || 0,
-      p_minimum: parseFloat(overlay.querySelector('#als-min').value) || 0,
-    });
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-    overlay.remove();
-    if (onComplete) await onComplete();
+    btn.disabled = true; btn.textContent = 'Adding...';
+    try {
+      const { error } = await supabaseClient.rpc('po_line_add_to_stock', {
+        p_line_id: lineItem.id,
+        p_name: overlay.querySelector('#als-name').value.trim(),
+        p_category: overlay.querySelector('#als-category').value.trim() || null,
+        p_supplier_id: overlay.querySelector('#als-supplier').value || null,
+        p_cost: parseFloat(overlay.querySelector('#als-cost').value) || 0,
+        p_sell: parseFloat(overlay.querySelector('#als-sell').value) || 0,
+        p_minimum: parseFloat(overlay.querySelector('#als-min').value) || 0,
+      });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
   });
 }
 
@@ -5120,19 +5231,24 @@ async function openAddPoItemPanel(po, onComplete) {
   overlay.querySelector('#api-add-line').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'api-items'));
   overlay.querySelector('#api-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#api-save-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#api-save-btn');
+    const label = btn.textContent;
     const msg = overlay.querySelector('#api-msg');
     const lines = readMaterialLineRows('api-items');
     if (!lines.length) { msg.innerHTML = `<div class="error-box">Add an item with a quantity.</div>`; return; }
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    const { error } = await supabaseClient.from('purchase_order_line_items').insert(lines.map(l => ({
-      po_id: po.id, material_id: l.materialId, description: l.description, quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
-    })));
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-    const text = `PO ${po.po_number || ''}: added ${lines.map(l => `${l.description} x${l.quantity} at ${money(l.unit_cost)}`).join(', ')}`;
-    await logActivity('purchase_order', po.id, 'po_item_added', text);
-    if (po.project_id) await logActivity('project', po.project_id, 'po_item_added', text);
-    overlay.remove();
-    if (onComplete) await onComplete();
+    btn.disabled = true; btn.textContent = 'Adding...';
+    try {
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const { error } = await supabaseClient.from('purchase_order_line_items').insert(lines.map(l => ({
+        po_id: po.id, material_id: l.materialId, description: l.description, quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
+      })));
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const text = `PO ${po.po_number || ''}: added ${lines.map(l => `${l.description} x${l.quantity} at ${money(l.unit_cost)}`).join(', ')}`;
+      await logActivity('purchase_order', po.id, 'po_item_added', text);
+      if (po.project_id) await logActivity('project', po.project_id, 'po_item_added', text);
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
   });
 }
 
@@ -5356,12 +5472,17 @@ function openBackorderPanel(lineItem, onComplete) {
 
   overlay.querySelector('#bo-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#bo-save-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#bo-save-btn');
+    const label = btn.textContent;
     const msg = overlay.querySelector('#bo-msg');
-    // po_set_backorder (not a plain update): PO line updates are pricing roles only, so Staff got 0 rows and no error
-    const { error } = await supabaseClient.rpc('po_set_backorder', { p_line_id: lineItem.id, p_backordered: true, p_eta: overlay.querySelector('#bo-eta').value || null });
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-    overlay.remove();
-    await onComplete();
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      // po_set_backorder (not a plain update): PO line updates are pricing roles only, so Staff got 0 rows and no error
+      const { error } = await supabaseClient.rpc('po_set_backorder', { p_line_id: lineItem.id, p_backordered: true, p_eta: overlay.querySelector('#bo-eta').value || null });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
   });
   const clearBtn = overlay.querySelector('#bo-clear-btn');
   if (clearBtn) {

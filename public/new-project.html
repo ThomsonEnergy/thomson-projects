@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -250,7 +250,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/email-compose.js?v=5"></script>
   <script src="/js/theme.js"></script>
@@ -690,9 +690,10 @@
       pg.style.cssText = 'border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px;';
       pg.dataset.photos = JSON.stringify(photos);
       pg.innerHTML = `
-        <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${description}" style="margin-bottom:8px;" />
+        <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${escapeHtml(description)}" style="margin-bottom:8px;" />
         <div class="pg-thumbs" style="margin-bottom:8px;"></div>
         <input type="file" class="pg-file" accept="image/*" multiple style="font-size:12px;" />
+        <div class="pg-msg" style="font-size:12px;"></div>
         <button type="button" class="secondary pg-remove" style="font-size:12px; padding:6px 12px;">Remove group</button>
       `;
       stageRow.querySelector('.photo-groups').appendChild(pg);
@@ -710,13 +711,25 @@
       // file was already the whole job done.
       pg.querySelector('.pg-file').addEventListener('change', async () => {
         const fileInput = pg.querySelector('.pg-file');
+        const msgEl = pg.querySelector('.pg-msg');
         if (!fileInput.files.length) return;
-        const urls = await uploadPhotos(fileInput.files, 'stage-photos');
-        const arr = JSON.parse(pg.dataset.photos);
-        arr.push(...urls);
-        pg.dataset.photos = JSON.stringify(arr);
-        fileInput.value = '';
-        renderThumbs();
+        fileInput.disabled = true;
+        msgEl.innerHTML = `<p class="subtitle" style="margin:4px 0;">Uploading 1 of ${fileInput.files.length}...</p>`;
+        try {
+          const urls = await uploadPhotos(fileInput.files, 'stage-photos', 'proposal-photos', {
+            onProgress: (done, total) => { if (done < total) msgEl.innerHTML = `<p class="subtitle" style="margin:4px 0;">Uploading ${done + 1} of ${total}...</p>`; },
+          });
+          const arr = JSON.parse(pg.dataset.photos);
+          arr.push(...urls);
+          pg.dataset.photos = JSON.stringify(arr);
+          renderThumbs();
+          msgEl.innerHTML = '';
+        } catch (err) {
+          msgEl.innerHTML = `<div class="error-box">Upload failed: ${escapeHtml(err.message)}. Choose the photos again.</div>`;
+        } finally {
+          fileInput.disabled = false;
+          fileInput.value = '';
+        }
       });
       pg.querySelector('.pg-remove').addEventListener('click', () => pg.remove());
     }
@@ -1092,173 +1105,183 @@
       const msg = document.getElementById('msg');
       msg.innerHTML = '';
 
-      const name = document.getElementById('p-name').value.trim();
-      const client_name = document.getElementById('p-client').value.trim();
-      const client_email = document.getElementById('p-email').value.trim();
-      const client_phone = document.getElementById('p-phone').value.trim();
-      const client_address = document.getElementById('p-address').value.trim();
-      const payment_terms = document.getElementById('p-payment-terms').value;
-      const sow_text = document.getElementById('p-sow').value;
-      const proposal_subtitle = document.getElementById('p-subtitle').value.trim();
-      const terms_text = document.getElementById('p-terms').value;
-      const deposit_percent = parseFloat(document.getElementById('p-deposit').value) || 0;
-      const pylon_link = document.getElementById('p-pylon-link').value.trim();
-      const pylon_project_id = document.getElementById('p-pylon-id').value.trim();
+      const btn = document.getElementById('save-btn');
+      const label = btn.textContent;
+      let navigated = false;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      try {
+        const name = document.getElementById('p-name').value.trim();
+        const client_name = document.getElementById('p-client').value.trim();
+        const client_email = document.getElementById('p-email').value.trim();
+        const client_phone = document.getElementById('p-phone').value.trim();
+        const client_address = document.getElementById('p-address').value.trim();
+        const payment_terms = document.getElementById('p-payment-terms').value;
+        const sow_text = document.getElementById('p-sow').value;
+        const proposal_subtitle = document.getElementById('p-subtitle').value.trim();
+        const terms_text = document.getElementById('p-terms').value;
+        const deposit_percent = parseFloat(document.getElementById('p-deposit').value) || 0;
+        const pylon_link = document.getElementById('p-pylon-link').value.trim();
+        const pylon_project_id = document.getElementById('p-pylon-id').value.trim();
 
-      const stageRows = [...document.querySelectorAll('.cc-row')];
-      const stagesPayload = stageRows.map((row, i) => ({
-        name: row.querySelector('.cc-name').value.trim(),
-        description: row.querySelector('.cc-desc').value.trim(),
-        markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
-        stc_total: parseFloat(row.querySelector('.cc-stc-total').value) || 0,
-        stc_system_kw: parseFloat(row.querySelector('.cc-stc-kw').value) || null,
-        stc_zone_rating: parseFloat(row.querySelector('.cc-stc-zone').value) || 1.382,
-        stc_install_year: parseInt(row.querySelector('.cc-stc-year').value, 10) || null,
-        stc_price_per_certificate: parseFloat(row.querySelector('.cc-stc-price').value) || null,
-        estimated_labour_cost: parseFloat(row.dataset.labourTotal) || 0,
-        estimated_material_cost: parseFloat(row.dataset.materialTotal) || 0,
-        quoted_amount: parseFloat(row.dataset.salePrice) || 0,
-        sort_order: i,
-        lineItems: [...row.querySelectorAll('.li-row')].map((li, j) => {
-          const item_type = li.querySelector('.li-type').value;
-          const rate_tier_id = li.querySelector('.li-tier').value || null;
-          let description = li.querySelector('.li-desc').value.trim();
-          // Labour description is optional - if left blank, fall back to
-          // the rate tier's own name (e.g. "Principal Electrician") rather
-          // than dropping the line entirely.
-          if (!description && item_type === 'labour' && rate_tier_id) {
-            description = RATE_TIERS.find(t => t.id === rate_tier_id)?.name || '';
-          }
-          return {
-            description, item_type,
-            quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
-            unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
-            rate_tier_id,
+        const stageRows = [...document.querySelectorAll('.cc-row')];
+        const stagesPayload = stageRows.map((row, i) => ({
+          name: row.querySelector('.cc-name').value.trim(),
+          description: row.querySelector('.cc-desc').value.trim(),
+          markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
+          stc_total: parseFloat(row.querySelector('.cc-stc-total').value) || 0,
+          stc_system_kw: parseFloat(row.querySelector('.cc-stc-kw').value) || null,
+          stc_zone_rating: parseFloat(row.querySelector('.cc-stc-zone').value) || 1.382,
+          stc_install_year: parseInt(row.querySelector('.cc-stc-year').value, 10) || null,
+          stc_price_per_certificate: parseFloat(row.querySelector('.cc-stc-price').value) || null,
+          estimated_labour_cost: parseFloat(row.dataset.labourTotal) || 0,
+          estimated_material_cost: parseFloat(row.dataset.materialTotal) || 0,
+          quoted_amount: parseFloat(row.dataset.salePrice) || 0,
+          sort_order: i,
+          lineItems: [...row.querySelectorAll('.li-row')].map((li, j) => {
+            const item_type = li.querySelector('.li-type').value;
+            const rate_tier_id = li.querySelector('.li-tier').value || null;
+            let description = li.querySelector('.li-desc').value.trim();
+            // Labour description is optional - if left blank, fall back to
+            // the rate tier's own name (e.g. "Principal Electrician") rather
+            // than dropping the line entirely.
+            if (!description && item_type === 'labour' && rate_tier_id) {
+              description = RATE_TIERS.find(t => t.id === rate_tier_id)?.name || '';
+            }
+            return {
+              description, item_type,
+              quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
+              unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
+              rate_tier_id,
+              sort_order: j,
+              prebuild_group_id: li.dataset.prebuildGroupId || null,
+              prebuild_client_description: li.dataset.prebuildClientDescription || null,
+              prebuild_base_quantity: li.dataset.prebuildBaseQuantity ? parseFloat(li.dataset.prebuildBaseQuantity) : null,
+            };
+          }).filter(li => li.description),
+          photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
+            description: pg.querySelector('.pg-desc').value.trim(),
+            photos: JSON.parse(pg.dataset.photos || '[]').map(url => ({ url })),
             sort_order: j,
-            prebuild_group_id: li.dataset.prebuildGroupId || null,
-            prebuild_client_description: li.dataset.prebuildClientDescription || null,
-            prebuild_base_quantity: li.dataset.prebuildBaseQuantity ? parseFloat(li.dataset.prebuildBaseQuantity) : null,
-          };
-        }).filter(li => li.description),
-        photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
-          description: pg.querySelector('.pg-desc').value.trim(),
-          photos: JSON.parse(pg.dataset.photos || '[]').map(url => ({ url })),
-          sort_order: j,
-        })).filter(pg => pg.description || pg.photos.length),
-      })).filter(s => s.name);
+          })).filter(pg => pg.description || pg.photos.length),
+        })).filter(s => s.name);
 
-      if (!name || !client_name || stagesPayload.length === 0) {
-        msg.innerHTML = `<div class="error-box">Please fill in the project name, client name, and at least one stage.</div>`;
-        return;
-      }
-
-      // Keep the linked client record in sync, or create one if this quote
-      // was built without picking an existing client.
-      let clientId = selectedClientId;
-      const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, address: client_address || null, payment_terms };
-      if (clientId) {
-        await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
-      } else {
-        const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert(clientFields).select().single();
-        if (clientErr) { msg.innerHTML = `<div class="error-box">Could not save client: ${clientErr.message}</div>`; return; }
-        clientId = newClient.id;
-      }
-
-      const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
-      const allPhotos = (settings && settings.portfolio_photos) || [];
-      const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
-      const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
-
-      const projectFields = {
-        name, client_id: clientId, client_name, client_email, client_phone, client_address,
-        sow_text, proposal_subtitle, terms_text,
-        notes: document.getElementById('p-notes').value.trim() || null,
-        deposit_percent, pylon_link, pylon_project_id,
-        laha_approved: document.getElementById('p-laha-approved').checked,
-        reference_photos: referencePhotos.map(url => ({ url })),
-        cover_photos: coverPhotos,
-        proposal_template: currentTemplate,
-        template_answers: readTemplateAnswers(document.getElementById('template-questions')),
-        estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
-        project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
-        site_contact_id: assignedContactIds.site_contact_id || null,
-        job_contact_id: assignedContactIds.job_contact_id || null,
-        sales_contact_id: assignedContactIds.sales_contact_id || null,
-        accounts_contact_id: assignedContactIds.accounts_contact_id || null,
-      };
-      if (!editId && prefillLeadId) projectFields.lead_id = prefillLeadId;
-      // Only on creation - re-saving edits to an already-sent/approved
-      // quote must never reset its pipeline_stage back to draft.
-      if (!editId) projectFields.pipeline_stage = 'draft_quote';
-
-      // Quote number is drawn once, atomically, only when a new quote is
-      // created - editing an existing one never reassigns it. Job number
-      // is NOT drawn here - a database trigger assigns it automatically
-      // the moment the quote is approved (or immediately for Time &
-      // Materials, which skips straight to booked below). No job number
-      // yet is itself the signal that a quote isn't approved.
-      if (!editId) {
-        const { data: quoteNum, error: qErr } = await supabaseClient.rpc('get_next_number', { counter_name: 'quote' });
-        if (qErr) {
-          msg.innerHTML = `<div class="error-box">Could not draw a quote number: ${qErr.message}</div>`;
+        if (!name || !client_name || stagesPayload.length === 0) {
+          msg.innerHTML = `<div class="error-box">Please fill in the project name, client name, and at least one stage.</div>`;
           return;
         }
-        projectFields.quote_number = quoteNum;
+
+        // Keep the linked client record in sync, or create one if this quote
+        // was built without picking an existing client.
+        let clientId = selectedClientId;
+        const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, address: client_address || null, payment_terms };
+        if (clientId) {
+          await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
+        } else {
+          const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert(clientFields).select().single();
+          if (clientErr) { msg.innerHTML = `<div class="error-box">Could not save client: ${escapeHtml(clientErr.message)}</div>`; return; }
+          clientId = newClient.id;
+        }
+
+        const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
+        const allPhotos = (settings && settings.portfolio_photos) || [];
+        const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
+        const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
+
+        const projectFields = {
+          name, client_id: clientId, client_name, client_email, client_phone, client_address,
+          sow_text, proposal_subtitle, terms_text,
+          notes: document.getElementById('p-notes').value.trim() || null,
+          deposit_percent, pylon_link, pylon_project_id,
+          laha_approved: document.getElementById('p-laha-approved').checked,
+          reference_photos: referencePhotos.map(url => ({ url })),
+          cover_photos: coverPhotos,
+          proposal_template: currentTemplate,
+          template_answers: readTemplateAnswers(document.getElementById('template-questions')),
+          estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
+          project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
+          site_contact_id: assignedContactIds.site_contact_id || null,
+          job_contact_id: assignedContactIds.job_contact_id || null,
+          sales_contact_id: assignedContactIds.sales_contact_id || null,
+          accounts_contact_id: assignedContactIds.accounts_contact_id || null,
+        };
+        if (!editId && prefillLeadId) projectFields.lead_id = prefillLeadId;
+        // Only on creation - re-saving edits to an already-sent/approved
+        // quote must never reset its pipeline_stage back to draft.
+        if (!editId) projectFields.pipeline_stage = 'draft_quote';
+
+        // Quote number is drawn once, atomically, only when a new quote is
+        // created - editing an existing one never reassigns it. Job number
+        // is NOT drawn here - a database trigger assigns it automatically
+        // the moment the quote is approved (or immediately for Time &
+        // Materials, which skips straight to booked below). No job number
+        // yet is itself the signal that a quote isn't approved.
+        if (!editId) {
+          const { data: quoteNum, error: qErr } = await supabaseClient.rpc('get_next_number', { counter_name: 'quote' });
+          if (qErr) {
+            msg.innerHTML = `<div class="error-box">Could not draw a quote number: ${escapeHtml(qErr.message)}</div>`;
+            return;
+          }
+          projectFields.quote_number = quoteNum;
+        }
+
+        let projectId = editId;
+        if (editId) {
+          const { error: updateErr } = await supabaseClient.from('projects').update(projectFields).eq('id', editId);
+          if (updateErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(updateErr.message)}</div>`; return; }
+          // Simplest way to keep stages/line items in sync with edits: replace them.
+          const { error: delErr } = await supabaseClient.from('cost_centres').delete().eq('project_id', editId);
+          if (delErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(delErr.message)}</div>`; return; }
+        } else {
+          const { data: project, error: projErr } = await supabaseClient.from('projects').insert(projectFields).select().single();
+          if (projErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(projErr.message)}</div>`; return; }
+          projectId = project.id;
+          if (prefillLeadId) await supabaseClient.from('leads').update({ status: 'converted' }).eq('id', prefillLeadId);
+          if (prefillEmailThreadId) { try { await emailTagThreadToProject(prefillEmailThreadId, projectId, 'client', 'Quote created from this email'); } catch (e) { console.error('Could not tag the email to the quote:', e); } }
+        }
+
+        // Replace-all, same approach as stages just below - simplest way to
+        // handle add/edit/remove/reorder of the milestone list in one save.
+        await supabaseClient.from('payment_milestones').delete().eq('project_id', projectId);
+        const milestonesPayload = readMilestones();
+        if (milestonesPayload.length) {
+          const { error: msErr } = await supabaseClient.from('payment_milestones').insert(milestonesPayload.map(m => ({ ...m, project_id: projectId })));
+          if (msErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(msErr.message)}</div>`; return; }
+        }
+
+        const { data: insertedStages, error: ccErr } = await supabaseClient
+          .from('cost_centres')
+          .insert(stagesPayload.map(({ lineItems, photoGroups, ...s }) => ({ ...s, project_id: projectId })))
+          .select();
+        if (ccErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(ccErr.message)}</div>`; return; }
+
+        const allLineItems = [];
+        const allPhotoGroups = [];
+        insertedStages.forEach((stage, i) => {
+          stagesPayload[i].lineItems.forEach(li => allLineItems.push({ ...li, cost_centre_id: stage.id }));
+          stagesPayload[i].photoGroups.forEach(pg => allPhotoGroups.push({ ...pg, cost_centre_id: stage.id }));
+        });
+        if (allLineItems.length) {
+          const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(allLineItems);
+          if (liErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(liErr.message)}</div>`; return; }
+        }
+        if (allPhotoGroups.length) {
+          const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(allPhotoGroups);
+          if (pgErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(pgErr.message)}</div>`; return; }
+        }
+
+        await logActivity('project', projectId, editId ? 'stage_updated' : 'created', editId ? 'Quote details and stages updated' : 'Quote created');
+
+        // Write the installer summary now (only if the scope is new or changed) so
+        // it is waiting on the job card by the time the work is booked.
+        if (sow_text && sow_text.trim()) { try { await requestInstallerSummary(projectId, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
+
+        try { const { data: tk } = await supabaseClient.from('projects').select('quote_token').eq('id', projectId).single(); autoGenerateQuotePdf({ id: projectId, quote_token: tk && tk.quote_token, proposal_template: currentTemplate }); } catch (e) { /* the Generate PDF button is still there */ }
+        navigated = true;
+        window.location.href = `/project.html?id=${projectId}`;
+      } finally {
+        if (!navigated) { btn.disabled = false; btn.textContent = label; }
       }
-
-      let projectId = editId;
-      if (editId) {
-        const { error: updateErr } = await supabaseClient.from('projects').update(projectFields).eq('id', editId);
-        if (updateErr) { msg.innerHTML = `<div class="error-box">${updateErr.message}</div>`; return; }
-        // Simplest way to keep stages/line items in sync with edits: replace them.
-        const { error: delErr } = await supabaseClient.from('cost_centres').delete().eq('project_id', editId);
-        if (delErr) { msg.innerHTML = `<div class="error-box">${delErr.message}</div>`; return; }
-      } else {
-        const { data: project, error: projErr } = await supabaseClient.from('projects').insert(projectFields).select().single();
-        if (projErr) { msg.innerHTML = `<div class="error-box">${projErr.message}</div>`; return; }
-        projectId = project.id;
-        if (prefillLeadId) await supabaseClient.from('leads').update({ status: 'converted' }).eq('id', prefillLeadId);
-        if (prefillEmailThreadId) { try { await emailTagThreadToProject(prefillEmailThreadId, projectId, 'client', 'Quote created from this email'); } catch (e) { console.error('Could not tag the email to the quote:', e); } }
-      }
-
-      // Replace-all, same approach as stages just below - simplest way to
-      // handle add/edit/remove/reorder of the milestone list in one save.
-      await supabaseClient.from('payment_milestones').delete().eq('project_id', projectId);
-      const milestonesPayload = readMilestones();
-      if (milestonesPayload.length) {
-        const { error: msErr } = await supabaseClient.from('payment_milestones').insert(milestonesPayload.map(m => ({ ...m, project_id: projectId })));
-        if (msErr) { msg.innerHTML = `<div class="error-box">${msErr.message}</div>`; return; }
-      }
-
-      const { data: insertedStages, error: ccErr } = await supabaseClient
-        .from('cost_centres')
-        .insert(stagesPayload.map(({ lineItems, photoGroups, ...s }) => ({ ...s, project_id: projectId })))
-        .select();
-      if (ccErr) { msg.innerHTML = `<div class="error-box">${ccErr.message}</div>`; return; }
-
-      const allLineItems = [];
-      const allPhotoGroups = [];
-      insertedStages.forEach((stage, i) => {
-        stagesPayload[i].lineItems.forEach(li => allLineItems.push({ ...li, cost_centre_id: stage.id }));
-        stagesPayload[i].photoGroups.forEach(pg => allPhotoGroups.push({ ...pg, cost_centre_id: stage.id }));
-      });
-      if (allLineItems.length) {
-        const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(allLineItems);
-        if (liErr) { msg.innerHTML = `<div class="error-box">${liErr.message}</div>`; return; }
-      }
-      if (allPhotoGroups.length) {
-        const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(allPhotoGroups);
-        if (pgErr) { msg.innerHTML = `<div class="error-box">${pgErr.message}</div>`; return; }
-      }
-
-      await logActivity('project', projectId, editId ? 'stage_updated' : 'created', editId ? 'Quote details and stages updated' : 'Quote created');
-
-      // Write the installer summary now (only if the scope is new or changed) so
-      // it is waiting on the job card by the time the work is booked.
-      if (sow_text && sow_text.trim()) { try { await requestInstallerSummary(projectId, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
-
-      try { const { data: tk } = await supabaseClient.from('projects').select('quote_token').eq('id', projectId).single(); autoGenerateQuotePdf({ id: projectId, quote_token: tk && tk.quote_token, proposal_template: currentTemplate }); } catch (e) { /* the Generate PDF button is still there */ }
-      window.location.href = `/project.html?id=${projectId}`;
     });
 
     // ---------- load (edit mode) or start fresh ----------

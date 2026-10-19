@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -40,7 +40,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/theme.js"></script>
   <script>
     let staffOptions = [];
@@ -134,6 +134,11 @@
         const msg = overlay.querySelector('#veh-msg');
         const rego = overlay.querySelector('#veh-rego').value.trim();
         if (!rego) { msg.innerHTML = `<div class="error-box">Rego is required.</div>`; return; }
+        const btn = overlay.querySelector('#veh-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const fields = {
           rego,
           vehicle_name: overlay.querySelector('#veh-name').value.trim() || null,
@@ -154,6 +159,10 @@
         if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         overlay.remove();
         await loadFleet();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
 
       if (vehicle) {

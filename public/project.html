@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -517,6 +517,7 @@
         <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${escapeHtml(description)}" style="margin-bottom:8px;" />
         <div class="pg-thumbs" style="margin-bottom:8px;"></div>
         <input type="file" class="pg-file" accept="image/*" multiple style="font-size:12px;" />
+        <div class="pg-msg" style="font-size:12px;"></div>
         <button type="button" class="secondary pg-remove" style="font-size:12px; padding:6px 12px;">Remove group</button>
       `;
       stageRow.querySelector('.photo-groups').appendChild(pg);
@@ -532,13 +533,25 @@
       // file was already the whole job done.
       pg.querySelector('.pg-file').addEventListener('change', async () => {
         const fileInput = pg.querySelector('.pg-file');
+        const msgEl = pg.querySelector('.pg-msg');
         if (!fileInput.files.length) return;
-        const urls = await uploadPhotos(fileInput.files, 'stage-photos');
-        const arr = JSON.parse(pg.dataset.photos);
-        arr.push(...urls);
-        pg.dataset.photos = JSON.stringify(arr);
-        fileInput.value = '';
-        renderThumbs();
+        fileInput.disabled = true;
+        msgEl.innerHTML = `<p class="subtitle" style="margin:4px 0;">Uploading 1 of ${fileInput.files.length}...</p>`;
+        try {
+          const urls = await uploadPhotos(fileInput.files, 'stage-photos', 'proposal-photos', {
+            onProgress: (done, total) => { if (done < total) msgEl.innerHTML = `<p class="subtitle" style="margin:4px 0;">Uploading ${done + 1} of ${total}...</p>`; },
+          });
+          const arr = JSON.parse(pg.dataset.photos);
+          arr.push(...urls);
+          pg.dataset.photos = JSON.stringify(arr);
+          renderThumbs();
+          msgEl.innerHTML = '';
+        } catch (err) {
+          msgEl.innerHTML = `<div class="error-box">Upload failed: ${escapeHtml(err.message)}. Choose the photos again.</div>`;
+        } finally {
+          fileInput.disabled = false;
+          fileInput.value = '';
+        }
       });
       pg.querySelector('.pg-remove').addEventListener('click', () => pg.remove());
     }
@@ -2787,7 +2800,18 @@
       }
     }
 
+    // Needs attention line on the Summary tab: shown until a certificate is
+    // uploaded or a not-required reason is saved (both re-run initCcewSection).
+    function renderCcewNudge(project) {
+      const line = document.getElementById('summary-ccew-line');
+      if (!line) return;
+      line.innerHTML = project.job_number && !project.ccew_file_path && !project.ccew_not_required_reason
+        ? '<p class="subtitle" style="margin-bottom:6px;">No CCEW uploaded yet. Add it under Compliance - CCEW on this tab.</p>'
+        : '';
+    }
+
     async function initCcewSection(project) {
+      renderCcewNudge(project);
       const el = document.getElementById('ccew-section');
       if (!el) return;
 
@@ -2802,7 +2826,7 @@
       } else if (project.ccew_not_required_reason) {
         el.innerHTML = `
           <div class="badge draft" style="margin-bottom:10px; display:inline-block;">Not required</div>
-          <p class="subtitle" style="margin-bottom:10px;">${project.ccew_not_required_reason}</p>
+          <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(project.ccew_not_required_reason)}</p>
           <button type="button" class="secondary" id="ccew-change-btn">Upload one instead / change reason</button>`;
         el.querySelector('#ccew-change-btn').addEventListener('click', () => renderCcewUploadForm(project));
       } else {
@@ -2914,6 +2938,12 @@
         project.quote_number ? `Q${project.quote_number}` : null,
         project.sm8_job_number ? `ServiceM8 #${escapeHtml(project.sm8_job_number)}` : null,
       ].filter(Boolean).join(' &middot; ');
+      // Site address (map link), client phone (tap to call) and email under the name line.
+      const contactLine = [
+        project.client_address ? mapsLink(project.client_address) : null,
+        project.client_phone ? `<a class="link-quiet" href="tel:${escapeHtml(String(project.client_phone).replace(/[^\d+]/g, ''))}">${escapeHtml(project.client_phone)}</a>` : null,
+        project.client_email ? `<a class="link-quiet" href="mailto:${escapeHtml(project.client_email)}">${escapeHtml(project.client_email)}</a>` : null,
+      ].filter(Boolean).join(' &middot; ');
 
       // Quoted-split donut (Materials/Labour/Profit) - only meaningful
       // when there's a positive quote and cost hasn't blown past it;
@@ -2946,7 +2976,7 @@
 
       content.innerHTML = `
         <h1>${escapeHtml(project.name)}</h1>
-        <p class="subtitle">${escapeHtml(project.client_name)} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
+        <p class="subtitle">${escapeHtml(project.client_name)} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}${contactLine ? '<br>' + contactLine : ''}</p>
         ${isFrozenQuote && project.approved_at ? `<p class="subtitle" style="margin-top:2px;">Approved ${new Date(project.approved_at).toLocaleDateString('en-AU')}${project.approval_note ? ' - ' + escapeHtml(project.approval_note) : ' - approved online by the client'}${project.approval_email_thread_id ? ` &middot; <a class="link-quiet" href="/inbox.html?thread=${project.approval_email_thread_id}">View the email</a>` : ''}</p>` : ''}
         ${!project.job_number && project.status === 'declined' ? `<div class="error-box" style="margin:6px 0 12px;">${approvalProofHtml(project)}${pricingVisible ? (project.expired ? ' <button type="button" class="secondary vu-extend" data-key="quote" style="font-size:12px; padding:4px 10px; margin-left:6px;">Extend...</button>' : ' <button type="button" class="secondary" id="quote-reopen-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Reopen quote</button>') : ''}</div>` : ''}
         ${!project.job_number && project.status === 'sent' ? `<div id="quote-valid-until">${validUntilHtml(project, 'quote', pricingVisible)}</div>` : ''}
@@ -3013,7 +3043,15 @@
                 <div id="installer-summary-msg"></div>
               </div>
               ` : ''}
-              ${!editMode ? '<div id="meetings-card"></div><div id="assets-card"></div><div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
+              ${!editMode ? '<div id="meetings-card"></div><div id="assets-card"></div>' : ''}
+              ${project.job_number && !editMode ? `
+              <div class="card">
+                <h2>Compliance - CCEW</h2>
+                <p class="subtitle" style="margin-bottom:10px;">Submitted through the Building and Energy Commission's own website - upload the resulting certificate here for the record, or state why one isn't needed.</p>
+                <div id="ccew-section"></div>
+              </div>
+              ` : ''}
+              ${!editMode ? '<div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
               ${pricingVisible ? (isQuoteFree ? `
                 <div class="grid cols-2">
                   <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
@@ -3104,6 +3142,7 @@
 
               <div class="card">
                 <h2>Needs attention</h2>
+                <div id="summary-ccew-line"></div>
                 <div id="summary-po-line">${project.job_number ? `<p class="subtitle">Loading purchase orders...</p>` : `<p class="subtitle">Purchase orders start once this quote is approved and becomes a job.</p>`}</div>
               </div>
 
@@ -3549,14 +3588,6 @@
                 </label>
                 <p class="subtitle" style="margin-top:6px;">For jobs more than 100km from base with a Mobilisation stage covering travel/LAHA. Staff clocking out of this job are asked whether they stayed overnight, and the allowance gets added to their pay automatically.</p>
                 <div id="laha-approved-msg"></div>
-              </div>
-              ` : ''}
-
-              ${['client_handover', 'awaiting_payment', 'archived'].includes(project.pipeline_stage) ? `
-              <div class="card">
-                <h2>Compliance - CCEW</h2>
-                <p class="subtitle" style="margin-bottom:10px;">Submitted through the Building and Energy Commission's own website - upload the resulting certificate here for the record, or state why one isn't needed.</p>
-                <div id="ccew-section"></div>
               </div>
               ` : ''}
 
@@ -4709,31 +4740,40 @@
       holder.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       document.getElementById('js-cancel').addEventListener('click', () => { holder.innerHTML = ''; });
       document.getElementById('js-save').addEventListener('click', async () => {
-        const msg = document.getElementById('js-msg');
-        const count = parseInt(document.getElementById('js-count').value, 10);
-        if (!(count >= 0)) { msg.innerHTML = '<div class="error-box">Enter the number of STCs.</div>'; return; }
-        const sale = document.getElementById('js-sale').value;
-        const data = {
-          stc_type: document.getElementById('js-type').value,
-          stc_count: count,
-          booked_price: parseFloat(document.getElementById('js-booked').value) || 0,
-          formbay_job_id: document.getElementById('js-formbay').value.trim() || null,
-          commercial: document.getElementById('js-commercial').checked,
-          notes: document.getElementById('js-notes').value.trim() || null,
-          updated_at: new Date().toISOString(),
-        };
-        if (!paid) {
-          data.status = document.getElementById('js-status').value;
-          data.sale_price = sale === '' ? null : parseFloat(sale);
-          data.sold_on = document.getElementById('js-sold-on').value || null;
+        const btn = document.getElementById('js-save');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+          const msg = document.getElementById('js-msg');
+          const count = parseInt(document.getElementById('js-count').value, 10);
+          if (!(count >= 0)) { msg.innerHTML = '<div class="error-box">Enter the number of STCs.</div>'; return; }
+          const sale = document.getElementById('js-sale').value;
+          const data = {
+            stc_type: document.getElementById('js-type').value,
+            stc_count: count,
+            booked_price: parseFloat(document.getElementById('js-booked').value) || 0,
+            formbay_job_id: document.getElementById('js-formbay').value.trim() || null,
+            commercial: document.getElementById('js-commercial').checked,
+            notes: document.getElementById('js-notes').value.trim() || null,
+            updated_at: new Date().toISOString(),
+          };
+          if (!paid) {
+            data.status = document.getElementById('js-status').value;
+            data.sale_price = sale === '' ? null : parseFloat(sale);
+            data.sold_on = document.getElementById('js-sold-on').value || null;
+          }
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const { error } = row
+            ? await supabaseClient.from('job_stcs').update(data).eq('id', row.id)
+            : await supabaseClient.from('job_stcs').insert({ ...data, project_id: project.id, created_by: session.user.id });
+          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+          await syncProjectStcStatus(project);
+          loadJobStcs(project, centres);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
         }
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const { error } = row
-          ? await supabaseClient.from('job_stcs').update(data).eq('id', row.id)
-          : await supabaseClient.from('job_stcs').insert({ ...data, project_id: project.id, created_by: session.user.id });
-        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-        await syncProjectStcStatus(project);
-        loadJobStcs(project, centres);
       });
       const del = document.getElementById('js-delete');
       if (del) del.addEventListener('click', async () => {
@@ -5844,9 +5884,12 @@
               });
               return;
             }
-            const url = await getSignedDocUrl(a.dataset.path);
-            window.open(url, '_blank');
-          } catch (err) { alert(err.message); }
+            // Tab is opened on the tap itself (no await before it) so iPhone Safari does not block it.
+            await openSignedDocInNewTab(a.dataset.path);
+          } catch (err) {
+            listEl.querySelectorAll('.doc-open-error').forEach(el => el.remove());
+            listEl.insertAdjacentHTML('afterbegin', `<div class="error-box doc-open-error">Could not open: ${escapeHtml(err.message)}</div>`);
+          }
         });
       });
       listEl.querySelectorAll('.doc-delete-btn').forEach(btn => {
@@ -5945,7 +5988,6 @@
       if (!el || !project.job_number || typeof openAssetPanel !== 'function') return;
       const { data: assets } = await supabaseClient.from('customer_assets').select('*').eq('project_id', project.id).order('created_at');
       const finished = ['client_handover', 'ready_to_invoice', 'awaiting_payment', 'complete', 'archived'].includes(project.pipeline_stage);
-      if (!(assets || []).length && !finished) { el.innerHTML = ''; return; }
       const refresh = () => loadAssetsCard(project);
       const addFromJob = () => {
         const queue = assetPrefillsForJob(project);
@@ -5953,7 +5995,7 @@
         next();
       };
       el.innerHTML = `
-        <div class="card" ${!(assets || []).length ? 'style="border-color:var(--accent);"' : ''}>
+        <div class="card" ${finished && !(assets || []).length ? 'style="border-color:var(--accent);"' : ''}>
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
             <h2 style="margin:0;">Installed equipment</h2>
             <div style="display:flex; gap:6px;">
@@ -6912,20 +6954,11 @@
     }
 
     function wireSitePhotoUpload(projectId) {
-      document.getElementById('site-photo-file').addEventListener('change', async () => {
-        const fileInput = document.getElementById('site-photo-file');
-        const msg = document.getElementById('site-photo-upload-msg');
-        if (!fileInput.files.length) return;
-        msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
-        try {
-          const { data: { user } } = await supabaseClient.auth.getUser();
-          const urls = await uploadPhotos(fileInput.files, projectId, 'site-photos');
-          const { error } = await supabaseClient.from('project_photos').insert(urls.map(url => ({ project_id: projectId, staff_id: user.id, url })));
-          if (error) throw error;
-          fileInput.value = '';
-          msg.innerHTML = '';
-          await loadSitePhotos(projectId);
-        } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+      // Shared helper (supabase-client.js): per-file count, one project_photos row as each
+      // file lands, Retry for the ones that failed. staffId omitted so it uses the logged-in user.
+      wireSitePhotoInput(document.getElementById('site-photo-file'), document.getElementById('site-photo-upload-msg'), {
+        projectId,
+        onAdded: () => loadSitePhotos(projectId),
       });
     }
 
@@ -7115,11 +7148,12 @@
       listEl.querySelectorAll('.view-doc').forEach(a => {
         a.addEventListener('click', async (e) => {
           e.preventDefault();
+          document.getElementById('po-msg').innerHTML = '';
           try {
-            const url = await getSignedDocUrl(a.dataset.path);
-            window.open(url, '_blank');
+            // Tab is opened on the tap itself (no await before it) so iPhone Safari does not block it.
+            await openSignedDocInNewTab(a.dataset.path);
           } catch (err) {
-            alert(err.message);
+            document.getElementById('po-msg').innerHTML = `<div class="error-box">Could not open: ${escapeHtml(err.message)}</div>`;
           }
         });
       });
@@ -7396,6 +7430,10 @@
 
       overlay.querySelector('#cp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#cp-save-btn').addEventListener('click', async () => {
+        const btn = overlay.querySelector('#cp-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
         const msg = overlay.querySelector('#cp-msg');
         const budgetCap = parseFloat(overlay.querySelector('#cp-budget-cap').value) || null;
 
@@ -7443,7 +7481,10 @@
           overlay.remove();
           await loadPurchaseOrders(projectId, centres);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
         }
       });
     }

@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -48,7 +48,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
   <script>
     const esc = escapeHtml;
@@ -56,9 +56,12 @@
 
     async function openDoc(doc) {
       if (doc.kind === 'schedule_of_rates') { window.open('/rates.html', '_blank'); return; }
-      const win = window.open('', '_blank'); // opened now so a phone does not block it as a popup
-      try { win.location.href = await getSignedDocUrl(doc.file_path); }
-      catch (err) { if (win) win.close(); alert('Could not open: ' + err.message); }
+      try { await openSignedDocInNewTab(doc.file_path); }
+      catch (err) {
+        const listEl = document.getElementById('cd-list');
+        listEl.querySelectorAll('.cd-open-error').forEach(el => el.remove());
+        listEl.insertAdjacentHTML('afterbegin', `<div class="error-box cd-open-error">Could not open: ${esc(err.message)}</div>`);
+      }
     }
 
     async function loadDocs() {

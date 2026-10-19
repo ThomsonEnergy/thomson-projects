@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -96,10 +96,12 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allEntries = [];
+    let myRole = 'staff';
+    let myId = null;
     let editingEntryId = null;
 
     // Collapsed by default - the form used to be the first thing on the
@@ -280,21 +282,23 @@
       filtered.sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { numeric: true, sensitivity: 'base' }));
       const listEl = document.getElementById('kb-list');
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">Nothing here yet.</p>`; return; }
+      const canManage = (e) => isPricingRole(myRole) || e.created_by === myId;
       listEl.innerHTML = filtered.map(e => `
         <div class="kb-entry" data-id="${e.id}" style="padding:12px 0; border-bottom:0.5px solid var(--border);">
-          <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
-            <div>
+          <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:start; gap:8px;">
+            <div style="flex:1 1 220px; min-width:0;">
               <strong>${escapeHtml(e.title)}</strong>
               <span class="subtitle" style="font-size:12px;">${escapeHtml(e.category || 'Uncategorised')} &middot; ${e.profiles ? escapeHtml(e.profiles.full_name) : 'Someone'} &middot; ${new Date(e.created_at).toLocaleDateString()}</span>
             </div>
-            <div style="white-space:nowrap;">
-              ${e.source_url && /^https?:\/\//i.test(e.source_url) ? `<a class="link-quiet" href="${escapeHtml(e.source_url).replace(/"/g, '&quot;')}" target="_blank" style="font-size:12px; margin-right:10px;">Open link</a>` : ''}
-              ${e.file_path ? `<button type="button" class="secondary kb-open-file" style="font-size:12px; padding:4px 8px;">Open file</button>` : ''}
-              ${e.file_path && /\.pdf$/i.test(e.file_name || '') ? `<button type="button" class="secondary kb-ocr" style="font-size:12px; padding:4px 8px;">Read with OCR</button>` : ''}
-              <button type="button" class="secondary kb-edit" style="font-size:12px; padding:4px 8px;">Edit</button>
-              <button type="button" class="secondary kb-delete" style="font-size:12px; padding:4px 8px;">Delete</button>
+            <div style="display:flex; flex-wrap:wrap; gap:6px;">
+              ${e.source_url && /^https?:\/\//i.test(e.source_url) ? `<a class="btn secondary" href="${escapeHtml(e.source_url).replace(/"/g, '&quot;')}" target="_blank" rel="noopener" style="font-size:13px; padding:8px 12px;">Open link</a>` : ''}
+              ${e.file_path ? `<button type="button" class="secondary kb-open-file" style="font-size:13px; padding:8px 12px;">Open file</button>` : ''}
+              ${e.file_path && /\.pdf$/i.test(e.file_name || '') ? `<button type="button" class="secondary kb-ocr" style="font-size:13px; padding:8px 12px;">Read with OCR</button>` : ''}
+              ${canManage(e) ? `<button type="button" class="secondary kb-edit" style="font-size:13px; padding:8px 12px;">Edit</button>
+              <button type="button" class="secondary kb-delete" style="font-size:13px; padding:8px 12px;">Delete</button>` : ''}
             </div>
           </div>
+          <div class="kb-row-msg"></div>
           ${e.content && e.extraction_error ? `<p style="margin:6px 0 0; font-size:12px; color:var(--red);">${escapeHtml(e.extraction_error)}</p>` : ''}
           <p class="kb-preview" style="margin:6px 0 0; font-size:13px; ${e.content ? 'cursor:pointer;' : 'font-style:italic; color:var(--muted);'} white-space:pre-wrap;" data-expanded="false">${escapeHtml(entryStatusPreview(e))}</p>
         </div>`).join('');
@@ -310,14 +314,27 @@
         const openBtn = row.querySelector('.kb-open-file');
         if (openBtn) {
           openBtn.addEventListener('click', async () => {
-            const { data, error } = await supabaseClient.storage.from('knowledge-files').createSignedUrl(entry.file_path, 300);
-            if (!error) window.open(data.signedUrl, '_blank');
+            const name = entry.file_name || entry.file_path || '';
+            const msgEl = row.querySelector('.kb-row-msg');
+            msgEl.innerHTML = '';
+            try {
+              if (/\.pdf$/i.test(name)) { openPdfViewer(entry.file_path, entry.title, { bucket: 'knowledge-files' }); return; }
+              if (/\.(jpe?g|png|webp|gif)$/i.test(name)) {
+                const url = await getSignedDocUrl(entry.file_path, 'knowledge-files');
+                openPhotoLightbox([url], 0);
+                return;
+              }
+              // First await in this branch, so the tab opens on the tap (iPhone).
+              await openSignedDocInNewTab(entry.file_path, 'knowledge-files');
+            } catch (err) {
+              msgEl.innerHTML = `<div class="error-box">Could not open: ${escapeHtml(err.message)}</div>`;
+            }
           });
         }
         const ocrBtn = row.querySelector('.kb-ocr');
         if (ocrBtn) ocrBtn.addEventListener('click', () => openOcrPanel(entry));
-        row.querySelector('.kb-edit').addEventListener('click', () => startEdit(entry));
-        row.querySelector('.kb-delete').addEventListener('click', async () => {
+        row.querySelector('.kb-edit')?.addEventListener('click', () => startEdit(entry));
+        row.querySelector('.kb-delete')?.addEventListener('click', async () => {
           if (!confirm(`Delete "${entry.title}"?`)) return;
           if (editingEntryId === entry.id) cancelEdit();
           await supabaseClient.from('knowledge_entries').delete().eq('id', entry.id);
@@ -474,6 +491,8 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+      myId = session.user.id;
+      myRole = await getMyRole();
       await loadEntries();
     })();
   </script>

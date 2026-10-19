@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=19" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=20" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -154,7 +154,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=95"></script>
+  <script src="/js/supabase-client.js?v=96"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId = null;
@@ -1177,16 +1177,24 @@
       const notes = document.getElementById('leave-notes').value.trim();
       if (!start_date || !end_date) { msg.innerHTML = `<div class="error-box">Pick a start and end date.</div>`; return; }
       if (end_date < start_date) { msg.innerHTML = `<div class="error-box">End date can't be before the start date.</div>`; return; }
-
+      const btn = document.getElementById('request-leave-btn');
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Requesting...';
+      try {
       const { error } = await supabaseClient.from('leave_requests').insert({ staff_id: myUserId, start_date, end_date, leave_type, notes });
       msg.innerHTML = error
-        ? `<div class="error-box">${error.message}</div>`
+        ? `<div class="error-box">${escapeHtml(error.message)}</div>`
         : `<div class="success-box">Requested. You'll see it below once it's actioned.</div>`;
       if (!error) {
         document.getElementById('leave-start').value = '';
         document.getElementById('leave-end').value = '';
         document.getElementById('leave-notes').value = '';
         await loadMyLeave();
+      }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
       }
     });
 
