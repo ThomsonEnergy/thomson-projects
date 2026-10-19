@@ -393,3 +393,14 @@ Live: see `docs/PROJECT_SPEC.md` A3 Variations. Code only.
 ## 13. Approve by phone or email and Decline, for quotes and variations (built 19 Oct 2026)
 
 Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261029000000).
+
+## 14. Quotes and variations expire (auto decline) (planned 19 Oct 2026, waiting on owner's yes)
+
+1. **Valid for 30 days by default.** Settings > Company: "Quotes and variations valid for (days)", default 30. Each quote and fixed-price variation gets a "Valid until" date, set when it is first sent (email from the app or "I've sent it myself" / Mark sent) as sent date + 30. Editable on the quote's Details tab and the variation card.
+2. **Shown to the client:** "Valid until 18 November 2026" on the quote (investment summary and sign block) and the variation page.
+3. **Reminder:** 3 days before, whoever made it gets a notification to follow up.
+4. **Nightly auto decline** (just after midnight Sydney, like the Job Booked check): anything still Sent past its date becomes Declined with reason "Expired: not accepted by 18 Nov 2026" (shown as "Expired"), creator notified, listed on the ops page. Client page then says it expired and to contact us; accepting is blocked.
+5. **Reopen** sets a fresh valid until (today + 30).
+6. **Existing sent quotes** get today + 30 (nothing expires the first night).
+
+Migration: `valid_until` on quotes and variations, `quote_valid_days` in company settings, `expired` flag on the decline.
