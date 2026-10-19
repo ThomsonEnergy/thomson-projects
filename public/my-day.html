@@ -15,10 +15,16 @@
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .day-item {
-    display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+    display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:12px;
     padding:10px 0; border-bottom:1px solid var(--border);
   }
   .day-item:last-child { border-bottom:none; }
+  .day-item-actions { display:flex; gap:6px; flex-shrink:0; }
+  .day-item .task-error { flex-basis:100%; margin-top:0; }
+  @media (max-width: 700px) {
+    .day-item-actions { flex-basis:100%; }
+    .day-item-actions button { flex:1; min-height:44px; justify-content:center; }
+  }
 </style>
 </head>
 <body>
@@ -569,10 +575,11 @@
       // Stages plus any variation that still has work to do (see loadClockableCostCentres).
       const centres = await loadClockableCostCentres(projectId);
       if (!centres.length) { wrap.style.display = 'none'; return; }
+      if (centres.length === 1) selectedClockCostCentres = [centres[0].id];
 
       wrap.style.display = 'block';
       chipsEl.innerHTML = centres.map(c => `
-        <button type="button" class="cc-chip" data-id="${c.id}">
+        <button type="button" class="cc-chip ${selectedClockCostCentres.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
           <span class="cc-chip-num">${c.number}</span> ${escapeHtml(c.name)}
         </button>
       `).join('');
@@ -698,8 +705,8 @@
       const parent = task.parent_task_id ? taskData.byId[task.parent_task_id] : null;
       const openHref = task.project_id ? `/project.html?id=${task.project_id}` : '/tasks.html';
       const doneBtn = openSubs > 0
-        ? `<button type="button" class="secondary" onclick="window.location.href='${openHref}'" title="Tick off its subtasks first" style="font-size:12px; padding:6px 10px;">Open ${task.project_id ? 'job' : 'tasks'}</button>`
-        : `<button type="button" class="secondary complete-task-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">Done</button>`;
+        ? `<button type="button" class="secondary" onclick="window.location.href='${openHref}'" title="Tick off its subtasks first">Open ${task.project_id ? 'job' : 'tasks'}</button>`
+        : `<button type="button" class="secondary complete-task-btn" data-id="${task.id}">Done</button>`;
       const notes = [];
       if (parent) notes.push(`Subtask of: ${escapeHtml(parent.description)}`);
       if (sub) notes.push(`${sub.done} of ${sub.total} subtasks done`);
@@ -712,8 +719,8 @@
             ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${escapeHtml(task.description)}</a>` : `<span>${escapeHtml(task.description)}</span>`}
             ${notes.length ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${notes.join(' &middot; ')}</p>` : ''}
           </div>
-          <div style="display:flex; gap:6px; flex-shrink:0;">
-            ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">I can do this</button>` : ''}
+          <div class="day-item-actions">
+            ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}">I can do this</button>` : ''}
             ${doneBtn}
           </div>
         </div>`;
@@ -769,6 +776,15 @@
       }).join('');
     }
 
+    // Keeps the reason in the task row instead of an alert the person taps away.
+    function showTaskError(btn, text) {
+      const row = btn.closest('.day-item');
+      if (!row) return;
+      let box = row.querySelector('.task-error');
+      if (!box) { box = document.createElement('div'); box.className = 'error-box task-error'; row.appendChild(box); }
+      box.textContent = text;
+    }
+
     function renderTasks() {
       const { mine, open } = taskData;
       const q = (document.getElementById('open-task-search').value || '').trim().toLowerCase();
@@ -789,22 +805,34 @@
       document.querySelectorAll('.complete-task-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const task = taskData.byId[btn.dataset.id];
-          btn.disabled = true;
-          const { error: doneErr } = await supabaseClient.from('job_tasks').update({
-            completed: true, completed_by: myUserId, completed_at: new Date().toISOString(),
-          }).eq('id', btn.dataset.id);
-          if (doneErr) { btn.disabled = false; alert('Could not tick that off: ' + doneErr.message); return; }
-          // Same gate as the job page: the last required task moves the job out of Awaiting Action.
-          if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
-          await loadTasks();
+          const label = btn.textContent;
+          btn.disabled = true; btn.textContent = 'Saving...';
+          try {
+            const { error: doneErr } = await supabaseClient.from('job_tasks').update({
+              completed: true, completed_by: myUserId, completed_at: new Date().toISOString(),
+            }).eq('id', btn.dataset.id);
+            if (doneErr) throw doneErr;
+            // Same gate as the job page: the last required task moves the job out of Awaiting Action.
+            if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
+            await loadTasks();
+          } catch (err) {
+            btn.disabled = false; btn.textContent = label;
+            showTaskError(btn, 'Could not tick that off: ' + ((err && err.message) || String(err)));
+          }
         });
       });
       document.querySelectorAll('.pick-up-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          btn.disabled = true;
-          const { error: pickErr } = await supabaseClient.from('job_tasks').update({ assigned_to_user_id: myUserId }).eq('id', btn.dataset.id);
-          if (pickErr) { btn.disabled = false; alert('Could not pick that up: ' + pickErr.message); return; }
-          await loadTasks();
+          const label = btn.textContent;
+          btn.disabled = true; btn.textContent = 'Saving...';
+          try {
+            const { error: pickErr } = await supabaseClient.from('job_tasks').update({ assigned_to_user_id: myUserId }).eq('id', btn.dataset.id);
+            if (pickErr) throw pickErr;
+            await loadTasks();
+          } catch (err) {
+            btn.disabled = false; btn.textContent = label;
+            showTaskError(btn, 'Could not pick that up: ' + ((err && err.message) || String(err)));
+          }
         });
       });
     }

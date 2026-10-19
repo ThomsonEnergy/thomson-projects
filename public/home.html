@@ -70,7 +70,10 @@
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:4px;">
       <h1 id="greeting" style="margin:0 0 20px;">Home</h1>
       <div style="text-align:right;">
-        <button type="button" id="clock-btn" class="btn" style="white-space:nowrap;">Clock in</button>
+        <div style="display:inline-flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+          <button type="button" class="secondary" id="switch-job-btn" style="display:none; white-space:nowrap;">Switch job</button>
+          <button type="button" id="clock-btn" class="btn" style="white-space:nowrap;">Clock in</button>
+        </div>
         <div id="clocked-into-line" class="subtitle" style="display:none; margin-top:6px; font-size:12px;"></div>
       </div>
     </div>
@@ -84,6 +87,7 @@
           <button type="button" class="secondary" id="edit-quick-nav-btn" style="font-size:12px; padding:6px 10px;">Edit</button>
         </div>
         <div class="quick-nav" id="quick-nav"><p class="subtitle">Loading...</p></div>
+        <p id="daily-quote" class="subtitle" style="display:none; margin:0 0 20px; font-size:13px;"></p>
       </div>
       <div class="card" id="my-schedule-card">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
@@ -140,6 +144,7 @@
     async function refreshClockButton() {
       const btn = document.getElementById('clock-btn');
       const lineEl = document.getElementById('clocked-into-line');
+      const switchBtn = document.getElementById('switch-job-btn');
       const { data } = await supabaseClient
         .from('time_entries')
         .select('id, staff_id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, projects(name, job_number, quote_number)')
@@ -153,14 +158,17 @@
         btn.textContent = 'Clock out';
         btn.classList.add('danger');
         btn.onclick = () => openClockOutModal(data, refreshClockButton);
+        switchBtn.style.display = '';
+        switchBtn.onclick = () => openJobSwitchModal(data, refreshClockButton);
         const jobLabel = data.projects ? projectRef(data.projects) : 'General / Office';
-        lineEl.innerHTML = `Clocked into: ${escapeHtml(jobLabel)} &middot; <a href="/my-day.html" class="link-quiet">Switch job</a>`;
+        lineEl.innerHTML = `Clocked into: ${escapeHtml(jobLabel)}`;
         lineEl.style.display = 'block';
       } else {
         btn.textContent = 'Clock in';
         btn.classList.remove('danger');
         btn.disabled = false;
         btn.onclick = () => { window.location.href = '/my-day.html'; };
+        switchBtn.style.display = 'none';
         lineEl.style.display = 'none';
       }
     }
@@ -888,14 +896,17 @@
     ];
 
     function loadDailyGreeting(firstName) {
-      // #greeting already shows a plain "Welcome back, {name}" fallback -
-      // only swap it out once the quote's actually picked, so there's
-      // never a blank heading, though this resolves instantly (no fetch).
+      // #greeting only ever holds "Welcome back, {name}" (one line, so the
+      // clock button stays at the top on a phone). The daily quote goes in
+      // #daily-quote under the shortcut tiles, shown once it is picked.
       const el = document.getElementById('greeting');
       const sydneyDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
       const dayOfYear = Math.floor((new Date(sydneyDateStr) - new Date(sydneyDateStr.slice(0, 4) + '-01-01')) / 86400000);
       const quote = INSPIRATIONAL_QUOTES[dayOfYear % INSPIRATIONAL_QUOTES.length];
-      el.textContent = `Welcome back, ${firstName || 'there'}. "${quote.text}" - ${quote.author}`;
+      el.textContent = `Welcome back, ${firstName || 'there'}`;
+      const quoteEl = document.getElementById('daily-quote');
+      quoteEl.textContent = `"${quote.text}" - ${quote.author}`;
+      quoteEl.style.display = '';
     }
 
     async function loadFeed() {

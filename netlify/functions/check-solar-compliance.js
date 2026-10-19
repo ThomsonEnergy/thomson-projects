@@ -55,7 +55,7 @@ exports.handler = async (event) => {
       hasAccreditedStaff:
         (licences || []).some((l) => /saa|accreditation/i.test(l.licence_name || '')) &&
         (licences || []).some((l) => /electrical/i.test(l.licence_name || '')),
-      hasComplianceCertDoc: (docs || []).some((d) => d.folder === 'Compliance certificate'),
+      hasComplianceCertDoc: (docs || []).some((d) => d.folder === 'Compliance certificate'), // legacy folder only; the rule reads projects.ccew_file_path first
       hasOwnerDeclarationDoc: (docs || []).some((d) => d.folder === 'Owner STC declaration'),
     };
 
