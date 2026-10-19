@@ -382,10 +382,6 @@ Reviewed 18 Oct 2026 against `policies and Contracts/`. Have: Code of Conduct, C
 
 Live: see `docs/PROJECT_SPEC.md` A10 (migration 20261025000000).
 
-## 11. Variation documents and in-app client emails (planned 19 Oct 2026, waiting on owner's yes)
+## 11. Variation documents and in-app client emails (built 19 Oct 2026)
 
-1. **Variation as its own document.** `quote.html?variation=` becomes a stand-alone variation in the proposal's look (cover, header, footer): "Variation V<n> to Quote Q<n> / J<n>", the original proposal's date and value, what is changing and why, priced lines, contract summary (original + earlier approved variations + this one = new total), sign block, and a link to the original proposal. No longer repeats the whole original quote.
-2. **Email from the Variations tab.** "Email to client..." makes the variation PDF first, attaches it, sends from sales@ through the app (kept on the job's Emails tab), with the "view and sign" button. Card gets View PDF / Regenerate.
-3. **Details tab "Email quote to client".** No more Gmail link: opens the in-app composer, makes the quote PDF if missing or out of date, attaches it, adds the accept online button, marks the quote Sent once it goes.
-
-Code only, no migration expected (`job_variation_entries.pdf_path` already exists).
+Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261028000000).
