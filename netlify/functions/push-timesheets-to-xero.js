@@ -39,8 +39,26 @@ const { dayBands, localDateKey, entryHours } = require('./_shared/compute-labour
 const BAND_LABELS = ['ordinary', 'ot1', 'ot2', 'publicHoliday'];
 const BAND_NAMES = { ordinary: 'Ordinary Hours', ot1: 'OT1 (1.5x)', ot2: 'OT2 (2x)', publicHoliday: 'Public holiday penalty' };
 
-function dateOnly(iso) {
-  return iso.slice(0, 10);
+// YYYY-MM-DD plus n calendar days (UTC noon arithmetic, no server-timezone drift).
+function addDays(ymd, n) {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Midnight at the start of a Sydney calendar date, as a UTC ISO string.
+// DST-safe: reads Sydney's real offset for that moment via Intl.
+function sydneyMidnightUtc(ymd) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const asUtc = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const offsetAt = (ms) => {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Australia/Sydney', hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(new Date(ms));
+    const g = (t) => Number(parts.find(p => p.type === t).value);
+    return Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second')) - ms;
+  };
+  let guess = asUtc - offsetAt(asUtc);
+  guess = asUtc - offsetAt(guess);
+  return new Date(guess).toISOString();
 }
 
 const JOB_LABEL = 'Billable (Jobs)';
@@ -126,11 +144,13 @@ exports.handler = async (event) => {
       return trackingIdCache[label];
     }
 
+    // Sydney pay week: Sydney midnight starting startDate up to (not
+    // including) Sydney midnight after endDate, as real UTC instants.
     const { data: entries, error: entriesErr } = await supabaseAdmin
       .from('time_entries')
       .select('*, profiles(xero_employee_id, full_name)')
-      .gte('clock_in', `${startDate}T00:00:00`)
-      .lte('clock_in', `${endDate}T23:59:59`)
+      .gte('clock_in', sydneyMidnightUtc(startDate))
+      .lt('clock_in', sydneyMidnightUtc(addDays(endDate, 1)))
       .not('clock_out', 'is', null)
       .is('xero_pushed_at', null)
       // ServiceM8 imports were paid through Xero already (marked pushed
@@ -194,12 +214,8 @@ exports.handler = async (event) => {
       // the timesheet period, in order from startDate to endDate - shared
       // across every line below.
       const days = [];
-      let cursor = new Date(`${startDate}T00:00:00`);
-      const end = new Date(`${endDate}T00:00:00`);
-      while (cursor <= end) {
-        days.push(dateOnly(cursor.toISOString()));
-        cursor.setDate(cursor.getDate() + 1);
-      }
+      for (let d = startDate; d <= endDate; d = addDays(d, 1)) days.push(d);
+      const daySet = new Set(days);
 
       // Band each CALENDAR DAY's hours (Sydney local date) across the
       // employee's WHOLE day - every entry together, same as payroll
@@ -314,7 +330,9 @@ exports.handler = async (event) => {
         }
 
         if (labelHasLine) {
-          allEntriesForThisStaff = allEntriesForThisStaff.concat(staffEntries.filter(e => trackingLabelFor(e) === label));
+          // Only mark entries whose Sydney day is actually in this timesheet,
+          // so hours outside the pushed days are never marked paid.
+          allEntriesForThisStaff = allEntriesForThisStaff.concat(staffEntries.filter(e => trackingLabelFor(e) === label && daySet.has(localDateKey(e.clock_in))));
         }
       }
 

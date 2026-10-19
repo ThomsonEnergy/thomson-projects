@@ -129,7 +129,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=95"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=5"></script>
@@ -533,7 +533,12 @@
       bind('accept-label', 'accept_label'); bind('dismiss-label', 'dismiss_label'); bind('accept-job', 'accept_job'); bind('dismiss-job', 'dismiss_job');
 
       const lastInbound = (emails || []).filter(m => m.direction === 'inbound').slice(-1)[0];
-      const replyTo = draft?.to_addresses || emailAddressOnly((lastInbound || (emails || []).slice(-1)[0])?.from_address || '');
+      // Reply to whoever last wrote to us. If they haven't replied yet (we sent the last one), a
+      // follow-up goes to the people we sent it to, not back to ourselves.
+      const lastOutbound = (emails || []).filter(m => m.direction === 'outbound').slice(-1)[0];
+      const replyTo = draft?.to_addresses || (lastInbound
+        ? emailAddressOnly(lastInbound.from_address || '')
+        : (lastOutbound ? (lastOutbound.to_addresses || []).map(a => emailAddressOnly(a)).filter(Boolean).join(', ') : ''));
       const subject = thread.subject || '';
       document.getElementById('reply-save-btn').addEventListener('click', async () => {
         const msg = document.getElementById('reply-msg');

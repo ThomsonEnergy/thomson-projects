@@ -44,6 +44,10 @@ exports.handler = async (event) => {
     if (!claimRows.length) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'At least one stage needs a non-zero credit amount' }) };
     }
+    // No negative parts: Xero only takes positive lines, so a negative one would make the app and Xero disagree.
+    if (claimRows.some(c => c.labour_amount < 0 || c.material_amount < 0 || c.stc_amount < 0)) {
+      return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'Credit amounts can not be negative.' }) };
+    }
 
     const { data: invoice, error: invErr } = await supabaseAdmin
       .from('invoices')

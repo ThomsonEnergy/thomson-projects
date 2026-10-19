@@ -245,7 +245,7 @@ async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary, g
   });
 
   const [{ data: projects, error }, { data: linked, error: linkErr }] = await Promise.all([
-    supabaseAdmin.from('projects').select('id, job_number, sm8_job_uuid, sm8_job_number, cost_centres(id)').not('sm8_job_uuid', 'is', null),
+    supabaseAdmin.from('projects').select('id, job_number, quote_number, sm8_job_uuid, sm8_job_number, cost_centres(id)').not('sm8_job_uuid', 'is', null),
     supabaseAdmin.from('profiles').select('id, sm8_staff_uuid').not('sm8_staff_uuid', 'is', null),
   ]);
   if (error) throw error;
@@ -284,7 +284,7 @@ async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary, g
       summary.jobs++;
     } catch (err) {
       console.error('sm8-labour job error:', project.sm8_job_uuid, err.message);
-      summary.jobErrors.push({ jobNumber: project.job_number, error: String(err.message).slice(0, 300) });
+      summary.jobErrors.push({ jobNumber: project.job_number, ref: project.job_number ? `J${project.job_number}` : `Q${project.quote_number}`, error: String(err.message).slice(0, 300) });
     }
     await sleep(800);
   }

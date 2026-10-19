@@ -42,12 +42,18 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 
 - `npm run check` before finishing: syntax checks every JS file, every inline HTML script block, every SQL migration, and the policy pairs below.
 - Every `create policy` has a matching `drop policy if exists` right before it.
-- New tables: fast RLS (`(select auth.uid())`, one policy per action), and an index on every FK.
+- New tables: fast RLS (`(select auth.uid())`, one policy per action), and an index on every FK. Policies are `to authenticated` unless the row is meant for the public (client pages read through token functions, never table policies).
+- Every new or changed database function: `set search_path = public`; `security definer` ones check the caller (`auth.uid()`, `is_admin()`, `is_pricing_role()` or a token) and end with `revoke execute ... from public, anon` plus a `grant` only to who needs it (`authenticated`, or nobody when only the server calls it). No new `security definer` views: use `security_invoker` or a function.
+- Every Netlify function checks who is calling (`requireAdmin`, `requirePricingRole`, `requireActiveUser`) unless it is public by design, in which case a random token or a verified webhook signature is the check, and the function does only what that token is for.
+- Any text a person typed or that came from outside (names, notes, emails, PDFs, lead forms) goes through `escapeHtml()` before it lands in HTML, including inside `value="..."` and `data-*` attributes.
+- Anything that changes money or stock (invoices, claims, credit notes, receiving, moving) runs on the server or in one database function, checks its limits there (not only in the browser), and finishes all or nothing.
+- "Today" is the Sydney date (`toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' })` or `sydney_today()`), never `toISOString().slice(0, 10)`.
 - Verify schema dependencies exist (tables, columns, functions) instead of assuming.
 - Bump the `?v=` number on every script and stylesheet reference you change (`/js` and `/css` are cached for 10 minutes).
 - Compress images: static images squashed before committing; every upload goes through `compressImage()`.
 - Keep the app Capacitor-ready (native iPhone wrap is planned): no web-only tricks that break inside a native WebView; anything that must work offline uses save-locally-then-sync (local queue, temp IDs, timestamps at the moment of the action).
 - If something breaks after a deploy, check the Netlify deploy status and the Supabase migration status first.
+- After each big chunk of features, run a whole-site review pass (read only, every area, like `docs/BUG_REVIEW.md` on 19 Oct 2026), list what it finds worst first, then fix in consolidated deliveries. The owner chose these manual passes over automatic rule checks.
 
 ## Secrets
 

@@ -99,6 +99,7 @@ exports.handler = () => runAgent('mailbox-work', async () => {
         const r = await runEmailAgent(admin, mb, { budgetMs: Math.max(0, BUDGET_MS - (Date.now() - startedAt)) });
         usage.input_tokens += r.usage.input_tokens; usage.output_tokens += r.usage.output_tokens;
         if (r.sorted) parts.push(`${mb.address}: ${r.sorted} sorted, ${r.priority} need a reply, ${r.drafted} drafted`);
+        if (r.invoicesPassed) parts.push(`${mb.address}: ${r.invoicesPassed} supplier invoice${r.invoicesPassed === 1 ? '' : 's'} passed to invoice@, ${r.routingReplies} "use invoice@" repl${r.routingReplies === 1 ? 'y' : 'ies'}`);
       }
       if (mb.last_error) await admin.from('mailboxes').update({ last_error: null }).eq('id', mb.id);
     } catch (err) {

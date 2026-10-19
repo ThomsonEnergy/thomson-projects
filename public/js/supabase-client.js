@@ -181,6 +181,35 @@ function expiryBadge(dateStr) {
   return dateLabel;
 }
 
+// The note under a licence / insurance ("Paid renewal, waiting on card") and, for an
+// employee licence, the open "Ask to update" request. names: { profileId: full_name }.
+function licenceNoteHtml(rec, names) {
+  const who = (id) => (id && names && names[id]) ? ` by ${escapeHtml(names[id])}` : '';
+  const day = (ts) => new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'Australia/Sydney' });
+  let out = '';
+  if (rec.notes) out += `<span class="subtitle" style="display:block; font-size:12px; white-space:pre-wrap;">Note: ${escapeHtml(rec.notes)}${rec.notes_updated_at ? ` <span style="opacity:0.7;">(${day(rec.notes_updated_at)}${who(rec.notes_updated_by)})</span>` : ''}</span>`;
+  if (rec.update_requested_at) out += `<span style="display:block; font-size:12px; color:var(--accent); font-weight:600;">Update asked ${day(rec.update_requested_at)}${who(rec.update_requested_by)}</span>`;
+  return out;
+}
+
+// Saves a person's licence rows from an edit form: rows with an id are updated in place (so
+// notes, update requests and anything not in the form stay), new rows are added, and licences
+// no longer in the form are removed. oldIds: the ids loaded into the form.
+async function saveLicenceRows(oldIds, rows) {
+  for (const { id, ...fields } of rows) {
+    const { error } = id
+      ? await supabaseClient.from('profile_licences').update(fields).eq('id', id)
+      : await supabaseClient.from('profile_licences').insert(fields);
+    if (error) throw error;
+  }
+  const kept = new Set(rows.map(r => r.id).filter(Boolean));
+  const gone = (oldIds || []).filter(id => !kept.has(id));
+  if (gone.length) {
+    const { error } = await supabaseClient.from('profile_licences').delete().in('id', gone);
+    if (error) throw error;
+  }
+}
+
 async function runCredentialExtraction(file) {
   const base64 = await fileToBase64(file);
   const { data: { session } } = await supabaseClient.auth.getSession();
@@ -1767,31 +1796,54 @@ function fuzzyMatchScore(a, b) {
 // last resort, fuzzy business name matching. Returns null if nothing
 // matches confidently enough - the caller should offer to create a new
 // supplier rather than silently guessing wrong.
+// Supplier names without the words every company has. Same list and rules as matchSupplier()
+// in netlify/functions/_shared/supplier-bill-intake.js: account number, then ABN, then bank
+// details, and a name only when nothing on the bill disagrees. MMEM's Haymans and Greentech
+// share an ABN and bank account, so only our account number tells them apart.
+const SUPPLIER_NAME_FILLER = new Set(['pty', 'ltd', 'limited', 'australia', 'australian', 'aust', 'group', 'company', 'the', 'and', 'trading', 'holdings', 'services', 'supplies', 'supply', 'wholesale', 'wholesalers', 'electrical', 'electric', 'solar', 'energy', 'nsw', 'sydney']);
+function supplierNameScore(a, b) {
+  const words = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !SUPPLIER_NAME_FILLER.has(w));
+  const wordsA = new Set(words(a));
+  const wordsB = words(b);
+  if (!wordsA.size || !wordsB.length) return 0;
+  return wordsB.filter(w => wordsA.has(w)).length / Math.max(wordsA.size, wordsB.length);
+}
+
+// Returns { supplier, how }, { supplier: null, shared: [suppliers], how } when the ABN or bank
+// details belong to more than one supplier and our account number is missing, or null.
 async function findMatchingSupplier(fields) {
   const { name, ourAccountNumber, abn, bsb, bankAccountNumber } = typeof fields === 'string' ? { name: fields } : fields;
   const { data: suppliers } = await supabaseClient.from('suppliers').select('*');
   const list = suppliers || [];
+  const digits = (v) => String(v || '').replace(/\D/g, '');
 
-  if (ourAccountNumber) {
-    const match = list.find(s => s.our_account_number && s.our_account_number.trim() === String(ourAccountNumber).trim());
-    if (match) return match;
+  const acct = String(ourAccountNumber || '').trim();
+  if (acct) {
+    const hits = list.filter(s => s.our_account_number && s.our_account_number.trim().toLowerCase() === acct.toLowerCase());
+    if (hits.length === 1) return { supplier: hits[0], how: 'account number' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'account number' };
   }
-  if (abn) {
-    const normalizedAbn = String(abn).replace(/\s/g, '');
-    const match = list.find(s => s.abn && s.abn.replace(/\s/g, '') === normalizedAbn);
-    if (match) return match;
+  const abnDigits = digits(abn);
+  if (abnDigits) {
+    const hits = list.filter(s => digits(s.abn) === abnDigits);
+    if (hits.length === 1) return { supplier: hits[0], how: 'ABN' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'ABN' };
   }
-  if (bsb && bankAccountNumber) {
-    const match = list.find(s => s.bsb === bsb && s.bank_account_number === bankAccountNumber);
-    if (match) return match;
+  const bsbDigits = digits(bsb), bankDigits = digits(bankAccountNumber);
+  if (bsbDigits && bankDigits) {
+    const hits = list.filter(s => digits(s.bsb) === bsbDigits && digits(s.bank_account_number) === bankDigits);
+    if (hits.length === 1) return { supplier: hits[0], how: 'bank details' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'bank details' };
   }
 
   let best = null, bestScore = 0;
   list.forEach(s => {
-    const score = fuzzyMatchScore(s.name, name);
+    if (abnDigits && digits(s.abn) && digits(s.abn) !== abnDigits) return; // the bill's ABN is someone else's
+    if (bsbDigits && bankDigits && digits(s.bank_account_number) && (digits(s.bsb) !== bsbDigits || digits(s.bank_account_number) !== bankDigits)) return;
+    const score = supplierNameScore(s.name, name);
     if (score > bestScore) { bestScore = score; best = s; }
   });
-  return bestScore >= 0.5 ? best : null;
+  return bestScore >= 0.5 ? { supplier: best, how: 'name' } : null;
 }
 
 // Single source of truth for the main nav - every page calls
@@ -2022,7 +2074,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=9';
+  s.src = '/js/notifications.js?v=10';
   document.head.appendChild(s);
 }
 
@@ -2854,13 +2906,23 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         cursor = segEnd;
       });
 
-      const inserts = rows.map((r, i) => ({
+      // The open entry becomes the first stage's segment (updated, never
+      // deleted: deleting an open entry fires sync_project_booked and can
+      // unbook the job, migration 20261023000000). The rest are inserted.
+      const { error: upErr } = await supabaseClient.from('time_entries').update({
+        cost_centre_id: rows[0].cost_centre_id, selected_cost_centre_ids: null,
+        clock_in: rows[0].clock_in, clock_out: rows[0].clock_out, ...onceFields,
+      }).eq('id', entry.id);
+      if (upErr) saveError = upErr;
+
+      const inserts = rows.slice(1).map(r => ({
         staff_id: entry.staff_id, project_id: entry.project_id, cost_centre_id: r.cost_centre_id,
         time_category: entry.time_category, clock_in: r.clock_in, clock_out: r.clock_out,
-        ...(i === 0 ? onceFields : {}),
       }));
-      const { error: insErr } = await supabaseClient.from('time_entries').insert(inserts);
-      if (insErr) saveError = insErr;
+      if (!saveError && inserts.length) {
+        const { error: insErr } = await supabaseClient.from('time_entries').insert(inserts);
+        if (insErr) saveError = insErr;
+      }
 
       if (!saveError && segments.length > 1) {
         const extra = segments.slice(1).map(seg => ({
@@ -2870,10 +2932,6 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         }));
         const { error: e2 } = await supabaseClient.from('time_entries').insert(extra);
         if (e2) saveError = e2;
-      }
-      if (!saveError) {
-        const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', entry.id);
-        if (delErr) saveError = delErr;
       }
     }
 
@@ -2909,8 +2967,21 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         <div id="cko-job-status-msg" style="margin-top:10px;"></div>
       </div>`;
 
-    overlay.querySelector('#cko-job-complete').addEventListener('click', async () => {
-      await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+    overlay.querySelector('#cko-job-complete').addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      const { data: moved, error: mvErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']).select('id');
+      const statusMsg = overlay.querySelector('#cko-job-status-msg');
+      if (mvErr) {
+        statusMsg.innerHTML = `<div class="error-box">${escapeHtml(mvErr.message)}</div>`;
+        e.target.disabled = false;
+        return;
+      }
+      if (!moved || !moved.length) {
+        // Nothing moved (the job left Job Booked meanwhile): say so, don't log it as done.
+        statusMsg.innerHTML = `<div class="error-box">The job is no longer in Job Booked, so it was not moved to Client Handover. Your clock-out is saved, let your PM know.</div>`;
+        setTimeout(renderStep3, 3000);
+        return;
+      }
       await logActivity('project', project.id, 'job_complete', 'Marked complete at clock-out - moved to Client Handover');
       renderStep3();
     });
@@ -2920,10 +2991,12 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       const btn = overlay.querySelector('#cko-job-not-complete');
       btn.disabled = true;
       try {
-        await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+        const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+        if (ncErr) throw ncErr;
 
-        const tomorrow = new Date(state.outIso);
-        tomorrow.setDate(tomorrow.getDate() + 1);
+        // Sydney day after the clock-out, via UTC noon so it can't drift.
+        const tomorrow = new Date(`${sydneyDateKey(new Date(state.outIso))}T12:00:00Z`);
+        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
         const tomorrowStr = tomorrow.toISOString().slice(0, 10);
 
         const { data: existingTomorrow } = await supabaseClient
@@ -3568,7 +3641,7 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
       <div class="grid cols-3">
         <div>
           <label>Date</label>
-          <input type="date" id="si-date" value="${new Date().toISOString().slice(0, 10)}" />
+          <input type="date" id="si-date" value="${sydneyDateKey(new Date())}" />
         </div>
         <div>
           <label>Start time</label>
@@ -4528,7 +4601,8 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
   overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><p class="subtitle">Working out which supplier this is...</p></div>`;
   document.body.appendChild(overlay);
 
-  const match = await findMatchingSupplier(matchFields);
+  const found = await findMatchingSupplier(matchFields);
+  const match = found?.supplier || null;
   const fileBase64 = await fileToBase64(file);
 
   function proceedTo(supplierId) {
@@ -4538,10 +4612,12 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
     window.location.href = `/supplier-detail.html?id=${supplierId}&resume_upload=1`;
   }
 
-  if (match) {
+  if (found?.shared) {
+    showManualPick(`${found.shared.map(s => escapeHtml(s.name)).join(' and ')} share this ${found.how}. Pick the one whose account number is on the document${matchFields.ourAccountNumber ? ` (it says ${escapeHtml(matchFields.ourAccountNumber)})` : ''}.`, found.shared);
+  } else if (match) {
     overlay.querySelector('.card').innerHTML = `
       <h2>Is this ${escapeHtml(match.name)}?</h2>
-      <p class="subtitle" style="margin-bottom:14px;">${matchFields.ourAccountNumber ? `Matched by account number ${matchFields.ourAccountNumber}.` : (matchFields.abn ? `Matched by ABN.` : `The document says "${escapeHtml(extractedSupplierName)}".`)}</p>
+      <p class="subtitle" style="margin-bottom:14px;">${found.how === 'name' ? `Matched by name only (no ABN or bank details to confirm). The document says "${escapeHtml(extractedSupplierName)}".` : `Matched by ${found.how === 'account number' ? `account number ${escapeHtml(matchFields.ourAccountNumber)}` : found.how}.`}</p>
       <button id="rs-yes-btn">Yes, that's ${escapeHtml(match.name)}</button>
       <button type="button" class="secondary" id="rs-no-btn">No, pick a different supplier</button>`;
     overlay.querySelector('#rs-yes-btn').addEventListener('click', () => proceedTo(match.id));
@@ -4550,10 +4626,12 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
     showNewSupplierPrompt();
   }
 
-  async function showManualPick() {
-    const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
+  // note: trusted HTML (already escaped); only: the suppliers to offer (default all)
+  async function showManualPick(note = '', only = null) {
+    const suppliers = only || (await supabaseClient.from('suppliers').select('id, name').order('name')).data;
     overlay.querySelector('.card').innerHTML = `
       <h2>Pick the supplier</h2>
+      ${note ? `<p class="subtitle" style="margin-bottom:10px;">${note}</p>` : ''}
       <select id="rs-manual-select"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select>
       <p class="subtitle" style="margin:10px 0;">Or</p>
       <button type="button" class="secondary" id="rs-new-instead-btn">This is actually a new supplier</button>
@@ -4566,7 +4644,7 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
   }
 
   async function showNewSupplierPrompt() {
-    overlay.querySelector('.card').innerHTML = `<h2>Creating supplier</h2><p class="subtitle">Setting up "${extractedSupplierName}" - you can add or adjust anything anytime from their page.</p>`;
+    overlay.querySelector('.card').innerHTML = `<h2>Creating supplier</h2><p class="subtitle">Setting up "${escapeHtml(extractedSupplierName)}" - you can add or adjust anything anytime from their page.</p>`;
     const { data: created, error } = await supabaseClient.from('suppliers').insert({
       name: extractedSupplierName || 'Unknown supplier',
       credit_terms_type: 'net_days',
@@ -4878,7 +4956,8 @@ async function openAddLineToStockPanel(lineItem, po, onComplete) {
     supabaseClient.from('materials').select('category').not('category', 'is', null),
     supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
   ]);
-  const markup = Number(settings?.default_markup_percent) || 45;
+  const markupSetting = parseFloat(settings?.default_markup_percent);
+  const markup = Number.isFinite(markupSetting) ? markupSetting : 45;
   const categories = [...new Set((cats || []).map(c => c.category).filter(Boolean))].sort();
   const cost = Number(lineItem.unit_cost) || 0;
   const overlay = poOverlay(`
@@ -5066,8 +5145,9 @@ function openEditPoLinesPanel(po, onComplete) {
     ${items.map(li => `
       <div class="ov-line" data-id="${li.id}" style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:6px; margin-bottom:6px;">
         <input class="ov-desc" value="${escapeHtml(li.description)}" style="font-size:13px;" />
-        <input class="ov-qty" type="number" step="0.01" value="${li.quantity}" style="font-size:13px;" />
-        <input class="ov-cost" type="number" step="0.01" value="${li.unit_cost}" style="font-size:13px;" />
+        <input class="ov-qty" type="number" step="0.01" value="${li.quantity}" style="font-size:13px;" ${li.received ? 'disabled' : ''} />
+        <input class="ov-cost" type="number" step="0.01" value="${li.unit_cost}" style="font-size:13px;" ${li.received ? 'disabled' : ''} />
+        ${li.received ? '<div style="grid-column:1 / -1; font-size:11px; color:var(--muted);">Received. Undo received first to change the quantity or cost.</div>' : ''}
       </div>`).join('')}
     <div style="margin-top:14px;">
       <button id="ov-save-btn">Save changes</button>
@@ -5085,6 +5165,8 @@ function openEditPoLinesPanel(po, onComplete) {
           unit_cost: parseFloat(row.querySelector('.ov-cost').value) || 0,
         };
         const was = items.find(li => li.id === row.dataset.id) || {};
+        // received lines: qty and cost are locked (stock and job cost were set when it landed)
+        if (was.received) { next.quantity = Number(was.quantity); next.unit_cost = Number(was.unit_cost); }
         const changes = [];
         if ((was.description || '') !== next.description) changes.push(`name "${was.description || ''}" to "${next.description}"`);
         if (Number(was.quantity) !== next.quantity) changes.push(`qty ${Number(was.quantity)} to ${next.quantity}`);
@@ -5275,10 +5357,9 @@ function openBackorderPanel(lineItem, onComplete) {
   overlay.querySelector('#bo-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#bo-save-btn').addEventListener('click', async () => {
     const msg = overlay.querySelector('#bo-msg');
-    const { error } = await supabaseClient.from('purchase_order_line_items')
-      .update({ is_backordered: true, backorder_eta: overlay.querySelector('#bo-eta').value || null })
-      .eq('id', lineItem.id);
-    if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+    // po_set_backorder (not a plain update): PO line updates are pricing roles only, so Staff got 0 rows and no error
+    const { error } = await supabaseClient.rpc('po_set_backorder', { p_line_id: lineItem.id, p_backordered: true, p_eta: overlay.querySelector('#bo-eta').value || null });
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
     overlay.remove();
     await onComplete();
   });
@@ -5286,24 +5367,24 @@ function openBackorderPanel(lineItem, onComplete) {
   if (clearBtn) {
     clearBtn.addEventListener('click', async () => {
       const msg = overlay.querySelector('#bo-msg');
-      const { error } = await supabaseClient.from('purchase_order_line_items')
-        .update({ is_backordered: false, backorder_eta: null })
-        .eq('id', lineItem.id);
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      const { error } = await supabaseClient.rpc('po_set_backorder', { p_line_id: lineItem.id, p_backordered: false, p_eta: null });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       overlay.remove();
       await onComplete();
     });
   }
 }
 
-// Draws the next sequential PO number (e.g. "PO2001") - same atomic
-// counter pattern already used for quotes/jobs/invoices, so two people
-// creating a PO at the same moment never collide.
+// Deprecated: new POs leave po_number out and read it back from the insert
+// (.select('id, po_number')); trigger trg_purchase_orders_fill_number fills
+// it for every role. get_next_number is pricing roles only, so on any error
+// this returns null and the trigger fills the number instead. Kept only
+// until the last callers (project.html) switch over.
 async function drawNextPoNumber() {
   const { data: settings } = await supabaseClient.from('company_settings').select('po_number_prefix').eq('id', 1).single();
   const prefix = settings?.po_number_prefix || 'PO';
   const { data: nextNum, error } = await supabaseClient.rpc('get_next_number', { counter_name: 'po' });
-  if (error) throw error;
+  if (error) return null;
   return `${prefix}${nextNum}`;
 }
 

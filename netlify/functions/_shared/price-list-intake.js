@@ -405,8 +405,8 @@ async function processPriceLists({ budgetMs = 12 * 60 * 1000, extractAttachments
       const { data: fresh } = await admin.from('price_list_imports').select('*').eq('id', row.id).single();
       const meta = fresh.read_meta || {};
       const match = matchSupplier(suppliers, { supplier: meta.supplier, abn: meta.abn, our_account_number: meta.our_account_number });
-      if (!match) {
-        await admin.from('price_list_imports').update({ status: 'to_check', item_count: (fresh.items || []).length, summary: `${(fresh.items || []).length} items read. Supplier "${meta.supplier || 'unknown'}" not recognised: pick the supplier.` }).eq('id', row.id);
+      if (!match?.supplier) {
+        await admin.from('price_list_imports').update({ status: 'to_check', item_count: (fresh.items || []).length, summary: `${(fresh.items || []).length} items read. ${match?.shared ? `${match.shared.map(x => x.name).join(' and ')} share this ${match.how}: pick the supplier by our account number.` : `Supplier "${meta.supplier || 'unknown'}" not recognised: pick the supplier.`}` }).eq('id', row.id);
         await notifyCheckers(admin, 'An emailed price list needs its supplier picked', `"${meta.supplier || fresh.file_name}" was not recognised.`);
         results.push('to_check'); continue;
       }

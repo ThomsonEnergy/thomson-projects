@@ -79,12 +79,25 @@ exports.handler = async (event) => {
     const xeroInvoiceId = invoiceRow?.invoices?.xero_invoice_id;
     if (!xeroInvoiceId) throw new Error("This invoice hasn't been pushed to Xero - can't allocate a credit note to it.");
 
-    await xeroRequest('accounting', `CreditNotes/${xeroCreditNoteId}/Allocations`, {
-      method: 'PUT',
-      body: { Amount: allocateAmount, Invoice: { InvoiceID: xeroInvoiceId } },
-    });
+    // Only allocate what the invoice still owes: on a paid (or part paid) invoice Xero rejects an
+    // allocation above AmountDue. Whatever is left stays on the credit note in Xero to refund or
+    // use against another invoice (bug review M10).
+    const xeroInvoice = (await xeroRequest('accounting', `Invoices/${xeroInvoiceId}`)).Invoices?.[0];
+    const amountDue = Number(xeroInvoice?.AmountDue || 0);
+    const toAllocate = Math.round(Math.min(Number(allocateAmount) || 0, amountDue) * 100) / 100;
+    if (toAllocate > 0) {
+      await xeroRequest('accounting', `CreditNotes/${xeroCreditNoteId}/Allocations`, {
+        method: 'PUT',
+        body: { Amount: toAllocate, Invoice: { InvoiceID: xeroInvoiceId } },
+      });
+    }
+    const leftOver = Math.round(((Number(allocateAmount) || 0) - toAllocate) * 100) / 100;
+    const note = leftOver > 0
+      ? `$${leftOver.toFixed(2)} of this credit note is unallocated in Xero (the invoice was already paid). Refund it or apply it to another invoice in Xero.`
+      : null;
+    await supabaseAdmin.from('credit_notes').update({ xero_credit_note_error: note }).eq('id', creditNoteId).then(() => {}, () => {});
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, xeroCreditNoteId }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, xeroCreditNoteId, unallocated: leftOver }) };
   } catch (err) {
     console.error('push-credit-note-to-xero error:', err.message);
     if (creditNoteId) {

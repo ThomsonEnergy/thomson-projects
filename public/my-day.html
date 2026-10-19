@@ -97,11 +97,12 @@
     <div class="card">
       <h2>Free tasks - up for grabs</h2>
       <p class="subtitle" style="margin-bottom:8px;">Unassigned tasks. Pick one up if you reckon you can do it.</p>
+      <input type="search" id="open-task-search" placeholder="Search job number, job or task" style="margin-bottom:10px;" />
       <div id="open-tasks"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=95"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -477,8 +478,20 @@
         entry.selected_cost_centre_ids = selectedClockCostCentres;
       }
 
+      // Double tap guard, and never two open clock-ins (another tab, Home, a job page).
+      const clockBtn = document.getElementById('clock-in-btn');
+      if (clockBtn.disabled) return;
+      clockBtn.disabled = true;
+      const { data: already, error: openErr } = await supabaseClient.from('time_entries').select('id').eq('staff_id', myUserId).is('clock_out', null).limit(1);
+      if (openErr || (already && already.length)) {
+        msg.innerHTML = `<div class="error-box">${openErr ? escapeHtml(openErr.message) : 'You are already clocked in. Clock out (or switch job) first.'}</div>`;
+        clockBtn.disabled = false;
+        await checkActiveClock();
+        return;
+      }
       const { error } = await supabaseClient.from('time_entries').insert(entry);
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      clockBtn.disabled = false;
+      if (error) { msg.innerHTML = `<div class="error-box">${error.code === '23505' ? 'You are already clocked in.' : error.message}</div>`; await checkActiveClock(); return; }
       msg.innerHTML = '';
       selectedClockCostCentres = [];
       selectedClockJobId = null;
@@ -488,75 +501,174 @@
       await checkActiveClock();
     });
 
+    // Tasks are shown as main tasks only (subtasks are counted under their task,
+    // not listed), split Prejob / office, Handover, Onsite, then grouped by job.
+    const TASK_SECTIONS = [
+      { key: 'prejob', label: 'Prejob / office' },
+      { key: 'handover', label: 'Handover' },
+      { key: 'onsite', label: 'Onsite' },
+    ];
+    const JOBS_SHOWN = 10;
+    let taskData = { mine: [], open: [], subCounts: {}, byId: {} };
+    const expandedSections = new Set();
+
+    function taskSection(t) {
+      if (t.task_type === 'onsite') return 'onsite';
+      if (t.task_type === 'handover') return 'handover';
+      return 'prejob';
+    }
+
     function taskRow(task, showPickUp) {
-      const jobLabel = task.project_id
-        ? (task.projects?.job_number ? 'J' + task.projects.job_number : (task.projects?.name || ''))
-        : 'Office / General';
+      const sub = taskData.subCounts[task.id];
+      const openSubs = sub ? sub.total - sub.done : 0;
+      const parent = task.parent_task_id ? taskData.byId[task.parent_task_id] : null;
+      const openHref = task.project_id ? `/project.html?id=${task.project_id}` : '/tasks.html';
+      const doneBtn = openSubs > 0
+        ? `<button type="button" class="secondary" onclick="window.location.href='${openHref}'" title="Tick off its subtasks first" style="font-size:12px; padding:6px 10px;">Open ${task.project_id ? 'job' : 'tasks'}</button>`
+        : `<button type="button" class="secondary complete-task-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">Done</button>`;
+      const notes = [];
+      if (parent) notes.push(`Subtask of: ${escapeHtml(parent.description)}`);
+      if (sub) notes.push(`${sub.done} of ${sub.total} subtasks done`);
+      if (task.meetings) notes.push(`<a href="/meetings.html?id=${task.meeting_id}" class="link-quiet">Meeting: ${escapeHtml(task.meetings.title)}</a>`);
+      if (task.remind_at && new Date(task.remind_at) <= new Date()) notes.push('<span style="color:var(--red);">Reminder due</span>');
+      if (task.required_before_scheduling) notes.push('<span style="color:var(--red);">Required before scheduling</span>');
       return `
         <div class="day-item">
           <div>
-            ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${task.description}</a>` : `<span>${task.description}</span>`}
-            <p class="subtitle" style="margin:2px 0 0; font-size:12px;">
-              ${jobLabel}
-              ${task.meetings ? ` &middot; <a href="/meetings.html?id=${task.meeting_id}" class="link-quiet">Meeting: ${escapeHtml(task.meetings.title)}</a>` : ''}
-              ${task.remind_at && new Date(task.remind_at) <= new Date() ? ' &middot; <span style="color:var(--red);">Reminder due</span>' : ''}
-              ${task.required_before_scheduling ? ' &middot; <span style="color:var(--red);">Required before scheduling</span>' : ''}
-            </p>
+            ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${escapeHtml(task.description)}</a>` : `<span>${escapeHtml(task.description)}</span>`}
+            ${notes.length ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${notes.join(' &middot; ')}</p>` : ''}
           </div>
           <div style="display:flex; gap:6px; flex-shrink:0;">
             ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">I can do this</button>` : ''}
-            <button type="button" class="secondary complete-task-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">Done</button>
+            ${doneBtn}
           </div>
         </div>`;
     }
 
-    async function loadTasks() {
-      const { data: allTasks, error } = await supabaseClient
-        .from('job_tasks')
-        .select('*, projects(name, job_number), meetings(id, title)')
-        .eq('completed', false)
-        .order('required_before_scheduling', { ascending: false })
-        .order('created_at', { ascending: true });
+    // Required-before-scheduling first, then oldest first.
+    function taskOrder(a, b) {
+      if (a.required_before_scheduling !== b.required_before_scheduling) return a.required_before_scheduling ? -1 : 1;
+      return new Date(a.created_at) - new Date(b.created_at);
+    }
 
-      if (error) {
-        document.getElementById('my-tasks').innerHTML = `<div class="error-box">${error.message}</div>`;
-        return;
-      }
+    function jobGroups(list) {
+      const groups = new Map();
+      list.forEach(t => {
+        const key = t.project_id || 'office';
+        if (!groups.has(key)) {
+          const label = t.project_id ? (projectRef(t.projects) || 'Job') : 'Office / General';
+          groups.set(key, { key, label, tasks: [] });
+        }
+        groups.get(key).tasks.push(t);
+      });
+      const out = [...groups.values()];
+      out.forEach(g => g.tasks.sort(taskOrder));
+      // Each group sorts by its first (most urgent / oldest) task.
+      out.sort((a, b) => taskOrder(a.tasks[0], b.tasks[0]));
+      return out;
+    }
 
-      const mine = allTasks.filter(t => t.assigned_to_user_id === myUserId || (!t.assigned_to_user_id && t.assigned_to_role === myRole));
-      const open = allTasks.filter(t => !t.assigned_to_user_id && !t.assigned_to_role);
-
-      function splitByType(list, showPickUp) {
-        const onsite = list.filter(t => t.task_type === 'onsite');
-        const prejob = list.filter(t => t.task_type !== 'onsite');
+    function renderTaskCard(list, cardKey, showPickUp, openGroups) {
+      return TASK_SECTIONS.map(sec => {
+        const tasks = list.filter(t => taskSection(t) === sec.key);
+        const groups = jobGroups(tasks);
+        const sectionKey = cardKey + ':' + sec.key;
+        const showAll = openGroups || expandedSections.has(sectionKey);
+        const shown = showAll ? groups : groups.slice(0, JOBS_SHOWN);
+        const body = groups.length ? shown.map(g => {
+          const needsReq = g.tasks.some(t => t.required_before_scheduling);
+          return `
+            <details ${openGroups ? 'open' : ''} style="border:1px solid var(--border); border-radius:10px; padding:8px 12px; margin-bottom:6px;">
+              <summary style="cursor:pointer; font-weight:600; font-size:14px;">${escapeHtml(g.label)} <span class="subtitle" style="font-weight:400;">(${g.tasks.length})</span>${needsReq ? ' <span style="color:var(--red); font-weight:400; font-size:12px;">&middot; required</span>' : ''}</summary>
+              ${g.tasks.map(t => taskRow(t, showPickUp)).join('')}
+            </details>`;
+        }).join('') : '<p class="subtitle">None.</p>';
+        const more = !showAll && groups.length > JOBS_SHOWN
+          ? `<button type="button" class="secondary show-more-tasks-btn" data-section="${sectionKey}" style="font-size:12px; padding:6px 10px;">Show all (${groups.length} jobs)</button>`
+          : '';
         return `
           <div style="margin-bottom:14px;">
-            <h3 style="font-size:14px; margin:0 0 4px;">Onsite</h3>
-            ${onsite.length ? onsite.map(t => taskRow(t, showPickUp)).join('') : '<p class="subtitle">None.</p>'}
-          </div>
-          <div>
-            <h3 style="font-size:14px; margin:0 0 4px;">Prejob / office / handover</h3>
-            ${prejob.length ? prejob.map(t => taskRow(t, showPickUp)).join('') : '<p class="subtitle">None.</p>'}
+            <h3 style="font-size:14px; margin:0 0 6px;">${sec.label} (${tasks.length})</h3>
+            ${body}
+            ${more}
           </div>`;
-      }
+      }).join('');
+    }
 
-      document.getElementById('my-tasks').innerHTML = mine.length ? splitByType(mine, false) : '<p class="subtitle">Nothing scheduled to you right now.</p>';
-      document.getElementById('open-tasks').innerHTML = open.length ? splitByType(open, true) : '<p class="subtitle">Nothing unassigned right now.</p>';
+    function renderTasks() {
+      const { mine, open } = taskData;
+      const q = (document.getElementById('open-task-search').value || '').trim().toLowerCase();
+      const openFiltered = q ? open.filter(t => [
+        t.description, t.projects?.name, t.projects?.job_number ? 'j' + t.projects.job_number : '', t.projects?.quote_number ? 'q' + t.projects.quote_number : '',
+        t.project_id ? '' : 'office general',
+      ].some(v => v && String(v).toLowerCase().includes(q))) : open;
 
+      // Your own tasks are few, so their job groups start open.
+      document.getElementById('my-tasks').innerHTML = mine.length ? renderTaskCard(mine, 'mine', false, true) : '<p class="subtitle">Nothing scheduled to you right now.</p>';
+      document.getElementById('open-tasks').innerHTML = !open.length
+        ? '<p class="subtitle">Nothing unassigned right now.</p>'
+        : openFiltered.length ? renderTaskCard(openFiltered, 'open', true, !!q) : '<p class="subtitle">No free tasks match that search.</p>';
+
+      document.querySelectorAll('.show-more-tasks-btn').forEach(btn => {
+        btn.addEventListener('click', () => { expandedSections.add(btn.dataset.section); renderTasks(); });
+      });
       document.querySelectorAll('.complete-task-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          await supabaseClient.from('job_tasks').update({
+          const task = taskData.byId[btn.dataset.id];
+          btn.disabled = true;
+          const { error: doneErr } = await supabaseClient.from('job_tasks').update({
             completed: true, completed_by: myUserId, completed_at: new Date().toISOString(),
           }).eq('id', btn.dataset.id);
+          if (doneErr) { btn.disabled = false; alert('Could not tick that off: ' + doneErr.message); return; }
+          // Same gate as the job page: the last required task moves the job out of Awaiting Action.
+          if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
           await loadTasks();
         });
       });
       document.querySelectorAll('.pick-up-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          await supabaseClient.from('job_tasks').update({ assigned_to_user_id: myUserId }).eq('id', btn.dataset.id);
+          btn.disabled = true;
+          const { error: pickErr } = await supabaseClient.from('job_tasks').update({ assigned_to_user_id: myUserId }).eq('id', btn.dataset.id);
+          if (pickErr) { btn.disabled = false; alert('Could not pick that up: ' + pickErr.message); return; }
           await loadTasks();
         });
       });
+    }
+
+    async function loadTasks() {
+      const { data: allTasks, error } = await supabaseClient
+        .from('job_tasks')
+        .select('*, projects(name, job_number, quote_number), meetings(id, title)')
+        .eq('completed', false)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        document.getElementById('my-tasks').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+        return;
+      }
+
+      const byId = {};
+      allTasks.forEach(t => { byId[t.id] = t; });
+      const isMine = t => t.assigned_to_user_id === myUserId || (!t.assigned_to_user_id && t.assigned_to_role === myRole);
+      const topLevel = allTasks.filter(t => !t.parent_task_id);
+      // A subtask of yours still shows when its main task is not yours, so nothing goes missing.
+      const mine = allTasks.filter(t => isMine(t) && (!t.parent_task_id || !byId[t.parent_task_id] || !isMine(byId[t.parent_task_id])));
+      const open = topLevel.filter(t => !t.assigned_to_user_id && !t.assigned_to_role);
+
+      // "3 of 5 subtasks done" needs the finished subtasks too, so count them for the main tasks shown.
+      const subCounts = {};
+      const parentIds = [...new Set([...mine, ...open].filter(t => !t.parent_task_id).map(t => t.id))];
+      for (let i = 0; i < parentIds.length; i += 150) {
+        const { data: subs } = await supabaseClient.from('job_tasks').select('parent_task_id, completed').in('parent_task_id', parentIds.slice(i, i + 150));
+        (subs || []).forEach(s => {
+          const c = subCounts[s.parent_task_id] || (subCounts[s.parent_task_id] = { total: 0, done: 0 });
+          c.total++;
+          if (s.completed) c.done++;
+        });
+      }
+
+      taskData = { mine, open, subCounts, byId };
+      renderTasks();
     }
 
     (async function () {
@@ -583,6 +695,7 @@
       }
 
       await checkActiveClock();
+      document.getElementById('open-task-search').addEventListener('input', renderTasks);
       await loadTasks();
     })();
   </script>

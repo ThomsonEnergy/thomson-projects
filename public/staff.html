@@ -38,11 +38,11 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=95"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/hr-templates.js?v=2"></script>
   <script src="/js/hr-shared.js?v=2"></script>
-  <script src="/js/staff-editor.js?v=4"></script>
+  <script src="/js/staff-editor.js?v=5"></script>
   <script>
     // Staff profile: everything about one team member in one place, laid out
     // like a job (tabs for overview, documents, photos, letters, incidents
@@ -78,11 +78,12 @@
         supabaseClient.from('employee_contracts').select('status, updated_at').eq('profile_id', staffId).maybeSingle(),
       ]);
       if (error) throw error;
+      const { data: people } = await supabaseClient.from('profiles').select('id, full_name');
       // The signed contract itself: the latest signature on the contract template.
       const { data: tmpl } = await supabaseClient.from('onboarding_documents').select('id').eq('is_contract', true).maybeSingle();
       const contractSig = tmpl ? (await supabaseClient.from('onboarding_document_signatures').select('id, signed_at, file_path, document_title_snapshot')
         .eq('profile_id', staffId).eq('document_id', tmpl.id).order('signed_at', { ascending: false }).limit(1).maybeSingle()).data : null;
-      person = Object.assign(profile, sensitive || {}, { licences: licences || [], contract, contractSig });
+      person = Object.assign(profile, sensitive || {}, { licences: licences || [], contract, contractSig, names: Object.fromEntries((people || []).map(x => [x.id, x.full_name])) });
       person.address_full = [person.residential_address, person.residential_suburb, person.residential_state, person.residential_postcode].filter(Boolean).join(', ');
     }
 
@@ -320,15 +321,25 @@
           <h2>Licences</h2>
           ${p.licences.length ? `<table class="responsive-stack"><thead><tr><th>Licence</th><th>Number</th><th>Expiry</th><th></th></tr></thead><tbody>
             ${p.licences.map(l => `<tr>
-              <td data-label="Licence">${escapeHtml(l.licence_name)}</td>
+              <td data-label="Licence">${escapeHtml(l.licence_name)}${licenceNoteHtml(l, p.names)}</td>
               <td data-label="Number">${escapeHtml(l.licence_number || '-')}</td>
               <td data-label="Expiry">${expiryBadge(l.expiry_date)}</td>
-              <td data-label="">${l.file_path ? `<button type="button" class="secondary lic-view" data-path="${escapeHtml(l.file_path)}" data-title="${escapeHtml(l.licence_name)}" style="font-size:12px; padding:4px 10px;">View file</button>` : '<span class="subtitle" style="font-size:12px;">No file</span>'}</td>
+              <td data-label="">${l.file_path ? `<button type="button" class="secondary lic-view" data-path="${escapeHtml(l.file_path)}" data-title="${escapeHtml(l.licence_name)}" style="font-size:12px; padding:4px 10px;">View file</button>` : '<span class="subtitle" style="font-size:12px;">No file</span>'}${HR.myRole === 'admin' ? ` <button type="button" class="secondary lic-ask" data-id="${l.id}" style="font-size:12px; padding:4px 10px;">Ask to update</button>` : ''}</td>
             </tr>`).join('')}</tbody></table>` : '<p class="subtitle">No licences recorded. Add them on the Team page.</p>'}
         </div>`;
       wireContractPdf(document.getElementById('panel-overview'));
       document.querySelectorAll('#panel-overview .lic-view').forEach(b => b.addEventListener('click', async () => {
         try { await viewStoredFile(b.dataset.path, b.dataset.title); } catch (err) { alert(err.message); }
+      }));
+      document.querySelectorAll('#panel-overview .lic-ask').forEach(b => b.addEventListener('click', async () => {
+        const l = p.licences.find(x => x.id === b.dataset.id);
+        if (!confirm(`Send ${p.full_name || 'them'} a notification asking them to update their ${l.licence_name}?`)) return;
+        b.disabled = true;
+        const { error } = await supabaseClient.rpc('request_licence_update', { p_licence_id: l.id });
+        if (error) { alert(error.message); b.disabled = false; return; }
+        const { data: fresh } = await supabaseClient.from('profile_licences').select('*').eq('profile_id', p.id).order('expiry_date');
+        p.licences = fresh || [];
+        renderOverview();
       }));
     }
 

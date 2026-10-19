@@ -54,7 +54,9 @@ function fileParts(att) {
 // PDFs are ServiceM8's internal copy of each claim line on the main job,
 // not what the client got, so they are not brought across at all.
 const isPartialInvoice = (fileName) => /\bpartial\s+invoice\b/i.test(String(fileName || ''));
-const docFolder = (fileName) => (/\binvoice\b/i.test(fileName) ? 'ServiceM8 invoices' : 'ServiceM8');
+// A quote's own PDF ("Quote #4600", "Proposal") goes to its own folder.
+const docFolder = (fileName) => (/\binvoice\b/i.test(fileName) ? 'ServiceM8 invoices'
+  : /\b(quote|quotation|proposal)\b/i.test(fileName) ? 'ServiceM8 proposal' : 'ServiceM8');
 
 const safe = (s) => s.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
 
@@ -212,7 +214,7 @@ exports.handler = async (event) => {
 
     const { data: run } = await supabaseAdmin.from('sm8_copy_runs').insert({}).select('id').single();
     const { data: projects, error: projErr } = await supabaseAdmin
-      .from('projects').select('id, sm8_job_uuid, sm8_job_number').not('sm8_job_uuid', 'is', null);
+      .from('projects').select('id, job_number, sm8_job_uuid, sm8_job_number').not('sm8_job_uuid', 'is', null);
     if (projErr) throw projErr;
     // If the lettered-job lookup fails, still copy each main job's own records.
     let groups = new Map((projects || []).map(p => [p.id, [p.sm8_job_uuid]]));
@@ -238,6 +240,16 @@ exports.handler = async (event) => {
     const profileByStaff = new Map((linked || []).map(p => [p.sm8_staff_uuid, p.id]));
     const attachments = await queueAttachments(supabaseAdmin, apiKey, groups);
     await removePartialInvoices(supabaseAdmin);
+
+    // How many quotes brought across have a quote or proposal PDF in
+    // ServiceM8 (online-only proposals are not in its API), for the summary.
+    const quoteIds = (projects || []).filter(p => !p.job_number).map(p => p.id);
+    if (quoteIds.length && run) {
+      const { data: files } = await supabaseAdmin.from('sm8_attachment_copies').select('project_id, file_name').in('project_id', quoteIds);
+      const withPdf = new Set((files || []).filter(f => docFolder(f.file_name) === 'ServiceM8 proposal').map(f => f.project_id));
+      Object.assign(summary, { quotes: quoteIds.length, quotesWithProposal: withPdf.size });
+      await supabaseAdmin.from('sm8_copy_runs').update({ summary }).eq('id', run.id);
+    }
     const moved = await requeueNewPhotoTypes(supabaseAdmin);
     await syncCopiedMeta(supabaseAdmin, attachments, profileByStaff);
     console.log(`sm8-copy-attachments: ${attachments.size} attachments on imported jobs, ${moved} moved from Documents to Photos`);

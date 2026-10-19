@@ -63,11 +63,13 @@
 
   <div class="wrap">
     <h1>ServiceM8 Import</h1>
-    <p class="subtitle">Brings the jobs still open in ServiceM8 (status Work Order) across as Direct Jobs. Loading the list is a dry run: it only reads from ServiceM8 and saves nothing. Check each job, untick any you would rather finish in ServiceM8, then press Import. Jobs already brought across are skipped, so this can be run again on cutover day.</p>
+    <p class="subtitle">Brings the jobs still open in ServiceM8 (status Work Order) across as jobs, and open quotes (status Quote) from the last few months as quotes: Quote sent if ServiceM8 sent it, otherwise Draft quote. Loading the list is a dry run: it only reads from ServiceM8 and saves nothing. Check each job, untick any you would rather finish in ServiceM8, then press Import. Jobs already brought across are skipped, so this can be run again on cutover day.</p>
 
     <div class="card">
       <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <button id="load-btn">Load open jobs from ServiceM8</button>
+        <label style="margin:0; display:flex; gap:6px; align-items:center; font-weight:normal;">Plus open quotes from the last
+          <input type="number" id="quote-months" value="6" min="0" max="120" style="width:70px; margin:0;" /> months</label>
         <span id="load-msg" class="subtitle"></span>
       </div>
     </div>
@@ -76,7 +78,8 @@
       <div class="stat"><div class="label">Open jobs in ServiceM8</div><div class="value" id="stat-open">-</div></div>
       <div class="stat"><div class="label">Already imported</div><div class="value" id="stat-done">-</div></div>
       <div class="stat"><div class="label">Need checking</div><div class="value" id="stat-check">-</div></div>
-      <div class="stat"><div class="label">Quotes (not imported)</div><div class="value" id="stat-quotes">-</div></div>
+      <div class="stat"><div class="label">Open quotes to bring</div><div class="value" id="stat-quote-rows">-</div></div>
+      <div class="stat"><div class="label">Older quotes (left behind)</div><div class="value" id="stat-quotes">-</div></div>
     </div>
 
     <div id="review" class="card" style="display:none;">
@@ -120,7 +123,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=95"></script>
   <script src="/js/theme.js"></script>
   <script>
     const BATCH = 5;
@@ -135,6 +138,8 @@
 
     const FILTERS = [
       { value: 'all', label: 'All' },
+      { value: 'jobs', label: 'Jobs' },
+      { value: 'quotes', label: 'Quotes' },
       { value: 'check', label: 'Need checking' },
       { value: 'new-client', label: 'New clients' },
       { value: 'done', label: 'Already imported' },
@@ -227,7 +232,7 @@
       btn.disabled = true;
       msg.textContent = 'Reading open jobs, clients, contacts and notes from ServiceM8...';
       try {
-        const data = await callFn('sm8-import-preview');
+        const data = await callFn('sm8-import-preview', { quotesSinceMonths: Number(document.getElementById('quote-months').value) || 0 });
         rows = data.rows;
         edits.clear();
         rows.forEach(r => edits.set(r.sm8JobUuid, {
@@ -241,12 +246,13 @@
           typeOverrides: {},
           lines: null,
           linesError: null,
-          result: r.alreadyImported ? { ok: true, skipped: true, projectId: r.alreadyImported.projectId, jobNumber: r.alreadyImported.jobNumber } : null,
+          result: r.alreadyImported ? { ok: true, skipped: true, projectId: r.alreadyImported.projectId, jobNumber: r.alreadyImported.jobNumber, quoteNumber: r.alreadyImported.quoteNumber } : null,
         }));
         document.getElementById('stat-open').textContent = data.summary.workOrders;
         document.getElementById('stat-done').textContent = data.summary.alreadyImported;
         document.getElementById('stat-check').textContent = rows.filter(r => !r.alreadyImported && needsCheck(r)).length;
         document.getElementById('stat-quotes').textContent = data.summary.quotesNotImported;
+        document.getElementById('stat-quote-rows').textContent = data.summary.quotes || 0;
         const orphans = data.summary.orphanClaims || [];
         document.getElementById('orphan-claims').innerHTML = orphans.length
           ? `<div class="error-box" style="margin-bottom:12px;">Open claims in ServiceM8 whose main job is not open, so they are not imported: ${orphans.map(n => '#' + escapeHtml(n)).join(', ')}. Check those in ServiceM8.</div>`
@@ -254,7 +260,7 @@
         document.getElementById('stats').style.display = '';
         document.getElementById('review').style.display = rows.length ? '' : 'none';
         msg.textContent = rows.length
-          ? `Loaded ${rows.length} open job${rows.length === 1 ? '' : 's'}. Nothing has been saved.`
+          ? `Loaded ${data.summary.workOrders} open job${data.summary.workOrders === 1 ? '' : 's'} and ${data.summary.quotes || 0} open quote${data.summary.quotes === 1 ? '' : 's'}. Nothing has been saved.`
           : 'No open Work Order jobs found in ServiceM8.';
         btn.textContent = 'Reload from ServiceM8';
         renderFilters();
@@ -281,6 +287,8 @@
     function visibleRows() {
       return rows.filter(r => {
         const e = edits.get(r.sm8JobUuid);
+        if (filter === 'jobs') return r.kind !== 'quote';
+        if (filter === 'quotes') return r.kind === 'quote';
         if (filter === 'check') return !r.alreadyImported && needsCheck(r);
         if (filter === 'new-client') return !r.alreadyImported && e.clientId === 'new';
         if (filter === 'done') return !!(e.result && e.result.ok);
@@ -322,7 +330,10 @@
     // Completed claims.
     function jobSection(r, e, locked) {
       const f = jobFigures(e);
-      const typeSelect = `
+      const typeSelect = r.kind === 'quote'
+        ? `<div><label>Comes across as</label><div>${r.quoteSent ? `Quote sent${r.quoteSentDate ? ' ' + new Date(r.quoteSentDate).toLocaleDateString('en-AU') : ''}` : 'Draft quote (not sent from ServiceM8)'}</div></div>
+        <div><label>Stage name</label><input data-field="stageName" value="${escAttr(e.stageName)}" ${locked} /></div>`
+        : `
         <div><label>Job type</label><select data-field="jobType" ${locked}>
           <option value="quoted" ${e.jobType === 'quoted' ? 'selected' : ''}>Quoted - invoice the remaining balance</option>
           <option value="do_and_charge" ${e.jobType === 'do_and_charge' ? 'selected' : ''}>Do and charge - invoice actual time and materials</option>
@@ -365,7 +376,7 @@
         <div class="imp-grid">
           ${typeSelect}
           ${valueField}
-          <div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${escAttr(e.invoiced)}" ${locked} /><div class="imp-meta">Left to invoice <strong class="imp-left">${money(f.value - f.invoiced)}</strong>${stc ? ' before STCs' : ''}</div></div>
+          ${r.kind === 'quote' ? '' : `<div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${escAttr(e.invoiced)}" ${locked} /><div class="imp-meta">Left to invoice <strong class="imp-left">${money(f.value - f.invoiced)}</strong>${stc ? ' before STCs' : ''}</div></div>`}
         </div>
         ${claims.length ? `<div class="imp-claims">ServiceM8 claims: ${claims.map(c => `#${escapeHtml(c.number)} ${money(c.valueExGst)} ${c.invoiced ? 'invoiced' : `<span style="color:var(--red);">not invoiced (${escapeHtml(c.status)})</span>`}`).join(' &middot; ')}</div>` : ''}
         ${groupRows ? `<details style="margin-top:10px;"><summary>Line items (${f.lines.length})${standaloneCount ? ` - check Labour/Material on the ${standaloneCount} line${standaloneCount === 1 ? '' : 's'} outside a prebuild` : ''}</summary>
@@ -380,11 +391,14 @@
       return '\n\nServiceM8 claims at the move (ex GST):\n' + claims.map(c => `#${c.number}: $${c.valueExGst.toFixed(2)}, ${c.invoiced ? 'invoiced' : `not invoiced yet (${c.status})`}`).join('\n');
     }
 
-    function resultLine(e) {
+    function resultLine(e, r) {
       if (!e.result) return '';
       if (!e.result.ok) return `<div class="imp-result fail">Import failed: ${escapeHtml(e.result.error)}</div>`;
-      const link = `<a href="/project.html?id=${e.result.projectId}" target="_blank">J${e.result.jobNumber}</a>`;
-      return `<div class="imp-result ok">${e.result.skipped ? 'Already in the app as' : 'Imported as'} ${link}</div>`;
+      const ref = e.result.jobNumber ? `J${e.result.jobNumber}` : e.result.quoteNumber ? `Q${e.result.quoteNumber}` : 'this job';
+      const link = `<a href="/project.html?id=${e.result.projectId}" target="_blank">${ref}</a>`;
+      // A ServiceM8 quote brought across earlier that is now a Work Order.
+      const approveHint = e.result.skipped && r && r.kind === 'job' && !e.result.jobNumber && e.result.quoteNumber ? ' (brought across as a quote: approve it there to make it the job)' : '';
+      return `<div class="imp-result ok">${e.result.skipped ? 'Already in the app as' : 'Imported as'} ${link}${approveHint}</div>`;
     }
 
     function renderList() {
@@ -399,8 +413,8 @@
         return `
           <div class="imp-job ${!e.include && !done ? 'excluded' : ''}" data-uuid="${r.sm8JobUuid}">
             <div class="imp-job-head">
-              <label><input type="checkbox" data-field="include" ${e.include && !done ? 'checked' : ''} ${locked} /> ServiceM8 #${escapeHtml(r.sm8JobNumber)}</label>
-              <div class="imp-meta">${r.sm8Date ? 'Work order ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}ServiceM8 total ${money(r.sm8Total)} inc GST${r.invoiceSent && !r.claims.length ? ' &middot; invoice sent' : ''}${r.paymentAmount > 0 ? ' &middot; ' + money(r.paymentAmount) + ' paid' : ''}</div>
+              <label><input type="checkbox" data-field="include" ${e.include && !done ? 'checked' : ''} ${locked} /> ${r.kind === 'quote' ? '<span class="badge sent">Quote</span> ' : ''}ServiceM8 #${escapeHtml(r.sm8JobNumber)}</label>
+              <div class="imp-meta">${r.kind === 'quote' ? `${r.sm8Date ? 'Quoted ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}${r.quoteSent ? 'Sent' + (r.quoteSentDate ? ' ' + new Date(r.quoteSentDate).toLocaleDateString('en-AU') : '') : '<span style="color:var(--red);">Not sent</span>'} &middot; ` : ''}${r.kind !== 'quote' && r.sm8Date ? 'Work order ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}ServiceM8 total ${money(r.sm8Total)} inc GST${r.invoiceSent && !r.claims.length ? ' &middot; invoice sent' : ''}${r.paymentAmount > 0 ? ' &middot; ' + money(r.paymentAmount) + ' paid' : ''}</div>
             </div>
             <div class="imp-grid">
               <div style="grid-column:1 / -1;"><label>Job name</label><input data-field="name" value="${escAttr(e.name)}" ${locked} /></div>
@@ -415,7 +429,7 @@
               <pre>${escapeHtml(r.description || '(no description)')}</pre>
               <pre>${escapeHtml(r.notesText)}</pre>
             </details>
-            ${resultLine(e)}
+            ${resultLine(e, r)}
           </div>`;
       }).join('');
 
@@ -459,7 +473,7 @@
     function updateImportBar() {
       const n = selectedRows().length;
       const btn = document.getElementById('import-btn');
-      btn.textContent = linesLoading ? 'Reading line items...' : `Import ${n} selected job${n === 1 ? '' : 's'}`;
+      btn.textContent = linesLoading ? 'Reading line items...' : `Import ${n} selected job${n === 1 ? '' : 's'} and quote${n === 1 ? '' : 's'}`;
       btn.disabled = n === 0 || linesLoading;
     }
 
@@ -496,6 +510,7 @@
             const e = edits.get(r.sm8JobUuid);
             return {
               sm8JobUuid: r.sm8JobUuid, sm8JobNumber: r.sm8JobNumber,
+              kind: r.kind, quoteSent: !!r.quoteSent, quoteSentDate: r.quoteSentDate || null,
               companyUuid: r.companyUuid, companyName: r.companyName, companyAddress: r.companyAddress,
               clientEmail: r.clientEmail, clientPhone: r.clientPhone, siteAddress: r.siteAddress,
               description: r.description, notesText: r.notesText + claimsNote(e),
@@ -623,10 +638,11 @@
       el.innerHTML = `
         <p class="subtitle" style="margin:0;">Last run ${new Date(run.finished_at).toLocaleString()}: ${s.jobs || 0} job${s.jobs === 1 ? '' : 's'} checked${s.letteredJobs ? `, with ${s.letteredJobs} lettered job${s.letteredJobs === 1 ? '' : 's'} (4515A and so on) folded in` : ''}. ServiceM8 had ${s.activitiesSeen || 0} time record${s.activitiesSeen === 1 ? '' : 's'} and ${s.checklistSeen || 0} checklist item${s.checklistSeen === 1 ? '' : 's'} on them.</p>
         <p style="margin:6px 0 0; font-size:13px;">Timesheets: ${s.timeAdded || 0} added${s.timeAlready ? `, ${s.timeAlready} already in` : ''}${s.timeMoved ? `, ${s.timeMoved} moved to a newly matched person` : ''}${s.timeSkippedNoTimes ? `, ${s.timeSkippedNoTimes} skipped (no check-out time)` : ''}.</p>
+        ${s.quotes ? `<p style="margin:4px 0 0; font-size:13px;">Quotes: ${s.quotesWithProposal || 0} of ${s.quotes} have a quote or proposal PDF from ServiceM8 (in Documents, folder "ServiceM8 proposal").</p>` : ''}
         <p style="margin:4px 0 0; font-size:13px;">Checklist tasks: ${s.checklistAdded || 0} added${s.checklistAlready ? `, ${s.checklistAlready} already in` : ''}${s.checklistTicked ? `, ${s.checklistTicked} newly ticked` : ''}.</p>
         ${unmatched.length ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">${s.timeSkippedUnmatched} check-in${s.timeSkippedUnmatched === 1 ? '' : 's'} skipped, staff not matched: ${unmatched.map(([name, n]) => `${escapeHtml(name)} (${n})`).join(', ')}. Match them under Staff above and save; their time comes across then.</p>` : ''}
         ${s.error ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">Stopped: ${escapeHtml(s.error)}</p>` : ''}
-        ${(s.jobErrors || []).length ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">Could not read: ${s.jobErrors.map(j => `J${escapeHtml(String(j.jobNumber))} (${escapeHtml(j.error)})`).join(', ')}. Press the button again to retry.</p>` : ''}`;
+        ${(s.jobErrors || []).length ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">Could not read: ${s.jobErrors.map(j => `${escapeHtml(String(j.ref || 'J' + j.jobNumber))} (${escapeHtml(j.error)})`).join(', ')}. Press the button again to retry.</p>` : ''}`;
       return false;
     }
 

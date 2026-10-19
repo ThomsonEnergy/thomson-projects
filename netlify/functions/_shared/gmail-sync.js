@@ -361,7 +361,11 @@ async function runSync({ budgetMs = 8000 } = {}) {
     .is('triaged_at', null).eq('is_supplier_bill', false).not('mailboxes.connected_at', 'is', null)
     .gt('last_message_at', new Date(Date.now() - 60 * 86400000).toISOString());
   const pendingWork = (personal || []).some((mb) => !mb.backfill_done_at || (mb.cleanup_started_at && !mb.cleanup_done_at) || mb.cleanup_read_older_days);
-  if (inbound || unsorted || pendingWork) await startMailboxWork();
+  // Also once an hour even with nothing to do, so its heartbeat stays fresh and the 5am digest
+  // doesn't report the email agent as down after a quiet night (bug review F14).
+  const { data: hb } = await supabaseAdmin.from('agent_heartbeats').select('last_ok_at').eq('agent', 'mailbox-work').maybeSingle();
+  const stale = !hb?.last_ok_at || Date.now() - new Date(hb.last_ok_at).getTime() > 50 * 60000;
+  if (inbound || unsorted || pendingWork || stale) await startMailboxWork();
   // Supplier bills are read in the background (a PDF takes longer than this function gets).
   // Started when a bill came in, when some are still waiting, and once an hour as a safety net.
   const { count: waiting } = await supabaseAdmin.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'pending');

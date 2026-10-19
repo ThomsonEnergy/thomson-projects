@@ -85,7 +85,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=95"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/licence-share.js?v=1"></script>
   <script>
@@ -94,7 +94,11 @@
 
     async function loadCompanyCredentials() {
       const el = document.getElementById('credentials-list');
-      const { data, error } = await supabaseClient.from('company_credentials').select('*').order('expiry_date', { ascending: true, nullsFirst: false });
+      const [{ data, error }, { data: people }] = await Promise.all([
+        supabaseClient.from('company_credentials').select('*').order('expiry_date', { ascending: true, nullsFirst: false }),
+        supabaseClient.from('profiles').select('id, full_name'),
+      ]);
+      const names = Object.fromEntries((people || []).map(p => [p.id, p.full_name]));
       if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
       if (!data.length) { el.innerHTML = `<p class="subtitle">Nothing added yet.</p>`; return; }
 
@@ -104,10 +108,10 @@
           <tbody>
             ${data.map(c => `
               <tr>
-                <td data-label="Type"><span class="badge draft">${c.credential_type}</span></td>
-                <td data-label="Name">${c.name}${c.file_path ? ` <button type="button" class="secondary cred-view" data-path="${c.file_path}" data-title="${escapeHtml(c.name)}" style="font-size:12px; padding:4px 10px; margin-left:6px;">View file</button>` : ''}</td>
-                <td data-label="Provider">${c.provider || '-'}</td>
-                <td data-label="Reference">${c.reference_number || '-'}</td>
+                <td data-label="Type"><span class="badge draft">${escapeHtml(c.credential_type)}</span></td>
+                <td data-label="Name">${escapeHtml(c.name)}${c.file_path ? ` <button type="button" class="secondary cred-view" data-path="${escapeHtml(c.file_path)}" data-title="${escapeHtml(c.name)}" style="font-size:12px; padding:4px 10px; margin-left:6px;">View file</button>` : ''}${licenceNoteHtml(c, names)}</td>
+                <td data-label="Provider">${escapeHtml(c.provider || '-')}</td>
+                <td data-label="Reference">${escapeHtml(c.reference_number || '-')}</td>
                 <td data-label="Expiry">${expiryBadge(c.expiry_date)}</td>
                 <td data-label="">
                   <button type="button" class="secondary cred-edit-btn" data-id="${c.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
@@ -149,13 +153,15 @@
             <option value="licence" ${existing?.credential_type === 'licence' ? 'selected' : ''}>Licence</option>
           </select>
           <label>Name</label>
-          <input id="cred-name" placeholder="e.g. Public Liability Insurance" value="${existing?.name || ''}" />
+          <input id="cred-name" placeholder="e.g. Public Liability Insurance" value="${escapeHtml(existing?.name || '')}" />
           <label>Provider / issuer</label>
-          <input id="cred-provider" placeholder="e.g. QBE, or the Building and Energy Commission" value="${existing?.provider || ''}" />
+          <input id="cred-provider" placeholder="e.g. QBE, or the Building and Energy Commission" value="${escapeHtml(existing?.provider || '')}" />
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Reference / policy number</label><input id="cred-reference" value="${existing?.reference_number || ''}" /></div>
+            <div><label style="margin-top:0">Reference / policy number</label><input id="cred-reference" value="${escapeHtml(existing?.reference_number || '')}" /></div>
             <div><label style="margin-top:0">Expiry date</label><input id="cred-expiry" type="date" value="${existing?.expiry_date || ''}" /></div>
           </div>
+          <label>Notes</label>
+          <textarea id="cred-notes" rows="2" placeholder="e.g. Renewal paid 15 Oct, waiting on certificate">${escapeHtml(existing?.notes || '')}</textarea>
           <div style="margin-top:14px;">
             <button id="cred-save-btn">${existing ? 'Save changes' : 'Add'}</button>
             <button type="button" class="secondary" id="cred-cancel-btn">Cancel</button>
@@ -197,6 +203,7 @@
           provider: overlay.querySelector('#cred-provider').value.trim() || null,
           reference_number: overlay.querySelector('#cred-reference').value.trim() || null,
           expiry_date: overlay.querySelector('#cred-expiry').value || null,
+          notes: overlay.querySelector('#cred-notes').value.trim() || null,
           file_path: filePath,
           file_name: fileName,
         };
@@ -388,11 +395,13 @@
 
     async function loadEmployeeLicencesSummary() {
       const el = document.getElementById('employee-licences-list');
-      const [{ data: staff }, { data: licences, error }] = await Promise.all([
+      const [{ data: staff }, { data: licences, error }, { data: people }] = await Promise.all([
         supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
         supabaseClient.from('profile_licences').select('*').order('expiry_date', { ascending: true, nullsFirst: false }),
+        supabaseClient.from('profiles').select('id, full_name'),
       ]);
-      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const names = Object.fromEntries((people || []).map(p => [p.id, p.full_name]));
 
       el.innerHTML = `
         <table class="responsive-stack">
@@ -402,11 +411,12 @@
               const staffName = (staff || []).find(s => s.id === l.profile_id)?.full_name || 'Unknown';
               return `
               <tr>
-                <td data-label="Employee">${staffName}</td>
-                <td data-label="Licence">${l.licence_name}${l.file_path ? ` <button type="button" class="secondary lic-view" data-path="${l.file_path}" data-title="${escapeHtml(staffName + ' - ' + l.licence_name)}" style="font-size:12px; padding:4px 10px; margin-left:6px;">View file</button>` : ` <span class="subtitle" style="font-size:12px;">(no file uploaded)</span>`}</td>
-                <td data-label="Number">${l.licence_number || '-'}</td>
+                <td data-label="Employee">${escapeHtml(staffName)}</td>
+                <td data-label="Licence">${escapeHtml(l.licence_name)}${l.file_path ? ` <button type="button" class="secondary lic-view" data-path="${escapeHtml(l.file_path)}" data-title="${escapeHtml(staffName + ' - ' + l.licence_name)}" style="font-size:12px; padding:4px 10px; margin-left:6px;">View file</button>` : ` <span class="subtitle" style="font-size:12px;">(no file uploaded)</span>`}${licenceNoteHtml(l, names)}</td>
+                <td data-label="Number">${escapeHtml(l.licence_number || '-')}</td>
                 <td data-label="Expiry">${expiryBadge(l.expiry_date)}</td>
                 <td data-label="">
+                  <button type="button" class="secondary lic-ask-btn" data-id="${l.id}" style="font-size:12px; padding:6px 10px;">Ask to update</button>
                   <button type="button" class="secondary lic-edit-btn" data-id="${l.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
                   <button type="button" class="secondary lic-delete-btn" data-id="${l.id}" style="font-size:12px; padding:6px 10px;">Delete</button>
                 </td>
@@ -416,7 +426,7 @@
         </table>
         <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <label style="margin:0;">Add a licence for</label>
-          <select id="new-licence-employee" style="max-width:280px;">${(staff || []).map(s => `<option value="${s.id}">${s.full_name}</option>`).join('')}</select>
+          <select id="new-licence-employee" style="max-width:280px;">${(staff || []).map(s => `<option value="${s.id}">${escapeHtml(s.full_name)}</option>`).join('')}</select>
           <button type="button" id="add-employee-licence-btn" class="secondary">+ Add licence</button>
         </div>`;
 
@@ -427,6 +437,15 @@
       el.querySelectorAll('.lic-edit-btn').forEach(btn => btn.addEventListener('click', () => {
         const l = licences.find(x => x.id === btn.dataset.id);
         openEmployeeLicencePanel(l.profile_id, (staff.find(s => s.id === l.profile_id) || {}).full_name || 'Unknown', l);
+      }));
+      el.querySelectorAll('.lic-ask-btn').forEach(btn => btn.addEventListener('click', async () => {
+        const l = licences.find(x => x.id === btn.dataset.id);
+        const who = (staff.find(s => s.id === l.profile_id) || {}).full_name || 'them';
+        if (!confirm(`Send ${who} a notification asking them to update their ${l.licence_name}?`)) return;
+        btn.disabled = true;
+        const { error: askErr } = await supabaseClient.rpc('request_licence_update', { p_licence_id: l.id });
+        if (askErr) { alert(askErr.message); btn.disabled = false; return; }
+        await loadEmployeeLicencesSummary();
       }));
       el.querySelectorAll('.lic-delete-btn').forEach(btn => btn.addEventListener('click', async () => {
         if (!confirm('Delete this licence record? This cannot be undone.')) return;
@@ -449,16 +468,18 @@
       let fileName = existing?.file_name || null;
       overlay.innerHTML = `
         <div class="card" style="max-width:480px; width:100%; max-height:90vh; overflow-y:auto;">
-          <h2>${existing ? 'Edit' : 'Add'} licence - ${employeeName}</h2>
+          <h2>${existing ? 'Edit' : 'Add'} licence - ${escapeHtml(employeeName)}</h2>
           <label style="margin-top:0">Certificate (optional - reads it automatically)</label>
           <input type="file" id="elic-file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
           <div id="elic-file-status" class="subtitle" style="margin:4px 0 10px;">${fileName ? `Attached: ${fileName}` : ''}</div>
           <label>Licence name</label>
-          <input id="elic-name" placeholder="e.g. Electrical Licence" value="${existing?.licence_name || ''}" />
+          <input id="elic-name" placeholder="e.g. Electrical Licence" value="${escapeHtml(existing?.licence_name || '')}" />
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Number</label><input id="elic-number" value="${existing?.licence_number || ''}" /></div>
+            <div><label style="margin-top:0">Number</label><input id="elic-number" value="${escapeHtml(existing?.licence_number || '')}" /></div>
             <div><label style="margin-top:0">Expiry date</label><input id="elic-expiry" type="date" value="${existing?.expiry_date || ''}" /></div>
           </div>
+          <label>Notes</label>
+          <textarea id="elic-notes" rows="2" placeholder="e.g. Paid for renewal, waiting on card">${escapeHtml(existing?.notes || '')}</textarea>
           <div style="margin-top:14px;">
             <button id="elic-save-btn">${existing ? 'Save changes' : 'Add'}</button>
             <button type="button" class="secondary" id="elic-cancel-btn">Cancel</button>
@@ -497,6 +518,7 @@
           licence_name,
           licence_number: overlay.querySelector('#elic-number').value.trim() || null,
           expiry_date: overlay.querySelector('#elic-expiry').value || null,
+          notes: overlay.querySelector('#elic-notes').value.trim() || null,
           file_path: filePath,
           file_name: fileName,
         };
@@ -553,7 +575,7 @@
             ${email ? `<p class="subtitle" style="margin:0 0 6px; font-size:12px;"><a class="link-quiet" href="mailto:${email}">${email}</a></p>` : ''}
             ${myLicences.length ? `
               <div style="text-align:left; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
-                ${myLicences.map(l => `<p style="margin:0 0 4px; font-size:11px;">${l.licence_name}: ${l.licence_number || '<span class="subtitle">no number set</span>'}</p>`).join('')}
+                ${myLicences.map(l => `<p style="margin:0 0 4px; font-size:11px;">${escapeHtml(l.licence_name)}: ${l.licence_number ? escapeHtml(l.licence_number) : '<span class="subtitle">no number set</span>'}</p>`).join('')}
               </div>` : ''}
           </div>`;
       }).join('');
@@ -612,6 +634,8 @@
         await loadCompanyCredentials();
         await loadEmployeeLicencesSummary();
         await initShareSection();
+        // The licence expiry agent's notification links here
+        if (location.hash === '#insurance-section') document.getElementById('insurance-section').scrollIntoView();
       }
     })();
   </script>

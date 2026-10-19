@@ -34,8 +34,8 @@
     <div class="grid cols-4">
       <div class="stat"><div class="label">Total</div><div class="value" id="stat-total">-</div></div>
       <div class="stat"><div class="label">This month</div><div class="value" id="stat-month">-</div></div>
-      <div class="stat"><div class="label">Outstanding</div><div class="value" id="stat-outstanding">-</div></div>
-      <div class="stat"><div class="label">Overdue</div><div class="value" id="stat-overdue">-</div></div>
+      <div class="stat"><div class="label">Outstanding (inc GST)</div><div class="value" id="stat-outstanding">-</div></div>
+      <div class="stat"><div class="label">Overdue (inc GST)</div><div class="value" id="stat-overdue">-</div></div>
     </div>
 
     <div class="card">
@@ -44,7 +44,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=95"></script>
   <script src="/js/theme.js"></script>
   <script>
     async function loadInvoices() {
@@ -70,23 +70,43 @@
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-      let total = 0, thisMonth = 0, outstanding = 0, overdue = 0;
+      let total = 0, thisMonth = 0;
 
       data.forEach(inv => {
         const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
         const sentAt = new Date(inv.sent_at);
         total += amount;
         if (sentAt >= startOfMonth) thisMonth += amount;
-        if (!inv.paid_at) {
-          outstanding += amount;
-          if (inv.due_date && new Date(inv.due_date + 'T00:00:00') < now) overdue += amount;
-        }
       });
 
       document.getElementById('stat-total').textContent = money(total);
       document.getElementById('stat-month').textContent = money(thisMonth);
-      document.getElementById('stat-outstanding').textContent = money(outstanding);
-      document.getElementById('stat-overdue').textContent = money(overdue);
+
+      // Outstanding / Overdue: the balance due each unpaid invoice shows (inc GST, less the
+      // STC credit with GST for a company, less credit notes), from get_invoice_balance_due.
+      // Only unpaid invoices are asked for, all at once.
+      const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+      const unpaid = data.filter(inv => !inv.paid_at);
+      document.getElementById('stat-outstanding').textContent = unpaid.length ? '...' : money(0);
+      document.getElementById('stat-overdue').textContent = unpaid.length ? '...' : money(0);
+      Promise.all(unpaid.map(async (inv) => {
+        const { data: bal, error: balErr } = await supabaseClient.rpc('get_invoice_balance_due', { p_invoice_id: inv.id });
+        if (!balErr && bal != null) return { inv, due: Number(bal) };
+        // Fallback (no credit notes): the same sum calculate_balance_due does.
+        const sub = r2(Number(inv.labour_amount || 0) + Number(inv.material_amount || 0));
+        const project = inv.cost_centres?.projects || inv.projects;
+        const stc = Number(inv.stc_amount || 0);
+        const stcIncGst = project?.clients?.client_type === 'company' ? r2(stc * 1.10) : r2(stc);
+        return { inv, due: r2(sub + r2(sub * 0.10) - stcIncGst) };
+      })).then((rows) => {
+        let outstanding = 0, overdue = 0;
+        rows.forEach(({ inv, due }) => {
+          outstanding += due;
+          if (inv.due_date && new Date(inv.due_date + 'T00:00:00') < now) overdue += due;
+        });
+        document.getElementById('stat-outstanding').textContent = money(outstanding);
+        document.getElementById('stat-overdue').textContent = money(overdue);
+      });
 
       listEl.innerHTML = `
         <table class="responsive-stack">

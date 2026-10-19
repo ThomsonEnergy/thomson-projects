@@ -196,7 +196,7 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=95"></script>
   <script src="/js/theme.js"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
@@ -309,10 +309,11 @@
       const windowStart = new Date(dateStr + 'T00:00:00'); windowStart.setDate(windowStart.getDate() - 1);
       const windowEnd = new Date(dateStr + 'T00:00:00'); windowEnd.setDate(windowEnd.getDate() + 2);
 
-      const [{ data: assignments }, { data: leave }, { data: dayTimeEntries }] = await Promise.all([
+      const [{ data: assignments }, { data: leave }, { data: dayTimeEntries, error: dayTimeErr }] = await Promise.all([
         supabaseClient.from('schedule_assignments').select('*, profiles(id, full_name), projects(id, name, job_number, quote_number)').eq('assignment_date', dateStr),
         supabaseClient.from('leave_requests').select('*, profiles(id, full_name)').eq('status', 'approved').lte('start_date', dateStr).gte('end_date', dateStr),
-        supabaseClient.from('time_entries').select('staff_id, project_id, time_category, clock_in, clock_out').gte('clock_in', windowStart.toISOString()).lte('clock_in', windowEnd.toISOString()).not('clock_out', 'is', null),
+        // Open entries too: someone who forgot to clock out still worked that day.
+        supabaseClient.from('time_entries').select('staff_id, project_id, time_category, clock_in, clock_out').gte('clock_in', windowStart.toISOString()).lte('clock_in', windowEnd.toISOString()),
       ]);
       await fetchHolidays(dateStr, dateStr);
       const isHoliday = publicHolidaySet.has(dateStr);
@@ -327,25 +328,34 @@
       // day. Found -> lock it in with the real times. Not found -> it
       // was scheduled but never actually worked, so remove it rather
       // than leave an inaccurate plan sitting on the board.
-      const toDelete = [];
+      // Only removed when the viewer can manage the schedule (and so can see
+      // everyone's time) and the time entries actually loaded. Lead site
+      // inspections and site visits are never clocked against, so they are
+      // never removed here.
+      let toDelete = [];
       const reconciledById = {};
-      if (isPastDay) {
+      const sameCategory = (x) => (x === 'office' ? 'admin' : x); // both show as Admin
+      if (isPastDay && !dayTimeErr) {
         (assignments || []).forEach(a => {
           const matches = (dayTimeEntries || []).filter(te =>
             te.staff_id === a.staff_id &&
             sydneyDateStr(te.clock_in) === dateStr &&
-            (a.project_id ? te.project_id === a.project_id : (!te.project_id && te.time_category === a.block_type))
+            (a.project_id ? te.project_id === a.project_id : (!te.project_id && sameCategory(te.time_category) === sameCategory(a.block_type)))
           );
-          if (matches.length) {
-            const starts = matches.map(m => sydneyTimeStr(m.clock_in));
-            const ends = matches.map(m => sydneyTimeStr(m.clock_out));
+          const closed = matches.filter(m => m.clock_out);
+          if (closed.length) {
+            const starts = closed.map(m => sydneyTimeStr(m.clock_in));
+            // A shift split at Sydney midnight ends at 00:00 the next day: show it as 24:00.
+            const ends = closed.map(m => (sydneyDateStr(m.clock_out) !== dateStr ? '24:00' : sydneyTimeStr(m.clock_out)));
             reconciledById[a.id] = { start: starts.sort()[0], end: ends.sort().slice(-1)[0] };
-          } else {
+          } else if (!matches.length && a.block_type !== 'site_inspection' && a.block_type !== 'site_visit' && !a.site_inspection_id) {
             toDelete.push(a.id);
           }
         });
+        if (!canEditSchedule()) toDelete = [];
         if (toDelete.length) {
-          await supabaseClient.from('schedule_assignments').delete().in('id', toDelete);
+          const { error: delErr } = await supabaseClient.from('schedule_assignments').delete().in('id', toDelete);
+          if (delErr) toDelete = []; // keep showing them rather than hide what is still there
         }
       }
       const liveAssignments = (assignments || []).filter(a => !toDelete.includes(a.id));

@@ -55,6 +55,7 @@
         <button class="settings-tab" data-panel="numbering" data-admin-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
         <button class="settings-tab" data-panel="billable-rates" data-pricing-only="1">Billable Rates</button>
+        <button class="settings-tab" data-panel="auto-replies" data-pricing-only="1">Email Auto Replies</button>
         <button class="settings-tab" data-panel="inspections" data-pricing-only="1">Inspection Checklists</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
         <button class="settings-tab" data-panel="terms" data-admin-only="1">Payment Terms &amp; T&amp;Cs</button>
@@ -400,6 +401,25 @@
           </div>
           <button id="save-quoting-btn">Save quoting defaults</button>
           <div id="save-quoting-msg"></div>
+        </div>
+
+        <!-- Email auto replies (company_settings.routing_reply_mode, migration 20261103010000) -->
+        <div class="settings-panel" id="panel-auto-replies">
+          <div class="card">
+            <h2>Email auto replies</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Two replies that point people to the right mailbox:</p>
+            <p class="subtitle" style="margin-bottom:6px;"><b>Postie (sales@):</b> a supplier emails an invoice to sales@. The invoice is passed to invoice@ for reading, and the reply asks them to send invoices to invoice@ next time with our PO number on it.</p>
+            <p class="subtitle" style="margin-bottom:10px;"><b>Tally (invoice@):</b> an email to invoice@ with no invoice, statement, credit note or price list. The reply asks them to use sales@.</p>
+            <label>Replies</label>
+            <select id="routing-reply-mode">
+              <option value="draft">Drafts (in sales@ Gmail Drafts, a person sends them)</option>
+              <option value="send">Send automatically</option>
+              <option value="off">Off (also stops passing sales@ invoices to invoice@)</option>
+            </select>
+            <p class="subtitle" style="margin:6px 0 0; font-size:12px;">One reply per conversation, and no more than one per sender every 14 days. Never to our own addresses, no-reply senders or automatic mail.</p>
+          </div>
+          <button id="save-auto-replies-btn">Save auto replies</button>
+          <div id="save-auto-replies-msg"></div>
         </div>
 
         <!-- Billable Rates -->
@@ -753,7 +773,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=95"></script>
   <script src="/js/theme.js"></script>
   <script>
     let portfolioPhotos = [];
@@ -834,6 +854,7 @@
       document.getElementById('default-deposit').value = data.default_deposit_percent ?? 10;
       document.getElementById('quote-valid-days').value = data.quote_valid_days ?? 30;
       document.getElementById('auto-decline-expired').checked = data.auto_decline_expired !== false;
+      document.getElementById('routing-reply-mode').value = data.routing_reply_mode || 'draft';
       document.getElementById('next-quote-number').value = data.next_quote_number ?? 1000;
       document.getElementById('next-job-number').value = data.next_job_number ?? 7000;
       document.getElementById('next-invoice-number').value = data.next_invoice_number ?? 3000;
@@ -985,6 +1006,17 @@
         .eq('id', 1);
       msg.innerHTML = error
         ? `<div class="error-box">${error.message}</div>`
+        : `<div class="success-box">Saved.</div>`;
+    });
+
+    document.getElementById('save-auto-replies-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('save-auto-replies-msg');
+      const { error } = await supabaseClient
+        .from('company_settings')
+        .update({ routing_reply_mode: document.getElementById('routing-reply-mode').value })
+        .eq('id', 1);
+      msg.innerHTML = error
+        ? `<div class="error-box">${escapeHtml(error.message)}</div>`
         : `<div class="success-box">Saved.</div>`;
     });
 
@@ -1402,13 +1434,15 @@
 
     // --- My Profile (self-service, every role) ---
     let myProfileUserId = null;
+    let myLicenceIds = [];
 
     function myLicenceRowHtml(l) {
       return `
-        <div class="my-licence-row" data-id="${l.id || ''}" data-file-path="${l.file_path || ''}" data-file-name="${l.file_name || ''}" style="margin-bottom:12px; padding:10px; background:var(--surface-2); border-radius:8px;">
+        <div class="my-licence-row" data-id="${escapeHtml(l.id || '')}" data-file-path="${escapeHtml(l.file_path || '')}" data-file-name="${escapeHtml(l.file_name || '')}" style="margin-bottom:12px; padding:10px; background:var(--surface-2); border-radius:8px;">
+          ${l.update_requested_at ? `<div class="error-box" style="margin:0 0 8px; font-size:13px;">Please update this licence: upload the current one and its expiry date, then Save licences.</div>` : ''}
           <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
-            <input class="my-licence-name" value="${l.licence_name || ''}" placeholder="Licence name" style="flex:2; margin:0;" />
-            <input class="my-licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1; margin:0;" />
+            <input class="my-licence-name" value="${escapeHtml(l.licence_name || '')}" placeholder="Licence name" style="flex:2; margin:0;" />
+            <input class="my-licence-number" value="${escapeHtml(l.licence_number || '')}" placeholder="Number" style="flex:1; margin:0;" />
             <input class="my-licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1; margin:0;" />
             <button type="button" class="secondary remove-my-licence-btn" style="padding:8px 10px;">&times;</button>
           </div>
@@ -1416,6 +1450,7 @@
           <input type="file" class="my-licence-file" accept="image/*,.pdf" style="margin:0;" />
           <button type="button" class="secondary my-licence-view" style="font-size:12px; padding:4px 10px; margin-left:8px; ${l.file_path ? '' : 'display:none;'}">View uploaded file</button>
           <div class="my-licence-scan-msg" style="margin-top:4px;"></div>
+          <textarea class="my-licence-notes" rows="1" placeholder="Notes, e.g. Paid for renewal, waiting on card" style="margin:6px 0 0;">${escapeHtml(l.notes || '')}</textarea>
         </div>`;
     }
     function wireMyLicenceRows() {
@@ -1474,8 +1509,13 @@
       document.getElementById('my-rate-2x').textContent = rates?.rate_2x != null ? money(rates.rate_2x) : 'Not set';
       document.getElementById('my-rate-2-5x').textContent = rates?.rate_2_5x != null ? money(rates.rate_2_5x) : 'Not set';
 
+      myLicenceIds = (licences || []).map(l => l.id);
       document.getElementById('my-licence-rows').innerHTML = (licences || []).map(myLicenceRowHtml).join('');
       wireMyLicenceRows();
+      // ?licence=<id>: from an "update your licence" notification
+      const askedLicence = new URLSearchParams(location.search).get('licence');
+      const askedRow = askedLicence && [...document.querySelectorAll('.my-licence-row')].find(r => r.dataset.id === askedLicence);
+      if (askedRow) { askedRow.style.outline = '2px solid var(--accent)'; askedRow.scrollIntoView({ block: 'center' }); }
 
       await loadMySignedDocs(userId);
       await loadMyLetters(userId);
@@ -1655,24 +1695,20 @@
     document.getElementById('my-licences-save-btn').addEventListener('click', async () => {
       const msg = document.getElementById('my-licences-msg');
       try {
-        // Replace-all, same approach the admin panel uses - simplest way
-        // to handle add/edit/remove in one save given how few licences a
-        // person typically has.
-        await supabaseClient.from('profile_licences').delete().eq('profile_id', myProfileUserId);
-        const newLicences = [...document.querySelectorAll('.my-licence-row')]
+        // Rows keep their id, so notes, update requests and reminders stay with the licence.
+        const rows = [...document.querySelectorAll('.my-licence-row')]
           .map(row => ({
+            id: row.dataset.id || null,
             profile_id: myProfileUserId,
             licence_name: row.querySelector('.my-licence-name').value.trim(),
             licence_number: row.querySelector('.my-licence-number').value.trim() || null,
             expiry_date: row.querySelector('.my-licence-expiry').value || null,
+            notes: row.querySelector('.my-licence-notes').value.trim() || null,
             file_path: row.dataset.filePath || null,
             file_name: row.dataset.fileName || null,
           }))
           .filter(l => l.licence_name);
-        if (newLicences.length) {
-          const { error } = await supabaseClient.from('profile_licences').insert(newLicences);
-          if (error) throw error;
-        }
+        await saveLicenceRows(myLicenceIds, rows);
         msg.innerHTML = `<div class="success-box">Licences saved.</div>`;
         await loadMyProfile(myProfileUserId);
       } catch (err) {

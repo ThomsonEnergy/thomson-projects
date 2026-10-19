@@ -33,7 +33,12 @@ exports.handler = async (event) => {
     }
     if (entry.approval_status === 'approved') return { statusCode: 200, body: JSON.stringify({ ok: true, alreadyApproved: true }) };
 
-    await approveVariation(supabaseAdmin, entry, { method: 'online', signedName, signature });
+    try {
+      await approveVariation(supabaseAdmin, entry, { method: 'online', signedName, signature });
+    } catch (e) {
+      if (e.statusCode === 409) return { statusCode: 200, body: JSON.stringify({ ok: true, alreadyApproved: true }) }; // a second tap
+      throw e;
+    }
 
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
   } catch (err) {

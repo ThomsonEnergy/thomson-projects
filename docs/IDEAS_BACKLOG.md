@@ -19,7 +19,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
-| 16 | User-friendliness upgrades (whole-app review) | Suggestions only, waiting on owner's pick (`docs/UX_REVIEW.md`) | N | None |
+| 17 | User-friendliness upgrades (whole-app review) | Suggestions only, waiting on owner's pick (`docs/UX_REVIEW.md`) | N | None |
 
 ## High lead time, start now
 
@@ -440,7 +440,11 @@ Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261030000000).
 - [ ] Outside penetration test after the sweep, or not
 
 
-## 16. User-friendliness upgrades (whole-app review, 19 Oct 2026)
+## 16. Build rule checks in `npm run check` (decided against, 19 Oct 2026)
+
+Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/BUG_REVIEW.md`) after each big chunk of features is added; the build rules in `CLAUDE.md` guide each build.
+
+## 17. User-friendliness upgrades (whole-app review, 19 Oct 2026)
 
 **Status:** suggestions only, waiting on the owner's pick. Full list with file and line references in `docs/UX_REVIEW.md` (171 items in 10 themes, 128 of them small effort). Quote item numbers to pick, for example "UX 1, 2 and 6".
 

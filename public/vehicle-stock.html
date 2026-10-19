@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=91"></script>
+  <script src="/js/supabase-client.js?v=95"></script>
   <script src="/js/theme.js"></script>
   <script>
     const vehicleId = new URLSearchParams(window.location.search).get('id');
@@ -183,8 +183,7 @@
           const { data: { user } } = await supabaseClient.auth.getUser();
 
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
-            project_id: null, vehicle_id: vehicleId, supplier_id: supplierId, supplier_name: supplierName,
-            po_number: await drawNextPoNumber(),
+            project_id: null, vehicle_id: vehicleId, supplier_id: supplierId, supplier_name: supplierName || 'Warehouse', // supplier_name is required
             po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
             description: source === 'stock' ? 'Pulled from Warehouse stock' : 'Purchased for vehicle',
           }).select('id, po_number').single();
