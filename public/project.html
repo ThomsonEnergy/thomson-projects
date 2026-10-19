@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=87"></script>
+  <script src="/js/supabase-client.js?v=88"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -119,14 +119,12 @@
       // received count, so a PO that's just been placed doesn't inflate
       // "accrued" before anything's landed.
       if (project.job_number) {
-        const { data: poRows } = await supabaseClient
-          .from('purchase_orders')
-          .select('purchase_order_line_items(quantity, unit_cost, received)')
-          .eq('project_id', projectId);
-        project.accrued_material_cost = (poRows || []).reduce((s, po) =>
-          s + (po.purchase_order_line_items || [])
-                .filter(li => li.received)
-                .reduce((s2, li) => s2 + Number(li.quantity) * Number(li.unit_cost), 0), 0);
+        // every PO line received to this job, whichever PO it is on (lines can be moved between jobs)
+        const { data: liRows } = await supabaseClient
+          .from('purchase_order_line_items')
+          .select('quantity, unit_cost')
+          .eq('received', true).eq('destination_type', 'job').eq('destination_job_id', projectId);
+        project.accrued_material_cost = (liRows || []).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
       } else {
         project.accrued_material_cost = 0;
       }
@@ -206,14 +204,13 @@
           } catch (err) {
             console.error('Warranty accrued labour fetch failed:', err.message);
           }
-          const { data: poRows } = await supabaseClient
-            .from('purchase_orders')
-            .select('project_id, purchase_order_line_items(quantity, unit_cost, received)')
-            .in('project_id', warrantyIds);
+          const { data: liRows } = await supabaseClient
+            .from('purchase_order_line_items')
+            .select('destination_job_id, quantity, unit_cost')
+            .eq('received', true).eq('destination_type', 'job').in('destination_job_id', warrantyIds);
           const materialByProject = {};
-          (poRows || []).forEach(po => {
-            const cost = (po.purchase_order_line_items || []).filter(li => li.received).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
-            materialByProject[po.project_id] = (materialByProject[po.project_id] || 0) + cost;
+          (liRows || []).forEach(li => {
+            materialByProject[li.destination_job_id] = (materialByProject[li.destination_job_id] || 0) + Number(li.quantity) * Number(li.unit_cost);
           });
 
           project.warranty_jobs = warrantyJobs.map(w => {
@@ -6658,11 +6655,14 @@
     }
 
     async function loadPurchaseOrders(projectId, centres) {
-      const { data: pos, error } = await supabaseClient
+      const { data: movedIn } = await supabaseClient.from('purchase_order_line_items').select('po_id').eq('destination_job_id', projectId);
+      const otherPoIds = [...new Set((movedIn || []).map(r => r.po_id))];
+      let poQuery = supabaseClient
         .from('purchase_orders')
         .select('*, purchase_order_line_items(*), suppliers(name)')
-        .eq('project_id', projectId)
         .order('created_at', { ascending: false });
+      poQuery = otherPoIds.length ? poQuery.or(`project_id.eq.${projectId},id.in.(${otherPoIds.join(',')})`) : poQuery.eq('project_id', projectId);
+      const { data: pos, error } = await poQuery;
 
       // Wired up unconditionally, before any early return below - this
       // button previously only got its click handler when the project
@@ -6687,27 +6687,28 @@
 
       if (summaryEl) {
         const receivedCount = pos.filter(po => po.received).length;
+        // (POs from other jobs that only had a line moved here are counted too)
         summaryEl.innerHTML = `<p class="subtitle">${receivedCount} of ${pos.length} purchase order${pos.length === 1 ? '' : 's'} fully received.</p>`;
       }
 
       const stageName = (id) => (centres.find(c => c.id === id) || {}).name || 'Whole project';
       const myRole = await getMyRole();
-      const canOverride = myRole === 'admin' || myRole === 'finance';
 
       listEl.innerHTML = pos.map(po => {
         const items = po.purchase_order_line_items || [];
         const itemsTotal = items.reduce((s, li) => s + (Number(li.quantity) * Number(li.unit_cost)), 0);
         const total = items.length ? itemsTotal : Number(po.amount) || 0;
         const supplierLabel = po.suppliers?.name || po.supplier_name || 'Unknown supplier';
-        const budgetPercent = po.po_type === 'open' && po.budget_cap ? Math.round((total / Number(po.budget_cap)) * 100) : null;
+        const budgetPercent = po.budget_cap ? Math.round((total / Number(po.budget_cap)) * 100) : null;
+        const otherJob = po.project_id !== projectId;
 
         return `
           <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
               <div>
                 <strong>${supplierLabel}</strong>${po.po_number ? ` (${po.po_number})` : ''}
-                <span class="badge draft" style="margin-left:6px;">${po.po_type === 'open' ? 'Open-ended' : 'Fixed'}</span>
-                ${po.locked ? '<span class="badge draft">Locked</span>' : ''}
+                ${renderPoBadges(po)}
+                ${otherJob ? '<span class="badge draft" style="margin-left:6px;">Another job\'s PO, line moved here</span>' : ''}
               </div>
               <div>
                 <span class="badge ${po.status === 'paid' || po.status === 'invoiced' ? 'accepted' : 'draft'}">${po.status}</span>
@@ -6718,7 +6719,7 @@
 
             <div style="margin-top:8px;">${renderPoLineItemsReceivable(po, true)}</div>
 
-            ${po.po_type === 'open' && po.budget_cap ? `
+            ${po.budget_cap ? `
               <div style="margin-top:10px;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                   <span class="subtitle">Budget used</span>
@@ -6732,8 +6733,7 @@
             ${po.file_path ? `<a href="#" class="link-quiet view-doc" data-path="${po.file_path}" style="display:block; margin-top:8px; font-size:13px;">${po.file_name || 'View attached document'}</a>` : ''}
 
             <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-              ${po.po_type === 'open' && !po.locked ? `<button type="button" class="secondary add-po-item-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">+ Add item</button>` : ''}
-              ${po.po_type === 'fixed' && po.locked && canOverride ? `<button type="button" class="secondary override-po-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">Override (Admin/Finance)</button>` : ''}
+              ${renderPoControls(po, myRole)}
               ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">Upload invoice</button>` : ''}
               ${po.received ? `<span class="badge accepted" style="font-size:11px;">Fully received</span>` : ''}
             </div>
@@ -6754,12 +6754,7 @@
           }
         });
       });
-      listEl.querySelectorAll('.add-po-item-btn').forEach(btn => {
-        btn.addEventListener('click', () => openAddPoItemPanel(pos.find(p => p.id === btn.dataset.poId), projectId, centres));
-      });
-      listEl.querySelectorAll('.override-po-btn').forEach(btn => {
-        btn.addEventListener('click', () => openOverridePoPanel(pos.find(p => p.id === btn.dataset.poId), projectId, centres));
-      });
+      wirePoControls(listEl, pos, () => loadPurchaseOrders(projectId, centres));
       listEl.querySelectorAll('.upload-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
       });
@@ -6908,7 +6903,7 @@
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: group.supplierName,
               po_number: poNumber,
-              po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+              po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials',
             }).select('id').single();
             if (poErr) throw poErr;
@@ -6938,7 +6933,7 @@
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: supplierName,
               po_number: poNumber,
-              po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+              po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
               description: 'Auto-suggested from quoted materials (manually assigned)',
             }).select('id').single();
             if (poErr) throw poErr;
@@ -6965,12 +6960,17 @@
     async function openCreatePoPanel(projectId, centres) {
       const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
       const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
+      const vehicles = await stockVehicles();
+      const jobLabel = await poJobLabel(projectId);
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Create purchase order</h2>
-          <label style="margin-top:0">Supplier</label>
+          <label style="margin-top:0">Where from</label>
+          <select id="cp-source">${poSourceOptionsHtml(vehicles)}</select>
+          <p class="subtitle" style="font-size:12px; margin:4px 0 0;">Warehouse or vehicle stock makes a stock PO: the gear comes off that count and onto this job straight away.</p>
+          <label>Supplier</label>
           ${supplierPickerHtml({ search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' })}
           <button type="button" class="secondary" id="cp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
           <label style="margin-top:14px;">Stage (optional)</label>
@@ -6978,23 +6978,12 @@
           <label>Description</label>
           <input id="cp-description" />
 
-          <label style="margin-top:14px;">Type</label>
-          <div style="display:flex; gap:16px; margin-bottom:10px;">
-            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="cp-type" value="fixed" checked style="width:auto;" /> Fixed - items decided now, locked once sent</label>
-          </div>
-          <div style="display:flex; gap:16px; margin-bottom:10px;">
-            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="cp-type" value="open" style="width:auto;" /> Open-ended - starts empty, anyone can add items as the job goes</label>
-          </div>
-
-          <div id="cp-fixed-section">
-            <label>Line items</label>
-            <div id="cp-fixed-items-container"></div>
-            <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add line</button>
-          </div>
-          <div id="cp-open-section" style="display:none;">
-            <label>Budget cap (optional)</label>
-            <input id="cp-budget-cap" type="number" step="0.01" placeholder="Flag when spending gets close to this" />
-          </div>
+          <label style="margin-top:14px;">Line items</label>
+          <p class="subtitle" style="font-size:12px; margin:0 0 6px;">The PO stays Open, so anyone can add more as the job goes. Close it once it's all in.</p>
+          <div id="cp-fixed-items-container"></div>
+          <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add line</button>
+          <label>Budget cap (optional)</label>
+          <input id="cp-budget-cap" type="number" step="0.01" placeholder="Flag when spending gets close to this" />
 
           <label style="margin-top:14px;">Attach document (optional)</label>
           <input type="file" id="cp-file" />
@@ -7013,17 +7002,21 @@
       buildMaterialSearchRow(materials || [], 'cp-fixed-items-container');
       overlay.querySelector('#cp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'cp-fixed-items-container'));
 
-      overlay.querySelectorAll('input[name="cp-type"]').forEach(radio => {
-        radio.addEventListener('change', (e) => {
-          overlay.querySelector('#cp-fixed-section').style.display = e.target.value === 'fixed' ? 'block' : 'none';
-          overlay.querySelector('#cp-open-section').style.display = e.target.value === 'open' ? 'block' : 'none';
+      overlay.querySelector('#cp-source').addEventListener('change', (e) => {
+        if (e.target.value === 'supplier') return;
+        const vehicleId = e.target.value.startsWith('vehicle:') ? e.target.value.slice(8) : null;
+        const v = vehicles.find(x => x.id === vehicleId);
+        overlay.remove();
+        openStockPullPanel({
+          projectId, jobLabel, centres, source: vehicleId ? 'vehicle' : 'warehouse', vehicleId, vehicleLabel: v ? (v.vehicle_name || v.rego) : null,
+          onDone: () => loadPurchaseOrders(projectId, centres),
         });
       });
 
       overlay.querySelector('#cp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#cp-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#cp-msg');
-        const poType = overlay.querySelector('input[name="cp-type"]:checked').value;
+        const budgetCap = parseFloat(overlay.querySelector('#cp-budget-cap').value) || null;
 
         try {
           const { supplierId, supplierName } = await resolveSupplier();
@@ -7044,9 +7037,9 @@
             supplier_name: supplierName,
             po_number: await drawNextPoNumber(),
             description: overlay.querySelector('#cp-description').value.trim() || null,
-            po_type: poType,
-            locked: poType === 'fixed',
-            budget_cap: poType === 'open' ? (parseFloat(overlay.querySelector('#cp-budget-cap').value) || null) : null,
+            po_type: budgetCap ? 'open' : 'fixed', // bill checks compare against the cap when there is one
+            locked: false,
+            budget_cap: budgetCap,
             status: 'ordered',
             amount: 0,
             file_path, file_name,
@@ -7056,112 +7049,15 @@
           await logActivity('project', projectId, 'po_created', `PO ${newPo.po_number || ''} created for ${supplierName}`);
           await createPoFollowUpTask(projectId, newPo.po_number, supplierName);
 
-          if (poType === 'fixed') {
-            const lines = readMaterialLineRows('cp-fixed-items-container').map(l => ({
-              po_id: newPo.id, material_id: l.materialId, description: l.description,
-              quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
-            }));
-            if (lines.length) {
-              const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(lines);
-              if (liErr) throw liErr;
-            }
+          const lines = readMaterialLineRows('cp-fixed-items-container').map(l => ({
+            po_id: newPo.id, material_id: l.materialId, description: l.description,
+            quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
+          }));
+          if (lines.length) {
+            const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(lines);
+            if (liErr) throw liErr;
           }
 
-          overlay.remove();
-          await loadPurchaseOrders(projectId, centres);
-        } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-        }
-      });
-    }
-
-    function openAddPoItemPanel(po, projectId, centres) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:400px; width:100%;">
-          <h2>Add item</h2>
-          <label style="margin-top:0">Description</label>
-          <input id="ap-desc" />
-          <div class="grid cols-2">
-            <div><label>Quantity</label><input id="ap-qty" type="number" step="0.01" value="1" /></div>
-            <div><label>Unit cost</label><input id="ap-cost" type="number" step="0.01" /></div>
-          </div>
-          <div style="margin-top:14px;">
-            <button id="ap-save-btn">Add</button>
-            <button type="button" class="secondary" id="ap-cancel-btn">Cancel</button>
-          </div>
-          <div id="ap-msg"></div>
-        </div>`;
-      document.body.appendChild(overlay);
-
-      overlay.querySelector('#ap-cancel-btn').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#ap-save-btn').addEventListener('click', async () => {
-        const msg = overlay.querySelector('#ap-msg');
-        const description = overlay.querySelector('#ap-desc').value.trim();
-        if (!description) { msg.innerHTML = `<div class="error-box">Enter a description.</div>`; return; }
-        const { data: { user } } = await supabaseClient.auth.getUser();
-        const quantity = parseFloat(overlay.querySelector('#ap-qty').value) || 1;
-        const unitCost = parseFloat(overlay.querySelector('#ap-cost').value) || 0;
-        const { error } = await supabaseClient.from('purchase_order_line_items').insert({
-          po_id: po.id,
-          description,
-          quantity,
-          unit_cost: unitCost,
-          added_by: user.id,
-        });
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-        await logActivity('project', projectId, 'po_item_added', `PO ${po.po_number || ''}: added ${description} x${quantity} at ${money(unitCost)}`);
-        overlay.remove();
-        await loadPurchaseOrders(projectId, centres);
-      });
-    }
-
-    function openOverridePoPanel(po, projectId, centres) {
-      const items = po.purchase_order_line_items || [];
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; overflow-y:auto;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:520px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Override PO ${po.po_number || ''}</h2>
-          <p class="subtitle" style="margin-bottom:10px;">This PO was sent and locked - only Admin/Finance can adjust it after the fact, for when the real invoice comes in different.</p>
-          <div id="ov-items">
-            ${items.map(li => `
-              <div class="ov-line" data-id="${li.id}" style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:6px; margin-bottom:6px;">
-                <input class="ov-desc" value="${li.description}" style="font-size:13px;" />
-                <input class="ov-qty" type="number" step="0.01" value="${li.quantity}" style="font-size:13px;" />
-                <input class="ov-cost" type="number" step="0.01" value="${li.unit_cost}" style="font-size:13px;" />
-              </div>`).join('')}
-          </div>
-          <div style="margin-top:14px;">
-            <button id="ov-save-btn">Save changes</button>
-            <button type="button" class="secondary" id="ov-cancel-btn">Cancel</button>
-          </div>
-          <div id="ov-msg"></div>
-        </div>`;
-      document.body.appendChild(overlay);
-
-      overlay.querySelector('#ov-cancel-btn').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#ov-save-btn').addEventListener('click', async () => {
-        const msg = overlay.querySelector('#ov-msg');
-        try {
-          const rows = [...overlay.querySelectorAll('.ov-line')];
-          for (const row of rows) {
-            const next = {
-              description: row.querySelector('.ov-desc').value.trim(),
-              quantity: parseFloat(row.querySelector('.ov-qty').value) || 0,
-              unit_cost: parseFloat(row.querySelector('.ov-cost').value) || 0,
-            };
-            const { error } = await supabaseClient.from('purchase_order_line_items').update(next).eq('id', row.dataset.id);
-            if (error) throw error;
-            // One detail line per changed item, shown on the PO tab
-            const was = items.find(li => li.id === row.dataset.id) || {};
-            const changes = [];
-            if ((was.description || '') !== next.description) changes.push(`name "${was.description || ''}" to "${next.description}"`);
-            if (Number(was.quantity) !== next.quantity) changes.push(`qty ${Number(was.quantity)} to ${next.quantity}`);
-            if (Math.abs(Number(was.unit_cost) - next.unit_cost) >= 0.01) changes.push(`cost ${money(Number(was.unit_cost))} to ${money(next.unit_cost)}`);
-            if (changes.length) await logActivity('project', projectId, 'po_item_edited', `PO ${po.po_number || ''}: ${next.description} ${changes.join(', ')}`);
-          }
           overlay.remove();
           await loadPurchaseOrders(projectId, centres);
         } catch (err) {

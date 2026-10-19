@@ -4589,33 +4589,50 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
 // a PO gets ticked off and sent wherever it actually needs to go, not
 // just wherever the PO as a whole defaults to (buying materials for a
 // job and a tool for the van in the same order needs two destinations).
+// ---------- Purchase order lines and PO controls (shared by the job page and Purchase Orders) ----------
+// Receiving, undo, move and stock POs all go through server steps (migration 20261025000000) so the
+// stock counts, job costs and PO status change together, for every role.
+
+function poQty(n) { return String(Math.round((Number(n) || 0) * 100) / 100); }
+
+function poLineMoney(li) {
+  return `${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}`;
+}
+
+function poPlaceLabel(type) {
+  return type === 'job' ? 'Job' : type === 'vehicle' ? 'Vehicle' : 'Warehouse';
+}
+
 function renderPoLineItemsReceivable(po, canEdit) {
   const items = po.purchase_order_line_items || [];
+  const btn = (cls, li, text) => `<button type="button" class="secondary ${cls}" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">${text}</button>`;
   return items.map(li => {
     if (li.received) {
-      const destLabel = li.destination_type === 'job' ? 'Job' : li.destination_type === 'vehicle' ? 'Vehicle' : 'Warehouse';
-      return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
-        <span>${li.description} — ${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}</span>
-        <span class="badge accepted" style="font-size:11px;">Received - ${destLabel}</span>
+      return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
+        <span>${escapeHtml(li.description)} — ${poLineMoney(li)}</span>
+        <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <span class="badge accepted" style="font-size:11px;">Received - ${poPlaceLabel(li.destination_type)}</span>
+          ${canEdit ? btn('move-line-item-btn', li, 'Move') + btn('undo-receive-line-item-btn', li, 'Undo received') : ''}
+        </span>
       </div>`;
     }
     const etaLabel = li.backorder_eta ? new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : null;
     return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
-      <span>${li.description} — ${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}
+      <span>${escapeHtml(li.description)} — ${poLineMoney(li)}
         ${li.is_backordered ? `<span class="badge draft" style="font-size:11px; margin-left:6px;">Backordered${etaLabel ? ' - ETA ' + etaLabel : ''}</span>` : ''}
       </span>
       ${canEdit ? `
-        <span style="display:flex; gap:6px;">
-          <button type="button" class="secondary receive-line-item-btn" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">Receive</button>
-          <button type="button" class="secondary backorder-line-item-btn" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">${li.is_backordered ? 'Update backorder' : 'Mark backordered'}</button>
+        <span style="display:flex; gap:6px; flex-wrap:wrap;">
+          ${btn('receive-line-item-btn', li, 'Receive')}
+          ${btn('backorder-line-item-btn', li, li.is_backordered ? 'Update backorder' : 'Mark backordered')}
+          ${btn('move-line-item-btn', li, 'Move')}
         </span>` : '<span class="subtitle" style="font-size:11px;">Not yet received</span>'}
     </div>`;
   }).join('');
 }
 
-// Wires up every ".receive-line-item-btn"/".backorder-line-item-btn"
-// found in the container - call this after rendering a PO list that
-// used renderPoLineItemsReceivable.
+// Wires up every line button found in the container - call this after rendering a PO list that used
+// renderPoLineItemsReceivable.
 function wireReceiveLineItemButtons(containerEl, allPos, defaultDestinationFor, onComplete) {
   function findLineItem(lineId) {
     for (const po of allPos) {
@@ -4624,18 +4641,490 @@ function wireReceiveLineItemButtons(containerEl, allPos, defaultDestinationFor, 
     }
     return {};
   }
-  containerEl.querySelectorAll('.receive-line-item-btn').forEach(btn => {
+  const wire = (cls, fn) => containerEl.querySelectorAll(cls).forEach(btn => {
     btn.addEventListener('click', () => {
       const { lineItem, parentPo } = findLineItem(btn.dataset.lineId);
-      if (lineItem) openReceiveLineItemPanel(lineItem, parentPo, defaultDestinationFor(parentPo), onComplete);
+      if (lineItem) fn(lineItem, parentPo);
     });
   });
-  containerEl.querySelectorAll('.backorder-line-item-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const { lineItem } = findLineItem(btn.dataset.lineId);
-      if (lineItem) openBackorderPanel(lineItem, onComplete);
-    });
+  wire('.receive-line-item-btn', (li, po) => openReceiveLineItemPanel(li, po, defaultDestinationFor(po), onComplete));
+  wire('.backorder-line-item-btn', (li) => openBackorderPanel(li, onComplete));
+  wire('.move-line-item-btn', (li, po) => openMoveLineItemPanel(li, po, onComplete));
+  wire('.undo-receive-line-item-btn', (li, po) => openUndoReceivePanel(li, po, onComplete));
+}
+
+function poOverlay(innerHtml, maxWidth = 420) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
+  overlay.innerHTML = `<div class="card" style="max-width:${maxWidth}px; width:100%; max-height:88vh; overflow-y:auto;">${innerHtml}</div>`;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+async function stockVehicles() {
+  const { data } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
+  return data || [];
+}
+
+// Job search inside a panel: input + results + "Selected: J123". onPick(job) gets { id, label }.
+function wirePanelJobSearch(overlay, ids, onPick) {
+  const input = overlay.querySelector(ids.input);
+  const resultsEl = overlay.querySelector(ids.results);
+  let timer;
+  input.addEventListener('input', (e) => {
+    clearTimeout(timer);
+    onPick(null);
+    const q = e.target.value.trim();
+    if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+    timer = setTimeout(async () => {
+      const results = await searchProjects(q);
+      resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+        ${results.map(p => `<div class="pjs-pick" data-id="${p.id}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))}</div>`).join('')}
+      </div>`;
+      resultsEl.querySelectorAll('.pjs-pick').forEach(row => {
+        row.addEventListener('click', () => {
+          const p = results.find(r => r.id === row.dataset.id);
+          input.value = projectRef(p);
+          resultsEl.innerHTML = '';
+          onPick({ id: p.id, label: projectRef(p) });
+        });
+      });
+    }, 250);
   });
+}
+
+async function poJobLabel(projectId) {
+  if (!projectId) return null;
+  const { data } = await supabaseClient.from('projects').select('name, job_number').eq('id', projectId).maybeSingle();
+  return data ? (data.job_number ? `J${data.job_number}` : data.name) : 'this job';
+}
+
+// Receive: on a job PO it goes to that job (or the Warehouse / a vehicle); a different job is Move.
+async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComplete) {
+  const vehicles = await stockVehicles();
+  const jobLabel = await poJobLabel(po.project_id);
+  const overlay = poOverlay(`
+    <h2>Receive item</h2>
+    <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}</p>
+    <label style="margin-top:0">Send to</label>
+    <select id="rl-dest-type">
+      ${po.project_id ? `<option value="job">This job (${escapeHtml(jobLabel)})</option>` : '<option value="otherjob">A job</option>'}
+      <option value="warehouse">Warehouse</option>
+      ${vehicles.length ? '<option value="vehicle">A vehicle</option>' : ''}
+    </select>
+    <div id="rl-job-section" style="display:none; margin-top:8px;">
+      <input id="rl-job-search" placeholder="Search for the job..." autocomplete="off" />
+      <div id="rl-job-results"></div>
+    </div>
+    <div id="rl-vehicle-section" style="display:none; margin-top:8px;">
+      <select id="rl-vehicle-select">${vehicles.map(v => `<option value="${v.id}" ${v.id === po.vehicle_id ? 'selected' : ''}>${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}</select>
+    </div>
+    ${po.project_id ? '<p class="subtitle" style="font-size:12px; margin-top:8px;">For another job, open that job and make the PO there (or use Move once received).</p>' : ''}
+    <div style="margin-top:14px;">
+      <button id="rl-confirm-btn">Confirm received</button>
+      <button type="button" class="secondary" id="rl-cancel-btn">Cancel</button>
+    </div>
+    <div id="rl-msg"></div>`);
+
+  const destSel = overlay.querySelector('#rl-dest-type');
+  const wanted = defaultDestination === 'job' ? (po.project_id ? 'job' : 'otherjob') : defaultDestination;
+  if ([...destSel.options].some(o => o.value === wanted)) destSel.value = wanted;
+  function syncSections() {
+    overlay.querySelector('#rl-job-section').style.display = destSel.value === 'otherjob' ? 'block' : 'none';
+    overlay.querySelector('#rl-vehicle-section').style.display = destSel.value === 'vehicle' ? 'block' : 'none';
+  }
+  destSel.addEventListener('change', syncSections);
+  syncSections();
+  let pickedJob = null;
+  wirePanelJobSearch(overlay, { input: '#rl-job-search', results: '#rl-job-results' }, (j) => { pickedJob = j; });
+
+  overlay.querySelector('#rl-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#rl-confirm-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#rl-msg');
+    const dest = destSel.value;
+    const vehicleId = dest === 'vehicle' ? overlay.querySelector('#rl-vehicle-select').value : null;
+    let error;
+    if (dest === 'otherjob') {
+      if (!pickedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
+      ({ error } = await supabaseClient.rpc('po_move_line', { p_line_id: lineItem.id, p_qty: Number(lineItem.quantity), p_dest: 'job', p_job_id: pickedJob.id, p_vehicle_id: null, p_cost_centre_id: null }));
+    } else {
+      ({ error } = await supabaseClient.rpc('po_receive_line', { p_line_id: lineItem.id, p_dest: dest, p_vehicle_id: vehicleId }));
+    }
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+    overlay.remove();
+    if (onComplete) await onComplete();
+  });
+}
+
+// Undo received (e.g. ticked by mistake, or it was really back ordered). Needs a note once the PO is
+// closed or a bill on it is approved - the server checks the bills too.
+function openUndoReceivePanel(lineItem, po, onComplete) {
+  const approved = !!(po.closed_at || po.approved_for_payment);
+  const overlay = poOverlay(`
+    <h2>Undo received</h2>
+    <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}, received to ${poPlaceLabel(lineItem.destination_type)}. Undoing takes it back off ${lineItem.destination_type === 'job' ? "the job's costs" : 'that stock count'}.</p>
+    <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:0;"><input type="checkbox" id="ur-backorder" style="width:auto;" /> It's back ordered (mark it back ordered instead)</label>
+    <div id="ur-eta-section" style="display:none;">
+      <label>Expected date (optional)</label>
+      <input type="date" id="ur-eta" />
+    </div>
+    <label>Note ${approved ? '(needed: this PO is approved for payment)' : '(needed if a bill on it is approved for payment)'}</label>
+    <textarea id="ur-note" style="min-height:60px;" placeholder="Why it isn't received"></textarea>
+    <div style="margin-top:14px;">
+      <button id="ur-confirm-btn">Undo received</button>
+      <button type="button" class="secondary" id="ur-cancel-btn">Cancel</button>
+    </div>
+    <div id="ur-msg"></div>`);
+  const bo = overlay.querySelector('#ur-backorder');
+  bo.addEventListener('change', () => { overlay.querySelector('#ur-eta-section').style.display = bo.checked ? 'block' : 'none'; });
+  overlay.querySelector('#ur-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#ur-confirm-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#ur-msg');
+    const note = overlay.querySelector('#ur-note').value.trim();
+    if (approved && !note) { msg.innerHTML = `<div class="error-box">Add a note saying why.</div>`; return; }
+    const { error } = await supabaseClient.rpc('po_undo_receive', {
+      p_line_id: lineItem.id, p_note: note || null, p_backorder: bo.checked,
+      p_eta: bo.checked ? (overlay.querySelector('#ur-eta').value || null) : null,
+    });
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+    overlay.remove();
+    if (onComplete) await onComplete();
+  });
+}
+
+// Move all or part of a line (unused gear) to another job, the Warehouse or a vehicle.
+async function openMoveLineItemPanel(lineItem, po, onComplete) {
+  const vehicles = await stockVehicles();
+  const where = lineItem.received ? `Received to ${poPlaceLabel(lineItem.destination_type)}` : 'Not received yet';
+  const overlay = poOverlay(`
+    <h2>Move item</h2>
+    <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}. ${where}.</p>
+    <label style="margin-top:0">How many</label>
+    <input id="mv-qty" type="number" step="1" min="0" max="${lineItem.quantity}" value="${lineItem.quantity}" />
+    <label>Move to</label>
+    <select id="mv-dest">
+      <option value="job">A job</option>
+      <option value="warehouse">Warehouse</option>
+      ${vehicles.length ? '<option value="vehicle">A vehicle</option>' : ''}
+    </select>
+    <div id="mv-job-section" style="margin-top:8px;">
+      <input id="mv-job-search" placeholder="Search for the job..." autocomplete="off" />
+      <div id="mv-job-results"></div>
+      <div id="mv-stage-section" style="display:none;">
+        <label>Stage (optional)</label>
+        <select id="mv-stage"></select>
+      </div>
+    </div>
+    <div id="mv-vehicle-section" style="display:none; margin-top:8px;">
+      <select id="mv-vehicle">${vehicles.map(v => `<option value="${v.id}">${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}</select>
+    </div>
+    <p class="subtitle" style="font-size:12px; margin-top:8px;">${lineItem.received ? 'It comes off where it is now and goes on the new place. Not if that job has already invoiced it.' : 'It is received straight to the new place.'}</p>
+    <div style="margin-top:14px;">
+      <button id="mv-confirm-btn">Move</button>
+      <button type="button" class="secondary" id="mv-cancel-btn">Cancel</button>
+    </div>
+    <div id="mv-msg"></div>`);
+  const destSel = overlay.querySelector('#mv-dest');
+  function syncSections() {
+    overlay.querySelector('#mv-job-section').style.display = destSel.value === 'job' ? 'block' : 'none';
+    overlay.querySelector('#mv-vehicle-section').style.display = destSel.value === 'vehicle' ? 'block' : 'none';
+  }
+  destSel.addEventListener('change', syncSections);
+  syncSections();
+  let pickedJob = null;
+  wirePanelJobSearch(overlay, { input: '#mv-job-search', results: '#mv-job-results' }, async (j) => {
+    pickedJob = j;
+    const stageSection = overlay.querySelector('#mv-stage-section');
+    if (!j) { stageSection.style.display = 'none'; return; }
+    const { data: centres } = await supabaseClient.from('cost_centres').select('id, name').eq('project_id', j.id).order('sort_order');
+    overlay.querySelector('#mv-stage').innerHTML = `<option value="">Whole job</option>${(centres || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}`;
+    stageSection.style.display = (centres || []).length ? 'block' : 'none';
+  });
+
+  overlay.querySelector('#mv-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#mv-confirm-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#mv-msg');
+    const qty = parseFloat(overlay.querySelector('#mv-qty').value);
+    const dest = destSel.value;
+    if (!(qty > 0)) { msg.innerHTML = `<div class="error-box">Enter how many to move.</div>`; return; }
+    if (dest === 'job' && !pickedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
+    const { error } = await supabaseClient.rpc('po_move_line', {
+      p_line_id: lineItem.id, p_qty: qty, p_dest: dest,
+      p_job_id: dest === 'job' ? pickedJob.id : null,
+      p_vehicle_id: dest === 'vehicle' ? overlay.querySelector('#mv-vehicle').value : null,
+      p_cost_centre_id: dest === 'job' ? (overlay.querySelector('#mv-stage').value || null) : null,
+    });
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+    overlay.remove();
+    if (onComplete) await onComplete();
+  });
+}
+
+// Open / Closed and the rest of a PO's buttons. role decides Edit lines (pricing) and Reopen (Admin/Finance).
+function renderPoBadges(po) {
+  const stock = po.stock_source ? `<span class="badge draft" style="margin-left:6px;">Stock PO, from ${escapeHtml(po.supplier_name || 'Warehouse')}</span>` : '';
+  return `<span class="badge ${po.closed_at ? 'accepted' : 'draft'}" style="margin-left:6px;">${po.closed_at ? 'Closed' : 'Open'}</span>${stock}`;
+}
+
+function renderPoControls(po, role) {
+  const b = (cls, text) => `<button type="button" class="secondary ${cls}" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">${text}</button>`;
+  const open = !po.closed_at;
+  return [
+    open && !po.stock_source ? b('po-add-item-btn', '+ Add item') : '',
+    open && isPricingRole(role) && (po.purchase_order_line_items || []).length ? b('po-edit-lines-btn', 'Edit lines') : '',
+    po.supplier_id ? b('po-email-btn', 'Email PO') : '',
+    !po.stock_source ? b('po-view-pdf-btn', 'View PO') : '',
+    open ? b('po-close-btn', 'Close PO') : '',
+    !open && isFinanceRole(role) ? b('po-reopen-btn', 'Reopen') : '',
+  ].join('');
+}
+
+function wirePoControls(containerEl, allPos, onComplete) {
+  const find = (id) => allPos.find(p => p.id === id);
+  const wire = (cls, fn) => containerEl.querySelectorAll(cls).forEach(btn => btn.addEventListener('click', () => { const po = find(btn.dataset.poId); if (po) fn(po, btn); }));
+  wire('.po-add-item-btn', (po) => openAddPoItemPanel(po, onComplete));
+  wire('.po-edit-lines-btn', (po) => openEditPoLinesPanel(po, onComplete));
+  wire('.po-email-btn', (po, btn) => emailPurchaseOrder(po, btn));
+  wire('.po-view-pdf-btn', (po) => window.open(`/po.html?token=${po.po_token}`, '_blank'));
+  wire('.po-close-btn', async (po) => {
+    if (!confirm(`Close PO ${po.po_number || ''}? Nothing more can be added, and it is approved for payment (with any bills on it that match it).`)) return;
+    const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: true, p_note: null });
+    if (error) { alert(error.message); return; }
+    if (onComplete) await onComplete();
+  });
+  wire('.po-reopen-btn', async (po) => {
+    const note = prompt(`Why is PO ${po.po_number || ''} being reopened?`);
+    if (note === null) return;
+    if (!note.trim()) { alert('Add a note saying why.'); return; }
+    const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: false, p_note: note.trim() });
+    if (error) { alert(error.message); return; }
+    if (onComplete) await onComplete();
+  });
+}
+
+async function openAddPoItemPanel(po, onComplete) {
+  const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
+  const overlay = poOverlay(`
+    <h2>Add to PO ${escapeHtml(po.po_number || '')}</h2>
+    <div id="api-items"></div>
+    <button type="button" class="secondary" id="api-add-line" style="font-size:12px; padding:6px 10px;">+ Add another</button>
+    <div style="margin-top:14px;">
+      <button id="api-save-btn">Add</button>
+      <button type="button" class="secondary" id="api-cancel-btn">Cancel</button>
+    </div>
+    <div id="api-msg"></div>`, 560);
+  buildMaterialSearchRow(materials || [], 'api-items');
+  overlay.querySelector('#api-add-line').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'api-items'));
+  overlay.querySelector('#api-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#api-save-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#api-msg');
+    const lines = readMaterialLineRows('api-items');
+    if (!lines.length) { msg.innerHTML = `<div class="error-box">Add an item with a quantity.</div>`; return; }
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    const { error } = await supabaseClient.from('purchase_order_line_items').insert(lines.map(l => ({
+      po_id: po.id, material_id: l.materialId, description: l.description, quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
+    })));
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+    const text = `PO ${po.po_number || ''}: added ${lines.map(l => `${l.description} x${l.quantity} at ${money(l.unit_cost)}`).join(', ')}`;
+    await logActivity('purchase_order', po.id, 'po_item_added', text);
+    if (po.project_id) await logActivity('project', po.project_id, 'po_item_added', text);
+    overlay.remove();
+    if (onComplete) await onComplete();
+  });
+}
+
+// Pricing roles fix a line's name, qty or price while the PO is Open (e.g. the real invoice came in different).
+function openEditPoLinesPanel(po, onComplete) {
+  const items = po.purchase_order_line_items || [];
+  const overlay = poOverlay(`
+    <h2>Edit PO ${escapeHtml(po.po_number || '')}</h2>
+    <p class="subtitle" style="margin-bottom:10px;">Name, quantity and unit cost of each line.</p>
+    ${items.map(li => `
+      <div class="ov-line" data-id="${li.id}" style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:6px; margin-bottom:6px;">
+        <input class="ov-desc" value="${escapeHtml(li.description)}" style="font-size:13px;" />
+        <input class="ov-qty" type="number" step="0.01" value="${li.quantity}" style="font-size:13px;" />
+        <input class="ov-cost" type="number" step="0.01" value="${li.unit_cost}" style="font-size:13px;" />
+      </div>`).join('')}
+    <div style="margin-top:14px;">
+      <button id="ov-save-btn">Save changes</button>
+      <button type="button" class="secondary" id="ov-cancel-btn">Cancel</button>
+    </div>
+    <div id="ov-msg"></div>`, 520);
+  overlay.querySelector('#ov-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#ov-save-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#ov-msg');
+    try {
+      for (const row of overlay.querySelectorAll('.ov-line')) {
+        const next = {
+          description: row.querySelector('.ov-desc').value.trim(),
+          quantity: parseFloat(row.querySelector('.ov-qty').value) || 0,
+          unit_cost: parseFloat(row.querySelector('.ov-cost').value) || 0,
+        };
+        const was = items.find(li => li.id === row.dataset.id) || {};
+        const changes = [];
+        if ((was.description || '') !== next.description) changes.push(`name "${was.description || ''}" to "${next.description}"`);
+        if (Number(was.quantity) !== next.quantity) changes.push(`qty ${Number(was.quantity)} to ${next.quantity}`);
+        if (Math.abs(Number(was.unit_cost) - next.unit_cost) >= 0.01) changes.push(`cost ${money(Number(was.unit_cost))} to ${money(next.unit_cost)}`);
+        if (!changes.length) continue;
+        const { error } = await supabaseClient.from('purchase_order_line_items').update(next).eq('id', row.dataset.id);
+        if (error) throw error;
+        const text = `PO ${po.po_number || ''}: ${next.description} ${changes.join(', ')}`;
+        await logActivity('purchase_order', po.id, 'po_item_edited', text);
+        if (po.project_id) await logActivity('project', po.project_id, 'po_item_edited', text);
+      }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } catch (err) {
+      msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+    }
+  });
+}
+
+// Makes the PO PDF (po.html) and opens the email window to the supplier with it attached.
+async function emailPurchaseOrder(po, btn) {
+  if (typeof openEmailComposer !== 'function') { alert('Email is not available on this page.'); return; }
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Making the PDF...'; }
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const res = await fetch('/.netlify/functions/generate-client-document-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ doc_type: 'po', record_id: po.id }),
+    });
+    const out = await res.json().catch(() => ({ ok: false, error: 'Unexpected reply from the server' }));
+    if (!res.ok || !out.ok) throw new Error(out.error || 'Could not make the PO PDF');
+    const { data: sup } = await supabaseClient.from('suppliers').select('name, contact_email').eq('id', po.supplier_id).maybeSingle();
+    const name = `Purchase order ${po.po_number}.pdf`;
+    openEmailComposer({
+      title: `Email PO ${po.po_number}`,
+      to: sup?.contact_email || '',
+      subject: `Purchase order ${po.po_number} from Thomson Energy`,
+      body: `Hi${sup?.name ? ' ' + sup.name : ''},\n\nPlease find purchase order ${po.po_number} attached. Please quote ${po.po_number} on your invoice and delivery docket.\n\nThanks,`,
+      projectId: po.project_id || undefined, tagKind: 'supplier',
+      attachOptions: [{ group: 'Purchase order', label: name, bucket: 'project-documents', path: out.path, name, checked: true }],
+      onSent: async () => { await logActivity('purchase_order', po.id, 'emailed', `PO ${po.po_number} emailed to ${sup?.name || 'the supplier'}`); },
+    });
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+
+// Stock PO on a job: pull gear from the Warehouse or a vehicle. Each line shows what the app has there
+// and "Left after you take it"; if they take more than the app has they must say how many are left,
+// and that becomes the real count.
+async function openStockPullPanel({ projectId, jobLabel, centres, source, vehicleId, vehicleLabel, onDone }) {
+  const { data: materials } = await supabaseClient.from('materials').select('id, name').order('name');
+  let stockQuery = supabaseClient.from('material_stock_by_location').select('material_id, quantity').eq('location_type', source);
+  if (source === 'vehicle') stockQuery = stockQuery.eq('vehicle_id', vehicleId);
+  const { data: stockRows } = await stockQuery;
+  const have = {};
+  (stockRows || []).forEach(r => { have[r.material_id] = Number(r.quantity) || 0; });
+  const place = source === 'vehicle' ? (vehicleLabel || 'the vehicle') : 'Warehouse';
+
+  const overlay = poOverlay(`
+    <h2>Stock PO from ${escapeHtml(place)}</h2>
+    <p class="subtitle" style="margin-bottom:10px;">For ${escapeHtml(jobLabel || 'this job')}. Pick what you're taking. If the app's count is wrong, say how many are left and the count is fixed.</p>
+    ${(centres || []).length ? `<label style="margin-top:0">Stage (optional)</label>
+    <select id="sp2-stage"><option value="">Whole job</option>${centres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>` : ''}
+    <label>Items</label>
+    <div id="sp2-lines"></div>
+    <button type="button" class="secondary" id="sp2-add" style="font-size:12px; padding:6px 10px;">+ Add item</button>
+    <div style="margin-top:14px;">
+      <button id="sp2-save">Create stock PO</button>
+      <button type="button" class="secondary" id="sp2-cancel">Cancel</button>
+    </div>
+    <div id="sp2-msg"></div>`, 600);
+
+  const linesEl = overlay.querySelector('#sp2-lines');
+  function addLine() {
+    const row = document.createElement('div');
+    row.className = 'sp2-line';
+    row.style.cssText = 'border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:8px; position:relative;';
+    row.innerHTML = `
+      <div style="position:relative;">
+        <input class="sp2-search" placeholder="Search Stock..." autocomplete="off" style="font-size:13px;" />
+        <div class="sp2-results" style="position:absolute; top:100%; left:0; right:0; z-index:10; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:none;"></div>
+      </div>
+      <div class="sp2-have subtitle" style="font-size:12px; margin:4px 0;"></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:6px; align-items:end;">
+        <div><label style="margin-top:0; font-size:12px;">Taking</label><input class="sp2-qty" type="number" step="1" min="0" value="1" style="font-size:13px;" /></div>
+        <div><label style="margin-top:0; font-size:12px;">Left after you take it</label><input class="sp2-left" type="number" step="1" min="0" style="font-size:13px;" /></div>
+        <button type="button" class="secondary sp2-remove" style="padding:6px 10px; font-size:12px;">&times;</button>
+      </div>`;
+    linesEl.appendChild(row);
+    const search = row.querySelector('.sp2-search');
+    const results = row.querySelector('.sp2-results');
+    const qtyEl = row.querySelector('.sp2-qty');
+    const leftEl = row.querySelector('.sp2-left');
+    let leftTouched = false;
+    const refresh = () => {
+      const id = row.dataset.materialId;
+      if (!id) { row.querySelector('.sp2-have').textContent = ''; return; }
+      const h = have[id] || 0;
+      const qty = parseFloat(qtyEl.value) || 0;
+      row.querySelector('.sp2-have').textContent = `App says ${poQty(h)} in ${place}.${qty > h ? ' Say how many are really left.' : ''}`;
+      if (!leftTouched) leftEl.value = qty > h ? '' : String(Math.round((h - qty) * 100) / 100);
+    };
+    search.addEventListener('input', () => {
+      delete row.dataset.materialId;
+      refresh();
+      const q = search.value.trim().toLowerCase();
+      if (q.length < 2) { results.style.display = 'none'; return; }
+      const matches = (materials || []).filter(m => matchesAllWords(m.name, q)).slice(0, 8);
+      if (!matches.length) { results.style.display = 'none'; return; }
+      results.innerHTML = matches.map(m => `<div class="sp2-pick" data-id="${m.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(m.name)} <span class="subtitle">(${poQty(have[m.id] || 0)} in ${escapeHtml(place)})</span></div>`).join('');
+      results.style.display = 'block';
+      results.querySelectorAll('.sp2-pick').forEach(pick => pick.addEventListener('click', () => {
+        const m = materials.find(x => x.id === pick.dataset.id);
+        search.value = m.name;
+        row.dataset.materialId = m.id;
+        results.style.display = 'none';
+        leftTouched = false;
+        refresh();
+      }));
+    });
+    search.addEventListener('blur', () => setTimeout(() => { results.style.display = 'none'; }, 200));
+    qtyEl.addEventListener('input', refresh);
+    leftEl.addEventListener('input', () => { leftTouched = leftEl.value !== ''; });
+    row.querySelector('.sp2-remove').addEventListener('click', () => row.remove());
+  }
+  addLine();
+  overlay.querySelector('#sp2-add').addEventListener('click', addLine);
+  overlay.querySelector('#sp2-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#sp2-save').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#sp2-msg');
+    const lines = [];
+    for (const row of overlay.querySelectorAll('.sp2-line')) {
+      const id = row.dataset.materialId;
+      const name = row.querySelector('.sp2-search').value.trim();
+      if (!id) { if (name) { msg.innerHTML = `<div class="error-box">Pick "${escapeHtml(name)}" from the Stock list.</div>`; return; } continue; }
+      const qty = parseFloat(row.querySelector('.sp2-qty').value) || 0;
+      if (qty <= 0) { msg.innerHTML = `<div class="error-box">Enter how many ${escapeHtml(name)} you're taking.</div>`; return; }
+      const leftRaw = row.querySelector('.sp2-left').value;
+      const h = have[id] || 0;
+      if (leftRaw === '' && qty > h) { msg.innerHTML = `<div class="error-box">The app says ${poQty(h)} ${escapeHtml(name)} in ${escapeHtml(place)}. Say how many are left after you take ${poQty(qty)}.</div>`; return; }
+      lines.push({ material_id: id, quantity: qty, left_after: leftRaw === '' ? null : Number(leftRaw) });
+    }
+    if (!lines.length) { msg.innerHTML = `<div class="error-box">Add at least one item from Stock.</div>`; return; }
+    const btn = overlay.querySelector('#sp2-save');
+    btn.disabled = true;
+    const stageEl = overlay.querySelector('#sp2-stage');
+    const { data, error } = await supabaseClient.rpc('po_create_stock_pull', {
+      p_project_id: projectId, p_cost_centre_id: stageEl ? (stageEl.value || null) : null,
+      p_source: source, p_vehicle_id: source === 'vehicle' ? vehicleId : null, p_lines: lines, p_description: null,
+    });
+    if (error) { btn.disabled = false; msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+    overlay.remove();
+    if (onDone) await onDone(data);
+  });
+}
+
+// The "Where from" choice on a job's Create PO panels: a supplier, the Warehouse, or a stock vehicle.
+function poSourceOptionsHtml(vehicles) {
+  return `<option value="supplier">A supplier (order it)</option><option value="warehouse">Warehouse stock</option>${vehicles.map(v => `<option value="vehicle:${v.id}">Stock in ${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}`;
 }
 
 // Marks a not-yet-received line item as backordered with an expected
@@ -4681,157 +5170,6 @@ function openBackorderPanel(lineItem, onComplete) {
       await onComplete();
     });
   }
-}
-
-async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComplete) {
-  const sourceIsWarehouse = !!po.vehicle_id && !po.supplier_id; // pulled from the shed, not a new purchase
-  const { data: vehicles } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
-
-  let defaultJobName = null;
-  if (po.project_id) {
-    const { data: proj } = await supabaseClient.from('projects').select('name, job_number').eq('id', po.project_id).maybeSingle();
-    defaultJobName = proj ? (proj.job_number ? `J${proj.job_number}` : proj.name) : null;
-  }
-
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-  overlay.innerHTML = `
-    <div class="card" style="max-width:420px; width:100%; max-height:85vh; overflow-y:auto;">
-      <h2>Receive item</h2>
-      <p class="subtitle" style="margin-bottom:10px;">${lineItem.description} x${lineItem.quantity}</p>
-      <label style="margin-top:0">Send to</label>
-      <select id="rl-dest-type">
-        <option value="warehouse" ${defaultDestination === 'warehouse' ? 'selected' : ''}>Warehouse</option>
-        <option value="job" ${defaultDestination === 'job' ? 'selected' : ''}>A job</option>
-        ${vehicles?.length ? `<option value="vehicle" ${defaultDestination === 'vehicle' ? 'selected' : ''}>A vehicle</option>` : ''}
-      </select>
-      <div id="rl-job-section" style="display:none; margin-top:8px;">
-        <input id="rl-job-search" placeholder="Search for the job..." autocomplete="off" />
-        <div id="rl-job-results"></div>
-        <div id="rl-job-selected" class="subtitle" style="margin-top:4px;"></div>
-      </div>
-      <div id="rl-vehicle-section" style="display:none; margin-top:8px;">
-        <select id="rl-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}" ${v.id === po.vehicle_id ? 'selected' : ''}>${v.vehicle_name || v.rego}</option>`).join('')}</select>
-      </div>
-      <div style="margin-top:14px;">
-        <button id="rl-confirm-btn">Confirm received</button>
-        <button type="button" class="secondary" id="rl-cancel-btn">Cancel</button>
-      </div>
-      <div id="rl-msg"></div>
-    </div>`;
-  document.body.appendChild(overlay);
-
-  function syncSections() {
-    const val = overlay.querySelector('#rl-dest-type').value;
-    overlay.querySelector('#rl-job-section').style.display = val === 'job' ? 'block' : 'none';
-    overlay.querySelector('#rl-vehicle-section').style.display = val === 'vehicle' ? 'block' : 'none';
-  }
-  overlay.querySelector('#rl-dest-type').addEventListener('change', syncSections);
-  syncSections();
-
-  let selectedJob = po.project_id ? { id: po.project_id, name: defaultJobName } : null;
-  const jobSearchInput = overlay.querySelector('#rl-job-search');
-  if (po.project_id) {
-    overlay.querySelector('#rl-job-selected').textContent = defaultJobName ? `This PO's own job: ${defaultJobName}` : 'This PO\'s own job (default)';
-  }
-  let jobSearchTimeout;
-  jobSearchInput.addEventListener('input', (e) => {
-    clearTimeout(jobSearchTimeout);
-    selectedJob = null;
-    const q = e.target.value.trim();
-    if (q.length < 2) { overlay.querySelector('#rl-job-results').innerHTML = ''; return; }
-    jobSearchTimeout = setTimeout(async () => {
-      const results = await searchProjects(q);
-      const resultsEl = overlay.querySelector('#rl-job-results');
-      resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-        ${results.map(p => `<div class="rl-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
-      </div>`;
-      resultsEl.querySelectorAll('.rl-job-pick').forEach(row => {
-        row.addEventListener('click', () => {
-          selectedJob = { id: row.dataset.id, name: row.dataset.jobNumber ? `J${row.dataset.jobNumber}` : row.dataset.name };
-          jobSearchInput.value = row.dataset.name;
-          overlay.querySelector('#rl-job-selected').textContent = `Selected: ${row.dataset.name}`;
-          resultsEl.innerHTML = '';
-        });
-      });
-    }, 250);
-  });
-
-  overlay.querySelector('#rl-cancel-btn').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('#rl-confirm-btn').addEventListener('click', async () => {
-    const msg = overlay.querySelector('#rl-msg');
-    const destType = overlay.querySelector('#rl-dest-type').value;
-    if (destType === 'job' && !selectedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
-    const vehicleId = destType === 'vehicle' ? overlay.querySelector('#rl-vehicle-select').value : null;
-
-    try {
-      const { data: { user } } = await supabaseClient.auth.getUser();
-
-      if (destType === 'warehouse') {
-        // If this PO itself was a vehicle-pull-from-stock (no supplier),
-        // the warehouse quantity was already the source, not the
-        // destination - this path only ever ADDS to warehouse.
-        const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', lineItem.material_id).eq('location_type', 'warehouse').maybeSingle();
-        if (whRow) {
-          await supabaseClient.from('material_stock_by_location').update({ quantity: Number(whRow.quantity) + Number(lineItem.quantity), updated_at: new Date().toISOString() }).eq('id', whRow.id);
-        } else {
-          await supabaseClient.from('material_stock_by_location').insert({ material_id: lineItem.material_id, location_type: 'warehouse', quantity: lineItem.quantity });
-        }
-      } else if (destType === 'job') {
-        await supabaseClient.from('job_material_usage').insert({
-          project_id: selectedJob.id, cost_centre_id: po.cost_centre_id || null, material_id: lineItem.material_id,
-          quantity: lineItem.quantity, unit_cost: lineItem.unit_cost, source: 'from_po', po_line_item_id: lineItem.id, created_by: user.id,
-        });
-      } else if (destType === 'vehicle') {
-        if (sourceIsWarehouse) {
-          const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', lineItem.material_id).eq('location_type', 'warehouse').maybeSingle();
-          const warehouseQty = Number(whRow?.quantity) || 0;
-          if (lineItem.quantity > warehouseQty) throw new Error(`Only ${warehouseQty} available in the Warehouse.`);
-          if (whRow) {
-            await supabaseClient.from('material_stock_by_location').update({ quantity: warehouseQty - lineItem.quantity, updated_at: new Date().toISOString() }).eq('id', whRow.id);
-          }
-        }
-        const { data: vehRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', lineItem.material_id).eq('location_type', 'vehicle').eq('vehicle_id', vehicleId).maybeSingle();
-        if (vehRow) {
-          await supabaseClient.from('material_stock_by_location').update({ quantity: Number(vehRow.quantity) + Number(lineItem.quantity), updated_at: new Date().toISOString() }).eq('id', vehRow.id);
-        } else {
-          await supabaseClient.from('material_stock_by_location').insert({ material_id: lineItem.material_id, location_type: 'vehicle', vehicle_id: vehicleId, quantity: lineItem.quantity });
-        }
-      }
-
-      await supabaseClient.from('purchase_order_line_items').update({
-        received: true, destination_type: destType,
-        destination_job_id: destType === 'job' ? selectedJob.id : null,
-        destination_vehicle_id: destType === 'vehicle' ? vehicleId : null,
-        received_by: user.id, received_at: new Date().toISOString(),
-      }).eq('id', lineItem.id);
-
-      const destLabel = destType === 'job' ? (selectedJob.name || 'a job') : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || vehicles.find(v => v.id === vehicleId)?.rego || 'a vehicle') : 'Warehouse';
-      await logActivity('purchase_order', po.id, 'item_received', `${lineItem.description} x${lineItem.quantity} received - sent to ${destLabel}`);
-      if (destType === 'job') {
-        await logActivity('project', selectedJob.id, 'material_received', `${lineItem.description} x${lineItem.quantity} received from PO ${po.po_number || ''}, costed to this job`);
-      }
-
-      // If every line item on this PO is now received, mark the PO
-      // itself received and approve any linked bill for payment.
-      const { data: allItems } = await supabaseClient.from('purchase_order_line_items').select('received').eq('po_id', po.id);
-      if ((allItems || []).every(li => li.received)) {
-        await supabaseClient.from('purchase_orders').update({
-          received: true, received_by: user.id, received_at: new Date().toISOString(),
-        }).eq('id', po.id);
-        // only bills that passed their PO check (Bill checks page), and never for a supplier made
-        // automatically from a bill whose details nobody has checked yet
-        const { data: poSup } = po.supplier_id ? await supabaseClient.from('suppliers').select('needs_review').eq('id', po.supplier_id).maybeSingle() : { data: null };
-        if (!poSup?.needs_review) await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', po.id).in('check_status', ['matches', 'resolved']);
-        await logActivity('purchase_order', po.id, 'fully_received', `PO ${po.po_number || ''} fully received - linked bills that match it approved for payment`);
-      }
-
-      overlay.remove();
-      if (onComplete) await onComplete();
-    } catch (err) {
-      msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-    }
-  });
 }
 
 // Draws the next sequential PO number (e.g. "PO2001") - same atomic

@@ -56,7 +56,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=87"></script>
+  <script src="/js/supabase-client.js?v=88"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allMaterials = [];
@@ -303,7 +303,7 @@
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: null, supplier_id: supplierId, supplier_name: supplierName,
             po_number: await drawNextPoNumber(),
-            po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+            po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
             description: 'Stock purchase order',
           }).select('id, po_number').single();
           if (poErr) throw poErr;
@@ -398,7 +398,7 @@
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: null, supplier_id: supplierId, supplier_name: group.supplierName,
               po_number: await drawNextPoNumber(),
-              po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+              po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
               description: 'Restock - below minimum quantity',
             }).select('id, po_number').single();
             if (poErr) throw poErr;

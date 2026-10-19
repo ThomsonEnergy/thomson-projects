@@ -353,6 +353,21 @@ async function handle(event) {
       const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
       if (upErr) throw upErr;
       await supabaseAdmin.from('job_variation_entries').update({ pdf_path: path, pdf_generated_at: new Date().toISOString() }).eq('id', entry.id);
+    } else if (doc_type === 'po') {
+      // A purchase order for the supplier: po.html is the invoice layout without the payment parts.
+      const { data: po, error } = await supabaseAdmin.from('purchase_orders').select('id, po_token').eq('id', record_id).single();
+      if (error || !po) throw new Error(error?.message || 'PO not found');
+
+      const finalPdf = await renderPageToPdf(`${siteUrl}/po.html?token=${po.po_token}&print=1`, {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+
+      path = `client-documents/purchase-orders/${po.id}.pdf`;
+      const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
+      if (upErr) throw upErr;
+      await supabaseAdmin.from('purchase_orders').update({ pdf_path: path, pdf_generated_at: new Date().toISOString() }).eq('id', po.id);
     } else if (doc_type === 'schedule_of_rates') {
       // record_id is the job: the Schedule of Rates at today's rates goes in its "Company docs"
       // folder, so the job keeps the version the client was sent and the job email can attach it.
