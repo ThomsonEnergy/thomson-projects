@@ -2,6 +2,9 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 19 Oct 2026
+- Links no longer show the browser's default dark blue on the black theme: every plain link uses a light blue (`--link` #6cc4f5) on Dark, the indigo on Navy. (`public/css/style.css` v17)
+
 ## 18 Oct 2026
 - Fixed: jobs sat in Job Booked with nobody scheduled (J7003). Now a job is only Job Booked while someone is scheduled to it or clocked in; Quick Job, Warranty Job and ServiceM8 imports start at Ready to Book; J7003 moved back. LIVE: migration 20261023000000 applied to production. (`docs/PROJECT_SPEC.md` A6)
 - Fixed: Add from Documents (and possibly quote, invoice and variation PDFs) failed with "spawn ETXTBSY": the keep-warm ping started unpacking Chromium without waiting, so Netlify froze it half written. Unpacking is now shared and finished before use, with one retry. (`netlify/functions/generate-client-document-pdf.js`)

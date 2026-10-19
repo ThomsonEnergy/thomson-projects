@@ -16,6 +16,7 @@ html[data-theme="dark"] {
   --accent: #2f9bdb;
   --accent-dim: #16324a;
   --accent-contrast: #ffffff;
+  --link: #6cc4f5; /* links on black: a light blue, never the browser's default dark blue */
   --green: #4ade80;
   --red: #f87171;
   --radius: 10px;
@@ -31,12 +32,17 @@ html[data-theme="navy"] {
   --accent: #3b3486;
   --accent-dim: #e6e3f7;
   --accent-contrast: #ffffff;
+  --link: #3b3486;
   --green: #15803d;
   --red: #c0272d;
   --radius: 10px;
 }
 
 * { box-sizing: border-box; }
+
+/* Plain links had no colour, so browsers showed their default dark blue (purple once
+   visited), which is hard to read on the black theme. Classes still set their own. */
+a, a:visited { color: var(--link); }
 
 /* Pages never slide sideways. clip (not hidden) so it doesn't turn the page
    into its own scroll box, which would break position: sticky. Anything
@@ -504,7 +510,7 @@ td.num, th.num { text-align: right; }
 .empty-state .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.6; }
 .empty-state h2 { margin-bottom: 6px; }
 
-a.link-quiet { color: var(--accent); text-decoration: none; }
+a.link-quiet { color: var(--link); text-decoration: none; }
 
 .error-box {
   background: #2c1414;
