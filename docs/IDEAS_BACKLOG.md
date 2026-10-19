@@ -521,3 +521,17 @@ Why: the owner wants every mailbox and every person to write in his voice by def
 5. Server: new `polish-text` function (login check). `cleanup-text.js` gets a login check too (it has none today).
 
 Built 19 Oct 2026, migration 20261103030000. jasper@ set as the company voice in the migration. The script lives in `js/writing-help.js` (loaded by `supabase-client.js`). Detail in `docs/PROJECT_SPEC.md` A18 and A33. Later idea: a shared company word list (trade words, client names) instead of the per-device Undo list.
+
+## 21. Email the client when a job is booked (planned 19 Oct 2026)
+
+Why: the owner wants a tick box when booking someone into a job that emails the client the job name and number, when, where and who.
+
+1. Tick box "Email the client this booking" on the job page Book overlay and on Schedule's add booking (desktop and phone, once a job is picked). Not on the clock-out re-book, Sparky bookings or site inspections.
+2. Unticked by default. Ticking shows the email in an editable box (spell check and Polish apply). To: the job contact's email, else the job's client email, editable; no email means the box is greyed out with "No client email on this job".
+3. Book saves the bookings first, then sends through `send-gmail` (sales@, the sender's name and signature, tagged to the job as a client email so it shows on the Emails tab) and logs "Booking emailed to client". A failed send keeps the booking and shows a red "email not sent".
+4. Email: subject "Booking confirmed: J7002 <job name>"; first name greeting; When (one line, or each day, or "Tue 21 Oct to Fri 24 Oct (weekdays)"); Where (site address); Who (everyone booked on the job for those days, full names); "If that time doesn't suit, reply or call 0455 415 464"; Kind regards and signature. The booking's internal note is never included.
+5. No migration.
+
+Later: email the client when a booking is moved or cancelled.
+
+Waiting on owner's yes. Best model: Opus 5.5.
