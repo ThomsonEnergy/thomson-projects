@@ -104,7 +104,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=98"></script>
+  <script src="/js/supabase-client.js?v=99"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -470,7 +470,8 @@
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">${dateStr === todayStrVal ? 'Today - ' : ''}${dayLabel}</p>
             ${onLeave ? `<p class="subtitle" style="margin:0; color:var(--red);">On leave (${onLeave.leave_type || 'approved'})</p>` : dayAssignments.length ? dayAssignments.map(a => {
               const link = linkForAssignment(a);
-              const inner = `${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${labelForAssignment(a)}`;
+              const tentative = a.project_id && !a.client_informed_at && a.block_type !== 'site_inspection' ? ' <span class="subtitle" style="font-size:11px;">(tentative, client not told yet)</span>' : '';
+        const inner = `${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${labelForAssignment(a)}${tentative}`;
               return link ? `<a class="link-quiet" href="${link}" style="display:block; font-size:13px; margin:2px 0;">${inner}</a>` : `<p class="subtitle" style="margin:2px 0; font-size:13px;">${inner}</p>`;
             }).join('') : `<p class="subtitle" style="margin:0; font-size:13px;">Nothing scheduled.</p>`}
           </div>`;

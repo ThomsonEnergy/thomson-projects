@@ -2179,7 +2179,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=12';
+  s.src = '/js/notifications.js?v=13';
   document.head.appendChild(s);
 }
 
@@ -5770,6 +5770,9 @@ const JOB_ACTIVITY_GROUPS = [
     label: (n, po, e) => n === 1 ? e.description : `Updated ${n} tasks` },
 ];
 const JOB_ACTIVITY_TABS = {
+  staff_scheduled: 'schedule', schedule_added: 'schedule', job_not_complete: 'schedule', schedule_conflict: 'schedule',
+  booking_client_informed: 'schedule', booking_moved: 'schedule', booking_cancelled: 'schedule',
+  time_offer_sent: 'schedule', time_offer_picked: 'schedule', time_offer_declined: 'schedule', time_offer_withdrawn: 'schedule',
   po_created: 'pos',
   variation_logged: 'variations', variation_sent: 'variations', variation_recorded: 'variations', variation_approved: 'variations',
   invoice_created: 'invoices', invoice_edited: 'invoices', credit_note_created: 'invoices', sm8_invoice_deleted: 'invoices',

@@ -89,6 +89,9 @@
   .day-block.site-visit {
     background: rgba(234, 179, 8, 0.15); border-color: #eab308; color: #eab308;
   }
+  /* a job booking the client has not been told about yet (the job page's Schedule tab emails them) */
+  .day-block.tentative { border-style: dashed; }
+  .mobile-entry.tentative { border-left-style: dashed; }
 
   .job-search-card { position: sticky; top: 12px; }
   .job-card {
@@ -196,7 +199,7 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=98"></script>
+  <script src="/js/supabase-client.js?v=99"></script>
   <script src="/js/theme.js"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
@@ -399,10 +402,11 @@
           const isNote = !a.project_id && a.block_type !== 'site_inspection';
           const noteStyle = isNote && !reconciled ? 'background:var(--surface-1); color:var(--muted); border-color:var(--border);' : '';
           const siteVisitClass = (a.block_type === 'site_visit' || a.block_type === 'site_inspection') && !reconciled ? 'site-visit' : '';
+          const tentative = a.project_id && !a.client_informed_at && !reconciled && a.block_type !== 'site_inspection' && a.assignment_date >= sydneyDateKey(new Date()) ? 'tentative' : '';
           blocksHtml += `
-            <div class="day-block ${reconciled ? 'reconciled' : ''} ${siteVisitClass}" data-id="${a.id}" data-project-id="${a.project_id || ''}" data-inspection-id="${a.site_inspection_id || ''}" data-reconciled="${reconciled ? '1' : ''}" style="left:${left}px; width:${width}px; ${noteStyle}">
+            <div class="day-block ${reconciled ? 'reconciled' : ''} ${siteVisitClass} ${tentative}" data-id="${a.id}" data-project-id="${a.project_id || ''}" data-inspection-id="${a.site_inspection_id || ''}" data-reconciled="${reconciled ? '1' : ''}" style="left:${left}px; width:${width}px; ${noteStyle}">
               ${!reconciled ? `<div class="block-resize-handle" data-edge="left" style="position:absolute; left:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
-              <span class="block-label">${label}${reconciled ? ' &#10003;' : ''}</span>
+              <span class="block-label">${label}${reconciled ? ' &#10003;' : ''}${tentative ? ' (tentative)' : ''}</span>
               ${!reconciled ? `<div class="block-resize-handle" data-edge="right" style="position:absolute; right:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
             </div>`;
         });
@@ -449,9 +453,10 @@
               ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
               : `${CATEGORY_LABELS[a.block_type] || 'Admin'}${a.note ? ' - ' + a.note : ''}`;
           const cls = reconciled ? 'reconciled' : ((a.block_type === 'site_visit' || a.block_type === 'site_inspection') ? 'site-visit' : '');
+          const tentative = a.project_id && !a.client_informed_at && !reconciled && a.block_type !== 'site_inspection' && a.assignment_date >= sydneyDateKey(new Date()) ? ' tentative' : '';
           entriesHtml += `
-            <div class="mobile-entry ${cls}" data-id="${a.id}">
-              <span>${label}${reconciled ? ' &#10003;' : ''}</span>
+            <div class="mobile-entry ${cls}${tentative}" data-id="${a.id}">
+              <span>${label}${reconciled ? ' &#10003;' : ''}${tentative ? ' (tentative)' : ''}</span>
               <span class="me-time">${fmtTime12(displayStart)} - ${fmtTime12(displayEnd)}</span>
             </div>`;
         });
@@ -755,9 +760,9 @@
       const { error } = await supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id);
       if (error) { alert(error.message); return false; }
       showUndoToast(`${label} removed`, async () => {
-        const { id, staff_id, project_id, assignment_date, notes, start_time, end_time, block_type, note, site_inspection_id } = assignment;
+        const { id, staff_id, project_id, assignment_date, notes, start_time, end_time, block_type, note, site_inspection_id, created_by, client_informed_at, client_informed_email_id, time_offer_id } = assignment;
         const { error: restoreErr } = await supabaseClient.from('schedule_assignments').insert({
-          id, staff_id, project_id, assignment_date, notes, start_time, end_time, block_type, note, site_inspection_id,
+          id, staff_id, project_id, assignment_date, notes, start_time, end_time, block_type, note, site_inspection_id, created_by, client_informed_at, client_informed_email_id, time_offer_id,
         });
         if (restoreErr) alert(`Could not undo: ${restoreErr.message}`);
         await loadDay();
@@ -909,8 +914,13 @@
           const name = toRow.querySelector('.staff-name-col').textContent.trim();
           if (!confirm(`${name} is on leave this day. Move the booking to them anyway?`)) { await loadDay(); return; }
         }
+        const patch = { staff_id: newStaffId, start_time: newStart, end_time: newEnd };
+        // the client was told the old times: a new time is tentative again until they hear it (job page Schedule tab)
+        if (assignment.client_informed_at && (newStart !== String(assignment.start_time).slice(0, 5) || newEnd !== String(assignment.end_time).slice(0, 5))) {
+          patch.client_informed_at = null; patch.client_informed_email_id = null;
+        }
         const { error } = await supabaseClient.from('schedule_assignments')
-          .update({ staff_id: newStaffId, start_time: newStart, end_time: newEnd })
+          .update(patch)
           .eq('id', assignment.id);
         if (error) alert(error.message);
         await loadDay();

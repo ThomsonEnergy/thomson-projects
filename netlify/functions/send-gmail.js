@@ -16,17 +16,16 @@
 // not just in this app.
 
 const { requireActiveUser } = require('./_shared/require-active-user');
-const { gmailRequest, gmailUploadSend, GMAIL_MAILBOX } = require('./_shared/google-client');
+const { GMAIL_MAILBOX } = require('./_shared/google-client');
 const { sharedMailbox, mailboxById, canUseMailbox, deleteGmailDraft } = require('./_shared/mailboxes');
-const { buildMimeMessage, buildRfc822 } = require('./_shared/build-mime-message');
-const { signatureForUser, plainTextToHtml, plainTextWithoutButtons } = require('./_shared/build-email-signature');
+const { signatureForUser } = require('./_shared/build-email-signature');
+const { sendRecordedEmail } = require('./_shared/send-recorded-email');
 
 const ALLOWED_BUCKETS = ['email-attachments', 'project-documents'];
 const MAX_FILES = 10;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MIME_BY_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain', csv: 'text/csv', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', zip: 'application/zip', dwg: 'application/acad', mp4: 'video/mp4' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const KINDS = ['materials_quote', 'client', 'supplier', 'other'];
 
 async function loadAttachments(supabaseAdmin, list) {
   if (!Array.isArray(list) || !list.length) return [];
@@ -99,69 +98,14 @@ exports.handler = async (event) => {
     const personal = mailbox.kind === 'personal';
     const fromAddress = personal ? mailbox.address : GMAIL_MAILBOX;
     const signature = await signatureForUser(supabaseAdmin, user, { email: personal ? mailbox.address : undefined });
-    const fullBody = `${plainTextWithoutButtons(bodyText)}\n\n${signature.text}`;
-    const fullHtml = `${plainTextToHtml(bodyText)}${signature.html}`;
-
-    const finalSubject = (thread || replyToThreadId) && !/^re:/i.test(subject) ? `Re: ${subject}` : subject;
-    const mail = {
-      fromName: profile?.full_name || 'Thomson Energy Sales',
-      fromAddress,
-      to,
-      cc,
-      subject: finalSubject,
-      bodyText: fullBody,
-      bodyHtml: fullHtml,
-      inReplyTo: lastMessage?.message_id_header || undefined,
-      references: lastMessage?.message_id_header || undefined,
-    };
-
-    let sent;
-    if (attachments.length) {
-      // the upload endpoint takes big messages; the ordinary one does not
-      sent = await gmailUploadSend(buildRfc822({ ...mail, attachments }), thread ? thread.gmail_thread_id : undefined, mailbox);
-    } else {
-      const sendBody = { raw: buildMimeMessage(mail) };
-      if (thread) sendBody.threadId = thread.gmail_thread_id;
-      sent = await gmailRequest('messages/send', { method: 'POST', body: sendBody }, mailbox);
-    }
-
-    if (!thread) {
-      const { data: newThread, error: threadErr } = await supabaseAdmin
-        .from('email_threads')
-        .insert({ gmail_thread_id: sent.threadId, subject: finalSubject, mailbox_id: mailbox.id, is_read: true, section: 'other', section_by: 'person', triaged_at: new Date().toISOString() })
-        .select('*').single();
-      if (threadErr) throw threadErr;
-      thread = newThread;
-    }
-
-    // Keep the Message-ID Gmail gave this email, so the next reply in the thread can point at it
-    // (In-Reply-To / References) and stays threaded for the client. Best effort.
-    let sentMessageId = null;
-    try {
-      const meta = await gmailRequest(`messages/${sent.id}?format=metadata&metadataHeaders=Message-ID`, {}, mailbox);
-      sentMessageId = ((meta.payload && meta.payload.headers) || []).find(h => /^message-id$/i.test(h.name))?.value || null;
-    } catch (e) { console.error('send-gmail: could not read the Message-ID', e.message); }
-
-    const nowIso = new Date().toISOString();
-    const { error: emailErr } = await supabaseAdmin.from('emails').insert({
-      thread_id: thread.id,
-      gmail_message_id: sent.id,
-      message_id_header: sentMessageId,
-      direction: 'outbound',
-      from_address: `${profile?.full_name || 'Thomson Energy Sales'} <${fromAddress}>`,
-      to_addresses: to.split(',').map(s => s.trim()),
-      cc_addresses: cc ? cc.split(',').map(s => s.trim()) : [],
-      subject: finalSubject,
-      body_text: fullBody,
-      body_html: fullHtml,
-      // our own sent mail keeps where each file lives in storage, so it can be opened later
-      attachments: attachments.map(a => ({ part_id: null, name: a.filename, mime: a.mime, size: a.content.length, cid: null, inline: false, storage: a.storage })),
-      sent_at: nowIso,
-      created_by: user.id,
+    // a reply whose thread we could not use above still gets "Re:" (it continues the same conversation for the client)
+    const subjectOut = replyToThreadId && !thread && !/^re:/i.test(subject) ? `Re: ${subject}` : subject;
+    const sentRec = await sendRecordedEmail(supabaseAdmin, {
+      mailbox, fromName: profile?.full_name || 'Thomson Energy Sales', fromAddress, senderId: user.id, signature,
+      to, cc, subject: subjectOut, bodyText, attachments, thread, lastMessage, tagProjectId, tagKind,
     });
-    if (emailErr) throw emailErr;
-
-    await supabaseAdmin.from('email_threads').update({ last_message_at: nowIso, last_direction: 'outbound', is_read: true }).eq('id', thread.id);
+    thread = sentRec.thread;
+    const nowIso = new Date().toISOString();
 
     if (draftId && UUID.test(draftId)) {
       const { data: draft } = await supabaseAdmin.from('email_drafts').select('*').eq('id', draftId).eq('mailbox_id', mailbox.id).maybeSingle();
@@ -171,15 +115,7 @@ exports.handler = async (event) => {
       }
     }
 
-    if (tagProjectId && UUID.test(tagProjectId)) {
-      // already tagged to that job? leave the existing tag as it is
-      await supabaseAdmin.from('email_job_links').upsert(
-        { thread_id: thread.id, project_id: tagProjectId, kind: KINDS.includes(tagKind) ? tagKind : 'client', created_by: user.id },
-        { onConflict: 'thread_id,project_id', ignoreDuplicates: true }
-      );
-    }
-
-    return { statusCode: 200, body: JSON.stringify({ ok: true, threadId: thread.id }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, threadId: thread.id, emailId: sentRec.emailId }) };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };

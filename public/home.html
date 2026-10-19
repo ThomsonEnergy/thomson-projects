@@ -125,7 +125,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=98"></script>
+  <script src="/js/supabase-client.js?v=99"></script>
   <script src="/js/feed.js?v=9"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/circuit-background.js?v=17"></script>
@@ -418,7 +418,7 @@
       const until = new Date(today); until.setDate(today.getDate() + 6);
       const { data, error } = await supabaseClient
         .from('schedule_assignments')
-        .select('id, project_id, assignment_date, start_time, end_time, block_type, note, projects(name, job_number, quote_number)')
+        .select('id, project_id, assignment_date, start_time, end_time, block_type, note, client_informed_at, projects(name, job_number, quote_number)')
         .eq('staff_id', myUserId)
         .gte('assignment_date', ymd(today))
         .lte('assignment_date', ymd(until))
@@ -439,7 +439,8 @@
           : a.project_id
             ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects ? projectRef(a.projects) : 'Job'}`
             : `${SCHEDULE_CATEGORY_LABELS[a.block_type] || 'Admin'}${a.note ? ' - ' + a.note : ''}`;
-        const inner = `<span class="sched-time">${(a.start_time || '').slice(0, 5)} - ${(a.end_time || '').slice(0, 5)}</span><span class="sched-what">${escapeHtml(what)}</span>`;
+        const tentative = a.project_id && !a.client_informed_at && a.block_type !== 'site_inspection' ? ' (tentative)' : '';
+        const inner = `<span class="sched-time">${(a.start_time || '').slice(0, 5)} - ${(a.end_time || '').slice(0, 5)}</span><span class="sched-what">${escapeHtml(what + tentative)}</span>`;
         html += a.project_id ? `<a class="sched-item" href="/project.html?id=${a.project_id}">${inner}</a>` : `<div class="sched-item">${inner}</div>`;
       });
       el.innerHTML = html;
