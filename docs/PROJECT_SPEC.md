@@ -143,6 +143,9 @@ Manual steps only a person can do (the code is live):
 - **Undo received** (`po_undo_receive`): reverses the receive (off the job, out of the stock count; a stock PO's gear goes back where it came from). Option "It's back ordered" with ETA. Note required once the PO is closed or a bill on it is approved for payment.
 - **Email PO**: `po.html` (invoice layout: letterhead, supplier, job number and delivery address, lines ex GST, GST, total; no payment parts), PDF via `generate-client-document-pdf` type `po`, opened in the normal email window to the supplier's contact email with the PDF attached. **View PO** opens the page.
 - **Notes** (migration 20261026000000): every PO has "Notes for supplier" (printed on `po.html` and the PDF) and "Internal notes" (staff only), set when creating the PO or later with **+ Notes / Edit notes**, editable even when closed, changes logged on the PO.
+- **Prices on the PO** (migration 20261027000000): off by default, so the supplier's PO page and PDF show items and quantities only (the server does not send prices). **Prices on PO: Off / On** button on each PO, and a tick box on the Create PO panels. Staff still see prices in the app.
+- **Every PO has a number**: a PO saved without one draws the next (database rule). The blank one from bill M61732 (J7002 page) became PO2001; the supplier page's "Create a PO from this bill" now draws one too.
+- **+ Add to Stock** (`po_line_add_to_stock`, Admin/Finance/Sales): on any PO line not linked to Stock. Filled in from the line (name, PO supplier, cost, sell = cost + default markup), links the line, and adds the quantity to the Warehouse or vehicle count if it was already received there. Logged on the PO and the new item.
 - "Generate PO suggestions from quote" button on the job page (manual).
 
 ### A11. Supplier invoice upload (AI extraction)
