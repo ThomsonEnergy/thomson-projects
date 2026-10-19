@@ -88,6 +88,7 @@ Manual steps only a person can do (the code is live):
 
 ### A1. Time tracking and payroll
 - Clock in/out against job and stage from My Day; manual entries; leave requests with approval; staff scheduling calendar.
+- **My Day task cards** (Your scheduled tasks, Free tasks up for grabs): main tasks only (subtasks counted as "3 of 5 subtasks done", not listed; a subtask of yours still shows when its main task is not yours), split Prejob / office, Handover, Onsite with counts, grouped by job (required first, then oldest), 10 jobs per group then "Show all", search on free tasks. A task with open subtasks shows "Open job" instead of Done.
 - **Clock-out cost-centre slider** (`cko-split-slider` in `public/js/supabase-client.js`): split the shift's hours across stages at clock-out, waterfall redistribution. Closed variations drop out of the list; do-and-charge variations can take time.
 - **Who's clocked in:** "Clocked in now" card on Schedule and Team, "On this job now" with clock in/out/switch on a job's Summary (migration 147, `get_active_clock_ins`).
 - No overlapping entries; at least one cost centre per entry; break prompt on every entry.
