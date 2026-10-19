@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     const supplierId = new URLSearchParams(window.location.search).get('id');
@@ -77,8 +77,8 @@
         <a href="/suppliers.html" class="link-quiet">&larr; Suppliers</a>
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-top:8px;">
           <div>
-            <h1>${supplier.name}${supplier.kind === 'contractor' ? ' <span class="badge draft" style="vertical-align:middle;">Contractor</span>' : ''}</h1>
-            <p class="subtitle">${supplier.abn ? 'ABN ' + supplier.abn + (supplier.abn_legal_name ? ' (' + supplier.abn_legal_name + (supplier.gst_registered === false ? ', not registered for GST' : '') + ')' : '') + ' &middot; ' : ''}${terms}${supplier.contact_email ? ' &middot; ' + supplier.contact_email : ''}${supplier.contact_phone ? ' &middot; ' + supplier.contact_phone : ''}</p>
+            <h1>${escapeHtml(supplier.name)}${supplier.kind === 'contractor' ? ' <span class="badge draft" style="vertical-align:middle;">Contractor</span>' : ''}</h1>
+            <p class="subtitle">${supplier.abn ? 'ABN ' + escapeHtml(supplier.abn) + (supplier.abn_legal_name ? ' (' + escapeHtml(supplier.abn_legal_name) + (supplier.gst_registered === false ? ', not registered for GST' : '') + ')' : '') + ' &middot; ' : ''}${escapeHtml(terms)}${supplier.contact_email ? ' &middot; ' + escapeHtml(supplier.contact_email) : ''}${supplier.contact_phone ? ' &middot; ' + escapeHtml(supplier.contact_phone) : ''}</p>
           </div>
           <div>
             <button class="secondary" id="edit-supplier-btn" style="margin-right:8px;">Edit details</button>
@@ -103,8 +103,8 @@
           ${flaggedItems.map(fi => `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
               <div>
-                <p style="margin:0 0 2px;">${fi.description}</p>
-                <p class="subtitle" style="margin:0; color:var(--red);">${fi.flag_reason} - bill ${fi.supplier_bills.bill_number || ''}</p>
+                <p style="margin:0 0 2px;">${escapeHtml(fi.description)}</p>
+                <p class="subtitle" style="margin:0; color:var(--red);">${escapeHtml(fi.flag_reason)} - bill ${escapeHtml(fi.supplier_bills.bill_number)}</p>
               </div>
             </div>`).join('')}
         </div>` : ''}
@@ -118,9 +118,9 @@
               <tbody>
                 ${bills.map(b => `
                   <tr>
-                    <td data-label="Bill #">${b.bill_number || '-'}</td>
+                    <td data-label="Bill #">${escapeHtml(b.bill_number || '-')}</td>
                     <td data-label="Date">${b.bill_date ? new Date(b.bill_date).toLocaleDateString('en-AU') : '-'}</td>
-                    <td data-label="PO">${b.purchase_orders?.po_number || '-'}</td>
+                    <td data-label="PO">${escapeHtml(b.purchase_orders?.po_number || '-')}</td>
                     <td class="num" data-label="Amount">${money(b.amount)}</td>
                     <td data-label="Due">${b.due_date ? new Date(b.due_date).toLocaleDateString('en-AU') : '-'}</td>
                     <td data-label="Status">${b.paid ? '<span class="badge accepted">Paid</span>' : (b.approved_for_payment ? '<span class="badge sent">Approved</span>' : '<span class="badge draft">Not approved</span>')}</td>
@@ -141,10 +141,10 @@
             ${!pos.length ? '<p class="subtitle">No purchase orders for this supplier yet.</p>' : pos.map(po => `
               <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
                 <div style="display:flex; justify-content:space-between;">
-                  <strong>${po.po_number || 'PO'}</strong>${renderPoBadges(po)}
-                  <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
+                  <strong>${escapeHtml(po.po_number || 'PO')}</strong>${renderPoBadges(po)}
+                  <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : escapeHtml(po.status)}</span>
                 </div>
-                <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''}</p>
+                <p class="subtitle" style="margin:4px 0 8px;">${escapeHtml(po.description)}</p>
                 ${renderPoLineItemsReceivable(po, true)}
                 ${po.budget_cap ? `<p class="subtitle" style="margin-top:8px;">Budget cap: ${money(po.budget_cap)}</p>` : ''}
                 ${!po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice for this PO</button>` : ''}
@@ -232,7 +232,7 @@
         overlay.remove();
         await openStatementReviewPanel(data.extracted, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that statement</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="st-err-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that statement</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="st-err-close">Close</button>`;
         overlay.querySelector('#st-err-close').addEventListener('click', () => overlay.remove());
       }
     }
@@ -261,15 +261,15 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:700px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Statement reconciliation</h2>
-          <p class="subtitle" style="margin-bottom:14px;">Statement total: ${money(extracted.total_amount || 0)} - dated ${extracted.statement_date || 'unknown'}</p>
+          <p class="subtitle" style="margin-bottom:14px;">Statement total: ${money(extracted.total_amount || 0)} - dated ${escapeHtml(extracted.statement_date || 'unknown')}</p>
 
           ${mismatches.length ? `
             <div style="border:1px solid var(--red); border-radius:8px; padding:12px; margin-bottom:14px;">
               <p style="margin:0 0 8px; color:var(--red); font-weight:600;">${mismatches.length} discrepanc${mismatches.length === 1 ? 'y' : 'ies'} found</p>
               ${mismatches.map(m => `
                 <div style="padding:6px 0; border-bottom:1px solid var(--border); font-size:13px;">
-                  <strong>${m.bill_number || 'Unlisted'}</strong> - ${money(m.amount)}
-                  <p class="subtitle" style="margin:2px 0 0; color:var(--red);">${m.note}</p>
+                  <strong>${escapeHtml(m.bill_number || 'Unlisted')}</strong> - ${money(m.amount)}
+                  <p class="subtitle" style="margin:2px 0 0; color:var(--red);">${escapeHtml(m.note)}</p>
                 </div>`).join('')}
             </div>` : `<div class="success-box" style="margin-bottom:14px;">Every invoice on this statement matches our own records.</div>`}
 
@@ -310,7 +310,7 @@
           overlay.remove();
           alert('Statement saved. The full check (both ways, duplicates, balance) is on the Bill checks page.');
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         }
       });
     }
@@ -334,7 +334,7 @@
         overlay.remove();
         await openPricelistReviewPanel(data.items);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="pl-err-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="pl-err-close">Close</button>`;
         overlay.querySelector('#pl-err-close').addEventListener('click', () => overlay.remove());
       }
     }
@@ -362,12 +362,12 @@
             ${rows.map((r, i) => `
               <div class="pl-row" data-index="${i}" style="display:grid; grid-template-columns:24px 2fr 1.5fr 1fr; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:13px;">
                 <input type="checkbox" class="pl-include" checked style="width:auto;" />
-                <span>${r.description}</span>
+                <span>${escapeHtml(r.description)}</span>
                 <select class="pl-match" style="font-size:12px;">
                   <option value="__new__">+ Create as new material</option>
-                  ${materials.map(m => `<option value="${m.id}" ${r.suggestedMatchId === m.id ? 'selected' : ''}>${m.name} (currently ${money(m.cost_price)})</option>`).join('')}
+                  ${materials.map(m => `<option value="${m.id}" ${r.suggestedMatchId === m.id ? 'selected' : ''}>${escapeHtml(m.name)} (currently ${money(m.cost_price)})</option>`).join('')}
                 </select>
-                <input class="pl-cost" type="number" step="0.01" value="${r.unit_cost ?? ''}" style="font-size:12px;" />
+                <input class="pl-cost" type="number" step="0.01" value="${escapeHtml(r.unit_cost)}" style="font-size:12px;" />
               </div>`).join('')}
           </div>
           <div style="margin-top:14px;">
@@ -414,7 +414,7 @@
           overlay.remove();
           alert(`Done - ${updated} material${updated === 1 ? '' : 's'} updated, ${created} created.`);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           confirmBtn.disabled = false;
           confirmBtn.textContent = 'Apply price updates';
         }
@@ -426,14 +426,14 @@
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Edit ${supplier.name}</h2>
+          <h2>Edit ${escapeHtml(supplier.name)}</h2>
           <label style="margin-top:0">Name</label>
-          <input id="ed-name" value="${supplier.name}" />
+          <input id="ed-name" value="${escapeHtml(supplier.name)}" />
           <label>Type</label>
           <select id="ed-kind"><option value="supplier" ${supplier.kind !== 'contractor' ? 'selected' : ''}>Supplier (goods, materials)</option><option value="contractor" ${supplier.kind === 'contractor' ? 'selected' : ''}>Contractor (labour, services)</option></select>
           <div class="grid cols-2">
-            <div><label>Contact email</label><input id="ed-email" value="${supplier.contact_email || ''}" /></div>
-            <div><label>Contact phone</label><input id="ed-phone" value="${supplier.contact_phone || ''}" /></div>
+            <div><label>Contact email</label><input id="ed-email" value="${escapeHtml(supplier.contact_email)}" /></div>
+            <div><label>Contact phone</label><input id="ed-phone" value="${escapeHtml(supplier.contact_phone)}" /></div>
           </div>
           <label>Credit terms</label>
           <div class="grid cols-2">
@@ -442,28 +442,28 @@
               <option value="net_days" ${supplier.credit_terms_type === 'net_days' ? 'selected' : ''}>Net days</option>
               <option value="eom_days" ${supplier.credit_terms_type === 'eom_days' ? 'selected' : ''}>Days after end of month</option>
             </select>
-            <input id="ed-terms-days" type="number" value="${supplier.credit_terms_days}" />
+            <input id="ed-terms-days" type="number" value="${escapeHtml(supplier.credit_terms_days)}" />
           </div>
           <p class="subtitle" style="margin-top:14px;">Used to match future invoices to this supplier automatically.</p>
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Our account number with them</label><input id="ed-account-number" value="${supplier.our_account_number || ''}" placeholder="e.g. the \"Charge To\" number on their invoices" /></div>
-            <div><label style="margin-top:0">ABN</label><input id="ed-abn" value="${supplier.abn || ''}" /></div>
+            <div><label style="margin-top:0">Our account number with them</label><input id="ed-account-number" value="${escapeHtml(supplier.our_account_number)}" placeholder="e.g. the \"Charge To\" number on their invoices" /></div>
+            <div><label style="margin-top:0">ABN</label><input id="ed-abn" value="${escapeHtml(supplier.abn)}" /></div>
           </div>
 
           <p class="subtitle" style="margin-top:14px;">Bank details - needed to pay this supplier via Airwallex.</p>
           <label>Account name</label>
-          <input id="ed-bank-name" value="${supplier.bank_account_name || ''}" />
+          <input id="ed-bank-name" value="${escapeHtml(supplier.bank_account_name)}" />
           <div class="grid cols-2">
-            <div><label>BSB</label><input id="ed-bsb" value="${supplier.bsb || ''}" /></div>
-            <div><label>Account number</label><input id="ed-account" value="${supplier.bank_account_number || ''}" /></div>
+            <div><label>BSB</label><input id="ed-bsb" value="${escapeHtml(supplier.bsb)}" /></div>
+            <div><label>Account number</label><input id="ed-account" value="${escapeHtml(supplier.bank_account_number)}" /></div>
           </div>
           <p class="subtitle" style="margin-top:14px;">BPAY - if this supplier is paid that way instead.</p>
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Biller code</label><input id="ed-bpay-code" value="${supplier.bpay_biller_code || ''}" /></div>
-            <div><label style="margin-top:0">Reference</label><input id="ed-bpay-ref" value="${supplier.bpay_reference || ''}" /></div>
+            <div><label style="margin-top:0">Biller code</label><input id="ed-bpay-code" value="${escapeHtml(supplier.bpay_biller_code)}" /></div>
+            <div><label style="margin-top:0">Reference</label><input id="ed-bpay-ref" value="${escapeHtml(supplier.bpay_reference)}" /></div>
           </div>
           <label>Notes</label>
-          <textarea id="ed-notes" style="min-height:60px;">${supplier.notes || ''}</textarea>
+          <textarea id="ed-notes" style="min-height:60px;">${escapeHtml(supplier.notes)}</textarea>
           <div style="margin-top:14px;">
             <button id="ed-save-btn">Save</button>
             <button type="button" class="secondary" id="ed-cancel-btn">Cancel</button>
@@ -492,7 +492,7 @@
           bank_account_number: overlay.querySelector('#ed-account').value.trim() || null,
           notes: overlay.querySelector('#ed-notes').value.trim() || null,
         }).eq('id', supplier.id);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         await logActivity('supplier', supplier.id, 'updated', `Supplier "${overlay.querySelector('#ed-name').value.trim()}" updated`);
         overlay.remove();
         await loadSupplier();
@@ -522,7 +522,7 @@
         overlay.remove();
         await openReviewPanel(data.extracted, null, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="extract-err-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="extract-err-close">Close</button>`;
         overlay.querySelector('#extract-err-close').addEventListener('click', () => overlay.remove());
       }
     }
@@ -577,25 +577,25 @@
       });
 
       const nameWarning = extracted.supplier && !fuzzyMatchScore(currentSupplier.name, extracted.supplier)
-        ? `<div class="error-box" style="margin-bottom:10px;">The invoice says "${extracted.supplier}" - check this is actually a ${currentSupplier.name} bill before saving.</div>` : '';
+        ? `<div class="error-box" style="margin-bottom:10px;">The invoice says "${escapeHtml(extracted.supplier)}" - check this is actually a ${escapeHtml(currentSupplier.name)} bill before saving.</div>` : '';
 
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; overflow-y:auto;';
       overlay.innerHTML = `
         <div class="card" style="max-width:720px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Review before saving</h2>
-          <p class="subtitle" style="margin-bottom:14px;">Saving against ${currentSupplier.name}. Nothing's saved yet.</p>
+          <p class="subtitle" style="margin-bottom:14px;">Saving against ${escapeHtml(currentSupplier.name)}. Nothing's saved yet.</p>
           ${nameWarning}
 
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Bill number</label><input id="rev-bill-number" value="${extracted.bill_number || ''}" /></div>
-            <div><label style="margin-top:0">Date</label><input type="date" id="rev-bill-date" value="${extracted.bill_date || ''}" /></div>
+            <div><label style="margin-top:0">Bill number</label><input id="rev-bill-number" value="${escapeHtml(extracted.bill_number)}" /></div>
+            <div><label style="margin-top:0">Date</label><input type="date" id="rev-bill-date" value="${escapeHtml(extracted.bill_date)}" /></div>
           </div>
           <label>Total amount</label>
-          <input type="number" step="0.01" id="rev-total" value="${extracted.total || ''}" />
+          <input type="number" step="0.01" id="rev-total" value="${escapeHtml(extracted.total || '')}" />
 
           <label style="margin-top:14px;">Purchase order</label>
-          ${autoMatchedPoId ? `<p class="subtitle" style="color:var(--green); margin-bottom:6px;">${preselectedPoId ? 'Uploaded directly to this PO.' : `Matched to PO ${(openPOs.find(p => p.id === autoMatchedPoId) || {}).po_number} from the invoice's own reference - check this is correct.`}</p>` : ''}
+          ${autoMatchedPoId ? `<p class="subtitle" style="color:var(--green); margin-bottom:6px;">${preselectedPoId ? 'Uploaded directly to this PO.' : `Matched to PO ${escapeHtml((openPOs.find(p => p.id === autoMatchedPoId) || {}).po_number)} from the invoice's own reference - check this is correct.`}</p>` : ''}
           <select id="rev-po-mode">
             <option value="none" ${!autoMatchedPoId ? 'selected' : ''}>No PO for this bill</option>
             ${openPOs?.length ? `<option value="existing" ${autoMatchedPoId ? 'selected' : ''}>Link to an existing open PO</option>` : ''}
@@ -603,7 +603,7 @@
           </select>
 
           <div id="rev-po-existing-section" style="display:${autoMatchedPoId ? 'block' : 'none'}; margin-top:8px;">
-            <select id="rev-po"><option value="">-- Select --</option>${(openPOs || []).map(po => `<option value="${po.id}" ${po.id === autoMatchedPoId ? 'selected' : ''}>${po.po_number || 'PO'} - ${po.description || ''}</option>`).join('')}</select>
+            <select id="rev-po"><option value="">-- Select --</option>${(openPOs || []).map(po => `<option value="${po.id}" ${po.id === autoMatchedPoId ? 'selected' : ''}>${escapeHtml(po.po_number || 'PO')} - ${escapeHtml(po.description)}</option>`).join('')}</select>
           </div>
 
           <div id="rev-po-new-section" style="display:none; margin-top:8px;">
@@ -623,21 +623,21 @@
           <div id="rev-line-items">
             ${lineItems.map((li, i) => `
               <div class="rev-line-item" data-index="${i}" style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px;">
-                <input class="rli-desc" value="${li.description || ''}" placeholder="Description" style="margin-bottom:6px;" />
+                <input class="rli-desc" value="${escapeHtml(li.description)}" placeholder="Description" style="margin-bottom:6px;" />
                 <div class="grid cols-2">
-                  <div><label style="margin-top:0; font-size:11px;">Quantity</label><input class="rli-qty" type="number" step="0.01" value="${li.quantity ?? 1}" /></div>
-                  <div><label style="margin-top:0; font-size:11px;">Unit cost</label><input class="rli-cost" type="number" step="0.01" value="${li.unit_cost ?? 0}" /></div>
+                  <div><label style="margin-top:0; font-size:11px;">Quantity</label><input class="rli-qty" type="number" step="0.01" value="${escapeHtml(li.quantity ?? 1)}" /></div>
+                  <div><label style="margin-top:0; font-size:11px;">Unit cost</label><input class="rli-cost" type="number" step="0.01" value="${escapeHtml(li.unit_cost ?? 0)}" /></div>
                 </div>
                 <label style="margin-top:6px; font-size:11px;">Match to Stock</label>
                 <select class="rli-match">
                   <option value="__new__">+ Create as new material</option>
-                  ${materials.map(m => `<option value="${m.id}" ${li.suggestedMatchId === m.id ? 'selected' : ''}>${m.name} (currently ${money(m.cost_price)})</option>`).join('')}
+                  ${materials.map(m => `<option value="${m.id}" ${li.suggestedMatchId === m.id ? 'selected' : ''}>${escapeHtml(m.name)} (currently ${money(m.cost_price)})</option>`).join('')}
                 </select>
                 ${li.suggestedMatchId ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Suggested match - check this is actually the same item before confirming.</p>` : ''}
                 ${li.genericPoLineId ? `
                   <label style="margin-top:8px; display:flex; align-items:flex-start; gap:6px; font-size:12px;">
                     <input type="checkbox" class="rli-replace-generic" data-po-line-id="${li.genericPoLineId}" checked style="width:auto; margin-top:2px;" />
-                    Update the PO's "${li.genericPoLineDescription}" to this specific item
+                    Update the PO's "${escapeHtml(li.genericPoLineDescription)}" to this specific item
                   </label>` : ''}
               </div>`).join('')}
           </div>
@@ -675,7 +675,7 @@
             const results = await searchProjects(q);
             const resultsEl = overlay.querySelector('#rev-po-job-results');
             resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-              ${results.map(p => `<div class="rev-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" data-quote-number="${p.quote_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
+              ${results.map(p => `<div class="rev-job-pick" data-id="${p.id}" data-name="${escapeHtml(p.name)}" data-job-number="${escapeHtml(p.job_number)}" data-quote-number="${escapeHtml(p.quote_number)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))}</div>`).join('')}
             </div>`;
             resultsEl.querySelectorAll('.rev-job-pick').forEach(row => {
               row.addEventListener('click', () => {
@@ -855,7 +855,7 @@
           overlay.remove();
           await loadSupplier();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           confirmBtn.disabled = false;
           confirmBtn.textContent = 'Confirm & save';
         }

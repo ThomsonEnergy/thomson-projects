@@ -4,6 +4,8 @@ Read-only review of the whole app (job page, quotes and sales, invoices and Xero
 
 ## S. Security (fix first)
 
+**Fixed 19 Oct 2026 (migration 20261031000000, PR "Security fixes"):** S1 (policy; owner to confirm sign-ups are off), S2, S3, S4 (`sync-costs`, `create-jobs`, `_servicem8` deleted), S5, S6, S7, S8 (`escapeHtml` now also escapes quotes), S9, S10, S11, S12 (callback checks the Gmail address), S13, S14. Also found and fixed: the Stock page was blank on the live site (a variable clashed with a shared function name).
+
 | # | Problem | Where |
 |---|---|---|
 | S1 | If Supabase sign-ups are on, anyone can sign up and make themselves Admin: the "insert own profile" policy does not limit role **(checked policy; sign-up setting needs the owner to check)** | profiles policy, `supabase/config.toml` |

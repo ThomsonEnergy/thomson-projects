@@ -95,7 +95,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/assets.js?v=1"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -116,7 +116,7 @@
         supabaseClient.from('customer_assets').select('*, clients(name, email)').order('created_at', { ascending: false }),
         supabaseClient.from('asset_reminder_log').select('asset_id, kind, outcome, sent_at').gte('sent_at', new Date(Date.now() - 90 * 86400000).toISOString()),
       ]);
-      if (error) { document.getElementById('asset-list').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { document.getElementById('asset-list').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       allAssets = assets || [];
       recentLog = log || [];
       renderAssetList();
@@ -143,7 +143,7 @@
             ${rows.map(a => `
               <tr>
                 <td data-label="Customer"><strong>${escapeHtml(customerName(a))}</strong>${a.site_address ? `<div class="subtitle" style="font-size:12px;">${escapeHtml(a.site_address)}</div>` : ''}</td>
-                <td data-label="Asset">${escapeHtml(a.name)}${a.quantity > 1 ? ` x${a.quantity}` : ''}<div class="subtitle" style="font-size:12px;">${escapeHtml(typeLabel(a.asset_type))}${a.make || a.model ? ' &middot; ' + escapeHtml([a.make, a.model].filter(Boolean).join(' ')) : ''}${a.status === 'decommissioned' ? ' &middot; decommissioned' : ''}${a.reminders_paused ? ' &middot; reminders paused' : ''}</div></td>
+                <td data-label="Asset">${escapeHtml(a.name)}${a.quantity > 1 ? ` x${escapeHtml(a.quantity)}` : ''}<div class="subtitle" style="font-size:12px;">${escapeHtml(typeLabel(a.asset_type))}${a.make || a.model ? ' &middot; ' + escapeHtml([a.make, a.model].filter(Boolean).join(' ')) : ''}${a.status === 'decommissioned' ? ' &middot; decommissioned' : ''}${a.reminders_paused ? ' &middot; reminders paused' : ''}</div></td>
                 <td data-label="Installed">${assetFmtDate(a.installed_at)}</td>
                 <td data-label="Warranty">${assetDateBadge(a.warranty_expires, 'warranty')}</td>
                 <td data-label="Next service">${a.service_interval_months ? assetDateBadge(a.next_service_due, 'service') : '<span class="subtitle">-</span>'}</td>
@@ -173,7 +173,7 @@
         const a = r.asset; const email = clientEmail(a);
         const days = assetDaysUntil(r.date);
         const why = r.kind === 'service'
-          ? `${typeLabel(a.asset_type)} service ${days < 0 ? 'overdue since' : 'due'} ${assetFmtDate(r.date)}`
+          ? `${escapeHtml(typeLabel(a.asset_type))} service ${days < 0 ? 'overdue since' : 'due'} ${assetFmtDate(r.date)}`
           : `Warranty ends ${assetFmtDate(r.date)} (${days} days)`;
         return `
           <div class="reminder-row">
@@ -226,7 +226,7 @@
           overlay.remove();
           await loadAll();
         } catch (err) {
-          overlay.querySelector('#re-msg').innerHTML = `<div class="error-box">${err.message}</div>`;
+          overlay.querySelector('#re-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           btn.disabled = false; btn.textContent = 'Send email';
         }
       });

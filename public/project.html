@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -70,9 +70,10 @@
 
     async function loadProject() {
       const centreCols = await costCentreColumns();
+      const liCols = await lineItemColumns();
       const { data: project, error } = await supabaseClient
         .from('projects')
-        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), credit_note_claims(*), cost_centre_line_items(id, item_type, description, quantity, unit_cost, rate_tier_id, sort_order, prebuild_group_id, prebuild_client_description, prebuild_base_quantity), cost_centre_photo_groups(*)),
+        .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), credit_note_claims(*), cost_centre_line_items(${liCols}, rate_tier_id, prebuild_group_id, prebuild_client_description, prebuild_base_quantity), cost_centre_photo_groups(*)),
           project_manager:client_contacts!project_manager_contact_id(name, phone, email),
           site_contact:client_contacts!site_contact_id(name, phone, email),
           job_contact:client_contacts!job_contact_id(name, phone, email),
@@ -301,7 +302,7 @@
       const isLabour = item_type === 'labour';
       const descPlaceholder = isLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
       li.innerHTML = `
-        <input class="li-desc" placeholder="${descPlaceholder}" value="${description}" style="font-size:13px;" />
+        <input class="li-desc" placeholder="${descPlaceholder}" value="${escapeHtml(description)}" style="font-size:13px;" />
         <select class="li-type" style="font-size:13px;">
           <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
           <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
@@ -309,7 +310,7 @@
         <input class="li-qty" type="number" step="0.01" value="${quantity}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="font-size:13px;" />
         <select class="li-tier" style="font-size:13px; display:${isLabour ? 'block' : 'none'};">
           <option value="">-- Select tier --</option>
-          ${RATE_TIERS.map(t => `<option value="${t.id}" data-rate="${t.sell_rate}" ${rate_tier_id === t.id ? 'selected' : ''}>${t.name} ($${t.sell_rate}/hr)</option>`).join('')}
+          ${RATE_TIERS.map(t => `<option value="${t.id}" data-rate="${t.sell_rate}" ${rate_tier_id === t.id ? 'selected' : ''}>${escapeHtml(t.name)} ($${t.sell_rate}/hr)</option>`).join('')}
         </select>
         <input class="li-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px; display:${isLabour ? 'none' : 'block'};" />
         <div class="li-total" style="font-size:13px; font-weight:600;">$0.00</div>
@@ -372,7 +373,7 @@
     function milestoneRowHtml(m = {}) {
       return `
         <div class="milestone-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-          <input class="milestone-label" placeholder="e.g. On booking install day" value="${m.label || ''}" style="flex:2;" />
+          <input class="milestone-label" placeholder="e.g. On booking install day" value="${escapeHtml(m.label || '')}" style="flex:2;" />
           <input class="milestone-percent" type="number" step="1" min="0" max="100" placeholder="%" value="${m.percent ?? ''}" style="flex:1; max-width:90px;" />
           <button type="button" class="secondary remove-milestone-btn" style="padding:8px 10px;">&times;</button>
         </div>`;
@@ -427,11 +428,11 @@
         <div class="cc-row-top">
           <div>
             <label style="margin-top:0">Stage name <span class="cc-number" style="color:var(--muted); font-weight:400;"></span></label>
-            <input class="cc-name" placeholder="e.g. Rough In" value="${name}" />
+            <input class="cc-name" placeholder="e.g. Rough In" value="${escapeHtml(name)}" />
           </div>
           <div>
             <label style="margin-top:0">Description</label>
-            <input class="cc-desc" placeholder="What's covered in this stage" value="${description}" />
+            <input class="cc-desc" placeholder="What's covered in this stage" value="${escapeHtml(description)}" />
           </div>
         </div>
         <div style="margin-top:12px;">
@@ -510,7 +511,7 @@
       pg.style.cssText = 'border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px;';
       pg.dataset.photos = JSON.stringify(photos);
       pg.innerHTML = `
-        <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${description}" style="margin-bottom:8px;" />
+        <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${escapeHtml(description)}" style="margin-bottom:8px;" />
         <div class="pg-thumbs" style="margin-bottom:8px;"></div>
         <input type="file" class="pg-file" accept="image/*" multiple style="font-size:12px;" />
         <button type="button" class="secondary pg-remove" style="font-size:12px; padding:6px 12px;">Remove group</button>
@@ -582,7 +583,7 @@
       selectedClientId = client ? client.id : null;
       const note = document.getElementById('selected-client-note');
       if (client) {
-        note.innerHTML = `Using existing client: <strong>${client.name}</strong>. Edits below only apply to this quote unless you also update it on the <a class="link-quiet" href="/clients.html" target="_blank">Clients page</a>.`;
+        note.innerHTML = `Using existing client: <strong>${escapeHtml(client.name)}</strong>. Edits below only apply to this quote unless you also update it on the <a class="link-quiet" href="/clients.html" target="_blank">Clients page</a>.`;
         document.getElementById('p-client').value = client.name || '';
         document.getElementById('p-email').value = client.email || '';
         document.getElementById('p-phone').value = client.phone || '';
@@ -620,7 +621,7 @@
             <label style="margin-top:0">${t.label}</label>
             <select class="job-contact-select" data-key="${t.key}">
               <option value="">-- Not assigned --</option>
-              ${options.map(c => `<option value="${c.id}" ${preselected[t.key] === c.id ? 'selected' : ''}>${c.name || c.phone || c.email}</option>`).join('')}
+              ${options.map(c => `<option value="${c.id}" ${preselected[t.key] === c.id ? 'selected' : ''}>${escapeHtml(c.name || c.phone || c.email)}</option>`).join('')}
             </select>
           </div>`;
       }).join('');
@@ -637,7 +638,7 @@
       if (!sowDocs.length) { el.innerHTML = ''; return; }
       el.innerHTML = sowDocs.map((d, i) => `
         <div style="display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:6px 10px; margin:0 8px 8px 0; font-size:12px;">
-          ${d.name}
+          ${escapeHtml(d.name)}
           <button type="button" data-i="${i}" class="sow-doc-remove" style="padding:2px 6px; font-size:11px;">x</button>
         </div>`).join('');
       el.querySelectorAll('.sow-doc-remove').forEach(btn => {
@@ -901,8 +902,8 @@
           }
           resultsEl.innerHTML = data.map(c => `
             <div class="client-result" data-id="${c.id}" style="padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">
-              <div style="font-weight:600;">${c.name}</div>
-              <div style="color:var(--muted); font-size:12px;">${[c.email, c.phone].filter(Boolean).join(' &middot; ')}</div>
+              <div style="font-weight:600;">${escapeHtml(c.name)}</div>
+              <div style="color:var(--muted); font-size:12px;">${[c.email, c.phone].filter(Boolean).map(escapeHtml).join(' &middot; ')}</div>
             </div>`).join('');
           resultsEl.querySelectorAll('.client-result').forEach(row => {
             row.addEventListener('click', () => {
@@ -946,8 +947,10 @@
         msg.innerHTML = '';
         try {
           btn.textContent = 'Drafting stage names and descriptions...';
+          const { data: { session: aiSession } } = await supabaseClient.auth.getSession();
+          const aiHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${aiSession.access_token}` };
           const scopeRes = await fetch('/.netlify/functions/generate-scope', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: aiHeaders,
             body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames }),
           });
           const scopeJson = await scopeRes.json();
@@ -967,7 +970,7 @@
           btn.textContent = 'Writing scope of works...';
           const sowStyle = document.querySelector('input[name="sow-style"]:checked').value;
           const sowRes = await fetch('/.netlify/functions/generate-sow', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: aiHeaders,
             body: JSON.stringify({
               projectName: projectName || 'This project', brief, stageNames: updatedStageNames,
               stageDescriptions: updatedDescriptions, documentPaths: sowDocs.map(d => d.path),
@@ -1113,7 +1116,7 @@
           if (client) {
             document.getElementById('client-search-input').value = client.name;
             document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
-            document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${client.name}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+            document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${escapeHtml(client.name)}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
           }
           await loadEditJobContactPickers(project.client_id, {
             project_manager_contact_id: project.project_manager_contact_id,
@@ -1229,7 +1232,7 @@
         <div class="card" style="max-width:520px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Sign this variation</h2>
           <p class="subtitle" style="margin-bottom:10px;">Total change: <strong style="color:${totalDelta >= 0 ? 'var(--green)' : 'var(--red)'};">${totalDelta >= 0 ? '+' : ''}${money(totalDelta)}</strong></p>
-          <p style="margin:0 0 14px;">${description}</p>
+          <p style="margin:0 0 14px;">${escapeHtml(description)}</p>
 
           <label style="margin-top:0">Signed by (name)</label>
           <input id="var-signed-name" placeholder="Full name" />
@@ -1425,7 +1428,7 @@
       for (const centre of removedCentres) {
         const reasons = await checkCostCentreHasActivity(centre);
         if (reasons.length) {
-          msg.innerHTML = `<div class="error-box">Can't remove "${centre.name}" - it ${reasons.join(', ')}. Adjust its line items instead of deleting the stage, or add it back.</div>`;
+          msg.innerHTML = `<div class="error-box">Can't remove "${escapeHtml(centre.name)}" - it ${reasons.join(', ')}. Adjust its line items instead of deleting the stage, or add it back.</div>`;
           return;
         }
       }
@@ -1897,7 +1900,7 @@
           const resultsEl = overlay.querySelector('#cw-mfr-results');
           if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - fill in the fields below to add them as a new client.</p>`; return; }
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-            ${data.map(c => `<div class="mfr-pick-row" data-id="${c.id}" data-name="${c.name}" data-email="${c.email || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${c.name} <span class="subtitle">${c.email || ''}</span></div>`).join('')}
+            ${data.map(c => `<div class="mfr-pick-row" data-id="${c.id}" data-name="${escapeHtml(c.name)}" data-email="${escapeHtml(c.email || '')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(c.name)} <span class="subtitle">${escapeHtml(c.email || '')}</span></div>`).join('')}
           </div>`;
           resultsEl.querySelectorAll('.mfr-pick-row').forEach(row => {
             row.addEventListener('click', () => {
@@ -2012,7 +2015,7 @@
                 ${centres.map(x => `
                   <tr>
                     <td data-label=""><input type="checkbox" class="inv-stage-check" data-id="${x.centre.id}" style="width:auto;" ${opts.preselectCentreId ? (opts.preselectCentreId === x.centre.id ? 'checked' : '') : 'checked'} /></td>
-                    <td data-label="Stage">${x.centre.name}${x.stcRemaining > 0 ? `<br><span class="subtitle" style="font-size:11px;">${money(x.stcRemaining)} STC credit outstanding</span>` : ''}</td>
+                    <td data-label="Stage">${escapeHtml(x.centre.name)}${x.stcRemaining > 0 ? `<br><span class="subtitle" style="font-size:11px;">${money(x.stcRemaining)} STC credit outstanding</span>` : ''}</td>
                     <td class="num" data-label="Remaining">${money(x.remaining)}</td>
                     <td class="num" data-label="Claim %"><input type="number" class="inv-stage-pct" data-id="${x.centre.id}" min="0" max="100" step="1" value="${!opts.preselectCentreId || opts.preselectCentreId === x.centre.id ? 100 : 0}" style="width:70px;" /></td>
                     <td class="num" data-label="Claim $"><input type="number" class="inv-stage-amt" data-id="${x.centre.id}" step="0.01" style="width:100px;" /></td>
@@ -2394,7 +2397,7 @@
         <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
             <div>
-              <strong>${inv.invoice_number}</strong>${inv.description ? ` - ${inv.description}` : ''}
+              <strong>${escapeHtml(inv.invoice_number)}</strong>${inv.description ? ` - ${escapeHtml(inv.description)}` : ''}
               <span class="badge ${inv.paid_at ? 'accepted' : 'sent'}" style="margin-left:6px;">${inv.paid_at ? 'Paid' : 'Awaiting payment'}</span>
               <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${new Date(inv.sent_at).toLocaleDateString('en-AU')}${inv.due_date ? ` &middot; Due ${new Date(inv.due_date + 'T00:00:00').toLocaleDateString('en-AU')}` : ''}</p>
             </div>
@@ -2411,8 +2414,8 @@
               <div style="width:100%; margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);">
                 ${inv.credit_notes.map(cn => `
                   <p class="subtitle" style="font-size:12px; margin:4px 0;">
-                    Credit note${cn.reason ? ` - ${cn.reason}` : ''} (${new Date(cn.created_at).toLocaleDateString('en-AU')})
-                    ${cn.refund ? `<span class="badge sent" style="margin-left:4px;">Refunded${cn.refund_reference ? ` - ${cn.refund_reference}` : ''}</span>` : `<span class="badge accepted" style="margin-left:4px;">Account credit</span>`}
+                    Credit note${cn.reason ? ` - ${escapeHtml(cn.reason)}` : ''} (${new Date(cn.created_at).toLocaleDateString('en-AU')})
+                    ${cn.refund ? `<span class="badge sent" style="margin-left:4px;">Refunded${cn.refund_reference ? ` - ${escapeHtml(cn.refund_reference)}` : ''}</span>` : `<span class="badge accepted" style="margin-left:4px;">Account credit</span>`}
                     ${cn.xero_credit_note_id ? '<span style="margin-left:6px;">In Xero</span>' : (canIssueCreditNote ? `<button type="button" class="secondary push-credit-note-btn" data-credit-note-id="${cn.id}" style="font-size:11px; padding:4px 8px; margin-left:6px;">Push to Xero</button>` : '')}
                     ${cn.xero_credit_note_error ? `<span class="error-box" style="display:block; margin-top:4px;">${cn.xero_credit_note_error}</span>` : ''}
                   </p>`).join('')}
@@ -2897,8 +2900,8 @@
       const overallIsOver = overallBudgetPercent > 100;
 
       content.innerHTML = `
-        <h1>${project.name}</h1>
-        <p class="subtitle">${project.client_name} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
+        <h1>${escapeHtml(project.name)}</h1>
+        <p class="subtitle">${escapeHtml(project.client_name)} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}</p>
         ${isFrozenQuote && project.approved_at ? `<p class="subtitle" style="margin-top:2px;">Approved ${new Date(project.approved_at).toLocaleDateString('en-AU')}${project.approval_note ? ' - ' + escapeHtml(project.approval_note) : ' - approved online by the client'}${project.approval_email_thread_id ? ` &middot; <a class="link-quiet" href="/inbox.html?thread=${project.approval_email_thread_id}">View the email</a>` : ''}</p>` : ''}
         ${!project.job_number && project.status === 'declined' ? `<div class="error-box" style="margin:6px 0 12px;">${approvalProofHtml(project)}${pricingVisible ? (project.expired ? ' <button type="button" class="secondary vu-extend" data-key="quote" style="font-size:12px; padding:4px 10px; margin-left:6px;">Extend...</button>' : ' <button type="button" class="secondary" id="quote-reopen-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Reopen quote</button>') : ''}</div>` : ''}
         ${!project.job_number && project.status === 'sent' ? `<div id="quote-valid-until">${validUntilHtml(project, 'quote', pricingVisible)}</div>` : ''}
@@ -3170,7 +3173,7 @@
                     ${centres.map((c, i) => `
                       <tr>
                         <td data-label="#">${costCentreNumber(project.job_number, i + 1)}</td>
-                        <td data-label="Stage">${c.name}</td>
+                        <td data-label="Stage">${escapeHtml(c.name)}</td>
                         ${pricingVisible ? `
                           <td class="num" data-label="Quoted">${moneyOrHidden(c.quoted_amount)}</td>
                           <td class="num" data-label="Labour">${moneyOrHidden(c.estimated_labour_cost)}</td>
@@ -3181,9 +3184,9 @@
                       ${showLineItems ? (c.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order).map(li => `
                         <tr class="li-detail-row" style="background:var(--surface-2);">
                           <td data-label="#"></td>
-                          <td data-label="Stage" style="padding-left:24px; font-size:13px; color:var(--muted);">&#8627; ${li.description}${li.item_type === 'labour' ? ` (${li.quantity} hrs)` : ` (x${li.quantity})`}</td>
+                          <td data-label="Stage" style="padding-left:24px; font-size:13px; color:var(--muted);">&#8627; ${escapeHtml(li.description)}${li.item_type === 'labour' ? ` (${li.quantity} hrs)` : ` (x${li.quantity})`}</td>
                           ${pricingVisible ? `
-                            <td class="num" data-label="Quoted">${money(Number(li.quantity) * Number(li.unit_cost))}</td>
+                            <td class="num" data-label="Quoted">${money(Number(li.quantity) * (Number(li.unit_cost) || 0))}</td>
                             <td class="num" data-label="Labour"></td>
                             <td class="num" data-label="Materials"></td>
                             <td class="num" data-label="Invoiced"></td>
@@ -3216,7 +3219,7 @@
                   const gpPercent = centreQuotedAmt > 0 ? Math.round(((centreQuotedAmt - actualTotalCost) / centreQuotedAmt) * 100) : null;
                   return `
                   <div class="card">
-                    <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - cost &amp; margin</h2>
+                    <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${escapeHtml(c.name)} - cost &amp; margin</h2>
                     <p class="subtitle" style="margin-bottom:14px;">Labour + materials, quoted cost vs real spend so far.</p>
                     <div class="grid cols-3">
                       <div>
@@ -3255,7 +3258,7 @@
                 const markerPosition = isOver ? Math.round((100 / trackScale) * 100 * 10) / 10 : null;
                 return `
                 <div class="card">
-                  <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${c.name} - labour</h2>
+                  <h2 style="margin-bottom:2px;">${costCentreNumber(project.job_number, i + 1)} ${escapeHtml(c.name)} - labour</h2>
                   <p class="subtitle" style="margin-bottom:14px;">${actualHours.toFixed(1)} hrs logged - ${quotedHours.toFixed(1)} hrs quoted</p>
                   <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
                     <span class="subtitle">Labour budget</span>
@@ -3274,7 +3277,7 @@
                 const { stageInvoices, claimedTotal, quotedAmt, remaining, stcApplied, stcRemaining } = stageClaimSummary(c);
                 return `
                 <div class="card">
-                  <h2>${costCentreNumber(project.job_number, i + 1)} ${c.name} - claims</h2>
+                  <h2>${costCentreNumber(project.job_number, i + 1)} ${escapeHtml(c.name)} - claims</h2>
                   ${stageInvoices.length ? `
                     <table class="responsive-stack">
                       <thead><tr><th>Invoice</th><th class="num">Amount</th><th>Sent</th><th></th></tr></thead>
@@ -3439,7 +3442,7 @@
               <div class="card">
                 <h2>Notes</h2>
                 <p class="subtitle" style="margin-bottom:8px;">Background/context that sticks around regardless of how the job progresses - e.g. what a lead originally asked for. Not shown to the client.</p>
-                <textarea id="job-notes-text" placeholder="Internal notes...">${project.notes || ''}</textarea>
+                <textarea id="job-notes-text" placeholder="Internal notes...">${escapeHtml(project.notes || '')}</textarea>
                 <button type="button" class="secondary" id="job-notes-save-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Save notes</button>
                 <div id="job-notes-msg"></div>
               </div>
@@ -3466,7 +3469,7 @@
                 <table>
                   <thead><tr><th>Role</th><th>Name</th><th>Phone</th><th>Email</th></tr></thead>
                   <tbody>
-                    ${contactRows.map(r => `<tr><td>${r.label}</td><td>${r.c.name || ''}</td><td>${r.c.phone ? `<a class="link-quiet" href="tel:${r.c.phone}">${r.c.phone}</a>` : ''}</td><td>${r.c.email ? `<a class="link-quiet" href="mailto:${r.c.email}">${r.c.email}</a>` : ''}</td></tr>`).join('')}
+                    ${contactRows.map(r => `<tr><td>${r.label}</td><td>${escapeHtml(r.c.name || '')}</td><td>${r.c.phone ? `<a class="link-quiet" href="tel:${escapeHtml(r.c.phone)}">${escapeHtml(r.c.phone)}</a>` : ''}</td><td>${r.c.email ? `<a class="link-quiet" href="mailto:${escapeHtml(r.c.email)}">${escapeHtml(r.c.email)}</a>` : ''}</td></tr>`).join('')}
                   </tbody>
                 </table>
               </div>`;
@@ -4214,11 +4217,11 @@
                 ${isSigned ? `<span class="badge accepted">Signed</span>` : `<span class="badge draft">Quick note</span>`}
                 <span style="margin-left:6px; font-weight:600; color:${Number(v.total_delta) >= 0 ? 'var(--green)' : 'var(--red)'};">${Number(v.total_delta) >= 0 ? '+' : ''}${money(v.total_delta)}</span>
               </div>
-              <p class="subtitle" style="margin:0; font-size:12px;">${who} &middot; ${new Date(v.created_at).toLocaleDateString('en-AU')}</p>
+              <p class="subtitle" style="margin:0; font-size:12px;">${escapeHtml(who)} &middot; ${new Date(v.created_at).toLocaleDateString('en-AU')}</p>
             </div>
-            <p style="margin:8px 0 0;">${v.description}</p>
+            <p style="margin:8px 0 0;">${escapeHtml(v.description)}</p>
             <div style="margin-top:8px; font-size:13px;">
-              ${(v.changes || []).map(c => `<div class="subtitle">${c.cost_centre_name}: ${money(c.old_amount)} &rarr; ${money(c.new_amount)}</div>`).join('')}
+              ${(v.changes || []).map(c => `<div class="subtitle">${escapeHtml(c.cost_centre_name)}: ${money(c.old_amount)} &rarr; ${money(c.new_amount)}</div>`).join('')}
             </div>
             ${isSigned ? `<p class="subtitle" style="margin-top:8px;">Signed by ${v.signed_by_name} on ${new Date(v.signed_at).toLocaleDateString('en-AU')}</p>` : ''}
           </div>`;
@@ -4252,7 +4255,7 @@
         resultEl.innerHTML = `
           <div class="error-box">
             <p style="margin:0 0 8px; font-weight:600;">${checkJson.missing.length} thing${checkJson.missing.length === 1 ? '' : 's'} missing:</p>
-            <ul style="margin:0 0 10px; padding-left:18px;">${checkJson.missing.map(m => `<li>${m.label}</li>`).join('')}</ul>
+            <ul style="margin:0 0 10px; padding-left:18px;">${checkJson.missing.map(m => `<li>${escapeHtml(m.label)}</li>`).join('')}</ul>
             <button type="button" class="secondary create-compliance-tasks-btn">Create tasks for these</button>
           </div>`;
 
@@ -4348,8 +4351,8 @@
           return `
           <div class="${isChild ? 'insp-child' : ''}">
             <div class="insp-item ${answered ? 'answered' : ''}" data-item-id="${it.id}">
-              <div class="insp-label">${it.label}${it.required ? '' : ' <span class="subtitle">(optional)</span>'}</div>
-              ${it.description ? `<div class="insp-desc">${it.description}</div>` : ''}
+              <div class="insp-label">${escapeHtml(it.label)}${it.required ? '' : ' <span class="subtitle">(optional)</span>'}</div>
+              ${it.description ? `<div class="insp-desc">${escapeHtml(it.description)}</div>` : ''}
               ${it.item_type === 'yes_no' ? `
                 <button type="button" class="insp-yn-btn yn-yes ${a?.answer_yes_no === true ? 'selected' : ''}">Yes</button>
                 <button type="button" class="insp-yn-btn secondary yn-no ${a?.answer_yes_no === false ? 'selected' : ''}">No</button>
@@ -5295,7 +5298,7 @@
             <option value="role">A role</option>
           </select>
           <div id="at-person-section" style="display:none; margin-top:8px;">
-            <select id="at-person">${(staff || []).map(s => `<option value="${s.id}">${s.full_name}</option>`).join('')}</select>
+            <select id="at-person">${(staff || []).map(s => `<option value="${s.id}">${escapeHtml(s.full_name)}</option>`).join('')}</select>
           </div>
           <div id="at-role-section" style="display:none; margin-top:8px;">
             <select id="at-role">
@@ -5519,7 +5522,7 @@
                 const cost = costById.get(e.id);
                 return `
                 <tr data-entry-id="${e.id}">
-                  <td data-label="Staff">${e.profiles?.full_name || 'Unknown'}</td>
+                  <td data-label="Staff">${escapeHtml(e.profiles?.full_name || 'Unknown')}</td>
                   <td data-label="Date">${new Date(e.clock_in).toLocaleDateString()}</td>
                   <td class="num" data-label="Hours">${hrs === null ? 'In progress' : hrs.toFixed(2)}</td>
                   <td data-label="Stage / category">${stageLabel(e)}${e.sm8_activity_uuid ? ' <span class="subtitle">(ServiceM8, already paid)</span>' : ''}</td>
@@ -5568,9 +5571,9 @@
             <tbody>
               ${receivedRows.map(li => `
                 <tr>
-                  <td data-label="Item">${li.description}${li.poNumber ? ` <span class="subtitle" style="font-size:11px;">(${li.poNumber})</span>` : ''}</td>
-                  <td data-label="Supplier">${li.supplierLabel}</td>
-                  <td data-label="Stage">${li.stage}</td>
+                  <td data-label="Item">${escapeHtml(li.description)}${li.poNumber ? ` <span class="subtitle" style="font-size:11px;">(${escapeHtml(li.poNumber)})</span>` : ''}</td>
+                  <td data-label="Supplier">${escapeHtml(li.supplierLabel)}</td>
+                  <td data-label="Stage">${escapeHtml(li.stage)}</td>
                   <td class="num" data-label="Qty">${li.quantity}</td>
                   <td class="num" data-label="Unit cost">${money(li.unit_cost)}</td>
                   <td class="num" data-label="Total">${money(Number(li.quantity) * Number(li.unit_cost))}</td>
@@ -5599,7 +5602,7 @@
               ${centres.map(c => `
                 <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:6px;">
                   <input type="checkbox" class="td-stage-check" value="${c.id}" style="width:auto;" ${selectedIds.includes(c.id) ? 'checked' : ''} />
-                  ${c.name}
+                  ${escapeHtml(c.name)}
                 </label>`).join('')}
             </div>
             <div style="margin-top:12px;">
@@ -5719,8 +5722,8 @@
               <div class="doc-tile" style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
                 <a href="#" class="doc-view-link" data-path="${d.file_path}" style="display:block;">${preview}</a>
                 <div style="padding:8px;">
-                  <a href="#" class="link-quiet doc-view-link" data-path="${d.file_path}" style="font-weight:600; font-size:12px; word-break:break-word;">${d.file_name}</a>
-                  <p class="subtitle" style="margin:4px 0 0; font-size:11px;">${d.profiles?.full_name || 'Someone'} &middot; ${new Date(d.created_at).toLocaleDateString('en-AU')}</p>
+                  <a href="#" class="link-quiet doc-view-link" data-path="${d.file_path}" style="font-weight:600; font-size:12px; word-break:break-word;">${escapeHtml(d.file_name)}</a>
+                  <p class="subtitle" style="margin:4px 0 0; font-size:11px;">${escapeHtml(d.profiles?.full_name || 'Someone')} &middot; ${new Date(d.created_at).toLocaleDateString('en-AU')}</p>
                   <button type="button" class="secondary doc-delete-btn" data-id="${d.id}" data-path="${d.file_path}" style="font-size:11px; padding:4px 8px; margin-top:6px; width:100%;">Delete</button>
                 </div>
               </div>`;
@@ -6997,7 +7000,7 @@
           <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
               <div>
-                <strong>${supplierLabel}</strong>${po.po_number ? ` (${po.po_number})` : ''}
+                <strong>${escapeHtml(supplierLabel)}</strong>${po.po_number ? ` (${escapeHtml(po.po_number)})` : ''}
                 ${renderPoBadges(po)}
                 ${otherJob ? '<span class="badge draft" style="margin-left:6px;">Another job\'s PO, line moved here</span>' : ''}
               </div>
@@ -7006,7 +7009,7 @@
                 <span style="font-weight:600; margin-left:8px;">${money(total)}</span>
               </div>
             </div>
-            <p class="subtitle" style="margin:6px 0;">${stageName(po.cost_centre_id)}${po.description ? ' - ' + po.description : ''}</p>
+            <p class="subtitle" style="margin:6px 0;">${escapeHtml(stageName(po.cost_centre_id))}${po.description ? ' - ' + escapeHtml(po.description) : ''}</p>
 
             <div style="margin-top:8px;">${renderPoLineItemsReceivable(po, true)}</div>
             ${renderPoNotes(po)}
@@ -7022,7 +7025,7 @@
                 </div>
               </div>` : ''}
 
-            ${po.file_path ? `<a href="#" class="link-quiet view-doc" data-path="${po.file_path}" style="display:block; margin-top:8px; font-size:13px;">${po.file_name || 'View attached document'}</a>` : ''}
+            ${po.file_path ? `<a href="#" class="link-quiet view-doc" data-path="${po.file_path}" style="display:block; margin-top:8px; font-size:13px;">${escapeHtml(po.file_name || 'View attached document')}</a>` : ''}
 
             <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
               ${renderPoControls(po, myRole)}
@@ -7111,7 +7114,7 @@
           if (!matched[match.supplier_id]) matched[match.supplier_id] = { supplierName: match.suppliers?.name || 'Unknown', items: [] };
           matched[match.supplier_id].items.push({ description: li.description, quantity: stillNeeded, unit_cost: match.cost_price, materialId: match.id, stageName: li.stageName });
         } else {
-          unassigned.push({ description: li.description, quantity: stillNeeded, unit_cost: li.unit_cost, materialId: match?.id || null, stageName: li.stageName });
+          unassigned.push({ description: li.description, quantity: stillNeeded, unit_cost: Number(li.unit_cost) || 0, materialId: match?.id || null, stageName: li.stageName });
         }
       });
 
@@ -7132,14 +7135,14 @@
           ${fromStock.length ? `
             <div style="border:1px solid var(--green); border-radius:8px; padding:12px; margin-bottom:10px;">
               <p style="margin:0 0 8px; color:var(--green); font-weight:600;">Already covered by Stock - nothing to order</p>
-              ${fromStock.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${item.description} (${item.stageName}) x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
+              ${fromStock.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${escapeHtml(item.description)} (${escapeHtml(item.stageName)}) x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
               <p class="subtitle" style="margin-top:6px;">This will be deducted from Stock and costed directly to the job when you confirm.</p>
             </div>` : ''}
 
           ${Object.entries(matched).map(([supplierId, group]) => `
             <div class="sp-group" data-supplier-id="${supplierId}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
-              <label style="margin-top:0; display:flex; align-items:center; gap:8px;"><input type="checkbox" class="sp-include" checked style="width:auto;" /><strong>${group.supplierName}</strong></label>
-              ${group.items.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${item.description} (${item.stageName}) x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
+              <label style="margin-top:0; display:flex; align-items:center; gap:8px;"><input type="checkbox" class="sp-include" checked style="width:auto;" /><strong>${escapeHtml(group.supplierName)}</strong></label>
+              ${group.items.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${escapeHtml(item.description)} (${escapeHtml(item.stageName)}) x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
               <p class="subtitle" style="margin-top:6px;">Total: ${money(group.items.reduce((s, i) => s + i.quantity * i.unit_cost, 0))}</p>
             </div>`).join('')}
 
@@ -7148,7 +7151,7 @@
               <p style="margin:0 0 8px; color:var(--red); font-weight:600;">Needs a supplier assigned</p>
               ${unassigned.map((item, i) => `
                 <div class="sp-unassigned-row" data-index="${i}" style="margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border);">
-                  <span style="font-size:13px;">${item.description} (${item.stageName}) x${item.quantity}</span>
+                  <span style="font-size:13px;">${escapeHtml(item.description)} (${escapeHtml(item.stageName)}) x${item.quantity}</span>
                   <p class="subtitle" style="margin:2px 0 4px;">Leave blank to skip ordering this item for now.</p>
                   ${supplierPickerHtml({ search: `sp-unassigned-search-${i}`, results: `sp-unassigned-results-${i}`, selected: `sp-unassigned-selected-${i}`, newSection: `sp-unassigned-new-section-${i}`, newEmail: `sp-unassigned-new-email-${i}`, newPhone: `sp-unassigned-new-phone-${i}` })}
                 </div>`).join('')}
@@ -7266,7 +7269,7 @@
           ${supplierPickerHtml({ search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' })}
           <button type="button" class="secondary" id="cp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
           <label style="margin-top:14px;">Stage (optional)</label>
-          <select id="cp-stage"><option value="">Whole project</option>${centres.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select>
+          <select id="cp-stage"><option value="">Whole project</option>${centres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
           <label>Description</label>
           <input id="cp-description" />
 

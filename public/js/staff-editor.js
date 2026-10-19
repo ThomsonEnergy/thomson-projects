@@ -11,6 +11,12 @@
 // fields show depends on employment type / pay type, same as the
 // clause selection itself (see generateContractDraft in
 // supabase-client.js).
+// escapeHtml (supabase-client.js) leaves quotes alone, so values inside
+// attribute quotes also need " escaped.
+function staffEditorEscAttr(s) {
+  return escapeHtml(s).replace(/"/g, '&quot;');
+}
+
 function contractAnswerFieldsHtml(profile, answers) {
   const fields = [
     ...CONTRACT_ANSWER_FIELDS,
@@ -23,7 +29,7 @@ function contractAnswerFieldsHtml(profile, answers) {
       <div>
         <label style="margin-top:0; font-size:12px;">${f.label}</label>
         <input class="contract-answer-input" data-key="${f.key}" type="${f.type}" ${f.type === 'number' ? 'step="0.01"' : ''}
-          placeholder="${f.placeholder || ''}" value="${answers[f.key] ?? defaults[f.key] ?? ''}" />
+          placeholder="${f.placeholder || ''}" value="${staffEditorEscAttr(answers[f.key] ?? defaults[f.key] ?? '')}" />
       </div>`).join('')}
   </div>`;
 }
@@ -76,8 +82,8 @@ async function openStaffEditor(userId, opts = {}) {
   function renderLicenceRows(list) {
     return (list || []).map(l => `
       <div class="licence-row" data-id="${l.id}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <input class="licence-name" value="${l.licence_name || ''}" placeholder="Licence name" style="flex:2;" />
-        <input class="licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1;" />
+        <input class="licence-name" value="${staffEditorEscAttr(l.licence_name)}" placeholder="Licence name" style="flex:2;" />
+        <input class="licence-number" value="${staffEditorEscAttr(l.licence_number)}" placeholder="Number" style="flex:1;" />
         <input class="licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1;" />
         <button type="button" class="secondary remove-licence-btn" style="padding:8px 10px;">&times;</button>
       </div>`).join('');
@@ -86,7 +92,7 @@ async function openStaffEditor(userId, opts = {}) {
   function renderAllowanceRows(list) {
     return (list || []).map(a => `
       <div class="allowance-row" data-id="${a.id}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <input class="allowance-name" value="${a.name || ''}" placeholder="e.g. Company car" style="flex:2;" />
+        <input class="allowance-name" value="${staffEditorEscAttr(a.name)}" placeholder="e.g. Company car" style="flex:2;" />
         <input class="allowance-amount" type="number" step="0.01" value="${a.amount || ''}" placeholder="$" style="flex:1;" />
         <select class="allowance-frequency" style="flex:1;">
           <option value="per_day" ${a.frequency === 'per_day' ? 'selected' : ''}>Per day</option>
@@ -97,9 +103,9 @@ async function openStaffEditor(userId, opts = {}) {
   }
 
   overlay.querySelector('.card').innerHTML = `
-    <h2>${profile.full_name || 'User profile'}</h2>
+    <h2>${escapeHtml(profile.full_name || 'User profile')}</h2>
     <div style="display:flex; gap:16px; align-items:start; margin-bottom:10px;">
-      <img id="profile-photo-preview" src="${profile.photo_url || ''}" style="width:80px; height:80px; border-radius:50%; object-fit:cover; background:var(--surface-2); display:${profile.photo_url ? 'block' : 'none'};" />
+      <img id="profile-photo-preview" src="${staffEditorEscAttr(profile.photo_url)}" style="width:80px; height:80px; border-radius:50%; object-fit:cover; background:var(--surface-2); display:${profile.photo_url ? 'block' : 'none'};" />
       <div style="flex:1;">
         <label style="margin-top:0">Photo</label>
         <input type="file" id="profile-photo-input" accept="image/*" />
@@ -107,13 +113,13 @@ async function openStaffEditor(userId, opts = {}) {
     </div>
 
     <label>Name</label>
-    <input id="profile-name-input" value="${profile.full_name || ''}" />
+    <input id="profile-name-input" value="${staffEditorEscAttr(profile.full_name)}" />
 
     <label>Mobile number</label>
-    <input id="profile-mobile-input" value="${profile.mobile_number || ''}" />
+    <input id="profile-mobile-input" value="${staffEditorEscAttr(profile.mobile_number)}" />
 
     <label>Notes</label>
-    <textarea id="profile-notes-input" style="min-height:70px;">${profile.notes || ''}</textarea>
+    <textarea id="profile-notes-input" style="min-height:70px;">${escapeHtml(profile.notes)}</textarea>
 
     <label style="margin-top:14px;">Industry licences</label>
     <div id="licence-rows">${renderLicenceRows(licences)}</div>
@@ -123,7 +129,7 @@ async function openStaffEditor(userId, opts = {}) {
       <label style="margin-top:0">Rate tier (for quoting - see Settings &gt; Billable Rates)</label>
       <select id="profile-tier-select">
         <option value="">-- None --</option>
-        ${(rateTiers || []).map(t => `<option value="${t.id}" ${profile.rate_tier_id === t.id ? 'selected' : ''}>${t.name}</option>`).join('')}
+        ${(rateTiers || []).map(t => `<option value="${t.id}" ${profile.rate_tier_id === t.id ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
       </select>
 
       <p class="subtitle" style="margin:14px 0 8px;">Actual pay rates - entered directly since award overtime rarely equals a clean multiple of ordinary time. Used to calculate real job costs from logged hours.</p>
@@ -227,15 +233,15 @@ async function openStaffEditor(userId, opts = {}) {
         </div>
       </div>
       <label style="margin-top:10px;">Residential address</label>
-      <input id="profile-address" value="${profile.residential_address || ''}" />
+      <input id="profile-address" value="${staffEditorEscAttr(profile.residential_address)}" />
       <div class="grid cols-2" style="margin-top:10px;">
         <div>
           <label style="margin-top:0">Emergency contact</label>
-          <input id="profile-emergency-name" value="${profile.emergency_contact_name || ''}" placeholder="Name" />
+          <input id="profile-emergency-name" value="${staffEditorEscAttr(profile.emergency_contact_name)}" placeholder="Name" />
         </div>
         <div>
           <label style="margin-top:0">Relationship</label>
-          <input id="profile-emergency-relationship" value="${profile.emergency_contact_relationship || ''}" />
+          <input id="profile-emergency-relationship" value="${staffEditorEscAttr(profile.emergency_contact_relationship)}" />
         </div>
       </div>
     </div>
@@ -245,7 +251,7 @@ async function openStaffEditor(userId, opts = {}) {
       <p class="subtitle" style="margin-bottom:8px;">Fills in the contract template against the fields above plus these - edit the raw template under Settings &gt; Onboarding Documents if the wording itself needs to change. Review the generated draft below and edit anything it couldn't resolve, then mark ready to sign - the employee only sees it once you do.</p>
       ${contractAnswerFieldsHtml(profile, (contract && contract.answers) || {})}
       <button type="button" class="secondary" id="generate-contract-btn" style="font-size:12px; padding:6px 10px; margin:10px 0 8px;" ${contractTemplate ? '' : 'disabled'}>${contract ? 'Regenerate draft' : 'Generate draft'}</button>
-      <textarea id="profile-contract-body" style="min-height:220px; font-family:monospace; font-size:12px; ${contract ? '' : 'display:none;'}">${contract ? contract.generated_body : ''}</textarea>
+      <textarea id="profile-contract-body" style="min-height:220px; font-family:monospace; font-size:12px; ${contract ? '' : 'display:none;'}">${contract ? escapeHtml(contract.generated_body) : ''}</textarea>
       <div style="margin-top:8px; display:${contract ? 'flex' : 'none'}; gap:8px;" id="contract-action-row">
         <button type="button" class="secondary" id="save-contract-draft-btn" style="font-size:12px; padding:6px 10px;">Save draft</button>
         <button type="button" class="secondary" id="mark-contract-ready-btn" style="font-size:12px; padding:6px 10px;" ${contract && contract.status === 'ready_to_sign' ? 'disabled' : ''}>Mark ready to sign</button>

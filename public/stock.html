@@ -56,22 +56,22 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allMaterials = [];
     let allSuppliers = [];
-    let stockVehicles = [];
+    let vehicleList = [];
     let locationRows = [];
 
     async function loadMaterials() {
       const listEl = document.getElementById('stock-list');
       const { data, error } = await supabaseClient.from('materials').select('*, suppliers(id, name)').order('name');
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       allMaterials = data || [];
 
       const { data: vehicles } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
-      stockVehicles = vehicles || [];
+      vehicleList = vehicles || [];
       const { data: locations } = await supabaseClient.from('material_stock_by_location').select('*');
       locationRows = locations || [];
 
@@ -81,9 +81,9 @@
     function locationBreakdown(materialId) {
       const warehouseQty = locationRows.find(r => r.material_id === materialId && r.location_type === 'warehouse')?.quantity || 0;
       const parts = [`${warehouseQty} Warehouse`];
-      stockVehicles.forEach(v => {
+      vehicleList.forEach(v => {
         const qty = locationRows.find(r => r.material_id === materialId && r.location_type === 'vehicle' && r.vehicle_id === v.id)?.quantity || 0;
-        parts.push(`${qty} ${v.vehicle_name || v.rego}`);
+        parts.push(`${escapeHtml(qty)} ${escapeHtml(v.vehicle_name || v.rego)}`);
       });
       return parts.join(' &middot; ');
     }
@@ -114,17 +114,17 @@
           const isBelowMin = Number(m.minimum_quantity) > 0 && Number(m.quantity_on_hand) < Number(m.minimum_quantity);
           return `
           <tr>
-            <td data-label="Name">${m.name}</td>
-            <td data-label="Category">${m.category || '-'}</td>
-            <td data-label="Supplier">${m.suppliers?.name || '-'}</td>
+            <td data-label="Name">${escapeHtml(m.name)}</td>
+            <td data-label="Category">${escapeHtml(m.category || '-')}</td>
+            <td data-label="Supplier">${escapeHtml(m.suppliers?.name || '-')}</td>
             <td class="num" data-label="Cost">${money(m.cost_price)}</td>
             <td class="num" data-label="Sell">${money(m.sell_price)}</td>
             ${showQtyCols ? `
               <td class="num" data-label="Qty" style="${isBelowMin ? 'color:var(--red); font-weight:600;' : ''}">
-                ${m.quantity_on_hand}${isBelowMin ? ' &#9888;' : ''}
-                ${stockVehicles.length ? `<div class="subtitle" style="font-size:11px; font-weight:400; white-space:nowrap;">${locationBreakdown(m.id)}</div>` : ''}
+                ${escapeHtml(m.quantity_on_hand)}${isBelowMin ? ' &#9888;' : ''}
+                ${vehicleList.length ? `<div class="subtitle" style="font-size:11px; font-weight:400; white-space:nowrap;">${locationBreakdown(m.id)}</div>` : ''}
               </td>
-              <td class="num" data-label="Minimum">${m.minimum_quantity || '-'}</td>
+              <td class="num" data-label="Minimum">${escapeHtml(m.minimum_quantity || '-')}</td>
             ` : ''}
             <td data-label="">
               <button class="secondary edit-material-btn" data-id="${m.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
@@ -177,35 +177,35 @@
         <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
           <h2>${material ? 'Edit material' : 'Add material'}</h2>
           <label style="margin-top:0">Name</label>
-          <input id="mat-name" value="${material?.name || ''}" />
+          <input id="mat-name" value="${escapeHtml(material?.name)}" />
           <div class="grid cols-2">
             <div>
               <label>Category</label>
-              <input id="mat-category" value="${material?.category || ''}" placeholder="e.g. Cable" />
+              <input id="mat-category" value="${escapeHtml(material?.category)}" placeholder="e.g. Cable" />
             </div>
             <div>
               <label>Supplier</label>
-              <select id="mat-supplier"><option value="">-- None --</option>${allSuppliers.map(s => `<option value="${s.id}" ${material?.supplier_id === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}</select>
+              <select id="mat-supplier"><option value="">-- None --</option>${allSuppliers.map(s => `<option value="${s.id}" ${material?.supplier_id === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select>
             </div>
           </div>
           <div class="grid cols-3">
             <div>
               <label>Cost price</label>
-              <input id="mat-cost" type="number" step="0.01" value="${material?.cost_price || 0}" />
+              <input id="mat-cost" type="number" step="0.01" value="${escapeHtml(material?.cost_price || 0)}" />
             </div>
             <div>
               <label>Sell price</label>
-              <input id="mat-sell" type="number" step="0.01" value="${material?.sell_price || 0}" />
+              <input id="mat-sell" type="number" step="0.01" value="${escapeHtml(material?.sell_price || 0)}" />
             </div>
             <div>
               <label>Qty on hand</label>
-              <input id="mat-qty" type="number" step="1" value="${material?.quantity_on_hand || 0}" />
+              <input id="mat-qty" type="number" step="1" value="${escapeHtml(material?.quantity_on_hand || 0)}" />
             </div>
           </div>
           <label>Minimum quantity - flags for restocking below this</label>
-          <input id="mat-minimum" type="number" step="1" value="${material?.minimum_quantity || 0}" />
+          <input id="mat-minimum" type="number" step="1" value="${escapeHtml(material?.minimum_quantity || 0)}" />
           <label>Notes</label>
-          <textarea id="mat-notes" style="min-height:60px;">${material?.notes || ''}</textarea>
+          <textarea id="mat-notes" style="min-height:60px;">${escapeHtml(material?.notes)}</textarea>
           <div style="margin-top:14px; display:flex; justify-content:space-between;">
             <div>
               <button id="mat-save-btn">Save</button>
@@ -234,12 +234,12 @@
         };
         if (material) {
           const { error } = await supabaseClient.from('materials').update(fields).eq('id', material.id);
-          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
           await setWarehouseStock(material.id, quantityValue);
           await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
         } else {
           const { data: newMat, error } = await supabaseClient.from('materials').insert(fields).select('id').single();
-          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
           await setWarehouseStock(newMat.id, quantityValue);
           await logActivity('material', newMat.id, 'created', `Material "${name}" added`);
         }
@@ -321,7 +321,7 @@
           overlay.remove();
           await loadStockPOs();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         }
       });
     }
@@ -363,16 +363,16 @@
           <p class="subtitle" style="margin-bottom:14px;">Below minimum quantity - nothing's created yet, review then confirm.</p>
 
           ${Object.entries(grouped).map(([supplierId, group]) => `
-            <div class="rk-group" data-supplier-id="${supplierId}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
-              <label style="margin-top:0; display:flex; align-items:center; gap:8px;"><input type="checkbox" class="rk-include" checked style="width:auto;" /><strong>${group.supplierName}</strong></label>
-              ${group.items.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${item.description} x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
+            <div class="rk-group" data-supplier-id="${escapeHtml(supplierId)}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+              <label style="margin-top:0; display:flex; align-items:center; gap:8px;"><input type="checkbox" class="rk-include" checked style="width:auto;" /><strong>${escapeHtml(group.supplierName)}</strong></label>
+              ${group.items.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${escapeHtml(item.description)} x${escapeHtml(item.quantity)}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
               <p class="subtitle" style="margin-top:6px;">Total: ${money(group.items.reduce((s, i) => s + i.quantity * i.unit_cost, 0))}</p>
             </div>`).join('')}
 
           ${noSupplier.length ? `
             <div style="border:1px solid var(--red); border-radius:8px; padding:12px; margin-bottom:10px;">
               <p style="margin:0 0 8px; color:var(--red); font-weight:600;">No supplier assigned - can't include in a PO</p>
-              ${noSupplier.map(item => `<div style="font-size:13px; padding:4px 0;">${item.description} x${item.quantity} - assign a supplier on this material first</div>`).join('')}
+              ${noSupplier.map(item => `<div style="font-size:13px; padding:4px 0;">${escapeHtml(item.description)} x${escapeHtml(item.quantity)} - assign a supplier on this material first</div>`).join('')}
             </div>` : ''}
 
           <div style="margin-top:14px;">
@@ -412,7 +412,7 @@
           alert(`Created ${created} restock purchase order${created === 1 ? '' : 's'}.`);
           await loadStockPOs();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           confirmBtn.disabled = false;
           confirmBtn.textContent = 'Create purchase orders';
         }
@@ -426,7 +426,7 @@
         .select('*, purchase_order_line_items(*), suppliers(name)')
         .is('project_id', null)
         .order('created_at', { ascending: false });
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       if (!pos.length) { listEl.innerHTML = `<p class="subtitle">No stock purchase orders yet.</p>`; return; }
 
       listEl.innerHTML = pos.map(po => {
@@ -435,10 +435,10 @@
         return `
           <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
             <div style="display:flex; justify-content:space-between;">
-              <strong>${po.suppliers?.name || po.supplier_name || 'Unknown supplier'}${po.po_number ? ' (' + po.po_number + ')' : ''}</strong>
-              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
+              <strong>${escapeHtml(po.suppliers?.name || po.supplier_name || 'Unknown supplier')}${po.po_number ? ' (' + escapeHtml(po.po_number) + ')' : ''}</strong>
+              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : escapeHtml(po.status)}</span>
             </div>
-            <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''} - ${money(total)}</p>
+            <p class="subtitle" style="margin:4px 0 8px;">${escapeHtml(po.description)} - ${money(total)}</p>
             ${renderPoLineItemsReceivable(po, true)}
             ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice</button>` : ''}
           </div>`;
@@ -472,7 +472,7 @@
           overlay.remove();
           await resolveSupplierAndHandoff(data.supplier, 'pricelist', { items: data.items }, file);
         } catch (err) {
-          overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="sp-close">Close</button>`;
+          overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="sp-close">Close</button>`;
           overlay.querySelector('#sp-close').addEventListener('click', () => overlay.remove());
         }
       };

@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/email-compose.js?v=5"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -71,7 +71,7 @@
         .from('purchase_orders')
         .select('*, purchase_order_line_items(*), suppliers(name), projects(name, job_number), fleet_vehicles(vehicle_name, rego)')
         .order('created_at', { ascending: false });
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       allPos = data || [];
       myRole = await getMyRole();
       renderStats();
@@ -127,16 +127,16 @@
         <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
           <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
             <div>
-              <strong>${po.po_number || 'PO'}</strong> - ${po.suppliers?.name || po.supplier_name || 'Unknown supplier'}
-              <span class="badge draft" style="margin-left:6px;">${destinationLabel(po)}</span>
+              <strong>${escapeHtml(po.po_number || 'PO')}</strong> - ${escapeHtml(po.suppliers?.name || po.supplier_name || 'Unknown supplier')}
+              <span class="badge draft" style="margin-left:6px;">${escapeHtml(destinationLabel(po))}</span>
               ${renderPoBadges(po)}
             </div>
             <div>
-              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
+              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : escapeHtml(po.status)}</span>
               <span style="font-weight:600; margin-left:8px;">${money(poTotal(po))}</span>
             </div>
           </div>
-          <p class="subtitle" style="margin:6px 0;">${po.description || ''}</p>
+          <p class="subtitle" style="margin:6px 0;">${escapeHtml(po.description)}</p>
           ${renderPoLineItemsReceivable(po, true)}
           ${renderPoNotes(po)}
           <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -203,7 +203,7 @@
             <select id="np-source">${poSourceOptionsHtml(vehicles || [])}</select>
           </div>
           <div id="np-vehicle-section" style="display:none; margin-top:8px;">
-            <select id="np-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}">${v.vehicle_name || v.rego}</option>`).join('')}</select>
+            <select id="np-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}">${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}</select>
           </div>
 
           <label style="margin-top:14px;">Supplier ${' '}<span class="subtitle" id="np-supplier-hint"></span></label>
@@ -246,7 +246,7 @@
           const results = await searchProjects(q);
           const resultsEl = overlay.querySelector('#np-job-results');
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-            ${results.map(p => `<div class="np-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" data-quote-number="${p.quote_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
+            ${results.map(p => `<div class="np-job-pick" data-id="${p.id}" data-name="${escapeHtml(p.name)}" data-job-number="${escapeHtml(p.job_number)}" data-quote-number="${escapeHtml(p.quote_number)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))}</div>`).join('')}
           </div>`;
           resultsEl.querySelectorAll('.np-job-pick').forEach(row => {
             row.addEventListener('click', () => {
@@ -324,7 +324,7 @@
           overlay.remove();
           await loadAllPOs();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         }
       });
     }

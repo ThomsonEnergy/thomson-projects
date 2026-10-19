@@ -37,6 +37,14 @@ exports.handler = async (event) => {
     const rates = await loadOverheadRates(supabaseAdmin);
     const byProject = await computeAccruedLabourCost(supabaseAdmin, projectIds, { rates });
     const isPricing = ['admin', 'finance', 'sales'].includes(role);
+    // Other roles get hours and the budget % only: no $ (on a job one person worked alone,
+    // cost / hours would give away their pay rate).
+    if (!isPricing) {
+      Object.values(byProject).forEach((p) => {
+        delete p.totalActualLabourCost; delete p.totalActualWages; delete p.totalIndirectOverhead;
+        Object.values(p.byCentre || {}).forEach((c) => { delete c.actualLabourCost; delete c.actualWages; delete c.actualIndirectOverhead; });
+      });
+    }
     const overheadRates = isPricing ? { directRate: rates.directRate, indirectRate: rates.indirectRate } : null;
     return { statusCode: 200, body: JSON.stringify({ ok: true, byProject, overheadRates }) };
   } catch (err) {

@@ -86,6 +86,13 @@ exports.handler = async (event) => {
     await supabaseAdmin.from('api_keys').delete().eq('key_name', stateKey);
 
     if (!mineMatch) {
+      // Google only takes login_hint as a hint: make sure it really was sales@ that agreed, so a
+      // browser signed in to someone else's Google account can't replace the working sales@ token.
+      const salesProfile = await gmailRequest('profile', { token: tokenData.access_token }, { kind: 'personal' });
+      const salesAddress = String(salesProfile.emailAddress || '').toLowerCase();
+      if (salesAddress !== 'sales@thomsonenergy.com.au') {
+        return htmlResponse('Not connected', `That was ${esc(salesAddress || 'another account')}, not sales@thomsonenergy.com.au. Sign in to Google as sales@ and try again from Settings. The existing connection was kept.`);
+      }
       await supabaseAdmin.from('api_keys').upsert([
         { key_name: 'google_refresh_token', key_value: tokenData.refresh_token },
       ]);
@@ -100,6 +107,13 @@ exports.handler = async (event) => {
     const address = String(profile.emailAddress || '').toLowerCase();
     if (!address.endsWith('@thomsonenergy.com.au') || FORBIDDEN_PERSONAL.includes(address)) {
       return htmlResponse('Not connected', `${esc(address)} can't be connected as your own inbox. Sign in with your own @thomsonenergy.com.au email and try again from Inbox > My inbox.`);
+    }
+    // It must be the person's own Gmail (the email they log in to TEops with). Otherwise someone
+    // could send their Connect link to a colleague and attach the colleague's mail to their account.
+    const { data: owner } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const ownEmail = String(owner?.user?.email || '').toLowerCase();
+    if (!ownEmail || address !== ownEmail) {
+      return htmlResponse('Not connected', `${esc(address)} is not the email you log in to TEops with${ownEmail ? ' (' + esc(ownEmail) + ')' : ''}. Sign in to Google with your own work email and try again from Inbox > My inbox.`);
     }
     const { data: taken } = await supabaseAdmin.from('mailboxes').select('id, kind, owner_id').eq('address', address).maybeSingle();
     if (taken && taken.owner_id !== userId) {

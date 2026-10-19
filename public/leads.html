@@ -57,7 +57,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     function timeAgo(dateStr) {
@@ -88,7 +88,7 @@
       const rows = Object.entries(details).filter(([k]) => k !== 'attachments');
       if (!rows.length) return `<p class="subtitle">No further details captured.</p>`;
       return `<table><tbody>${rows.map(([k, v]) => `
-        <tr><td style="font-weight:600; white-space:nowrap;">${DETAIL_FIELD_LABELS[k] || k}</td><td>${typeof v === 'boolean' ? (v ? 'Yes' : 'No') : escapeHtml(String(v))}</td></tr>
+        <tr><td style="font-weight:600; white-space:nowrap;">${escapeHtml(DETAIL_FIELD_LABELS[k] || k)}</td><td>${typeof v === 'boolean' ? (v ? 'Yes' : 'No') : escapeHtml(String(v))}</td></tr>
       `).join('')}</tbody></table>`;
     }
 
@@ -133,8 +133,8 @@
         <div class="card" style="max-width:640px; width:100%; max-height:88vh; overflow-y:auto;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
             <div>
-              <h2 style="margin:0;">${lead.name || '(no name given)'}</h2>
-              <p class="subtitle" style="margin:4px 0 0;">${sourceLabel(lead.source)} &middot; ${timeAgo(lead.created_at)}</p>
+              <h2 style="margin:0;">${escapeHtml(lead.name || '(no name given)')}</h2>
+              <p class="subtitle" style="margin:4px 0 0;">${escapeHtml(sourceLabel(lead.source))} &middot; ${timeAgo(lead.created_at)}</p>
             </div>
             <button type="button" class="secondary" id="ld-close-btn" style="font-size:12px; padding:6px 10px;">Close</button>
           </div>
@@ -166,8 +166,8 @@
           </div>
 
           <div class="grid cols-2" style="margin-top:14px;">
-            <div><label style="margin-top:0">Phone</label><p>${lead.phone || '-'}</p></div>
-            <div><label style="margin-top:0">Email</label><p>${lead.email || '-'}</p></div>
+            <div><label style="margin-top:0">Phone</label><p>${escapeHtml(lead.phone || '-')}</p></div>
+            <div><label style="margin-top:0">Email</label><p>${escapeHtml(lead.email || '-')}</p></div>
           </div>
           ${lead.address_formatted ? `<label>Address</label><p>${mapsLink(lead.address_formatted)}</p>` : ''}
 
@@ -197,7 +197,7 @@
             const name = attachments[i].name || 'file';
             return isImage(name)
               ? `<a href="${u.data.signedUrl}" target="_blank" rel="noopener"><img src="${u.data.signedUrl}" style="width:100px; height:100px; object-fit:cover; border-radius:8px; border:1px solid var(--border);" /></a>`
-              : `<a class="link-quiet" href="${u.data.signedUrl}" target="_blank" rel="noopener" style="display:block; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:12px;">${name}</a>`;
+              : `<a class="link-quiet" href="${u.data.signedUrl}" target="_blank" rel="noopener" style="display:block; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:12px;">${escapeHtml(name)}</a>`;
           }).join('') || '(could not load files)';
         });
       }
@@ -234,7 +234,7 @@
         card.style.display = 'block';
         overlay.querySelector('#ld-callbacks-area').innerHTML = cbs.map(r => `
           <p style="margin:4px 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}
-            <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}">${r.status}</span>
+            <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}">${escapeHtml(r.status)}</span>
           </p>`).join('');
       })();
 
@@ -349,11 +349,11 @@
         contactList.innerHTML = contactLeads.map(l => `
           <div class="project-list-item lead-row" data-id="${l.id}" style="cursor:pointer;">
             <div>
-              <div class="name">${l.name || '(no name given)'}</div>
+              <div class="name">${escapeHtml(l.name || '(no name given)')}</div>
               <p class="subtitle lead-summary-text" data-id="${l.id}" style="margin:4px 0; max-width:520px;">${l.ai_summary ? escapeHtml(l.ai_summary) : 'Generating description...'}</p>
               <div class="meta">
-                ${sourceLabel(l.source)} &middot; ${timeAgo(l.created_at)}
-                ${l.phone ? ' &middot; ' + l.phone : ''}${l.email ? ' &middot; ' + l.email : ''}
+                ${escapeHtml(sourceLabel(l.source))} &middot; ${timeAgo(l.created_at)}
+                ${l.phone ? ' &middot; ' + escapeHtml(l.phone) : ''}${l.email ? ' &middot; ' + escapeHtml(l.email) : ''}
               </div>
             </div>
             <div style="text-align:right; min-width:110px;">
@@ -392,8 +392,8 @@
               ${anonLeads.slice(0, 30).map(l => `
                 <tr>
                   <td>${timeAgo(l.created_at)}</td>
-                  <td>${sourceLabel(l.source)}</td>
-                  <td style="color:var(--muted); font-size:12px;">${l.details ? JSON.stringify(l.details) : ''}</td>
+                  <td>${escapeHtml(sourceLabel(l.source))}</td>
+                  <td style="color:var(--muted); font-size:12px;">${l.details ? escapeHtml(JSON.stringify(l.details)) : ''}</td>
                 </tr>`).join('')}
             </tbody>
           </table>`;
@@ -449,22 +449,22 @@
         <div class="card" style="max-width:560px; width:100%; max-height:88vh; overflow-y:auto;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
             <div>
-              <h2 style="margin:0;">${r.name || '(no name given)'}</h2>
+              <h2 style="margin:0;">${escapeHtml(r.name || '(no name given)')}</h2>
               <p class="subtitle" style="margin:4px 0 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}</p>
             </div>
             <button type="button" class="secondary" id="cb-close-btn" style="font-size:12px; padding:6px 10px;">Close</button>
           </div>
           <div class="grid cols-2" style="margin-top:14px;">
-            <div><label style="margin-top:0">Phone</label><p>${r.phone || '<span class="subtitle">No number given</span>'}</p></div>
-            <div><label style="margin-top:0">Email</label><p>${r.email || '-'}</p></div>
+            <div><label style="margin-top:0">Phone</label><p>${r.phone ? escapeHtml(r.phone) : '<span class="subtitle">No number given</span>'}</p></div>
+            <div><label style="margin-top:0">Email</label><p>${escapeHtml(r.email || '-')}</p></div>
           </div>
           ${r.message ? `<label>Message</label><p>${escapeHtml(r.message)}</p>` : ''}
 
           ${!leadsMatch.length && !projectsMatch.length ? `<p class="subtitle" style="margin-top:14px;">No matching lead or customer record found - this looks like a new contact.</p>` : `
             ${leadsMatch.length ? `<label>Matching lead${leadsMatch.length > 1 ? 's' : ''}</label>
-              ${leadsMatch.map(l => `<p style="margin:4px 0;"><a class="link-quiet cb-open-lead" data-id="${l.id}" href="#">${l.name || '(no name)'} &middot; ${timeAgo(l.created_at)}</a></p>`).join('')}` : ''}
+              ${leadsMatch.map(l => `<p style="margin:4px 0;"><a class="link-quiet cb-open-lead" data-id="${l.id}" href="#">${escapeHtml(l.name || '(no name)')} &middot; ${timeAgo(l.created_at)}</a></p>`).join('')}` : ''}
             ${projectsMatch.length ? `<label>Jobs &amp; quotes</label>
-              ${projectsMatch.map(p => `<p style="margin:4px 0;"><a class="link-quiet" href="/project.html?id=${p.id}" target="_blank" rel="noopener">${p.job_number ? 'Job #' + p.job_number : p.quote_number ? 'Quote #' + p.quote_number : p.name}</a> ${p.pipeline_stage === 'archived' ? '<span class="badge draft">Archived</span>' : ''}</p>`).join('')}` : ''}
+              ${projectsMatch.map(p => `<p style="margin:4px 0;"><a class="link-quiet" href="/project.html?id=${p.id}" target="_blank" rel="noopener">${p.job_number ? 'Job #' + p.job_number : p.quote_number ? 'Quote #' + p.quote_number : escapeHtml(p.name)}</a> ${p.pipeline_stage === 'archived' ? '<span class="badge draft">Archived</span>' : ''}</p>`).join('')}` : ''}
           `}
         </div>`;
       document.body.appendChild(overlay);
@@ -504,11 +504,11 @@
         <div class="callback-row" data-id="${r.id}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; cursor:pointer;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
             <div>
-              <strong>${r.name || '(no name given)'}</strong>
-              <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}" style="margin-left:6px;">${r.status}</span>
+              <strong>${escapeHtml(r.name || '(no name given)')}</strong>
+              <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}" style="margin-left:6px;">${escapeHtml(r.status)}</span>
               ${matchTag}
               <p class="subtitle" style="margin:4px 0 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}</p>
-              <p class="subtitle" style="margin:2px 0 0;">${r.phone ? r.phone + ' &middot; ' : ''}${r.email || ''}</p>
+              <p class="subtitle" style="margin:2px 0 0;">${r.phone ? escapeHtml(r.phone) + ' &middot; ' : ''}${escapeHtml(r.email)}</p>
               ${r.message ? `<p style="margin:6px 0 0;">${escapeHtml(r.message)}</p>` : ''}
             </div>
             <div>

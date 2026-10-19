@@ -64,7 +64,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     const FILTERS = {
@@ -141,7 +141,7 @@
 
       return `<div class="sb-item" data-id="${item.id}">
         <div class="sb-head">
-          <div><span class="sb-title">${esc(title)}</span> ${ex.bill_number ? `<span class="subtitle" style="margin:0;">Bill ${esc(ex.bill_number)}</span>` : ''} <span class="sb-chip">${STATUS_TEXT[item.status] || item.status}</span></div>
+          <div><span class="sb-title">${esc(title)}</span> ${ex.bill_number ? `<span class="subtitle" style="margin:0;">Bill ${esc(ex.bill_number)}</span>` : ''} <span class="sb-chip">${esc(STATUS_TEXT[item.status] || item.status)}</span></div>
           ${ex.total != null ? `<div class="sb-total">${money(ex.total)}</div>` : ''}
         </div>
         <div class="sb-meta">${ex.bill_date ? 'Dated ' + dateText(ex.bill_date) + ' · ' : ''}${ex.our_order_reference ? 'Our ref on bill: ' + esc(ex.our_order_reference) + ' · ' : ''}Emailed ${dateText(item.received_at || item.created_at)} by ${esc(item.email_from || 'unknown')}${item.file_name ? ' · ' + esc(item.file_name) : ''}</div>

@@ -59,7 +59,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     const PAGE_SIZE = 50;
@@ -84,7 +84,7 @@
       const { data } = await supabaseClient.from('profiles').select('id, full_name').order('full_name');
       allStaff = data || [];
       const sel = document.getElementById('log-staff-filter');
-      sel.innerHTML = `<option value="">All staff</option>` + allStaff.map(s => `<option value="${s.id}">${s.full_name || 'Unnamed'}</option>`).join('');
+      sel.innerHTML = `<option value="">All staff</option>` + allStaff.map(s => `<option value="${s.id}">${escapeHtml(s.full_name || 'Unnamed')}</option>`).join('');
     }
 
     async function loadTypeFilter() {
@@ -94,7 +94,7 @@
       const { data } = await supabaseClient.from('activity_log').select('entity_type').neq('entity_type', 'login');
       const types = [...new Set((data || []).map(r => r.entity_type))].sort();
       const sel = document.getElementById('log-type-filter');
-      sel.innerHTML = `<option value="">All types</option>` + types.map(t => `<option value="${t}">${entityLabel(t)}</option>`).join('');
+      sel.innerHTML = `<option value="">All types</option>` + types.map(t => `<option value="${escapeHtml(t).replace(/"/g, '&quot;')}">${escapeHtml(entityLabel(t))}</option>`).join('');
     }
 
     async function loadLogins(append = false) {
@@ -110,7 +110,7 @@
 
       const rowsHtml = entries.map(e => `
         <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
-          <span>${e.profiles?.full_name || 'Someone'}</span>
+          <span>${escapeHtml(e.profiles?.full_name || 'Someone')}</span>
           <span class="subtitle">${fmtWhen(e.created_at)}</span>
         </div>`).join('');
 
@@ -145,10 +145,10 @@
       const rowsHtml = entries.map(e => `
         <div style="padding:10px 0; border-bottom:1px solid var(--border); font-size:13px;">
           <div style="display:flex; justify-content:space-between; gap:12px;">
-            <span>${e.description}</span>
+            <span>${escapeHtml(e.description)}</span>
             <span class="subtitle" style="white-space:nowrap;">${fmtWhen(e.created_at)}</span>
           </div>
-          <div class="subtitle" style="font-size:11px; margin-top:2px;">${e.profiles?.full_name || 'Someone'} - ${entityLabel(e.entity_type)}</div>
+          <div class="subtitle" style="font-size:11px; margin-top:2px;">${escapeHtml(e.profiles?.full_name || 'Someone')} - ${escapeHtml(entityLabel(e.entity_type))}</div>
         </div>`).join('');
 
       if (append) listEl.insertAdjacentHTML('beforeend', rowsHtml);

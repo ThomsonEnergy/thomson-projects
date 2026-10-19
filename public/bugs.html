@@ -75,7 +75,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     async function syncToRepo() {
@@ -139,15 +139,15 @@
       const claudeStyle = c.author_type === 'claude' ? 'background:var(--panel-2, rgba(127,127,127,0.08));' : '';
       return `
         <div style="border-radius:6px; padding:8px 10px; margin-top:6px; ${claudeStyle} border:1px solid var(--border);">
-          <p class="subtitle" style="margin:0 0 4px; font-size:12px;"><strong style="color:var(--text);">${who}</strong> &middot; ${new Date(c.created_at).toLocaleString('en-AU')}</p>
-          <p style="margin:0; white-space:pre-wrap;">${c.body}</p>
+          <p class="subtitle" style="margin:0 0 4px; font-size:12px;"><strong style="color:var(--text);">${escapeHtml(who)}</strong> &middot; ${new Date(c.created_at).toLocaleString('en-AU')}</p>
+          <p style="margin:0; white-space:pre-wrap;">${escapeHtml(c.body)}</p>
         </div>`;
     }
 
     function reportCardHtml(r, staffName, comments) {
       const typeBadge = r.report_type === 'bug' ? `<span class="badge draft" style="color:var(--red);">Bug</span>` : `<span class="badge sent">Update idea</span>`;
       const approvedBadge = r.approved_at
-        ? `<span class="badge sent" style="margin-left:6px;">Approved ${new Date(r.approved_at).toLocaleDateString('en-AU')}${r.approved_by ? ' by ' + staffName(r.approved_by) : ''}</span>`
+        ? `<span class="badge sent" style="margin-left:6px;">Approved ${new Date(r.approved_at).toLocaleDateString('en-AU')}${r.approved_by ? ' by ' + escapeHtml(staffName(r.approved_by)) : ''}</span>`
         : (isDevModeActive() ? `<button type="button" class="secondary approve-report-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Approve</button>` : `<span class="subtitle" style="font-size:12px;">Not approved yet</span>`);
       const reportComments = comments.filter(c => c.report_id === r.id);
       return `
@@ -155,13 +155,13 @@
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
             <div>
               ${typeBadge}
-              <strong style="margin-left:6px;">${r.title}</strong>
-              ${r.page_or_feature ? `<p class="subtitle" style="margin:4px 0 0;">${r.page_or_feature}</p>` : ''}
+              <strong style="margin-left:6px;">${escapeHtml(r.title)}</strong>
+              ${r.page_or_feature ? `<p class="subtitle" style="margin:4px 0 0;">${escapeHtml(r.page_or_feature)}</p>` : ''}
             </div>
-            <p class="subtitle" style="margin:0; font-size:12px; white-space:nowrap;">${staffName(r.created_by)} &middot; ${new Date(r.created_at).toLocaleDateString('en-AU')}</p>
+            <p class="subtitle" style="margin:0; font-size:12px; white-space:nowrap;">${escapeHtml(staffName(r.created_by))} &middot; ${new Date(r.created_at).toLocaleDateString('en-AU')}</p>
           </div>
-          <p style="margin:10px 0 0;">${r.description}</p>
-          ${r.expected_behavior ? `<p class="subtitle" style="margin:6px 0 0;"><strong>Expected:</strong> ${r.expected_behavior}</p>` : ''}
+          <p style="margin:10px 0 0;">${escapeHtml(r.description)}</p>
+          ${r.expected_behavior ? `<p class="subtitle" style="margin:6px 0 0;"><strong>Expected:</strong> ${escapeHtml(r.expected_behavior)}</p>` : ''}
           <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
             ${approvedBadge}
             ${r.status !== 'in_progress' ? `<button type="button" class="secondary status-btn" data-id="${r.id}" data-status="in_progress" style="font-size:12px; padding:6px 10px;">Mark in progress</button>` : ''}
@@ -229,7 +229,7 @@
           const r = (reports || []).find(x => x.id === btn.dataset.id);
           const card = btn.closest('.report-card');
           if (!r || !card) return;
-          const val = (v) => escapeHtml(v || '');
+          const val = (v) => escapeHtml(v || '').replace(/"/g, '&quot;');
           card.innerHTML = `
             <label style="margin-top:0;">Type</label>
             <select class="er-type"><option value="bug" ${r.report_type === 'bug' ? 'selected' : ''}>Bug - something's broken</option><option value="update_idea" ${r.report_type === 'update_idea' ? 'selected' : ''}>Update idea - something to add or change</option></select>

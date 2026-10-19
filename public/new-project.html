@@ -250,7 +250,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/email-compose.js?v=5"></script>
   <script src="/js/theme.js"></script>
@@ -783,9 +783,11 @@
       msg.innerHTML = '';
       try {
         btn.textContent = 'Drafting stage names and descriptions...';
+        const { data: { session: aiSession } } = await supabaseClient.auth.getSession();
+        const aiHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${aiSession.access_token}` };
         const scopeRes = await fetch('/.netlify/functions/generate-scope', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: aiHeaders,
           body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames }),
         });
         const scopeJson = await scopeRes.json();
@@ -813,7 +815,7 @@
         const sowStyle = document.querySelector('input[name="sow-style"]:checked').value;
         const sowRes = await fetch('/.netlify/functions/generate-sow', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: aiHeaders,
           body: JSON.stringify({
             projectName: projectName || 'This project',
             brief,

@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 // Uses your Anthropic API key (set in Settings > API Keys, falls back to the
 // ANTHROPIC_API_KEY environment variable if that hasn't been set yet) to
@@ -10,6 +11,9 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
   }
+
+  // Pricing roles only: it spends the Anthropic key.
+  if (!(await requirePricingRole(event))) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
 
   try {
     const { projectName, brief, stageNames } = JSON.parse(event.body);

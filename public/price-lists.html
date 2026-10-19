@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     let filter = 'check', imports = [], changes = [], applied = [], suppliers = [], materials = {};
@@ -91,14 +91,14 @@
         : c.kind === 'match' ? `<button type="button" data-apply="${c.id}">Yes, same item</button><button type="button" class="secondary" data-skip="${c.id}">No</button>`
         : `<button type="button" data-apply="${c.id}">Switch to the new item</button><button type="button" class="secondary" data-skip="${c.id}">Keep the old one</button>`;
       return `<div class="pl-change ${dir}">
-        <div class="pl-head"><span><strong>${title}</strong> <span class="pl-chip">${KIND_TEXT[c.kind]}</span></span>
+        <div class="pl-head"><span><strong>${title}</strong> <span class="pl-chip">${esc(KIND_TEXT[c.kind] || c.kind)}</span></span>
           <span>${money(c.old_cost)} &rarr; <strong>${money(c.new_cost)}</strong> ${pctText(c.change_pct)}</span></div>
         <div class="pl-meta">${esc(c.reason || '')}${withUndo ? ` · ${dateText(c.resolved_at)}${c.resolved_by ? '' : ' (automatic)'}` : ''}</div>
         <div class="pl-actions">${buttons}</div></div>`;
     }
 
     function importHead(i) {
-      return `<div class="pl-head"><strong>${esc(supplierName(i.supplier_id) || i.supplier_name_read || i.file_name)}</strong><span class="pl-chip">${STATUS_TEXT[i.status] || i.status}</span></div>
+      return `<div class="pl-head"><strong>${esc(supplierName(i.supplier_id) || i.supplier_name_read || i.file_name)}</strong><span class="pl-chip">${esc(STATUS_TEXT[i.status] || i.status)}</span></div>
         <div class="pl-meta">${esc(i.file_name || '')} · emailed ${dateText(i.received_at || i.created_at)} by ${esc(i.email_from || 'unknown')}${i.pages_total ? ` · ${i.pages_done}/${i.pages_total} pages read` : ''}</div>
         ${i.summary ? `<div class="pl-meta" style="color:var(--text);">${esc(i.summary)}</div>` : ''}
         ${i.error && i.status !== 'applied' ? `<div class="pl-meta" style="color:var(--red, #c0392b);">${esc(i.error)}</div>` : ''}`;

@@ -461,7 +461,7 @@ Done since last review: clock-out cost-centre slider (A1), overheads calculator 
 
 ## Explicitly dropped
 
-- **ServiceM8:** dropped. Only the one-time import (A27) remains. **Deletion candidates:** `create-jobs.js`, `sync-costs.js` and `_servicem8.js` are still deployed but nothing calls them.
+- **ServiceM8:** dropped. Only the one-time import (A27) remains. `create-jobs.js`, `sync-costs.js` and `_servicem8.js` deleted 19 Oct 2026 (unused, no login check; `docs/BUG_REVIEW.md` S4).
 - **`sales.html`:** "Coming in Phase 5" placeholder, not in the nav. Deletion candidate.
 - **Employment Hero:** being replaced by the Xero Payroll push (H2).
 - **TFN/super/bank in the app:** handled by Xero onboarding; old values cleared. Do not re-add.

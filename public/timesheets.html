@@ -154,7 +154,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=90"></script>
+  <script src="/js/supabase-client.js?v=91"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId = null;
@@ -194,7 +194,7 @@
       if (!breakEntry) return '';
       return breakEntry.break_taken
         ? `<span class="subtitle" style="font-size:12px;">Break: ${breakEntry.break_minutes}m${breakEntry.break_start ? ' from ' + fmtTime(breakEntry.break_start) : ''}</span>`
-        : `<span style="font-size:12px; color:var(--red);">No break taken${breakEntry.break_skip_reason ? ' - ' + breakEntry.break_skip_reason : ''}</span>`;
+        : `<span style="font-size:12px; color:var(--red);">No break taken${breakEntry.break_skip_reason ? ' - ' + escapeHtml(breakEntry.break_skip_reason) : ''}</span>`;
     }
 
     // Overlapping entries / forgotten clock-outs, with a Fix button that opens
@@ -338,15 +338,15 @@
             let splitNote = '';
             if (e.project_id) {
               if (e.selected_cost_centre_ids && e.selected_cost_centre_ids.length > 1) {
-                splitNote = `<span class="subtitle" style="font-size:12px;">Split: ${e.selected_cost_centre_ids.map(id => ccMap[id] || '?').join(', ')}</span>`;
+                splitNote = `<span class="subtitle" style="font-size:12px;">Split: ${e.selected_cost_centre_ids.map(id => escapeHtml(ccMap[id] || '?')).join(', ')}</span>`;
               } else if (e.cost_centre_id) {
-                splitNote = `<span class="subtitle" style="font-size:12px;">${ccMap[e.cost_centre_id] || 'Stage selected'}</span>`;
+                splitNote = `<span class="subtitle" style="font-size:12px;">${escapeHtml(ccMap[e.cost_centre_id] || 'Stage selected')}</span>`;
               } else if (e.clock_out) {
                 splitNote = `<span style="font-size:12px; color:var(--red);">No stage selected</span>`;
               }
             }
             return `<div class="week-entry-row" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; margin:4px 0; font-size:13px; border-radius:6px; background:var(--surface-2);">
-              <span><strong>${timesLabel}</strong> &middot; ${jobLabel}${splitNote ? ' &middot; ' + splitNote : ''}</span>
+              <span><strong>${timesLabel}</strong> &middot; ${escapeHtml(jobLabel)}${splitNote ? ' &middot; ' + splitNote : ''}</span>
               <span class="subtitle">${dur}</span>
             </div>`;
           }).join('');
@@ -412,8 +412,8 @@
               const dayHours = days.map(d => hoursFor(s.id, localDateStr(d)));
               const total = dayHours.reduce((a, b) => a + b, 0);
               return `<tr>
-                <td data-label="Staff">${s.full_name || 'Unnamed'}</td>
-                ${dayHours.map((h, i) => `<td class="num team-week-cell" data-label="${days[i].toLocaleDateString('en-AU', { weekday: 'short' })}" data-staff-id="${s.id}" data-date="${localDateStr(days[i])}" data-staff-name="${(s.full_name || 'staff member').replace(/"/g, '&quot;')}" style="cursor:pointer; text-decoration:underline dotted;">${h ? h.toFixed(1) : '-'}</td>`).join('')}
+                <td data-label="Staff">${escapeHtml(s.full_name || 'Unnamed')}</td>
+                ${dayHours.map((h, i) => `<td class="num team-week-cell" data-label="${days[i].toLocaleDateString('en-AU', { weekday: 'short' })}" data-staff-id="${s.id}" data-date="${localDateStr(days[i])}" data-staff-name="${escapeHtml(s.full_name || 'staff member').replace(/"/g, '&quot;')}" style="cursor:pointer; text-decoration:underline dotted;">${h ? h.toFixed(1) : '-'}</td>`).join('')}
                 <td class="num" data-label="Total" style="font-weight:600;">${total.toFixed(1)}</td>
               </tr>`;
             }).join('')}
@@ -453,8 +453,8 @@
         ? exceptions.map(ex => `
           <div class="project-list-item" data-staff-id="${ex.staffId}" data-date="${ex.dStr}" style="cursor:pointer;">
             <div>
-              <div class="name">${ex.staffName} - ${fmtDayLabel(ex.day)}</div>
-              <div class="meta" style="${ex.isSkip ? 'color:var(--red);' : ''}">${ex.note}</div>
+              <div class="name">${escapeHtml(ex.staffName)} - ${fmtDayLabel(ex.day)}</div>
+              <div class="meta" style="${ex.isSkip ? 'color:var(--red);' : ''}">${escapeHtml(ex.note)}</div>
             </div>
           </div>`).join('')
         : `<p class="subtitle">No skipped or missing breaks this week.</p>`;
@@ -499,8 +499,8 @@
               return `
               <tr>
                 <td data-label=""><input type="checkbox" class="entry-select" data-id="${e.id}" style="width:auto;" /></td>
-                <td data-label="Staff">${staffName}</td>
-                <td data-label="Job">${e.projects ? projectRef(e.projects) : 'General / Office'}</td>
+                <td data-label="Staff">${escapeHtml(staffName)}</td>
+                <td data-label="Job">${e.projects ? escapeHtml(projectRef(e.projects)) : 'General / Office'}</td>
                 <td data-label="Clocked in">${fmtDateTime(e.clock_in)}</td>
                 <td data-label="Clocked out">${e.clock_out ? fmtDateTime(e.clock_out) : '<span class="badge in_progress">In progress</span>'}</td>
                 <td class="num" data-label="Duration">${e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : ''}</td>
@@ -673,7 +673,7 @@
       async function renderAll() {
         overlay.innerHTML = `
           <div class="card" style="max-width:640px; width:100%; max-height:90vh; overflow-y:auto;">
-            <h2>Edit timesheet${isSelf ? '' : ` - ${staffName || 'staff member'}`} - ${new Date(dateStr + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' })}</h2>
+            <h2>Edit timesheet${isSelf ? '' : ` - ${escapeHtml(staffName || 'staff member')}`} - ${new Date(dateStr + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' })}</h2>
             <p class="subtitle" style="margin-bottom:14px;">You can be logged against more than one job in a day - add a block per job and split each one across its own stages.</p>
             <div id="day-blocks"></div>
             <button type="button" class="secondary" id="day-add-block-btn" style="margin-top:6px;">+ Add another job for this day</button>
@@ -729,7 +729,7 @@
           detailEl.querySelector('#day-break-start').addEventListener('input', (e) => { dayBreak.start = e.target.value; });
           detailEl.querySelector('#day-break-minutes').addEventListener('change', (e) => { dayBreak.minutes = parseInt(e.target.value) || 30; });
         } else if (dayBreak.taken === false) {
-          detailEl.innerHTML = `<label style="margin-top:0">Why not?</label><input id="day-break-reason" placeholder="e.g. too busy on site" value="${dayBreak.skipReason}" />`;
+          detailEl.innerHTML = `<label style="margin-top:0">Why not?</label><input id="day-break-reason" placeholder="e.g. too busy on site" value="${escapeHtml(dayBreak.skipReason).replace(/"/g, '&quot;')}" />`;
           detailEl.querySelector('#day-break-reason').addEventListener('input', (e) => { dayBreak.skipReason = e.target.value; });
         } else {
           detailEl.innerHTML = '';
@@ -751,7 +751,7 @@
           <div style="display:flex; gap:10px; align-items:flex-end;">
             <div style="flex:1;">
               <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
-              <input class="day-block-job-search" placeholder="Job number, name, client..." autocomplete="off" value="${block.projectLabel}" />
+              <input class="day-block-job-search" placeholder="Job number, name, client..." autocomplete="off" value="${escapeHtml(block.projectLabel).replace(/"/g, '&quot;')}" />
               <div class="day-block-job-results"></div>
             </div>
             <button type="button" class="secondary day-block-remove" style="flex-shrink:0;">Remove</button>
@@ -772,7 +772,7 @@
             <label style="margin-top:0">Stage(s)</label>
             <div class="day-block-cc-chips">${block.centres.map(c => `
               <button type="button" class="cc-chip ${block.ccIds.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
-                <span class="cc-chip-num">${c.number}</span> ${c.name}
+                <span class="cc-chip-num">${c.number}</span> ${escapeHtml(c.name)}
               </button>`).join('')}</div>
           </div>
           <div style="display:flex; gap:10px; margin-top:8px;">
@@ -795,7 +795,7 @@
           jobResultsEl.innerHTML = `
             ${label ? `<p class="subtitle" style="margin:6px 0 2px; font-size:12px;">${label}</p>` : ''}
             <div style="border:1px solid var(--border); border-radius:8px; ${label ? '' : 'margin-top:6px;'}">
-              ${results.map(p => `<div class="day-block-job-pick" data-id="${p.id}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:13px;">${projectRef(p)}</div>`).join('')}
+              ${results.map(p => `<div class="day-block-job-pick" data-id="${p.id}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:13px;">${escapeHtml(projectRef(p))}</div>`).join('')}
             </div>`;
           jobResultsEl.querySelectorAll('.day-block-job-pick').forEach(row => {
             row.addEventListener('click', async () => {
@@ -896,7 +896,7 @@
           ${splitCentres.map((c, i) => `
             <div style="margin-bottom:10px;">
               <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:3px; gap:8px;">
-                <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${c.number}</strong> ${c.name}</span>
+                <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${c.number}</strong> ${escapeHtml(c.name)}</span>
                 <span style="display:flex; align-items:center; gap:4px;">
                   <input type="number" min="0" max="100" value="${block.splitPercentages[i]}" class="day-split-number" data-index="${i}" style="width:50px; padding:3px 5px; text-align:right;" />%
                   <span class="day-split-label subtitle" data-index="${i}" style="min-width:60px; text-align:right;">${fmtDuration(Math.round(totalMin * block.splitPercentages[i] / 100) * 60000)}</span>
@@ -1197,7 +1197,7 @@
         <div class="project-list-item">
           <div>
             <div class="name">${l.leave_type[0].toUpperCase() + l.leave_type.slice(1)} leave</div>
-            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + l.notes : ''}</div>
+            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + escapeHtml(l.notes) : ''}</div>
           </div>
           <span class="badge ${badgeClass[l.status]}">${l.status}</span>
         </div>`).join('');
@@ -1307,8 +1307,8 @@
       listEl.innerHTML = data.map(l => `
         <div class="project-list-item" data-id="${l.id}">
           <div>
-            <div class="name">${(l.profiles && l.profiles.full_name) || 'Staff member'} - ${l.leave_type} leave</div>
-            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + l.notes : ''}</div>
+            <div class="name">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff member')} - ${l.leave_type} leave</div>
+            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + escapeHtml(l.notes) : ''}</div>
           </div>
           <div>
             <button class="secondary approve-leave-btn" data-id="${l.id}">Approve</button>

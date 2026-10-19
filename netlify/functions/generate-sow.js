@@ -1,6 +1,6 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
-const { getAdminClient } = require('./_shared/require-admin');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 // Drafts a full scope-of-works document from a brief, the stage names/
 // descriptions already generated, and optionally the actual content of
@@ -24,6 +24,10 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
+  // Pricing roles only: it spends the Anthropic key and reads private job documents.
+  const auth = await requirePricingRole(event);
+  if (!auth) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
+
   try {
     const { projectName, brief, stageNames = [], stageDescriptions = {}, documentPaths = [], style = 'story', template = '' } = JSON.parse(event.body);
     if (!brief) {
@@ -31,7 +35,7 @@ exports.handler = async (event) => {
     }
 
     const apiKey = await getIntegrationKey('anthropic');
-    const supabaseAdmin = getAdminClient();
+    const { supabaseAdmin } = auth;
 
     const docBlocks = [];
     for (const path of documentPaths.slice(0, MAX_DOCS)) {
