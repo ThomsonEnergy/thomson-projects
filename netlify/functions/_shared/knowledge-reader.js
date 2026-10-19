@@ -141,6 +141,9 @@ async function claudeRead(apiKey, prompt, jpeg) {
     }
     const errText = (await res.text().catch(() => '')).slice(0, 400);
     if (res.status === 401 || res.status === 403) { const e = new Error(`Anthropic API error: ${res.status} ${errText}`); e.fatal = true; throw e; }
+    // No credits: stop the whole job with a clear reason, instead of quietly keeping thin text layers page after
+    // page (found for real: 65 AS/NZS 3008 pages went through that way when the balance ran out mid-run).
+    if (res.status === 400 && /credit balance/i.test(errText)) { const e = new Error('The Anthropic account has no credits left (console.anthropic.com > Plans & Billing). Top up, then Read again > Only the failed pages.'); e.fatal = true; throw e; }
     if (res.status === 400 && /content filtering/i.test(errText)) { const e = new Error('Blocked by the copyright output filter'); e.filtered = true; throw e; }
     if ((res.status === 429 || res.status >= 500) && attempt < waits.length) { await sleep(waits[attempt]); continue; }
     throw new Error(`Anthropic API error: ${res.status} ${errText}`);
@@ -157,14 +160,15 @@ async function readPageAsPicture(apiKey, n, jpeg) {
   catch (err) { if (!err.filtered) throw err; throw new Error('Blocked by the copyright output filter, even as reference notes'); }
 }
 
-// Which pages this job reads. 'failed': only pages that failed before (or were never stored).
+// Which pages this job reads. 'failed': pages that failed before, pages whose picture read failed and kept
+// only the text layer (error set), and pages never stored.
 async function pagesInScope(admin, job, pdfPages) {
   if (job.mode !== 'failed') return Array.from({ length: pdfPages }, (_, i) => i + 1);
-  const { data: rows, error } = await admin.from('knowledge_pages').select('page_no, read_as').eq('entry_id', job.entry_id);
+  const { data: rows, error } = await admin.from('knowledge_pages').select('page_no, read_as, error').eq('entry_id', job.entry_id);
   if (error) throw new Error(error.message);
-  const have = new Map((rows || []).map((r) => [r.page_no, r.read_as]));
+  const ok = new Set((rows || []).filter((r) => r.read_as !== 'failed' && !r.error).map((r) => r.page_no));
   const out = [];
-  for (let n = 1; n <= pdfPages; n++) if (!have.has(n) || have.get(n) === 'failed') out.push(n);
+  for (let n = 1; n <= pdfPages; n++) if (!ok.has(n)) out.push(n);
   return out;
 }
 
