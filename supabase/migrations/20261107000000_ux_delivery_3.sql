@@ -24,11 +24,12 @@ begin
     raise exception 'That material has already been removed.';
   end if;
 
-  if not (is_pricing_role()
+  -- coalesce: a null created_by (creator's profile deleted) must refuse, not slip through
+  if not coalesce(is_pricing_role()
           or (m.created_by = auth.uid()
               and m.kind <> 'other'
               and exists (select 1 from job_variation_entries e
-                          where e.id = m.variation_id and e.status = 'to_bill'))) then
+                          where e.id = m.variation_id and e.status = 'to_bill')), false) then
     raise exception 'You cannot remove this material.';
   end if;
 
