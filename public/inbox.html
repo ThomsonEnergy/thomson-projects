@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .inbox-head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
@@ -40,6 +40,15 @@
   .inbox-thread-item.recv-last { border-right:3px solid #3fb97a; }
   .inbox-who { font-size:12px; color:var(--text); margin:3px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .inbox-reason { font-size:12px; font-style:italic; color:var(--accent); margin:3px 0 0; }
+  .inbox-status { font-size:12px; margin:3px 0 0; color:var(--muted); }
+  .inbox-status.waiting { color:var(--red); font-weight:700; }
+  .inbox-status.onit { color:#e0a526; font-weight:700; }
+  .inbox-status.replied { color:var(--green); }
+  .claim-banner { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:8px 12px; border-radius:8px; margin:0 0 10px; font-size:13px; border:1px solid #e0a526; background:rgba(224,165,38,.12); }
+  .claim-banner button { font-size:12px; padding:3px 10px; }
+  .job-group { display:flex; justify-content:space-between; gap:8px; align-items:baseline; padding:12px 12px 4px; border-bottom:1px solid var(--border); }
+  .job-group a { font-weight:700; font-size:13px; }
+  .job-group .n { font-size:12px; color:var(--muted); white-space:nowrap; }
   .chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; padding:1px 8px; border:1px solid var(--border); border-radius:20px; margin:4px 4px 0 0; white-space:nowrap; }
   .chip.draft { border-color:var(--accent); color:var(--accent); font-weight:700; }
   .chip.ai { border-style:dashed; }
@@ -129,22 +138,41 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=99"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=5"></script>
+  <script src="/js/email-compose.js?v=6"></script>
   <script>
     // Sales inbox (sales@, shared) and My inbox (the logged-in person's own Gmail, private).
     // The email agent sorts conversations into Priority (needs a reply), Other and
     // Subscriptions and updates; labels hold non-job matters; drafts wait in the Drafts
-    // list and at the bottom of their conversation. See docs/PROJECT_SPEC.md A18.
+    // list and at the bottom of their conversation. Every row says who replied or who is
+    // handling it (assigned_to, "I've got this"), and "Tagged to jobs" groups the last 30
+    // days by job. See docs/PROJECT_SPEC.md A18.
 
     const NOTICE_VERSION = 1;
     const SECTION_NAMES = { priority: 'Priority', other: 'Other', updates: 'Subscriptions and updates' };
     const S = {
-      me: null, assistant: 'Sparky', box: 'sales', view: 'priority', unreadOnly: false,
+      me: null, assistant: 'Sparky', box: 'sales', view: 'priority', unreadOnly: false, mineOnly: false, staff: [],
       shared: null, mine: null, labels: [], drafts: [], activeThreadId: null, cleanupFilter: 'archive', cleanupTimer: null,
     };
+    const staffName = (id) => (S.staff.find(s => s.id === id) || {}).full_name || 'A team member';
+    const who = (id) => (id === S.me.id ? 'You' : staffName(id));
+    // How a conversation stands, from its newest message `l`: who replied, who is on it, or
+    // nobody yet. Null when there is nothing to say (an FYI email, a newsletter).
+    function threadStatus(t, l) {
+      if (t.is_done) return { cls: 'done', text: 'Done' };
+      const claimed = t.assigned_to ? `${who(t.assigned_to)} ${t.assigned_to === S.me.id ? 'are' : 'is'} on it` : '';
+      if (l && l.direction === 'outbound') {
+        const by = l.created_by ? `${who(l.created_by)} replied` : (S.box === 'mine' ? 'You replied from Gmail' : 'Replied from Gmail (sales@)');
+        const also = t.assigned_to && t.assigned_to !== l.created_by ? `, ${claimed.replace('You are', 'you are')}` : '';
+        return { cls: 'replied', text: `${by} ${timeAgo(l.sent_at)}${t.section === 'priority' ? ', waiting on them' : ''}${also}` };
+      }
+      if (t.assigned_to) return { cls: 'onit', text: `${claimed.replace('You are', "You're")}${t.assigned_at ? ' (claimed ' + timeAgo(t.assigned_at) + ')' : ''}` };
+      if (t.section === 'priority') return { cls: 'waiting', text: 'Nobody has replied yet' };
+      return null;
+    }
+    const statusHtml = (t, l, extra) => { const st = threadStatus(t, l); return st ? `<div class="inbox-status ${st.cls}" ${extra || ''}>${escapeHtml(st.text)}</div>` : ''; };
     const mb = () => (S.box === 'mine' ? S.mine : S.shared);
     const mineConnected = () => !!(S.mine && S.mine.connected_at);
 
@@ -280,9 +308,10 @@
         + item('updates', 'Subscriptions and updates', counts.updates)
         + item('sent', 'Sent') + item('done', 'Done') + item('all', 'All')
         + `<div class="side-head"><span>Labels</span><a href="#" id="new-label-link">+ New</a></div>`
-        + open.map(l => `<a class="side-item ${S.view === 'label:' + l.id ? 'on' : ''}" data-view="label:${l.id}" title="${escapeHtml(l.description || '')}"><span><span class="label-dot"></span>${escapeHtml(l.name)}</span>${l.openCount ? `<span class="n">${l.openCount}</span>` : ''}</a>`).join('')
+        + open.map(l => `<a class="side-item ${S.view === 'label:' + l.id ? 'on' : ''}" data-view="label:${l.id}" title="${escapeHtml(l.description || '')}${l.by_ai ? ' (label made by ' + escapeHtml(S.assistant) + ')' : ''}"><span><span class="label-dot"></span>${escapeHtml(l.name)}${l.by_ai ? ' <span class="chip ai" style="margin:0; font-size:10px; padding:0 5px;">AI</span>' : ''}</span>${l.openCount ? `<span class="n">${l.openCount}</span>` : ''}</a>`).join('')
         + (open.length ? '' : '<p class="subtitle" style="font-size:12px; margin:2px 10px;">For matters that are not a job, like a supplier dispute or a licence application.</p>')
         + (finished.length ? `<div class="side-head"><span>Finished</span></div>` + finished.map(l => `<a class="side-item ${S.view === 'label:' + l.id ? 'on' : ''}" data-view="label:${l.id}"><span style="color:var(--muted);">${escapeHtml(l.name)}</span></a>`).join('') : '')
+        + `<div class="side-head"><span>Jobs</span></div>` + item('jobs', 'Tagged to jobs')
         + `<div class="side-head"><span>Tools</span></div>` + item('cleanup', 'Clean up')
         + (S.box === 'mine' ? `<a class="side-item" id="disconnect-link"><span style="color:var(--muted); font-size:13px;">Disconnect my Gmail</span></a>` : '');
       side.querySelectorAll('[data-view]').forEach(a => a.addEventListener('click', () => { S.view = a.dataset.view; S.activeThreadId = null; clearInterval(S.cleanupTimer); renderSide(); S.view === 'cleanup' ? renderCleanup() : loadList(); }));
@@ -299,10 +328,29 @@
       listEl.style.width = '';
       document.getElementById('thread-detail').style.display = '';
       const m = mb();
-      let threads = [], header = '', latest = {}, sentRows = null;
+      let threads = [], header = '', latest = {}, sentRows = null, jobGroups = null;
       const label = S.view.startsWith('label:') ? S.labels.find(l => l.id === S.view.slice(6)) : null;
+      const mineBox = `<label style="margin:0 0 0 8px; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;" title="Only conversations assigned to you"><input type="checkbox" id="mine-only" style="width:auto;" ${S.mineOnly ? 'checked' : ''} /> Mine</label>`;
 
-      if (S.view === 'sent') {
+      if (S.view === 'jobs') {
+        // the last 30 days of this inbox's conversations that are tagged to a job, grouped by job
+        const since = new Date(Date.now() - 30 * 86400000).toISOString();
+        let q = supabaseClient.from('email_job_links')
+          .select('thread_id, kind, project_id, projects(id, name, job_number, quote_number, client_name), email_threads!inner(*, clients(name))')
+          .eq('email_threads.mailbox_id', m.id).eq('email_threads.is_supplier_bill', false).gt('email_threads.last_message_at', since).limit(600);
+        if (S.mineOnly) q = q.eq('email_threads.assigned_to', S.me.id);
+        const { data, error } = await q;
+        if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        const groups = new Map();
+        (data || []).filter(l => l.projects && l.email_threads).forEach(l => {
+          const g = groups.get(l.project_id) || { project: l.projects, threads: new Map() };
+          g.threads.set(l.thread_id, l.email_threads);
+          groups.set(l.project_id, g);
+        });
+        jobGroups = [...groups.values()].map(g => ({ project: g.project, threads: [...g.threads.values()].sort((a, b) => String(b.last_message_at || '').localeCompare(String(a.last_message_at || ''))) }))
+          .sort((a, b) => String(b.threads[0].last_message_at || '').localeCompare(String(a.threads[0].last_message_at || '')));
+        threads = jobGroups.flatMap(g => g.threads);
+      } else if (S.view === 'sent') {
         const { data, error } = await supabaseClient.from('emails')
           .select('id, thread_id, to_addresses, sent_at, email_threads!inner(id, subject, mailbox_id, is_supplier_bill, clients(name))')
           .eq('direction', 'outbound').eq('email_threads.mailbox_id', m.id).eq('email_threads.is_supplier_bill', false)
@@ -318,14 +366,17 @@
           q = viewFilter[S.view](q);
         }
         if (S.unreadOnly) q = q.eq('is_read', false);
+        if (S.mineOnly) q = q.eq('assigned_to', S.me.id);
         const { data, error } = await q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(200);
         if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         threads = data || [];
-        if (threads.length) {
-          const { data: recent } = await supabaseClient.from('emails').select('thread_id, direction, from_address, to_addresses, sent_at')
-            .in('thread_id', threads.map(t => t.id)).order('sent_at', { ascending: false }).limit(1500);
-          (recent || []).forEach(e => { if (!latest[e.thread_id]) latest[e.thread_id] = e; });
-        }
+        // Priority: nobody on it first, so an unclaimed client is never buried under claimed ones
+        if (S.view === 'priority') threads.sort((a, b) => (a.assigned_to ? 1 : 0) - (b.assigned_to ? 1 : 0));
+      }
+      if (threads.length) {
+        const { data: recent } = await supabaseClient.from('emails').select('thread_id, direction, from_address, to_addresses, sent_at, created_by')
+          .in('thread_id', threads.map(t => t.id)).order('sent_at', { ascending: false }).limit(1500);
+        (recent || []).forEach(e => { if (!latest[e.thread_id]) latest[e.thread_id] = e; });
       }
 
       const threadIds = sentRows ? [...new Set(sentRows.map(r => r.thread_id))] : threads.map(t => t.id);
@@ -340,12 +391,16 @@
       const sub = (t, when) => '<p class="subtitle" style="margin:2px 0 0; font-size:12px;">' + (t.clients?.name ? escapeHtml(t.clients.name) + ' &middot; ' : '') + when + '</p>';
 
       if (label) {
-        header = `<h3>${escapeHtml(label.name)}</h3><span class="chip">${label.status === 'done' ? 'Finished' : 'Open'}</span><button type="button" class="secondary" id="edit-label-btn" style="font-size:12px; padding:4px 10px; margin-left:auto;">Edit</button>`
-          + (label.description ? `<p class="subtitle" style="width:100%; margin:4px 0 0; font-size:12px;">${escapeHtml(label.description)}</p>` : '');
+        const sweep = label.sweep_requested_at ? `${escapeHtml(S.assistant)} is checking the last 60 days of mail for this label...` : label.sweep_done_at ? `Older mail checked ${timeAgo(label.sweep_done_at)}.` : '';
+        header = `<h3>${escapeHtml(label.name)}</h3><span class="chip">${label.status === 'done' ? 'Finished' : 'Open'}</span>${label.by_ai ? `<span class="chip ai" title="Made by ${escapeHtml(S.assistant)}">AI</span>` : ''}<button type="button" class="secondary" id="edit-label-btn" style="font-size:12px; padding:4px 10px; margin-left:auto;">Edit</button>`
+          + (label.description || sweep ? `<p class="subtitle" style="width:100%; margin:4px 0 0; font-size:12px;">${escapeHtml(label.description || '')}${label.description && sweep ? ' ' : ''}${sweep}</p>` : '');
+      } else if (jobGroups) {
+        header = `<h3>Tagged to jobs</h3>${mineBox}<p class="subtitle" style="width:100%; margin:4px 0 0; font-size:12px;">This inbox's conversations tagged to a job, last 30 days, newest job first. Who replied, who is on it, or nobody yet. The job's Emails tab shows every inbox.</p>`;
       } else {
         const titles = { priority: 'Needs a reply', other: 'Other', updates: 'Subscriptions and updates', sent: 'Sent', done: 'Done', all: 'All' };
-        header = `<h3>${titles[S.view]}</h3>` + (S.view === 'sent' ? '' : `<label style="margin:0 0 0 auto; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="unread-only" style="width:auto;" ${S.unreadOnly ? 'checked' : ''} /> Unread only</label>`);
+        header = `<h3>${titles[S.view]}</h3>` + (S.view === 'sent' ? '' : `<label style="margin:0 0 0 auto; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="unread-only" style="width:auto;" ${S.unreadOnly ? 'checked' : ''} /> Unread only</label>${mineBox}`);
         if (S.view === 'updates') header += `<p class="subtitle" style="width:100%; margin:4px 0 0; font-size:12px;">Skim when you have time to check ${escapeHtml(S.assistant)} did not miss anything. Wrong place? Open it and move it.</p>`;
+        if (S.view === 'priority') header += `<p class="subtitle" style="width:100%; margin:4px 0 0; font-size:12px;">Nobody on it first. Open one and press "I've got this" so the team knows you are handling it.</p>`;
       }
 
       let body;
@@ -358,22 +413,33 @@
             + chips(t.id) + sub(t, timeAgo(e.sent_at)) + '</a>';
         }).join('') || '<p class="subtitle" style="padding:8px 4px;">Nothing sent yet.</p>';
       } else {
-        body = threads.map(t => {
+        const row = (t) => {
           const l = latest[t.id];
           const out = !!l && l.direction === 'outbound';
-          const who = !l ? '' : out
+          const whoLine = !l ? '' : out
             ? '<span class="dir-badge outbound">Sent</span>To ' + escapeHtml(addrName((l.to_addresses || [])[0]) || 'unknown')
             : '<span class="dir-badge inbound">Received</span>From ' + escapeHtml(addrShort(l.from_address) || 'unknown');
           const reason = t.section === 'priority' && t.section_reason && !out ? `<div class="inbox-reason">${escapeHtml(t.section_reason)}</div>` : '';
           return `<a class="inbox-thread-item ${t.id === S.activeThreadId ? 'active' : ''} ${!t.is_read ? 'unread' : ''} ${l ? (out ? 'sent-last' : 'recv-last') : ''}" data-id="${t.id}">`
             + `<div class="inbox-subject">${escapeHtml(t.subject || '(no subject)')}</div>`
-            + `<div class="inbox-who">${who}</div>${reason}${chips(t.id)}${sub(t, timeAgo(t.last_message_at))}</a>`;
-        }).join('') || `<p class="subtitle" style="padding:8px 4px;">${S.view === 'priority' ? 'Nothing waiting on a reply.' : 'Nothing here.'}</p>`;
+            + `<div class="inbox-who">${whoLine}</div>${reason}${statusHtml(t, l)}${chips(t.id)}${sub(t, timeAgo(t.last_message_at))}</a>`;
+        };
+        if (jobGroups) {
+          body = jobGroups.map(g => {
+            const waiting = g.threads.filter(t => threadStatus(t, latest[t.id])?.cls === 'waiting').length;
+            const p = g.project;
+            return `<div class="job-group"><span><a href="/project.html?id=${p.id}&tab=emails" class="link-quiet">${escapeHtml(projectRef(p))} ${escapeHtml(p.name || '')}</a>${p.client_name ? `<span class="subtitle" style="font-size:12px;"> &middot; ${escapeHtml(p.client_name)}</span>` : ''}</span><span class="n" ${waiting ? 'style="color:var(--red); font-weight:700;"' : ''}>${waiting ? `${waiting} need${waiting === 1 ? 's' : ''} a reply` : `${g.threads.length} conversation${g.threads.length === 1 ? '' : 's'}`}</span></div>` + g.threads.map(row).join('');
+          }).join('') || `<p class="subtitle" style="padding:8px 4px;">${S.mineOnly ? 'Nothing tagged to a job is assigned to you.' : 'No conversations tagged to a job in the last 30 days. Open one and press "+ Tag to a job".'}</p>`;
+        } else {
+          body = threads.map(row).join('') || `<p class="subtitle" style="padding:8px 4px;">${S.mineOnly ? 'Nothing here is assigned to you.' : S.view === 'priority' ? 'Nothing waiting on a reply.' : 'Nothing here.'}</p>`;
+        }
       }
       listEl.innerHTML = `<div class="list-filters">${header}</div>` + body;
 
       const uo = document.getElementById('unread-only');
       if (uo) uo.addEventListener('change', () => { S.unreadOnly = uo.checked; loadList(); });
+      const mo = document.getElementById('mine-only');
+      if (mo) mo.addEventListener('change', () => { S.mineOnly = mo.checked; loadList(); });
       const el = document.getElementById('edit-label-btn');
       if (el) el.addEventListener('click', () => openLabelEditor(label));
       listEl.querySelectorAll('.inbox-thread-item').forEach(a => a.addEventListener('click', () => openThread(a.dataset.id)));
@@ -463,24 +529,33 @@
       detailEl.style.display = '';
       detailEl.innerHTML = '<p class="subtitle">Loading...</p>';
 
-      const [{ data: thread }, { data: emails }, { data: staff }, { data: drafts }] = await Promise.all([
+      const [{ data: thread }, { data: emails }, { data: drafts }] = await Promise.all([
         supabaseClient.from('email_threads').select('*, clients(name), projects:suggested_project_id(id, name, job_number, quote_number)').eq('id', threadId).single(),
         supabaseClient.from('emails').select('*').eq('thread_id', threadId).order('sent_at', { ascending: true }),
-        supabaseClient.from('profiles').select('id, full_name'),
         supabaseClient.from('email_drafts').select('*').eq('thread_id', threadId).eq('status', 'draft').order('updated_at', { ascending: false }).limit(1),
       ]);
       if (!thread) { detailEl.innerHTML = '<p class="subtitle">That conversation is not available.</p>'; return; }
-      const staffName = (id) => (staff || []).find(s => s.id === id)?.full_name || 'A team member';
       const draft = (drafts || [])[0] || null;
-      const lastOut = (emails || []).slice(-1)[0]?.direction === 'outbound';
+      const lastMsg = (emails || []).slice(-1)[0];
+      const lastOut = lastMsg?.direction === 'outbound';
       const sec = thread.section || 'other';
       const gmailUrl = `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(mb().address)}#all/${thread.gmail_thread_id}`;
+      const others = S.staff.filter(s => s.active && s.id !== thread.assigned_to);
+      const assignCtl = `<span style="display:inline-flex; gap:6px; align-items:center;">`
+        + (!thread.assigned_to ? '<button type="button" id="claim-btn" title="Tell the team you are handling this">I\'ve got this</button>'
+          : thread.assigned_to === S.me.id ? '<button type="button" class="secondary" id="unclaim-btn">Not mine any more</button>'
+          : '<button type="button" class="secondary" id="claim-btn">Take over</button>')
+        + `<select id="assign-select" title="Assign to someone"><option value="">Assign to...</option>${others.map(s => `<option value="${s.id}">${escapeHtml(s.full_name || '')}</option>`).join('')}</select></span>`;
+      const someoneElse = thread.assigned_to && thread.assigned_to !== S.me.id && !thread.is_done;
 
       detailEl.innerHTML = `
         <button type="button" class="secondary back-btn" id="back-btn" style="font-size:12px; padding:4px 10px; margin-bottom:8px;">&larr; Back</button>
         <h2 style="margin:0 0 6px;">${escapeHtml(thread.subject || '(no subject)')}</h2>
         ${thread.clients?.name ? `<p class="subtitle" style="margin:0 0 6px;">${escapeHtml(thread.clients.name)}</p>` : ''}
+        ${statusHtml(thread, lastMsg, 'style="margin:0 0 8px; font-size:13px;"')}
+        ${someoneElse && !lastOut ? `<div class="claim-banner"><strong>${escapeHtml(staffName(thread.assigned_to))} is on this</strong>${thread.assigned_at ? ', claimed ' + timeAgo(thread.assigned_at) : ''}. Check with them before you reply, so the client is not chased twice.</div>` : ''}
         <div class="thread-bar">
+          ${assignCtl}
           <span class="section-pill ${sec === 'priority' && !lastOut ? 'priority' : ''}">${sec === 'priority' && lastOut ? 'Replied, waiting on them' : SECTION_NAMES[sec]}${thread.section_reason && sec === 'priority' && !lastOut ? ': ' + escapeHtml(thread.section_reason) : ''}</span>
           <select id="move-section" title="Move to">
             <option value="">Move to...</option>
@@ -531,6 +606,12 @@
       });
       const bind = (id, action) => { const b = document.getElementById(id); if (b) b.addEventListener('click', async () => { try { await act(action, { thread_id: threadId }); } catch (err) { alert(err.message); } reload(true); }); };
       bind('accept-label', 'accept_label'); bind('dismiss-label', 'dismiss_label'); bind('accept-job', 'accept_job'); bind('dismiss-job', 'dismiss_job');
+      const assign = async (userId) => { try { await act('assign', { thread_id: threadId, user_id: userId }); } catch (err) { alert(err.message); } reload(true); };
+      const claimBtn = document.getElementById('claim-btn');
+      if (claimBtn) claimBtn.addEventListener('click', () => assign(S.me.id));
+      const unclaimBtn = document.getElementById('unclaim-btn');
+      if (unclaimBtn) unclaimBtn.addEventListener('click', () => assign(null));
+      document.getElementById('assign-select').addEventListener('change', (e) => { if (e.target.value) assign(e.target.value); });
 
       const lastInbound = (emails || []).filter(m => m.direction === 'inbound').slice(-1)[0];
       // Reply to whoever last wrote to us. If they haven't replied yet (we sent the last one), a
@@ -584,7 +665,7 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:480px; width:100%;">
           <h2 style="margin-top:0;">${label ? 'Edit label' : 'New label'}</h2>
-          <p class="subtitle" style="font-size:12px; margin:0 0 8px;">For a matter that is not a job, so its emails stay together and nothing gets missed. ${S.box === 'mine' ? 'Only you see labels in My inbox.' : 'Labels in the Sales inbox are shared with the team.'}</p>
+          <p class="subtitle" style="font-size:12px; margin:0 0 8px;">For a matter that is not a job, so its emails stay together and nothing gets missed. ${S.box === 'mine' ? 'Only you see labels in My inbox.' : 'Labels in the Sales inbox are shared with the team.'} ${label ? 'Changing what belongs here makes' : 'Saving makes'} ${escapeHtml(S.assistant)} check the last 60 days of mail and file what fits (you get a notification when it is done).</p>
           <label style="margin-top:0">Name</label>
           <input id="lb-name" value="${escapeHtml(label ? label.name : '')}" placeholder="Supplier dispute: Middys" />
           <label>What belongs here (helps ${escapeHtml(S.assistant)} file new emails)</label>
@@ -877,18 +958,26 @@ Please also read the Notice of Workplace Surveillance and Computer Surveillance 
         window.location.href = '/login.html';
       });
       S.me = (await supabaseClient.auth.getUser()).data.user;
-      const { data: cs } = await supabaseClient.from('company_settings').select('ai_assistant_name').eq('id', 1).maybeSingle();
+      const [{ data: cs }, { data: staff }] = await Promise.all([
+        supabaseClient.from('company_settings').select('ai_assistant_name').eq('id', 1).maybeSingle(),
+        supabaseClient.from('profiles').select('id, full_name, active').order('full_name'),
+      ]);
       S.assistant = (cs && cs.ai_assistant_name && cs.ai_assistant_name.trim()) || 'Sparky';
+      S.staff = staff || [];
       await loadMailboxes();
       const params = new URLSearchParams(window.location.search);
       const deepThread = params.get('thread');
+      const deepLabel = params.get('label');
       if (deepThread && !params.get('box')) {
         // a link to a conversation: open it in whichever inbox it is in
         const { data: t } = await supabaseClient.from('email_threads').select('mailbox_id').eq('id', deepThread).maybeSingle();
         if (t && S.mine && t.mailbox_id === S.mine.id) params.set('box', 'mine');
       }
       if (deepThread) S.view = 'all';
+      if (deepLabel) S.view = 'label:' + deepLabel;
+      if (params.get('view') === 'jobs') S.view = 'jobs';
       await showBox(params.get('box') === 'mine' ? 'mine' : 'sales');
+      if (deepLabel && !S.labels.some(l => l.id === deepLabel)) { S.view = 'priority'; await renderSide(); await loadList(); }
       if (deepThread) openThread(deepThread);
     })();
   </script>

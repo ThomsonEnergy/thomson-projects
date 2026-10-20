@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -92,7 +92,9 @@
       <div class="grid cols-3">
         <div style="grid-column: span 2;">
           <label>Site address</label>
-          <input id="p-address" />
+          <select id="p-site-pick" style="display:none; margin-bottom:6px;"></select>
+          <input id="p-address" placeholder="Where the work is done" />
+          <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new address is saved as a site for this client. The client's office address stays as it is (Clients page).</p>
         </div>
         <div>
           <label>Payment terms</label>
@@ -250,9 +252,9 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=99"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
   <script src="/js/template-questions.js"></script>
-  <script src="/js/email-compose.js?v=5"></script>
+  <script src="/js/email-compose.js?v=6"></script>
   <script src="/js/theme.js"></script>
   <script>
     const editId = new URLSearchParams(window.location.search).get('id');
@@ -267,6 +269,7 @@
     let RATE_TIERS = [];
     let currentJobNumber = null;
     const rowsEl = document.getElementById('cc-rows');
+    const sitePicker = attachSitePicker(document.getElementById('p-site-pick'), document.getElementById('p-address'));
 
     function renumberStages() {
       document.querySelectorAll('.cc-row').forEach((row, i) => {
@@ -285,11 +288,11 @@
         document.getElementById('p-client').value = client.name || '';
         document.getElementById('p-email').value = client.email || '';
         document.getElementById('p-phone').value = client.phone || '';
-        document.getElementById('p-address').value = client.address || '';
         document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
       } else {
         note.textContent = 'No client selected - search above, or just fill in the fields below to create one when you save.';
       }
+      sitePicker.setClient(client);
       document.getElementById('client-search-results').style.display = 'none';
     }
 
@@ -1174,15 +1177,18 @@
 
         // Keep the linked client record in sync, or create one if this quote
         // was built without picking an existing client.
+        // The job's site address never overwrites the client's office address; a new client's
+        // first site is the best guess for their office address until it is set on the Clients page.
         let clientId = selectedClientId;
-        const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, address: client_address || null, payment_terms };
+        const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
         if (clientId) {
           await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
         } else {
-          const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert(clientFields).select().single();
+          const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({ ...clientFields, address: client_address || null }).select().single();
           if (clientErr) { msg.innerHTML = `<div class="error-box">Could not save client: ${escapeHtml(clientErr.message)}</div>`; return; }
           clientId = newClient.id;
         }
+        const client_site_id = await resolveClientSite(clientId, client_address, selectedClientId ? (sitePicker.client() || {}).address : client_address);
 
         const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
         const allPhotos = (settings && settings.portfolio_photos) || [];
@@ -1190,7 +1196,7 @@
         const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
 
         const projectFields = {
-          name, client_id: clientId, client_name, client_email, client_phone, client_address,
+          name, client_id: clientId, client_name, client_email, client_phone, client_address, client_site_id,
           sow_text, proposal_subtitle, terms_text,
           notes: document.getElementById('p-notes').value.trim() || null,
           deposit_percent, pylon_link, pylon_project_id,
@@ -1389,7 +1395,8 @@
         if (client) {
           document.getElementById('client-search-input').value = client.name;
           document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
-          document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${client.name}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+          document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${escapeHtml(client.name)}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+          await sitePicker.setClient(client);
         }
         await loadJobContactPickers(project.client_id, {
           project_manager_contact_id: project.project_manager_contact_id,
@@ -1559,6 +1566,7 @@
           }
           setV('p-name', emailPf.name); setV('p-client', emailPf.client_name); setV('p-email', emailPf.client_email);
           setV('p-phone', emailPf.client_phone); setV('p-address', emailPf.address);
+          sitePicker.refresh();
           setV('p-brief', emailPf.work); setV('p-notes', emailPf.notes);
           const banner = document.createElement('div');
           banner.className = 'success-box';
@@ -1575,6 +1583,7 @@
           const setIf = (id, v) => { if (typeof v === 'string' && v) document.getElementById(id).value = v; };
           setIf('p-name', aiPf.name); setIf('p-client', aiPf.client_name); setIf('p-email', aiPf.client_email);
           setIf('p-phone', aiPf.client_phone); setIf('p-address', aiPf.client_address); setIf('p-notes', aiPf.notes); setIf('p-brief', aiPf.brief);
+          sitePicker.refresh();
           const banner = document.createElement('div');
           banner.className = 'success-box';
           banner.style.cssText = 'margin-bottom:14px;';

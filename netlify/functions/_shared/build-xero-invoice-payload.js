@@ -6,7 +6,9 @@
 
 const { xeroRequest } = require('./xero-client');
 
-async function getOrCreateContact({ name, email }, storeOn) {
+// address is the client's office / billing address (never a job site); only used when the
+// contact is created, an existing Xero contact is left as it is.
+async function getOrCreateContact({ name, email, address }, storeOn) {
   if (storeOn.xero_contact_id) return storeOn.xero_contact_id;
 
   const searchName = (name || '').replace(/"/g, '\\"');
@@ -17,7 +19,7 @@ async function getOrCreateContact({ name, email }, storeOn) {
 
   const created = await xeroRequest('accounting', 'Contacts', {
     method: 'POST',
-    body: { Contacts: [{ Name: name, EmailAddress: email || undefined }] },
+    body: { Contacts: [{ Name: name, EmailAddress: email || undefined, Addresses: address ? [{ AddressType: 'POBOX', AddressLine1: String(address).slice(0, 500) }] : undefined }] },
   });
   return created.Contacts[0].ContactID;
 }
@@ -29,7 +31,7 @@ async function getOrCreateContact({ name, email }, storeOn) {
 async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   const { data: invoice, error: invErr } = await supabaseAdmin
     .from('invoices')
-    .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id))), clients:client_id(name, email, client_type, xero_contact_id), invoice_claims(*, cost_centres(name, sort_order)), bill_to:bill_to_client_id(id, name, email, client_type, xero_contact_id)')
+    .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id, address))), clients:client_id(name, email, address, client_type, xero_contact_id), invoice_claims(*, cost_centres(name, sort_order)), bill_to:bill_to_client_id(id, name, email, address, client_type, xero_contact_id)')
     .eq('id', invoiceId)
     .single();
   if (invErr || !invoice) throw new Error('Invoice not found');
@@ -40,7 +42,7 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
 
   let project = null;
   if (isMultiStage) {
-    const { data: proj } = await supabaseAdmin.from('projects').select('*, clients(client_type, xero_contact_id)').eq('id', invoice.project_id).single();
+    const { data: proj } = await supabaseAdmin.from('projects').select('*, clients(client_type, xero_contact_id, address)').eq('id', invoice.project_id).single();
     project = proj;
   } else if (centre) {
     project = centre.projects;
@@ -48,12 +50,13 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
 
   // Everything below is branched: job-linked claims get a job-tagged
   // reference; standalone invoices just get a plain description.
-  let contactName, contactEmail, clientType, jobNumber, contactStoreTable, contactStoreId, existingXeroContactId;
+  let contactName, contactEmail, contactAddress, clientType, jobNumber, contactStoreTable, contactStoreId, existingXeroContactId;
 
   if (isStandalone) {
     const client = invoice.clients;
     contactName = client?.name;
     contactEmail = client?.email;
+    contactAddress = client?.address;
     clientType = client?.client_type || 'individual';
     jobNumber = null;
     contactStoreTable = 'clients';
@@ -62,6 +65,7 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   } else {
     contactName = project.client_name;
     contactEmail = project.client_email;
+    contactAddress = project.clients?.address;
     clientType = project.clients?.client_type || 'individual';
     jobNumber = project.job_number;
     contactStoreTable = 'projects';
@@ -78,6 +82,7 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   if (invoice.bill_to) {
     contactName = invoice.bill_to.name;
     contactEmail = invoice.bill_to.email;
+    contactAddress = invoice.bill_to.address;
     clientType = invoice.bill_to.client_type || 'individual';
     contactStoreTable = 'clients';
     contactStoreId = invoice.bill_to.id;
@@ -92,7 +97,7 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
     throw new Error('Labour and Materials mappings must be set up in Settings > Xero Mapping before pushing invoices.');
   }
 
-  const contactId = await getOrCreateContact({ name: contactName, email: contactEmail }, { xero_contact_id: existingXeroContactId });
+  const contactId = await getOrCreateContact({ name: contactName, email: contactEmail, address: contactAddress }, { xero_contact_id: existingXeroContactId });
   if (!existingXeroContactId && contactStoreId) {
     await supabaseAdmin.from(contactStoreTable).update({ xero_contact_id: contactId }).eq('id', contactStoreId);
   }

@@ -10,7 +10,7 @@
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/document-fonts.css?v=1" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   /* The proposal is a set of A4 "pages" (black cover, white content pages
@@ -216,7 +216,7 @@
     <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading your proposal...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=99"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
@@ -630,7 +630,7 @@
           ${darkHeadHtml('logo-cover')}
           <div class="pg-body">
             <h1 class="pg-title">${esc(docLabel)}${coverSub ? `<br><span style="font-size:0.42em; letter-spacing:0; opacity:0.9;">${esc(coverSub)}</span>` : ''}</h1>
-            <div class="cover-tag">${esc(project.name)}<small>Prepared for ${esc(project.client_name)}${project.client_address ? ' &middot; ' + esc(project.client_address) : ''}</small></div>
+            <div class="cover-tag">${esc(project.name)}<small>Prepared for ${esc(project.client_name)}${(project.client_office_address || project.client_address) ? ' &middot; ' + esc(project.client_office_address || project.client_address) : ''}</small></div>
           </div>
           <div class="cover-meta">
             <div class="lbl">Prepared by:</div>

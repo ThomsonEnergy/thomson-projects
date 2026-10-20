@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -36,9 +36,10 @@
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
         <h2 style="margin:0;">Pay week</h2>
-        <div>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
           <button type="button" class="secondary" id="week-prev">&larr; Previous</button>
-          <span class="subtitle" id="week-range" style="margin:0 10px; font-weight:600;"></span>
+          <span class="subtitle" id="week-range" style="margin:0; font-weight:600;"></span>
+          <button type="button" class="secondary" id="week-today" title="Back to the current pay week">This week</button>
           <button type="button" class="secondary" id="week-next">Next &rarr;</button>
         </div>
       </div>
@@ -154,7 +155,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=99"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
   <script src="/js/theme.js"></script>
   <script>
     let myUserId = null;
@@ -266,6 +267,8 @@
       const end = addDays(weekStart, 6);
       document.getElementById('week-range').textContent =
         `${weekStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} - ${end.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+      const onCurrentWeek = localDateStr(weekStart) === localDateStr(getPayWeekStart(new Date()));
+      document.getElementById('week-today').disabled = onCurrentWeek;
     }
 
     async function refreshWeekViews() {
@@ -283,6 +286,7 @@
 
     document.getElementById('week-prev').addEventListener('click', () => { weekStart = addDays(weekStart, -7); refreshWeekViews(); });
     document.getElementById('week-next').addEventListener('click', () => { weekStart = addDays(weekStart, 7); refreshWeekViews(); });
+    document.getElementById('week-today').addEventListener('click', () => { weekStart = getPayWeekStart(new Date()); refreshWeekViews(); });
 
     async function loadMyWeek() {
       const el = document.getElementById('my-week-days');

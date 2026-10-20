@@ -11,14 +11,21 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .day-item {
-    display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+    display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:12px;
     padding:10px 0; border-bottom:1px solid var(--border);
   }
   .day-item:last-child { border-bottom:none; }
+  .day-item > div:first-child { flex:1 1 0; min-width:0; }
+  .day-item-actions { display:flex; gap:6px; flex-shrink:0; }
+  .day-item .task-error { flex-basis:100%; margin-top:0; }
+  @media (max-width: 700px) {
+    .day-item-actions { flex-basis:100%; }
+    .day-item-actions button { flex:1; min-height:44px; justify-content:center; }
+  }
 </style>
 </head>
 <body>
@@ -104,7 +111,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=99"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -470,8 +477,7 @@
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">${dateStr === todayStrVal ? 'Today - ' : ''}${dayLabel}</p>
             ${onLeave ? `<p class="subtitle" style="margin:0; color:var(--red);">On leave (${onLeave.leave_type || 'approved'})</p>` : dayAssignments.length ? dayAssignments.map(a => {
               const link = linkForAssignment(a);
-              const tentative = a.project_id && !a.client_informed_at && a.block_type !== 'site_inspection' ? ' <span class="subtitle" style="font-size:11px;">(tentative, client not told yet)</span>' : '';
-        const inner = `${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${labelForAssignment(a)}${tentative}`;
+              const inner = `${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${labelForAssignment(a)}`;
               return link ? `<a class="link-quiet" href="${link}" style="display:block; font-size:13px; margin:2px 0;">${inner}</a>` : `<p class="subtitle" style="margin:2px 0; font-size:13px;">${inner}</p>`;
             }).join('') : `<p class="subtitle" style="margin:0; font-size:13px;">Nothing scheduled.</p>`}
           </div>`;
@@ -503,7 +509,7 @@
       resultsEl.innerHTML = `
         ${label ? `<p class="subtitle" style="margin:6px 0 2px; font-size:12px;">${label}</p>` : ''}
         <div style="border:1px solid var(--border); border-radius:8px; ${label ? '' : 'margin-top:6px;'}">
-          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+          ${results.map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${escapeHtml(projectRef(p))}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))} <span class="subtitle">${escapeHtml(p.client_name || '')}</span></div>`).join('')}
         </div>`;
       resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
         row.addEventListener('click', () => {
@@ -549,6 +555,9 @@
       clearTimeout(clockJobSearchTimeout);
       const q = e.target.value.trim();
       selectedClockJobId = null;
+      selectedClockCostCentres = [];
+      ccChipsSeq++;
+      document.getElementById('clock-cost-centres').style.display = 'none';
       document.getElementById('clock-job-selected').textContent = '';
       document.getElementById('clock-category-row').style.display = 'block';
       if (q.length === 0) { showRecentJobSuggestions(); return; }
@@ -559,7 +568,9 @@
       }, 250);
     });
 
+    let ccChipsSeq = 0; // drops a slow stage list for a job that is no longer picked
     async function loadCostCentreChips(projectId) {
+      const seq = ++ccChipsSeq;
       selectedClockCostCentres = [];
       const wrap = document.getElementById('clock-cost-centres');
       const chipsEl = document.getElementById('clock-cc-chips');
@@ -569,11 +580,13 @@
 
       // Stages plus any variation that still has work to do (see loadClockableCostCentres).
       const centres = await loadClockableCostCentres(projectId);
+      if (seq !== ccChipsSeq) return;
       if (!centres.length) { wrap.style.display = 'none'; return; }
+      if (centres.length === 1) selectedClockCostCentres = [centres[0].id];
 
       wrap.style.display = 'block';
       chipsEl.innerHTML = centres.map(c => `
-        <button type="button" class="cc-chip" data-id="${c.id}">
+        <button type="button" class="cc-chip ${selectedClockCostCentres.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
           <span class="cc-chip-num">${c.number}</span> ${escapeHtml(c.name)}
         </button>
       `).join('');
@@ -647,7 +660,9 @@
         time_category: projectId ? 'job' : document.getElementById('clock-category').value,
         clock_in: roundToQuarterHour(new Date()).toISOString(),
       };
-      if (selectedClockCostCentres.length === 1) {
+      if (!projectId) {
+        // office / training time never carries a job stage
+      } else if (selectedClockCostCentres.length === 1) {
         entry.cost_centre_id = selectedClockCostCentres[0];
       } else if (selectedClockCostCentres.length > 1) {
         entry.selected_cost_centre_ids = selectedClockCostCentres;
@@ -699,8 +714,8 @@
       const parent = task.parent_task_id ? taskData.byId[task.parent_task_id] : null;
       const openHref = task.project_id ? `/project.html?id=${task.project_id}` : '/tasks.html';
       const doneBtn = openSubs > 0
-        ? `<button type="button" class="secondary" onclick="window.location.href='${openHref}'" title="Tick off its subtasks first" style="font-size:12px; padding:6px 10px;">Open ${task.project_id ? 'job' : 'tasks'}</button>`
-        : `<button type="button" class="secondary complete-task-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">Done</button>`;
+        ? `<button type="button" class="secondary" onclick="window.location.href='${openHref}'" title="Tick off its subtasks first">Open ${task.project_id ? 'job' : 'tasks'}</button>`
+        : `<button type="button" class="secondary complete-task-btn" data-id="${task.id}">Done</button>`;
       const notes = [];
       if (parent) notes.push(`Subtask of: ${escapeHtml(parent.description)}`);
       if (sub) notes.push(`${sub.done} of ${sub.total} subtasks done`);
@@ -713,8 +728,8 @@
             ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${escapeHtml(task.description)}</a>` : `<span>${escapeHtml(task.description)}</span>`}
             ${notes.length ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${notes.join(' &middot; ')}</p>` : ''}
           </div>
-          <div style="display:flex; gap:6px; flex-shrink:0;">
-            ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}" style="font-size:12px; padding:6px 10px;">I can do this</button>` : ''}
+          <div class="day-item-actions">
+            ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}">I can do this</button>` : ''}
             ${doneBtn}
           </div>
         </div>`;
@@ -770,6 +785,15 @@
       }).join('');
     }
 
+    // Keeps the reason in the task row instead of an alert the person taps away.
+    function showTaskError(btn, text) {
+      const row = btn.closest('.day-item');
+      if (!row) return;
+      let box = row.querySelector('.task-error');
+      if (!box) { box = document.createElement('div'); box.className = 'error-box task-error'; row.appendChild(box); }
+      box.textContent = text;
+    }
+
     function renderTasks() {
       const { mine, open } = taskData;
       const q = (document.getElementById('open-task-search').value || '').trim().toLowerCase();
@@ -790,22 +814,34 @@
       document.querySelectorAll('.complete-task-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const task = taskData.byId[btn.dataset.id];
-          btn.disabled = true;
-          const { error: doneErr } = await supabaseClient.from('job_tasks').update({
-            completed: true, completed_by: myUserId, completed_at: new Date().toISOString(),
-          }).eq('id', btn.dataset.id);
-          if (doneErr) { btn.disabled = false; alert('Could not tick that off: ' + doneErr.message); return; }
-          // Same gate as the job page: the last required task moves the job out of Awaiting Action.
-          if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
-          await loadTasks();
+          const label = btn.textContent;
+          btn.disabled = true; btn.textContent = 'Saving...';
+          try {
+            const { error: doneErr } = await supabaseClient.from('job_tasks').update({
+              completed: true, completed_by: myUserId, completed_at: new Date().toISOString(),
+            }).eq('id', btn.dataset.id);
+            if (doneErr) throw doneErr;
+            // Same gate as the job page: the last required task moves the job out of Awaiting Action.
+            if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
+            await loadTasks();
+          } catch (err) {
+            btn.disabled = false; btn.textContent = label;
+            showTaskError(btn, 'Could not tick that off: ' + ((err && err.message) || String(err)));
+          }
         });
       });
       document.querySelectorAll('.pick-up-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          btn.disabled = true;
-          const { error: pickErr } = await supabaseClient.from('job_tasks').update({ assigned_to_user_id: myUserId }).eq('id', btn.dataset.id);
-          if (pickErr) { btn.disabled = false; alert('Could not pick that up: ' + pickErr.message); return; }
-          await loadTasks();
+          const label = btn.textContent;
+          btn.disabled = true; btn.textContent = 'Saving...';
+          try {
+            const { error: pickErr } = await supabaseClient.from('job_tasks').update({ assigned_to_user_id: myUserId }).eq('id', btn.dataset.id);
+            if (pickErr) throw pickErr;
+            await loadTasks();
+          } catch (err) {
+            btn.disabled = false; btn.textContent = label;
+            showTaskError(btn, 'Could not pick that up: ' + ((err && err.message) || String(err)));
+          }
         });
       });
     }

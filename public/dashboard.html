@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -41,7 +41,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=99"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
   <script src="/js/theme.js"></script>
   <script>
     const STAGES = [
@@ -59,6 +59,9 @@
       { key: 'awaiting_payment',  label: 'Invoice Sent - Awaiting Payment' },
       { key: 'complete',          label: 'Complete' },
     ];
+    // A quote (no J number yet) only moves between the quote stages here: approving it has to go
+    // through Mark approved on the quote (or the client signing), which makes the job and deposit.
+    const QUOTE_STAGES = ['lead', 'draft_quote', 'quote_sent'];
     // Archived sits off-board per the spec - it's a valid stage value but
     // doesn't get its own column here. The scheduled archive-completed-
     // jobs.js function moves a job here 2 days after it hits 'complete';
@@ -136,7 +139,7 @@
       });
 
       board.innerHTML = STAGES.map(stage => `
-        <div class="pipeline-column">
+        <div class="pipeline-column" data-stage="${stage.key}">
           <div class="pipeline-column-header">
             <span>${stage.label}${stage.key === 'complete' ? ' <a class="link-quiet" id="view-archived-link" href="#" style="font-size:11px; font-weight:400;">(Archived &rarr;)</a>' : ''}</span>
             <span class="count">${byStage[stage.key].length}</span>
@@ -150,12 +153,9 @@
       const viewArchivedLink = document.getElementById('view-archived-link');
       if (viewArchivedLink) viewArchivedLink.addEventListener('click', (e) => { e.preventDefault(); openArchivedPanel(); });
 
-      // A quote (no J number yet) only moves between the quote stages here: approving it has to go
-      // through Mark approved on the quote (or the client signing), which makes the job and deposit.
-      const QUOTE_STAGES = ['lead', 'draft_quote', 'quote_sent'];
       function cardHtml(p) {
         return `
-          <div class="pipeline-card" data-id="${p.id}">
+          <div class="pipeline-card" data-id="${escapeHtml(p.id)}" data-stage="${escapeHtml(p.pipeline_stage)}">
             <a class="name" href="/project.html?id=${p.id}">${escapeHtml(projectRef(p))}</a>
             <div class="client">${escapeHtml(p.client_name)}</div>
             <select class="stage-select" data-id="${p.id}">
@@ -165,25 +165,56 @@
           </div>`;
       }
 
-      board.querySelectorAll('.stage-select').forEach(sel => {
-        sel.addEventListener('change', async () => {
-          const id = sel.dataset.id;
-          const newStage = sel.value;
-          const oldStage = sel.querySelector('option[selected]')?.value;
-          sel.disabled = true;
-          const { error: updateErr } = await supabaseClient
-            .from('projects')
-            .update({ pipeline_stage: newStage })
-            .eq('id', id);
-          if (updateErr) {
-            alert('Could not move this card: ' + updateErr.message);
-            if (oldStage) sel.value = oldStage;
-            sel.disabled = false;
-            return;
-          }
-          // Re-render so the card lands in its new column.
-          location.reload();
-        });
+      function refreshColumn(col) {
+        if (!col) return;
+        const body = col.querySelector('.pipeline-column-body');
+        const n = body.querySelectorAll('.pipeline-card').length;
+        col.querySelector('.pipeline-column-header .count').textContent = n;
+        const empty = body.querySelector('.pipeline-column-empty');
+        if (n === 0 && !empty) body.insertAdjacentHTML('beforeend', '<div class="pipeline-column-empty">No projects here</div>');
+        if (n > 0 && empty) empty.remove();
+      }
+
+      // Rebuild the card from the row the server stored (a trigger may have changed the stage or
+      // given it a J number) and drop it into that column. Archived has no column: the card leaves the board.
+      function moveCard(card, row) {
+        const fromCol = card.closest('.pipeline-column');
+        const toCol = board.querySelector(`.pipeline-column[data-stage="${row.pipeline_stage}"]`);
+        card.remove();
+        let fresh = null;
+        if (toCol) {
+          const tmp = document.createElement('div');
+          tmp.innerHTML = cardHtml(row);
+          fresh = tmp.firstElementChild;
+          toCol.querySelector('.pipeline-column-body').prepend(fresh);
+        }
+        refreshColumn(fromCol);
+        refreshColumn(toCol);
+        if (fresh) fresh.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+
+      board.addEventListener('change', async (e) => {
+        const sel = e.target.closest('.stage-select');
+        if (!sel) return;
+        const card = sel.closest('.pipeline-card');
+        const oldStage = card.dataset.stage;
+        const newStage = sel.value;
+        if (newStage === oldStage) return;
+        card.querySelector('.pipeline-card-error')?.remove();
+        sel.disabled = true;
+        const { data: row, error: updateErr } = await supabaseClient
+          .from('projects')
+          .update({ pipeline_stage: newStage })
+          .eq('id', card.dataset.id)
+          .select('id, name, client_name, pipeline_stage, job_number, quote_number')
+          .single();
+        if (updateErr || !row) {
+          sel.value = oldStage;
+          sel.disabled = false;
+          card.insertAdjacentHTML('beforeend', `<div class="error-box pipeline-card-error">Could not move: ${escapeHtml(updateErr?.message || 'no row returned')}</div>`);
+          return;
+        }
+        moveCard(card, row);
       });
     })();
   </script>

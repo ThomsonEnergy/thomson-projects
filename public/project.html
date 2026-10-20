@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -31,13 +31,13 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=99"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=5"></script>
+  <script src="/js/email-compose.js?v=6"></script>
   <script src="/js/job-schedule.js?v=1"></script>
-  <script src="/js/assets.js?v=1"></script>
+  <script src="/js/assets.js?v=2"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -244,6 +244,7 @@
     let RATE_TIERS = [];
     let companySettings = {};
     let selectedClientId = null;
+    let sitePicker = null; // attached when the quote edit form is on screen
     let referencePhotos = [];
     let sowDocs = [];
     let assignedContactIds = {};
@@ -604,11 +605,11 @@
         document.getElementById('p-client').value = client.name || '';
         document.getElementById('p-email').value = client.email || '';
         document.getElementById('p-phone').value = client.phone || '';
-        document.getElementById('p-address').value = client.address || '';
         document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
       } else {
         note.textContent = 'No client selected - search above, or just fill in the fields below to create one when you save.';
       }
+      if (sitePicker) sitePicker.setClient(client);
       document.getElementById('client-search-results').style.display = 'none';
     }
 
@@ -737,7 +738,12 @@
             <div><label style="margin-top:0">Client phone</label><input id="p-phone" /></div>
           </div>
           <div class="grid cols-3">
-            <div style="grid-column: span 2;"><label>Site address</label><input id="p-address" /></div>
+            <div style="grid-column: span 2;">
+              <label>Site address</label>
+              <select id="p-site-pick" style="display:none; margin-bottom:6px;"></select>
+              <input id="p-address" placeholder="Where the work is done" />
+              <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new address is saved as a site for this client. The client's office address stays as it is (Clients page).</p>
+            </div>
             <div>
               <label>Payment terms</label>
               <select id="p-payment-terms">
@@ -897,6 +903,7 @@
       if (isQuoteEdit) {
       document.querySelectorAll('.template-option').forEach(btn => btn.addEventListener('click', () => applyEditTemplate(btn.dataset.template, true)));
 
+      sitePicker = attachSitePicker(document.getElementById('p-site-pick'), document.getElementById('p-address'));
       document.getElementById('clear-client-btn').addEventListener('click', () => {
         document.getElementById('client-search-input').value = '';
         setSelectedEditClient(null);
@@ -1134,6 +1141,7 @@
             document.getElementById('client-search-input').value = client.name;
             document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
             document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${escapeHtml(client.name)}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+            await sitePicker.setClient(client);
           }
           await loadEditJobContactPickers(project.client_id, {
             project_manager_contact_id: project.project_manager_contact_id,
@@ -1381,15 +1389,18 @@
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving...';
         try {
+          // The job's site address never overwrites the client's office address; a new client's
+          // first site is the best guess for their office address until it is set on the Clients page.
           let clientId = selectedClientId;
-          const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, address: client_address || null, payment_terms };
+          const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
           if (clientId) {
             await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
           } else {
-            const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert(clientFields).select().single();
+            const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({ ...clientFields, address: client_address || null }).select().single();
             if (clientErr) throw clientErr;
             clientId = newClient.id;
           }
+          const client_site_id = await resolveClientSite(clientId, client_address, selectedClientId ? (sitePicker.client() || {}).address : client_address);
 
           const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
           const allPhotos = (settings && settings.portfolio_photos) || [];
@@ -1397,7 +1408,7 @@
           const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
 
           const projectFields = {
-            name, client_id: clientId, client_name, client_email, client_phone, client_address, notes,
+            name, client_id: clientId, client_name, client_email, client_phone, client_address, client_site_id, notes,
             sow_text, proposal_subtitle, terms_text, deposit_percent, pylon_link, pylon_project_id,
             reference_photos: referencePhotos.map(url => ({ url })),
             cover_photos: coverPhotos,
@@ -2817,13 +2828,22 @@
       if (!el) return;
 
       if (project.ccew_file_path) {
-        let viewUrl = '#';
-        try { viewUrl = await getSignedDocUrl(project.ccew_file_path); } catch {}
         el.innerHTML = `
           <div class="success-box" style="margin-bottom:10px;">CCEW uploaded.</div>
-          <a class="btn secondary" href="${viewUrl}" target="_blank">View certificate</a>
-          <button type="button" class="secondary" id="ccew-replace-btn" style="margin-left:8px;">Replace</button>`;
+          <button type="button" class="secondary" id="ccew-view-btn">View certificate</button>
+          <button type="button" class="secondary" id="ccew-replace-btn" style="margin-left:8px;">Replace</button>
+          <div id="ccew-view-msg"></div>`;
         el.querySelector('#ccew-replace-btn').addEventListener('click', () => renderCcewUploadForm(project));
+        el.querySelector('#ccew-view-btn').addEventListener('click', async () => {
+          const msg = el.querySelector('#ccew-view-msg');
+          msg.innerHTML = '';
+          try {
+            // Tab is opened on the tap itself (no await before it) so iPhone Safari does not block it.
+            await openSignedDocInNewTab(project.ccew_file_path);
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box" style="margin-top:10px;">Could not open: ${escapeHtml(err.message)}</div>`;
+          }
+        });
       } else if (project.ccew_not_required_reason) {
         el.innerHTML = `
           <div class="badge draft" style="margin-bottom:10px; display:inline-block;">Not required</div>
@@ -2838,18 +2858,25 @@
     function renderCcewUploadForm(project) {
       const el = document.getElementById('ccew-section');
       el.innerHTML = `
-        <label style="margin-top:0">Upload the certificate</label>
-        <input type="file" id="ccew-file-input" accept=".pdf,.jpg,.jpeg,.png" />
+        <label class="btn" id="ccew-upload-btn" style="margin:0; cursor:pointer;">Upload the CCEW (photo or PDF)<input type="file" id="ccew-file-input" accept="image/*,.pdf,application/pdf" style="display:none;" /></label>
         <p class="subtitle" style="margin:10px 0 4px;">Or, if this job isn't electrical work and no CCEW applies:</p>
         <input id="ccew-reason-input" placeholder="e.g. Not electrical work" />
-        <button id="ccew-save-reason-btn" style="margin-top:8px;">Save reason</button>
+        <button type="button" class="secondary" id="ccew-save-reason-btn" style="margin-top:8px;">Save reason</button>
         <div id="ccew-msg"></div>`;
 
       el.querySelector('#ccew-file-input').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
         const msg = el.querySelector('#ccew-msg');
-        msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
+        const input = e.target;
+        const labelBtn = el.querySelector('#ccew-upload-btn');
+        const saveBtn = el.querySelector('#ccew-save-reason-btn');
+        input.disabled = true;
+        labelBtn.firstChild.textContent = 'Uploading...';
+        labelBtn.style.opacity = '0.5';
+        labelBtn.style.pointerEvents = 'none';
+        saveBtn.disabled = true;
+        msg.innerHTML = '';
         try {
           const path = await uploadPrivateFile(file, `ccew/${project.id}`);
           const { error } = await supabaseClient.from('projects').update({ ccew_file_path: path, ccew_not_required_reason: null }).eq('id', project.id);
@@ -2858,7 +2885,13 @@
           project.ccew_not_required_reason = null;
           await initCcewSection(project);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          input.disabled = false;
+          input.value = '';
+          labelBtn.firstChild.textContent = 'Upload the CCEW (photo or PDF)';
+          labelBtn.style.opacity = '';
+          labelBtn.style.pointerEvents = '';
+          saveBtn.disabled = false;
         }
       });
 
@@ -2866,11 +2899,20 @@
         const reason = el.querySelector('#ccew-reason-input').value.trim();
         const msg = el.querySelector('#ccew-msg');
         if (!reason) { msg.innerHTML = `<div class="error-box">Enter a reason.</div>`; return; }
-        const { error } = await supabaseClient.from('projects').update({ ccew_not_required_reason: reason, ccew_file_path: null }).eq('id', project.id);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-        project.ccew_not_required_reason = reason;
-        project.ccew_file_path = null;
-        await initCcewSection(project);
+        const btn = el.querySelector('#ccew-save-reason-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+          const { error } = await supabaseClient.from('projects').update({ ccew_not_required_reason: reason, ccew_file_path: null }).eq('id', project.id);
+          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+          project.ccew_not_required_reason = reason;
+          project.ccew_file_path = null;
+          await initCcewSection(project);
+        } finally {
+          // initCcewSection replaces the card on success, so only restore a button still on the page.
+          if (el.contains(btn)) { btn.disabled = false; btn.textContent = label; }
+        }
       });
     }
 
@@ -3151,13 +3193,15 @@
               ${project.job_number && project.proposal_template === 'solar' && !editMode ? `
               <div class="card">
                 <h2>Handover / STC details</h2>
-                <p class="subtitle" style="margin-bottom:10px;">Recorded once install is done - feeds the handover checklist and, eventually, the Formbay STC lodgement.</p>
+                <p class="subtitle" style="margin-bottom:10px;">Recorded once install is done - feeds the handover checklist${pricingVisible ? ' and, eventually, the Formbay STC lodgement' : ''}.</p>
                 <label style="margin-top:0">NMI</label>
-                <input id="hd-nmi" value="${escapeHtml(project.nmi || '')}" placeholder="National Metering Identifier" />
+                <input id="hd-nmi" autocapitalize="characters" autocorrect="off" spellcheck="false" autocomplete="off" value="${escapeHtml(project.nmi || '')}" placeholder="National Metering Identifier" />
+                <p class="subtitle" style="margin-top:4px;">NMI: the 10 or 11 digit number on the power bill or meter box.</p>
                 <label>Panel serial numbers (one per line)</label>
-                <textarea id="hd-panel-serials" style="min-height:70px;">${escapeHtml(project.panel_serial_numbers || '')}</textarea>
+                <textarea id="hd-panel-serials" autocapitalize="characters" autocorrect="off" spellcheck="false" autocomplete="off" style="min-height:70px;">${escapeHtml(project.panel_serial_numbers || '')}</textarea>
                 <label>Inverter serial numbers (one per line)</label>
-                <textarea id="hd-inverter-serials" style="min-height:70px;">${escapeHtml(project.inverter_serial_numbers || '')}</textarea>
+                <textarea id="hd-inverter-serials" autocapitalize="characters" autocorrect="off" spellcheck="false" autocomplete="off" style="min-height:70px;">${escapeHtml(project.inverter_serial_numbers || '')}</textarea>
+                ${pricingVisible ? `
                 <label>Formbay STC lodgement status</label>
                 <select id="hd-formbay-status">
                   <option value="" ${!project.formbay_lodgement_status ? 'selected' : ''}>-- Not lodged yet --</option>
@@ -3168,12 +3212,15 @@
                   <option value="sold" ${project.formbay_lodgement_status === 'sold' ? 'selected' : ''}>Sold</option>
                 </select>
                 <p class="subtitle" style="margin-top:4px;">Set by hand for now - Formbay isn't wired up to push/pull this automatically yet.</p>
+                ` : ''}
                 <button type="button" id="hd-save-btn" style="margin-top:10px;">Save</button>
                 <div id="hd-save-msg"></div>
+                ${pricingVisible ? `
                 <div style="margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border);">
                   <button type="button" class="secondary" id="handover-check-btn">Check handover checklist</button>
                   <div id="handover-check-result" style="margin-top:12px;"></div>
                 </div>
+                ` : ''}
               </div>
               ` : ''}
 
@@ -3715,18 +3762,20 @@
             nmi: document.getElementById('hd-nmi').value.trim() || null,
             panel_serial_numbers: document.getElementById('hd-panel-serials').value.trim() || null,
             inverter_serial_numbers: document.getElementById('hd-inverter-serials').value.trim() || null,
-            formbay_lodgement_status: document.getElementById('hd-formbay-status').value || null,
           };
+          const fbSel = document.getElementById('hd-formbay-status');
+          if (fbSel) updates.formbay_lodgement_status = fbSel.value || null;
           const { error } = await supabaseClient.from('projects').update(updates).eq('id', project.id);
           if (error) throw error;
           Object.assign(project, updates);
           await checkAndAdvanceHandover(project.id);
           msgEl.innerHTML = `<div class="success-box">Saved.</div>`;
         } catch (err) {
-          msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        } finally {
+          hdSaveBtn.disabled = false;
+          hdSaveBtn.textContent = 'Save';
         }
-        hdSaveBtn.disabled = false;
-        hdSaveBtn.textContent = 'Save';
       });
 
       const handoverCheckBtn = document.getElementById('handover-check-btn');
@@ -4564,15 +4613,41 @@
       });
     }
 
+    // Who replied or who is handling a tagged conversation (email_threads.assigned_to), same
+    // wording as the Inbox. Null when there is nothing to say.
+    let jobEmailStaff = null, jobEmailMe = null;
+    function jobThreadStatus(t, last) {
+      const name = (id) => (id === jobEmailMe ? 'You' : ((jobEmailStaff || []).find(s => s.id === id) || {}).full_name || 'A team member');
+      if (t.is_done) return { colour: 'var(--muted)', text: 'Done' };
+      const claimed = t.assigned_to ? `${name(t.assigned_to)} ${t.assigned_to === jobEmailMe ? 'are' : 'is'} on it` : '';
+      if (last && last.direction === 'outbound') {
+        const by = last.created_by ? `${name(last.created_by)} replied` : 'Replied from Gmail';
+        return { colour: 'var(--green)', text: `${by} ${jobEmailAgo(last.sent_at)}${t.section === 'priority' ? ', waiting on them' : ''}${t.assigned_to && t.assigned_to !== last.created_by ? ', ' + claimed.replace('You are', 'you are') : ''}` };
+      }
+      if (t.assigned_to) return { colour: '#e0a526', text: `${claimed.replace('You are', "You're")}${t.assigned_at ? ' (claimed ' + jobEmailAgo(t.assigned_at) + ')' : ''}` };
+      if (t.section === 'priority' && t.last_direction === 'inbound') return { colour: 'var(--red)', text: 'Nobody has replied yet' };
+      return null;
+    }
+    function jobEmailAgo(d) {
+      const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+      if (mins < 60) return `${Math.max(mins, 0)}m ago`;
+      if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
+      return `${Math.floor(mins / 1440)}d ago`;
+    }
+
     async function loadJobEmails(project) {
       const el = document.getElementById('job-emails-list');
       if (!el) return;
       const { data: links, error } = await supabaseClient.from('email_job_links')
-        .select('id, kind, note, thread_id, email_threads(id, subject, last_message_at)').eq('project_id', project.id);
+        .select('id, kind, note, thread_id, email_threads(id, subject, last_message_at, last_direction, section, is_done, assigned_to, assigned_at)').eq('project_id', project.id);
       if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      if (!jobEmailStaff) {
+        const [{ data: staff }, { data: { user } }] = await Promise.all([supabaseClient.from('profiles').select('id, full_name, active').order('full_name'), supabaseClient.auth.getUser()]);
+        jobEmailStaff = staff || []; jobEmailMe = user ? user.id : null;
+      }
       const ids = (links || []).map(l => l.thread_id);
       let msgs = [];
-      if (ids.length) ({ data: msgs } = await supabaseClient.from('emails').select('id, thread_id, direction, from_address, to_addresses, body_text, attachments, sent_at').in('thread_id', ids).order('sent_at', { ascending: false }));
+      if (ids.length) ({ data: msgs } = await supabaseClient.from('emails').select('id, thread_id, direction, from_address, to_addresses, body_text, attachments, sent_at, created_by').in('thread_id', ids).order('sent_at', { ascending: false }));
       const byThread = {}; (msgs || []).forEach(m => { (byThread[m.thread_id] ||= []).push(m); });
       const sorted = (links || []).slice().sort((a, b) => String(b.email_threads?.last_message_at).localeCompare(String(a.email_threads?.last_message_at)));
       // review requests sent from this job, and what came back
@@ -4593,11 +4668,20 @@
         const atts = list.flatMap(m => (m.attachments || []).filter(a => !(a.inline && a.cid)).map(a => ({ m, a })));
         const snippet = last ? String(last.body_text || '').replace(/\s+/g, ' ').trim().slice(0, 180) : '';
         const out = last && last.direction === 'outbound';
+        const st = jobThreadStatus(thread, last);
+        const others = (jobEmailStaff || []).filter(s => s.active && s.id !== thread.assigned_to);
         return `<div class="card" style="margin:0 0 10px;" data-link="${l.id}">
           <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
             <div style="min-width:0;"><strong>${escapeHtml(thread.subject || '(no subject)')}</strong>
               <span style="font-size:11px; padding:2px 8px; border:1px solid var(--accent); border-radius:20px; margin-left:6px;">${EMAIL_KINDS[l.kind] || 'Other'}</span></div>
             <span class="subtitle" style="margin:0; font-size:12px;">${thread.last_message_at ? new Date(thread.last_message_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : ''}</span>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; font-size:12px;">
+            ${st ? `<span style="color:${st.colour}; font-weight:700;">${escapeHtml(st.text)}</span>` : ''}
+            <select class="job-email-assign" data-t="${thread.id}" style="width:auto; font-size:12px; padding:3px 8px;" title="Who is handling this conversation">
+              <option value="">${thread.assigned_to ? 'Nobody (unassign)' : 'Assign to...'}</option>
+              ${others.map(s => `<option value="${s.id}">${s.id === jobEmailMe ? 'Me' : escapeHtml(s.full_name || '')}</option>`).join('')}
+            </select>
           </div>
           ${l.note ? `<p class="subtitle" style="margin:4px 0 0;">Note: ${escapeHtml(l.note)}</p>` : ''}
           ${last ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">${out ? 'Last sent to ' + escapeHtml((last.to_addresses || [])[0] || 'unknown') : 'Last received from ' + escapeHtml(String(last.from_address || '').replace(/<.*>/, '').trim() || 'unknown')}: ${escapeHtml(snippet)}${snippet.length >= 180 ? '...' : ''}</p>` : ''}
@@ -4623,6 +4707,10 @@
       el.querySelectorAll('.job-email-untag').forEach(btn => btn.addEventListener('click', async () => {
         if (!confirm('Take this email off the job? The email itself is not deleted.')) return;
         await supabaseClient.from('email_job_links').delete().eq('id', btn.dataset.link);
+        loadJobEmails(project);
+      }));
+      el.querySelectorAll('.job-email-assign').forEach(sel => sel.addEventListener('change', async () => {
+        try { await emailAction('assign', { thread_id: sel.dataset.t, user_id: sel.value || null }); } catch (err) { alert(err.message); }
         loadJobEmails(project);
       }));
     }
@@ -5180,7 +5268,7 @@
                   ${tPhotos.length ? `<div class="jt-photos">${tPhotos.map(p => isVideoUrl(p.url)
                     ? `<a href="${escapeHtml(p.url)}" target="_blank" rel="noopener" class="jt-photo jt-video">&#9654;</a>`
                     : `<img src="${supaImageVariant(p.url, 200, 60)}" class="jt-photo" data-act="task-photo-view" data-id="${t.id}" data-url="${escapeHtml(p.url)}" alt="" />`).join('')}</div>` : ''}
-                  <label class="secondary jt-photo-btn" style="display:inline-block; margin-top:4px; cursor:pointer;">&#128247; Take photo<input type="file" accept="image/*" capture="environment" class="jt-photo-input" data-id="${t.id}" style="display:none;" /></label>
+                  <label class="secondary jt-photo-btn" style="display:inline-block; margin-top:4px; cursor:pointer;">&#128247; Add photo<input type="file" accept="image/*" multiple class="jt-photo-input" data-id="${t.id}" style="display:none;" /></label>
                 </div>
                 ${(() => {
                   // Move: a subtask to another task (or out on its own); a
@@ -5355,7 +5443,7 @@
             await reload();
           } catch (err) {
             alert('Could not save the photo: ' + err.message);
-            label.firstChild.textContent = 'Take photo ';
+            label.firstChild.textContent = 'Add photo ';
           }
           return;
         }
@@ -6015,19 +6103,43 @@
       if (!el || !project.job_number || typeof openAssetPanel !== 'function') return;
       const { data: assets } = await supabaseClient.from('customer_assets').select('*').eq('project_id', project.id).order('created_at');
       const finished = ['client_handover', 'ready_to_invoice', 'awaiting_payment', 'complete', 'archived'].includes(project.pipeline_stage);
-      const refresh = () => loadAssetsCard(project);
-      const addFromJob = () => {
+      const refresh = (synced) => {
+        if (synced) {
+          Object.assign(project, synced);
+          const panelEl = document.getElementById('hd-panel-serials');
+          if (panelEl && synced.panel_serial_numbers !== undefined) panelEl.value = synced.panel_serial_numbers;
+          const invEl = document.getElementById('hd-inverter-serials');
+          if (invEl && synced.inverter_serial_numbers !== undefined) invEl.value = synced.inverter_serial_numbers;
+          const hdMsg = document.getElementById('hd-save-msg');
+          if (hdMsg) hdMsg.innerHTML = `<div class="success-box">Serial numbers updated from Installed equipment.</div>`;
+        }
+        return loadAssetsCard(project);
+      };
+      const addFromJob = (e) => {
         const queue = assetPrefillsForJob(project);
-        const next = () => { if (queue.length) openAssetPanel({ prefill: queue.shift(), onSaved: async () => { await refresh(); next(); } }); };
-        next();
+        const total = queue.length;
+        const next = (trigger) => {
+          if (!queue.length) return;
+          // A panel is already open or opening (Skip tapped during a save): do not drop the next item
+          if ((typeof assetPanelOpening !== 'undefined' && assetPanelOpening) || document.getElementById('asset-panel')) return;
+          const prefill = queue.shift();
+          openAssetPanel({
+            prefill,
+            trigger,
+            progress: { n: total - queue.length, total },
+            onCancel: queue.length ? () => next(trigger) : null,
+            onSaved: (synced) => { next(trigger); return refresh(synced); },
+          });
+        };
+        next(e.currentTarget);
       };
       el.innerHTML = `
         <div class="card" ${finished && !(assets || []).length ? 'style="border-color:var(--accent);"' : ''}>
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
             <h2 style="margin:0;">Installed equipment</h2>
             <div style="display:flex; gap:6px;">
-              <button type="button" class="secondary" id="assets-add-blank" style="font-size:12px; padding:6px 10px;">+ Add</button>
-              <button type="button" id="assets-add-job" style="font-size:12px; padding:6px 10px;">${(assets || []).length ? 'Add more from this job' : 'Add installed equipment'}</button>
+              <button type="button" class="secondary" id="assets-add-blank" style="min-height:44px;">+ Add</button>
+              <button type="button" id="assets-add-job" style="min-height:44px;">${(assets || []).length ? 'Add more from this job' : 'Add installed equipment'}</button>
             </div>
           </div>
           ${(assets || []).length ? `
@@ -6042,9 +6154,9 @@
                 </tr>`).join('')}</tbody>
             </table>` : `<p class="subtitle" style="margin:0;">Nothing recorded yet. Add what was installed (with serial numbers and warranty) so we can remind ${escapeHtml(project.client_name || 'the customer')} when a service is due or the warranty is running out.</p>`}
         </div>`;
-      document.getElementById('assets-add-blank').addEventListener('click', () => openAssetPanel({ prefill: { client_id: project.client_id || null, client_name: project.client_name, site_address: project.client_address, project_id: project.id, installed_at: assetToday() }, onSaved: refresh }));
+      document.getElementById('assets-add-blank').addEventListener('click', (e) => openAssetPanel({ prefill: { client_id: project.client_id || null, client_name: project.client_name, site_address: project.client_address, project_id: project.id, installed_at: assetToday() }, trigger: e.currentTarget, onSaved: refresh }));
       document.getElementById('assets-add-job').addEventListener('click', addFromJob);
-      el.querySelectorAll('.job-asset-edit').forEach(b => b.addEventListener('click', () => openAssetPanel({ asset: assets.find(a => a.id === b.dataset.id), onSaved: refresh })));
+      el.querySelectorAll('.job-asset-edit').forEach(b => b.addEventListener('click', (e) => openAssetPanel({ asset: assets.find(a => a.id === b.dataset.id), trigger: e.currentTarget, onSaved: refresh })));
     }
 
     // Per-job log of out-of-scope work (job_variation_entries), two kinds:

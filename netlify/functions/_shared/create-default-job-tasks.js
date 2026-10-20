@@ -70,7 +70,7 @@ async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
     hasAccreditedStaff:
       (licences || []).some((l) => /saa|accreditation/i.test(l.licence_name || '')) &&
       (licences || []).some((l) => /electrical/i.test(l.licence_name || '')),
-    hasComplianceCertDoc: false, // no documents exist yet on a job this fresh
+    hasComplianceCertDoc: false, // legacy folder check; a fresh job has no CCEW yet, so the Upload the CCEW task is always created
     hasOwnerDeclarationDoc: false,
   };
   const handoverMissing = evaluate('handover', ctx).filter((r) => !r.met);

@@ -64,10 +64,11 @@ const HANDOVER_RULES = [
     label: 'Confirm the installer/designer\'s SAA accreditation number and electrical licence number are on file (Settings > Team)',
     check: (ctx) => ctx.hasAccreditedStaff,
   },
+  // Reads projects.ccew_file_path (the Compliance - CCEW card on the job Summary tab); hasComplianceCertDoc only keeps a pre-card project_documents folder passing.
   {
     id: 'compliance_certificate_uploaded',
-    label: 'Upload the signed electrical safety compliance certificate',
-    check: (ctx) => ctx.hasComplianceCertDoc,
+    label: 'Upload the CCEW',
+    check: (ctx) => !!ctx.project.ccew_file_path || !!(ctx.project.ccew_not_required_reason || '').trim() || !!ctx.hasComplianceCertDoc,
   },
   {
     id: 'owner_stc_declaration',

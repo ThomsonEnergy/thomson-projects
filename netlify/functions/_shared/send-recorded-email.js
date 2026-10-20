@@ -82,7 +82,9 @@ async function sendRecordedEmail(admin, opts) {
   }).select('id').single();
   if (emailErr) throw emailErr;
 
-  await admin.from('email_threads').update({ last_message_at: nowIso, last_direction: 'outbound', is_read: true }).eq('id', thread.id);
+  // sending claims an unclaimed conversation for the sender, so the team sees who has it
+  const claim = !thread.assigned_to && senderId ? { assigned_to: senderId, assigned_by: senderId, assigned_at: nowIso } : {};
+  await admin.from('email_threads').update({ last_message_at: nowIso, last_direction: 'outbound', is_read: true, ...claim }).eq('id', thread.id);
 
   if (tagProjectId && UUID.test(tagProjectId)) {
     // already tagged to that job? leave the existing tag as it is

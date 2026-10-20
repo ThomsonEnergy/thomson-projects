@@ -27,6 +27,7 @@
 // written to ServiceM8.
 
 const crypto = require('crypto');
+const { resolveClientSite } = require('./_shared/client-sites');
 const { requireAdmin } = require('./_shared/require-admin');
 const { stageFromLines, stcsText } = require('./_shared/sm8-import');
 
@@ -47,7 +48,7 @@ function tierFor(tierIds, description) {
 async function resolveClient(supabaseAdmin, row) {
   if (row.clientId && row.clientId !== 'new') {
     const { data: client, error } = await supabaseAdmin
-      .from('clients').select('id, name, email, phone, sm8_company_uuid').eq('id', row.clientId).maybeSingle();
+      .from('clients').select('id, name, email, phone, address, sm8_company_uuid').eq('id', row.clientId).maybeSingle();
     if (error) throw error;
     if (!client) throw new Error('The chosen client no longer exists - re-run the preview');
     // Remember the link so a later run matches straight to this client. A
@@ -63,7 +64,7 @@ async function resolveClient(supabaseAdmin, row) {
   // (several open jobs for the same ServiceM8 company).
   if (row.companyUuid) {
     const { data: existing } = await supabaseAdmin
-      .from('clients').select('id, name, email, phone').eq('sm8_company_uuid', row.companyUuid).maybeSingle();
+      .from('clients').select('id, name, email, phone, address').eq('sm8_company_uuid', row.companyUuid).maybeSingle();
     if (existing) return existing;
   }
 
@@ -76,7 +77,7 @@ async function resolveClient(supabaseAdmin, row) {
       address: str(row.companyAddress, 500) || str(row.siteAddress, 500) || null,
       sm8_company_uuid: row.companyUuid || null,
     })
-    .select('id, name, email, phone')
+    .select('id, name, email, phone, address')
     .single();
   if (error) throw error;
   return created;
@@ -148,6 +149,7 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
       client_email: client.email || str(row.clientEmail, 300) || null,
       client_phone: client.phone || str(row.clientPhone, 100) || null,
       client_address: str(row.siteAddress, 500) || null,
+      client_site_id: await resolveClientSite(supabaseAdmin, client.id, str(row.siteAddress, 500), client.address),
       // new_build: the general quoted electrical job, invoiced as a share
       // of its quoted value ("Invoice project"). direct_job: invoiced from
       // actual time and materials.

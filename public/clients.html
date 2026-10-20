@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
 </head>
@@ -78,8 +78,9 @@
             </div>
             <div class="grid cols-3">
               <div style="grid-column: span 2;">
-                <label>Address</label>
+                <label>Office / billing address</label>
                 <input id="c-address" />
+                <p class="subtitle" style="margin:4px 0 0; font-size:11px;">Used on invoices, quote covers and the Xero contact. Where the work happens goes under Sites below; a job never changes this address.</p>
               </div>
               <div>
                 <label>ABN</label>
@@ -111,6 +112,11 @@
             <label>Contacts</label>
             <div id="contacts-rows"></div>
             <button type="button" class="secondary" id="add-contact-btn" style="font-size:12px; padding:6px 12px;">+ Add contact</button>
+
+            <label>Sites</label>
+            <p class="subtitle" style="margin:0 0 6px; font-size:11px;">Places this client has work done, other than the office address. A new site address on a job is added here by itself. Removing a site keeps the address on its jobs.</p>
+            <div id="sites-rows"></div>
+            <button type="button" class="secondary" id="add-site-btn" style="font-size:12px; padding:6px 12px;">+ Add site</button>
 
             <div style="margin-top:16px;">
               <button id="save-client-btn">Save client</button>
@@ -168,7 +174,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=99"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allClients = [];
@@ -216,6 +222,27 @@
     }
     document.getElementById('add-contact-btn').addEventListener('click', () => addContactRow());
 
+    // --- sites sub-form (client_sites) ---
+    function addSiteRow({ id = '', label = '', address = '', jobs = 0 } = {}) {
+      const row = document.createElement('div');
+      row.className = 'site-row';
+      row.dataset.id = id;
+      row.dataset.jobs = jobs;
+      row.style.cssText = 'display:grid; grid-template-columns:1fr 2.4fr auto auto; gap:8px; margin-bottom:6px; align-items:center;';
+      row.innerHTML = `
+        <input class="st-label" placeholder="Label (e.g. Warehouse)" value="${escapeHtml(label)}" style="font-size:13px;" />
+        <input class="st-address" placeholder="Site address" value="${escapeHtml(address)}" style="font-size:13px;" />
+        <span class="subtitle" style="font-size:12px; white-space:nowrap;">${jobs ? jobs + ' job' + (jobs === 1 ? '' : 's') : ''}</span>
+        <button type="button" class="secondary st-remove" style="padding:6px 10px; font-size:12px;">x</button>
+      `;
+      row.querySelector('.st-remove').addEventListener('click', () => {
+        if (jobs && !confirm(`${jobs} job${jobs === 1 ? ' uses' : 's use'} this site. The jobs keep their address; the site just drops off this list. Remove it?`)) return;
+        row.remove();
+      });
+      document.getElementById('sites-rows').appendChild(row);
+    }
+    document.getElementById('add-site-btn').addEventListener('click', () => addSiteRow());
+
     function resetEditForm() {
       editingClientId = null;
       document.getElementById('edit-heading').textContent = 'New client';
@@ -228,6 +255,7 @@
       document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
       document.getElementById('contacts-rows').innerHTML = '';
+      document.getElementById('sites-rows').innerHTML = '';
       document.getElementById('delete-client-btn').style.display = 'none';
       document.getElementById('save-client-msg').innerHTML = '';
       addContactRow();
@@ -356,7 +384,7 @@
     // --- list + search ---
     async function loadClients() {
       const listEl = document.getElementById('clients-list');
-      const { data, error } = await supabaseClient.from('clients').select('*, client_contacts(*)').order('name');
+      const { data, error } = await supabaseClient.from('clients').select('*, client_contacts(*), client_sites(*)').order('name');
       if (error) {
         listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
         return;
@@ -375,7 +403,7 @@
         <div class="project-list-item" data-id="${c.id}" style="cursor:pointer;">
           <div>
             <div class="name">${escapeHtml(c.name)}</div>
-            <div class="meta">${[escapeHtml(c.email), escapeHtml(c.phone), mapsLink(c.address)].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}</div>
+            <div class="meta">${[escapeHtml(c.email), escapeHtml(c.phone), mapsLink(c.address)].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}${(c.client_sites || []).length ? ' &middot; ' + c.client_sites.length + ' site' + (c.client_sites.length === 1 ? '' : 's') : ''}</div>
           </div>
           <div style="text-align:right;">
             <span class="badge draft">${escapeHtml((c.payment_terms || 'cod').replace('_', ' ').toUpperCase())}</span>
@@ -398,9 +426,12 @@
       ));
     });
 
-    function openClientForEdit(id) {
+    async function openClientForEdit(id) {
       const c = allClients.find(x => x.id === id);
       if (!c) return;
+      const { data: siteJobs } = await supabaseClient.from('projects').select('client_site_id').eq('client_id', c.id).not('client_site_id', 'is', null);
+      const jobsPerSite = {};
+      (siteJobs || []).forEach(j => { jobsPerSite[j.client_site_id] = (jobsPerSite[j.client_site_id] || 0) + 1; });
       editingClientId = c.id;
       document.getElementById('edit-heading').textContent = 'Edit client';
       document.getElementById('c-name').value = c.name || '';
@@ -414,6 +445,9 @@
       document.getElementById('contacts-rows').innerHTML = '';
       (c.client_contacts || []).forEach(addContactRow);
       if (!(c.client_contacts || []).length) addContactRow();
+      document.getElementById('sites-rows').innerHTML = '';
+      (c.client_sites || []).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+        .forEach(st => addSiteRow({ id: st.id, label: st.label || '', address: st.address || '', jobs: jobsPerSite[st.id] || 0 }));
       document.getElementById('delete-client-btn').style.display = 'inline-flex';
       document.getElementById('save-client-msg').innerHTML = '';
       showEditTab();
@@ -465,6 +499,29 @@
         const { error: contactErr } = await supabaseClient.from('client_contacts').insert(contacts);
         if (contactErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(contactErr.message)}</div>`; return; }
       }
+
+      // Sites keep their ids (jobs link to them): existing rows are updated, new rows added,
+      // rows taken off the form deleted (their jobs keep the address text).
+      const siteRows = [...document.querySelectorAll('.site-row')].map(row => ({
+        id: row.dataset.id || null,
+        label: row.querySelector('.st-label').value.trim() || null,
+        address: row.querySelector('.st-address').value.trim(),
+      })).filter(st => st.address);
+      const before = editingClientId ? (allClients.find(x => x.id === editingClientId)?.client_sites || []) : [];
+      const keptIds = siteRows.filter(st => st.id).map(st => st.id);
+      const removedIds = before.map(st => st.id).filter(id => !keptIds.includes(id));
+      const siteErrors = [];
+      if (removedIds.length) {
+        const { error } = await supabaseClient.from('client_sites').delete().in('id', removedIds);
+        if (error) siteErrors.push(error.message);
+      }
+      for (const st of siteRows) {
+        const { error } = st.id
+          ? await supabaseClient.from('client_sites').update({ label: st.label, address: st.address }).eq('id', st.id)
+          : await supabaseClient.from('client_sites').insert({ client_id: clientId, label: st.label, address: st.address });
+        if (error) siteErrors.push(/client_sites_client_address_uidx/.test(error.message) ? `"${st.address}" is already a site for this client.` : error.message);
+      }
+      if (siteErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a site did not: ${escapeHtml(siteErrors.join('; '))}</div>`; await loadClients(); return; }
 
       await loadClients();
       document.querySelector('.settings-tab[data-panel="list"]').click();

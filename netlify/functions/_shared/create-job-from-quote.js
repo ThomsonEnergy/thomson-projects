@@ -153,6 +153,7 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
       client_email: quote.client_email,
       client_phone: quote.client_phone,
       client_address: quote.client_address,
+      client_site_id: quote.client_site_id,
       sow_text: quote.sow_text,
       installer_summary: quote.installer_summary,
       installer_summary_generated_at: quote.installer_summary_generated_at,

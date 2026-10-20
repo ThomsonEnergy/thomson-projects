@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -58,8 +58,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=99"></script>
-  <script src="/js/email-compose.js?v=5"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
+  <script src="/js/email-compose.js?v=6"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allPos = [];
@@ -69,7 +69,7 @@
       const listEl = document.getElementById('po-full-list');
       const { data, error } = await supabaseClient
         .from('purchase_orders')
-        .select('*, purchase_order_line_items(*), suppliers(name), projects(name, job_number), fleet_vehicles(vehicle_name, rego)')
+        .select('*, purchase_order_line_items(*), suppliers(name), projects(name, job_number), fleet_vehicles!vehicle_id(vehicle_name, rego)')
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       allPos = data || [];

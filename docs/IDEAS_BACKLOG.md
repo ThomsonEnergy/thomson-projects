@@ -19,7 +19,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
-| 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; delivery 1 (top ten) LIVE 19 Oct 2026, next delivery 2 (`docs/UX_REVIEW.md`) | N | None |
+| 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 (top ten) and 2 (items 1 to 30) LIVE 19 Oct 2026, next delivery 3 (`docs/UX_REVIEW.md`) | N | None |
 | 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Built 19 Oct 2026, LIVE (spec A32) | N | None |
 
 ## High lead time, start now
@@ -215,7 +215,7 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 - My inbox: connect from Inbox > My inbox with Google sign-in (same internal OAuth app, own refresh token per user, service-role only table), open to all staff. Workplace Surveillance Act notice first: agree (waives the 14 days) connects now, don't agree locks Connect for 14 days. Private to that user; only threads tagged to a job show on the job.
 - Clean up for big old inboxes (owner has 23,613 unread): whole-inbox scan by sender, agent suggests archive / look / keep, one tap per sender. Full load of every old email was not done (slow and costly); 60 days are loaded in full.
 - Sections, sorted by the triage agent (Gmail category labels and unsubscribe headers first, AI for the rest): **Priority** (agent flagged "you need to reply", with a one-line reason), **Other**, **Subscriptions and updates** (newsletters, receipts, notifications, marketing; skim when free to check nothing was missed), **Sent**, **All**. One tap moves a thread to another section; "always do this for this sender" saves a sender rule.
-- Labels like Gmail: job threads keep job tagging (`email_job_links`); non-job matters get labels (for example "Supplier dispute: X", "Electrical licence application"). Labels sidebar with counts, open/done per label. Agent applies existing labels when sure, suggests new ones for a person to confirm. Sales inbox labels are team labels, My inbox labels are private.
+- Labels like Gmail: job threads keep job tagging (`email_job_links`); non-job matters get labels (for example "Supplier dispute: X", "Electrical licence application"). Labels sidebar with counts, open/done per label. Agent applies existing labels when sure, suggests new ones for a person to confirm. Sales inbox labels are team labels, My inbox labels are private. Built 20 Oct 2026: label sweeps over the last 60 days, agent-made labels (per-inbox switch), who-has-it (replied by, I've got this, assign) and the Tagged to jobs view (spec A18).
 - Drafts: agent drafts replies for Priority threads. Draft shows inline at the bottom of its thread (edit, Send, Discard) and in a **Drafts** list in the top corner with a count. Nothing sends without a click.
 - Migration planned: mailboxes table, `mailbox_id` on threads (sales@ backfilled), triage section and reason, labels and thread labels, drafts, sender rules. RLS changes so My inbox threads are private.
 
@@ -447,7 +447,7 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 
 ## 17. User-friendliness upgrades (whole-app review, 19 Oct 2026)
 
-**Status:** owner said yes to building all 168 (19 Oct 2026). Delivery 1 (the top ten) LIVE 19 Oct 2026; next is delivery 2. Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
+**Status:** owner said yes to building all 168 (19 Oct 2026). Delivery 1 (the top ten) and delivery 2 (items 1 to 30) LIVE 19 Oct 2026; next is delivery 3 (items 31 to 82). Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
 
 **Do first (top ten, best first):**
 62. Inputs are 14px so iPhones zoom on every tap
@@ -462,6 +462,8 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 5. Field staff cannot report an incident from site
 
 **Delivery plan (agreed 19 Oct 2026):** build all 168, in about six deliveries by theme so each lands and gets tested on its own: (1) the top ten plus the shared pieces later items reuse; (2) items 1 to 30 (clock in, My Day, schedule, tasks, finishing a job); (3) 31 to 82 (job page, feedback and saving, phone layout); (4) 83 to 109 (navigation, speed); (5) 110 to 146 (invoicing and Xero, office and public pages); (6) 147 to 168 (login, chat, inbox, settings, HR). Delivery 1 LIVE 19 Oct 2026 (migration 20261104000000_report_incident.sql for item 5). Next: delivery 2, plan then owner's yes.
+
+**Follow-up from delivery 2 (LIVE 20 Oct 2026, migration 20261106000000):** `book_back_after_clockout(p_project_id, p_date)` security definer function so Staff-role tradies can be booked back on a job they clocked out of today; checks the caller clocked out of that job today (Sydney), skips if already booked that day, inserts 07:00 to 15:00. Client calls it instead of the direct insert.
 
 **Themes (item numbers in docs/UX_REVIEW.md):**
 - Clock in, My Day, schedule, timesheets and tasks: items 1 to 18

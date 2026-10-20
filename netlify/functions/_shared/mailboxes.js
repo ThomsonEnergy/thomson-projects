@@ -81,6 +81,7 @@ async function ensureGmailLabel(admin, mailbox, label) {
       gl = (list.labels || []).find((l) => l.name.toLowerCase() === name.toLowerCase());
       if (!gl) throw err;
     }
+    label.gmail_label_id = gl.id; // the same label object is reused across a batch or a sweep
     await admin.from('email_labels').update({ gmail_label_id: gl.id }).eq('id', label.id);
     return gl.id;
   });
