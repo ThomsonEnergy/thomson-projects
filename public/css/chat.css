@@ -155,4 +155,5 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 @media (pointer: coarse) {
   .cm-link { padding: 0 10px; font-size: 13px; }
   .cm-more { min-height: 0; }
+  .cc-x { min-height: 0; }
 }

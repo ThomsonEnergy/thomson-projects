@@ -303,6 +303,8 @@ body {
 /* Bar collapsed (every phone): Log out leaves the top bar and becomes the
    last row of the menu (renderMainNav in supabase-client.js adds the row). */
 .topbar.nav-collapsed #logout-link { display: none; }
+/* Very narrow phones (320px): the five 44px icons leave no room for the wordmark */
+@media (max-width: 359px) { .topbar.nav-collapsed .topbar-logo { display: none; } }
 .mobile-menu-dropdown a.nav-logout { display: none; color: var(--red); }
 .topbar.nav-collapsed .mobile-menu-dropdown a.nav-logout { display: flex; }
 

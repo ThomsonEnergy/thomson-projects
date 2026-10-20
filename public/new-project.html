@@ -1179,7 +1179,7 @@
             if (firstStage) flagRequiredField(firstStage, 'Name at least one stage.');
             else flagRequiredField(document.getElementById('add-row'), 'Add at least one stage.');
           }
-          msg.innerHTML = `<div class="error-box">Fill in the fields marked * (the first one is highlighted above).</div>`;
+          msg.innerHTML = `<div class="error-box">${(!name || !client_name) ? 'Fill in the fields marked * (the first one is highlighted above).' : 'Name at least one stage (highlighted above).'}</div>`;
           return;
         }
 
