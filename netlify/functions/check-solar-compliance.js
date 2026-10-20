@@ -31,7 +31,7 @@ exports.handler = async (event) => {
     const [{ data: project, error: projErr }, { data: docs }, { data: licences }] = await Promise.all([
       supabaseAdmin.from('projects').select('*, cost_centres(*)').eq('id', projectId).single(),
       supabaseAdmin.from('project_documents').select('folder').eq('project_id', projectId),
-      supabaseAdmin.from('profile_licences').select('licence_name, profiles!inner(active)').eq('profiles.active', true),
+      supabaseAdmin.from('profile_licences').select('licence_name, profiles!profile_licences_profile_id_fkey!inner(active)').eq('profiles.active', true),
     ]);
     if (projErr || !project) throw projErr || new Error('Project not found');
 
