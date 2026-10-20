@@ -2190,6 +2190,7 @@ const MAIN_NAV_ITEMS = [
   // Purchases
   { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html', icon: '&#128230;', group: 'purchases' },
   { key: 'stock', label: 'Stock', href: '/stock.html', icon: '&#128736;', group: 'purchases' },
+  { key: 'tools', label: 'Tools', href: '/tools.html', icon: '&#9874;', group: 'purchases' },
   { key: 'fleet', label: 'Vehicles', href: '/fleet.html', icon: '&#128666;', group: 'purchases' },
   { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;', group: 'purchases' },
   { key: 'support', label: 'Tech Support', href: '/support.html', icon: '&#128222;', group: 'purchases' },
@@ -4234,7 +4235,7 @@ async function checkAndAdvanceHandover(projectId) {
 // Mirrors advance-job-stage.js's server-side logic (run right after a
 // deposit is paid) - re-checked any time a required-before-scheduling
 // task is completed or a new one is added, but only while the job
-// hasn't been scheduled yet (awaiting_action/ready_to_book). Once it's
+// hasn't been scheduled yet (awaiting_action/ready_to_book; awaiting_client_action is hand-moved only). Once it's
 // actually job_booked or further along, a task change shouldn't silently
 // move it backwards - see PROJECT_SPEC/the job-not-complete flow for
 // how a job returns to awaiting_action deliberately instead.
@@ -5369,43 +5370,47 @@ function poLineMoney(li) {
 }
 
 function poPlaceLabel(type) {
-  return type === 'job' ? 'Job' : type === 'vehicle' ? 'Vehicle' : 'Warehouse';
+  return type === 'job' ? 'Job' : type === 'vehicle' ? 'Vehicle' : type === 'tools' ? 'Tools register' : 'Warehouse';
 }
+function poLineIsTool(li, po) { return !!(li.is_tool || (po && po.po_kind === 'tools')); }
 
 function renderPoLineItemsReceivable(po, canEdit) {
   const items = po.purchase_order_line_items || [];
   const btn = (cls, li, text) => `<button type="button" class="secondary btn-sm ${cls}" data-line-id="${li.id}">${text}</button>`;
   // only the roles that can add Stock items (role not loaded yet: shown, and the server checks)
   const canAddStock = canEdit && (!_cachedRole || isPricingRole(_cachedRole));
-  const addStock = (li) => (canAddStock && !li.material_id && Number(li.quantity) > 0) ? btn('add-line-to-stock-btn', li, '+ Add to Stock') : '';
+  const addStock = (li) => (canAddStock && !li.material_id && Number(li.quantity) > 0 && !poLineIsTool(li, po)) ? btn('add-line-to-stock-btn', li, '+ Add to Stock') : '';
+  // a line marked as a tool lands in the Tools register when received (pricing roles mark or unmark it)
+  const toolChip = (li) => poLineIsTool(li, po) ? `<span class="badge draft" style="margin-left:6px;" title="Goes to the Tools register, not the job or stock">${li.tool_kind === 'perishable' ? 'Perishable' : 'Tool'}</span>` : '';
+  const toolBtn = (li) => (canAddStock && !po.stock_source && !po.closed_at && po.po_kind !== 'tools') ? btn('tool-line-btn', li, li.is_tool ? 'Not a tool' : 'Tool?') : '';
   const rows = items.map(li => {
     if (li.received) {
       return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
-        <span>${escapeHtml(li.description)} - ${poLineMoney(li)}</span>
+        <span>${escapeHtml(li.description)} - ${poLineMoney(li)}${toolChip(li)}</span>
         <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
           <span class="badge accepted">Received - ${poPlaceLabel(li.destination_type)}</span>
           ${po.stock_source && !(Number(li.unit_cost) > 0) ? '<span class="badge draft" style="color:var(--red);" title="Added from site without a price. Price it on the Stock page and this line takes the price.">Needs a price</span>' : ''}
-          ${canEdit ? btn('move-line-item-btn', li, 'Move') + btn('undo-receive-line-item-btn', li, 'Undo received') : ''}
-          ${addStock(li)}
+          ${canEdit ? (li.destination_type === 'tools' ? '' : btn('move-line-item-btn', li, 'Move')) + btn('undo-receive-line-item-btn', li, 'Undo received') : ''}
+          ${addStock(li)}${toolBtn(li)}
         </span>
       </div>`;
     }
     const etaLabel = li.backorder_eta ? new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : null;
     return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
-      <span>${escapeHtml(li.description)} - ${poLineMoney(li)}
+      <span>${escapeHtml(li.description)} - ${poLineMoney(li)}${toolChip(li)}
         ${li.is_backordered ? `<span class="badge draft" style="margin-left:6px;">Backordered${etaLabel ? ' - ETA ' + etaLabel : ''}</span>` : ''}
       </span>
       ${canEdit ? `
         <span style="display:flex; gap:6px; flex-wrap:wrap;">
           ${btn('receive-line-item-btn', li, 'Receive')}
           ${btn('backorder-line-item-btn', li, li.is_backordered ? 'Update backorder' : 'Mark backordered')}
-          ${btn('move-line-item-btn', li, 'Move')}
-          ${addStock(li)}
+          ${poLineIsTool(li, po) ? '' : btn('move-line-item-btn', li, 'Move')}
+          ${addStock(li)}${toolBtn(li)}
         </span>` : '<span class="subtitle small">Not yet received</span>'}
     </div>`;
   }).join('');
   // One button to receive every open line to the job (job POs only, two or more lines left)
-  const toReceive = items.filter(li => !li.received && !li.is_backordered);
+  const toReceive = items.filter(li => !li.received && !li.is_backordered && !poLineIsTool(li, po));
   const jobRef = po.projects && po.projects.job_number ? 'J' + po.projects.job_number : 'the job';
   const receiveAllHtml = canEdit && po.project_id && !po.vehicle_id && !po.closed_at && toReceive.length > 1
     ? `<div style="margin-top:8px;"><button type="button" class="receive-all-po-btn" data-po-id="${escapeHtml(po.id)}">Receive all ${toReceive.length} to ${escapeHtml(jobRef)}</button></div>`
@@ -5434,6 +5439,17 @@ function wireReceiveLineItemButtons(containerEl, allPos, defaultDestinationFor, 
   wire('.move-line-item-btn', (li, po) => openMoveLineItemPanel(li, po, onComplete));
   wire('.undo-receive-line-item-btn', (li, po) => openUndoReceivePanel(li, po, onComplete));
   wire('.add-line-to-stock-btn', (li, po) => openAddLineToStockPanel(li, po, onComplete));
+  wire('.tool-line-btn', async (li, po) => {
+    let kind = 'tool';
+    if (!li.is_tool) {
+      const answer = prompt(`"${li.description}": is it a tool, or a perishable (drill bits, blades)? Type tool or perishable.`, 'tool');
+      if (answer === null) return;
+      kind = /^p/i.test(answer.trim()) ? 'perishable' : 'tool';
+    } else if (!confirm(`"${li.description}" is no longer a tool? It goes back to ${po.project_id ? "the job's costs" : 'stock'} when received.`)) return;
+    const { error } = await supabaseClient.rpc('po_line_set_tool', { p_line_id: li.id, p_is_tool: !li.is_tool, p_kind: kind });
+    if (error) { alert(friendlyError(error)); return; }
+    if (onComplete) await onComplete();
+  });
   containerEl.querySelectorAll('.receive-all-po-btn').forEach(btn => btn.addEventListener('click', () => {
     const po = allPos.find(p => p.id === btn.dataset.poId);
     if (po) receiveAllPoLines(po, btn, onComplete);
@@ -5505,14 +5521,16 @@ async function poJobLabel(projectId) {
 async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComplete) {
   const vehicles = await stockVehicles();
   const jobLabel = await poJobLabel(po.project_id);
+  const isTool = poLineIsTool(lineItem, po);
   const overlay = poOverlay(`
     <h2>Receive item</h2>
-    <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}</p>
+    <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}${isTool ? ' (a ' + (lineItem.tool_kind === 'perishable' ? 'perishable' : 'tool') + ': it lands in the Tools register, not stock or the job)' : ''}</p>
     <label style="margin-top:0">Send to</label>
     <select id="rl-dest-type">
+      ${isTool ? `<option value="tools">Tools register, at the Warehouse</option>${vehicles.length ? '<option value="tools_vehicle">Tools register, in a vehicle</option>' : ''}` : `
       ${po.project_id ? `<option value="job">This job (${escapeHtml(jobLabel)})</option>` : '<option value="otherjob">A job</option>'}
       <option value="warehouse">Warehouse</option>
-      ${vehicles.length ? '<option value="vehicle">A vehicle</option>' : ''}
+      ${vehicles.length ? '<option value="vehicle">A vehicle</option>' : ''}`}
     </select>
     <div id="rl-job-section" style="display:none; margin-top:8px;">
       <input id="rl-job-search" placeholder="Search for the job..." autocomplete="off" />
@@ -5529,11 +5547,11 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
     <div id="rl-msg"></div>`);
 
   const destSel = overlay.querySelector('#rl-dest-type');
-  const wanted = defaultDestination === 'job' ? (po.project_id ? 'job' : 'otherjob') : defaultDestination;
+  const wanted = isTool ? (po.vehicle_id ? 'tools_vehicle' : 'tools') : defaultDestination === 'job' ? (po.project_id ? 'job' : 'otherjob') : defaultDestination;
   if ([...destSel.options].some(o => o.value === wanted)) destSel.value = wanted;
   function syncSections() {
     overlay.querySelector('#rl-job-section').style.display = destSel.value === 'otherjob' ? 'block' : 'none';
-    overlay.querySelector('#rl-vehicle-section').style.display = destSel.value === 'vehicle' ? 'block' : 'none';
+    overlay.querySelector('#rl-vehicle-section').style.display = (destSel.value === 'vehicle' || destSel.value === 'tools_vehicle') ? 'block' : 'none';
   }
   destSel.addEventListener('change', syncSections);
   syncSections();
@@ -5545,8 +5563,8 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
     const btn = overlay.querySelector('#rl-confirm-btn');
     const label = btn.textContent;
     const msg = overlay.querySelector('#rl-msg');
-    const dest = destSel.value;
-    const vehicleId = dest === 'vehicle' ? overlay.querySelector('#rl-vehicle-select').value : null;
+    const dest = destSel.value === 'tools_vehicle' ? 'tools' : destSel.value;
+    const vehicleId = (destSel.value === 'vehicle' || destSel.value === 'tools_vehicle') ? overlay.querySelector('#rl-vehicle-select').value : null;
     btn.disabled = true; btn.textContent = 'Saving...';
     try {
       let error;
@@ -5566,7 +5584,7 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
 // Receive every open line on a job PO to the job, one server call per line (each call locks the
 // PO row), then refresh once. Stops at the first failure; earlier lines stay received.
 async function receiveAllPoLines(po, btn, onComplete) {
-  const lines = (po.purchase_order_line_items || []).filter(li => !li.received && !li.is_backordered);
+  const lines = (po.purchase_order_line_items || []).filter(li => !li.received && !li.is_backordered && !poLineIsTool(li, po));
   if (!lines.length) return;
   if (!confirm(`Receive all ${lines.length} lines on PO ${po.po_number || ''} to the job? You can still Undo received on any line.`)) return;
   const label = btn.textContent;
@@ -5775,7 +5793,8 @@ function renderPoBadges(po) {
   const cls = po.closed_at ? 'accepted' : po.status === 'received' ? 'sent' : 'draft';
   const stock = po.stock_source ? `<span class="badge draft" style="margin-left:6px;">Stock PO, from ${escapeHtml(po.supplier_name || 'Warehouse')}</span>` : '';
   const open = po.po_type === 'open' && !po.closed_at ? '<span class="badge draft" style="margin-left:6px;" title="Lines are filled in from the supplier\'s invoice">Open PO: lines from the invoice</span>' : '';
-  return `<span class="badge ${cls}" style="margin-left:6px;">${poStatusLabel(po)}</span>${stock}${open}`;
+  const tools = po.po_kind === 'tools' ? '<span class="badge draft" style="margin-left:6px;" title="Lines land in the Tools register, not stock or a job">Tools PO</span>' : '';
+  return `<span class="badge ${cls}" style="margin-left:6px;">${poStatusLabel(po)}</span>${stock}${open}${tools}`;
 }
 
 // The two notes on a PO: for the supplier (printed on po.html) and internal (staff only).
@@ -7167,7 +7186,8 @@ const PIPELINE_STAGES = [
   { key: 'quote_sent',        label: 'Quote Sent' },
   { key: 'quote_approved',    label: 'Quote Approved' },
   { key: 'deposit_paid',      label: 'Deposit Paid' },
-  { key: 'awaiting_action',   label: 'Awaiting Action' },
+  { key: 'awaiting_action',   label: 'Awaiting Our Action' },
+  { key: 'awaiting_client_action', label: 'Awaiting Client Action' },
   { key: 'ready_to_book',     label: 'Ready to Book' },
   { key: 'job_booked',        label: 'Job Booked' },
   { key: 'job_not_complete',  label: 'Job Not Complete' },

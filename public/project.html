@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=107"></script>
+  <script src="/js/supabase-client.js?v=109"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=10"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -5683,7 +5683,7 @@
             const top = t.parent_task_id ? tasks.find(p => p.id === t.parent_task_id) : t;
             if (top && top.required_before_scheduling) await refreshPipelineTaskGate(projectId);
             if (done && top && top.task_type === 'handover') await checkAndAdvanceHandover(projectId);
-            // The header badge follows a stage move (Awaiting Action to Ready to Book, handover)
+            // The header badge follows a stage move (Awaiting Our Action to Ready to Book, handover)
             const badge = document.getElementById('pipeline-stage-badge');
             if (badge) {
               const { data: p } = await supabaseClient.from('projects').select('pipeline_stage').eq('id', projectId).maybeSingle();

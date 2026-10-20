@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=107"></script>
+  <script src="/js/supabase-client.js?v=109"></script>
   <script src="/js/email-compose.js?v=7"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -88,6 +88,7 @@
     }
 
     function destinationLabel(po) {
+      if (po.po_kind === 'tools') return 'Tools' + (po.fleet_vehicles ? ' in ' + (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : '');
       if (po.project_id) return po.projects ? `${po.projects.job_number ? 'J' + po.projects.job_number + ' ' : ''}${po.projects.name}` : 'Job';
       if (po.vehicle_id) return po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : 'Vehicle';
       return 'Stock';
@@ -218,7 +219,15 @@
             <option value="stock">Stock</option>
             <option value="job">A job</option>
             ${vehicles?.length ? '<option value="vehicle">A vehicle</option>' : ''}
+            <option value="tools">Tools and equipment</option>
           </select>
+          <div id="np-tools-section" style="display:none; margin-top:8px;">
+            <p class="subtitle" style="font-size:12px; margin:0 0 6px;">Lines land in the Tools register when received, not in stock or on a job. Over $500 a tool then needs its serial, photo and receipt.</p>
+            <div class="grid cols-2">
+              <div><label style="margin-top:0;">Kind</label><select id="np-tools-kind"><option value="tool">Tools</option><option value="perishable">Perishables (bits, blades)</option></select></div>
+              <div><label style="margin-top:0;">Where they will live</label><select id="np-tools-loc"><option value="">Warehouse</option>${(vehicles || []).map(v => `<option value="${v.id}">${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}</select></div>
+            </div>
+          </div>
 
           <div id="np-job-section" style="display:none; margin-top:8px;">
             <input id="np-job-search" placeholder="Search for the job..." autocomplete="off" />
@@ -254,12 +263,13 @@
       // job pulling from stock (the stock pull panel takes over).
       function supplierNeeded() {
         const d = overlay.querySelector('#np-dest-type').value;
-        return d === 'stock' || (d === 'job' && overlay.querySelector('#np-source').value === 'supplier');
+        return d === 'stock' || d === 'tools' || (d === 'job' && overlay.querySelector('#np-source').value === 'supplier');
       }
       function syncDestSections() {
         const val = overlay.querySelector('#np-dest-type').value;
         overlay.querySelector('#np-job-section').style.display = val === 'job' ? 'block' : 'none';
         overlay.querySelector('#np-vehicle-section').style.display = val === 'vehicle' ? 'block' : 'none';
+        overlay.querySelector('#np-tools-section').style.display = val === 'tools' ? 'block' : 'none';
         overlay.querySelector('#np-supplier-req').style.display = supplierNeeded() ? '' : 'none';
         overlay.querySelector('#np-supplier-hint').textContent = val === 'vehicle' ? '(leave blank to pull from Warehouse stock)'
           : (val === 'job' && overlay.querySelector('#np-source').value !== 'supplier') ? '(not needed: you pick the stock on the next screen)' : '';
@@ -340,23 +350,27 @@
           const { data: { user } } = await supabaseClient.auth.getUser();
           const { supplierId, supplierName } = await resolveSupplier();
 
+          const toolsVehicleId = destType === 'tools' ? (overlay.querySelector('#np-tools-loc').value || null) : null;
+          const toolsKind = destType === 'tools' ? overlay.querySelector('#np-tools-kind').value : null;
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: destType === 'job' ? selectedJob.id : null,
-            vehicle_id: destType === 'vehicle' ? vehicleId : null,
+            vehicle_id: destType === 'vehicle' ? vehicleId : toolsVehicleId,
+            po_kind: destType === 'tools' ? 'tools' : 'materials',
             supplier_id: supplierId, supplier_name: supplierName || 'Warehouse', // supplier_name is required
             po_type: readPoTypeChoice(overlay, 'np'), locked: false, status: 'ordered', amount: 0,
             ...readPoNotesFields(overlay, 'np'),
             show_prices: overlay.querySelector('#np-show-prices').checked,
-            description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? (supplierId ? 'PO for vehicle' : 'Pulled from Warehouse stock') : 'Stock purchase order',
+            description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? (supplierId ? 'PO for vehicle' : 'Pulled from Warehouse stock') : destType === 'tools' ? (toolsKind === 'perishable' ? 'Perishables (tools register)' : 'Tools and equipment') : 'Stock purchase order',
           }).select('id, po_number').single();
           if (poErr) throw poErr;
-          const destLabel = destType === 'job' ? selectedJob.name : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || 'a vehicle') : 'Stock';
+          const destLabel = destType === 'job' ? selectedJob.name : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || 'a vehicle') : destType === 'tools' ? 'Tools' : 'Stock';
           await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${supplierName || 'Warehouse pull'} - ${destLabel}`);
           if (destType === 'job') await createPoFollowUpTask(selectedJob.id, newPo.po_number, supplierName);
 
           const lines = readMaterialLineRows('np-items-container').map(l => ({
-            po_id: newPo.id, material_id: l.materialId, description: l.description,
+            po_id: newPo.id, material_id: destType === 'tools' ? null : l.materialId, description: l.description,
             quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
+            is_tool: destType === 'tools', tool_kind: destType === 'tools' ? toolsKind : null,
           }));
           if (lines.length) {
             const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(lines);
