@@ -149,4 +149,25 @@ Respond with ONLY a JSON object:
   return { is_price_list: items.length > 0, supplier: plan.supplier || null, items };
 }
 
-module.exports = { pdfPageCount, readPdfRange, readFirstPages, readSpreadsheet, sheetsOf, toNumber };
+// A whole uploaded file (the manual price list upload on Stock and Suppliers): a PDF a few
+// pages at a time with the same cut-off handling as the emailed reader, or one image.
+async function readWholeDocument({ fileBase64, mediaType, usage, pageBatch = 4 }) {
+  if (mediaType !== 'application/pdf') {
+    const r = await readFirstPages({ fileBase64, mediaType, usage });
+    if (r.truncated) throw new Error('The photo has too many items to read in one go. Send it as a PDF, or split it.');
+    return { is_price_list: r.is_price_list !== false, supplier: r.supplier || null, items: r.items || [] };
+  }
+  const buffer = Buffer.from(fileBase64, 'base64');
+  const total = await pdfPageCount(buffer);
+  let supplier = null, isPriceList = true, items = [];
+  for (let done = 0; done < total;) {
+    const count = Math.min(pageBatch, total - done);
+    const r = await readPdfRange(buffer, done, count, usage, done === 0);
+    if (done === 0) { supplier = r.supplier || null; isPriceList = r.is_price_list !== false; }
+    items = items.concat(r.items || []);
+    done += count;
+  }
+  return { is_price_list: isPriceList, supplier, items };
+}
+
+module.exports = { pdfPageCount, readPdfRange, readFirstPages, readSpreadsheet, readWholeDocument, sheetsOf, toNumber };

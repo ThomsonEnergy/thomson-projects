@@ -597,7 +597,7 @@
       if (myRole === 'admin' || myRole === 'finance') {
         const { data: pendingLeave } = await supabaseClient
           .from('leave_requests')
-          .select('id, profiles(full_name)')
+          .select('id, profiles!leave_requests_staff_id_fkey(full_name)')
           .eq('status', 'pending');
         (pendingLeave || []).forEach(lr => {
           items.push({ group: 'admin', label: `Leave request pending: ${lr.profiles ? escapeHtml(lr.profiles.full_name) : 'a staff member'}`, link: '/timesheets.html' });

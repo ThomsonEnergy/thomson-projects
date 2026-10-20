@@ -1320,7 +1320,7 @@
       const listEl = document.getElementById('approvals-list');
       const { data, error } = await supabaseClient
         .from('leave_requests')
-        .select('*, profiles(full_name)')
+        .select('*, profiles!leave_requests_staff_id_fkey(full_name)')
         .eq('status', 'pending')
         .order('start_date');
       if (error || !data) return;

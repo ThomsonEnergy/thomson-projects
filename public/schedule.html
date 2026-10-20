@@ -277,7 +277,7 @@
 
         const [aRes, lRes] = await Promise.all([
           supabaseClient.from('schedule_assignments').select('*, profiles(full_name), projects(name, job_number, quote_number)').gte('assignment_date', rangeStart).lte('assignment_date', rangeEnd),
-          supabaseClient.from('leave_requests').select('*, profiles(full_name)').eq('status', 'approved').lte('start_date', rangeEnd).gte('end_date', rangeStart),
+          supabaseClient.from('leave_requests').select('*, profiles!leave_requests_staff_id_fkey(full_name)').eq('status', 'approved').lte('start_date', rangeEnd).gte('end_date', rangeStart),
         ]);
         const err = firstError(aRes, lRes);
         if (err) throw err;
@@ -356,7 +356,7 @@
 
         const [aRes, lRes, { data: dayTimeEntries, error: dayTimeErr }] = await Promise.all([
           supabaseClient.from('schedule_assignments').select('*, profiles(id, full_name), projects(id, name, job_number, quote_number)').eq('assignment_date', dateStr),
-          supabaseClient.from('leave_requests').select('*, profiles(id, full_name)').eq('status', 'approved').lte('start_date', dateStr).gte('end_date', dateStr),
+          supabaseClient.from('leave_requests').select('*, profiles!leave_requests_staff_id_fkey(id, full_name)').eq('status', 'approved').lte('start_date', dateStr).gte('end_date', dateStr),
           // Open entries too: someone who forgot to clock out still worked that day.
           supabaseClient.from('time_entries').select('staff_id, project_id, time_category, clock_in, clock_out').gte('clock_in', windowStart.toISOString()).lte('clock_in', windowEnd.toISOString()),
         ]);
