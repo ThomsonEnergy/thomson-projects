@@ -38,7 +38,7 @@
 
     <div class="grid cols-3">
       <div class="stat"><div class="label">Pending (not received)</div><div class="value" id="stat-pending">-</div></div>
-      <div class="stat"><div class="label">Needs approval</div><div class="value" id="stat-needs-approval" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:4px;" title="Click to see the list">-</div></div>
+      <div class="stat"><div class="label">Ready to close</div><div class="value" id="stat-needs-approval" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:4px;" title="Every line received: close them to approve their bills">-</div></div>
       <div class="stat"><div class="label">Received this month</div><div class="value" id="stat-received-month">-</div></div>
     </div>
 
@@ -48,7 +48,7 @@
         <select id="po-filter">
           <option value="all">All</option>
           <option value="pending">Pending only</option>
-          <option value="needs_approval">Needs approval</option>
+          <option value="needs_approval">Ready to close</option>
           <option value="received">Received only</option>
           <option value="open">Open</option>
           <option value="closed">Closed</option>
@@ -58,11 +58,12 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/supabase-client.js?v=108"></script>
   <script src="/js/email-compose.js?v=7"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allPos = [];
+    let billsByPo = {};
     let myRole = 'staff';
     // ?id= (from the top bar search) shows just that PO until the user asks for all
     let focusPoId = new URLSearchParams(window.location.search).get('id');
@@ -76,6 +77,7 @@
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       allPos = data || [];
       myRole = await getMyRole();
+      billsByPo = await loadBillsForPos(allPos.map(p => p.id));
       renderStats();
       renderList();
     }
@@ -86,6 +88,7 @@
     }
 
     function destinationLabel(po) {
+      if (po.po_kind === 'tools') return 'Tools' + (po.fleet_vehicles ? ' in ' + (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : '');
       if (po.project_id) return po.projects ? `${po.projects.job_number ? 'J' + po.projects.job_number + ' ' : ''}${po.projects.name}` : 'Job';
       if (po.vehicle_id) return po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : 'Vehicle';
       return 'Stock';
@@ -94,9 +97,9 @@
     function renderStats() {
       const pending = allPos.filter(po => !po.received);
       const pendingTotal = pending.reduce((s, po) => s + poTotal(po), 0);
-      const needsApproval = pending.filter(po => (po.purchase_order_line_items || []).some(li => !li.received)).length;
-      const now = new Date();
-      const receivedThisMonth = allPos.filter(po => po.received && po.received_at && new Date(po.received_at).getMonth() === now.getMonth() && new Date(po.received_at).getFullYear() === now.getFullYear());
+      const needsApproval = allPos.filter(po => !po.closed_at && po.status === 'received').length;
+      const thisMonth = sydneyDateKey(new Date()).slice(0, 7); // Sydney month, not the browser's
+      const receivedThisMonth = allPos.filter(po => po.received && po.received_at && sydneyDateKey(new Date(po.received_at)).startsWith(thisMonth));
       const receivedTotal = receivedThisMonth.reduce((s, po) => s + poTotal(po), 0);
 
       document.getElementById('stat-pending').textContent = money(pendingTotal);
@@ -141,16 +144,16 @@
               ${renderPoBadges(po)}
             </div>
             <div>
-              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : escapeHtml(po.status)}</span>
-              <span style="font-weight:600; margin-left:8px;">${money(poTotal(po))}</span>
+              <span style="font-weight:600;">${money(poTotal(po))}</span>
             </div>
           </div>
           <p class="subtitle" style="margin:6px 0;">${escapeHtml(po.description)}</p>
           ${renderPoLineItemsReceivable(po, true)}
           ${renderPoNotes(po)}
+          ${renderPoBills(billsByPo[po.id], po, myRole)}
           <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
             ${renderPoControls(po, myRole)}
-            ${po.supplier_id && !po.received ? `<button type="button" class="secondary btn-sm upload-invoice-btn" data-po-id="${po.id}">Upload invoice for this PO</button>` : ''}
+            ${po.supplier_id && !po.closed_at ? `<button type="button" class="secondary btn-sm upload-invoice-btn" data-po-id="${po.id}">Upload invoice for this PO</button>` : ''}
             <button type="button" class="secondary btn-sm view-log-btn" data-po-id="${po.id}">View log</button>
           </div>
           <div id="log-${po.id}" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);"></div>
@@ -174,6 +177,7 @@
       });
 
       wirePoControls(listEl, filtered, loadAllPOs);
+      wirePoBillButtons(listEl, loadAllPOs);
       wireReceiveLineItemButtons(
         listEl,
         filtered,
@@ -215,7 +219,15 @@
             <option value="stock">Stock</option>
             <option value="job">A job</option>
             ${vehicles?.length ? '<option value="vehicle">A vehicle</option>' : ''}
+            <option value="tools">Tools and equipment</option>
           </select>
+          <div id="np-tools-section" style="display:none; margin-top:8px;">
+            <p class="subtitle" style="font-size:12px; margin:0 0 6px;">Lines land in the Tools register when received, not in stock or on a job. Over $500 a tool then needs its serial, photo and receipt.</p>
+            <div class="grid cols-2">
+              <div><label style="margin-top:0;">Kind</label><select id="np-tools-kind"><option value="tool">Tools</option><option value="perishable">Perishables (bits, blades)</option></select></div>
+              <div><label style="margin-top:0;">Where they will live</label><select id="np-tools-loc"><option value="">Warehouse</option>${(vehicles || []).map(v => `<option value="${v.id}">${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}</select></div>
+            </div>
+          </div>
 
           <div id="np-job-section" style="display:none; margin-top:8px;">
             <input id="np-job-search" placeholder="Search for the job..." autocomplete="off" />
@@ -232,7 +244,7 @@
           ${supplierPickerHtml({ search: 'np-supplier-search', results: 'np-supplier-results', selected: 'np-supplier-selected', newSection: 'np-supplier-new-section', newEmail: 'np-supplier-new-email', newPhone: 'np-supplier-new-phone' })}
           <button type="button" class="secondary" id="np-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
 
-          <label style="margin-top:14px;">Items</label>
+          ${poTypeChoiceHtml('np')}
           <div id="np-items-container"></div>
           <button type="button" class="secondary" id="np-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
           ${poNotesFieldsHtml('np')}
@@ -251,12 +263,13 @@
       // job pulling from stock (the stock pull panel takes over).
       function supplierNeeded() {
         const d = overlay.querySelector('#np-dest-type').value;
-        return d === 'stock' || (d === 'job' && overlay.querySelector('#np-source').value === 'supplier');
+        return d === 'stock' || d === 'tools' || (d === 'job' && overlay.querySelector('#np-source').value === 'supplier');
       }
       function syncDestSections() {
         const val = overlay.querySelector('#np-dest-type').value;
         overlay.querySelector('#np-job-section').style.display = val === 'job' ? 'block' : 'none';
         overlay.querySelector('#np-vehicle-section').style.display = val === 'vehicle' ? 'block' : 'none';
+        overlay.querySelector('#np-tools-section').style.display = val === 'tools' ? 'block' : 'none';
         overlay.querySelector('#np-supplier-req').style.display = supplierNeeded() ? '' : 'none';
         overlay.querySelector('#np-supplier-hint').textContent = val === 'vehicle' ? '(leave blank to pull from Warehouse stock)'
           : (val === 'job' && overlay.querySelector('#np-source').value !== 'supplier') ? '(not needed: you pick the stock on the next screen)' : '';
@@ -337,23 +350,27 @@
           const { data: { user } } = await supabaseClient.auth.getUser();
           const { supplierId, supplierName } = await resolveSupplier();
 
+          const toolsVehicleId = destType === 'tools' ? (overlay.querySelector('#np-tools-loc').value || null) : null;
+          const toolsKind = destType === 'tools' ? overlay.querySelector('#np-tools-kind').value : null;
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: destType === 'job' ? selectedJob.id : null,
-            vehicle_id: destType === 'vehicle' ? vehicleId : null,
+            vehicle_id: destType === 'vehicle' ? vehicleId : toolsVehicleId,
+            po_kind: destType === 'tools' ? 'tools' : 'materials',
             supplier_id: supplierId, supplier_name: supplierName || 'Warehouse', // supplier_name is required
-            po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
+            po_type: readPoTypeChoice(overlay, 'np'), locked: false, status: 'ordered', amount: 0,
             ...readPoNotesFields(overlay, 'np'),
             show_prices: overlay.querySelector('#np-show-prices').checked,
-            description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? (supplierId ? 'PO for vehicle' : 'Pulled from Warehouse stock') : 'Stock purchase order',
+            description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? (supplierId ? 'PO for vehicle' : 'Pulled from Warehouse stock') : destType === 'tools' ? (toolsKind === 'perishable' ? 'Perishables (tools register)' : 'Tools and equipment') : 'Stock purchase order',
           }).select('id, po_number').single();
           if (poErr) throw poErr;
-          const destLabel = destType === 'job' ? selectedJob.name : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || 'a vehicle') : 'Stock';
+          const destLabel = destType === 'job' ? selectedJob.name : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || 'a vehicle') : destType === 'tools' ? 'Tools' : 'Stock';
           await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${supplierName || 'Warehouse pull'} - ${destLabel}`);
           if (destType === 'job') await createPoFollowUpTask(selectedJob.id, newPo.po_number, supplierName);
 
           const lines = readMaterialLineRows('np-items-container').map(l => ({
-            po_id: newPo.id, material_id: l.materialId, description: l.description,
+            po_id: newPo.id, material_id: destType === 'tools' ? null : l.materialId, description: l.description,
             quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
+            is_tool: destType === 'tools', tool_kind: destType === 'tools' ? toolsKind : null,
           }));
           if (lines.length) {
             const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(lines);

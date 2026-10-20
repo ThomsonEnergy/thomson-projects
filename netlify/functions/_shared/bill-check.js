@@ -2,8 +2,10 @@
 //
 // Issues a bill can have (supplier_bills.check_issues, each { kind, text, ... }):
 //   no_po              the bill is not linked to a PO
-//   not_on_po          a line that is not on the linked PO
-//   price_higher       a line charged more than the PO price (over 1%)
+//   not_on_po          a line that is not on the linked PO (until Accept adds it, or Deny)
+//   freight            a freight / delivery / handling line (always shown, never on a PO)
+//   price_higher       a line charged more than the PO price (over 1%, until accepted)
+//   denied             a line a person denied: the bill waits until it is sorted with the supplier
 //   over_quantity      more billed for a PO line, across every bill on that PO, than was ordered
 //   po_total_exceeded  every bill on the PO together comes to more than the PO (over 2%)
 //   duplicate_number   another bill from the same supplier has the same number
@@ -16,13 +18,16 @@ const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-AU', { minimumFra
 // INV-0103, inv103 and INV 103 are the same number
 const normNum = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^(inv|invoice)/, '').replace(/^0+/, '');
 const qty = (n) => Number(n || 0).toLocaleString('en-AU', { maximumFractionDigits: 2 });
+const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+// same rule as _is_freight() in the database
+const isFreight = (s) => /(freight|delivery|deliver|shipping|postage|courier|handling|cartage)/i.test(String(s || ''));
 
 async function checkBill(admin, billId) {
   const { data: bill } = await admin.from('supplier_bills').select('*').eq('id', billId).maybeSingle();
   if (!bill) return null;
   const { data: lines } = await admin.from('supplier_bill_line_items').select('*').eq('bill_id', bill.id);
   const issues = [];
-  let poReceived = false;
+  let poClosed = false;
 
   // duplicates among our own bills from this supplier
   if (bill.supplier_id) {
@@ -41,17 +46,23 @@ async function checkBill(admin, billId) {
   if (!bill.po_id) {
     issues.push({ kind: 'no_po', text: 'Not linked to a PO' });
   } else {
-    const { data: po } = await admin.from('purchase_orders').select('id, po_number, po_type, budget_cap, received').eq('id', bill.po_id).maybeSingle();
+    const { data: po } = await admin.from('purchase_orders').select('id, po_number, po_type, budget_cap, received, closed_at').eq('id', bill.po_id).maybeSingle();
     const { data: poLineRows } = await admin.from('purchase_order_line_items').select('id, description, quantity, unit_cost').eq('po_id', bill.po_id);
     if (po) po.purchase_order_line_items = poLineRows || [];
-    poReceived = !!po?.received;
+    poClosed = !!po?.closed_at;
     const poLines = po?.purchase_order_line_items || [];
     const { data: poBills } = await admin.from('supplier_bills').select('id').eq('po_id', bill.po_id);
     const billIds = (poBills || []).map(b => b.id);
     const { data: allLines } = billIds.length ? await admin.from('supplier_bill_line_items').select('bill_id, po_line_item_id, quantity, unit_cost').in('bill_id', billIds) : { data: [] };
 
     (lines || []).forEach(l => {
-      if (!l.po_line_item_id) { issues.push({ kind: 'not_on_po', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) is not on ${po?.po_number || 'the PO'}` }); return; }
+      if (l.resolution === 'denied') { issues.push({ kind: 'denied', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) denied${l.resolution_note ? ': ' + l.resolution_note : ''}, waiting on the supplier` }); return; }
+      if (l.resolution === 'accepted' || l.resolution === 'added') return;
+      if (!l.po_line_item_id) {
+        if (isFreight(l.description)) issues.push({ kind: 'freight', line_id: l.id, text: `Freight / delivery: "${l.description}" ${money((Number(l.unit_cost) || 0) * (Number(l.quantity) || 1))}` });
+        else issues.push({ kind: 'not_on_po', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) is not on ${po?.po_number || 'the PO'}` });
+        return;
+      }
       const pl = poLines.find(p => p.id === l.po_line_item_id);
       if (!pl) return;
       if (Number(l.unit_cost) > Number(pl.unit_cost) * 1.01 + 0.005) {
@@ -81,9 +92,13 @@ async function checkBill(admin, billId) {
   let status = real.length ? 'problems' : (bill.po_id ? 'matches' : 'no_po');
   if (['queried', 'resolved'].includes(bill.check_status) && status !== 'matches') status = bill.check_status;
   const update = { check_status: status, check_issues: issues, checked_at: new Date().toISOString() };
-  // matches its PO and the goods are in: approved for payment, same as when a PO is marked received
+  // matches a PO that is already closed (the approval step): approved for payment, pay on the later of the
+  // supplier's terms date and today (same rule as closing the PO)
   const { data: sup } = bill.supplier_id ? await admin.from('suppliers').select('needs_review').eq('id', bill.supplier_id).maybeSingle() : { data: null };
-  if (status === 'matches' && poReceived && !bill.paid && !bill.approved_for_payment && !sup?.needs_review) { update.approved_for_payment = true; update.approved_at = update.checked_at; }
+  if (status === 'matches' && poClosed && !bill.paid && !bill.approved_for_payment && !sup?.needs_review) {
+    const today = sydneyToday();
+    Object.assign(update, { approved_for_payment: true, approved_at: update.checked_at, pay_on: bill.due_date && bill.due_date > today ? bill.due_date : today });
+  }
   await admin.from('supplier_bills').update(update).eq('id', bill.id);
   return { status, issues };
 }
@@ -99,4 +114,4 @@ async function checkBillAndSiblings(admin, billId) {
   return r;
 }
 
-module.exports = { checkBill, checkBillAndSiblings };
+module.exports = { checkBill, checkBillAndSiblings, normNum, sydneyToday, isFreight };

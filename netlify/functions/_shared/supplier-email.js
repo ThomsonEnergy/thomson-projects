@@ -30,12 +30,17 @@ async function draft(admin, kind, id) {
   if (kind === 'bill_query') {
     const { data: bill } = await admin.from('supplier_bills').select('*, purchase_orders(po_number)').eq('id', id).single();
     const { name, to } = await supplierEmail(admin, bill.supplier_id);
-    const issues = (bill.check_issues || []).filter(i => !['no_po', 'possible_duplicate', 'duplicate_number'].includes(i.kind));
+    const { data: denied } = await admin.from('supplier_bill_line_items').select('description, quantity, unit_cost, resolution_note').eq('bill_id', id).eq('resolution', 'denied');
+    const issues = (bill.check_issues || []).filter(i => !['no_po', 'possible_duplicate', 'duplicate_number', 'denied'].includes(i.kind));
     const po = bill.purchase_orders?.po_number;
+    const deniedText = (denied || []).length
+      ? `We do not accept these charges and will not be paying them as billed:\n\n${denied.map(d => `- ${d.description} (${Number(d.quantity) || 1} x ${money(d.unit_cost)})${d.resolution_note ? ': ' + d.resolution_note : ''}`).join('\n')}\n\n`
+      : '';
+    const issueText = issues.length ? `${deniedText ? 'Also, these' : 'Some of it'} do${deniedText ? '' : 'es'} not line up with our purchase order${po ? ' ' + po : ''}:\n\n${issues.map(i => '- ' + i.text).join('\n')}\n\n` : (deniedText ? '' : '- (add the details here)\n\n');
     return {
       to,
       subject: `Query on invoice ${bill.bill_number || ''}${po ? ` (our ${po})` : ''}`.trim(),
-      body: `Hi ${name},\n\nWe have checked invoice ${bill.bill_number || ''} (${money(bill.amount)}${bill.bill_date ? ', dated ' + bill.bill_date : ''}) against our purchase order${po ? ' ' + po : ''} and some of it does not line up:\n\n${issues.map(i => '- ' + i.text).join('\n') || '- (add the details here)'}\n\nCould you please check these and either explain the difference or send a credit note / corrected invoice? We will hold the invoice until it is sorted.${SIGN_OFF}`,
+      body: `Hi ${name},\n\nWe have checked invoice ${bill.bill_number || ''} (${money(bill.amount)}${bill.bill_date ? ', dated ' + bill.bill_date : ''})${po ? ' against our purchase order ' + po : ''}.\n\n${deniedText}${issueText}Could you please explain, or send a credit note / corrected invoice? We will hold the invoice until it is sorted.${SIGN_OFF}`,
     };
   }
   if (kind === 'request_statement') { // id is the supplier

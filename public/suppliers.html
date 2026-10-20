@@ -37,7 +37,7 @@
         <button class="secondary" id="upload-bill-btn" style="margin-right:8px;">Upload bill</button>
         <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
         <button class="secondary" id="upload-statement-btn" style="margin-right:8px;">Upload statement</button>
-        <button class="secondary" id="run-payments-btn" style="margin-right:8px;">Run payments due today</button>
+        <button class="secondary" id="run-payments-btn" style="margin-right:8px;">Pay bills due</button>
         <button id="add-supplier-btn">+ Add supplier</button>
       </div>
     </div>
@@ -61,7 +61,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/supabase-client.js?v=108"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allSuppliers = [];
@@ -260,41 +260,55 @@
       }
     }));
 
+    // Bills due for payment: approved bills whose pay-on date is today or earlier. Pay them in Airwallex
+    // or by bank transfer, then Record as paid (date and reference kept on each bill and the batch).
+    // Sending to Airwallex from here is a later build (needs a payout key and beneficiaries).
     document.getElementById('run-payments-btn').addEventListener('click', async () => {
-      const overlay = openModal(`<p class="subtitle">Checking what's due...</p>`, { maxWidth: 500 });
-
-      try {
+      const overlay = openModal(`<p class="subtitle">Checking what's due...</p>`, { maxWidth: 560 });
+      const call = async (method, body) => {
         const { data: { session } } = await supabaseClient.auth.getSession();
         const res = await fetch('/.netlify/functions/run-supplier-payments', {
-          headers: { Authorization: `Bearer ${session.access_token}` },
+          method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: body ? JSON.stringify(body) : undefined,
         });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not check due payments');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+        return data;
+      };
+      const dayText = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
 
+      try {
+        const data = await call('GET');
         if (!data.preview.length) {
-          overlay.querySelector('.card').innerHTML = `<h2>Nothing due today</h2><p class="subtitle">No approved, unpaid bills have a due date today or earlier.</p><button type="button" class="secondary" id="rp-close-btn">Close</button>`;
+          overlay.querySelector('.card').innerHTML = `<h2>Nothing due</h2><p class="subtitle">No approved, unpaid bills have a pay-on date of today or earlier. A bill is approved when its PO is closed (or by hand on Bill checks), and its pay-on date is the later of the supplier's terms and the day it was approved.</p><button type="button" class="secondary" id="rp-close-btn">Close</button>`;
           overlay.querySelector('#rp-close-btn').addEventListener('click', () => overlay.remove());
           return;
         }
 
         const totalDue = data.preview.reduce((s, p) => s + p.total, 0);
+        const billCount = data.preview.reduce((s, p) => s + p.billCount, 0);
         overlay.querySelector('.card').innerHTML = `
-          <h2>Confirm payments</h2>
-          <p class="subtitle" style="margin-bottom:14px;">These become Airwallex transfers - nothing pays out until you also approve them directly inside Airwallex.</p>
+          <h2>Bills due for payment</h2>
+          <p class="subtitle" style="margin-bottom:12px;">Approved bills with a pay-on date of today or earlier. Pay them in Airwallex or by bank transfer, then record them here so they show as paid.</p>
           <table>
-            <thead><tr><th>Supplier</th><th class="num">Bills</th><th class="num">Amount</th></tr></thead>
+            <thead><tr><th></th><th>Supplier</th><th>Bills</th><th class="num">Amount</th></tr></thead>
             <tbody>
               ${data.preview.map(p => `
                 <tr>
+                  <td><input type="checkbox" class="rp-pick" data-supplier-id="${escapeHtml(p.supplierId)}" checked style="width:auto;" /></td>
                   <td>${escapeHtml(p.supplierName)}${!p.hasBankDetails ? ' <span class="badge red">No bank details</span>' : ''}</td>
-                  <td class="num">${p.billCount}</td>
+                  <td style="font-size:12px;">${p.bills.map(b => `${escapeHtml(b.billNumber || '(no number)')} ${money(b.amount)}${b.payOn && b.payOn < data.today ? ` <span style="color:var(--red);">due ${escapeHtml(dayText(b.payOn))}</span>` : ''}`).join('<br />')}</td>
                   <td class="num">${money(p.total)}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
           <p style="text-align:right; font-weight:600; margin-top:10px;">Total: ${money(totalDue)}</p>
+          <div class="grid cols-2" style="margin-top:10px;">
+            <div><label style="margin-top:0;">Paid on</label><input type="date" id="rp-paid-on" value="${escapeHtml(data.today)}" /></div>
+            <div><label style="margin-top:0;">Reference (optional)</label><input id="rp-reference" placeholder="e.g. Airwallex batch 20 Oct" /></div>
+          </div>
           <div style="margin-top:14px;">
-            <button id="rp-confirm-btn">Confirm & send to Airwallex</button>
+            <button id="rp-confirm-btn">Record ${billCount} bill${billCount === 1 ? '' : 's'} as paid</button>
             <button type="button" class="secondary" id="rp-cancel-btn">Cancel</button>
           </div>
           <div id="rp-msg"></div>`;
@@ -303,25 +317,23 @@
         overlay.querySelector('#rp-confirm-btn').addEventListener('click', async () => {
           const confirmBtn = overlay.querySelector('#rp-confirm-btn');
           const msg = overlay.querySelector('#rp-msg');
+          const picked = new Set([...overlay.querySelectorAll('.rp-pick:checked')].map(c => c.dataset.supplierId));
+          const billIds = data.preview.filter(p => picked.has(p.supplierId)).flatMap(p => p.bills.map(b => b.id));
+          if (!billIds.length) { msg.innerHTML = `<div class="error-box">Tick at least one supplier.</div>`; return; }
+          if (!confirm(`Record ${billIds.length} bill${billIds.length === 1 ? '' : 's'} as paid? Only do this once the money has actually been sent.`)) return;
+          const label = confirmBtn.textContent;
           confirmBtn.disabled = true;
-          confirmBtn.textContent = 'Processing...';
+          confirmBtn.textContent = 'Recording...';
           try {
-            const res2 = await fetch('/.netlify/functions/run-supplier-payments', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${session.access_token}` },
-            });
-            const data2 = await res2.json();
-            if (!res2.ok || !data2.ok) throw new Error(data2.error || 'Payment run failed');
-            msg.innerHTML = data2.results.map(r => r.ok
-              ? `<div class="success-box">${escapeHtml(r.supplier)}: ${money(r.amount)} sent to Airwallex.</div>`
-              : `<div class="error-box">${escapeHtml(r.supplier)}: ${escapeHtml(r.error)}</div>`).join('');
+            const r = await call('POST', { action: 'mark_paid', bill_ids: billIds, paid_on: overlay.querySelector('#rp-paid-on').value, reference: overlay.querySelector('#rp-reference').value });
+            msg.innerHTML = r.results.map(x => `<div class="success-box">${escapeHtml(x.supplier)}: ${money(x.amount)} recorded as paid (${x.billCount} bill${x.billCount === 1 ? '' : 's'}).</div>`).join('');
             confirmBtn.style.display = 'none';
             overlay.querySelector('#rp-cancel-btn').textContent = 'Close';
             await loadSuppliers();
           } catch (err) {
             msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
             confirmBtn.disabled = false;
-            confirmBtn.textContent = 'Confirm & send to Airwallex';
+            confirmBtn.textContent = label;
           }
         });
       } catch (err) {

@@ -128,7 +128,7 @@ async function reconcileStatement(admin, statementId) {
   });
 
   // our unpaid bills in the statement's period that it does not show
-  const stDate = st.statement_date || new Date().toISOString().slice(0, 10);
+  const stDate = st.statement_date || new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
   const dates = lines.map(l => l.date).filter(Boolean).sort();
   const from = dates[0] || new Date(new Date(stDate).getTime() - 62 * 86400000).toISOString().slice(0, 10);
   bills.filter(b => !b.paid && !matchedIds.has(b.id) && b.bill_date && b.bill_date >= from && b.bill_date <= stDate).forEach(b => {

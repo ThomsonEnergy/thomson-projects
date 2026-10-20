@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/supabase-client.js?v=108"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const vehicleId = new URLSearchParams(window.location.search).get('id');
@@ -47,7 +47,7 @@
 
       const { data: stockRows } = await supabaseClient
         .from('material_stock_by_location')
-        .select('*, materials(id, name, cost_price)')
+        .select('*, materials(id, name, cost_price, is_consumable, pack_label)')
         .eq('vehicle_id', vehicleId)
         .eq('location_type', 'vehicle')
         .gt('quantity', 0);
@@ -58,10 +58,12 @@
         .eq('vehicle_id', vehicleId)
         .order('created_at', { ascending: false });
 
-      render(vehicle, stockRows || [], pos || []);
+      const billsByPo = await loadBillsForPos((pos || []).map(p => p.id));
+      const myRole = await getMyRole();
+      render(vehicle, stockRows || [], pos || [], billsByPo, myRole);
     }
 
-    function render(vehicle, stockRows, pos) {
+    function render(vehicle, stockRows, pos, billsByPo, myRole) {
       document.getElementById('content').innerHTML = `
         <a href="/fleet.html" class="link-quiet">&larr; Fleet</a>
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-top:8px;">
@@ -69,7 +71,11 @@
             <h1>${escapeHtml(vehicle.vehicle_name || vehicle.rego)}</h1>
             <p class="subtitle">${escapeHtml(vehicle.rego)}${vehicle.asset_number ? ' &middot; Asset ' + escapeHtml(vehicle.asset_number) : ''}</p>
           </div>
-          <button id="create-po-btn">+ Create PO for this vehicle</button>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="secondary" id="move-stock-btn">+ Move stock here from Warehouse</button>
+            <button type="button" class="secondary" id="stocktake-btn">Stocktake</button>
+            <button id="create-po-btn">+ Buy for this vehicle (PO)</button>
+          </div>
         </div>
 
         <div class="card">
@@ -81,7 +87,7 @@
                 ${stockRows.map(r => `
                   <tr>
                     <td data-label="Material">${escapeHtml(r.materials?.name || 'Unknown')}</td>
-                    <td class="num" data-label="Quantity">${escapeHtml(r.quantity)}</td>
+                    <td class="num" data-label="Quantity"><button type="button" class="secondary btn-sm veh-qty-btn" data-material-id="${escapeHtml(r.material_id)}" data-name="${escapeHtml(r.materials?.name || '')}" data-qty="${escapeHtml(r.quantity)}" title="Tap to correct the count">${escapeHtml(r.quantity)}</button>${r.materials?.is_consumable ? ` <button type="button" class="secondary btn-sm veh-low-btn" data-material-id="${escapeHtml(r.material_id)}" data-name="${escapeHtml(r.materials?.name || '')}" title="One tap: Admin is told to restock">Running low</button>` : ''}</td>
                     <td class="num" data-label="Value">${money(r.quantity * (r.materials?.cost_price || 0))}</td>
                   </tr>`).join('')}
               </tbody>
@@ -97,10 +103,11 @@
                 <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
                   <div style="display:flex; justify-content:space-between;">
                     <strong>${isStockPull ? 'From Warehouse stock' : escapeHtml(po.suppliers?.name || po.supplier_name || 'Unknown supplier')}</strong>
-                    <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : escapeHtml(po.status)}</span>
+                    ${renderPoBadges(po)}
                   </div>
                   ${renderPoLineItemsReceivable(po, true)}
-                  ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice</button>` : ''}
+                  ${renderPoBills(billsByPo[po.id], po, myRole)}
+                  ${po.supplier_id && !po.closed_at ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice</button>` : ''}
                 </div>`;
             }).join('')}
           </div>
@@ -108,11 +115,39 @@
       `;
 
       document.getElementById('create-po-btn').addEventListener('click', openCreatePoPanel);
+      const vehLabel = vehicle.vehicle_name || vehicle.rego;
+      document.getElementById('move-stock-btn').addEventListener('click', () => openStockTransferPanel({ fromLoc: 'warehouse', fromVehicleId: null, fromLabel: 'Warehouse', toLoc: 'vehicle', toVehicleId: vehicleId, toLabel: vehLabel, onDone: loadVehicleStock }));
+      document.getElementById('stocktake-btn').addEventListener('click', () => openStocktakePanel({ loc: 'vehicle', vehicleId, placeLabel: vehLabel, onDone: loadVehicleStock }));
+      document.querySelectorAll('.veh-low-btn').forEach(btn => btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const { error } = await supabaseClient.rpc('stock_flag_low', { p_material_id: btn.dataset.materialId, p_loc: 'vehicle', p_vehicle_id: vehicleId, p_note: null });
+        if (error) { alert(friendlyError(error)); btn.disabled = false; return; }
+        showToast(`${btn.dataset.name}: flagged running low, Admin has been told`);
+        btn.textContent = 'Flagged';
+      }));
+
+      // Tap a count to correct it: one server step, logged on the item with who and why.
+      document.querySelectorAll('.veh-qty-btn').forEach(btn => btn.addEventListener('click', async () => {
+        const raw = prompt(`How many ${btn.dataset.name} are actually in ${vehicle.vehicle_name || vehicle.rego}? (app has ${btn.dataset.qty})`, btn.dataset.qty);
+        if (raw === null) return;
+        const qty = Number(raw);
+        if (!(qty >= 0)) { alert('Enter a number, 0 or more.'); return; }
+        if (qty === Number(btn.dataset.qty)) return;
+        const reason = prompt('Why is the count different? (e.g. stocktake, used on a job, damaged)', '');
+        if (reason === null) return;
+        btn.disabled = true;
+        try {
+          await setStockCount(btn.dataset.materialId, 'vehicle', vehicleId, qty, reason);
+          showToast(`${btn.dataset.name}: count set to ${qty}`);
+          await loadVehicleStock();
+        } catch (err) { alert(friendlyError(err)); btn.disabled = false; }
+      }));
 
       document.querySelectorAll('.upload-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
       });
 
+      wirePoBillButtons(document.getElementById('veh-po-list'), loadVehicleStock);
       wireReceiveLineItemButtons(
         document.getElementById('veh-po-list'),
         pos,
@@ -129,22 +164,16 @@
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
-          <h2>Create PO for ${escapeHtml(currentVehicle.vehicle_name || currentVehicle.rego)}</h2>
-          <label style="margin-top:0">Source</label>
-          <div style="display:flex; gap:16px; margin-bottom:10px;">
-            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="cp-source" value="stock" checked style="width:auto;" /> At the shed - pull from Warehouse stock</label>
-          </div>
-          <div style="display:flex; gap:16px; margin-bottom:10px;">
-            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="cp-source" value="supplier" style="width:auto;" /> At a wholesaler - buying from a supplier</label>
-          </div>
+          <h2>Buy for ${escapeHtml(currentVehicle.vehicle_name || currentVehicle.rego)}</h2>
+          <p class="subtitle" style="margin-bottom:8px;">A PO to a supplier, received into this vehicle. Gear from the shed is moved with "Move stock here from Warehouse" instead (no PO).</p>
 
-          <div id="cp-supplier-section" style="display:none;">
+          <div id="cp-supplier-section">
             <label>Supplier</label>
             ${supplierPickerHtml({ search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' })}
             <button type="button" class="secondary" id="cp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
           </div>
 
-          <label style="margin-top:14px;">Items</label>
+          ${poTypeChoiceHtml('cp')}
           <div id="cp-items-container"></div>
           <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
 
@@ -162,16 +191,10 @@
       buildMaterialSearchRow(materials || [], 'cp-items-container');
       overlay.querySelector('#cp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'cp-items-container'));
 
-      overlay.querySelectorAll('input[name="cp-source"]').forEach(radio => {
-        radio.addEventListener('change', (e) => {
-          overlay.querySelector('#cp-supplier-section').style.display = e.target.value === 'supplier' ? 'block' : 'none';
-        });
-      });
-
       overlay.querySelector('#cp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#cp-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#cp-msg');
-        const source = overlay.querySelector('input[name="cp-source"]:checked').value;
+        const source = 'supplier';
         const btn = overlay.querySelector('#cp-save-btn');
         const label = btn.textContent;
         const lineProblem = materialLineRowsProblem('cp-items-container');
@@ -190,7 +213,7 @@
 
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: null, vehicle_id: vehicleId, supplier_id: supplierId, supplier_name: supplierName || 'Warehouse', // supplier_name is required
-            po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
+            po_type: supplierId ? readPoTypeChoice(overlay, 'cp') : 'fixed', locked: false, status: 'ordered', amount: 0,
             description: source === 'stock' ? 'Pulled from Warehouse stock' : 'Purchased for vehicle',
           }).select('id, po_number').single();
           if (poErr) throw poErr;
