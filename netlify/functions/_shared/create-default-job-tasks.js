@@ -58,7 +58,7 @@ async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
 
   const { data: licences } = await supabaseAdmin
     .from('profile_licences')
-    .select('licence_name, profiles!inner(active)')
+    .select('licence_name, profiles!profile_licences_profile_id_fkey!inner(active)')
     .eq('profiles.active', true);
 
   const solarCentres = (newStages || []).filter((c) => c.stc_system_kw != null || c.stc_total != null);
