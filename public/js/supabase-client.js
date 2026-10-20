@@ -857,7 +857,7 @@ async function compressImage(file, maxDimension = 1920, quality = 0.82) {
     const name = file.name.replace(/\.[^.]+$/, '') + '.' + ext;
     return new File([blob], name, { type: outputType });
   } catch (err) {
-    console.warn('compressImage: falling back to original file —', err.message);
+    console.warn('compressImage: falling back to original file:', err.message);
     return file;
   }
 }
