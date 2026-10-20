@@ -8,7 +8,8 @@
 //      read / unsubscribe taps (_shared/mailbox-cleanup.js).
 //   3. Writing style: learn it from the sent replies when asked (Settings > Email Agent) or
 //      every 30 days (_shared/writing-style.js), before the drafts below use it.
-//   4. The email agent: sections, labels, job tags and drafts (_shared/email-agent.js).
+//   4. The email agent: sections, labels (and label sweeps over older mail), job tags and
+//      drafts (_shared/email-agent.js).
 // One run per mailbox at a time (mailboxes.busy_until). Starts itself again if time runs out.
 
 const { getAdminClient } = require('./_shared/require-admin');
@@ -113,6 +114,9 @@ exports.handler = () => runAgent('mailbox-work', async () => {
         usage.input_tokens += r.usage.input_tokens; usage.output_tokens += r.usage.output_tokens;
         if (r.sorted) parts.push(`${mb.address}: ${r.sorted} sorted, ${r.priority} need a reply, ${r.drafted} drafted`);
         if (r.invoicesPassed) parts.push(`${mb.address}: ${r.invoicesPassed} supplier invoice${r.invoicesPassed === 1 ? '' : 's'} passed to invoice@, ${r.routingReplies} "use invoice@" repl${r.routingReplies === 1 ? 'y' : 'ies'}`);
+        if (r.labelsMade) parts.push(`${mb.address}: ${r.labelsMade} new label${r.labelsMade === 1 ? '' : 's'} made`);
+        if (r.labelsSwept || r.labelsFound) parts.push(`${mb.address}: ${r.labelsSwept} label sweep${r.labelsSwept === 1 ? '' : 's'}, ${r.labelsFound} older conversation${r.labelsFound === 1 ? '' : 's'} filed`);
+        if (r.pending) more = true;
       }
       if (mb.last_error) await admin.from('mailboxes').update({ last_error: null }).eq('id', mb.id);
     } catch (err) {

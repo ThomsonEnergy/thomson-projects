@@ -411,6 +411,12 @@
             <div id="company-voice-box" style="margin-bottom:6px;"></div>
             <div id="writing-style-list"><p class="subtitle">Loading...</p></div>
           </div>
+          <!-- Labels made by the agent (mailboxes.auto_labels, migration 20261105010000) -->
+          <div class="card">
+            <h2>Labels made by Postie</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Labels group the emails of a matter that is not a job (a supplier dispute, a licence application, a council matter). Normally Postie only <b>suggests</b> a new label on the conversation and a person adds it. With this on, Postie makes the label itself (marked AI in the Inbox sidebar), files the conversation under it and checks the last 60 days of that inbox for others that belong. It reuses an existing label when the matter is already there, so you do not end up with near duplicates. Rename, merge or delete any label from the Inbox. Job emails are never labelled: they are tagged to the job.</p>
+            <div id="auto-labels-list"><p class="subtitle">Loading...</p></div>
+          </div>
           <!-- Spell check and Polish (profiles.spellcheck_mode, migration 20261103030000, js/writing-help.js) -->
           <div class="card">
             <h2>Spell check and Polish</h2>
@@ -1040,7 +1046,7 @@
 
     // Writing style per mailbox (mailboxes.writing_style, migration 20261103020000). sales@ for
     // pricing roles, plus the person's own My inbox. Learn runs in the mailbox worker, so poll.
-    const WS_COLS = 'id, address, kind, owner_id, writing_style, writing_style_examples, writing_style_learned_at, writing_style_edited_at, writing_style_requested_at, writing_style_error, writing_style_source';
+    const WS_COLS = 'id, address, kind, owner_id, writing_style, writing_style_examples, writing_style_learned_at, writing_style_edited_at, writing_style_requested_at, writing_style_error, writing_style_source, auto_labels';
     // The company voice (company_settings.writing_style_mailbox_id, migration 20261103030000): Admin picks it.
     async function loadCompanyVoice() {
       const el = document.getElementById('company-voice-box');
@@ -1101,6 +1107,7 @@
         listEl.innerHTML = '<p class="subtitle">Connect your Gmail in Inbox &gt; My inbox first, then come back here.</p>';
         return;
       }
+      renderAutoLabels(boxes);
       let anyLearning = false;
       listEl.innerHTML = boxes.map((m) => {
         const key = m.kind === 'shared' ? 'sales' : 'mine';
@@ -1159,6 +1166,29 @@
       });
       clearTimeout(wsPollTimer);
       if (anyLearning) wsPollTimer = setTimeout(loadWritingStyles, 4000);
+    }
+
+    // Let Postie make labels itself, per mailbox (mailboxes.auto_labels, email-actions set_auto_labels)
+    function renderAutoLabels(boxes) {
+      const el = document.getElementById('auto-labels-list');
+      if (!el) return;
+      el.innerHTML = boxes.map((m) => `<label style="display:flex; align-items:center; gap:8px; margin:6px 0; font-weight:400;">
+          <input type="checkbox" class="auto-labels" data-id="${escapeHtml(m.id)}" style="width:auto;" ${m.auto_labels ? 'checked' : ''} />
+          <span>${escapeHtml(m.address)}${m.kind === 'shared' ? ' (shared labels, the whole team sees them)' : ' (your own labels)'}: let Postie create labels</span>
+        </label>`).join('') + '<span id="auto-labels-msg" class="subtitle" style="font-size:12px;"></span>';
+      el.querySelectorAll('.auto-labels').forEach((box) => box.addEventListener('change', async () => {
+        const msg = document.getElementById('auto-labels-msg');
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/email-actions', {
+            method: 'POST', headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'set_auto_labels', mailbox_id: box.dataset.id, on: box.checked }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+          msg.textContent = box.checked ? 'On. New labels Postie makes show in the Inbox sidebar with an AI tag.' : 'Off. Postie suggests labels and you confirm them.';
+        } catch (err) { box.checked = !box.checked; msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+      }));
     }
 
     // Spell check and Polish setting (profiles.spellcheck_mode, migration 20261103030000)

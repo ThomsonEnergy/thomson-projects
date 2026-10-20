@@ -4586,15 +4586,41 @@
       });
     }
 
+    // Who replied or who is handling a tagged conversation (email_threads.assigned_to), same
+    // wording as the Inbox. Null when there is nothing to say.
+    let jobEmailStaff = null, jobEmailMe = null;
+    function jobThreadStatus(t, last) {
+      const name = (id) => (id === jobEmailMe ? 'You' : ((jobEmailStaff || []).find(s => s.id === id) || {}).full_name || 'A team member');
+      if (t.is_done) return { colour: 'var(--muted)', text: 'Done' };
+      const claimed = t.assigned_to ? `${name(t.assigned_to)} ${t.assigned_to === jobEmailMe ? 'are' : 'is'} on it` : '';
+      if (last && last.direction === 'outbound') {
+        const by = last.created_by ? `${name(last.created_by)} replied` : 'Replied from Gmail';
+        return { colour: 'var(--green)', text: `${by} ${jobEmailAgo(last.sent_at)}${t.section === 'priority' ? ', waiting on them' : ''}${t.assigned_to && t.assigned_to !== last.created_by ? ', ' + claimed.replace('You are', 'you are') : ''}` };
+      }
+      if (t.assigned_to) return { colour: '#e0a526', text: `${claimed.replace('You are', "You're")}${t.assigned_at ? ' (claimed ' + jobEmailAgo(t.assigned_at) + ')' : ''}` };
+      if (t.section === 'priority' && t.last_direction === 'inbound') return { colour: 'var(--red)', text: 'Nobody has replied yet' };
+      return null;
+    }
+    function jobEmailAgo(d) {
+      const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+      if (mins < 60) return `${Math.max(mins, 0)}m ago`;
+      if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
+      return `${Math.floor(mins / 1440)}d ago`;
+    }
+
     async function loadJobEmails(project) {
       const el = document.getElementById('job-emails-list');
       if (!el) return;
       const { data: links, error } = await supabaseClient.from('email_job_links')
-        .select('id, kind, note, thread_id, email_threads(id, subject, last_message_at)').eq('project_id', project.id);
+        .select('id, kind, note, thread_id, email_threads(id, subject, last_message_at, last_direction, section, is_done, assigned_to, assigned_at)').eq('project_id', project.id);
       if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      if (!jobEmailStaff) {
+        const [{ data: staff }, { data: { user } }] = await Promise.all([supabaseClient.from('profiles').select('id, full_name, active').order('full_name'), supabaseClient.auth.getUser()]);
+        jobEmailStaff = staff || []; jobEmailMe = user ? user.id : null;
+      }
       const ids = (links || []).map(l => l.thread_id);
       let msgs = [];
-      if (ids.length) ({ data: msgs } = await supabaseClient.from('emails').select('id, thread_id, direction, from_address, to_addresses, body_text, attachments, sent_at').in('thread_id', ids).order('sent_at', { ascending: false }));
+      if (ids.length) ({ data: msgs } = await supabaseClient.from('emails').select('id, thread_id, direction, from_address, to_addresses, body_text, attachments, sent_at, created_by').in('thread_id', ids).order('sent_at', { ascending: false }));
       const byThread = {}; (msgs || []).forEach(m => { (byThread[m.thread_id] ||= []).push(m); });
       const sorted = (links || []).slice().sort((a, b) => String(b.email_threads?.last_message_at).localeCompare(String(a.email_threads?.last_message_at)));
       // review requests sent from this job, and what came back
@@ -4615,11 +4641,20 @@
         const atts = list.flatMap(m => (m.attachments || []).filter(a => !(a.inline && a.cid)).map(a => ({ m, a })));
         const snippet = last ? String(last.body_text || '').replace(/\s+/g, ' ').trim().slice(0, 180) : '';
         const out = last && last.direction === 'outbound';
+        const st = jobThreadStatus(thread, last);
+        const others = (jobEmailStaff || []).filter(s => s.active && s.id !== thread.assigned_to);
         return `<div class="card" style="margin:0 0 10px;" data-link="${l.id}">
           <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
             <div style="min-width:0;"><strong>${escapeHtml(thread.subject || '(no subject)')}</strong>
               <span style="font-size:11px; padding:2px 8px; border:1px solid var(--accent); border-radius:20px; margin-left:6px;">${EMAIL_KINDS[l.kind] || 'Other'}</span></div>
             <span class="subtitle" style="margin:0; font-size:12px;">${thread.last_message_at ? new Date(thread.last_message_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : ''}</span>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; font-size:12px;">
+            ${st ? `<span style="color:${st.colour}; font-weight:700;">${escapeHtml(st.text)}</span>` : ''}
+            <select class="job-email-assign" data-t="${thread.id}" style="width:auto; font-size:12px; padding:3px 8px;" title="Who is handling this conversation">
+              <option value="">${thread.assigned_to ? 'Nobody (unassign)' : 'Assign to...'}</option>
+              ${others.map(s => `<option value="${s.id}">${s.id === jobEmailMe ? 'Me' : escapeHtml(s.full_name || '')}</option>`).join('')}
+            </select>
           </div>
           ${l.note ? `<p class="subtitle" style="margin:4px 0 0;">Note: ${escapeHtml(l.note)}</p>` : ''}
           ${last ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">${out ? 'Last sent to ' + escapeHtml((last.to_addresses || [])[0] || 'unknown') : 'Last received from ' + escapeHtml(String(last.from_address || '').replace(/<.*>/, '').trim() || 'unknown')}: ${escapeHtml(snippet)}${snippet.length >= 180 ? '...' : ''}</p>` : ''}
@@ -4645,6 +4680,10 @@
       el.querySelectorAll('.job-email-untag').forEach(btn => btn.addEventListener('click', async () => {
         if (!confirm('Take this email off the job? The email itself is not deleted.')) return;
         await supabaseClient.from('email_job_links').delete().eq('id', btn.dataset.link);
+        loadJobEmails(project);
+      }));
+      el.querySelectorAll('.job-email-assign').forEach(sel => sel.addEventListener('change', async () => {
+        try { await emailAction('assign', { thread_id: sel.dataset.t, user_id: sel.value || null }); } catch (err) { alert(err.message); }
         loadJobEmails(project);
       }));
     }
