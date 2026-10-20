@@ -149,6 +149,13 @@
   .sor .qtable td, .sor .qtable th { padding-top: 7px; padding-bottom: 7px; font-size: 12.5px; }
   .est-note { border: 1px solid var(--q-blue); padding: 12px 16px; font-weight: 600; font-size: 13px; margin-bottom: 22px; }
 
+  /* The payment schedule is set tighter than the stage table so it usually fits under the totals;
+     when it does not, the A4 pagination moves it whole onto the next sheet. */
+  .sec-title.ps { margin-top: 24px; font-size: 17px; }
+  .qtable.ps th { font-size: 13px; padding: 6px 8px 7px 0; }
+  .qtable.ps td { padding: 7px 8px 7px 0; font-size: 12.5px; }
+  .note-line.ps { font-size: 11px; margin-top: 8px; }
+
   .pg.invest { padding-top: 0; }
   .invest-top { background: #000; color: #fff; margin: 0 -64px 34px; padding: 48px 64px 44px; position: relative; }
   .invest-top .pg-head { margin-bottom: 36px; }
@@ -615,7 +622,7 @@
       const lightLogoImg = s.logo_url
         ? `<img class="pg-logo" src="${s.logo_url}" alt="${esc(s.company_name || '')}" />`
         : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`;
-      const headHtml = `<div class="pg-head"><div>${siteLink ? `<a href="${esc(siteLink)}">${lightLogoImg}</a>` : lightLogoImg}</div>${contactHtml}</div>`;
+      const headHtml = lightPageHeadHtml = `<div class="pg-head"><div>${siteLink ? `<a href="${esc(siteLink)}">${lightLogoImg}</a>` : lightLogoImg}</div>${contactHtml}</div>`;
       // On the black pages (cover, investment header) the logo is drawn in its own
       // colours straight on the page, with no white box behind it.
       const darkLogoHtml = (cls) => lightLogo
@@ -720,12 +727,12 @@
       // Approved variations are invoiced on their own, once that work is done.
       const variationScheduleRows = centres.filter(c => c.is_variation).map(c => `<tr><td>${esc(c.name)}, invoiced when the work is done</td><td class="num">${money(c.quoted_amount * 1.1)}</td></tr>`).join('');
       const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials') ? '' : `
-        <div class="sec-title">Payment schedule</div>
-        <table class="qtable">
+        <div class="sec-title ps">Payment schedule</div>
+        <table class="qtable split ps">
           <thead><tr><th>Milestone</th><th class="num">Amount (inc GST)</th></tr></thead>
           <tbody>${milestoneRowsHtml}${variationScheduleRows}</tbody>
         </table>
-        <p class="note-line">For projects that span multiple months, we reserve the right to invoice each milestone in part at the end of the month, based on the percentage of that stage completed at the time, rather than waiting until it is fully finished.</p>`;
+        <p class="note-line ps">For projects that span multiple months, we reserve the right to invoice each milestone in part at the end of the month, based on the percentage of that stage completed at the time, rather than waiting until it is fully finished.</p>`;
 
       const stageRowsHtml = centres.map((c, i) => {
         const hasItems = (c.line_items || []).length > 0;
@@ -747,6 +754,11 @@
           </tr>` : ''}`;
       }).join('');
 
+      // the payment schedule, valid-until line and approve link stay together: on a full page they
+      // move onto the next sheet as one (paginateToA4)
+      const investTailHtml = paymentScheduleHtml
+        + (isAccepted || isDeclined || vInfo ? '' : validLine(project.valid_until, template === 'quick_estimate' ? 'estimate' : 'quote'))
+        + (isAccepted || isDeclined || vInfo ? '' : `<p style="margin-top:24px;"><a class="q-btn" href="${shareOrigin()}/quote.html?token=${encodeURIComponent(token)}">View and approve this quote online &rarr;</a></p>`);
       const investHtml = `
         <section class="pg invest">
           <div class="invest-top dark-block">
@@ -755,7 +767,7 @@
           </div>
           <div class="pg-body">
             ${template === 'quick_estimate' ? `<div class="est-note">${esc(project.estimate_disclaimer_text || 'Estimate only - final invoice based on actual hours and materials used.')}</div>` : ''}
-            <table class="qtable">
+            <table class="qtable split">
               <thead><tr><th>Stage</th><th>Description</th><th class="num">Price (ex GST)</th></tr></thead>
               <tbody>${stageRowsHtml}</tbody>
             </table>
@@ -766,9 +778,7 @@
               <div class="big">Total${stcTotal > 0 ? ' after STC credit' : ' inc GST'}: ${money(stcTotal > 0 ? totalAfterStc : totalIncGst)}</div>
               ${stcTotal > 0 ? `<div class="note-line">The STC credit is applied against your invoice once the system is installed and registered - not a separate payment.</div>` : ''}
             </div>
-            ${paymentScheduleHtml}
-            ${isAccepted || isDeclined || vInfo ? '' : validLine(project.valid_until, template === 'quick_estimate' ? 'estimate' : 'quote')}
-            ${isAccepted || isDeclined || vInfo ? '' : `<p style="margin-top:24px;"><a class="q-btn" href="${shareOrigin()}/quote.html?token=${encodeURIComponent(token)}">View and approve this quote online &rarr;</a></p>`}
+            ${investTailHtml.trim() ? `<div class="keep">${investTailHtml}</div>` : ''}
           </div>
         </section>`;
 
@@ -1016,25 +1026,48 @@
     // content runs past the bottom (a long scope, the terms) has its overflow moved onto a new sheet with
     // the same header, instead of spilling over the page edge or leaving a sliver on an extra sheet.
     const A4_HEIGHT = 1123, A4_BOTTOM_PAD = 72;
+    // the white pages' header (logo and company details), for sheets carried on from the investment
+    // page, whose own header sits on its black block
+    let lightPageHeadHtml = '';
     function paginateToA4() {
       const content = document.getElementById('content');
       const spill = (pg) => { const body = pg.querySelector('.pg-body'); return body ? body.offsetTop + body.offsetHeight + A4_BOTTOM_PAD > A4_HEIGHT : false; };
-      // takes the last block off the end of a page body (looking inside lists of rows / photos / terms);
-      // returns { wrapper class, element } or null when only the title is left
+      const WRAPS = /\b(rows|gallery|terms-cols)\b/;
+      // takes the last block off the end of a page body (looking inside lists of rows / photos / terms,
+      // and taking a long table a row at a time); returns { els, wrap?, wrapTag?, removeWrap?, table? }
+      // or null when nothing more can move
       const takeLast = (body) => {
         const last = body.lastElementChild;
-        if (!last || last.tagName === 'H1' || body.children.length < 2 && !/\b(rows|gallery|terms-cols|photo-row)\b/.test(last.className)) return null;
-        if (/\b(rows|gallery|terms-cols)\b/.test(last.className) && last.children.length > 1) {
-          return { wrap: last.className, wrapTag: last.tagName, el: last.lastElementChild };
+        if (!last || last.tagName === 'H1') return null;
+        // a block kept whole (the payment schedule and approve link) that is on its own and still too tall for a
+        // sheet is opened up, so its table can carry on over the page instead
+        if (last.classList.contains('keep') && body.children.length < 2) {
+          last.replaceWith(...last.children);
+          return takeLast(body);
         }
-        if (/\b(rows|gallery|terms-cols)\b/.test(last.className) && last.children.length === 1) {
-          const only = last.lastElementChild;
-          return { wrap: last.className, wrapTag: last.tagName, el: only, removeWrap: last };
+        // a long table (many cost centres or milestones) moves its last row on; the column headings
+        // repeat on the next sheet, and a stage moves together with its item list
+        if (last.tagName === 'TABLE' && last.classList.contains('split') && last.tBodies[0]) {
+          const rows = [...last.tBodies[0].rows];
+          if (rows.filter(r => !r.classList.contains('stage-detail-row')).length > 1) {
+            const lastRow = rows[rows.length - 1];
+            const els = [lastRow];
+            if (lastRow.classList.contains('stage-detail-row') && lastRow.previousElementSibling) els.unshift(lastRow.previousElementSibling);
+            return { table: last, els };
+          }
         }
-        return { wrap: null, el: last };
+        if (body.children.length < 2 && !WRAPS.test(last.className)) return null;
+        if (WRAPS.test(last.className) && last.children.length > 1) {
+          return { wrap: last.className, wrapTag: last.tagName, els: [last.lastElementChild] };
+        }
+        if (WRAPS.test(last.className) && last.children.length === 1) {
+          return { wrap: last.className, wrapTag: last.tagName, els: [last.lastElementChild], removeWrap: last };
+        }
+        return { els: [last] };
       };
       [...content.querySelectorAll('.pg')].forEach((first) => {
-        if (first.classList.contains('cover') || first.classList.contains('invest') || first.querySelector('.band-panel')) return;
+        if (first.classList.contains('cover') || first.querySelector('.band-panel')) return;
+        const isInvest = first.classList.contains('invest');
         let cur = first;
         let guard = 0;
         while (spill(cur) && guard++ < 12) {
@@ -1044,25 +1077,41 @@
           while (spill(cur) && more) {
             const t = takeLast(body);
             if (!t) { more = false; break; }
-            t.el.remove(); if (t.removeWrap) t.removeWrap.remove();
+            t.els.forEach(el => el.remove()); if (t.removeWrap) t.removeWrap.remove();
             moved.unshift(t);
             // a heading left stranded at the bottom goes with what follows it
             const nowLast = body.lastElementChild;
-            if (nowLast && /\b(sec-title|sor-h)\b/.test(nowLast.className) && !spill(cur)) { moved.unshift({ wrap: null, el: nowLast }); nowLast.remove(); }
+            if (nowLast && /\b(sec-title|sor-h)\b/.test(nowLast.className) && !spill(cur)) { moved.unshift({ els: [nowLast] }); nowLast.remove(); }
           }
           if (!moved.length) break;
           const cont = document.createElement('section');
           cont.className = 'pg fixed cont';
-          const head = first.querySelector('.pg-head');
-          const slabs = first.querySelector(':scope > .slabs');
-          cont.innerHTML = (slabs ? slabs.outerHTML : '') + (head ? head.outerHTML : '') + '<div class="' + body.className + '"></div>';
+          let top;
+          // no corner slabs here: on a sheet of stage rows they would sit behind the last prices
+          if (isInvest) top = lightPageHeadHtml;
+          else {
+            const head = first.querySelector('.pg-head');
+            const slabs = first.querySelector(':scope > .slabs');
+            top = (slabs ? slabs.outerHTML : '') + (head ? head.outerHTML : '');
+          }
+          cont.innerHTML = top + '<div class="' + body.className + '"></div>';
           const nbody = cont.querySelector('.pg-body');
           let open = null;
           moved.forEach((m) => {
-            if (m.wrap) {
-              if (!open || open.className !== m.wrap) { open = document.createElement(m.wrapTag || 'div'); open.className = m.wrap; nbody.appendChild(open); }
-              open.appendChild(m.el);
-            } else { open = null; nbody.appendChild(m.el); }
+            if (m.table) {
+              if (!open || open._from !== m.table) {
+                open = document.createElement('table');
+                open.className = m.table.className;
+                open._from = m.table;
+                if (m.table.tHead) open.appendChild(m.table.tHead.cloneNode(true));
+                open.appendChild(document.createElement('tbody'));
+                nbody.appendChild(open);
+              }
+              m.els.forEach(el => open.tBodies[0].appendChild(el));
+            } else if (m.wrap) {
+              if (!open || open._from || open.className !== m.wrap) { open = document.createElement(m.wrapTag || 'div'); open.className = m.wrap; nbody.appendChild(open); }
+              m.els.forEach(el => open.appendChild(el));
+            } else { open = null; m.els.forEach(el => nbody.appendChild(el)); }
           });
           cur.after(cont);
           cur.classList.add('fixed');

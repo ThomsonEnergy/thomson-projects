@@ -6,12 +6,17 @@
 // Netlify scheduled functions cannot be called over HTTP in production (they answer
 // 403 with an empty body), which is why the buttons need their own function.
 //
-// Uses Gmail's history API for incremental sync (only what's new since the last run)
-// once we have a starting point; falls back to listing recent messages to bootstrap
-// that starting point on the very first run, or if Gmail's history has aged out (it
-// only keeps about a week). Works within a time budget: if it runs out of time it
-// stops cleanly and does NOT move the starting point on, so the next run carries on
-// with the rest (anything already saved is skipped quickly).
+// sales@ uses Gmail's history API (only what's new since the last run), a page at a time:
+// the starting point (api_keys google_history_id) moves on after every finished page, and
+// mail TEops already has is ruled out for a whole page in one query, so a backlog always
+// makes progress. Without a starting point, or if Gmail's history has aged out (it keeps
+// about a week), it loads the last 14 days instead. Works within a time budget: a run
+// that is out of time stops cleanly and hands the rest to mailbox-work-background.js
+// (catchUpSharedMailbox, up to 15 minutes). One sales@ sync at a time (gmail_sync_lock).
+//
+// 20 Oct 2026: the old version saved its starting point only after a whole batch of 100,
+// checked each message one by one and refetched drafts and deleted mail every run, so it
+// never finished a batch inside its budget and sales@ stopped pulling in mail for days.
 
 const { getAdminClient } = require('./require-admin');
 const { gmailRequest, GMAIL_MAILBOX } = require('./google-client');
@@ -288,57 +293,127 @@ async function backfillEmails(supabaseAdmin, startedAt, budgetMs) {
   return filled;
 }
 
+// One sales@ sync at a time. Netlify retries a scheduled run that takes over 15 seconds and
+// the background catch-up may be going too; two runs would only repeat each other's work.
+// The lock is an expiry time in api_keys, so a run that dies never holds it for long.
+const SYNC_LOCK = 'gmail_sync_lock';
+const EPOCH = new Date(0).toISOString();
+async function claimSharedSync(admin, holdMs) {
+  const now = new Date();
+  await admin.from('api_keys').upsert({ key_name: SYNC_LOCK, key_value: EPOCH }, { onConflict: 'key_name', ignoreDuplicates: true });
+  const { data } = await admin.from('api_keys').update({ key_value: new Date(now.getTime() + holdMs).toISOString() })
+    .eq('key_name', SYNC_LOCK).lt('key_value', now.toISOString()).select('key_name');
+  return !!(data && data.length);
+}
+const releaseSharedSync = (admin) => admin.from('api_keys').update({ key_value: EPOCH }).eq('key_name', SYNC_LOCK);
+
+const SKIP_LABELS = ['DRAFT', 'SPAM', 'TRASH'];
+
+// Saves the messages sales@ has that TEops does not, 4 at a time. msgs: [{ id, labelIds? }].
+// Drafts, spam and bin are left out without fetching them (every draft save is a new message
+// in Gmail's history). Returns false if time ran out first.
+async function saveNewMessages(admin, msgs, shared, ctx, startedAt, budgetMs) {
+  const ids = [...new Set(msgs.filter((m) => !(m.labelIds || []).some((l) => SKIP_LABELS.includes(l))).map((m) => m.id))];
+  const known = new Set();
+  for (let i = 0; i < ids.length; i += 150) {
+    let q = admin.from('emails').select('gmail_message_id, email_threads!inner(mailbox_id)').in('gmail_message_id', ids.slice(i, i + 150));
+    if (shared) q = q.eq('email_threads.mailbox_id', shared.id);
+    const { data, error } = await q;
+    if (error) throw error;
+    (data || []).forEach((e) => known.add(e.gmail_message_id));
+  }
+  const todo = ids.filter((id) => !known.has(id));
+  if (todo.length && ctx.billLabelId === undefined) ctx.billLabelId = await getBillLabelId();
+  let next = 0, outOfTime = false;
+  await Promise.all(Array.from({ length: Math.min(4, todo.length) }, async () => {
+    while (next < todo.length) {
+      if (Date.now() - startedAt > budgetMs) { outOfTime = true; return; }
+      const id = todo[next++];
+      try {
+        const seen = await processMessageId(admin, id, ctx.billLabelId, shared);
+        if (seen.bill) ctx.bills += 1;
+        if (seen.priceList) ctx.priceLists += 1;
+        if (seen.inbound && !seen.bill) ctx.inbound += 1;
+      } catch (err) {
+        // deleted from Gmail after it was listed: skip it
+        if (!/not found|404/i.test(err.message || '')) throw err;
+      }
+      ctx.synced += 1;
+    }
+  }));
+  return !outOfTime;
+}
+
+// sales@ since the last run. Returns { synced, bills, priceLists, inbound, done }.
+async function syncSharedMailbox(admin, shared, startedAt, budgetMs) {
+  const ctx = { synced: 0, bills: 0, priceLists: 0, inbound: 0, billLabelId: undefined };
+  const out = (done) => ({ synced: ctx.synced, bills: ctx.bills, priceLists: ctx.priceLists, inbound: ctx.inbound, done });
+  const saveMarker = (id) => admin.from('api_keys').upsert({ key_name: 'google_history_id', key_value: String(id) });
+  const { data: row } = await admin.from('api_keys').select('key_value').eq('key_name', 'google_history_id').maybeSingle();
+  const start = row?.key_value;
+
+  // no starting point, or too old for Gmail: the last 14 days, then start from "now" (taken
+  // first, so nothing arriving during the load is missed; what is already saved is skipped)
+  const loadRecent = async () => {
+    const profile = await gmailRequest('profile');
+    const list = await gmailRequest(`messages?q=${encodeURIComponent('newer_than:14d -in:drafts -in:spam -in:trash')}&maxResults=500`);
+    const finished = await saveNewMessages(admin, list.messages || [], shared, ctx, startedAt, budgetMs);
+    if (finished) await saveMarker(profile.historyId);
+    return out(finished);
+  };
+  if (!start) return loadRecent();
+
+  let pageToken = null;
+  for (;;) {
+    if (Date.now() - startedAt > budgetMs) return out(false);
+    let page;
+    try {
+      page = await gmailRequest(`history?startHistoryId=${encodeURIComponent(start)}&historyTypes=messageAdded&maxResults=500${pageToken ? `&pageToken=${pageToken}` : ''}`);
+    } catch (err) {
+      if (err.status !== 404) throw err;
+      console.error('sync-gmail: sales@ history has aged out, loading the last 14 days');
+      return loadRecent();
+    }
+    const history = page.history || [];
+    const msgs = history.flatMap((h) => (h.messagesAdded || []).map((m) => m.message));
+    // out of time part way through a page: the starting point stays put and the next run
+    // does this page again (what is already saved is ruled out in one query)
+    if (!(await saveNewMessages(admin, msgs, shared, ctx, startedAt, budgetMs))) return out(false);
+    pageToken = page.nextPageToken;
+    // move the starting point on: to the last change on this page, or to "now" at the end
+    const moved = pageToken ? (history.length ? history[history.length - 1].id : null) : page.historyId;
+    if (moved) await saveMarker(moved);
+    if (!pageToken) return out(true);
+  }
+}
+
+// mailbox-work-background.js: the rest of a sales@ backlog the scheduled sync ran out of time
+// for. Returns { synced, done } (done: null when another run has the lock).
+async function catchUpSharedMailbox(admin, budgetMs) {
+  const startedAt = Date.now();
+  const { data: shared } = await admin.from('mailboxes').select('*').eq('kind', 'shared').order('created_at').limit(1).maybeSingle();
+  if (!(await claimSharedSync(admin, budgetMs + 60000))) return { synced: 0, done: null };
+  let r;
+  try { r = await syncSharedMailbox(admin, shared, startedAt, budgetMs); } finally { await releaseSharedSync(admin); }
+  if (r.bills) await startSupplierBillProcessing();
+  if (r.priceLists) await startPriceListProcessing();
+  return r;
+}
+
 // Returns { synced, done }. done=false means time ran out before every message was handled.
 async function runSync({ budgetMs = 8000 } = {}) {
   const startedAt = Date.now();
   const supabaseAdmin = getAdminClient();
 
-  const { data: historyRow } = await supabaseAdmin.from('api_keys').select('key_value').eq('key_name', 'google_history_id').maybeSingle();
-  const startHistoryId = historyRow?.key_value;
-
-  let messageIds = [];
-  let newHistoryId = null;
-
-  if (startHistoryId) {
-    try {
-      const history = await gmailRequest(`history?startHistoryId=${encodeURIComponent(startHistoryId)}&historyTypes=messageAdded`);
-      messageIds = (history.history || []).flatMap(h => (h.messagesAdded || []).map(m => m.message.id));
-      newHistoryId = history.historyId;
-    } catch (err) {
-      // historyId too old (Gmail only keeps ~1 week) - fall through to the bootstrap path below.
-      console.error('history.list failed, falling back to messages.list:', err.message);
-    }
-  }
-
-  if (!newHistoryId) {
-    const list = await gmailRequest('messages?maxResults=50');
-    messageIds = (list.messages || []).map(m => m.id);
-    const profile = await gmailRequest('profile');
-    newHistoryId = profile.historyId;
-  }
-
-  messageIds = [...new Set(messageIds)];
-  const billLabelId = messageIds.length ? await getBillLabelId() : null;
   const { data: shared } = await supabaseAdmin.from('mailboxes').select('*').eq('kind', 'shared').order('created_at').limit(1).maybeSingle();
-  let synced = 0, done = true, bills = 0, priceLists = 0, inbound = 0;
-  for (const id of messageIds) {
-    if (Date.now() - startedAt > budgetMs) { done = false; break; }
-    try {
-      const seen = await processMessageId(supabaseAdmin, id, billLabelId, shared);
-      if (seen.bill) bills += 1;
-      if (seen.priceList) priceLists += 1;
-      if (seen.inbound && !seen.bill) inbound += 1;
-    } catch (err) {
-      // deleted from Gmail after it was listed: skip it, or the sync gets stuck on it every run
-      if (!/not found|404/i.test(err.message || '')) throw err;
-      console.log('sync-gmail: skipped a message Gmail no longer has:', id);
-    }
-    synced += 1;
+  let sales = { synced: 0, bills: 0, priceLists: 0, inbound: 0, done: true };
+  if (await claimSharedSync(supabaseAdmin, budgetMs + 60000)) {
+    try { sales = await syncSharedMailbox(supabaseAdmin, shared, startedAt, budgetMs); } finally { await releaseSharedSync(supabaseAdmin); }
+  } else {
+    sales.done = false; // another run is pulling sales@ in right now
   }
-
-  if (done && newHistoryId) {
-    await supabaseAdmin.from('api_keys').upsert({ key_name: 'google_history_id', key_value: String(newHistoryId) });
-  }
+  const synced = sales.synced, done = sales.done;
+  let { bills, priceLists, inbound } = sales;
   let backfilled = 0;
   if (done) backfilled = await backfillEmails(supabaseAdmin, startedAt, budgetMs);
 
@@ -365,7 +440,8 @@ async function runSync({ budgetMs = 8000 } = {}) {
   // doesn't report the email agent as down after a quiet night (bug review F14).
   const { data: hb } = await supabaseAdmin.from('agent_heartbeats').select('last_ok_at').eq('agent', 'mailbox-work').maybeSingle();
   const stale = !hb?.last_ok_at || Date.now() - new Date(hb.last_ok_at).getTime() > 50 * 60000;
-  if (inbound || unsorted || pendingWork || stale) await startMailboxWork();
+  // also when sales@ is behind: the background run carries on with the backlog
+  if (inbound || unsorted || pendingWork || stale || !done) await startMailboxWork();
   // Supplier bills are read in the background (a PDF takes longer than this function gets).
   // Started when a bill came in, when some are still waiting, and once an hour as a safety net.
   const { count: waiting } = await supabaseAdmin.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'pending');
@@ -375,8 +451,8 @@ async function runSync({ budgetMs = 8000 } = {}) {
   if (priceLists || listsWaiting || new Date().getMinutes() < 5) await startPriceListProcessing();
   // bill checks and statements: after the bill reader has had a go, so hourly is soon enough
   if (new Date().getMinutes() >= 30 && new Date().getMinutes() < 35) await startStatementProcessing();
-  console.log(`sync-gmail: processed ${synced} of ${messageIds.length} message(s)${done ? '' : ' (out of time, will carry on next run)'}, ${bills} supplier bill(s), filled in ${backfilled} older email(s).`);
-  return { synced: synced + personalSynced, done: done && personalDone, total: messageIds.length, backfilled, bills, priceLists };
+  console.log(`sync-gmail: sales@ ${synced} new message(s)${done ? '' : ' (more waiting, handed to the background run)'}, ${bills} supplier bill(s), filled in ${backfilled} older email(s).`);
+  return { synced: synced + personalSynced, done: done && personalDone, backfilled, bills, priceLists };
 }
 
-module.exports = { runSync, processMessageId, startMailboxWork, headerValue, firstAddress, extractHtml, extractAttachments, extractPlainText };
+module.exports = { runSync, catchUpSharedMailbox, processMessageId, startMailboxWork, headerValue, firstAddress, extractHtml, extractAttachments, extractPlainText };

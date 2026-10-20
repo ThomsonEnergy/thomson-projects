@@ -2597,7 +2597,7 @@
         try { data = JSON.parse(text); } catch (e) { throw new Error(`The sync did not answer properly (status ${res.status}). Try again in a minute.`); }
         if (!data.ok) throw new Error(data.error || 'The sync failed.');
         msg.innerHTML = data.done === false
-          ? `<div class="success-box">Pulled in ${data.synced} of ${data.total} messages so far. Press Sync now again to bring in the rest.</div>`
+          ? `<div class="success-box">Pulled in ${data.synced} message${data.synced === 1 ? '' : 's'} so far. The rest carries on in the background, or press Sync now again.</div>`
           : `<div class="success-box">Synced - ${data.synced} new message(s).</div>`;
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
