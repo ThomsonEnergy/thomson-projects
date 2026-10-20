@@ -74,8 +74,8 @@
                   <td data-label="Rego">${escapeHtml(v.rego)}</td>
                   <td data-label="Vehicle">${escapeHtml([v.year, v.make, v.model].filter(Boolean).join(' '))}</td>
                   <td data-label="Assigned to">${escapeHtml(v.profiles?.full_name || '-')}</td>
-                  <td data-label="Rego expiry">${v.rego_expiry ? new Date(v.rego_expiry).toLocaleDateString('en-AU') : '-'}${regoWarn ? ` <span class="badge draft" style="color:var(--red);">${regoDays}d</span>` : ''}</td>
-                  <td data-label="Next service">${v.next_service_date ? new Date(v.next_service_date).toLocaleDateString('en-AU') : '-'}${serviceWarn ? ` <span class="badge draft" style="color:var(--red);">${serviceDays}d</span>` : ''}</td>
+                  <td data-label="Rego expiry">${v.rego_expiry ? new Date(v.rego_expiry).toLocaleDateString('en-AU') : '-'}${regoWarn ? ` <span class="badge red">${regoDays}d</span>` : ''}</td>
+                  <td data-label="Next service">${v.next_service_date ? new Date(v.next_service_date).toLocaleDateString('en-AU') : '-'}${serviceWarn ? ` <span class="badge red">${serviceDays}d</span>` : ''}</td>
                   <td data-label="">
                     ${v.holds_stock ? `<a href="/vehicle-stock.html?id=${v.id}" class="link-quiet" style="font-size:12px; margin-right:10px;">Stock</a>` : ''}
                     <button class="secondary edit-vehicle-btn" data-id="${v.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
@@ -101,7 +101,7 @@
             <div><label style="margin-top:0">Asset number</label><input id="veh-asset" value="${escapeHtml(vehicle?.asset_number)}" /></div>
           </div>
           <label>Rego</label>
-          <input id="veh-rego" value="${escapeHtml(vehicle?.rego)}" />
+          <input id="veh-rego" value="${escapeHtml(vehicle?.rego)}" autocapitalize="characters" autocorrect="off" spellcheck="false" />
           <div class="grid cols-3">
             <div><label>Year</label><input id="veh-year" type="number" value="${escapeHtml(vehicle?.year)}" /></div>
             <div><label>Make</label><input id="veh-make" value="${escapeHtml(vehicle?.make)}" /></div>

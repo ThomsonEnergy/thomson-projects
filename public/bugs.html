@@ -145,9 +145,9 @@
     }
 
     function reportCardHtml(r, staffName, comments) {
-      const typeBadge = r.report_type === 'bug' ? `<span class="badge draft" style="color:var(--red);">Bug</span>` : `<span class="badge sent">Update idea</span>`;
+      const typeBadge = r.report_type === 'bug' ? `<span class="badge red">Bug</span>` : `<span class="badge info">Update idea</span>`;
       const approvedBadge = r.approved_at
-        ? `<span class="badge sent" style="margin-left:6px;">Approved ${new Date(r.approved_at).toLocaleDateString('en-AU')}${r.approved_by ? ' by ' + escapeHtml(staffName(r.approved_by)) : ''}</span>`
+        ? `<span class="badge approved" style="margin-left:6px;">Approved ${new Date(r.approved_at).toLocaleDateString('en-AU')}${r.approved_by ? ' by ' + escapeHtml(staffName(r.approved_by)) : ''}</span>`
         : (isDevModeActive() ? `<button type="button" class="secondary approve-report-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">Approve</button>` : `<span class="subtitle" style="font-size:12px;">Not approved yet</span>`);
       const reportComments = comments.filter(c => c.report_id === r.id);
       return `

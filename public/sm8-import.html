@@ -424,7 +424,7 @@
         return `
           <div class="imp-job ${!e.include && !done ? 'excluded' : ''}" data-uuid="${r.sm8JobUuid}">
             <div class="imp-job-head">
-              <label><input type="checkbox" data-field="include" ${e.include && !done ? 'checked' : ''} ${locked} /> ${r.kind === 'quote' ? '<span class="badge sent">Quote</span> ' : ''}ServiceM8 #${escapeHtml(r.sm8JobNumber)}</label>
+              <label><input type="checkbox" data-field="include" ${e.include && !done ? 'checked' : ''} ${locked} /> ${r.kind === 'quote' ? '<span class="badge info">Quote</span> ' : ''}ServiceM8 #${escapeHtml(r.sm8JobNumber)}</label>
               <div class="imp-meta">${r.kind === 'quote' ? `${r.sm8Date ? 'Quoted ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}${r.quoteSent ? 'Sent' + (r.quoteSentDate ? ' ' + new Date(r.quoteSentDate).toLocaleDateString('en-AU') : '') : '<span style="color:var(--red);">Not sent</span>'} &middot; ` : ''}${r.kind !== 'quote' && r.sm8Date ? 'Work order ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}ServiceM8 total ${money(r.sm8Total)} inc GST${r.invoiceSent && !r.claims.length ? ' &middot; invoice sent' : ''}${r.paymentAmount > 0 ? ' &middot; ' + money(r.paymentAmount) + ' paid' : ''}</div>
             </div>
             <div class="imp-grid">

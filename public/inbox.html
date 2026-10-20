@@ -66,6 +66,7 @@
   .thread-bar button, .thread-bar select { font-size:12px; padding:4px 10px; width:auto; }
   .suggest { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:13px; padding:8px 10px; border:1px dashed var(--accent); border-radius:8px; margin:0 0 10px; }
   .suggest button { font-size:12px; padding:3px 10px; }
+  @media (pointer: coarse) { .thread-bar select { min-height: 40px; } .thread-bar button, .claim-banner button, .suggest button { padding: 6px 12px; } }
   .section-pill { display:inline-block; font-size:12px; padding:2px 10px; border-radius:20px; background:var(--surface-2); }
   .section-pill.priority { background:var(--accent); color:var(--accent-contrast, #fff); }
   .menu { position:absolute; z-index:50; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; min-width:240px; max-height:320px; overflow-y:auto; box-shadow:0 6px 24px rgba(0,0,0,.35); }
@@ -660,10 +661,7 @@
     // ---------- labels ----------
 
     function openLabelEditor(label) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:120; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:480px; width:100%;">
+      const overlay = openModal(`
           <h2 style="margin-top:0;">${label ? 'Edit label' : 'New label'}</h2>
           <p class="subtitle" style="font-size:12px; margin:0 0 8px;">For a matter that is not a job, so its emails stay together and nothing gets missed. ${S.box === 'mine' ? 'Only you see labels in My inbox.' : 'Labels in the Sales inbox are shared with the team.'} ${label ? 'Changing what belongs here makes' : 'Saving makes'} ${escapeHtml(S.assistant)} check the last 60 days of mail and file what fits (you get a notification when it is done).</p>
           <label style="margin-top:0">Name</label>
@@ -675,9 +673,7 @@
             ${label ? `<button type="button" class="secondary" id="lb-status">${label.status === 'done' ? 'Reopen' : 'Matter finished'}</button><button type="button" class="secondary" id="lb-delete">Delete label</button>` : ''}
             <button type="button" class="secondary" id="lb-cancel">Cancel</button>
           </div>
-          <div id="lb-msg" style="margin-top:8px;"></div>
-        </div>`;
-      document.body.appendChild(overlay);
+          <div id="lb-msg" style="margin-top:8px;"></div>`, { maxWidth: 480, zIndex: 120 });
       const close = async (refresh) => { overlay.remove(); if (refresh) { await loadLabels(); await renderSide(); await loadList(); } };
       const run = async (fn) => { try { await fn(); close(true); } catch (err) { overlay.querySelector('#lb-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; } };
       overlay.querySelector('#lb-cancel').addEventListener('click', () => close(false));

@@ -121,13 +121,6 @@
       return (blankLabel ? `<option value="">${escapeHtml(blankLabel)}</option>` : '') +
         staff.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${escapeHtml(s.full_name || 'Unnamed')}</option>`).join('');
     }
-    function showToast(msg) {
-      const t = document.createElement('div');
-      t.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--surface-2); color:var(--text); border:1px solid var(--border); padding:10px 16px; border-radius:8px; z-index:300; box-shadow:0 4px 14px rgba(0,0,0,.4);';
-      t.textContent = msg;
-      document.body.appendChild(t);
-      setTimeout(() => t.remove(), 2600);
-    }
     function modal(html) {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';

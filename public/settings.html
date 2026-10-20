@@ -102,7 +102,7 @@
               </div>
               <div>
                 <label>Phone</label>
-                <input id="phone" placeholder="0455 415 464" />
+                <input id="phone" type="tel" autocomplete="tel" placeholder="0455 415 464" />
               </div>
             </div>
             <div class="grid cols-3">
@@ -279,7 +279,7 @@
               </div>
             </div>
             <label>Mobile number</label>
-            <input id="my-profile-mobile" />
+            <input id="my-profile-mobile" type="tel" autocomplete="tel" />
             <label>Qualifications line (optional)</label>
             <input id="my-profile-signature" placeholder="e.g. Nominated Supervisor (NSW) | QBP &amp; QTP (QLD) | Electrical Nominee (WA)" />
             <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
@@ -1248,7 +1248,7 @@
           <tbody>
             ${data.map(t => `
               <tr>
-                <td><input class="tier-name-input" data-id="${t.id}" value="${t.name}" /></td>
+                <td><input class="tier-name-input" data-id="${t.id}" value="${escapeHtml(t.name)}" /></td>
                 <td class="num"><input class="tier-rate-input" data-id="${t.id}" type="number" step="0.01" value="${t.sell_rate}" style="text-align:right;" /></td>
                 <td><button class="secondary delete-tier-btn" data-id="${t.id}" style="font-size:12px; padding:6px 10px;">Delete</button></td>
               </tr>`).join('')}
@@ -1262,7 +1262,7 @@
           const sell_rate = parseFloat(listEl.querySelector(`.tier-rate-input[data-id="${id}"]`).value) || 0;
           const { error } = await supabaseClient.from('billable_rate_tiers').update({ name, sell_rate }).eq('id', id);
           if (error) alert('Could not save: ' + error.message);
-          else markRatesReviewed().catch(() => {});
+          else { showToast('Saved'); markRatesReviewed().catch(() => {}); }
         });
       });
       listEl.querySelectorAll('.delete-tier-btn').forEach(btn => {
@@ -1351,7 +1351,7 @@
                 return `
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:8px 0; ${i > 0 ? 'border-top:1px solid var(--border);' : ''}">
                   <div>
-                    <span class="badge ${it.item_type === 'photo' ? 'sent' : 'draft'}">${it.item_type === 'photo' ? 'Photo' : 'Yes/No'}</span>
+                    <span class="badge ${it.item_type === 'photo' ? 'info' : 'draft'}">${it.item_type === 'photo' ? 'Photo' : 'Yes/No'}</span>
                     <strong style="margin-left:6px;">${it.label}</strong> ${!it.required ? '<span class="subtitle">(optional)</span>' : ''}
                     ${it.description ? `<p class="subtitle" style="margin:4px 0 0;">${it.description}</p>` : ''}
                     ${parent ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Shown when "${parent.label}" = ${it.show_when_parent_answer ? 'Yes' : 'No'}</p>` : ''}
@@ -2068,6 +2068,7 @@
               .update({ full_name: input.value.trim() || null })
               .eq('id', input.dataset.id);
             if (error) alert('Could not save name: ' + error.message);
+            else showToast('Name saved');
           });
         });
 
@@ -2079,7 +2080,7 @@
               .update({ xero_employee_id: id, xero_payroll_status: id ? 'synced' : 'pending', xero_payroll_error: null })
               .eq('id', input.dataset.id);
             if (error) alert('Could not save Xero Employee ID: ' + error.message);
-            else await loadUsers();
+            else { showToast('Xero Employee ID saved'); await loadUsers(); }
           });
         });
 
@@ -2182,6 +2183,7 @@
               .eq('id', sel.dataset.id);
             sel.disabled = false;
             if (error) alert('Could not update role: ' + error.message);
+            else showToast('Role updated');
           });
         });
 
@@ -2310,9 +2312,9 @@
       return `
         <div class="onboarding-doc-row" data-id="${d.id || ''}" style="padding:14px 0; border-bottom:1px solid var(--border);">
           <div style="display:flex; gap:10px; align-items:center; margin-bottom:8px;">
-            <input class="od-title" value="${d.title || ''}" placeholder="Document title" style="flex:1; font-weight:600;" />
-            ${d.is_contract ? '<span class="badge sent">Contract template</span>' : `
-              ${d.id ? `<span class="badge draft" title="Publish new version to make everyone re-sign">v${d.version || 1}</span>` : ''}
+            <input class="od-title" value="${escapeHtml(d.title || '')}" placeholder="Document title" style="flex:1; font-weight:600;" />
+            ${d.is_contract ? '<span class="badge info">Contract template</span>' : `
+              ${d.id ? `<span class="badge draft od-version" title="Publish new version to make everyone re-sign">v${d.version || 1}</span>` : ''}
               <label style="display:flex; align-items:center; gap:6px; font-weight:400; white-space:nowrap;">
                 <input type="checkbox" class="od-required" style="width:auto;" ${d.is_required !== false ? 'checked' : ''} /> Required
               </label>`}
@@ -2326,7 +2328,7 @@
                 <option value="location" ${d.consent_type === 'location' ? 'selected' : ''}>Location consent (I agree / I don't agree)</option>
               </select>
             </div>`}
-          <textarea class="od-body" style="min-height:140px;">${d.body || ''}</textarea>
+          <textarea class="od-body" style="min-height:140px;">${escapeHtml(d.body || '')}</textarea>
           <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="secondary od-save-btn" style="font-size:12px; padding:6px 12px;">Save</button>
             ${!d.is_contract && d.id ? `<button type="button" class="secondary od-publish-btn" style="font-size:12px; padding:6px 12px;">Publish new version (everyone re-signs)</button>` : ''}
@@ -2349,6 +2351,7 @@
     function wireOnboardingDocRows() {
       document.querySelectorAll('.onboarding-doc-row').forEach(row => {
         row.querySelector('.od-save-btn').onclick = async () => {
+          const btn = row.querySelector('.od-save-btn');
           const msg = row.querySelector('.od-msg');
           const title = row.querySelector('.od-title').value.trim();
           const body = row.querySelector('.od-body').value;
@@ -2358,12 +2361,28 @@
           const fields = { title, body };
           if (requiredCheckbox) fields.is_required = requiredCheckbox.checked;
           if (consentSelect) fields.consent_type = consentSelect.value || null;
-          const { error } = row.dataset.id
-            ? await supabaseClient.from('onboarding_documents').update(fields).eq('id', row.dataset.id)
-            : await supabaseClient.from('onboarding_documents').insert(fields);
-          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-          msg.innerHTML = `<div class="success-box">Saved.</div>`;
-          await loadOnboardingDocs();
+          const label = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Saving...';
+          try {
+            if (row.dataset.id) {
+              const { error } = await supabaseClient.from('onboarding_documents').update(fields).eq('id', row.dataset.id);
+              if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+              msg.innerHTML = '';
+              showToast(`Saved: ${title}`);
+            } else {
+              // New document: swap in a fresh row for it (id, v1 badge, Publish button) without reloading the list, so unsaved edits in other rows are kept.
+              const { data, error } = await supabaseClient.from('onboarding_documents').insert(fields).select().single();
+              if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+              row.insertAdjacentHTML('afterend', onboardingDocRowHtml(data));
+              row.remove();
+              wireOnboardingDocRows();
+              showToast(`Added: ${title}`);
+            }
+          } finally {
+            btn.disabled = false;
+            btn.textContent = label;
+          }
         };
         // Saving fixes typos without bothering anyone. Publishing bumps the
         // version: everyone who finished onboarding is asked to sign it
@@ -2373,18 +2392,29 @@
           publishBtn.onclick = async () => {
             const msg = row.querySelector('.od-msg');
             if (!confirm('Save and publish a new version? Everyone will be asked to read and sign it again next time they log in.')) return;
-            const consentSelect = row.querySelector('.od-consent-type');
-            const { data: current, error: readErr } = await supabaseClient.from('onboarding_documents').select('version').eq('id', row.dataset.id).single();
-            if (readErr) { msg.innerHTML = `<div class="error-box">${readErr.message}</div>`; return; }
-            const { error } = await supabaseClient.from('onboarding_documents').update({
-              title: row.querySelector('.od-title').value.trim(),
-              body: row.querySelector('.od-body').value,
-              is_required: row.querySelector('.od-required').checked,
-              consent_type: consentSelect ? (consentSelect.value || null) : null,
-              version: (current.version || 1) + 1,
-            }).eq('id', row.dataset.id);
-            if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-            await loadOnboardingDocs();
+            const label = publishBtn.textContent;
+            publishBtn.disabled = true;
+            publishBtn.textContent = 'Publishing...';
+            try {
+              const consentSelect = row.querySelector('.od-consent-type');
+              const { data: current, error: readErr } = await supabaseClient.from('onboarding_documents').select('version').eq('id', row.dataset.id).single();
+              if (readErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(readErr.message)}</div>`; return; }
+              const newVersion = (current.version || 1) + 1;
+              const { error } = await supabaseClient.from('onboarding_documents').update({
+                title: row.querySelector('.od-title').value.trim(),
+                body: row.querySelector('.od-body').value,
+                is_required: row.querySelector('.od-required').checked,
+                consent_type: consentSelect ? (consentSelect.value || null) : null,
+                version: newVersion,
+              }).eq('id', row.dataset.id);
+              if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+              const versionEl = row.querySelector('.od-version');
+              if (versionEl) versionEl.textContent = `v${newVersion}`;
+              msg.innerHTML = `<div class="success-box">Published v${newVersion}. Everyone will be asked to read and sign it again on their next login.</div>`;
+            } finally {
+              publishBtn.disabled = false;
+              publishBtn.textContent = label;
+            }
           };
         }
         const deleteBtn = row.querySelector('.od-delete-btn');
@@ -2664,14 +2694,23 @@
       listEl.querySelectorAll('.xm-save-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const row = btn.closest('tr');
-          const { error: updErr } = await supabaseClient
-            .from('xero_account_mapping')
-            .update({
-              xero_account_code: row.querySelector('.xm-edit-code').value.trim(),
-              xero_tax_type: row.querySelector('.xm-edit-tax').value.trim(),
-            })
-            .eq('id', row.dataset.id);
-          if (updErr) alert(updErr.message);
+          const label = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Saving...';
+          try {
+            const { error: updErr } = await supabaseClient
+              .from('xero_account_mapping')
+              .update({
+                xero_account_code: row.querySelector('.xm-edit-code').value.trim(),
+                xero_tax_type: row.querySelector('.xm-edit-tax').value.trim(),
+              })
+              .eq('id', row.dataset.id);
+            if (updErr) { alert(updErr.message); return; }
+            showToast('Mapping saved');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = label;
+          }
         });
       });
       listEl.querySelectorAll('.xm-delete-btn').forEach(btn => {

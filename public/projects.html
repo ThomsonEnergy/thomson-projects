@@ -252,12 +252,9 @@
     // 'delete' } | { action: 'cancel' } (skip deleting this one job).
     function openReassignHoursModal(project, timeCount, otherProjects) {
       return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-        overlay.innerHTML = `
-          <div class="card" style="max-width:480px; width:100%;">
+        const overlay = openModal(`
             <h2>Move logged hours first</h2>
-            <p class="subtitle" style="margin-bottom:12px;">${projectRef(project)} has ${timeCount} logged time ${timeCount === 1 ? 'entry' : 'entries'}. Move them to a different job, or delete them along with this one.</p>
+            <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))} has ${timeCount} logged time ${timeCount === 1 ? 'entry' : 'entries'}. Move them to a different job, or delete them along with this one.</p>
             <label style="margin-top:0">Move hours to</label>
             <input id="rh-job-search" placeholder="Search jobs..." autocomplete="off" />
             <div id="rh-job-results" style="position:relative;"></div>
@@ -267,9 +264,7 @@
               <button type="button" class="secondary" id="rh-delete-hours-btn">Delete hours too</button>
               <button type="button" class="secondary" id="rh-cancel-btn">Skip this job</button>
             </div>
-            <div id="rh-msg"></div>
-          </div>`;
-        document.body.appendChild(overlay);
+            <div id="rh-msg"></div>`, { maxWidth: 480 });
 
         let targetProjectId = null;
         let searchTimeout;
