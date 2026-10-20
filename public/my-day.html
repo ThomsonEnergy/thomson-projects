@@ -56,7 +56,7 @@
             <input id="clock-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
             <div id="clock-job-results"></div>
             <div id="clock-job-selected" class="subtitle" style="margin-top:4px;"></div>
-            <button type="button" class="secondary" id="new-quick-job-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">+ New job (no quote)</button>
+            <button type="button" class="secondary" id="new-quick-job-btn" style="margin-top:8px;">+ New job (no quote)</button>
           </div>
         </div>
         <div id="clock-category-row" style="margin-top:10px;">
@@ -91,8 +91,8 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
         <h2 style="margin:0;">Your schedule</h2>
         <div style="display:flex; gap:6px;">
-          <button type="button" class="secondary" id="my-sched-day-btn" style="font-size:12px; padding:6px 10px;">Day</button>
-          <button type="button" class="secondary" id="my-sched-week-btn" style="font-size:12px; padding:6px 10px;">Week</button>
+          <button type="button" class="secondary" id="my-sched-day-btn">Day</button>
+          <button type="button" class="secondary" id="my-sched-week-btn">Week</button>
         </div>
       </div>
       <div id="my-schedule-view"><p class="subtitle">Loading...</p></div>
@@ -159,7 +159,7 @@
         document.getElementById('clock-active').style.display = 'none';
         document.getElementById('clock-heading').textContent = 'Clock';
         checking.style.display = 'block';
-        checking.innerHTML = '<div class="error-box">Could not check your clock, check your signal. <button type="button" class="secondary" id="clock-retry-btn" style="margin-left:8px; font-size:12px; padding:4px 10px;">Retry</button></div>';
+        checking.innerHTML = '<div class="error-box">Could not check your clock, check your signal. <button type="button" class="secondary" id="clock-retry-btn" style="margin-left:8px;">Retry</button></div>';
         document.getElementById('clock-retry-btn').addEventListener('click', () => {
           checking.innerHTML = '<p class="subtitle" style="margin:0;">Checking your clock...</p>';
           checkActiveClock();
@@ -726,7 +726,7 @@
         <div class="day-item">
           <div>
             ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${escapeHtml(task.description)}</a>` : `<span>${escapeHtml(task.description)}</span>`}
-            ${notes.length ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${notes.join(' &middot; ')}</p>` : ''}
+            ${notes.length ? `<p class="subtitle small" style="margin:2px 0 0;">${notes.join(' &middot; ')}</p>` : ''}
           </div>
           <div class="day-item-actions">
             ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}">I can do this</button>` : ''}
@@ -774,7 +774,7 @@
             </details>`;
         }).join('') : '<p class="subtitle">None.</p>';
         const more = !showAll && groups.length > JOBS_SHOWN
-          ? `<button type="button" class="secondary show-more-tasks-btn" data-section="${sectionKey}" style="font-size:12px; padding:6px 10px;">Show all (${groups.length} jobs)</button>`
+          ? `<button type="button" class="secondary show-more-tasks-btn" data-section="${sectionKey}">Show all (${groups.length} jobs)</button>`
           : '';
         return `
           <div style="margin-bottom:14px;">

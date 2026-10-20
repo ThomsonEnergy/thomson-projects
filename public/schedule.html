@@ -791,10 +791,7 @@
 
     function promptCategory() {
       return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200;';
-        overlay.innerHTML = `
-          <div class="card" style="max-width:360px; width:90%;">
+        const overlay = openModal(`
             <h2>Block type</h2>
             <label style="margin-top:0">Category</label>
             <select id="category-select">
@@ -805,9 +802,7 @@
             <div style="margin-top:14px;">
               <button id="category-ok-btn">Add</button>
               <button type="button" class="secondary" id="category-cancel-btn">Cancel</button>
-            </div>
-          </div>`;
-        document.body.appendChild(overlay);
+            </div>`, { maxWidth: 360, zIndex: 200 });
         overlay.querySelector('#category-cancel-btn').addEventListener('click', () => { overlay.remove(); resolve(null); });
         overlay.querySelector('#category-ok-btn').addEventListener('click', () => {
           const type = overlay.querySelector('#category-select').value;
