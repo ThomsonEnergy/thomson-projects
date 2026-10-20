@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=103"></script>
+  <script src="/js/supabase-client.js?v=104"></script>
   <script src="/js/theme.js"></script>
   <script>
     const supplierId = new URLSearchParams(window.location.search).get('id');
@@ -51,7 +51,7 @@
 
       const { data: bills } = await supabaseClient
         .from('supplier_bills')
-        .select('*, purchase_orders(id, po_number, description, received)')
+        .select('*, purchase_orders(id, po_number, description, received, closed_at)')
         .eq('supplier_id', supplierId)
         .order('bill_date', { ascending: false });
 
@@ -67,10 +67,13 @@
         .eq('supplier_id', supplierId)
         .order('created_at', { ascending: false });
 
-      render(supplier, summary, bills || [], flaggedItems || [], pos || []);
+      const myRole = await getMyRole();
+      render(supplier, summary, bills || [], flaggedItems || [], pos || [], myRole);
     }
 
-    function render(supplier, summary, bills, flaggedItems, pos) {
+    function render(supplier, summary, bills, flaggedItems, pos, myRole) {
+      const canPay = isFinanceRole(myRole);
+      const dayText = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
       const terms = supplier.credit_terms_type === 'cod' ? 'COD' : `${supplier.credit_terms_days} ${CREDIT_TERMS_LABELS[supplier.credit_terms_type]}`;
 
       document.getElementById('content').innerHTML = `
@@ -114,7 +117,7 @@
           <div id="bills-list">
             ${!bills.length ? '<p class="subtitle">No bills logged yet.</p>' : `
             <table class="responsive-stack">
-              <thead><tr><th>Bill #</th><th>Date</th><th>PO</th><th class="num">Amount</th><th>Due</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Bill #</th><th>Date</th><th>PO</th><th class="num">Amount</th><th>Terms due</th><th>Pay on</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 ${bills.map(b => `
                   <tr>
@@ -122,13 +125,17 @@
                     <td data-label="Date">${b.bill_date ? new Date(b.bill_date).toLocaleDateString('en-AU') : '-'}</td>
                     <td data-label="PO">${escapeHtml(b.purchase_orders?.po_number || '-')}</td>
                     <td class="num" data-label="Amount">${money(b.amount)}</td>
-                    <td data-label="Due">${b.due_date ? new Date(b.due_date).toLocaleDateString('en-AU') : '-'}</td>
-                    <td data-label="Status">${b.paid ? '<span class="badge accepted">Paid</span>' : (b.approved_for_payment ? '<span class="badge sent">Approved</span>' : '<span class="badge draft">Not approved</span>')}</td>
+                    <td data-label="Terms due">${dayText(b.due_date)}</td>
+                    <td data-label="Pay on">${b.paid ? '-' : (b.approved_for_payment ? dayText(b.pay_on || b.due_date) : '<span class="subtitle" style="font-size:12px;">after approval</span>')}</td>
+                    <td data-label="Status">${b.paid ? `<span class="badge accepted" title="${escapeHtml(b.payment_reference || '')}">Paid ${b.paid_at ? dayText(b.paid_at.slice(0, 10)) : ''}</span>`
+                      : b.approved_for_payment ? '<span class="badge sent">Approved</span>'
+                      : b.purchase_orders && !b.purchase_orders.closed_at ? '<span class="badge draft">Waiting on PO close</span>'
+                      : '<span class="badge draft">Not approved</span>'}</td>
                     <td data-label="">${!b.paid && !b.approved_for_payment ? (
                       b.purchase_orders
-                        ? (b.purchase_orders.received ? '' : '<span class="subtitle" style="font-size:12px;">Waiting on goods received</span>')
+                        ? (b.purchase_orders.closed_at ? '<span class="subtitle" style="font-size:12px;">See Bill checks</span>' : '<span class="subtitle" style="font-size:12px;">Approved when the PO is closed</span>')
                         : (supplier.needs_review ? '<span class="subtitle" style="font-size:12px;">Check supplier details first</span>' : `<button class="secondary approve-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Approve</button>`)
-                    ) : ''}</td>
+                    ) : ''}${!b.paid && b.approved_for_payment && canPay ? `<button class="secondary paid-bill-btn" data-id="${b.id}" data-number="${escapeHtml(b.bill_number || '')}" style="font-size:12px; padding:6px 10px;">Paid</button>` : ''}${b.paid && canPay ? `<button class="secondary unpaid-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Not paid</button>` : ''}</td>
                   </tr>`).join('')}
               </tbody>
             </table>`}
@@ -142,12 +149,11 @@
               <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
                 <div style="display:flex; justify-content:space-between;">
                   <strong>${escapeHtml(po.po_number || 'PO')}</strong>${renderPoBadges(po)}
-                  <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : escapeHtml(po.status)}</span>
                 </div>
                 <p class="subtitle" style="margin:4px 0 8px;">${escapeHtml(po.description)}</p>
                 ${renderPoLineItemsReceivable(po, true)}
                 ${po.budget_cap ? `<p class="subtitle" style="margin-top:8px;">Budget cap: ${money(po.budget_cap)}</p>` : ''}
-                ${!po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice for this PO</button>` : ''}
+                ${!po.closed_at ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice for this PO</button>` : ''}
               </div>`).join('')}
           </div>
         </div>
@@ -159,23 +165,35 @@
       `;
 
       renderActivityLog('supplier', supplier.id, 'supplier-activity-log');
-      document.querySelectorAll('.approve-bill-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const label = btn.textContent;
-          btn.disabled = true;
-          btn.textContent = 'Approving...';
-          try {
-          const { error } = await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('id', btn.dataset.id);
-          if (error) { alert(error.message); return; }
-          const bill = bills.find(b => b.id === btn.dataset.id);
-          await logActivity('supplier', supplierId, 'bill_approved', `Bill ${bill?.bill_number || ''} approved for payment`);
-          await loadSupplier();
-          } finally {
-            btn.disabled = false;
-            btn.textContent = label;
-          }
-        });
-      });
+      // Approve, Paid and Not paid all run on the server (who, when, pay-on date, the payment batch).
+      async function callServer(fn, body) {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch(`/.netlify/functions/${fn}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+        return data;
+      }
+      const busy = async (btn, working, fn) => {
+        const label = btn.textContent;
+        btn.disabled = true; btn.textContent = working;
+        try { await fn(); await loadSupplier(); }
+        catch (err) { alert(friendlyError(err)); btn.disabled = false; btn.textContent = label; }
+      };
+      document.querySelectorAll('.approve-bill-btn').forEach(btn => btn.addEventListener('click', () =>
+        busy(btn, 'Approving...', () => callServer('supplier-checks', { action: 'approve_bill', id: btn.dataset.id }))));
+      document.querySelectorAll('.paid-bill-btn').forEach(btn => btn.addEventListener('click', () => {
+        const paidOn = prompt(`Bill ${btn.dataset.number} paid on which day? (YYYY-MM-DD)`, sydneyDateKey(new Date()));
+        if (paidOn === null) return;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn.trim())) { alert('Enter the date as YYYY-MM-DD.'); return; }
+        const reference = prompt('Payment reference (optional, e.g. Airwallex transfer or bank reference)', '');
+        if (reference === null) return;
+        busy(btn, 'Saving...', () => callServer('run-supplier-payments', { action: 'mark_paid', bill_ids: [btn.dataset.id], paid_on: paidOn.trim(), reference }));
+      }));
+      document.querySelectorAll('.unpaid-bill-btn').forEach(btn => btn.addEventListener('click', () => {
+        const note = prompt('Mark this bill as not paid. Why?', '');
+        if (note === null) return;
+        busy(btn, 'Saving...', () => callServer('run-supplier-payments', { action: 'undo_paid', bill_id: btn.dataset.id, note }));
+      }));
 
       document.querySelectorAll('.upload-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
@@ -534,9 +552,9 @@
 
       const { data: openPOs } = await supabaseClient
         .from('purchase_orders')
-        .select('id, po_number, description, status, purchase_order_line_items(id, material_id, description, quantity, unit_cost)')
+        .select('id, po_number, description, status, closed_at, purchase_order_line_items(id, material_id, description, quantity, unit_cost)')
         .eq('supplier_id', supplierId)
-        .not('status', 'in', '(paid,invoiced)');
+        .is('closed_at', null);
 
       // If the invoice itself references our PO number (e.g. "Your
       // Order: PO2014"), auto-match against it rather than making the
@@ -697,142 +715,54 @@
         confirmBtn.textContent = 'Saving...';
 
         try {
-          const { data: { user } } = await supabaseClient.auth.getUser();
-          const { data: companySettings } = await supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).single();
-          const markup = Number(companySettings?.default_markup_percent) || 45;
-
           const poMode = overlay.querySelector('#rev-po-mode').value;
-          let poId = null;
-          let linkedPO = null;
-
+          let poId = null, newPo = null;
           if (poMode === 'existing') {
             poId = overlay.querySelector('#rev-po').value || null;
-            linkedPO = poId ? openPOs.find(p => p.id === poId) : null;
+            if (!poId) throw new Error('Pick the PO, or switch to "No PO for this bill".');
           } else if (poMode === 'new') {
             const assignType = overlay.querySelector('#rev-po-assign-type').value;
             if (assignType === 'job' && !selectedJobForNewPO) {
               throw new Error('Search for and select a job, or switch to assigning this PO to Stock instead.');
             }
-            const lineRows = [...overlay.querySelectorAll('.rev-line-item')];
-            const { data: newPO, error: poErr } = await supabaseClient.from('purchase_orders').insert({
-              project_id: assignType === 'job' ? selectedJobForNewPO.id : null,
-              supplier_id: supplierId,
-              supplier_name: currentSupplier.name,
-              po_type: 'fixed',
-              locked: false,
-              status: 'ordered',
-              amount: 0,
-              description: `Created from bill ${overlay.querySelector('#rev-bill-number').value.trim() || ''}`.trim(),
-            }).select('*').single();
-            if (poErr) throw poErr;
-
-            const poLineItems = lineRows.map(row => ({
-              po_id: newPO.id,
+            newPo = { project_id: assignType === 'job' ? selectedJobForNewPO.id : null };
+          }
+          const billDate = overlay.querySelector('#rev-bill-date').value || null;
+          const lines = [...overlay.querySelectorAll('.rev-line-item')].map(row => {
+            const replaceCheckbox = row.querySelector('.rli-replace-generic');
+            const matchValue = row.querySelector('.rli-match').value;
+            return {
               description: row.querySelector('.rli-desc').value.trim(),
               quantity: parseFloat(row.querySelector('.rli-qty').value) || 0,
               unit_cost: parseFloat(row.querySelector('.rli-cost').value) || 0,
-              added_by: user.id,
-            })).filter(li => li.description);
-            if (poLineItems.length) {
-              const { error: poLiErr } = await supabaseClient.from('purchase_order_line_items').insert(poLineItems);
-              if (poLiErr) throw poLiErr;
-            }
+              material_id: matchValue === '__new__' ? null : matchValue,
+              create_material: matchValue === '__new__',
+              replace_po_line_id: replaceCheckbox && replaceCheckbox.checked ? replaceCheckbox.dataset.poLineId : null,
+            };
+          }).filter(l => l.description);
+          if (!lines.length) throw new Error('Add at least one line item.');
 
-            poId = newPO.id;
-            linkedPO = { ...newPO, purchase_order_line_items: poLineItems };
-          }
-
-          const billDate = overlay.querySelector('#rev-bill-date').value || null;
-          const dueDate = billDate ? await (async () => {
-            const { data: computed } = await supabaseClient.rpc('calculate_bill_due_date', {
-              p_bill_date: billDate, p_credit_terms_type: currentSupplier.credit_terms_type, p_credit_terms_days: currentSupplier.credit_terms_days,
-            });
-            return computed;
-          })() : null;
-
-          // Keeps the original scan/PDF, same as the sibling statement
-          // upload already does - without this the source document was
-          // silently discarded the moment extraction succeeded, with no
-          // way to pull it back up later.
+          // Keeps the original scan/PDF, same as the sibling statement upload does.
           let filePath = null, fileName = null;
           if (sourceFile) {
             filePath = await uploadPrivateFile(sourceFile, `bills/${supplierId}`);
             fileName = sourceFile.name;
           }
 
-          const { data: newBill, error: billErr } = await supabaseClient.from('supplier_bills').insert({
+          // One server step, all or nothing: duplicate check by bill number, the PO (linked or new), the
+          // bill and its lines linked or flagged against the PO. Stock counts are not touched here: gear
+          // goes into stock or onto the job when its PO line is received.
+          const { data: billId, error: saveErr } = await supabaseClient.rpc('supplier_bill_save_review', { p: {
             supplier_id: supplierId,
-            supplier_name: currentSupplier.name,
             bill_number: overlay.querySelector('#rev-bill-number').value.trim() || null,
             bill_date: billDate,
-            due_date: dueDate,
             amount: parseFloat(overlay.querySelector('#rev-total').value) || 0,
-            po_id: poId,
-            file_path: filePath,
-            file_name: fileName,
-            created_by: user.id,
-          }).select('id').single();
-          if (billErr) throw billErr;
-
-          const rows = [...overlay.querySelectorAll('.rev-line-item')];
-          for (const row of rows) {
-            const description = row.querySelector('.rli-desc').value.trim();
-            const quantity = parseFloat(row.querySelector('.rli-qty').value) || 0;
-            const unitCost = parseFloat(row.querySelector('.rli-cost').value) || 0;
-            const matchValue = row.querySelector('.rli-match').value;
-            if (!description) continue;
-
-            let materialId;
-            if (matchValue === '__new__') {
-              const { data: newMat, error: matErr } = await supabaseClient.from('materials').insert({
-                name: description, cost_price: unitCost,
-                sell_price: Math.round(unitCost * (1 + markup / 100) * 100) / 100,
-                supplier_id: supplierId,
-              }).select('id').single();
-              if (matErr) throw matErr;
-              materialId = newMat.id;
-              await adjustWarehouseStock(materialId, quantity);
-            } else {
-              materialId = matchValue;
-              await supabaseClient.from('materials').update({ cost_price: unitCost }).eq('id', materialId);
-              await adjustWarehouseStock(materialId, quantity);
-            }
-
-            // If accepted, update the PO's generic line item to reflect
-            // what was actually invoiced - never done without the
-            // person seeing and confirming it on the review screen.
-            const replaceCheckbox = row.querySelector('.rli-replace-generic');
-            let replacedGenericPoLineId = null;
-            if (replaceCheckbox && replaceCheckbox.checked) {
-              const genericPoLineId = replaceCheckbox.dataset.poLineId;
-              await supabaseClient.from('purchase_order_line_items').update({
-                material_id: materialId, description,
-              }).eq('id', genericPoLineId);
-              replacedGenericPoLineId = genericPoLineId;
-            }
-
-            // Flag against the linked PO, if one was chosen - either the
-            // item isn't on that PO at all, or it's genuinely priced
-            // higher than what the PO expected.
-            let flagReason = null;
-            let poLineItemId = replacedGenericPoLineId;
-            if (linkedPO && !poLineItemId) {
-              const poLine = (linkedPO.purchase_order_line_items || []).find(pl => pl.material_id === materialId);
-              if (!poLine) {
-                flagReason = 'Not on the linked PO';
-              } else {
-                poLineItemId = poLine.id;
-                if (unitCost > Number(poLine.unit_cost) * 1.01) {
-                  flagReason = `Charged ${money(unitCost)}, PO expected ${money(poLine.unit_cost)}`;
-                }
-              }
-            }
-
-            await supabaseClient.from('supplier_bill_line_items').insert({
-              bill_id: newBill.id, material_id: materialId, description, quantity, unit_cost: unitCost,
-              po_line_item_id: poLineItemId, flag_reason: flagReason,
-            });
-          }
+            po_mode: poMode, po_id: poId, new_po: newPo,
+            file_path: filePath, file_name: fileName,
+            lines,
+          } });
+          if (saveErr) throw saveErr;
+          const newBill = { id: billId };
 
           // check the new bill line by line against its PO (Bill checks page)
           {

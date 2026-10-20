@@ -19,7 +19,7 @@ const { gmailRequest } = require('./google-client');
 const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
 const { extractSupplierInvoiceWithUsage } = require('./supplier-invoice-ai');
-const { checkBillAndSiblings } = require('./bill-check');
+const { checkBillAndSiblings, normNum } = require('./bill-check');
 
 const INVOICE_ADDRESS = 'invoice@thomsonenergy.com.au';
 const BILL_LABEL = 'Supplier Bills';
@@ -311,7 +311,7 @@ function matchPurchaseOrder({ pos, supplierId, ex, subject, bodyText, prefix }) 
 async function loadOpenPurchaseOrders(supabaseAdmin) {
   const { data, error } = await supabaseAdmin.from('purchase_orders')
     .select('id, po_number, description, amount, status, supplier_id, supplier_name, order_date, project_id, projects(name, job_number, quote_number), purchase_order_line_items(id, material_id, description, quantity, unit_cost)')
-    .not('status', 'in', '(paid,invoiced)');
+    .is('closed_at', null);
   if (error) throw error;
   return data || [];
 }
@@ -323,8 +323,11 @@ async function poPrefix(supabaseAdmin) {
 
 async function findDuplicateBill(supabaseAdmin, supplierId, billNumber) {
   if (!supplierId || !billNumber) return null;
-  const { data } = await supabaseAdmin.from('supplier_bills').select('id').eq('supplier_id', supplierId).ilike('bill_number', String(billNumber).trim()).limit(1);
-  return data?.[0]?.id || null;
+  // INV-0103, inv103 and INV 103 are the same bill (normNum, same rule as the bill check)
+  const want = normNum(billNumber);
+  if (!want) return null;
+  const { data } = await supabaseAdmin.from('supplier_bills').select('id, bill_number').eq('supplier_id', supplierId).not('bill_number', 'is', null);
+  return (data || []).find(b => normNum(b.bill_number) === want)?.id || null;
 }
 
 // Supplier, duplicate and PO matching for one inbox row that has been read. Returns the

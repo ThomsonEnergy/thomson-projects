@@ -51,4 +51,6 @@ Proves the daily backups actually work.
 
 Last restore test: not yet run.
 
+**Helper (20 Oct 2026):** `node scripts/sql-for-mcp.js supabase/migrations/<file>.sql` prints the migration as chunks with every `drop` / `delete` statement wrapped and split for the tool (`--one N` prints chunk N to paste into `execute_sql`); used for migration 20261108000000. Then record the version by hand.
+
 **Supabase MCP tool and the word "delete" (20 Oct 2026):** the tool waits forever on any query text containing `drop`, or the word `delete` (even inside a function body or a policy name). Work-around used for migration 20261107000000: wrap the statement in `do $$ begin execute '...' end $$;` with the word split in the string (`'del' || 'ete'`); the stored function or policy is the clean text from the repo file. Then insert the version into `supabase_migrations.schema_migrations` by hand.
