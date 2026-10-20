@@ -85,7 +85,7 @@
         .eq('id', projectId)
         .single();
       if (error) {
-        document.getElementById('content').innerHTML = `<div class="error-box">${error.message}</div>`;
+        document.getElementById('content').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
         return null;
       }
 
@@ -331,12 +331,12 @@
           <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
           <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
         </select>
-        <input class="li-qty" type="number" step="0.01" value="${quantity}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="font-size:13px;" />
+        <input class="li-qty" type="number" step="0.01" inputmode="decimal" value="${quantity}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="font-size:13px;" />
         <select class="li-tier" style="font-size:13px; display:${isLabour ? 'block' : 'none'};">
           <option value="">-- Select tier --</option>
           ${RATE_TIERS.map(t => `<option value="${t.id}" data-rate="${t.sell_rate}" ${rate_tier_id === t.id ? 'selected' : ''}>${escapeHtml(t.name)} ($${t.sell_rate}/hr)</option>`).join('')}
         </select>
-        <input class="li-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px; display:${isLabour ? 'none' : 'block'};" />
+        <input class="li-cost" type="number" step="0.01" inputmode="decimal" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px; display:${isLabour ? 'none' : 'block'};" />
         <div class="li-total" style="font-size:13px; font-weight:600;">$0.00</div>
         <button type="button" class="secondary li-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
@@ -571,7 +571,7 @@
           renderThumbs();
           msgEl.innerHTML = '';
         } catch (err) {
-          msgEl.innerHTML = `<div class="error-box">Upload failed: ${escapeHtml(err.message)}. Choose the photos again.</div>`;
+          msgEl.innerHTML = `<div class="error-box">Upload failed: ${escapeHtml(friendlyError(err))}. Choose the photos again.</div>`;
         } finally {
           fileInput.disabled = false;
           fileInput.value = '';
@@ -757,7 +757,7 @@
           <div class="grid cols-3" style="margin-top:14px;">
             <div><label style="margin-top:0">Client name</label><input id="p-client" required /></div>
             <div><label style="margin-top:0">Client email</label><input id="p-email" type="email" placeholder="for sending the quote" /></div>
-            <div><label style="margin-top:0">Client phone</label><input id="p-phone" /></div>
+            <div><label style="margin-top:0">Client phone</label><input id="p-phone" type="tel" autocomplete="tel" /></div>
           </div>
           <div class="grid cols-3">
             <div style="grid-column: span 2;">
@@ -915,7 +915,7 @@
         // than leaving editMode true with no edit form actually shown.
         editMode = false;
         console.error('enterEditMode failed:', err);
-        alert('Could not open the editor: ' + err.message);
+        alert('Could not open the editor: ' + friendlyError(err));
       }
     }
 
@@ -991,7 +991,7 @@
           renderEditSowDocList();
           fileInput.value = '';
           msg.innerHTML = '';
-        } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+        } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
       });
 
       document.getElementById('generate-scope-btn').addEventListener('click', async () => {
@@ -1043,7 +1043,7 @@
           document.getElementById('p-sow').value = sowJson.sow;
           msg.innerHTML = `<div class="success-box">Stage names, descriptions, and scope of works drafted. Review and edit as needed.</div>`;
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {
           btn.disabled = false;
           btn.textContent = 'Generate scope of works with AI';
@@ -1061,7 +1061,7 @@
           renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
           fileInput.value = '';
           msg.innerHTML = '';
-        } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+        } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
       });
 
       (project.payment_milestones || []).slice().sort((a, b) => a.sort_order - b.sort_order).forEach(m => {
@@ -1111,7 +1111,7 @@
           // Pylon account without solar-project-creation API access
           // (403 feature_not_available) shouldn't leave staff with no way
           // to create the job at all, just without the auto-filled details.
-          msg.innerHTML = `<div class="error-box">${err.message} - <a class="link-quiet" href="https://app.getpylon.com/app" target="_blank" rel="noopener">open Pylon</a> and create it manually instead.</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))} - <a class="link-quiet" href="https://app.getpylon.com/app" target="_blank" rel="noopener">open Pylon</a> and create it manually instead.</div>`;
         }
         btn.disabled = false;
         btn.textContent = 'Create job in Pylon →';
@@ -1132,7 +1132,7 @@
           const summary = pylonSystemSummary(json.pylonData);
           msg.innerHTML = `<div class="success-box">Pulled from Pylon.${summary ? ' ' + summary : ' No hardware summary came back - check the function logs against the field names in the Pylon API docs.'}</div>`;
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message} (check Settings &gt; API Keys &gt; Pylon, and that this Pylon project ID is correct)</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))} (check Settings &gt; API Keys &gt; Pylon, and that this Pylon project ID is correct)</div>`;
         }
       });
 
@@ -1223,7 +1223,7 @@
         // completely unpopulated/unwired, which looks exactly like
         // "nothing happens" if the swap itself was subtle. Surface it.
         console.error('wireEditForm failed:', err);
-        alert('The editor loaded but hit an error setting up: ' + err.message);
+        alert('The editor loaded but hit an error setting up: ' + friendlyError(err));
       }
     }
 
@@ -1470,7 +1470,7 @@
           }
 
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           saveBtn.disabled = false;
           saveBtn.textContent = 'Save changes';
           return;
@@ -1577,7 +1577,7 @@
         const myRole = await getMyRole();
         if (refreshed) render(refreshed, isPricingRole(myRole));
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         saveBtn.disabled = false;
         saveBtn.textContent = 'Save changes';
       }
@@ -1660,6 +1660,40 @@
     // prebuilds can be added straight onto any cost centre while building
     // it: create-invoice.js prices them, takes Stock out of the warehouse
     // and records them in invoice_line_items.
+    // Due date from the client's payment terms: the same rule as netlify/functions/_shared/compute-due-date.js.
+    const INVOICE_TERM_DAYS = { cod: 0, net_7: 7, net_14: 14, net_30: 30 };
+    function invoiceDueKey(terms, invoiceDateKey) {
+      const d = new Date(`${invoiceDateKey}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + (INVOICE_TERM_DAYS[terms] || 0));
+      return sydneyDateKey(d);
+    }
+    // Fills the due date from the client's terms as soon as the panel opens, moves it when the invoice
+    // date changes, and leaves it alone once someone types their own (clearing the box hands it back).
+    async function wireInvoiceDueDate(overlay, { dateSel, dueSel, noteSel, clientId }) {
+      const dateEl = overlay.querySelector(dateSel), dueEl = overlay.querySelector(dueSel), noteEl = overlay.querySelector(noteSel);
+      let terms = 'cod', touched = false;
+      const fill = () => { if (!touched && dateEl.value) dueEl.value = invoiceDueKey(terms, dateEl.value); };
+      dueEl.addEventListener('input', () => { touched = !!dueEl.value; if (!touched) fill(); });
+      dateEl.addEventListener('change', fill);
+      if (!clientId) {
+        noteEl.textContent = 'No client on this job: due on the invoice date.';
+      } else {
+        let row = null;
+        try {
+          const { data, error } = await supabaseClient.from('clients').select('payment_terms').eq('id', clientId).maybeSingle();
+          if (error) throw error;
+          row = data;
+        } catch (err) {
+          noteEl.textContent = 'Could not read the client\'s terms. Leave it blank and it is worked out when the invoice is made.';
+          return;
+        }
+        terms = row?.payment_terms || 'cod';
+        const days = INVOICE_TERM_DAYS[terms] || 0;
+        noteEl.textContent = days ? `Client terms: ${days} days` : 'Client terms: COD (due on the invoice date)';
+      }
+      fill(); // once, so a date typed while the terms were loading is kept
+    }
+
     async function openInvoiceActualCostsPanel(project) {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
@@ -1683,7 +1717,7 @@
         prebuilds = pbs || [];
         materials = mats || [];
       } catch (err) {
-        overlay.innerHTML = `<div class="card" style="max-width:440px; width:100%;"><div class="error-box">${err.message}</div><button type="button" class="secondary" id="ia-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+        overlay.innerHTML = `<div class="card" style="max-width:440px; width:100%;"><div class="error-box">${escapeHtml(friendlyError(err))}</div><button type="button" class="secondary" id="ia-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
         overlay.querySelector('#ia-close-btn').addEventListener('click', () => overlay.remove());
         return;
       }
@@ -1720,16 +1754,17 @@
           <div id="ia-mode-wrap" style="margin-top:12px;"></div>
           <div class="grid cols-2">
             <div><label>Invoice date</label><input type="date" id="ia-date" value="${new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' })}" /></div>
-            <div><label>Due date (optional - defaults to the client's payment terms)</label><input type="date" id="ia-due-date" /></div>
+            <div><label>Due date</label><input type="date" id="ia-due-date" /><p class="subtitle" id="ia-due-note" style="font-size:12px; margin:4px 0 0;"></p></div>
           </div>
           <p id="ia-total" style="margin:14px 0 0; font-weight:600;"></p>
           <div style="margin-top:14px;">
-            <button id="ia-confirm-btn">Create &amp; send</button>
+            <button id="ia-confirm-btn">Create invoice</button>
             <button type="button" class="secondary" id="ia-cancel-btn">Cancel</button>
           </div>
           <div id="ia-msg"></div>
         </div>`;
 
+      wireInvoiceDueDate(overlay, { dateSel: '#ia-date', dueSel: '#ia-due-date', noteSel: '#ia-due-note', clientId: project.client_id });
       const centresEl = overlay.querySelector('#ia-centres');
       const modeWrap = overlay.querySelector('#ia-mode-wrap');
 
@@ -1850,21 +1885,25 @@
             autoGenerateInvoicePdf(data.invoiceId);
           }
         } catch (err) {
-          msg.innerHTML = `${created.length ? `<div class="success-box">Created ${created.map(d => d.invoiceNumber).join(', ')} before this failed.</div>` : ''}<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `${created.length ? `<div class="success-box">Created ${created.map(d => d.invoiceNumber).join(', ')} before this failed.</div>` : ''}<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           if (created.length) {
             confirmBtn.style.display = 'none';
             overlay.querySelector('#ia-cancel-btn').textContent = 'Close';
             overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => window.location.reload());
           } else {
             confirmBtn.disabled = false;
-            confirmBtn.textContent = 'Create & send';
+            confirmBtn.textContent = 'Create invoice';
           }
           return;
         }
 
         msg.innerHTML = `
-          <div class="success-box">Created ${created.map(d => d.invoiceNumber).join(', ')}.</div>
-          ${created.map(d => `<label>${d.invoiceNumber} link</label><input readonly value="${shareOrigin()}/invoice.html?token=${d.invoiceToken}" onclick="this.select()" />`).join('')}`;
+          <div class="success-box">Created ${escapeHtml(created.map(d => d.invoiceNumber).join(', '))}.</div>
+          ${created.map(d => `
+            <label>${escapeHtml(d.invoiceNumber)} link</label><input readonly value="${escapeHtml(`${shareOrigin()}/invoice.html?token=${d.invoiceToken}`)}" onclick="this.select()" />
+            <button type="button" class="ia-email-btn" data-id="${escapeHtml(d.invoiceId)}" style="margin-top:8px;">Email ${escapeHtml(d.invoiceNumber)} to client</button>
+            <div class="ia-email-msg"></div>`).join('')}`;
+        msg.querySelectorAll('.ia-email-btn').forEach(b => b.addEventListener('click', () => emailInvoiceToClient(b.dataset.id, project, { btn: b, msgEl: b.nextElementSibling })));
         confirmBtn.style.display = 'none';
         overlay.querySelector('#ia-cancel-btn').textContent = 'Close';
         overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => window.location.reload());
@@ -1897,7 +1936,7 @@
         actuals = await res.json();
         if (!res.ok || !actuals.ok) throw new Error(actuals.error || 'Could not work out accrued costs');
       } catch (err) {
-        overlay.innerHTML = `<div class="card" style="max-width:480px; width:100%;"><div class="error-box">${err.message}</div><button type="button" class="secondary" id="cw-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+        overlay.innerHTML = `<div class="card" style="max-width:480px; width:100%;"><div class="error-box">${escapeHtml(friendlyError(err))}</div><button type="button" class="secondary" id="cw-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
         overlay.querySelector('#cw-close-btn').addEventListener('click', () => overlay.remove());
         return;
       }
@@ -2032,11 +2071,59 @@
           overlay.remove();
           location.reload();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           confirmBtn.disabled = false;
           confirmBtn.textContent = 'Close out';
         }
       });
+    }
+
+    // One "Email invoice to client" for every place an invoice is made or listed: makes sure the PDF
+    // exists (the one made on create is reused), then opens the in-app email window with it attached
+    // and a View and pay button. Same shape as emailPurchaseOrder in supabase-client.js.
+    async function emailInvoiceToClient(invoiceId, project, { btn, msgEl } = {}) {
+      const label = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = 'Making the PDF...'; }
+      if (msgEl) msgEl.innerHTML = '';
+      try {
+        const readInvoice = async () => {
+          const { data, error } = await supabaseClient.from('invoices').select('invoice_number, invoice_token, pdf_path, bill_to_client_id').eq('id', invoiceId).single();
+          if (error) throw error;
+          return data;
+        };
+        let inv = await readInvoice();
+        if (!inv.pdf_path) {
+          await generateClientPdf('invoice', invoiceId); // copes with autoGenerateInvoicePdf running at the same time
+          inv = await readInvoice();
+          if (!inv.pdf_path) throw new Error('The PDF is not ready yet. Try again in a moment.');
+        }
+        const n = inv.invoice_number;
+        let to = project.client_email || '', name = project.client_name || '';
+        if (inv.bill_to_client_id) { // a warranty job billed to the manufacturer
+          const { data: billTo } = await supabaseClient.from('clients').select('name, email').eq('id', inv.bill_to_client_id).maybeSingle();
+          if (billTo) { to = billTo.email || ''; name = billTo.name || ''; }
+        }
+        const first = name.trim().split(/\s+/)[0] || 'there';
+        const fileName = `${projectRef(project)} - Invoice ${n}.pdf`;
+        openEmailComposer({
+          title: `Email invoice ${n}`,
+          to,
+          subject: `Invoice ${n} - ${projectRef(project)}`,
+          body: `Hi ${first},\n\nPlease find invoice ${n} for ${project.name} attached. You can also view and pay it online with the button below.\n\nThanks,`,
+          projectId: project.id, tagKind: 'client',
+          quoteLink: { url: `${shareOrigin()}/invoice.html?token=${inv.invoice_token}`, label: 'Include a button to view and pay the invoice online', buttonText: 'View and pay your invoice', checked: true },
+          attachOptions: [{ group: 'Invoice', label: fileName, bucket: 'project-documents', path: inv.pdf_path, name: fileName, checked: true }],
+          onSent: async () => {
+            await logActivity('project', project.id, 'invoice_emailed', `Invoice ${n} emailed to ${name || 'the client'}`);
+            if (btn) { btn.textContent = 'Emailed'; btn.disabled = true; }
+          },
+        });
+      } catch (err) {
+        const text = friendlyError(err, 'Could not set up the email.');
+        if (msgEl) msgEl.innerHTML = `<div class="error-box">${escapeHtml(text)}</div>`; else alert(text);
+      } finally {
+        if (btn && btn.textContent === 'Making the PDF...') { btn.disabled = false; btn.textContent = label; }
+      }
     }
 
     // One invoice, multiple stage-claim lines: either a single % of the
@@ -2083,8 +2170,8 @@
                     <td data-label=""><input type="checkbox" class="inv-stage-check" data-id="${x.centre.id}" style="width:auto;" ${opts.preselectCentreId ? (opts.preselectCentreId === x.centre.id ? 'checked' : '') : 'checked'} /></td>
                     <td data-label="Stage">${escapeHtml(x.centre.name)}${x.stcRemaining > 0 ? `<br><span class="subtitle" style="font-size:11px;">${money(x.stcRemaining)} STC credit outstanding</span>` : ''}</td>
                     <td class="num" data-label="Remaining">${money(x.remaining)}</td>
-                    <td class="num" data-label="Claim %"><input type="number" class="inv-stage-pct" data-id="${x.centre.id}" min="0" max="100" step="1" value="${!opts.preselectCentreId || opts.preselectCentreId === x.centre.id ? 100 : 0}" style="width:70px;" /></td>
-                    <td class="num" data-label="Claim $"><input type="number" class="inv-stage-amt" data-id="${x.centre.id}" step="0.01" style="width:100px;" /></td>
+                    <td class="num" data-label="Claim %"><input type="number" inputmode="numeric" class="inv-stage-pct" data-id="${x.centre.id}" min="0" max="100" step="1" value="${!opts.preselectCentreId || opts.preselectCentreId === x.centre.id ? 100 : 0}" style="width:70px;" /></td>
+                    <td class="num" data-label="Claim $"><input type="number" inputmode="decimal" class="inv-stage-amt" data-id="${x.centre.id}" step="0.01" style="width:100px;" /></td>
                   </tr>`).join('')}
               </tbody>
             </table>
@@ -2100,14 +2187,15 @@
             </div>
             <div>
               <label style="margin-top:0">Due date</label>
-              <input type="date" id="inv-due-date" placeholder="From client's payment terms" />
+              <input type="date" id="inv-due-date" />
+              <p class="subtitle" id="inv-due-note" style="font-size:12px; margin:4px 0 0;"></p>
             </div>
           </div>
 
           <p style="margin-top:14px; font-size:16px;">Total this claim: <strong id="inv-total-display">$0.00</strong></p>
 
           <div style="margin-top:8px;">
-            <button id="inv-confirm-btn">Create &amp; send</button>
+            <button id="inv-confirm-btn">Create invoice</button>
             <button type="button" class="secondary" id="inv-cancel-btn">Cancel</button>
           </div>
           <div id="inv-panel-msg"></div>
@@ -2333,28 +2421,30 @@
 
           const invoiceUrl = `${shareOrigin()}/invoice.html?token=${data.invoiceToken}`;
           panelMsg.innerHTML = `
-            <div class="success-box">Created as ${data.invoiceNumber}.</div>
-            <label>Invoice link</label>
-            <input readonly value="${invoiceUrl}" onclick="this.select()" />
+            <div class="success-box">Created as ${escapeHtml(data.invoiceNumber)}.</div>
             <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-              <a class="btn secondary" target="_blank" href="${gmailComposeUrl({ to: project.client_email || '', subject: 'Invoice ' + data.invoiceNumber + ' - ' + project.name, body: 'Hi ' + project.client_name + ',\n\nPlease find your invoice here:\n' + invoiceUrl + '\n\nThanks,\nThomson Energy' })}">Email invoice to client</a>
-              <a class="btn secondary" target="_blank" href="/invoice.html?token=${data.invoiceToken}&print=1">Download PDF</a>
+              <button type="button" id="inv-email-btn">Email invoice to client</button>
+              <a class="btn secondary" target="_blank" href="/invoice.html?token=${encodeURIComponent(data.invoiceToken)}&print=1">Download PDF</a>
             </div>
-            <p class="subtitle" style="margin-top:6px;">Gmail opens in a new tab ready to send - the PDF downloads separately, so you'll need to attach it yourself once Gmail's open (no browser can auto-attach a file for you). The client's invoice page already has a Pay Online option alongside your bank details, generated automatically - nothing else to do here.</p>`;
+            <label>Invoice link (for pasting into a text)</label>
+            <input readonly value="${escapeHtml(invoiceUrl)}" onclick="this.select()" />
+            <div id="inv-email-msg"></div>`;
+          overlay.querySelector('#inv-email-btn').addEventListener('click', (e) => emailInvoiceToClient(data.invoiceId, project, { btn: e.currentTarget, msgEl: overlay.querySelector('#inv-email-msg') }));
           confirmBtn.style.display = 'none';
           overlay.querySelector('#inv-cancel-btn').textContent = 'Close';
 
           const refreshed = await loadProject();
           if (refreshed) render(refreshed, pricingVisible);
         } catch (err) {
-          panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          panelMsg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           confirmBtn.disabled = false;
-          confirmBtn.textContent = 'Create & send';
+          confirmBtn.textContent = 'Create invoice';
         }
       });
 
       document.body.appendChild(overlay);
       refresh();
+      wireInvoiceDueDate(overlay, { dateSel: '#inv-date', dueSel: '#inv-due-date', noteSel: '#inv-due-note', clientId: project.client_id });
 
       // The bill-to client's type decides whether the STC credit carries GST (as invoice_client_type does).
       if (project.client_id) {
@@ -2381,7 +2471,7 @@
           }));
           renderVarSection();
         } catch (err) {
-          sec.innerHTML = `<div class="error-box" style="margin-top:12px;">Couldn't price the logged variations: ${escapeHtml(err.message)}</div>`;
+          sec.innerHTML = `<div class="error-box" style="margin-top:12px;">Couldn't price the logged variations: ${escapeHtml(friendlyError(err))}</div>`;
         }
         refresh();
       })();
@@ -2404,7 +2494,7 @@
         msg.innerHTML = `<div class="success-box">Pushed ${data.invoiceNumber} to Xero.</div>`;
         location.reload();
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         btn.disabled = false;
         btn.textContent = 'Push to Xero';
       }
@@ -2454,7 +2544,7 @@
           if (delErr) throw delErr;
           await logActivity('project', projectId, 'sm8_invoice_deleted', `Deleted ServiceM8 invoice copy ${d.file_name}`);
           await loadSm8Invoices(projectId);
-        } catch (err) { alert(err.message); }
+        } catch (err) { alert(friendlyError(err)); }
       }));
     }
 
@@ -2467,7 +2557,7 @@
         supabaseClient.from('xero_account_mapping').select('*'),
         project.client_id ? supabaseClient.from('clients').select('client_type').eq('id', project.client_id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!invoices.length) { listEl.innerHTML = `<p class="subtitle">No invoices raised yet.</p>`; return; }
 
       const clientType = client?.client_type || 'individual';
@@ -2482,6 +2572,7 @@
             </div>
             <div>
               <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:10px;">View client-facing invoice</a>
+              <button type="button" class="secondary email-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Email</button>
               ${inv.pdf_path ? `<button type="button" class="secondary view-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">View PDF</button>` : ''}
               <button type="button" class="secondary generate-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">${inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF'}</button>
               ${!inv.xero_invoice_id && !inv.paid_at
@@ -2494,7 +2585,7 @@
                 ${inv.credit_notes.map(cn => `
                   <p class="subtitle" style="font-size:12px; margin:4px 0;">
                     Credit note${cn.reason ? ` - ${escapeHtml(cn.reason)}` : ''} (${new Date(cn.created_at).toLocaleDateString('en-AU')})
-                    ${cn.refund ? `<span class="badge sent" style="margin-left:4px;">Refunded${cn.refund_reference ? ` - ${escapeHtml(cn.refund_reference)}` : ''}</span>` : `<span class="badge accepted" style="margin-left:4px;">Account credit</span>`}
+                    ${cn.refund ? `<span class="badge info" style="margin-left:4px;">Refunded${cn.refund_reference ? ` - ${escapeHtml(cn.refund_reference)}` : ''}</span>` : `<span class="badge accepted" style="margin-left:4px;">Account credit</span>`}
                     ${cn.xero_credit_note_id ? '<span style="margin-left:6px;">In Xero</span>' : (canIssueCreditNote ? `<button type="button" class="secondary push-credit-note-btn" data-credit-note-id="${cn.id}" style="font-size:11px; padding:4px 8px; margin-left:6px;">Push to Xero</button>` : '')}
                     ${cn.xero_credit_note_error ? `<span class="error-box" style="display:block; margin-top:4px;">${cn.xero_credit_note_error}</span>` : ''}
                   </p>`).join('')}
@@ -2516,6 +2607,9 @@
       listEl.querySelectorAll('.push-credit-note-btn').forEach(btn => {
         btn.addEventListener('click', () => pushCreditNoteToXero(btn));
       });
+      listEl.querySelectorAll('.email-invoice-btn').forEach(btn => {
+        btn.addEventListener('click', () => emailInvoiceToClient(btn.dataset.invoiceId, project, { btn, msgEl: document.getElementById(`invoice-pdf-msg-${btn.dataset.invoiceId}`) }));
+      });
       listEl.querySelectorAll('.view-invoice-pdf-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const inv = invoices.find(i => i.id === btn.dataset.invoiceId);
@@ -2533,7 +2627,7 @@
             await generateClientPdf('invoice', inv.id);
             loadJobInvoices(project);
           } catch (err) {
-            msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+            msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
             btn.disabled = false;
             btn.textContent = inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF';
           }
@@ -2684,7 +2778,7 @@
           overlay.remove();
           location.reload();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           saveBtn.disabled = false;
           saveBtn.textContent = saveBtnLabel;
         }
@@ -2820,7 +2914,7 @@
           overlay.remove();
           location.reload();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           saveBtn.disabled = false;
           saveBtn.textContent = 'Create credit note';
         }
@@ -2844,7 +2938,7 @@
         if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
         location.reload();
       } catch (err) {
-        if (msg) msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        if (msg) msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         btn.disabled = false;
         btn.textContent = 'Push to Xero';
       }
@@ -2879,7 +2973,7 @@
             // Tab is opened on the tap itself (no await before it) so iPhone Safari does not block it.
             await openSignedDocInNewTab(project.ccew_file_path);
           } catch (err) {
-            msg.innerHTML = `<div class="error-box" style="margin-top:10px;">Could not open: ${escapeHtml(err.message)}</div>`;
+            msg.innerHTML = `<div class="error-box" style="margin-top:10px;">Could not open: ${escapeHtml(friendlyError(err))}</div>`;
           }
         });
       } else if (project.ccew_not_required_reason) {
@@ -2923,7 +3017,7 @@
           project.ccew_not_required_reason = null;
           await initCcewSection(project);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           input.disabled = false;
           input.value = '';
           labelBtn.firstChild.textContent = 'Upload the CCEW (photo or PDF)';
@@ -2943,7 +3037,7 @@
         btn.textContent = 'Saving...';
         try {
           const { error } = await supabaseClient.from('projects').update({ ccew_not_required_reason: reason, ccew_file_path: null }).eq('id', project.id);
-          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
           project.ccew_not_required_reason = reason;
           project.ccew_file_path = null;
           await initCcewSection(project);
@@ -3483,7 +3577,7 @@
 
                   <p class="subtitle" style="margin-top:14px;">Claimed to date: <strong style="color:var(--text);">${money(claimedTotal)}</strong> of ${money(quotedAmt)}. Remaining: <strong style="color:var(--text);">${money(remaining)}</strong>.</p>
                   ${c.stc_total > 0 ? `<p class="subtitle">STC entitlement: ${money(c.stc_total)} - applied so far: ${money(stcApplied)}, remaining: ${money(stcRemaining)}.</p>` : ''}
-                  ${remaining > 0 ? `<button class="secondary create-invoice-btn" data-id="${c.id}" style="margin-top:6px;">Create &amp; send next claim</button>` : ''}
+                  ${remaining > 0 ? `<button class="secondary create-invoice-btn" data-id="${c.id}" style="margin-top:6px;">Invoice next claim</button>` : ''}
                 </div>`;
               }).join('') : ''}
               <div id="push-xero-msg"></div>
@@ -3832,7 +3926,7 @@
           await checkAndAdvanceHandover(project.id);
           msgEl.innerHTML = `<div class="success-box">Saved.</div>`;
         } catch (err) {
-          msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {
           hdSaveBtn.disabled = false;
           hdSaveBtn.textContent = 'Save';
@@ -3922,7 +4016,7 @@
           project.notes = notesVal;
           msgEl.innerHTML = `<div class="success-box" style="margin-top:6px; font-size:12px;">Saved.</div>`;
         } catch (err) {
-          msgEl.innerHTML = `<div class="error-box" style="margin-top:6px; font-size:12px;">${err.message}</div>`;
+          msgEl.innerHTML = `<div class="error-box" style="margin-top:6px; font-size:12px;">${escapeHtml(friendlyError(err))}</div>`;
         }
         jobNotesSaveBtn.disabled = false;
         jobNotesSaveBtn.textContent = 'Save notes';
@@ -3999,7 +4093,7 @@
             else installerSummaryBtn.textContent = label;
           } catch (err) {
             installerSummaryBtn.textContent = label;
-            if (!quiet) msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+            if (!quiet) msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
             else textEl.innerHTML = '<span class="subtitle">Could not write the summary automatically. Press Generate summary to try again.</span>';
           }
           installerSummaryBtn.disabled = false;
@@ -4026,7 +4120,7 @@
           if (fresh) Object.assign(project, fresh);
           await openJobEmailComposer(project, null, { withQuote: true });
         } catch (err) {
-          msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         }
         emailQuoteBtn.disabled = false; emailQuoteBtn.textContent = label;
       });
@@ -4239,7 +4333,7 @@
 
           window.location.href = `/new-project.html?id=${newProject.id}`;
         } catch (err) {
-          document.getElementById('action-msg').innerHTML = `<div class="error-box">${err.message}</div>`;
+          document.getElementById('action-msg').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           btn.disabled = false;
           btn.textContent = 'Duplicate as new quote';
         }
@@ -4327,7 +4421,7 @@
           overlay.remove();
           await opts.onDone();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           btn.disabled = false; btn.textContent = isApprove ? 'Mark approved' : 'Mark declined';
         }
       });
@@ -4359,7 +4453,7 @@
       el.querySelectorAll(sel('.vu-noauto')).forEach(cb => cb.addEventListener('change', async () => {
         const f = find(cb.dataset.key);
         const { error } = await supabaseClient.from(f.kind === 'quote' ? 'projects' : 'job_variation_entries').update({ no_auto_decline: cb.checked }).eq('id', f.row.id);
-        if (error) { alert(error.message); cb.checked = !cb.checked; return; }
+        if (error) { alert(friendlyError(error)); cb.checked = !cb.checked; return; }
         f.row.no_auto_decline = cb.checked;
         await logActivity('project', project.id, 'auto_decline_changed', `${f.kind === 'quote' ? 'Quote' : 'Variation ' + (f.row.variation_number || '')}: auto decline turned ${cb.checked ? 'off' : 'on'}`);
       }));
@@ -4371,10 +4465,7 @@
       const today = sydneyYmd();
       const from = row.valid_until && row.valid_until >= today ? row.valid_until : today;
       const what = kind === 'quote' ? (project.quote_number ? `quote Q${project.quote_number}` : 'this quote') : `Variation ${row.variation_number || ''}`.trim();
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:440px; width:100%;">
+      const overlay = openModal(`
           <h2>Extend ${escapeHtml(what)}</h2>
           <p class="subtitle" style="margin-bottom:10px;">${row.valid_until ? (row.expired ? 'Expired ' : 'Valid until ') + validUntilText(row.valid_until) : 'No valid until date yet'}.${row.expired ? ' Extending it reopens it, so the client can accept it again.' : ''}</p>
           <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
@@ -4384,9 +4475,7 @@
           <input type="date" id="ex-date" min="${today}" value="${ymdPlus(from, 14)}" />
           <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400;"><input type="checkbox" id="ex-email" style="width:auto;" /> Email the client the new date</label>
           <div style="margin-top:14px;"><button type="button" id="ex-save">Extend</button> <button type="button" class="secondary" id="ex-cancel">Cancel</button></div>
-          <div id="ex-msg"></div>
-        </div>`;
-      document.body.appendChild(overlay);
+          <div id="ex-msg"></div>`, { maxWidth: 440, zIndex: 110 });
       overlay.querySelectorAll('.ex-plus').forEach(b => b.addEventListener('click', () => { overlay.querySelector('#ex-date').value = ymdPlus(from, Number(b.dataset.n)); }));
       overlay.querySelector('#ex-cancel').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#ex-save').addEventListener('click', async () => {
@@ -4408,7 +4497,7 @@
           if (wantEmail) await emailExtension(kind, project, { ...row, valid_until: validUntil });
           await onDone();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           btn.disabled = false; btn.textContent = 'Extend';
         }
       });
@@ -4447,7 +4536,7 @@
           });
         }
       } catch (err) {
-        alert('Extended, but the email could not be set up: ' + err.message);
+        alert('Extended, but the email could not be set up: ' + friendlyError(err));
       }
     }
 
@@ -4481,7 +4570,7 @@
         supabaseClient.from('variations').select('*').eq('project_id', projectId).order('created_at', { ascending: false }),
         supabaseClient.from('profiles').select('id, full_name'),
       ]);
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!variations.length) { listEl.innerHTML = `<p class="subtitle">No variations recorded.</p>`; return; }
 
       listEl.innerHTML = variations.map(v => {
@@ -4565,11 +4654,11 @@
           } catch (err) {
             createBtn.disabled = false;
             createBtn.textContent = 'Create tasks for these';
-            resultEl.insertAdjacentHTML('beforeend', `<div class="error-box">${err.message}</div>`);
+            resultEl.insertAdjacentHTML('beforeend', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
           }
         });
       } catch (err) {
-        resultEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        resultEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
       } finally {
         btnEl.disabled = false;
         btnEl.textContent = originalLabel;
@@ -4634,8 +4723,8 @@
                 <button type="button" class="insp-yn-btn yn-yes ${a?.answer_yes_no === true ? 'selected' : ''}">Yes</button>
                 <button type="button" class="insp-yn-btn secondary yn-no ${a?.answer_yes_no === false ? 'selected' : ''}">No</button>
               ` : `
-                ${a?.photo_path ? `<img class="insp-photo-thumb insp-photo-view" src="${a.photo_path}" style="cursor:pointer;" />` : ''}
-                <input type="file" class="insp-photo-file" accept="image/*,.pdf" style="display:block; margin-bottom:8px;" />
+                ${a?.photo_path ? `<img class="insp-photo-thumb insp-photo-view" src="${escapeHtml(a.photo_path)}" style="cursor:pointer;" />` : ''}
+                <label class="btn ${a?.photo_path ? 'secondary' : ''} insp-photo-btn">&#128247; ${a?.photo_path ? 'Replace photo or PDF' : 'Add photo or PDF'}<input type="file" class="insp-photo-file" accept="image/*,.pdf" style="display:none;" /></label>
               `}
               <div class="insp-item-msg"></div>
             </div>
@@ -4649,7 +4738,7 @@
           el.querySelectorAll('.yn-yes, .yn-no').forEach(btn => {
             btn.addEventListener('click', async () => {
               try { await saveAnswer(itemId, { answer_yes_no: btn.classList.contains('yn-yes') }); renderChecklist(); }
-              catch (err) { msgEl.innerHTML = `<div class="error-box">${err.message}</div>`; }
+              catch (err) { msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
             });
           });
 
@@ -4657,18 +4746,21 @@
           if (photoViewImg) photoViewImg.addEventListener('click', () => openPhotoLightbox([photoViewImg.src], 0));
 
           const fileInput = el.querySelector('.insp-photo-file');
+          const photoBtn = el.querySelector('.insp-photo-btn');
           if (fileInput) {
             fileInput.addEventListener('change', async () => {
               if (!fileInput.files.length) return;
               fileInput.disabled = true;
+              photoBtn.classList.add('is-loading');
               msgEl.innerHTML = `<p class="subtitle">Uploading...</p>`;
               try {
                 const [url] = await uploadPhotos(fileInput.files, `quote-compliance/${project.id}`, 'site-photos');
                 await saveAnswer(itemId, { photo_path: url });
                 renderChecklist();
               } catch (err) {
-                msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+                msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
                 fileInput.disabled = false;
+                photoBtn.classList.remove('is-loading');
               }
             });
           }
@@ -4740,7 +4832,7 @@
       if (!el) return;
       const { data: links, error } = await supabaseClient.from('email_job_links')
         .select('id, kind, note, thread_id, email_threads(id, subject, last_message_at, last_direction, section, is_done, assigned_to, assigned_at)').eq('project_id', project.id);
-      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!jobEmailStaff) {
         const [{ data: staff }, { data: { user } }] = await Promise.all([supabaseClient.from('profiles').select('id, full_name, active').order('full_name'), supabaseClient.auth.getUser()]);
         jobEmailStaff = staff || []; jobEmailMe = user ? user.id : null;
@@ -4810,7 +4902,7 @@
         loadJobEmails(project);
       }));
       el.querySelectorAll('.job-email-assign').forEach(sel => sel.addEventListener('change', async () => {
-        try { await emailAction('assign', { thread_id: sel.dataset.t, user_id: sel.value || null }); } catch (err) { alert(err.message); }
+        try { await emailAction('assign', { thread_id: sel.dataset.t, user_id: sel.value || null }); } catch (err) { alert(friendlyError(err)); }
         loadJobEmails(project);
       }));
     }
@@ -4849,7 +4941,7 @@
         supabaseClient.from('job_stcs').select('*, formbay_payment_advice_lines(*, formbay_payment_advices(reference_no, advice_date, units, fee_ex_gst))').eq('project_id', project.id).order('created_at'),
         jobStcSettings ? Promise.resolve({ data: jobStcSettings }) : supabaseClient.from('company_settings').select('stc_expected_sale_price, stc_fee_per_certificate').limit(1).maybeSingle(),
       ]);
-      if (r.error) { el.innerHTML = `<div class="error-box">${escapeHtml(r.error.message)}</div>`; return; }
+      if (r.error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(r.error))}</div>`; return; }
       jobStcSettings = s.data || { stc_expected_sale_price: 39.25, stc_fee_per_certificate: 1 };
       jobStcRows = r.data || [];
       const quoteCount = centres.reduce((n, c) => n + stcCountForStage(c), 0);
@@ -4932,11 +5024,11 @@
           <h3 style="margin:0 0 8px;">${row ? 'Edit STCs' : 'Add STCs'}</h3>
           <div class="grid cols-4">
             <div><label style="margin-top:0;">Type</label><select id="js-type">${Object.entries(STC_TYPES).map(([k, l]) => `<option value="${k}" ${v.stc_type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-            <div><label style="margin-top:0;">Number of STCs</label><input id="js-count" type="number" step="1" min="0" value="${v.stc_count ?? ''}" /></div>
-            <div><label style="margin-top:0;">Credited per STC ($)</label><input id="js-booked" type="number" step="0.01" value="${v.booked_price ?? 35}" /></div>
+            <div><label style="margin-top:0;">Number of STCs</label><input id="js-count" type="number" inputmode="numeric" step="1" min="0" value="${v.stc_count ?? ''}" /></div>
+            <div><label style="margin-top:0;">Credited per STC ($)</label><input id="js-booked" type="number" inputmode="decimal" step="0.01" value="${v.booked_price ?? 35}" /></div>
             <div><label style="margin-top:0;">Formbay job ID</label><input id="js-formbay" value="${escapeHtml(v.formbay_job_id || '')}" placeholder="e.g. 1269150" /></div>
             <div><label style="margin-top:0;">Status</label><select id="js-status" ${paid ? 'disabled' : ''}>${STC_STATUSES.map(s => `<option value="${s.value}" ${v.status === s.value ? 'selected' : ''}>${s.label}</option>`).join('')}</select></div>
-            <div><label style="margin-top:0;">Sale price per STC ($)</label><input id="js-sale" type="number" step="0.01" value="${v.sale_price ?? ''}" placeholder="When sold" ${paid ? 'disabled' : ''} /></div>
+            <div><label style="margin-top:0;">Sale price per STC ($)</label><input id="js-sale" type="number" inputmode="decimal" step="0.01" value="${v.sale_price ?? ''}" placeholder="When sold" ${paid ? 'disabled' : ''} /></div>
             <div><label style="margin-top:0;">Sold on</label><input id="js-sold-on" type="date" value="${v.sold_on || ''}" ${paid ? 'disabled' : ''} /></div>
             <div><label style="margin-top:0;">&nbsp;</label><label style="margin:6px 0 0; font-weight:400;"><input id="js-commercial" type="checkbox" ${v.commercial ? 'checked' : ''} style="width:auto;" /> Commercial (GST on sale)</label></div>
           </div>
@@ -4980,7 +5072,7 @@
           const { error } = row
             ? await supabaseClient.from('job_stcs').update(data).eq('id', row.id)
             : await supabaseClient.from('job_stcs').insert({ ...data, project_id: project.id, created_by: session.user.id });
-          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
           await syncProjectStcStatus(project);
           loadJobStcs(project, centres);
         } finally {
@@ -4992,7 +5084,7 @@
       if (del) del.addEventListener('click', async () => {
         if (!confirm('Delete this STC line?')) return;
         const { error } = await supabaseClient.from('job_stcs').delete().eq('id', row.id);
-        if (error) { document.getElementById('js-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        if (error) { document.getElementById('js-msg').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
         await syncProjectStcStatus(project);
         loadJobStcs(project, centres);
       });
@@ -5171,7 +5263,7 @@
         resultsEl.style.display = 'block';
         if (!cache) resultsEl.innerHTML = '<p class="subtitle" style="padding:12px 14px; margin:0;">Searching this job...</p>';
         let items;
-        try { items = await getItems(); } catch (err) { resultsEl.innerHTML = `<div class="error-box" style="margin:10px;">${escapeHtml(err.message)}</div>`; return; }
+        try { items = await getItems(); } catch (err) { resultsEl.innerHTML = `<div class="error-box" style="margin:10px;">${escapeHtml(friendlyError(err))}</div>`; return; }
         if (input.value.trim() !== raw) return; // typed on while loading
         const tokens = raw.toLowerCase().split(/\s+/).filter(Boolean);
         const re = new RegExp('(' + tokens.map(reEsc).join('|') + ')', 'i');
@@ -5211,7 +5303,7 @@
         const m = shown[Number(row.dataset.i)];
         if (!m) return;
         resultsEl.style.display = 'none';
-        try { await m.open(); } catch (err) { alert(err.message); }
+        try { await m.open(); } catch (err) { alert(friendlyError(err)); }
       });
       resultsEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList.contains('js-result')) e.target.click(); });
 
@@ -5296,7 +5388,7 @@
         supabaseClient.from('project_photos').select('id, url, task_id').eq('project_id', projectId).not('task_id', 'is', null).order('created_at'),
         supabaseClient.auth.getSession(),
       ]);
-      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
       const summaryEl = document.getElementById('summary-tasks-line');
       if (summaryEl) {
@@ -5615,7 +5707,7 @@
             jtExpanded.add(t.id);
             await reload();
           } catch (err) {
-            alert('Could not save the photo: ' + err.message);
+            alert('Could not save the photo: ' + friendlyError(err));
             label.firstChild.textContent = 'Add photo ';
           }
           return;
@@ -5690,10 +5782,7 @@
         supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
         supabaseClient.from('projects').select('job_number').eq('id', projectId).single(),
       ]);
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:420px; width:100%;">
+      const overlay = openModal(`
           <h2>Add task</h2>
           <label style="margin-top:0">Description</label>
           <input id="at-desc" placeholder="e.g. Check POs and order stock" />
@@ -5744,9 +5833,7 @@
             <button id="at-save-btn">Add task</button>
             <button type="button" class="secondary" id="at-cancel-btn">Cancel</button>
           </div>
-          <div id="at-msg"></div>
-        </div>`;
-      document.body.appendChild(overlay);
+          <div id="at-msg"></div>`, { maxWidth: 420 });
 
       // "Add to calendar" only makes sense with a specific person and a
       // date to schedule them on - shown as a plain label/checkbox rather
@@ -5834,7 +5921,7 @@
           overlay.remove();
           await loadJobTasks(projectId);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           saveBtn.disabled = false;
           saveBtn.textContent = 'Add task';
         }
@@ -5896,7 +5983,7 @@
           .select('id, staff_id, clock_in, clock_out, cost_centre_id, selected_cost_centre_ids, time_category, sm8_activity_uuid, profiles(full_name)')
           .eq('project_id', project.id)
           .order('clock_in', { ascending: false });
-        if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
         if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No timesheet entries logged against this job yet.</p>`; return; }
 
         let costById = new Map();
@@ -5965,7 +6052,7 @@
           .from('purchase_orders')
           .select('id, po_number, cost_centre_id, suppliers(name), supplier_name, purchase_order_line_items(description, quantity, unit_cost, received)')
           .eq('project_id', project.id);
-        if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
         const receivedRows = [];
         (pos || []).forEach(po => {
@@ -6061,7 +6148,7 @@
             const refreshed = await loadProject();
             if (refreshed) render(refreshed, pricingVisible);
           } catch (err) {
-            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           }
         });
       }
@@ -6084,7 +6171,11 @@
         .eq('project_id', projectId)
         .neq('folder', SM8_INVOICE_FOLDER) // shown on the Invoices tab
         .order('created_at', { ascending: false });
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
+      // Only the uploader, or Admin and Finance, get a Delete button (files the server made have no uploader).
+      const [myRole, { data: { session } }] = await Promise.all([getMyRole(), supabaseClient.auth.getSession()]);
+      const myId = session?.user?.id;
+      const canDeleteDoc = (d) => isFinanceRole(myRole) || (!!myId && d.uploaded_by === myId);
 
       // "Plans" exists on every job and quote, even before anything's been
       // uploaded to it - it's where the builder's plans go, and where the
@@ -6129,15 +6220,15 @@
               : isVideo && url
                 ? `<video src="${url}" muted preload="metadata" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0; background:#000;"></video>`
                 : isPdf
-                  ? `<div class="doc-pdf-thumb" data-path="${d.file_path}" style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px; overflow:hidden;">&#128196;</div>`
+                  ? `<div class="doc-pdf-thumb" data-path="${escapeHtml(d.file_path)}" style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px; overflow:hidden;">&#128196;</div>`
                   : `<div style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px;">&#128196;</div>`;
             return `
               <div class="doc-tile" style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
-                <a href="#" class="doc-view-link" data-path="${d.file_path}" style="display:block;">${preview}</a>
+                <a href="#" class="doc-view-link" data-path="${escapeHtml(d.file_path)}" style="display:block;">${preview}</a>
                 <div style="padding:8px;">
-                  <a href="#" class="link-quiet doc-view-link" data-path="${d.file_path}" style="font-weight:600; font-size:12px; word-break:break-word;">${escapeHtml(d.file_name)}</a>
+                  <a href="#" class="link-quiet doc-view-link" data-path="${escapeHtml(d.file_path)}" style="font-weight:600; font-size:12px; word-break:break-word;">${escapeHtml(d.file_name)}</a>
                   <p class="subtitle" style="margin:4px 0 0; font-size:11px;">${escapeHtml(d.profiles?.full_name || 'Someone')} &middot; ${new Date(d.created_at).toLocaleDateString('en-AU')}</p>
-                  <button type="button" class="secondary doc-delete-btn" data-id="${d.id}" data-path="${d.file_path}" style="font-size:11px; padding:4px 8px; margin-top:6px; width:100%;">Delete</button>
+                  ${canDeleteDoc(d) ? `<div class="doc-del-wrap" data-id="${escapeHtml(d.id)}" style="margin-top:6px;"></div>` : ''}
                 </div>
               </div>`;
           }).join('')}
@@ -6191,22 +6282,42 @@
             await openSignedDocInNewTab(a.dataset.path);
           } catch (err) {
             listEl.querySelectorAll('.doc-open-error').forEach(el => el.remove());
-            listEl.insertAdjacentHTML('afterbegin', `<div class="error-box doc-open-error">Could not open: ${escapeHtml(err.message)}</div>`);
+            listEl.insertAdjacentHTML('afterbegin', `<div class="error-box doc-open-error">Could not open: ${escapeHtml(friendlyError(err))}</div>`);
           }
         });
       });
-      listEl.querySelectorAll('.doc-delete-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          if (!confirm('Delete this document? This removes the file permanently.')) return;
+      // Delete asks "Really delete? Yes / No" inside the tile instead of a phone popup.
+      function showDocDelete(wrap, doc) {
+        wrap.innerHTML = `<button type="button" class="secondary doc-delete-btn" style="width:100%; font-size:13px; min-height:40px;">Delete</button>`;
+        wrap.querySelector('.doc-delete-btn').addEventListener('click', () => askDocDelete(wrap, doc));
+      }
+      function askDocDelete(wrap, doc) {
+        wrap.innerHTML = `
+          <p style="margin:0 0 6px; font-size:12px; font-weight:600;">Really delete?</p>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="danger doc-del-yes" style="flex:1; min-height:40px;">Yes</button>
+            <button type="button" class="secondary doc-del-no" style="flex:1; min-height:40px;">No</button>
+          </div>`;
+        const yes = wrap.querySelector('.doc-del-yes'), no = wrap.querySelector('.doc-del-no');
+        no.addEventListener('click', () => showDocDelete(wrap, doc));
+        yes.addEventListener('click', async () => {
+          yes.disabled = true; no.disabled = true; yes.textContent = 'Deleting...';
+          wrap.parentElement.querySelectorAll('.doc-del-error').forEach(el => el.remove());
           try {
-            await supabaseClient.storage.from('project-documents').remove([btn.dataset.path]);
-            const { error: delErr } = await supabaseClient.from('project_documents').delete().eq('id', btn.dataset.id);
+            // Row first, then the file, so a failure never leaves a tile pointing at a missing file.
+            const { data: gone, error: delErr } = await supabaseClient.from('project_documents').delete().eq('id', doc.id).select('id');
             if (delErr) throw delErr;
-            await logActivity('project', projectId, 'document_deleted', 'Deleted a document');
+            if (!gone || !gone.length) throw new Error('Could not delete it. Refresh and try again.');
+            await supabaseClient.storage.from('project-documents').remove([doc.file_path]).catch(() => {}); // a leftover file is harmless
+            await logActivity('project', projectId, 'document_deleted', `Deleted document ${doc.file_name}`);
             await loadDocuments(projectId);
-          } catch (err) { alert(err.message); }
+          } catch (err) {
+            wrap.insertAdjacentHTML('afterend', `<div class="error-box doc-del-error" style="font-size:12px; margin-top:6px;">${escapeHtml(friendlyError(err, 'Could not delete it.'))}</div>`);
+            showDocDelete(wrap, doc);
+          }
         });
-      });
+      }
+      listEl.querySelectorAll('.doc-del-wrap').forEach(w => showDocDelete(w, visible.find(d => d.id === w.dataset.id)));
     }
 
     // Pricing roles see a note under the Summary cost tiles: "incl. overheads $X". The tile itself is the
@@ -6365,7 +6476,7 @@
         .select('*, profiles:created_by(full_name)')
         .eq('project_id', project.id)
         .order('work_date', { ascending: false }).order('created_at', { ascending: false });
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
       const ids = (rows || []).map(r => r.id);
       const centreIds = (rows || []).filter(r => r.variation_type !== 'fixed').map(r => r.cost_centre_id).filter(Boolean);
@@ -6501,7 +6612,7 @@
       listEl.querySelectorAll('.var-status').forEach(btn => btn.addEventListener('click', async () => {
         const { error: upErr } = await supabaseClient.from('job_variation_entries')
           .update({ status: btn.dataset.status, status_changed_by: user.id, status_changed_at: new Date().toISOString() }).eq('id', btn.dataset.id);
-        if (upErr) { alert(upErr.message); return; }
+        if (upErr) { alert(friendlyError(upErr)); return; }
         await reload();
       }));
 
@@ -6516,7 +6627,7 @@
           });
           const d = await res.json();
           if (!res.ok || !d.ok) throw new Error(d.error || 'Could not delete it');
-        } catch (err) { alert(err.message); }
+        } catch (err) { alert(friendlyError(err)); }
         await reload();
       }));
 
@@ -6530,7 +6641,7 @@
           variation_id: btn.dataset.id, project_id: project.id, staff_id: staffSel ? staffSel.value : user.id,
           work_date: card.querySelector('.var-h-date').value || today, hours, created_by: user.id,
         });
-        if (hErr) { alert(hErr.message); btn.disabled = false; return; }
+        if (hErr) { alert(friendlyError(hErr)); btn.disabled = false; return; }
         await logActivity('project', project.id, 'variation_hours_logged', `${hours} hrs logged on variation: ${rowById(btn.dataset.id)?.description || ''}`);
         await reload();
       }));
@@ -6563,7 +6674,7 @@
           }
           await logActivity('project', project.id, 'variation_materials_added', `${picked.quantity} x ${picked.name} added to variation: ${rowById(btn.dataset.id)?.description || ''}`);
         } catch (err) {
-          alert(err.message);
+          alert(friendlyError(err));
         }
         await reload();
       }));
@@ -6585,7 +6696,7 @@
           variation_id: btn.dataset.id, project_id: project.id, kind: 'other',
           description: item.description, quantity: item.quantity, other_unit_cost: item.unitCost, created_by: user.id,
         });
-        if (oErr) { alert(oErr.message); return; }
+        if (oErr) { alert(friendlyError(oErr)); return; }
         await reload();
       }));
 
@@ -6614,18 +6725,18 @@
         const label = btn.textContent;
         btn.disabled = true; btn.textContent = 'Making the PDF...';
         try { await makeVariationPdf(btn.dataset.id); await reload(); }
-        catch (err) { alert(err.message); btn.disabled = false; btn.textContent = label; }
+        catch (err) { alert(friendlyError(err)); btn.disabled = false; btn.textContent = label; }
       }));
       listEl.querySelectorAll('.var-fixed-marksent').forEach(btn => btn.addEventListener('click', async () => {
         const { error: sErr } = await supabaseClient.from('job_variation_entries').update({ approval_status: 'sent', sent_at: new Date().toISOString() }).eq('id', btn.dataset.id);
-        if (sErr) { alert(sErr.message); return; }
+        if (sErr) { alert(friendlyError(sErr)); return; }
         await logActivity('project', project.id, 'variation_sent', `Variation sent to the client: ${rowById(btn.dataset.id)?.description || ''}`);
         await reload();
       }));
       listEl.querySelectorAll('.var-fixed-withdraw').forEach(btn => btn.addEventListener('click', async () => {
         if (!confirm('Take this back to a draft? The client cannot sign it until you send it again.')) return;
         const { error: wErr } = await supabaseClient.from('job_variation_entries').update({ approval_status: 'draft' }).eq('id', btn.dataset.id);
-        if (wErr) { alert(wErr.message); return; }
+        if (wErr) { alert(friendlyError(wErr)); return; }
         await reload();
       }));
       listEl.querySelectorAll('.var-fixed-copy').forEach(btn => btn.addEventListener('click', async () => {
@@ -6664,7 +6775,7 @@
             await logActivity('project', project.id, 'variation_logged', `Variation ${d.number} logged: ${description}`);
             await reload();
           } catch (err) {
-            msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           }
           addBtn.disabled = false;
         });
@@ -6775,7 +6886,7 @@
           overlay.remove();
           await onSaved();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           saveBtn.disabled = false;
         }
       });
@@ -6801,7 +6912,7 @@
       if (btn) { btn.disabled = true; btn.textContent = 'Making the PDF...'; }
       let pdfPath;
       try { pdfPath = await makeVariationPdf(entry.id); }
-      catch (err) { alert(err.message); return; }
+      catch (err) { alert(friendlyError(err)); return; }
       finally { if (btn) { btn.disabled = false; btn.textContent = label; } }
       const first = String(project.client_name || '').trim().split(/\s+/)[0] || 'there';
       const total = (entry.fixed_lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -6890,19 +7001,14 @@
     // its cost. Resolves to { description, quantity, unitCost } or null.
     function openVariationOtherItemPrompt() {
       return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
-        overlay.innerHTML = `
-          <div class="card" style="max-width:420px; width:100%;">
+        const overlay = openModal(`
             <h2>Other item</h2>
             <p class="subtitle" style="margin-bottom:10px;">Something bought in for this variation that isn't in Stock. Enter what it cost you; the markup is added when it's billed.</p>
             <label style="margin-top:0;">Description</label><input id="voi-desc" placeholder="e.g. 2m galvanised cable tray" />
             <div class="grid cols-2"><div><label>Quantity</label><input id="voi-qty" type="number" value="1" min="0.01" step="0.01" /></div>
             <div><label>Cost each (ex GST)</label><input id="voi-cost" type="number" min="0" step="0.01" /></div></div>
             <div id="voi-msg"></div>
-            <div style="margin-top:12px;"><button type="button" id="voi-ok">Add</button> <button type="button" class="secondary" id="voi-cancel">Cancel</button></div>
-          </div>`;
-        document.body.appendChild(overlay);
+            <div style="margin-top:12px;"><button type="button" id="voi-ok">Add</button> <button type="button" class="secondary" id="voi-cancel">Cancel</button></div>`, { maxWidth: 420, zIndex: 110 });
         const done = (val) => { overlay.remove(); resolve(val); };
         overlay.querySelector('#voi-cancel').addEventListener('click', () => done(null));
         overlay.querySelector('#voi-ok').addEventListener('click', () => {
@@ -6944,13 +7050,13 @@
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 0; border-top:1px solid var(--border);">
               <div style="min-width:0;">
                 <a class="link-quiet" href="/project.html?id=${r.id}" style="font-weight:600;">${escapeHtml(projectRef(r))}</a>
-                ${sameSite(r) ? '<span class="badge sent" style="margin-left:6px;">Same site</span>' : ''}
+                ${sameSite(r) ? '<span class="badge info" style="margin-left:6px;">Same site</span>' : ''}
                 <span class="badge draft" style="margin-left:6px;">${escapeHtml((r.pipeline_stage || r.status || '').replace(/_/g, ' '))}</span>
                 ${r.client_address ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${escapeHtml(r.client_address)}</p>` : ''}
               </div>
               <div style="display:flex; gap:6px; flex-shrink:0;">
-                <a class="btn secondary" href="/project.html?id=${r.id}" style="font-size:12px; padding:6px 10px;">Open</a>
-                ${r.job_number ? `<button type="button" class="secondary related-clock-btn" data-id="${r.id}" style="font-size:12px; padding:6px 10px;">${active ? 'Switch to this job' : 'Clock in'}</button>` : ''}
+                <a class="btn secondary" href="/project.html?id=${r.id}">Open</a>
+                ${r.job_number ? `<button type="button" class="secondary related-clock-btn" data-id="${r.id}">${active ? 'Switch to this job' : 'Clock in'}</button>` : ''}
               </div>
             </div>`).join('')}
         </div>`;
@@ -7152,7 +7258,7 @@
             await render();
             overlay.querySelector('#sched-msg').innerHTML = `<div class="success-box">Booked ${rows.length} ${rows.length === 1 ? 'slot' : 'slots'}.</div>`;
           } catch (err) {
-            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
             bookBtn.disabled = false; bookBtn.textContent = 'Book';
           }
         });
@@ -7227,7 +7333,7 @@
           msg.innerHTML = `<div class="success-box">Saved to Documents &gt; Schedules.</div>`;
           openPdfViewer(path, fileName, { projectId: project.id, folder: 'Schedules', onSaved: () => loadDocuments(project.id) });
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {
           btn.disabled = false; btn.textContent = 'Export schedule PDF';
         }
@@ -7240,12 +7346,17 @@
     // somewhere to browse them instead of piling up unseen.
     async function loadSitePhotos(projectId) {
       const listEl = document.getElementById('site-photos-list');
-      let { data: photos, error } = await supabaseClient
-        .from('project_photos')
-        .select('id, url, caption, staff_id, created_at, task_id, profiles(full_name)')
-        .eq('project_id', projectId)
-        .order('created_at', { ascending: false });
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      let [{ data: photos, error }, myRole, { data: { session } }] = await Promise.all([
+        supabaseClient
+          .from('project_photos')
+          .select('id, url, caption, staff_id, created_at, task_id, profiles(full_name)')
+          .eq('project_id', projectId)
+          .order('created_at', { ascending: false }),
+        getMyRole(),
+        supabaseClient.auth.getSession(),
+      ]);
+      const myId = session?.user?.id;
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!photos.length) { listEl.innerHTML = `<p class="subtitle">No site photos yet.</p>`; return; }
 
       // Videos (ServiceM8 brought some across) play in place; only pictures
@@ -7254,23 +7365,52 @@
       photos = allPhotos.filter(p => !isVideoUrl(p.url));
       const urls = photos.map(p => p.url);
       const captions = photos.map(p => p.caption || '');
-      listEl.innerHTML = `
-        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">
-          ${allPhotos.map(p => `
+
+      // Grouped under Today, Yesterday, then 'Tue 14 Oct' (rows come newest first, so consecutive
+      // grouping is enough), with small thumbnails that load only as they scroll into view.
+      const todayKey = sydneyDateKey(new Date());
+      const yd = new Date(`${todayKey}T12:00:00Z`);
+      yd.setUTCDate(yd.getUTCDate() - 1);
+      const yesterdayKey = sydneyDateKey(yd);
+      const dayHeading = (key) => key === todayKey ? 'Today' : key === yesterdayKey ? 'Yesterday' : dayKeyLabel(key) + (key.slice(0, 4) === todayKey.slice(0, 4) ? '' : ' ' + key.slice(0, 4));
+      const groups = [];
+      allPhotos.forEach(p => {
+        const key = sydneyDateKey(new Date(p.created_at));
+        if (!groups.length || groups[groups.length - 1].key !== key) groups.push({ key, items: [] });
+        groups[groups.length - 1].items.push(p);
+      });
+      const tileHtml = (p) => `
             <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
               ${isVideoUrl(p.url)
                 ? `<video src="${escapeHtml(p.url)}" data-photo-id="${p.id}" controls playsinline preload="metadata" style="width:100%; height:110px; object-fit:cover; display:block; background:#000;"></video>`
-                : `<img src="${supaImageVariant(p.url, 400, 70)}" data-i="${photos.indexOf(p)}" data-photo-id="${p.id}" class="site-photo-view" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" />`}
+                : `<img src="${escapeHtml(supaImageVariant(p.url, 240, 70))}" loading="lazy" decoding="async" data-i="${photos.indexOf(p)}" data-photo-id="${p.id}" class="site-photo-view" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" />`}
               <div style="padding:6px 8px; font-size:11px; color:var(--muted);">
-                ${p.caption ? `<strong style="color:var(--text); font-size:12px;">${escapeHtml(p.caption)}</strong><br>` : ''}${p.profiles?.full_name || 'Unknown'}<br>${new Date(p.created_at).toLocaleDateString('en-AU')}
+                ${p.caption ? `<strong style="color:var(--text); font-size:12px;">${escapeHtml(p.caption)}</strong><br>` : ''}${escapeHtml(p.profiles?.full_name || 'Unknown')} &middot; ${new Date(p.created_at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: 'Australia/Sydney' })}
               </div>
-            </div>
-          `).join('')}
-        </div>`;
+            </div>`;
+      listEl.innerHTML = groups.map((g, gi) => `
+        <h3 class="site-photo-day" style="font-size:14px; margin:${gi ? '18px' : '0'} 0 8px;">${escapeHtml(dayHeading(g.key))} <span class="subtitle" style="font-weight:400; font-size:12px;">${g.items.length} photo${g.items.length === 1 ? '' : 's'}</span></h3>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">${g.items.map(tileHtml).join('')}</div>`).join('');
 
       listEl.querySelectorAll('.site-photo-view').forEach(img => {
         img.addEventListener('click', () => openPhotoLightbox(urls, parseInt(img.dataset.i), {
           captions,
+          // Delete (the person who took it, or Admin / Finance): the row goes first, then the
+          // file unless another photo row still points at it. The viewer drops its own entry.
+          canDelete: (i) => isFinanceRole(myRole) || photos[i].staff_id === myId,
+          onDelete: async (i) => {
+            const p = photos[i];
+            const { data: gone, error: delErr } = await supabaseClient.from('project_photos').delete().eq('id', p.id).select('id');
+            if (delErr) throw delErr;
+            if (!gone || !gone.length) throw new Error('Only the person who took this photo, or Admin or Finance, can delete it.');
+            const { data: stillUsed } = await supabaseClient.from('project_photos').select('id').eq('url', p.url).limit(1);
+            if (!stillUsed || !stillUsed.length) {
+              const path = decodeURIComponent(p.url.split('?')[0].split('/storage/v1/object/public/site-photos/')[1] || '');
+              if (path) await supabaseClient.storage.from('site-photos').remove([path]).catch(() => {}); // the row is already gone, a leftover file is harmless
+            }
+            await logActivity('project', projectId, 'photo_deleted', `Deleted a site photo${p.caption ? ': ' + p.caption : ''}`);
+            photos.splice(i, 1);
+          },
           onRename: async (i, name) => {
             const { error: renameErr } = await supabaseClient.from('project_photos').update({ caption: name || null }).eq('id', photos[i].id);
             if (renameErr) throw renameErr;
@@ -7311,7 +7451,7 @@
       const btn = document.getElementById('company-docs-add-btn');
       const msg = document.getElementById('company-docs-msg');
       const { data: docs, error } = await supabaseClient.from('company_documents').select('*').order('sort_order').order('title');
-      if (error) { pickEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; btn.style.display = 'none'; return; }
+      if (error) { pickEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; btn.style.display = 'none'; return; }
       if (!docs.length) { pickEl.innerHTML = `<p class="subtitle">No company documents yet. Add them on the <a href="/documents.html">Documents</a> page.</p>`; btn.style.display = 'none'; return; }
       pickEl.innerHTML = docs.map(d => `
         <label style="display:flex; gap:8px; align-items:center; margin:6px 0; font-weight:normal;">
@@ -7351,7 +7491,7 @@
           await loadDocuments(project.id);
           msg.innerHTML = `<div class="success-box">Added to Company docs. Attach ${picked.length === 1 ? 'it' : 'them'} from the Emails tab.</div>`;
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {
           btn.disabled = false; btn.textContent = 'Add to job';
         }
@@ -7385,7 +7525,7 @@
           await loadDocuments(project.id);
           msg.innerHTML = `<div class="success-box">${count} document${count === 1 ? '' : 's'} added.</div>`;
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {
           fileInput.disabled = false;
         }
@@ -7413,8 +7553,8 @@
       const listEl = document.getElementById('po-list');
       const summaryEl = document.getElementById('summary-po-line');
       if (error) {
-        listEl.innerHTML = `<div class="error-box">${error.message}</div>`;
-        if (summaryEl) summaryEl.innerHTML = `<div class="error-box">${error.message}</div>`;
+        listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
+        if (summaryEl) summaryEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
         return;
       }
       if (!pos.length) {
@@ -7494,7 +7634,7 @@
             // Tab is opened on the tap itself (no await before it) so iPhone Safari does not block it.
             await openSignedDocInNewTab(a.dataset.path);
           } catch (err) {
-            document.getElementById('po-msg').innerHTML = `<div class="error-box">Could not open: ${escapeHtml(err.message)}</div>`;
+            document.getElementById('po-msg').innerHTML = `<div class="error-box">Could not open: ${escapeHtml(friendlyError(err))}</div>`;
           }
         });
       });
@@ -7528,9 +7668,11 @@
       const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price, supplier_id, quantity_on_hand, suppliers(name)');
       const { data: existingPOItems } = await supabaseClient
         .from('purchase_order_line_items')
-        .select('material_id, purchase_orders!inner(project_id)')
+        .select('material_id, purchase_orders!inner(project_id, stock_source)')
         .eq('purchase_orders.project_id', projectId);
-      const alreadyOrderedMaterialIds = new Set((existingPOItems || []).map(x => x.material_id).filter(Boolean));
+      // Stock POs are left out: what they took is already counted through job_material_usage below,
+      // so a re-run still suggests any shortfall instead of skipping the whole quoted line.
+      const alreadyOrderedMaterialIds = new Set((existingPOItems || []).filter(x => !x.purchase_orders?.stock_source).map(x => x.material_id).filter(Boolean));
       // already costed to this job (an earlier run, a stock PO, a manual entry): covered, never deducted again
       const { data: usedRows } = await supabaseClient.from('job_material_usage').select('material_id, quantity').eq('project_id', projectId);
       const usedLeft = {};
@@ -7547,6 +7689,7 @@
       const matched = {}; // supplier_id -> { supplierName, items: [] }
       const unassigned = [];
       const fromStock = []; // covered by what's already on hand - never ordered at all
+      const warehouseStart = { ...warehouseLeft };
 
       quotedMaterials.forEach(li => {
         let bestMatch = null, bestScore = 0;
@@ -7566,7 +7709,7 @@
         const stillNeeded = quotedQty - alreadyOnJob - coveredByStock;
 
         if (coveredByStock > 0) {
-          fromStock.push({ description: li.description, quantity: coveredByStock, unit_cost: match.cost_price, materialId: match.id, costCentreId: li.costCentreId, stageName: li.stageName });
+          fromStock.push({ description: li.description, quantity: coveredByStock, unit_cost: match.cost_price, materialId: match.id, costCentreId: li.costCentreId, stageName: li.stageName, stockName: match.name, onHand: warehouseStart[match.id] || 0 });
         }
         if (stillNeeded <= 0) return; // fully covered by existing stock, nothing to order
 
@@ -7594,9 +7737,14 @@
 
           ${fromStock.length ? `
             <div style="border:1px solid var(--green); border-radius:8px; padding:12px; margin-bottom:10px;">
-              <p style="margin:0 0 8px; color:var(--green); font-weight:600;">Already covered by Stock - nothing to order</p>
-              ${fromStock.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${escapeHtml(item.description)} (${escapeHtml(item.stageName)}) x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
-              <p class="subtitle" style="margin-top:6px;">This will be deducted from Stock and costed directly to the job when you confirm.</p>
+              <p style="margin:0 0 4px; color:var(--green); font-weight:600;">Take from Warehouse stock</p>
+              <p class="subtitle" style="margin:0 0 8px;">Ticked lines come out of the Warehouse count and are costed to the job when you confirm. Untick any that matched the wrong Stock item: unticked lines are not taken or ordered, add them to a PO by hand.</p>
+              ${fromStock.map((item, i) => `
+                <label style="display:flex; gap:10px; align-items:center; min-height:44px; margin:0; font-weight:400; font-size:13px; cursor:pointer;">
+                  <input type="checkbox" class="sp-stock-include" data-i="${i}" checked style="width:auto;" />
+                  <span style="flex:1; min-width:0;">${escapeHtml(item.description)} (${escapeHtml(item.stageName)}) x${item.quantity}<br><span class="subtitle" style="font-size:12px;">Stock: ${escapeHtml(item.stockName)}, ${poQty(item.onHand)} on hand in the Warehouse</span></span>
+                  <span>${money(item.quantity * item.unit_cost)}</span>
+                </label>`).join('')}
             </div>` : ''}
 
           ${Object.entries(matched).map(([supplierId, group]) => `
@@ -7629,31 +7777,45 @@
         newSection: `sp-unassigned-new-section-${i}`, newEmail: `sp-unassigned-new-email-${i}`, newPhone: `sp-unassigned-new-phone-${i}`,
       }));
 
+      // Once per panel: what Confirm already did, so pressing it again after a failure never takes
+      // stock twice or makes a second PO for the same group.
+      const doneStages = new Map(); // cost centre id ('' for whole job) -> Stock PO number
+      const doneGroups = new Map(); // supplier group key -> PO number
       overlay.querySelector('#sp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#sp-confirm-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#sp-msg');
         const confirmBtn = overlay.querySelector('#sp-confirm-btn');
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Creating...';
+        const pickedStock = fromStock.filter((_, i) => overlay.querySelector(`.sp-stock-include[data-i="${i}"]`).checked);
 
         try {
           const { data: { user } } = await supabaseClient.auth.getUser();
-          let created = 0;
 
-          // Deduct what's covered by existing stock and cost it straight
-          // to the job - this portion is never ordered at all.
-          for (const item of fromStock) {
-            const { error: useErr } = await supabaseClient.from('job_material_usage').insert({
-              project_id: projectId, cost_centre_id: item.costCentreId, material_id: item.materialId,
-              quantity: item.quantity, unit_cost: item.unit_cost, source: 'from_stock', created_by: user.id,
+          // Ticked Stock lines come off the Warehouse through po_create_stock_pull, one closed Stock
+          // PO per stage: it locks the count, refuses to go below it, costs the lines to the stage
+          // and logs it, all or nothing. Nothing is deducted from the browser.
+          const byStage = {};
+          pickedStock.forEach(item => {
+            const key = item.costCentreId || '';
+            if (!byStage[key]) byStage[key] = {};
+            byStage[key][item.materialId] = (byStage[key][item.materialId] || 0) + item.quantity;
+          });
+          for (const [stageKey, mats] of Object.entries(byStage)) {
+            if (doneStages.has(stageKey)) continue;
+            const { data: pull, error: pullErr } = await supabaseClient.rpc('po_create_stock_pull', {
+              p_project_id: projectId, p_cost_centre_id: stageKey || null, p_source: 'warehouse', p_vehicle_id: null,
+              p_lines: Object.entries(mats).map(([materialId, quantity]) => ({ material_id: materialId, quantity, left_after: null })),
+              p_description: 'Stock covering quoted materials (PO suggestions)',
             });
-            if (useErr) throw useErr; // never take it out of Stock unless it is costed to the job
-            await adjustWarehouseStock(item.materialId, -item.quantity);
+            if (pullErr) throw pullErr;
+            doneStages.set(stageKey, pull?.po_number || '');
           }
 
           for (const groupEl of overlay.querySelectorAll('.sp-group')) {
             if (!groupEl.querySelector('.sp-include').checked) continue;
             const supplierId = groupEl.dataset.supplierId;
+            if (doneGroups.has(supplierId)) continue;
             const group = matched[supplierId];
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: group.supplierName,
@@ -7668,7 +7830,7 @@
             await supabaseClient.from('purchase_order_line_items').insert(
               group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
-            created++;
+            doneGroups.set(supplierId, poNumber || '');
           }
 
           // Group manually-assigned unassigned items by the supplier picked
@@ -7683,6 +7845,7 @@
             manualGroups[supplierId].items.push(item);
           }
           for (const [supplierId, group] of Object.entries(manualGroups)) {
+            if (doneGroups.has(`manual:${supplierId}`)) continue;
             const { supplierName, items } = group;
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: projectId, supplier_id: supplierId, supplier_name: supplierName,
@@ -7697,16 +7860,19 @@
             await supabaseClient.from('purchase_order_line_items').insert(
               items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
-            created++;
+            doneGroups.set(`manual:${supplierId}`, poNumber || '');
           }
 
+          const created = doneGroups.size;
+          const stockPos = [...doneStages.values()].filter(Boolean);
           overlay.remove();
-          alert(`Created ${created} purchase order${created === 1 ? '' : 's'}.`);
+          showToast(`Created ${created} purchase order${created === 1 ? '' : 's'}${stockPos.length ? `, took ${pickedStock.length} line${pickedStock.length === 1 ? '' : 's'} from Warehouse stock (${stockPos.join(', ')})` : ''}.`);
           await loadPurchaseOrders(projectId, centres);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          const done = [...doneStages.values(), ...doneGroups.values()].filter(Boolean);
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}${done.length ? ` Already done: ${escapeHtml(done.join(', '))}. Press Confirm again to finish the rest, nothing is repeated.` : ''}</div>`;
           confirmBtn.disabled = false;
-          confirmBtn.textContent = 'Create purchase orders';
+          confirmBtn.textContent = 'Confirm';
         }
       });
     }
@@ -7730,14 +7896,14 @@
           <label style="margin-top:14px;">Stage (optional)</label>
           <select id="cp-stage"><option value="">Whole project</option>${centres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
           <label>Description</label>
-          <input id="cp-description" />
+          <input id="cp-description" placeholder="e.g. Switchboard gear for stage 2" />
 
           <label style="margin-top:14px;">Line items</label>
           <p class="subtitle" style="font-size:12px; margin:0 0 6px;">The PO stays Open, so anyone can add more as the job goes. Close it once it's all in.</p>
           <div id="cp-fixed-items-container"></div>
           <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add line</button>
           <label>Budget cap (optional)</label>
-          <input id="cp-budget-cap" type="number" step="0.01" placeholder="Flag when spending gets close to this" />
+          <input id="cp-budget-cap" type="number" step="0.01" inputmode="decimal" placeholder="Flag when spending gets close to this" />
           ${poNotesFieldsHtml('cp')}
           ${poShowPricesHtml('cp')}
 
@@ -7762,6 +7928,11 @@
         if (e.target.value === 'supplier') return;
         const vehicleId = e.target.value.startsWith('vehicle:') ? e.target.value.slice(8) : null;
         const v = vehicles.find(x => x.id === vehicleId);
+        const typed = overlay.querySelector('#cp-supplier-search').value.trim()
+          || [...overlay.querySelectorAll('#cp-fixed-items-container .po-line-search')].some(i => i.value.trim())
+          || ['#cp-description', '#cp-supplier-notes', '#cp-internal-notes', '#cp-budget-cap'].some(s => overlay.querySelector(s).value.trim())
+          || overlay.querySelector('#cp-file').files.length;
+        if (typed && !confirm(`Switch to taking stock from ${v ? (v.vehicle_name || v.rego) : 'the Warehouse'}? The supplier, lines and notes typed here will be cleared.`)) { e.target.value = 'supplier'; return; }
         overlay.remove();
         openStockPullPanel({
           projectId, jobLabel, centres, source: vehicleId ? 'vehicle' : 'warehouse', vehicleId, vehicleLabel: v ? (v.vehicle_name || v.rego) : null,
@@ -7773,6 +7944,8 @@
       overlay.querySelector('#cp-save-btn').addEventListener('click', async () => {
         const btn = overlay.querySelector('#cp-save-btn');
         const label = btn.textContent;
+        const lineProblem = materialLineRowsProblem('cp-fixed-items-container');
+        if (lineProblem) { overlay.querySelector('#cp-msg').innerHTML = `<div class="error-box">${escapeHtml(lineProblem)}</div>`; return; }
         btn.disabled = true;
         btn.textContent = 'Creating...';
         const msg = overlay.querySelector('#cp-msg');
@@ -7822,7 +7995,7 @@
           overlay.remove();
           await loadPurchaseOrders(projectId, centres);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {
           btn.disabled = false;
           btn.textContent = label;
