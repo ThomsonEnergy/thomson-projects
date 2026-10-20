@@ -2,8 +2,10 @@
 //
 // Issues a bill can have (supplier_bills.check_issues, each { kind, text, ... }):
 //   no_po              the bill is not linked to a PO
-//   not_on_po          a line that is not on the linked PO
-//   price_higher       a line charged more than the PO price (over 1%)
+//   not_on_po          a line that is not on the linked PO (until Accept adds it, or Deny)
+//   freight            a freight / delivery / handling line (always shown, never on a PO)
+//   price_higher       a line charged more than the PO price (over 1%, until accepted)
+//   denied             a line a person denied: the bill waits until it is sorted with the supplier
 //   over_quantity      more billed for a PO line, across every bill on that PO, than was ordered
 //   po_total_exceeded  every bill on the PO together comes to more than the PO (over 2%)
 //   duplicate_number   another bill from the same supplier has the same number
@@ -17,6 +19,8 @@ const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-AU', { minimumFra
 const normNum = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^(inv|invoice)/, '').replace(/^0+/, '');
 const qty = (n) => Number(n || 0).toLocaleString('en-AU', { maximumFractionDigits: 2 });
 const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+// same rule as _is_freight() in the database
+const isFreight = (s) => /(freight|delivery|deliver|shipping|postage|courier|handling|cartage)/i.test(String(s || ''));
 
 async function checkBill(admin, billId) {
   const { data: bill } = await admin.from('supplier_bills').select('*').eq('id', billId).maybeSingle();
@@ -52,7 +56,13 @@ async function checkBill(admin, billId) {
     const { data: allLines } = billIds.length ? await admin.from('supplier_bill_line_items').select('bill_id, po_line_item_id, quantity, unit_cost').in('bill_id', billIds) : { data: [] };
 
     (lines || []).forEach(l => {
-      if (!l.po_line_item_id) { issues.push({ kind: 'not_on_po', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) is not on ${po?.po_number || 'the PO'}` }); return; }
+      if (l.resolution === 'denied') { issues.push({ kind: 'denied', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) denied${l.resolution_note ? ': ' + l.resolution_note : ''}, waiting on the supplier` }); return; }
+      if (l.resolution === 'accepted' || l.resolution === 'added') return;
+      if (!l.po_line_item_id) {
+        if (isFreight(l.description)) issues.push({ kind: 'freight', line_id: l.id, text: `Freight / delivery: "${l.description}" ${money((Number(l.unit_cost) || 0) * (Number(l.quantity) || 1))}` });
+        else issues.push({ kind: 'not_on_po', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) is not on ${po?.po_number || 'the PO'}` });
+        return;
+      }
       const pl = poLines.find(p => p.id === l.po_line_item_id);
       if (!pl) return;
       if (Number(l.unit_cost) > Number(pl.unit_cost) * 1.01 + 0.005) {
@@ -104,4 +114,4 @@ async function checkBillAndSiblings(admin, billId) {
   return r;
 }
 
-module.exports = { checkBill, checkBillAndSiblings, normNum, sydneyToday };
+module.exports = { checkBill, checkBillAndSiblings, normNum, sydneyToday, isFreight };

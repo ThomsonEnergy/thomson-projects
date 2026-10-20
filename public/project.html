@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=105"></script>
+  <script src="/js/supabase-client.js?v=106"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=10"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -7686,6 +7686,7 @@
         .order('created_at', { ascending: false });
       poQuery = otherPoIds.length ? poQuery.or(`project_id.eq.${projectId},id.in.(${otherPoIds.join(',')})`) : poQuery.eq('project_id', projectId);
       const { data: pos, error } = await poQuery;
+      const billsByPo = await loadBillsForPos((pos || []).map(p => p.id));
 
       // Wired up unconditionally, before any early return below - this
       // button previously only got its click handler when the project
@@ -7741,6 +7742,7 @@
 
             <div style="margin-top:8px;">${renderPoLineItemsReceivable(po, true)}</div>
             ${renderPoNotes(po)}
+            ${renderPoBills(billsByPo[po.id], po, myRole)}
 
             ${po.budget_cap ? `
               <div style="margin-top:10px;">
@@ -7782,6 +7784,7 @@
         });
       });
       wirePoControls(listEl, pos, () => loadPurchaseOrders(projectId, centres));
+      wirePoBillButtons(listEl, () => loadPurchaseOrders(projectId, centres));
       listEl.querySelectorAll('.upload-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
       });
@@ -8049,8 +8052,8 @@
           <label>Description</label>
           <input id="cp-description" placeholder="e.g. Switchboard gear for stage 2" />
 
-          <label style="margin-top:14px;">Line items</label>
-          <p class="subtitle" style="font-size:12px; margin:0 0 6px;">The PO stays Open, so anyone can add more as the job goes. Close it once it's all in.</p>
+          ${poTypeChoiceHtml('cp')}
+          <p class="subtitle" style="font-size:12px; margin:0 0 6px;">Anyone can add more lines as the job goes. Close the PO once it's all in: that approves its bills.</p>
           <div id="cp-fixed-items-container"></div>
           <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add line</button>
           <label>Budget cap (optional)</label>
@@ -8120,7 +8123,7 @@
             supplier_id: supplierId,
             supplier_name: supplierName,
             description: overlay.querySelector('#cp-description').value.trim() || null,
-            po_type: budgetCap ? 'open' : 'fixed', // bill checks compare against the cap when there is one
+            po_type: readPoTypeChoice(overlay, 'cp'), // open: the bill fills in the lines; bill checks use the cap when there is one
             locked: false,
             budget_cap: budgetCap,
             ...readPoNotesFields(overlay, 'cp'),
