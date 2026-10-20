@@ -98,12 +98,18 @@
     S.staffById = Object.fromEntries((data || []).map(p => [p.id, p]));
   }
   async function loadChannels() {
-    const { data, error } = await supabaseClient.rpc('chat_my_channels');
+    const [{ data, error }, made] = await Promise.all([
+      supabaseClient.rpc('chat_my_channels'),
+      // Channels I made: I can change those without being Admin
+      S.isAdmin ? Promise.resolve({ data: [] }) : supabaseClient.from('chat_channels').select('id').eq('kind', 'channel').is('slug', null).eq('created_by', S.me),
+    ]);
     if (error) { document.getElementById('ch-list').innerHTML = `<div class="error-box" style="margin:14px;">${esc(error.message)}</div>`; return; }
     S.channels = data || [];
+    S.madeByMe = new Set(((made && made.data) || []).map(r => r.id));
     renderList();
   }
   const chanById = (id) => S.channels.find(c => c.id === id);
+  const canManage = (c) => c.kind === 'channel' && (S.isAdmin || (!c.slug && S.madeByMe && S.madeByMe.has(c.id)));
   function chanTitle(c) {
     if (!c) return '';
     if (c.kind === 'dm') return (c.members || []).map(m => m.full_name).join(', ') || 'Just you';
@@ -213,7 +219,7 @@
         <button type="button" class="ch-back" id="ch-back" aria-label="Back">&#8249;</button>
         <div class="ch-title"><b>${esc(chanTitle(c))}</b><span>${esc(sub)}</span></div>
         <button type="button" class="secondary" id="ch-mute" title="${c.muted ? 'Unmute' : 'Mute'}">${c.muted ? '&#128263;' : '&#128276;'}</button>
-        ${S.isAdmin && c.kind === 'channel' ? '<button type="button" class="secondary" id="ch-settings" title="Channel settings">&#9881;</button>' : ''}
+        ${canManage(c) ? '<button type="button" class="secondary" id="ch-settings" title="Channel settings">&#9881;</button>' : ''}
       </div>
       <div class="ch-msgs" id="ch-msgs"><p class="subtitle" style="padding:14px;">Loading...</p></div>
       <div id="ch-composer"></div>`;
@@ -562,7 +568,7 @@
 
   function peoplePicker(selected, opts = {}) {
     return `<input type="search" class="pp-q" placeholder="Search people" autocomplete="off" style="margin-bottom:8px;" />
-      <div class="pp-list">${S.staff.filter(s => opts.includeMe || s.id !== S.me).map(s => `<label class="ch-pick" data-name="${esc((s.full_name || '').toLowerCase())}"><input type="checkbox" value="${s.id}" ${selected.includes(s.id) ? 'checked' : ''} /> ${avatar(s, false)} ${esc(s.full_name || 'Unnamed')}</label>`).join('')}</div>`;
+      <div class="pp-list">${S.staff.filter(s => opts.includeMe || s.id !== S.me).map(s => `<label class="ch-pick" data-name="${esc((s.full_name || '').toLowerCase())}"><input type="${opts.single ? 'radio' : 'checkbox'}" name="pp-pick" value="${s.id}" ${selected.includes(s.id) ? 'checked' : ''} /> ${avatar(s, false)} ${esc(s.full_name || 'Unnamed')}</label>`).join('')}</div>`;
   }
   function wirePeoplePicker(root) {
     const q = root.querySelector('.pp-q');
@@ -574,12 +580,13 @@
   }
 
   function newDmModal() {
-    const md = modal('New message', `<p class="subtitle" style="margin:0 0 8px;">Pick one person, or a few for a group message.</p>${peoplePicker([])}`,
-      `<button type="button" class="secondary" data-close>Cancel</button><button type="button" id="dm-go">Start chat</button>`);
+    const md = modal('New message', `<p class="subtitle" style="margin:0 0 8px;">Pick one person. For a group chat, make a channel.</p>${peoplePicker([], { single: true })}`,
+      `<button type="button" class="secondary" data-close>Cancel</button><button type="button" class="secondary" id="dm-channel">+ Channel</button><button type="button" id="dm-go">Start chat</button>`);
     const picked = wirePeoplePicker(md.el);
+    md.el.querySelector('#dm-channel').addEventListener('click', () => { md.close(); channelModal(null); });
     md.el.querySelector('#dm-go').addEventListener('click', async () => {
       const ids = picked();
-      if (!ids.length) { toast('Pick at least one person.'); return; }
+      if (!ids.length) { toast('Pick a person.'); return; }
       const { data: id, error } = await supabaseClient.rpc('chat_open_dm', { p_member_ids: ids });
       if (error) { toast(error.message); return; }
       md.close();
@@ -595,11 +602,14 @@
       members = (data || []).map(r => r.profile_id);
     }
     const system = c && c.slug;
+    // Admin can make Everyone channels; anyone else picks people (and stays in it themselves)
+    const everyoneOn = c ? c.everyone : S.isAdmin;
     const md = modal(c ? 'Channel settings' : 'New channel', `
       <label style="margin-top:0;">Name</label><input id="cm-name" value="${esc(c ? c.name : '')}" placeholder="e.g. Solar crew" ${system ? 'disabled' : ''} />
       <label>What it's for (optional)</label><input id="cm-desc" value="${esc(c ? c.description || '' : '')}" />
-      <label class="ch-pick" style="margin-top:12px;"><input type="checkbox" id="cm-everyone" ${!c || c.everyone ? 'checked' : ''} ${system ? 'disabled' : ''} /> Everyone (all staff, including new starters)</label>
-      <div id="cm-people" style="display:${!c || c.everyone ? 'none' : 'block'}; margin-top:6px;">${peoplePicker(members, { includeMe: true })}</div>
+      <label class="ch-pick" style="margin-top:12px;${S.isAdmin ? '' : ' display:none;'}"><input type="checkbox" id="cm-everyone" ${everyoneOn ? 'checked' : ''} ${system ? 'disabled' : ''} /> Everyone (all staff, including new starters)</label>
+      ${S.isAdmin ? '' : '<p class="subtitle" style="margin:12px 0 4px;">Who is in it (you are always in it)</p>'}
+      <div id="cm-people" style="display:${everyoneOn ? 'none' : 'block'}; margin-top:6px;">${peoplePicker(members, { includeMe: S.isAdmin })}</div>
       ${c && !system ? `<label class="ch-pick" style="margin-top:12px;"><input type="checkbox" id="cm-archive" ${c.archived_at ? 'checked' : ''} /> Archived (hidden, read only)</label>` : ''}`,
       `<button type="button" class="secondary" data-close>Cancel</button><button type="button" id="cm-save">${c ? 'Save' : 'Make channel'}</button>`);
     const picked = wirePeoplePicker(md.el);
@@ -609,6 +619,8 @@
       const name = md.el.querySelector('#cm-name').value.trim();
       const desc = md.el.querySelector('#cm-desc').value.trim();
       const ids = picked();
+      if (!name && !c) { toast('Give the channel a name.'); return; }
+      if (!every.checked && !ids.some(id => id !== S.me)) { toast('Pick at least one person for the channel.'); return; }
       let res;
       if (c) {
         const arch = md.el.querySelector('#cm-archive');
@@ -968,7 +980,6 @@
 
     S.role = await getMyRole();
     S.isAdmin = S.role === 'admin';
-    if (S.isAdmin) document.getElementById('ch-new-channel').style.display = '';
     S.botName = (typeof aiAssistantName === 'function' && aiAssistantName()) || 'Sparky';
     await Promise.all([
       loadStaff(),

@@ -292,7 +292,7 @@ Manual steps only a person can do (the code is live):
 
 ### A19a. Team chat (migration 20261020000000, live 18 Oct 2026)
 - Chat page (`chat.html`, `js/chat.js`, `css/chat.css`) and a chat icon with unread count in the top bar. Replaces WhatsApp.
-- Channels: General and Social for everyone; admins make more (everyone or chosen people), rename, archive. DMs: one to one or groups up to 12, anyone can start.
+- Channels: General and Social for everyone. Anyone can make a channel for people they pick (group chats are channels); only Admin makes Everyone channels. Whoever made a channel, or Admin, renames it, changes who is in it and archives it; the maker stays in it unless Admin takes them out (migration 20261113000000). DMs: one to one only, anyone can start. Chats are never deleted.
 - Messages: text, photos (through `compressImage()`), files up to 50 MB, voice messages (tap the mic, tap Send), @mentions, threads, edit and delete your own (admins delete any). Private `chat` bucket, folder per chat.
 - Job tags: type # (or the # button) to pick a J or Q number. Tagged messages show on the job's Feed tab under "From team chat" (only to people in that chat).
 - Instant delivery by Supabase Realtime; `chat-after-send.js` pushes notifications straight away. Notification types chat_dm, chat_mention, chat_reply, chat_message, each switchable; mute per chat. Thread replies only notify people in the thread.
