@@ -227,7 +227,7 @@
       document.querySelectorAll('.inbox-thread-item.active').forEach(el => el.classList.remove('active'));
     }
     function leaveThread() {
-      if (isNarrow() && history.state && history.state.teInbox) { history.back(); return; }
+      if (history.state && history.state.teInbox) { history.back(); return; }
       closeReading(); setUrl();
     }
     window.addEventListener('popstate', async () => {
@@ -788,6 +788,7 @@ Your rights under the Workplace Surveillance Act 2005 (NSW)
 Please also read the Notice of Workplace Surveillance and Computer Surveillance Policy in your signed documents.`;
 
     async function renderConnect() {
+      S.listSeq++; // a list still loading must not paint over this screen
       document.getElementById('inbox-side').innerHTML = '';
       document.getElementById('thread-detail').style.display = 'none';
       const listEl = document.getElementById('thread-list');
@@ -868,6 +869,7 @@ Please also read the Notice of Workplace Surveillance and Computer Surveillance 
     // ---------- clean up ----------
 
     async function renderCleanup() {
+      S.listSeq++; // a list still loading must not paint over this screen
       clearInterval(S.cleanupTimer);
       document.getElementById('thread-detail').style.display = 'none';
       const listEl = document.getElementById('thread-list');

@@ -179,7 +179,8 @@
     else history.replaceState(history.state, '', url);
   }
   function goBack(fallback) {
-    if (isPhone() && history.state && history.state.teChat) history.back();
+    // Step back whenever the entry was pushed, even after a rotate made the screen wider
+    if (history.state && history.state.teChat) history.back();
     else fallback();
   }
   function closeConv() {

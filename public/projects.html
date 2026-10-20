@@ -112,7 +112,9 @@
       return { labour, indirect };
     }
 
+    let loadSeq = 0; // a slower earlier load must not repaint over a newer one
     async function loadProjects() {
+      const seq = ++loadSeq;
       const listEl = document.getElementById('projects-list');
       const { data: projects, error } = await supabaseClient.from('projects')
         .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
@@ -140,6 +142,7 @@
 
       const ids = projects.map(p => p.id);
       const [materialCostByProject, { labour, indirect }] = await Promise.all([loadMaterialCosts(ids), loadLabourCosts(ids)]);
+      if (seq !== loadSeq) return;
       costsLoaded = true;
       allRows = buildRows(materialCostByProject, labour, indirect);
       renderProjects();
