@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=20" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
@@ -54,6 +54,7 @@
   .day-board { display: flex; gap: 16px; align-items: flex-start; }
   .day-board-main { flex: 1; overflow-x: auto; min-width: 0; }
   .day-board-sidebar { width: 280px; flex-shrink: 0; }
+  .schedule-view-only .day-board-sidebar { display: none; }
   @media (max-width: 900px) {
     .day-board { flex-direction: column; }
     .day-board-sidebar { width: 100%; }
@@ -105,6 +106,8 @@
     background: var(--surface-2);
   }
   .mobile-staff-block .msb-name { font-weight: 600; margin-bottom: 6px; }
+  .staff-name-col { flex-wrap: wrap; gap: 0 4px; }
+  .you-tag { font-size: 11px; font-weight: 500; color: var(--accent); margin-left: 4px; }
   .mobile-entry {
     display: flex; justify-content: space-between; gap: 8px; padding: 6px 0 6px 10px;
     border-left: 3px solid var(--accent); font-size: 13px; margin-bottom: 4px;
@@ -157,11 +160,11 @@
 
   <div class="wrap wide">
     <h1>Schedule</h1>
-    <p class="subtitle">Who's on which job, and who's on leave. Approved leave shows automatically - click a day to assign someone to a job.</p>
+    <p class="subtitle" id="schedule-subtitle">Who's on which job, and who's on leave. Approved leave shows automatically - click a day to assign someone to a job.</p>
 
     <div id="clocked-in-now"></div>
 
-    <div class="card">
+    <div class="card" id="schedule-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
         <button class="secondary" id="prev-btn">&larr; Prev</button>
         <h2 style="margin:0;"><span id="period-label"></span> <span id="period-badges"></span></h2>
@@ -171,11 +174,13 @@
           <button class="secondary" id="next-btn">Next &rarr;</button>
         </div>
       </div>
+      <div id="schedule-msg"></div>
       <div id="month-view">
         <div class="cal-grid" id="cal-dow-row"></div>
         <div class="cal-grid" id="cal-grid" style="margin-top:6px;"></div>
       </div>
       <div id="day-view" style="display:none;">
+        <div id="day-board-notice"></div>
         <div id="mobile-day-list" class="mobile-day-list"></div>
         <div class="day-board">
           <div class="day-board-main">
@@ -186,7 +191,7 @@
             <div class="job-search-card">
               <label style="margin-top:0">Find a job</label>
               <input id="job-search-input" placeholder="Job number, name, client, address..." autocomplete="off" />
-              <p class="subtitle" style="margin:8px 0 0;">Drag a job onto a staff member's timeline to schedule them. Drag a booking to another row to hand it to someone else, or off the board to remove it (with Undo). On mobile, use the + Add button under each person instead.</p>
+              <p class="subtitle" style="margin:8px 0 0;">Drag a job onto a staff member's timeline to schedule them. Double-click an empty spot on a timeline to add office, training or other non-job time. Drag a booking to another row to hand it to someone else, or off the board to remove it (with Undo). On mobile, use the + Add button under each person instead.</p>
               <div id="job-search-results" style="margin-top:10px;"></div>
             </div>
           </div>
@@ -196,12 +201,13 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=99"></script>
+  <script src="/js/supabase-client.js?v=100"></script>
   <script src="/js/theme.js"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
     let currentView = 'month';
     let myRole = 'staff';
+    let myId = null; // signed-in profile id, set after requireLogin
     let staffList = [];
     // schedule_assignments RLS only allows admin/finance/sales to write at
     // all - drag/resize/add/remove controls check this before attempting
@@ -228,58 +234,88 @@
       publicHolidaySet = new Set((data || []).map(h => h.holiday_date));
     }
 
+    let loadSeq = 0; // bumps on every load so a slow older fetch never overwrites a newer one
+    const NAV_BUTTON_IDS = ['prev-btn', 'next-btn', 'view-month-btn', 'view-day-btn'];
+    function setScheduleLoading(on) {
+      document.getElementById('schedule-card').classList.toggle('is-loading', on);
+      NAV_BUTTON_IDS.forEach(id => { document.getElementById(id).disabled = on; });
+    }
+    function showScheduleError(err, retry) {
+      // Clear whatever is under the label so a failed fetch never reads as an empty day
+      ['cal-grid', 'day-time-header', 'day-staff-rows', 'mobile-day-list', 'period-badges', 'day-board-notice'].forEach(id => { document.getElementById(id).innerHTML = ''; });
+      const msg = document.getElementById('schedule-msg');
+      msg.innerHTML = `<div class="error-box">Couldn't load the schedule: ${escapeHtml(err && err.message ? err.message : err)} <button class="secondary" id="schedule-retry" style="margin-left:8px; padding:6px 12px;">Retry</button></div>`;
+      document.getElementById('schedule-retry').addEventListener('click', retry);
+    }
+    function firstError(...results) {
+      const hit = results.find(r => r && r.error);
+      return hit ? hit.error : null;
+    }
+
     function renderDowRow() {
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       document.getElementById('cal-dow-row').innerHTML = days.map(d => `<div class="cal-dow">${d}</div>`).join('');
     }
 
     async function loadMonth() {
+      const seq = ++loadSeq;
       document.getElementById('period-label').textContent = new Date(viewYear, viewMonth, 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' });
+      document.getElementById('schedule-msg').innerHTML = '';
+      setScheduleLoading(true);
+      try {
+        const firstOfMonth = new Date(viewYear, viewMonth, 1);
+        const startDow = firstOfMonth.getDay();
+        const gridStart = new Date(viewYear, viewMonth, 1 - startDow);
+        const totalCells = 42;
 
-      const firstOfMonth = new Date(viewYear, viewMonth, 1);
-      const startDow = firstOfMonth.getDay();
-      const gridStart = new Date(viewYear, viewMonth, 1 - startDow);
-      const totalCells = 42;
+        const rangeStart = dateToStr(gridStart);
+        const gridEndDate = new Date(gridStart); gridEndDate.setDate(gridStart.getDate() + totalCells - 1);
+        const rangeEnd = dateToStr(gridEndDate);
 
-      const rangeStart = dateToStr(gridStart);
-      const gridEndDate = new Date(gridStart); gridEndDate.setDate(gridStart.getDate() + totalCells - 1);
-      const rangeEnd = dateToStr(gridEndDate);
+        const [aRes, lRes] = await Promise.all([
+          supabaseClient.from('schedule_assignments').select('*, profiles(full_name), projects(name, job_number, quote_number)').gte('assignment_date', rangeStart).lte('assignment_date', rangeEnd),
+          supabaseClient.from('leave_requests').select('*, profiles(full_name)').eq('status', 'approved').lte('start_date', rangeEnd).gte('end_date', rangeStart),
+        ]);
+        const err = firstError(aRes, lRes);
+        if (err) throw err;
+        await fetchHolidays(rangeStart, rangeEnd);
+        if (seq !== loadSeq) return; // a newer load took over
+        const assignments = aRes.data, leave = lRes.data;
 
-      const [{ data: assignments }, { data: leave }] = await Promise.all([
-        supabaseClient.from('schedule_assignments').select('*, profiles(full_name), projects(name, job_number, quote_number)').gte('assignment_date', rangeStart).lte('assignment_date', rangeEnd),
-        supabaseClient.from('leave_requests').select('*, profiles(full_name)').eq('status', 'approved').lte('start_date', rangeEnd).gte('end_date', rangeStart),
-      ]);
-      await fetchHolidays(rangeStart, rangeEnd);
+        const assignmentsByDate = {};
+        (assignments || []).forEach(a => { (assignmentsByDate[a.assignment_date] ||= []).push(a); });
 
-      const assignmentsByDate = {};
-      (assignments || []).forEach(a => { (assignmentsByDate[a.assignment_date] ||= []).push(a); });
+        const todayStr = dateToStr(new Date());
 
-      const todayStr = dateToStr(new Date());
+        let html = '';
+        for (let i = 0; i < totalCells; i++) {
+          const cellDate = new Date(gridStart); cellDate.setDate(gridStart.getDate() + i);
+          const dateStr = dateToStr(cellDate);
+          const isOtherMonth = cellDate.getMonth() !== viewMonth;
+          const isHoliday = publicHolidaySet.has(dateStr);
+          const dayAssignments = assignmentsByDate[dateStr] || [];
+          const dayLeave = (leave || []).filter(l => dateStr >= l.start_date && dateStr <= l.end_date);
 
-      let html = '';
-      for (let i = 0; i < totalCells; i++) {
-        const cellDate = new Date(gridStart); cellDate.setDate(gridStart.getDate() + i);
-        const dateStr = dateToStr(cellDate);
-        const isOtherMonth = cellDate.getMonth() !== viewMonth;
-        const isHoliday = publicHolidaySet.has(dateStr);
-        const dayAssignments = assignmentsByDate[dateStr] || [];
-        const dayLeave = (leave || []).filter(l => dateStr >= l.start_date && dateStr <= l.end_date);
+          html += `
+            <div class="cal-day ${isOtherMonth ? 'other-month' : ''} ${dateStr === todayStr ? 'today' : ''} ${isHoliday ? 'holiday' : ''}" data-date="${dateStr}">
+              <div class="day-num">${cellDate.getDate()}${isHoliday ? '<span class="holiday-badge">Public holiday</span>' : ''}</div>
+              ${dayLeave.map(l => `<span class="cal-chip leave">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff')} (leave)</span>`).join('')}
+              ${dayAssignments.map(a => `<span class="cal-chip">${escapeHtml((a.profiles && a.profiles.full_name) || 'Staff')} &middot; ${escapeHtml(a.projects ? projectRef(a.projects) : 'Job')}</span>`).join('')}
+            </div>`;
+        }
+        document.getElementById('cal-grid').innerHTML = html;
 
-        html += `
-          <div class="cal-day ${isOtherMonth ? 'other-month' : ''} ${dateStr === todayStr ? 'today' : ''} ${isHoliday ? 'holiday' : ''}" data-date="${dateStr}">
-            <div class="day-num">${cellDate.getDate()}${isHoliday ? '<span class="holiday-badge">Public holiday</span>' : ''}</div>
-            ${dayLeave.map(l => `<span class="cal-chip leave">${(l.profiles && l.profiles.full_name) || 'Staff'} (leave)</span>`).join('')}
-            ${dayAssignments.map(a => `<span class="cal-chip">${(a.profiles && a.profiles.full_name) || 'Staff'} &middot; ${a.projects ? projectRef(a.projects) : 'Job'}</span>`).join('')}
-          </div>`;
-      }
-      document.getElementById('cal-grid').innerHTML = html;
-
-      document.querySelectorAll('.cal-day').forEach(cell => {
-        cell.addEventListener('click', () => {
-          dayViewDate = new Date(cell.dataset.date + 'T00:00:00');
-          setView('day');
+        document.querySelectorAll('.cal-day').forEach(cell => {
+          cell.addEventListener('click', () => {
+            dayViewDate = new Date(cell.dataset.date + 'T00:00:00');
+            setView('day');
+          });
         });
-      });
+      } catch (e) {
+        if (seq === loadSeq) showScheduleError(e, loadMonth);
+      } finally {
+        if (seq === loadSeq) setScheduleLoading(false);
+      }
     }
 
     let dayViewDate; // Date - the single day currently shown in Day view
@@ -297,129 +333,149 @@
     }
 
     async function loadDay() {
+      const seq = ++loadSeq;
       document.getElementById('period-label').textContent = dayViewDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      document.getElementById('schedule-msg').innerHTML = '';
+      setScheduleLoading(true);
+      try {
+        // A failed staff list at start up is fetched again here, so Retry recovers it
+        if (!staffList.length) await loadPickerData();
+        const dateStr = dateToStr(dayViewDate);
+        const todayStr = dateToStr(new Date());
+        const isPastDay = dateStr < todayStr;
+        document.getElementById('day-board-notice').innerHTML = '';
 
-      const dateStr = dateToStr(dayViewDate);
-      const todayStr = dateToStr(new Date());
-      const isPastDay = dateStr < todayStr;
+        // Wide UTC window either side of the viewed day, to safely catch
+        // anything near the Sydney midnight boundary - filtered precisely
+        // by real Sydney-local date below.
+        const windowStart = new Date(dateStr + 'T00:00:00'); windowStart.setDate(windowStart.getDate() - 1);
+        const windowEnd = new Date(dateStr + 'T00:00:00'); windowEnd.setDate(windowEnd.getDate() + 2);
 
-      // Wide UTC window either side of the viewed day, to safely catch
-      // anything near the Sydney midnight boundary - filtered precisely
-      // by real Sydney-local date below.
-      const windowStart = new Date(dateStr + 'T00:00:00'); windowStart.setDate(windowStart.getDate() - 1);
-      const windowEnd = new Date(dateStr + 'T00:00:00'); windowEnd.setDate(windowEnd.getDate() + 2);
+        const [aRes, lRes, { data: dayTimeEntries, error: dayTimeErr }] = await Promise.all([
+          supabaseClient.from('schedule_assignments').select('*, profiles(id, full_name), projects(id, name, job_number, quote_number)').eq('assignment_date', dateStr),
+          supabaseClient.from('leave_requests').select('*, profiles(id, full_name)').eq('status', 'approved').lte('start_date', dateStr).gte('end_date', dateStr),
+          // Open entries too: someone who forgot to clock out still worked that day.
+          supabaseClient.from('time_entries').select('staff_id, project_id, time_category, clock_in, clock_out').gte('clock_in', windowStart.toISOString()).lte('clock_in', windowEnd.toISOString()),
+        ]);
+        const err = firstError(aRes, lRes); // time entries stay soft: dayTimeErr already only skips reconciliation
+        if (err) throw err;
+        const assignments = aRes.data, leave = lRes.data;
+        await fetchHolidays(dateStr, dateStr);
+        if (seq !== loadSeq) return;
+        const isHoliday = publicHolidaySet.has(dateStr);
+        document.getElementById('period-badges').innerHTML = isHoliday
+          ? `<span class="holiday-badge" style="font-size:11px; padding:3px 8px; vertical-align:2px;">Public holiday</span>`
+          : '';
 
-      const [{ data: assignments }, { data: leave }, { data: dayTimeEntries, error: dayTimeErr }] = await Promise.all([
-        supabaseClient.from('schedule_assignments').select('*, profiles(id, full_name), projects(id, name, job_number, quote_number)').eq('assignment_date', dateStr),
-        supabaseClient.from('leave_requests').select('*, profiles(id, full_name)').eq('status', 'approved').lte('start_date', dateStr).gte('end_date', dateStr),
-        // Open entries too: someone who forgot to clock out still worked that day.
-        supabaseClient.from('time_entries').select('staff_id, project_id, time_category, clock_in, clock_out').gte('clock_in', windowStart.toISOString()).lte('clock_in', windowEnd.toISOString()),
-      ]);
-      await fetchHolidays(dateStr, dateStr);
-      const isHoliday = publicHolidaySet.has(dateStr);
-      document.getElementById('period-badges').innerHTML = isHoliday
-        ? `<span class="holiday-badge" style="font-size:11px; padding:3px 8px; vertical-align:2px;">Public holiday</span>`
-        : '';
-
-      // Reconciliation: only meaningful for days that have actually
-      // happened - today's still in progress, future days haven't
-      // started. For each past assignment, find real clocked time
-      // against the same job (or the same non-billable category) that
-      // day. Found -> lock it in with the real times. Not found -> it
-      // was scheduled but never actually worked, so remove it rather
-      // than leave an inaccurate plan sitting on the board.
-      // Only removed when the viewer can manage the schedule (and so can see
-      // everyone's time) and the time entries actually loaded. Lead site
-      // inspections and site visits are never clocked against, so they are
-      // never removed here.
-      let toDelete = [];
-      const reconciledById = {};
-      const sameCategory = (x) => (x === 'office' ? 'admin' : x); // both show as Admin
-      if (isPastDay && !dayTimeErr) {
-        (assignments || []).forEach(a => {
-          const matches = (dayTimeEntries || []).filter(te =>
-            te.staff_id === a.staff_id &&
-            sydneyDateStr(te.clock_in) === dateStr &&
-            (a.project_id ? te.project_id === a.project_id : (!te.project_id && sameCategory(te.time_category) === sameCategory(a.block_type)))
-          );
-          const closed = matches.filter(m => m.clock_out);
-          if (closed.length) {
-            const starts = closed.map(m => sydneyTimeStr(m.clock_in));
-            // A shift split at Sydney midnight ends at 00:00 the next day: show it as 24:00.
-            const ends = closed.map(m => (sydneyDateStr(m.clock_out) !== dateStr ? '24:00' : sydneyTimeStr(m.clock_out)));
-            reconciledById[a.id] = { start: starts.sort()[0], end: ends.sort().slice(-1)[0] };
-          } else if (!matches.length && a.block_type !== 'site_inspection' && a.block_type !== 'site_visit' && !a.site_inspection_id) {
-            toDelete.push(a.id);
+        // Reconciliation: only meaningful for days that have actually
+        // happened - today's still in progress, future days haven't
+        // started. For each past assignment, find real clocked time
+        // against the same job (or the same non-billable category) that
+        // day. Found -> lock it in with the real times. Not found -> it
+        // was scheduled but never actually worked, so remove it rather
+        // than leave an inaccurate plan sitting on the board.
+        // Only removed when the viewer can manage the schedule (and so can see
+        // everyone's time) and the time entries actually loaded. Lead site
+        // inspections and site visits are never clocked against, so they are
+        // never removed here.
+        let toDelete = [];
+        const reconciledById = {};
+        const sameCategory = (x) => (x === 'office' ? 'admin' : x); // both show as Admin
+        if (isPastDay && !dayTimeErr) {
+          (assignments || []).forEach(a => {
+            const matches = (dayTimeEntries || []).filter(te =>
+              te.staff_id === a.staff_id &&
+              sydneyDateStr(te.clock_in) === dateStr &&
+              (a.project_id ? te.project_id === a.project_id : (!te.project_id && sameCategory(te.time_category) === sameCategory(a.block_type)))
+            );
+            const closed = matches.filter(m => m.clock_out);
+            if (closed.length) {
+              const starts = closed.map(m => sydneyTimeStr(m.clock_in));
+              // A shift split at Sydney midnight ends at 00:00 the next day: show it as 24:00.
+              const ends = closed.map(m => (sydneyDateStr(m.clock_out) !== dateStr ? '24:00' : sydneyTimeStr(m.clock_out)));
+              reconciledById[a.id] = { start: starts.sort()[0], end: ends.sort().slice(-1)[0] };
+            } else if (!matches.length && a.block_type !== 'site_inspection' && a.block_type !== 'site_visit' && !a.site_inspection_id) {
+              toDelete.push(a.id);
+            }
+          });
+          if (!canEditSchedule()) toDelete = [];
+          if (toDelete.length) {
+            const { error: delErr } = await supabaseClient.from('schedule_assignments').delete().in('id', toDelete);
+            if (delErr) toDelete = []; // keep showing them rather than hide what is still there
           }
-        });
-        if (!canEditSchedule()) toDelete = [];
+        }
+        const liveAssignments = (assignments || []).filter(a => !toDelete.includes(a.id));
+        if (seq !== loadSeq) return; // a newer load took over while the delete ran
         if (toDelete.length) {
-          const { error: delErr } = await supabaseClient.from('schedule_assignments').delete().in('id', toDelete);
-          if (delErr) toDelete = []; // keep showing them rather than hide what is still there
+          const n = toDelete.length;
+          document.getElementById('day-board-notice').innerHTML = `<p class="subtitle" style="margin:0 0 10px;">${n} booking${n === 1 ? '' : 's'} removed from this past day because nobody clocked on to ${n === 1 ? 'it' : 'them'}.</p>`;
         }
-      }
-      const liveAssignments = (assignments || []).filter(a => !toDelete.includes(a.id));
 
-      const hourCount = DAY_END_HOUR - DAY_START_HOUR;
-      const mainWidth = document.getElementById('day-time-header').parentElement.clientWidth || 900;
-      pxPerHour = Math.max(70, Math.floor((mainWidth - 90) / hourCount));
-      const timelineWidth = pxPerHour * hourCount;
+        const hourCount = DAY_END_HOUR - DAY_START_HOUR;
+        const mainWidth = document.getElementById('day-time-header').parentElement.clientWidth || 900;
+        pxPerHour = Math.max(70, Math.floor((mainWidth - 90) / hourCount));
+        const timelineWidth = pxPerHour * hourCount;
 
-      let headerHtml = `<div class="day-time-header" style="min-width:${90 + timelineWidth}px;"><div class="staff-col-spacer"></div>`;
-      for (let h = DAY_START_HOUR; h < DAY_END_HOUR; h++) {
-        headerHtml += `<div class="hour-label ${isHoliday ? 'holiday-hdr' : ''}" style="width:${pxPerHour}px; flex:none;">${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'am' : 'pm'}</div>`;
-      }
-      headerHtml += `</div>`;
-      document.getElementById('day-time-header').innerHTML = headerHtml;
-
-      const activeStaff = staffList; // already filtered to active in loadPickerData
-
-      let rowsHtml = '';
-      activeStaff.forEach(staff => {
-        const staffAssignments = liveAssignments.filter(a => a.staff_id === staff.id);
-        const staffLeave = (leave || []).find(l => l.staff_id === staff.id || (l.profiles && l.profiles.id === staff.id));
-
-        let blocksHtml = '';
-        if (staffLeave) {
-          blocksHtml += `<div class="day-block leave" style="left:0; width:${timelineWidth}px;">${staff.full_name} - leave (${staffLeave.leave_type || 'approved'})</div>`;
+        let headerHtml = `<div class="day-time-header" style="min-width:${90 + timelineWidth}px;"><div class="staff-col-spacer"></div>`;
+        for (let h = DAY_START_HOUR; h < DAY_END_HOUR; h++) {
+          headerHtml += `<div class="hour-label ${isHoliday ? 'holiday-hdr' : ''}" style="width:${pxPerHour}px; flex:none;">${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'am' : 'pm'}</div>`;
         }
-        staffAssignments.forEach(a => {
-          const reconciled = reconciledById[a.id];
-          const displayStart = reconciled ? reconciled.start : a.start_time.slice(0, 5);
-          const displayEnd = reconciled ? reconciled.end : a.end_time.slice(0, 5);
-          const startMin = timeToMinutes(displayStart) - DAY_START_HOUR * 60;
-          const endMin = timeToMinutes(displayEnd) - DAY_START_HOUR * 60;
-          const left = Math.max(0, startMin) / 60 * pxPerHour;
-          const width = Math.max(20, (endMin - startMin) / 60 * pxPerHour);
-          const label = a.block_type === 'site_inspection'
-            ? `${displayStart} - Inspection${a.projects?.name ? ': ' + a.projects.name : ''}`
-            : a.project_id
-              ? `${displayStart} - ${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
-              : `${CATEGORY_LABELS[a.block_type] || 'Admin'}${a.note ? ' - ' + a.note : ''}`;
-          const isNote = !a.project_id && a.block_type !== 'site_inspection';
-          const noteStyle = isNote && !reconciled ? 'background:var(--surface-1); color:var(--muted); border-color:var(--border);' : '';
-          const siteVisitClass = (a.block_type === 'site_visit' || a.block_type === 'site_inspection') && !reconciled ? 'site-visit' : '';
-          blocksHtml += `
-            <div class="day-block ${reconciled ? 'reconciled' : ''} ${siteVisitClass}" data-id="${a.id}" data-project-id="${a.project_id || ''}" data-inspection-id="${a.site_inspection_id || ''}" data-reconciled="${reconciled ? '1' : ''}" style="left:${left}px; width:${width}px; ${noteStyle}">
-              ${!reconciled ? `<div class="block-resize-handle" data-edge="left" style="position:absolute; left:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
-              <span class="block-label">${label}${reconciled ? ' &#10003;' : ''}</span>
-              ${!reconciled ? `<div class="block-resize-handle" data-edge="right" style="position:absolute; right:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
+        headerHtml += `</div>`;
+        document.getElementById('day-time-header').innerHTML = headerHtml;
+
+        const activeStaff = staffList; // already filtered to active in loadPickerData
+
+        let rowsHtml = '';
+        activeStaff.forEach(staff => {
+          const staffAssignments = liveAssignments.filter(a => a.staff_id === staff.id);
+          const staffLeave = (leave || []).find(l => l.staff_id === staff.id || (l.profiles && l.profiles.id === staff.id));
+
+          let blocksHtml = '';
+          if (staffLeave) {
+            blocksHtml += `<div class="day-block leave" style="left:0; width:${timelineWidth}px;">${escapeHtml(staff.full_name)} - leave (${escapeHtml(staffLeave.leave_type || 'approved')})</div>`;
+          }
+          staffAssignments.forEach(a => {
+            const reconciled = reconciledById[a.id];
+            const displayStart = reconciled ? reconciled.start : a.start_time.slice(0, 5);
+            const displayEnd = reconciled ? reconciled.end : a.end_time.slice(0, 5);
+            const startMin = timeToMinutes(displayStart) - DAY_START_HOUR * 60;
+            const endMin = timeToMinutes(displayEnd) - DAY_START_HOUR * 60;
+            const left = Math.max(0, startMin) / 60 * pxPerHour;
+            const width = Math.max(20, (endMin - startMin) / 60 * pxPerHour);
+            const label = a.block_type === 'site_inspection'
+              ? `${displayStart} - Inspection${a.projects?.name ? ': ' + a.projects.name : ''}`
+              : a.project_id
+                ? `${displayStart} - ${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects?.name || 'Job'}${a.projects?.job_number ? ' #' + a.projects.job_number : ''}`
+                : `${CATEGORY_LABELS[a.block_type] || 'Admin'}${a.note ? ' - ' + a.note : ''}`;
+            const isNote = !a.project_id && a.block_type !== 'site_inspection';
+            const noteStyle = isNote && !reconciled ? 'background:var(--surface-1); color:var(--muted); border-color:var(--border);' : '';
+            const siteVisitClass = (a.block_type === 'site_visit' || a.block_type === 'site_inspection') && !reconciled ? 'site-visit' : '';
+            blocksHtml += `
+              <div class="day-block ${reconciled ? 'reconciled' : ''} ${siteVisitClass}" data-id="${a.id}" data-project-id="${a.project_id || ''}" data-inspection-id="${a.site_inspection_id || ''}" data-reconciled="${reconciled ? '1' : ''}" style="left:${left}px; width:${width}px; ${noteStyle}">
+                ${!reconciled ? `<div class="block-resize-handle" data-edge="left" style="position:absolute; left:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
+                <span class="block-label">${escapeHtml(label)}${reconciled ? ' &#10003;' : ''}</span>
+                ${!reconciled ? `<div class="block-resize-handle" data-edge="right" style="position:absolute; right:0; top:0; bottom:0; width:6px; cursor:ew-resize;"></div>` : ''}
+              </div>`;
+          });
+
+          rowsHtml += `
+            <div class="staff-row ${isHoliday ? 'holiday-row' : ''}" style="min-width:${90 + timelineWidth}px;">
+              <div class="staff-name-col"><span class="staff-name">${escapeHtml(staff.full_name || 'Unnamed')}</span>${staff.id === myId ? '<span class="you-tag">(you)</span>' : ''}</div>
+              <div class="staff-timeline" data-staff-id="${staff.id}" style="width:${timelineWidth}px; --hour-count:${hourCount};">
+                ${blocksHtml}
+              </div>
             </div>`;
         });
+        document.getElementById('day-staff-rows').innerHTML = rowsHtml;
 
-        rowsHtml += `
-          <div class="staff-row ${isHoliday ? 'holiday-row' : ''}" style="min-width:${90 + timelineWidth}px;">
-            <div class="staff-name-col">${staff.full_name || 'Unnamed'}</div>
-            <div class="staff-timeline" data-staff-id="${staff.id}" style="width:${timelineWidth}px; --hour-count:${hourCount};">
-              ${blocksHtml}
-            </div>
-          </div>`;
-      });
-      document.getElementById('day-staff-rows').innerHTML = rowsHtml;
-
-      wireStaffTimelines();
-      wireDayBlocks(liveAssignments);
-      renderMobileDayList(activeStaff, liveAssignments, leave || [], reconciledById, dateStr);
+        wireStaffTimelines();
+        wireDayBlocks(liveAssignments);
+        renderMobileDayList(activeStaff, liveAssignments, leave || [], reconciledById, dateStr);
+      } catch (e) {
+        if (seq === loadSeq) showScheduleError(e, loadDay);
+      } finally {
+        if (seq === loadSeq) setScheduleLoading(false);
+      }
     }
 
     function fmtTime12(hhmm) {
@@ -451,16 +507,16 @@
           const cls = reconciled ? 'reconciled' : ((a.block_type === 'site_visit' || a.block_type === 'site_inspection') ? 'site-visit' : '');
           entriesHtml += `
             <div class="mobile-entry ${cls}" data-id="${a.id}">
-              <span>${label}${reconciled ? ' &#10003;' : ''}</span>
+              <span>${escapeHtml(label)}${reconciled ? ' &#10003;' : ''}</span>
               <span class="me-time">${fmtTime12(displayStart)} - ${fmtTime12(displayEnd)}</span>
             </div>`;
         });
 
         return `
           <div class="mobile-staff-block">
-            <div class="msb-name">${staff.full_name || 'Unnamed'}</div>
+            <div class="msb-name">${escapeHtml(staff.full_name || 'Unnamed')}${staff.id === myId ? '<span class="you-tag">(you)</span>' : ''}</div>
             ${entriesHtml || '<p class="subtitle" style="margin:0 0 6px;">Nothing scheduled.</p>'}
-            ${canEditSchedule() ? `<button type="button" class="secondary mobile-add-btn" data-staff-id="${staff.id}" data-staff-name="${staff.full_name || 'Unnamed'}">+ Add</button>` : ''}
+            ${canEditSchedule() ? `<button type="button" class="secondary mobile-add-btn" data-staff-id="${staff.id}" data-staff-name="${escapeHtml(staff.full_name || 'Unnamed')}">+ Add</button>` : ''}
           </div>`;
       }).join('');
 
@@ -471,31 +527,74 @@
         entry.addEventListener('click', () => {
           const assignment = liveAssignments.find(a => a.id === entry.dataset.id);
           if (!assignment) return;
-          const isReconciled = !!reconciledById[assignment.id];
-          if (isReconciled) {
-            if (!canEditSchedule()) return;
-            if (confirm('This reflects real clocked hours the employee was paid for. Remove it anyway?')) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
-            }
-            return;
-          }
-          if (assignment.project_id) {
-            if (canEditSchedule()) {
-              if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this block instead)`)) {
-                window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
-              } else if (confirm('Remove this schedule block?')) {
-                supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
-              }
-            } else if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now?`)) {
-              window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
-            }
-          } else if (canEditSchedule()) {
-            const categoryLabel = CATEGORY_LABELS[assignment.block_type] || 'this block';
-            if (confirm(`Remove this ${categoryLabel} block?`)) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
-            }
-          }
+          openBookingActions(assignment, reconciledById[assignment.id] || null);
         });
+      });
+    }
+
+    // Phone day list: one card with the actions for a booking, instead of a
+    // chain of confirm() popups where Cancel meant delete.
+    function openBookingActions(assignment, reconciled) {
+      const title = assignment.site_inspection_id
+        ? 'Inspection' + (assignment.projects ? ': ' + projectRef(assignment.projects) : '')
+        : assignment.projects
+          ? projectRef(assignment.projects)
+          : (CATEGORY_LABELS[assignment.block_type] || 'Admin') + (assignment.note ? ' - ' + assignment.note : '');
+      const start = reconciled ? reconciled.start : assignment.start_time.slice(0, 5);
+      const end = reconciled ? reconciled.end : assignment.end_time.slice(0, 5);
+      const fullWidth = 'width:100%; justify-content:center;';
+      const openJob = !!assignment.project_id;
+      const openInspection = !!assignment.site_inspection_id;
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+      overlay.innerHTML = `
+        <div class="card" style="max-width:420px; width:100%;">
+          <h2 style="margin-top:0;">${escapeHtml(title)}</h2>
+          <p class="subtitle">${fmtTime12(start)} - ${fmtTime12(end)}</p>
+          ${reconciled ? '<p class="subtitle">Confirmed clocked hours the employee was paid for.</p>' : ''}
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:14px;">
+            ${assignment.project_id && !reconciled ? `<button type="button" id="ba-clockin" style="${fullWidth}">Clock in</button>` : ''}
+            ${openJob ? `<button type="button" class="secondary" id="ba-open" style="${fullWidth}">Open job</button>` : ''}
+            ${openInspection ? `<button type="button" class="secondary" id="${openJob ? 'ba-open-inspection' : 'ba-open'}" style="${fullWidth}">Open inspection</button>` : ''}
+            ${canEditSchedule() ? `<button type="button" class="secondary" id="ba-remove" style="${fullWidth} color:var(--red);">${reconciled ? 'Remove these paid hours' : 'Remove booking'}</button>` : ''}
+            <button type="button" class="secondary" id="ba-close" style="${fullWidth}">Close</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      function onKey(e) { if (e.key === 'Escape') close(); }
+      function close() {
+        document.removeEventListener('keydown', onKey);
+        overlay.remove();
+      }
+      document.addEventListener('keydown', onKey);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+      overlay.querySelector('#ba-close').addEventListener('click', close);
+
+      const clockBtn = overlay.querySelector('#ba-clockin');
+      if (clockBtn) clockBtn.addEventListener('click', () => { window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`; });
+      const goJob = () => { window.location.href = `/project.html?id=${assignment.project_id}`; };
+      const goInspection = () => { window.location.href = `/site-inspection.html?id=${assignment.site_inspection_id}`; };
+      const openBtn = overlay.querySelector('#ba-open');
+      if (openBtn) openBtn.addEventListener('click', openJob ? goJob : goInspection);
+      const inspBtn = overlay.querySelector('#ba-open-inspection');
+      if (inspBtn) inspBtn.addEventListener('click', goInspection);
+
+      const removeBtn = overlay.querySelector('#ba-remove');
+      if (removeBtn) removeBtn.addEventListener('click', async () => {
+        const label = removeBtn.textContent;
+        removeBtn.disabled = true;
+        removeBtn.textContent = 'Removing...';
+        let ok = false;
+        try {
+          ok = await deleteBooking(assignment, timelineBookingLabel(assignment));
+        } finally {
+          removeBtn.disabled = false;
+          removeBtn.textContent = label;
+        }
+        if (!ok) return; // deleteBooking already showed the error, keep the card open
+        close();
+        await loadDay();
       });
     }
 
@@ -504,7 +603,7 @@
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:420px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Add to ${staffName}'s day</h2>
+          <h2>Add to ${escapeHtml(staffName)}'s day</h2>
           <label style="margin-top:0">Job (leave blank for training/office time)</label>
           <input id="mobile-add-job-search" placeholder="Job number, name, client..." autocomplete="off" />
           <div id="mobile-add-job-results"></div>
@@ -741,7 +840,7 @@
       document.querySelectorAll('.undo-toast').forEach(t => t.remove());
       const toast = document.createElement('div');
       toast.className = 'undo-toast';
-      toast.innerHTML = `<span>${message}</span><button type="button">Undo</button>`;
+      toast.innerHTML = `<span>${escapeHtml(message)}</span><button type="button">Undo</button>`;
       document.body.appendChild(toast);
       const timer = setTimeout(() => toast.remove(), 9000);
       toast.querySelector('button').addEventListener('click', async () => {
@@ -767,6 +866,7 @@
 
     function timelineBookingLabel(assignment) {
       if (assignment.projects) return projectRef(assignment.projects);
+      if (assignment.site_inspection_id || assignment.block_type === 'site_inspection') return 'Site inspection';
       return CATEGORY_LABELS[assignment.block_type] || 'Booking';
     }
 
@@ -853,7 +953,7 @@
           ghost.style.display = '';
           ghost.style.left = ((startMin - dayStartMin) / 60 * pxPerHour) + 'px';
           ghost.style.width = origWidth + 'px';
-          const person = row.querySelector('.staff-name-col').textContent.trim();
+          const person = row.querySelector('.staff-name').textContent.trim();
           const moved = timeline !== originTimeline;
           tip.textContent = `${minutesToTimeStr(startMin)} - ${minutesToTimeStr(finalEnd)}${moved ? ' - ' + person : ''}`;
         } else {
@@ -906,7 +1006,7 @@
         if (!changedPerson && newStart === assignment.start_time.slice(0, 5) && newEnd === assignment.end_time.slice(0, 5)) { await loadDay(); return; }
 
         if (changedPerson && toRow.querySelector('.day-block.leave')) {
-          const name = toRow.querySelector('.staff-name-col').textContent.trim();
+          const name = toRow.querySelector('.staff-name').textContent.trim();
           if (!confirm(`${name} is on leave this day. Move the booking to them anyway?`)) { await loadDay(); return; }
         }
         const { error } = await supabaseClient.from('schedule_assignments')
@@ -957,7 +1057,7 @@
               return; // locked - these are confirmed, paid hours, not editable by Staff
             }
             if (confirm('This reflects real clocked hours the employee was paid for. Remove it anyway?')) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+              deleteBooking(assignment, timelineBookingLabel(assignment)).then(() => loadDay());
             }
             return;
           }
@@ -967,7 +1067,7 @@
               if (confirm('Open this site inspection? (Cancel to remove this schedule block instead)')) {
                 window.location.href = `/site-inspection.html?id=${assignment.site_inspection_id}`;
               } else if (confirm('Remove this schedule block? The inspection itself stays, just unscheduled.')) {
-                supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+                deleteBooking(assignment, timelineBookingLabel(assignment)).then(() => loadDay());
               }
             } else {
               window.location.href = `/site-inspection.html?id=${assignment.site_inspection_id}`;
@@ -981,7 +1081,7 @@
               if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now? (Cancel to remove this schedule block instead)`)) {
                 window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
               } else if (confirm('Remove this schedule block?')) {
-                supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+                deleteBooking(assignment, timelineBookingLabel(assignment)).then(() => loadDay());
               }
             } else if (confirm(`Clock in to ${assignment.projects ? projectRef(assignment.projects) : 'this job'} now?`)) {
               window.location.href = `/my-day.html?clockin_project=${assignment.project_id}`;
@@ -989,7 +1089,7 @@
           } else if (canEditSchedule()) {
             const categoryLabel = CATEGORY_LABELS[assignment.block_type] || 'this block';
             if (confirm(`Remove this ${categoryLabel} block?`)) {
-              supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id).then(() => loadDay());
+              deleteBooking(assignment, timelineBookingLabel(assignment)).then(() => loadDay());
             }
           }
         });
@@ -1050,13 +1150,18 @@
     });
 
     async function loadPickerData() {
-      const { data: profiles } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true);
+      const { data: profiles, error } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
+      if (error) throw error;
       staffList = profiles || [];
+      // Viewer first so field staff never scroll to find their own row.
+      const mine = staffList.findIndex(p => p.id === myId);
+      if (mine > 0) staffList.unshift(staffList.splice(mine, 1)[0]);
     }
 
     (async function () {
       const session = await requireLogin();
       if (!session) return;
+      myId = session.user.id;
       await syncThemeFromProfile();
       renderMainNav(null);
       document.getElementById('logout-link').addEventListener('click', async (e) => {
@@ -1066,6 +1171,10 @@
       });
 
       myRole = await getMyRole();
+      if (!canEditSchedule()) {
+        document.getElementById('day-view').classList.add('schedule-view-only');
+        document.getElementById('schedule-subtitle').textContent = 'View only: who is on which job, and who is on leave. Approved leave shows automatically. Only admin, finance and sales can change the schedule.';
+      }
       const now = new Date();
       viewYear = now.getFullYear();
       viewMonth = now.getMonth();
@@ -1073,7 +1182,7 @@
 
       renderDowRow();
       renderClockedInNowCard(document.getElementById('clocked-in-now'));
-      await loadPickerData();
+      try { await loadPickerData(); } catch (e) { /* loadDay fetches it again and shows the error with Retry */ }
       setView('day');
     })();
   </script>

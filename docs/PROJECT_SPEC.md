@@ -87,6 +87,7 @@ Manual steps only a person can do (the code is live):
 ## PART A: Built and live
 
 ### A1. Time tracking and payroll
+- Clock in / clock out overlays appear on the tap with Loading..., and show an error card with Close if the load fails (UX 1). A job with one stage is preselected on My Day (UX 6). Break start defaults to 12:00 (or mid shift) when a break is asked (UX 16). Home has a Switch job button (UX 7). Timesheets has a This week button (UX 18).
 - Clock in/out against job and stage from My Day; manual entries; leave requests with approval; staff scheduling calendar.
 - **My Day task cards** (Your scheduled tasks, Free tasks up for grabs): main tasks only (subtasks counted as "3 of 5 subtasks done", not listed; a subtask of yours still shows when its main task is not yours), split Prejob / office, Handover, Onsite with counts, grouped by job (required first, then oldest), 10 jobs per group then "Show all", search on free tasks. A task with open subtasks shows "Open job" instead of Done.
 - **Clock-out cost-centre slider** (`cko-split-slider` in `public/js/supabase-client.js`): split the shift's hours across stages at clock-out, waterfall redistribution. Closed variations drop out of the list; do-and-charge variations can take time.
@@ -122,6 +123,7 @@ Manual steps only a person can do (the code is live):
 - `archive-completed-jobs.js` (daily) moves jobs at complete for more than 2 days to archived.
 - Manual only: draft_quote, job_not_complete and Not Complete back to Booked.
 - **Job Booked gate (migration 20261023000000):** a job is only **job_booked** while someone is scheduled to it (a job booking today or later) or clocked into it now. A booking or clock-in moves Ready to Book to Job Booked; removing or moving the last booking moves it back (to Awaiting Action if required tasks are open); clocking out does not (the clock-out "How's the job?" step decides). Quick Job, Warranty Job and ServiceM8 imports start at Ready to Book. Moving a job to Job Booked by hand with nobody scheduled or clocked in is refused. `sweep-job-booked.js` (just after midnight Sydney, migration 20261024000000) moves back any job whose last booking has passed with nobody clocked in.
+- **Clock-out "How's the job?" (UX 12, 22):** "Not complete, back <day>" books the next working day (Saturday and Sunday roll to Monday, public holidays are not rolled); the double-booking warning waits for Continue; "Not finished, do not book me" sets job_not_complete with no booking for the PM to schedule. Complete on a job with no CCEW offers an optional "Take photo of the CCEW" on the last step (saved to the same place as the CCEW card).
 
 ### A7. Navigation
 - One list, `MAIN_NAV_ITEMS` in `public/js/supabase-client.js`, rendered by `renderMainNav()`. On a computer the top bar shows starred pages (also the Home tiles) plus the current page, the rest under "More"; the phone menu lists everything. Schedule, Settings and notifications are top bar icons.
@@ -190,6 +192,7 @@ Manual steps only a person can do (the code is live):
 - Warehouse plus each `holds_stock` vehicle as separate rows; `materials.quantity_on_hand` is a trigger-kept total. Stock page: total cost, minimums, location breakdown, "Suggest restock PO". Vehicle stock pages.
 
 ### A13. Job tasks
+- Tasks page: Edit (reopens the Add task panel, with Delete), due dates as 19 Oct 2026 with Overdue in red and Due today in bold, sorted required first then soonest due (UX 14). Task buttons are full size with a busy state (UX 3, and My Day UX 8).
 - Added at quote stage or later; assign to a person, a role or anyone. Tasks page; Home "Needs attention" count.
 - **"Required before scheduling" is enforced** on every Schedule entry point and drives awaiting_action (A6).
 - Take photo on any task (open the task): saved as a site photo captioned "#task <task>" (`project_photos.task_id`), thumbnails and count on the task. Ticked tasks show who ticked them and when.
@@ -231,6 +234,8 @@ Manual steps only a person can do (the code is live):
 - Cost centre cards show labour plus materials quoted vs actual and GP%.
 - Header shows the site address (maps link), client phone (tap to call) and email under the subtitle (19 Oct 2026, UX 31).
 - Compliance (CCEW) and Installed equipment cards sit on the Summary tab for every job with a J number, from the day it is booked; Needs attention shows "No CCEW uploaded yet" until a certificate is uploaded or a not-required reason saved (UX 19).
+- The handover checklist and the default handover task read the CCEW from the card (`projects.ccew_file_path`, or a saved not-required reason) (UX 20). CCEW upload is one button; View certificate signs a fresh link on each tap (UX 23, 30). Staff do not see the Formbay row or the checklist button (UX 26).
+- Installed equipment: new solar, generator and air con assets default to a 12 month service; Add and Edit lock on tap; Log service saves the whole form; saving a solar or inverter asset copies its serials onto the job's handover fields (`syncAssetSerialsToProject` in `assets.js`); from a job the form skips the customer search; several Pylon items open as "Equipment 2 of 3" with Skip (UX 24, 25, 27, 28, 29). Serial and NMI boxes have autocorrect off (UX 21).
 - Site photo upload shows "Uploading n of N...", saves each photo as it lands, keeps the good ones on a failure with a Retry for the failed files (`wireSitePhotoInput`, `uploadPhotosBatch` in `supabase-client.js`, also used by the clock-out photos) (UX 35).
 - Documents and PO files open on iPhone through `openSignedDocInNewTab` (blank tab opened on the tap, then pointed at the signed link); same helper on Knowledge, Documents and HR files (UX 33).
 

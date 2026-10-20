@@ -2666,6 +2666,20 @@ function sydneyMidnightUtc(dateKey) {
   const guess = new Date(naive.getTime() - sydneyOffsetMinutesAt(naive) * 60000);
   return new Date(naive.getTime() - sydneyOffsetMinutesAt(guess) * 60000);
 }
+// The day a tradie is next back on site: the day after dateKey (a Sydney
+// YYYY-MM-DD), with Saturday and Sunday rolled to Monday. Works at UTC
+// noon so daylight saving cannot shift the date.
+function nextWorkingDayKey(dateKey) {
+  const d = new Date(`${dateKey}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  if (d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 2);
+  else if (d.getUTCDay() === 0) d.setUTCDate(d.getUTCDate() + 1);
+  return sydneyDateKey(d);
+}
+// 'Tue 20 Oct' for a YYYY-MM-DD key.
+function dayKeyLabel(dateKey) {
+  return new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', '');
+}
 function splitAtSydneyMidnight(clockInIso, clockOutIso) {
   const segments = [];
   let cursor = new Date(clockInIso);
@@ -2781,41 +2795,63 @@ async function clockOutActiveEntry(entry, opts = {}) {
 // this clock-out (and its before-you-go step) is done - see
 // openJobSwitchModal.
 async function openClockOutModal(entry, onDone, opts = {}) {
-  let project = null, centres = [];
-  if (entry.project_id) {
-    const [{ data: proj }, { data: cc }] = await Promise.all([
-      supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved, pipeline_stage').eq('id', entry.project_id).maybeSingle(),
-      supabaseClient.from('cost_centres').select('id, name, variation_entry_id').eq('project_id', entry.project_id).order('sort_order'),
-    ]);
-    project = proj;
-    // A variation is a stage here too, but only while there is still work to do on it (see My Day);
-    // a stage this shift was already ticked against always stays.
-    let usable = cc || [];
-    const variationIds = usable.map(c => c.variation_entry_id).filter(Boolean);
-    if (variationIds.length) {
-      const { data: vEntries } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
-      const open = new Set((vEntries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
-      const already = new Set([...(entry.selected_cost_centre_ids || []), entry.cost_centre_id].filter(Boolean));
-      usable = usable.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id) || already.has(c.id));
-    }
-    centres = usable.map((c, i) => ({ id: c.id, name: c.name, number: costCentreNumber(proj ? proj.job_number : null, i + 1) }));
-  }
+  // Overlay first, before any await, so a second tap on poor signal lands
+  // on it instead of stacking a second modal.
+  if (document.getElementById('clock-modal-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'clock-modal-overlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><p class="subtitle">Loading...</p></div>`;
+  document.body.appendChild(overlay);
+
+  let project = null, centres = [], recentEntries = [], loadError = null;
   let chosenCentres = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
     ? entry.selected_cost_centre_ids.slice()
     : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
   let splitPercentages = [];
+  try {
+    if (entry.project_id) {
+      const [{ data: proj, error: projErr }, { data: cc, error: ccErr }] = await Promise.all([
+        supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved, pipeline_stage, ccew_file_path, ccew_not_required_reason').eq('id', entry.project_id).maybeSingle(),
+        supabaseClient.from('cost_centres').select('id, name, variation_entry_id').eq('project_id', entry.project_id).order('sort_order'),
+      ]);
+      loadError = projErr || ccErr || null;
+      project = proj;
+      // A variation is a stage here too, but only while there is still work to do on it (see My Day);
+      // a stage this shift was already ticked against always stays.
+      let usable = cc || [];
+      const variationIds = usable.map(c => c.variation_entry_id).filter(Boolean);
+      if (variationIds.length) {
+        const { data: vEntries, error: vErr } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
+        if (vErr) loadError = vErr;
+        const open = new Set((vEntries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
+        const already = new Set([...(entry.selected_cost_centre_ids || []), entry.cost_centre_id].filter(Boolean));
+        usable = usable.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id) || already.has(c.id));
+      }
+      centres = usable.map((c, i) => ({ id: c.id, name: c.name, number: costCentreNumber(proj ? proj.job_number : null, i + 1) }));
+    }
 
-  // Has today's mandatory break already been answered against another
-  // entry today? Generous UTC window, exact Sydney-date match in JS -
-  // same pattern used server-side for day banding. The same fetch also
-  // gives us everything ELSE clocked today, to check the 6-hour
-  // threshold below.
-  const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
-  const { data: recentEntries } = await supabaseClient
-    .from('time_entries')
-    .select('id, project_id, clock_in, clock_out, break_taken, stayed_overnight')
-    .eq('staff_id', entry.staff_id)
-    .gte('clock_in', windowStart.toISOString());
+    // Has today's mandatory break already been answered against another
+    // entry today? Generous UTC window, exact Sydney-date match in JS -
+    // same pattern used server-side for day banding. The same fetch also
+    // gives us everything ELSE clocked today, to check the 6-hour
+    // threshold below.
+    const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
+    const { data: recent, error: recentErr } = await supabaseClient
+      .from('time_entries')
+      .select('id, project_id, clock_in, clock_out, break_taken, stayed_overnight')
+      .eq('staff_id', entry.staff_id)
+      .gte('clock_in', windowStart.toISOString());
+    if (recentErr) loadError = recentErr;
+    recentEntries = recent || [];
+  } catch (e) {
+    loadError = e;
+  }
+  if (loadError) {
+    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load your clock-out. Check your signal and try again.${loadError.message ? ` (${escapeHtml(loadError.message)})` : ''}</div><button type="button" class="secondary" id="cko-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+    overlay.querySelector('#cko-close-btn').addEventListener('click', () => overlay.remove());
+    return;
+  }
   const todayKey = sydneyDateKey(new Date());
   const todaysEntries = (recentEntries || []).filter(r => sydneyDateKey(new Date(r.clock_in)) === todayKey);
   const breakAlreadyLogged = todaysEntries.some(r => r.break_taken !== null && r.break_taken !== undefined);
@@ -2828,14 +2864,18 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   // once per day even if it's clocked in and out of more than once.
   const lahaAlreadyLogged = todaysEntries.some(r => r.project_id === entry.project_id && r.stayed_overnight !== null && r.stayed_overnight !== undefined);
 
-  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '', stayedOvernight: null };
-
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
-  document.body.appendChild(overlay);
+  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '', stayedOvernight: null, markedComplete: false };
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function timePartLocal(d) { return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+  // Sensible break-start default so Yes then Continue works without the
+  // picker: 12:00 when it falls inside the shift, else the shift midpoint.
+  function defaultBreakStart() {
+    const inD = new Date(entry.clock_in), outD = new Date(state.outIso);
+    const noon = new Date(outD); noon.setHours(12, 0, 0, 0);
+    if (noon > inD && noon < outD) return '12:00';
+    return timePartLocal(roundToQuarterHour(new Date((inD.getTime() + outD.getTime()) / 2)));
+  }
   function totalMinutesForSplit() {
     const mins = Math.round((new Date(state.outIso) - new Date(entry.clock_in)) / 60000);
     return mins > 0 ? mins : 0;
@@ -2973,6 +3013,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   }
 
   function renderStep2() {
+    if (!state.breakStart) state.breakStart = defaultBreakStart();
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Did you take your break today?</h2>
@@ -3055,6 +3096,8 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         const [hh, mm] = state.breakStart.split(':').map(Number);
         const breakStartDate = new Date(state.outIso);
         breakStartDate.setHours(hh, mm, 0, 0);
+        // Overnight shift: a break time later than the clock-out belongs to the day before
+        if (breakStartDate > new Date(state.outIso)) breakStartDate.setDate(breakStartDate.getDate() - 1);
         onceFields.break_start = breakStartDate.toISOString();
         onceFields.break_minutes = state.breakMinutes;
       } else {
@@ -3136,32 +3179,43 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     else await finishAndMaybeSwitch();
   }
 
-  // "Complete" moves the job on to Client Handover. "Not complete - back
-  // tomorrow" is the routine, no-note-needed case for an ordinary
+  // "Complete" moves the job on to Client Handover. "Not complete, back
+  // <next working day>" is the routine, no-note-needed case for an ordinary
   // multi-day job - it auto-books the same person on the same job for
-  // the next calendar day and flags (doesn't block) if that slot's
-  // already got something else on it. This is separate from the
-  // Job Not Complete a PM can still set by hand from the pipeline board
-  // for something genuinely stuck, not just "see you tomorrow".
+  // the next working day (Sat/Sun roll to Mon) and flags (doesn't block)
+  // if that slot's already got something else on it, keeping the warning
+  // up until Continue. The quiet "Not finished, do not book me" link sets
+  // Job Not Complete with no booking, for the PM to schedule. This is
+  // separate from the Job Not Complete a PM can still set by hand from
+  // the pipeline board for something genuinely stuck.
   function renderStepJobStatus() {
+    const backKey = nextWorkingDayKey(sydneyDateKey(new Date(state.outIso)));
+    const backLabel = dayKeyLabel(backKey);
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>How's the job?</h2>
-        <p class="subtitle" style="margin-bottom:12px;">${projectRef(project)}</p>
-        <div style="display:flex; flex-direction:column; gap:10px;">
+        <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))}</p>
+        <div id="cko-job-status-buttons" style="display:flex; flex-direction:column; gap:10px;">
           <button type="button" id="cko-job-complete">Complete</button>
-          <button type="button" class="secondary" id="cko-job-not-complete">Not complete - back tomorrow</button>
+          <button type="button" class="secondary" id="cko-job-not-complete">Not complete, back ${backLabel}</button>
         </div>
+        <a href="#" id="cko-job-no-book" class="link-quiet" style="display:block; text-align:center; font-size:13px; padding:10px; margin-top:6px;">Not finished, do not book me</a>
         <div id="cko-job-status-msg" style="margin-top:10px;"></div>
       </div>`;
 
+    // Only one of Complete / Not complete / do not book me may run at a time
+    const lockJobStatus = (on) => {
+      ['#cko-job-complete', '#cko-job-not-complete'].forEach(s => { const b = overlay.querySelector(s); if (b) b.disabled = on; });
+      const l = overlay.querySelector('#cko-job-no-book');
+      if (l) { l.style.pointerEvents = on ? 'none' : ''; l.style.opacity = on ? '0.6' : ''; }
+    };
     overlay.querySelector('#cko-job-complete').addEventListener('click', async (e) => {
-      e.target.disabled = true;
+      lockJobStatus(true);
       const { data: moved, error: mvErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']).select('id');
       const statusMsg = overlay.querySelector('#cko-job-status-msg');
       if (mvErr) {
         statusMsg.innerHTML = `<div class="error-box">${escapeHtml(mvErr.message)}</div>`;
-        e.target.disabled = false;
+        lockJobStatus(false);
         return;
       }
       if (!moved || !moved.length) {
@@ -3171,45 +3225,80 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         return;
       }
       await logActivity('project', project.id, 'job_complete', 'Marked complete at clock-out - moved to Client Handover');
+      state.markedComplete = true;
       renderStep3();
     });
 
     overlay.querySelector('#cko-job-not-complete').addEventListener('click', async () => {
       const msgEl = overlay.querySelector('#cko-job-status-msg');
       const btn = overlay.querySelector('#cko-job-not-complete');
-      btn.disabled = true;
+      const label = btn.textContent;
+      lockJobStatus(true);
+      btn.textContent = 'Booking...';
       try {
         const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
         if (ncErr) throw ncErr;
 
-        // Sydney day after the clock-out, via UTC noon so it can't drift.
-        const tomorrow = new Date(`${sydneyDateKey(new Date(state.outIso))}T12:00:00Z`);
-        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-        const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-
-        const { data: existingTomorrow } = await supabaseClient
+        const { data: existingOnBackDay } = await supabaseClient
           .from('schedule_assignments')
           .select('id, project_id, projects(name, job_number)')
           .eq('staff_id', entry.staff_id)
-          .eq('assignment_date', tomorrowStr);
-        const doubleBooked = (existingTomorrow || []).filter(a => a.project_id !== project.id);
+          .eq('assignment_date', backKey);
+        const doubleBooked = (existingOnBackDay || []).filter(a => a.project_id !== project.id);
+        const alreadyHere = (existingOnBackDay || []).some(a => a.project_id === project.id);
 
-        await supabaseClient.from('schedule_assignments').insert({
-          staff_id: entry.staff_id, project_id: project.id, block_type: 'job',
-          assignment_date: tomorrowStr, start_time: '07:00', end_time: '15:00',
-        });
-        await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - booked back in for ${tomorrowStr}`);
+        let bookErr = null;
+        if (!alreadyHere) {
+          const { error } = await supabaseClient.from('schedule_assignments').insert({
+            staff_id: entry.staff_id, project_id: project.id, block_type: 'job',
+            assignment_date: backKey, start_time: '07:00', end_time: '15:00',
+          });
+          bookErr = error;
+        }
+        if (bookErr) {
+          // Job is Not Complete either way; say plainly that the booking did not go in
+          await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - could not book back in for ${backKey}, PM to schedule`);
+          overlay.querySelector('#cko-job-status-buttons').style.display = 'none';
+          overlay.querySelector('#cko-job-no-book').style.display = 'none';
+          msgEl.innerHTML = `<div class="error-box">Job marked Not complete, but you could not be booked back in for ${backLabel}. Let your PM know so they can book you.</div><button type="button" id="cko-job-status-continue" style="width:100%; margin-top:10px;">Continue</button>`;
+          overlay.querySelector('#cko-job-status-continue').addEventListener('click', renderStep3);
+          return;
+        }
+        await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - ${alreadyHere ? 'already booked' : 'booked back in'} for ${backKey}`);
 
         if (doubleBooked.length) {
-          await logActivity('project', project.id, 'schedule_conflict', `Also booked on ${tomorrowStr} against: ${doubleBooked.map(a => a.projects?.name || 'another job').join(', ')}`);
-          msgEl.innerHTML = `<div class="error-box">Heads up - you're already booked on something else for ${tomorrowStr} too. Let your PM know.</div>`;
-          setTimeout(renderStep3, 2500);
+          await logActivity('project', project.id, 'schedule_conflict', `Also booked on ${backKey} against: ${doubleBooked.map(a => a.projects?.name || 'another job').join(', ')}`);
+          const others = doubleBooked.map(a => a.projects ? projectRef(a.projects) : 'another job').join(', ');
+          // Hide the choices: the booking is already in, nothing else to tap.
+          overlay.querySelector('#cko-job-status-buttons').style.display = 'none';
+          overlay.querySelector('#cko-job-no-book').style.display = 'none';
+          msgEl.innerHTML = `<div class="error-box">Heads up: you're booked back on this job for ${backLabel}, but you're already booked that day on ${escapeHtml(others)} too. Let your PM know.</div><button type="button" id="cko-job-status-continue" style="width:100%; margin-top:10px;">Continue</button>`;
+          overlay.querySelector('#cko-job-status-continue').addEventListener('click', renderStep3);
         } else {
           renderStep3();
         }
       } catch (err) {
-        msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
-        btn.disabled = false;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        btn.textContent = label;
+        lockJobStatus(false);
+      }
+    });
+
+    // Not finished, but leave the booking to the PM: no schedule row.
+    // Does not set state.markedComplete, so no CCEW ask follows.
+    overlay.querySelector('#cko-job-no-book').addEventListener('click', async (e) => {
+      e.preventDefault();
+      const link = e.currentTarget;
+      const msgEl = overlay.querySelector('#cko-job-status-msg');
+      lockJobStatus(true);
+      try {
+        const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+        if (ncErr) throw ncErr;
+        await logActivity('project', project.id, 'job_not_complete', 'Not complete at clock-out - not rebooked, PM to schedule');
+        renderStep3();
+      } catch (err) {
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        lockJobStatus(false);
       }
     });
   }
@@ -3230,14 +3319,24 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   }
 
   function renderStep3() {
+    // Only after Complete actually moved the job, and only while no CCEW
+    // (or not-required reason) is on file, same test as the job page.
+    const askCcew = state.markedComplete && project && project.job_number && !project.ccew_file_path && !project.ccew_not_required_reason;
     overlay.innerHTML = `
       <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Before you go...</h2>
         <p class="subtitle" style="margin-bottom:12px;">You're clocked out of ${escapeHtml(projectRef(project))}.${opts.switchTo ? ` Next up: ${escapeHtml(opts.switchTo.label)}.` : ''}</p>
 
+        ${askCcew ? `
+        <div id="cko-ccew-block" style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
+          <label style="margin-top:0">CCEW (optional, while you have it in hand)</label>
+          <label class="btn secondary" style="width:100%; justify-content:center; margin:0; cursor:pointer;">&#128247; Take photo of the CCEW<input type="file" id="cko-ccew-file" accept="image/*" capture="environment" style="display:none;" /></label>
+          <div id="cko-ccew-msg"></div>
+        </div>` : ''}
+
         <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
           <label style="margin-top:0">Site photos</label>
-          <input type="file" id="cko-photo-file" accept="image/*" multiple capture="environment" />
+          <input type="file" id="cko-photo-file" accept="image/*" multiple />
           <div id="cko-photo-msg"></div>
         </div>
 
@@ -3286,6 +3385,43 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     // "Upload" click that staff often skipped, assuming picking the file
     // was already the whole job done.
     wireSitePhotoInput(overlay.querySelector('#cko-photo-file'), overlay.querySelector('#cko-photo-msg'), { projectId: project.id, staffId: entry.staff_id });
+
+    // CCEW photo: same store as the job page's Compliance - CCEW card
+    // (ccew/<project id> in project-documents, projects.ccew_file_path).
+    const ccewInput = overlay.querySelector('#cko-ccew-file');
+    if (ccewInput) ccewInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const msg = overlay.querySelector('#cko-ccew-msg');
+      const labelBtn = ccewInput.parentElement;
+      const labelText = labelBtn.firstChild.textContent;
+      ccewInput.disabled = true;
+      labelBtn.style.opacity = '0.5';
+      labelBtn.firstChild.textContent = 'Uploading...';
+      msg.innerHTML = '';
+      try {
+        const path = await uploadPrivateFile(file, `ccew/${project.id}`);
+        // Never overwrite one someone uploaded from the job page meanwhile.
+        const { data: upd, error } = await supabaseClient.from('projects').update({ ccew_file_path: path, ccew_not_required_reason: null }).eq('id', project.id).is('ccew_file_path', null).select('id');
+        if (error) throw error;
+        if (!upd || !upd.length) {
+          msg.innerHTML = `<div class="success-box">A CCEW was already uploaded for this job, nothing more to do.</div>`;
+          labelBtn.style.display = 'none';
+          return;
+        }
+        project.ccew_file_path = path;
+        await logActivity('project', project.id, 'ccew_uploaded', 'CCEW photo uploaded at clock-out');
+        labelBtn.style.display = 'none';
+        msg.innerHTML = `<div class="success-box">CCEW uploaded. You can view or replace it under Compliance - CCEW on the job page.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message || String(err))}</div>`;
+      } finally {
+        ccewInput.disabled = false;
+        ccewInput.value = '';
+        labelBtn.style.opacity = '';
+        labelBtn.firstChild.textContent = labelText;
+      }
+    });
 
     overlay.querySelector('#cko-note-save-btn').addEventListener('click', async () => {
       const msg = overlay.querySelector('#cko-note-msg');
@@ -3485,12 +3621,30 @@ async function loadClockableCostCentres(projectId) {
 // clocked in somewhere, use openClockOutModal with switchTo instead.
 // `project` needs id/name/job_number/quote_number. Calls `onDone` once in.
 async function openJobClockInModal(project, onDone) {
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  const centres = await loadClockableCostCentres(project.id);
+  // Overlay first, before any await (see openClockOutModal).
+  if (document.getElementById('clock-modal-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'clock-modal-overlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><p class="subtitle">Loading...</p></div>`;
+  document.body.appendChild(overlay);
+
+  let user = null, centres = [], loadError = null;
+  try {
+    const { data, error } = await supabaseClient.auth.getUser();
+    user = data ? data.user : null;
+    if (error) loadError = error;
+    centres = await loadClockableCostCentres(project.id);
+  } catch (e) {
+    loadError = e;
+  }
+  if (loadError || !user) {
+    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load the job. Check your signal and try again.${loadError && loadError.message ? ` (${escapeHtml(loadError.message)})` : ''}</div><button type="button" class="secondary" id="jci-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+    overlay.querySelector('#jci-close-btn').addEventListener('click', () => overlay.remove());
+    return;
+  }
   let chosen = centres.length === 1 ? [centres[0].id] : [];
 
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
   overlay.innerHTML = `
     <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
       <h2>Clock in</h2>
@@ -3508,7 +3662,6 @@ async function openJobClockInModal(project, onDone) {
         <button type="button" class="secondary" id="jci-cancel">Cancel</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
 
   const hint = overlay.querySelector('#jci-hint');
   overlay.querySelectorAll('.cc-chip').forEach(chip => chip.addEventListener('click', () => {
