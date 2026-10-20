@@ -3096,6 +3096,8 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         const [hh, mm] = state.breakStart.split(':').map(Number);
         const breakStartDate = new Date(state.outIso);
         breakStartDate.setHours(hh, mm, 0, 0);
+        // Overnight shift: a break time later than the clock-out belongs to the day before
+        if (breakStartDate > new Date(state.outIso)) breakStartDate.setDate(breakStartDate.getDate() - 1);
         onceFields.break_start = breakStartDate.toISOString();
         onceFields.break_minutes = state.breakMinutes;
       } else {
@@ -3201,13 +3203,19 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         <div id="cko-job-status-msg" style="margin-top:10px;"></div>
       </div>`;
 
+    // Only one of Complete / Not complete / do not book me may run at a time
+    const lockJobStatus = (on) => {
+      ['#cko-job-complete', '#cko-job-not-complete'].forEach(s => { const b = overlay.querySelector(s); if (b) b.disabled = on; });
+      const l = overlay.querySelector('#cko-job-no-book');
+      if (l) { l.style.pointerEvents = on ? 'none' : ''; l.style.opacity = on ? '0.6' : ''; }
+    };
     overlay.querySelector('#cko-job-complete').addEventListener('click', async (e) => {
-      e.target.disabled = true;
+      lockJobStatus(true);
       const { data: moved, error: mvErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']).select('id');
       const statusMsg = overlay.querySelector('#cko-job-status-msg');
       if (mvErr) {
         statusMsg.innerHTML = `<div class="error-box">${escapeHtml(mvErr.message)}</div>`;
-        e.target.disabled = false;
+        lockJobStatus(false);
         return;
       }
       if (!moved || !moved.length) {
@@ -3225,7 +3233,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       const msgEl = overlay.querySelector('#cko-job-status-msg');
       const btn = overlay.querySelector('#cko-job-not-complete');
       const label = btn.textContent;
-      btn.disabled = true;
+      lockJobStatus(true);
       btn.textContent = 'Booking...';
       try {
         const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
@@ -3237,12 +3245,26 @@ async function openClockOutModal(entry, onDone, opts = {}) {
           .eq('staff_id', entry.staff_id)
           .eq('assignment_date', backKey);
         const doubleBooked = (existingOnBackDay || []).filter(a => a.project_id !== project.id);
+        const alreadyHere = (existingOnBackDay || []).some(a => a.project_id === project.id);
 
-        await supabaseClient.from('schedule_assignments').insert({
-          staff_id: entry.staff_id, project_id: project.id, block_type: 'job',
-          assignment_date: backKey, start_time: '07:00', end_time: '15:00',
-        });
-        await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - booked back in for ${backKey}`);
+        let bookErr = null;
+        if (!alreadyHere) {
+          const { error } = await supabaseClient.from('schedule_assignments').insert({
+            staff_id: entry.staff_id, project_id: project.id, block_type: 'job',
+            assignment_date: backKey, start_time: '07:00', end_time: '15:00',
+          });
+          bookErr = error;
+        }
+        if (bookErr) {
+          // Job is Not Complete either way; say plainly that the booking did not go in
+          await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - could not book back in for ${backKey}, PM to schedule`);
+          overlay.querySelector('#cko-job-status-buttons').style.display = 'none';
+          overlay.querySelector('#cko-job-no-book').style.display = 'none';
+          msgEl.innerHTML = `<div class="error-box">Job marked Not complete, but you could not be booked back in for ${backLabel}. Let your PM know so they can book you.</div><button type="button" id="cko-job-status-continue" style="width:100%; margin-top:10px;">Continue</button>`;
+          overlay.querySelector('#cko-job-status-continue').addEventListener('click', renderStep3);
+          return;
+        }
+        await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - ${alreadyHere ? 'already booked' : 'booked back in'} for ${backKey}`);
 
         if (doubleBooked.length) {
           await logActivity('project', project.id, 'schedule_conflict', `Also booked on ${backKey} against: ${doubleBooked.map(a => a.projects?.name || 'another job').join(', ')}`);
@@ -3258,7 +3280,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       } catch (err) {
         msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         btn.textContent = label;
-        btn.disabled = false;
+        lockJobStatus(false);
       }
     });
 
@@ -3268,7 +3290,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       e.preventDefault();
       const link = e.currentTarget;
       const msgEl = overlay.querySelector('#cko-job-status-msg');
-      link.style.pointerEvents = 'none'; link.style.opacity = '0.6';
+      lockJobStatus(true);
       try {
         const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
         if (ncErr) throw ncErr;
@@ -3276,7 +3298,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         renderStep3();
       } catch (err) {
         msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
-        link.style.pointerEvents = ''; link.style.opacity = '';
+        lockJobStatus(false);
       }
     });
   }
