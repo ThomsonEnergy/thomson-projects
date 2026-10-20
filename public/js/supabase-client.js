@@ -2234,18 +2234,21 @@ const DEFAULT_HOME_SHORTCUTS = [
 const STAFF_DEFAULT_HOME_SHORTCUTS = [
   'my-day', 'chat', 'tasks', 'timesheets', 'knowledge', 'team', 'documents', 'projects',
 ];
-function defaultHomeShortcuts(role) {
-  return isPricingRole(role) ? DEFAULT_HOME_SHORTCUTS : STAFF_DEFAULT_HOME_SHORTCUTS;
+// The tiles this person actually sees. getMyHomeShortcuts() hands back the
+// DEFAULT_HOME_SHORTCUTS array itself when nothing was saved (home.html
+// checks that by identity), and this swaps in the staff set for field staff.
+function effectiveHomeShortcuts(saved, role) {
+  return saved === DEFAULT_HOME_SHORTCUTS && !isPricingRole(role) ? STAFF_DEFAULT_HOME_SHORTCUTS : saved;
 }
 function homeShortcutsFromProfile(profile) {
-  return (profile && profile.home_shortcuts) || defaultHomeShortcuts((profile && profile.role) || 'staff');
+  return effectiveHomeShortcuts((profile && profile.home_shortcuts) || DEFAULT_HOME_SHORTCUTS, (profile && profile.role) || 'staff');
 }
 
 let _cachedHomeShortcuts = null;
 async function getMyHomeShortcuts() {
   if (_cachedHomeShortcuts) return _cachedHomeShortcuts;
   const profile = await getMyProfile();
-  _cachedHomeShortcuts = homeShortcutsFromProfile(profile);
+  _cachedHomeShortcuts = (profile && profile.home_shortcuts) || DEFAULT_HOME_SHORTCUTS;
   return _cachedHomeShortcuts;
 }
 async function setMyHomeShortcuts(keys) {
@@ -2257,7 +2260,7 @@ async function setMyHomeShortcuts(keys) {
   patchMyProfile({ home_shortcuts: keys });
 }
 async function toggleHomeShortcut(key) {
-  const current = (await getMyHomeShortcuts()).slice();
+  const current = effectiveHomeShortcuts(await getMyHomeShortcuts(), await getMyRole()).slice();
   const idx = current.indexOf(key);
   if (idx === -1) current.push(key); else current.splice(idx, 1);
   await setMyHomeShortcuts(current);
@@ -2357,7 +2360,7 @@ async function renderMainNav(activeKey) {
   // again (only if anything differs) once this page's read lands.
   const cached = await getCachedProfile();
   if (cached) paint(cached.role || 'staff', homeShortcutsFromProfile(cached));
-  paint(await getMyRole(), await getMyHomeShortcuts());
+  { const role = await getMyRole(); paint(role, effectiveHomeShortcuts(await getMyHomeShortcuts(), role)); }
 
   // Delegated via single globals so the inline onclicks above (needed
   // since tabs/dropdown get fully replaced on every paint, which would
@@ -2366,7 +2369,7 @@ async function renderMainNav(activeKey) {
   window.__onNavStarClick = async (el) => {
     try {
       await toggleHomeShortcut(el.dataset.key);
-      paint(await getMyRole(), await getMyHomeShortcuts());
+      { const role = await getMyRole(); paint(role, effectiveHomeShortcuts(await getMyHomeShortcuts(), role)); }
     } catch (err) {
       alert('Could not save that: ' + err.message);
     }
