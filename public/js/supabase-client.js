@@ -3245,15 +3245,14 @@ async function openClockOutModal(entry, onDone, opts = {}) {
           .eq('staff_id', entry.staff_id)
           .eq('assignment_date', backKey);
         const doubleBooked = (existingOnBackDay || []).filter(a => a.project_id !== project.id);
-        const alreadyHere = (existingOnBackDay || []).some(a => a.project_id === project.id);
+        let alreadyHere = (existingOnBackDay || []).some(a => a.project_id === project.id);
 
+        // Server function: Staff-role tradies cannot write schedule_assignments directly
         let bookErr = null;
         if (!alreadyHere) {
-          const { error } = await supabaseClient.from('schedule_assignments').insert({
-            staff_id: entry.staff_id, project_id: project.id, block_type: 'job',
-            assignment_date: backKey, start_time: '07:00', end_time: '15:00',
-          });
+          const { data: booked, error } = await supabaseClient.rpc('book_back_after_clockout', { p_project_id: project.id, p_date: backKey });
           bookErr = error;
+          if (booked === 'already') alreadyHere = true;
         }
         if (bookErr) {
           // Job is Not Complete either way; say plainly that the booking did not go in
