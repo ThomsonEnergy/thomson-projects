@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Projects - Thomson Energy</title>
+<title>Jobs - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -28,8 +28,8 @@
   </div>
 
   <div class="wrap wide">
-    <h1>Projects</h1>
-    <p class="subtitle">Every project with its financial position at a glance. For the pipeline board (moving jobs between stages), see Job pipeline instead.</p>
+    <h1>Jobs</h1>
+    <p class="subtitle">Every job with its money position at a glance. To move jobs between stages, use the <a class="link-quiet" href="/dashboard.html">Pipeline</a>.</p>
 
     <div class="grid cols-4">
       <div class="stat"><div class="label">Total signed</div><div class="value" id="stat-signed">-</div></div>
@@ -40,12 +40,15 @@
 
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
-        <input id="project-search" placeholder="Search by name, client, or job number..." style="max-width:320px; margin:0;" />
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; flex:1 1 320px;">
+          <input id="project-search" placeholder="Search by name, client, or job number..." style="max-width:320px; margin:0;" />
+          <button type="button" class="secondary" id="new-job-btn" style="white-space:nowrap;">+ New job</button>
+        </div>
         <div id="bulk-delete-projects-controls" style="display:none; align-items:center; gap:10px;">
           <label style="display:flex; align-items:center; gap:6px; margin:0;"><input type="checkbox" id="select-all-projects" style="width:auto;" /> Select all</label>
           <button type="button" id="bulk-delete-projects-btn" class="secondary" style="display:none;">Delete selected</button>
         </div>
-        <p class="subtitle" id="bulk-delete-projects-hint" style="margin:0;">Enable Dev Mode in Settings to bulk-select and delete projects.</p>
+        <p class="subtitle" id="bulk-delete-projects-hint" style="margin:0;">Enable Dev Mode in Settings to bulk-select and delete jobs.</p>
       </div>
       <div id="bulk-delete-projects-msg"></div>
       <div id="projects-list"><p class="subtitle">Loading...</p></div>
@@ -57,58 +60,68 @@
   <script>
     let allRows = [];
 
+    let costsLoaded = false;
+
+    // Materials actually incurred, per job: only received line items count,
+    // the same rule the job page's "Actual cost" uses, so a part-received PO
+    // shows the same figure in both places. Only the POs for the jobs on
+    // this list, in batches so the request URL stays short.
+    async function loadMaterialCosts(ids) {
+      const byProject = {};
+      const batches = [];
+      for (let i = 0; i < ids.length; i += 100) batches.push(ids.slice(i, i + 100));
+      const results = await Promise.all(batches.map(batch => supabaseClient.from('purchase_orders')
+        .select('project_id, purchase_order_line_items(quantity, unit_cost)')
+        .in('project_id', batch)
+        .eq('purchase_order_line_items.received', true)));
+      results.forEach(({ data, error }) => {
+        if (error) { console.error('PO cost fetch failed:', error.message); return; }
+        (data || []).forEach(po => {
+          const total = (po.purchase_order_line_items || []).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
+          byProject[po.project_id] = (byProject[po.project_id] || 0) + total;
+        });
+      });
+      return byProject;
+    }
+
+    // Actual labour cost, per job - computed entirely server-side
+    // (get-accrued-labour-cost.js) from each employee's real pay rate,
+    // banded by the same daily overtime rule used on the job page, so
+    // an individual's ordinary_rate/rate_1_5x/rate_2x never has to reach
+    // this (or any) browser directly. Labour includes direct overheads;
+    // indirect only shows as the "incl. overheads" line.
+    async function loadLabourCosts(ids) {
+      const labour = {}, indirect = {};
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/get-accrued-labour-cost', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ projectIds: ids }),
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          Object.entries(data.byProject).forEach(([pid, info]) => {
+            labour[pid] = info.totalActualLabourCost;
+            indirect[pid] = info.totalIndirectOverhead || 0;
+          });
+        }
+      } catch (err) {
+        console.error('Accrued labour cost fetch failed:', err.message);
+      }
+      return { labour, indirect };
+    }
+
     async function loadProjects() {
       const listEl = document.getElementById('projects-list');
-      const [{ data: projects, error }, { data: poRows }] = await Promise.all([
-        supabaseClient.from('projects')
-          .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
-          .not('job_number', 'is', null)
-          .neq('pipeline_stage', 'archived')
-          .order('created_at', { ascending: false }),
-        supabaseClient.from('purchase_orders').select('project_id, purchase_order_line_items(quantity, unit_cost, received)'),
-      ]);
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      const { data: projects, error } = await supabaseClient.from('projects')
+        .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
+        .not('job_number', 'is', null)
+        .neq('pipeline_stage', 'archived')
+        .order('created_at', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
-      // Materials actually incurred, per project - only line items actually
-      // received count, the same rule the job page's "Actual cost" uses, so
-      // a part-received PO shows the same figure in both places.
-      const materialCostByProject = {};
-      (poRows || []).forEach(po => {
-        const total = (po.purchase_order_line_items || [])
-          .filter(li => li.received)
-          .reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
-        materialCostByProject[po.project_id] = (materialCostByProject[po.project_id] || 0) + total;
-      });
-
-      // Actual labour cost, per project - computed entirely server-side
-      // (get-accrued-labour-cost.js) from each employee's real pay rate,
-      // banded by the same weekly overtime rule used on the job page, so
-      // an individual's ordinary_rate/rate_1_5x/rate_2x never has to reach
-      // this (or any) browser directly. Labour includes direct overheads;
-      // indirect only shows as the "incl. overheads" line.
-      const labourCostByProject = {};
-      const indirectByProject = {};
-      if (projects && projects.length) {
-        try {
-          const { data: { session } } = await supabaseClient.auth.getSession();
-          const res = await fetch('/.netlify/functions/get-accrued-labour-cost', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-            body: JSON.stringify({ projectIds: projects.map(p => p.id) }),
-          });
-          const data = await res.json();
-          if (res.ok && data.ok) {
-            Object.entries(data.byProject).forEach(([pid, info]) => {
-              labourCostByProject[pid] = info.totalActualLabourCost;
-              indirectByProject[pid] = info.totalIndirectOverhead || 0;
-            });
-          }
-        } catch (err) {
-          console.error('Accrued labour cost fetch failed:', err.message);
-        }
-      }
-
-      allRows = (projects || []).map(p => {
+      const buildRows = (materialCostByProject, labourCostByProject, indirectByProject) => (projects || []).map(p => {
         const totalQuoted = (p.cost_centres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
         const isSigned = !!p.job_number;
         const signed = isSigned ? totalQuoted : 0;
@@ -119,6 +132,16 @@
         return { ...p, totalQuoted, signed, pending, invoiced, costOutlayed, costInclOverheads, isSigned };
       });
 
+      // The list paints as soon as the jobs land; costs fill in after.
+      costsLoaded = false;
+      allRows = buildRows({}, {}, {});
+      renderProjects();
+      if (!projects || !projects.length) return;
+
+      const ids = projects.map(p => p.id);
+      const [materialCostByProject, { labour, indirect }] = await Promise.all([loadMaterialCosts(ids), loadLabourCosts(ids)]);
+      costsLoaded = true;
+      allRows = buildRows(materialCostByProject, labour, indirect);
       renderProjects();
     }
 
@@ -133,12 +156,12 @@
         signed: acc.signed + p.signed, cost: acc.cost + p.costOutlayed, costIncl: acc.costIncl + p.costInclOverheads, invoiced: acc.invoiced + p.invoiced, pending: acc.pending + p.pending,
       }), { signed: 0, cost: 0, costIncl: 0, invoiced: 0, pending: 0 });
       document.getElementById('stat-signed').textContent = money(totals.signed);
-      document.getElementById('stat-cost').textContent = money(totals.cost);
-      document.getElementById('stat-cost-incl').textContent = `incl. overheads ${money(totals.costIncl)}`;
+      document.getElementById('stat-cost').textContent = costsLoaded ? money(totals.cost) : '...';
+      document.getElementById('stat-cost-incl').textContent = costsLoaded ? `incl. overheads ${money(totals.costIncl)}` : '';
       document.getElementById('stat-invoiced').textContent = money(totals.invoiced);
       document.getElementById('stat-pending').textContent = money(totals.pending);
 
-      if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No projects match.</p>`; return; }
+      if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">${allRows.length ? 'No jobs match.' : 'No jobs yet.'}</p>`; return; }
 
       const devMode = isDevModeActive();
       document.getElementById('bulk-delete-projects-controls').style.display = devMode ? 'flex' : 'none';
@@ -149,21 +172,23 @@
           <thead><tr>${devMode ? '<th></th>' : ''}<th>#</th><th>Name</th><th>Client</th><th class="num">Signed</th><th class="num">Pending</th><th class="num">Cost outlayed</th><th class="num">Partial invoiced</th></tr></thead>
           <tbody>
             ${filtered.map(p => `
-              <tr class="project-row-link" data-id="${p.id}" style="cursor:pointer;">
-                ${devMode ? `<td data-label=""><input type="checkbox" class="project-select" data-id="${p.id}" style="width:auto;" onclick="event.stopPropagation()" /></td>` : ''}
-                <td data-label="#">${p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '-')}</td>
-                <td data-label="Name">${p.name}</td>
-                <td data-label="Client">${p.client_name || '-'}</td>
+              <tr class="project-row-link" style="cursor:pointer;">
+                ${devMode ? `<td data-label=""><input type="checkbox" class="project-select" data-id="${escapeHtml(p.id)}" style="width:auto;" /></td>` : ''}
+                <td data-label="#"><a class="project-link" href="/project.html?id=${encodeURIComponent(p.id)}" style="color:inherit; text-decoration:none;">${escapeHtml(p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '-'))}</a></td>
+                <td data-label="Name"><a href="/project.html?id=${encodeURIComponent(p.id)}" style="color:inherit; text-decoration:none;">${escapeHtml(p.name || '')}</a></td>
+                <td data-label="Client">${escapeHtml(p.client_name || '-')}</td>
                 <td class="num" data-label="Signed">${p.isSigned ? money(p.signed) : '<span class="subtitle">Not signed</span>'}</td>
                 <td class="num" data-label="Pending">${p.isSigned ? '<span class="subtitle">-</span>' : money(p.pending)}</td>
-                <td class="num" data-label="Cost outlayed">${money(p.costOutlayed)}${p.costInclOverheads > p.costOutlayed ? `<div class="subtitle" style="font-size:11px;">incl. overheads ${money(p.costInclOverheads)}</div>` : ''}</td>
+                <td class="num" data-label="Cost outlayed">${!costsLoaded ? '<span class="subtitle">...</span>' : money(p.costOutlayed)}${costsLoaded && p.costInclOverheads > p.costOutlayed ? `<div class="subtitle" style="font-size:11px;">incl. overheads ${money(p.costInclOverheads)}</div>` : ''}</td>
                 <td class="num" data-label="Partial invoiced">${money(p.invoiced)}</td>
               </tr>`).join('')}
           </tbody>
         </table>`;
 
+      // The number and name are real links (long-press, new tab, copy); a
+      // click anywhere else on the row follows them, except the Dev Mode tick box.
       listEl.querySelectorAll('.project-row-link').forEach(row => {
-        row.addEventListener('click', () => { window.location.href = `/project.html?id=${row.dataset.id}`; });
+        row.addEventListener('click', (e) => { if (!e.target.closest('a, input')) row.querySelector('.project-link').click(); });
       });
       wireBulkDeleteProjects(filtered);
     }
@@ -317,6 +342,9 @@
       if (!session) return;
       syncThemeFromProfile();
       renderMainNav('projects');
+      document.getElementById('new-job-btn').addEventListener('click', () => {
+        openQuickJobPanel((project) => { window.location.href = `/project.html?id=${project.id}`; });
+      });
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();

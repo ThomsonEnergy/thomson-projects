@@ -2231,11 +2231,11 @@ const DEFAULT_HOME_SHORTCUTS = [
   'job-pipeline', 'projects', 'timesheets', 'quotes', 'invoices', 'suppliers',
   'leads', 'clients', 'stock', 'team', 'fleet', 'bugs',
 ];
-const STAFF_HOME_SHORTCUTS = [
+const STAFF_DEFAULT_HOME_SHORTCUTS = [
   'my-day', 'chat', 'tasks', 'timesheets', 'knowledge', 'team', 'documents', 'projects',
 ];
 function defaultHomeShortcuts(role) {
-  return isPricingRole(role) ? DEFAULT_HOME_SHORTCUTS : STAFF_HOME_SHORTCUTS;
+  return isPricingRole(role) ? DEFAULT_HOME_SHORTCUTS : STAFF_DEFAULT_HOME_SHORTCUTS;
 }
 function homeShortcutsFromProfile(profile) {
   return (profile && profile.home_shortcuts) || defaultHomeShortcuts((profile && profile.role) || 'staff');
