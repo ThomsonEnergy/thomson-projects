@@ -4235,7 +4235,7 @@ async function checkAndAdvanceHandover(projectId) {
 // Mirrors advance-job-stage.js's server-side logic (run right after a
 // deposit is paid) - re-checked any time a required-before-scheduling
 // task is completed or a new one is added, but only while the job
-// hasn't been scheduled yet (awaiting_action/ready_to_book). Once it's
+// hasn't been scheduled yet (awaiting_action/ready_to_book; awaiting_client_action is hand-moved only). Once it's
 // actually job_booked or further along, a task change shouldn't silently
 // move it backwards - see PROJECT_SPEC/the job-not-complete flow for
 // how a job returns to awaiting_action deliberately instead.
@@ -7186,7 +7186,8 @@ const PIPELINE_STAGES = [
   { key: 'quote_sent',        label: 'Quote Sent' },
   { key: 'quote_approved',    label: 'Quote Approved' },
   { key: 'deposit_paid',      label: 'Deposit Paid' },
-  { key: 'awaiting_action',   label: 'Awaiting Action' },
+  { key: 'awaiting_action',   label: 'Awaiting Our Action' },
+  { key: 'awaiting_client_action', label: 'Awaiting Client Action' },
   { key: 'ready_to_book',     label: 'Ready to Book' },
   { key: 'job_booked',        label: 'Job Booked' },
   { key: 'job_not_complete',  label: 'Job Not Complete' },

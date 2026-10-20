@@ -3,7 +3,7 @@
 // later) or clocked in (migration 20261023000000). That rule re-checks a
 // job when its bookings or clock-ins change; this catches the ones whose
 // last booking simply slipped into the past. Moves them back to Ready to
-// Book (or Awaiting Action if required tasks are open). Migration
+// Book (or Awaiting Our Action if required tasks are open). Migration
 // 20261024000000.
 
 const { getAdminClient } = require('./_shared/require-admin');
@@ -16,7 +16,7 @@ exports.handler = () => runAgent('sweep-job-booked', async () => {
   if (error) throw error;
 
   const moved = data || [];
-  const label = { ready_to_book: 'Ready to Book', awaiting_action: 'Awaiting Action' };
+  const label = { ready_to_book: 'Ready to Book', awaiting_action: 'Awaiting Our Action' };
   const details = moved.map(r => `J${r.job_number} to ${label[r.new_stage] || r.new_stage}`).join(', ');
   console.log(`sweep-job-booked: moved ${moved.length} job(s) out of Job Booked. ${details}`);
   return {
