@@ -249,7 +249,9 @@
           .range(entries.length, entries.length + JOB_ACTIVITY_PAGE); // one extra row says whether there are more
         if (error) throw error;
         hasMore = (data || []).length > JOB_ACTIVITY_PAGE;
-        entries.push(...(data || []).slice(0, JOB_ACTIVITY_PAGE));
+        // Paged by position: a new entry since the last page shifts rows down, so skip ones already shown
+        const seen = new Set(entries.map(e => e.id));
+        entries.push(...(data || []).slice(0, JOB_ACTIVITY_PAGE).filter(e => !seen.has(e.id)));
       };
 
       const draw = () => {
@@ -6308,11 +6310,11 @@
       const folders = [...new Set(['Plans', ...(docs || []).map(d => d.folder)])]
         .sort((a, b) => (a === 'Plans' ? -1 : b === 'Plans' ? 1 : a.localeCompare(b)));
       const folderOptions = ['Plans', 'General', ...folders.filter(f => f !== 'Plans' && f !== 'General')];
-      folderSelect.innerHTML = folderOptions.map(f => `<option value="${f}">${f}</option>`).join('');
+      folderSelect.innerHTML = folderOptions.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
       folderSelect.value = folderOptions.includes(selectedDocFolder) ? selectedDocFolder : 'General';
 
       pillsEl.innerHTML = ['All', ...folders].map(f => `
-        <button type="button" class="secondary doc-folder-pill" data-folder="${f}" style="font-size:12px; padding:6px 12px; ${f === selectedDocFolder ? 'background:var(--accent-dim); color:var(--accent);' : ''}">${f}</button>
+        <button type="button" class="secondary doc-folder-pill" data-folder="${escapeHtml(f)}" style="font-size:12px; padding:6px 12px; ${f === selectedDocFolder ? 'background:var(--accent-dim); color:var(--accent);' : ''}">${escapeHtml(f)}</button>
       `).join('');
       pillsEl.querySelectorAll('.doc-folder-pill').forEach(btn => {
         btn.addEventListener('click', () => { selectedDocFolder = btn.dataset.folder; loadDocuments(projectId); });
@@ -6366,8 +6368,11 @@
           }).join('')}
         </div>`;
       // A picture the resizer cannot handle falls back to the full-size file.
+      // A link that expired while the tab sat open (lazy tiles load late) is signed again.
       listEl.querySelectorAll('img[data-full]').forEach(img => img.addEventListener('error', () => {
-        if (img.src !== img.dataset.full) img.src = img.dataset.full;
+        const p = img.closest('.doc-tile')?.querySelector('.doc-view-link')?.dataset.path;
+        if (p) signDocThumbUrl(p, 3600).then(u => { img.src = u || img.dataset.full; }).catch(() => { img.src = img.dataset.full; });
+        else if (img.src !== img.dataset.full) img.src = img.dataset.full;
       }, { once: true }));
 
       // PDFs show their first page like a photo, filled in after the grid
@@ -6408,7 +6413,8 @@
             if (doc && (doc.mime_type || '').startsWith('image/')) {
               const images = visible.filter(isImageDoc);
               const fresh = await signDocUrls(images.map(d => d.file_path));
-              const imageUrls = await Promise.all(images.map(d => fresh[d.file_path] || getSignedDocUrl(d.file_path)));
+              // One missing file must not stop the viewer opening
+              const imageUrls = await Promise.all(images.map(d => fresh[d.file_path] || getSignedDocUrl(d.file_path).catch(() => '')));
               openPhotoLightbox(imageUrls, images.indexOf(doc), {
                 captions: images.map(d => d.file_name),
                 onMarkup: async (i, blob) => { await saveDocCopy(blob, images[i], 'jpg', 'image/jpeg'); },
