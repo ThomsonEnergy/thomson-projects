@@ -101,6 +101,7 @@
     },
     {
       label: 'Staff',
+      financeOnly: true, // only Admin and Finance can open another person's profile
       run: async (q) => {
         const data = must(await supabaseClient.from('profiles')
           .select('id, full_name').ilike('full_name', `%${q}%`).order('full_name').limit(PER_GROUP));
@@ -185,10 +186,10 @@
     const num = numMatch ? numMatch[1] : null;
     panel.innerHTML = '<div class="gsearch-empty">Searching...</div>';
     showPanel();
-    let pricing = false;
-    try { pricing = isPricingRole(await getMyRole()); } catch (e) { /* treat as Staff */ }
+    let pricing = false, finance = false;
+    try { const role = await getMyRole(); pricing = isPricingRole(role); finance = isFinanceRole(role); } catch (e) { /* treat as Staff */ }
     if (mySeq !== seq) return;
-    const groups = await Promise.all(SOURCES.filter(s => pricing || !s.pricingOnly).map(s =>
+    const groups = await Promise.all(SOURCES.filter(s => (pricing || !s.pricingOnly) && (finance || !s.financeOnly)).map(s =>
       s.run(q, num).then(rows => ({ label: s.label, rows }), () => ({ label: s.label, rows: [], failed: true }))));
     if (mySeq !== seq) return; // a newer search has started since
     const filled = groups.filter(g => g.rows.length);

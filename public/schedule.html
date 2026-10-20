@@ -295,7 +295,7 @@
         const assignmentsByDate = {};
         (assignments || []).forEach(a => { (assignmentsByDate[a.assignment_date] ||= []).push(a); });
 
-        const todayStr = dateToStr(new Date());
+        const todayStr = sydneyDateKey(new Date());
 
         let html = '';
         for (let i = 0; i < totalCells; i++) {
@@ -352,7 +352,7 @@
         // A failed staff list at start up is fetched again here, so Retry recovers it
         if (!staffList.length) await loadPickerData();
         const dateStr = dateToStr(dayViewDate);
-        const todayStr = dateToStr(new Date());
+        const todayStr = sydneyDateKey(new Date());
         const isPastDay = dateStr < todayStr;
         document.getElementById('day-board-notice').innerHTML = '';
 

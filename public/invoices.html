@@ -208,7 +208,7 @@
         </table>`;
 
       const showAll = listEl.querySelector('#inv-show-all');
-      if (showAll) showAll.addEventListener('click', (e) => { e.preventDefault(); clearInvoiceFocus(); renderInvoiceList(); });
+      if (showAll) showAll.addEventListener('click', (e) => { e.preventDefault(); clearInvoiceFocus(); document.getElementById('invoice-filter').value = 'all'; renderInvoiceList(); });
 
       listEl.querySelectorAll('.xero-toggle-btn').forEach(btn => {
         btn.addEventListener('click', () => {

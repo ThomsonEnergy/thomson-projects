@@ -636,6 +636,8 @@
     let dayBreak = { taken: null, start: '', minutes: 30, skipReason: '' };
 
     async function openDayEditPanel(dateStr, staffId = myUserId, staffName = myProfileName, prefill = null) {
+      // The job list loads in the background; the editor needs it for Recent jobs and stage chips
+      if (window.__tsProjectsReady) await window.__tsProjectsReady;
       if (document.getElementById('day-edit-overlay')) return;
       const overlay = document.createElement('div');
       overlay.id = 'day-edit-overlay';
@@ -1403,6 +1405,7 @@
       // Every card loads at once; the job list only matters once a day is opened for editing
       const logFail = (what) => (err) => console.error(`Timesheets: ${what} failed`, err);
       const projectsReady = loadProjectOptions().catch(logFail('job list'));
+      window.__tsProjectsReady = projectsReady;
       initTeamWeekCard(myRole);
       initDevModeEntriesCard(myRole);
       initXeroPayrollCard(myRole);

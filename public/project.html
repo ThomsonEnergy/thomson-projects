@@ -8164,7 +8164,7 @@
       const session = await requireLogin();
       if (!session) return;
       syncThemeFromProfile();
-      renderMainNav('job-pipeline');
+      renderMainNav('projects');
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();

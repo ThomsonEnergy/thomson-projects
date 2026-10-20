@@ -1897,7 +1897,9 @@ function saveCachedProfile(profile) {
     else sessionStorage.removeItem(PROFILE_CACHE_KEY);
   } catch (e) { /* storage blocked: the next page just reads it again */ }
 }
-// Last page's copy, only if it belongs to whoever is logged in now.
+// Last page's copy, only if it belongs to whoever is logged in now. Pages await
+// requireLogin (which reads the profile fresh) before the nav paints, so this copy
+// only matters when that fresh read failed; it is used for painting, never access.
 async function getCachedProfile() {
   if (_myProfile) return _myProfile;
   try {
@@ -6757,7 +6759,7 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
 // still here; login and home load the animated version themselves. Left off
 // the client-facing pages, which also keeps it out of quote and invoice PDFs.
 (function () {
-  const clientPages = ['quote', 'invoice', 'review', 'letter', 'share-licences', 'rates'];
+  const clientPages = ['quote', 'invoice', 'review', 'letter', 'share-licences', 'rates', 'po'];
   const page = (location.pathname.split('/').pop() || '').replace(/\.html$/, '');
   if (clientPages.includes(page)) return;
   const start = () => {
