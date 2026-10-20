@@ -62,7 +62,7 @@ Read-only review of the PO, supplier bill, payment and stock code against the ow
 | G6 | **Adjustment history on Stock.** Count corrections are logged on the material in `activity_log` with the person, but only `logs.html` (Admin) shows them. Stock page edits log no old / new number. |
 | G7 | **Tools and equipment register.** Nothing exists (`assets.html` is customer assets, `fleet.html` is vehicles). |
 
-## Fix plan (owner said yes 20 Oct 2026; Deliveries 1 and 2 LIVE, migrations 20261108000000 and 20261109000000)
+## Fix plan (owner said yes 20 Oct 2026; Deliveries 1 to 3 LIVE, migrations 20261108000000 to 20261110000000)
 
 Four consolidated deliveries, each to `main` with its migration on production.
 

@@ -81,6 +81,7 @@
           <button class="danger" id="clock-out-btn" style="flex:1;">Clock out</button>
           <button type="button" class="secondary" id="switch-job-btn" style="flex:1;">Switch job</button>
         </div>
+        <button type="button" class="secondary" id="used-stock-btn" style="width:100%; margin-top:10px; min-height:44px; display:none;">Used stock on this job</button>
         <div id="active-job-card" style="display:none;"></div>
       </div>
       <div id="clock-msg"></div>
@@ -111,7 +112,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=106"></script>
+  <script src="/js/supabase-client.js?v=107"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -179,6 +180,11 @@
         elapsedInterval = setInterval(update, 30000);
         document.getElementById('clock-out-btn').onclick = () => openClockOutModal(data, checkActiveClock);
         document.getElementById('switch-job-btn').onclick = () => openJobSwitchModal(data, checkActiveClock);
+        // Stock taken from the van or the Warehouse for this job: a few taps, costed to the job.
+        const usedBtn = document.getElementById('used-stock-btn');
+        const isJob = !!(data.projects && data.projects.job_number);
+        usedBtn.style.display = isJob ? 'block' : 'none';
+        usedBtn.onclick = () => openUsedStockPanel({ projectId: data.project_id, jobLabel: projectRef(data.projects) });
         await renderActiveJobCard(data.project_id);
       } else {
         document.getElementById('clock-heading').textContent = 'Clock in';

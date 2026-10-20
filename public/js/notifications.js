@@ -20,6 +20,7 @@ const NOTIF_KINDS = [
   ['supplier_bill', 'Emailed supplier bills that need checking (admin and finance)'],
   ['price_list', 'Emailed price lists with changes to check (admin and finance)'],
   ['statement', 'Supplier statements that do not reconcile, and supplier replies (admin and finance)'],
+  ['stock_low', 'Stock flagged running low from a van or the Warehouse (admin and finance)'],
   ['ops_digest', 'Ops manager 5am digest (ops manager people)'],
   ['agent_alert', 'A background worker has stopped working (ops manager people)'],
   ['review', 'Client reviews received'],
