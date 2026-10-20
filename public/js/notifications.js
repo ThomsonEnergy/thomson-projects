@@ -137,9 +137,11 @@ const NOTIF_KINDS = [
     unread = count || 0;
     const badge = document.getElementById('notif-badge');
     if (badge) { badge.textContent = unread > 99 ? '99+' : String(unread); badge.style.display = unread ? 'flex' : 'none'; }
-    document.title = (unread ? `(${unread}) ` : '') + baseTitle;
+    window.__teApplyTitle();
     try { if (navigator.setAppBadge) { unread ? navigator.setAppBadge(unread) : navigator.clearAppBadge(); } } catch (e) { /* optional */ }
   }
+  // setPageTitle (supabase-client.js) keeps the record name in __teBaseTitle; the unread count goes in front
+  window.__teApplyTitle = () => { document.title = (unread ? `(${unread}) ` : '') + (window.__teBaseTitle || baseTitle); };
   async function loadItems() {
     const { data } = await supabaseClient.from('notifications').select('*').eq('user_id', me).order('created_at', { ascending: false }).limit(40);
     items = data || [];

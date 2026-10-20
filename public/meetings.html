@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Meetings - Thomson Energy</title>
+<title>Meetings - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .mt-tabs { display:flex; gap:6px; margin:14px 0 4px; flex-wrap:wrap; }
@@ -91,8 +91,8 @@
     <div id="mt-detail-view" style="display:none;"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=103"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script src="/js/meeting-recorder.js?v=1"></script>
   <script>
     let me = null, myRole = 'staff', staff = [], staffById = {};
@@ -209,7 +209,7 @@
     // ---------- list view ----------
     async function loadMeetings() {
       const { data, error } = await supabaseClient.from('meetings')
-        .select('*, projects(id, name, job_number, quote_number), job_tasks(id, completed, followed_up_at)')
+        .select('id, title, meeting_date, meeting_time, location, project_id, project_ids, notes, created_by, created_at, projects(id, name, job_number, quote_number), job_tasks(id, completed, followed_up_at)')
         .order('meeting_date', { ascending: false }).order('created_at', { ascending: false });
       if (error) { document.getElementById('mt-meetings').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       meetings = data || [];
@@ -480,6 +480,9 @@
     }
 
     async function openMeeting(id, prefill) {
+      // From the list: a new history entry, so back (or the iPhone back swipe) returns to it.
+      // Already on a meeting (a new one just saved): swap the entry instead.
+      const fromList = document.getElementById('mt-list-view').style.display !== 'none';
       document.getElementById('mt-list-view').style.display = 'none';
       const view = document.getElementById('mt-detail-view');
       view.style.display = 'block';
@@ -495,16 +498,19 @@
         linkedJobs = (prefill && prefill.project) ? [{ id: prefill.project.id, label: projectRef(prefill.project) }] : [];
       }
       currentMeeting = m;
-      if (!window.__mtNavigating) history.pushState({}, '', id ? `/meetings.html?id=${id}` : '/meetings.html?new=1');
+      const url = id ? `/meetings.html?id=${id}` : '/meetings.html?new=1';
+      if (!window.__mtNavigating) { if (fromList) history.pushState({ teMt: 1 }, '', url); else history.replaceState(history.state, '', url); }
       renderDetail(m, prefill || {});
     }
     function closeMeeting() {
       if (typeof maiIsRecording === 'function' && maiIsRecording() && !confirm('A recording is in progress and would be lost. Leave anyway?')) return;
       if (typeof maiUnmount === 'function') maiUnmount();
+      // Opened from the list: step back to it (popstate shows the list) so the back swipe does not reopen the meeting.
+      if (history.state && history.state.teMt) { history.back(); return; }
       document.getElementById('mt-detail-view').style.display = 'none';
       document.getElementById('mt-list-view').style.display = 'block';
       currentMeeting = null;
-      if (!window.__mtNavigating) history.pushState({}, '', '/meetings.html');
+      history.replaceState(null, '', '/meetings.html');
       loadMeetings();
       if (currentTab === 'followups') loadFollowUps();
     }
@@ -685,10 +691,16 @@
           }
           await openMeeting(null, { project });
         } else {
+          if (typeof maiIsRecording === 'function' && maiIsRecording() && !confirm('A recording is in progress and would be lost. Leave anyway?')) {
+            history.pushState({ teMt: 1 }, '', currentMeeting ? `/meetings.html?id=${currentMeeting.id}` : '/meetings.html?new=1');
+            return;
+          }
           if (typeof maiUnmount === 'function') maiUnmount();
           document.getElementById('mt-detail-view').style.display = 'none';
           document.getElementById('mt-list-view').style.display = 'block';
+          currentMeeting = null;
           await loadMeetings();
+          if (currentTab === 'followups') loadFollowUps();
         }
       } finally { window.__mtNavigating = false; }
     }
@@ -715,6 +727,12 @@
       document.getElementById('mt-search').addEventListener('input', renderMeetingList);
       document.getElementById('mt-fu-filter').addEventListener('change', loadFollowUps);
       window.addEventListener('popstate', routeFromUrl);
+      // Opened straight on a meeting (a link): put the list behind it so back lands on the list.
+      if (/[?&](id|new)=/.test(location.search)) {
+        const url = location.pathname + location.search;
+        history.replaceState(null, '', '/meetings.html');
+        history.pushState({ teMt: 1 }, '', url);
+      }
       await routeFromUrl();
       // number on the Follow-ups tab even before it is opened
       supabaseClient.from('job_tasks').select('id', { count: 'exact', head: true }).not('meeting_id', 'is', null).eq('completed', true).is('followed_up_at', null)

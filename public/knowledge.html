@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Knowledge - Thomson Energy</title>
+<title>Knowledge - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -96,10 +96,16 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=103"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let allEntries = [];
+    // The list loads without the full text (whole OCR'd standards); the text is
+    // fetched per entry when it is opened or edited, and kept here.
+    const LIST_COLUMNS = 'id, title, category, entry_type, source_url, file_path, file_name, created_by, created_at, extraction_error, profiles(full_name)';
+    let hasContent = new Set(); // ids of entries that have text
+    const contentById = {};
+    let searchMatches = null; // ids matching the search (server side), or null with no search
     let myRole = 'staff';
     let myId = null;
     let editingEntryId = null;
@@ -115,7 +121,18 @@
       setFormOpen(document.getElementById('kb-form-fields').style.display === 'none');
     });
 
-    function startEdit(entry) {
+    async function fetchEntryContent(id) {
+      if (id in contentById) return contentById[id];
+      const { data, error } = await supabaseClient.from('knowledge_entries').select('content').eq('id', id).maybeSingle();
+      if (error) throw error;
+      contentById[id] = (data && data.content) || '';
+      return contentById[id];
+    }
+
+    async function startEdit(entry) {
+      let content;
+      try { content = await fetchEntryContent(entry.id); }
+      catch (err) { alert(`Could not open the text: ${friendlyError(err)}`); return; }
       setFormOpen(true);
       editingEntryId = entry.id;
       document.getElementById('kb-title').value = entry.title;
@@ -130,7 +147,7 @@
         r.dispatchEvent(new Event('change'));
         if (r.value !== 'text') r.disabled = true;
       });
-      document.getElementById('kb-text-content').value = entry.content || '';
+      document.getElementById('kb-text-content').value = content || '';
       document.getElementById('kb-form-heading').textContent = `Editing "${entry.title}"`;
       document.getElementById('kb-editing-note').style.display = 'block';
       document.getElementById('kb-save-btn').textContent = 'Update';
@@ -178,6 +195,7 @@
         try {
           const { error: updErr } = await supabaseClient.from('knowledge_entries').update({ title, category, content }).eq('id', editingEntryId);
           if (updErr) throw updErr;
+          delete contentById[editingEntryId];
           await logActivity('knowledge_entry', editingEntryId, 'updated', `Updated "${title}" in the Knowledge Base`);
           cancelEdit();
           document.getElementById('kb-save-msg').innerHTML = `<div class="success-box">Updated.</div>`;
@@ -261,13 +279,8 @@
       btn.textContent = 'Save';
     });
 
-    function entryPreview(content) {
-      if (!content) return '';
-      return content.length > 220 ? content.slice(0, 220) + '...' : content;
-    }
-
     function entryStatusPreview(e) {
-      if (e.content) return entryPreview(e.content);
+      if (hasContent.has(e.id)) return 'Show the text';
       if (e.extraction_error) return `Couldn't read this: ${e.extraction_error}`;
       if (jobsByEntry[e.id] && ['queued', 'running'].includes(jobsByEntry[e.id].status)) return 'Being read now, see the progress above.';
       if (e.entry_type !== 'text') return 'Reading in the background - refresh the page in a minute.';
@@ -275,12 +288,10 @@
     }
 
     function renderList() {
-      const q = document.getElementById('kb-search').value.trim().toLowerCase();
       const cat = document.getElementById('kb-filter-category').value;
       const filtered = allEntries.filter(e => {
         if (cat && e.category !== cat) return false;
-        if (!q) return true;
-        return (e.title || '').toLowerCase().includes(q) || (e.content || '').toLowerCase().includes(q);
+        return !searchMatches || searchMatches.has(e.id);
       });
       // Alphabetical, with embedded numbers compared as numbers (numeric:
       // true) so "AS/NZS 3000" sorts before "AS/NZS 3001" and "3000" before
@@ -306,17 +317,31 @@
           </div>
           ${jobStatusLine(e)}
           <div class="kb-row-msg"></div>
-          ${e.content && e.extraction_error ? `<p style="margin:6px 0 0; font-size:12px; color:var(--red);">${escapeHtml(e.extraction_error)}</p>` : ''}
-          <p class="kb-preview" style="margin:6px 0 0; font-size:13px; ${e.content ? 'cursor:pointer;' : 'font-style:italic; color:var(--muted);'} white-space:pre-wrap;" data-expanded="false">${escapeHtml(entryStatusPreview(e))}</p>
+          ${hasContent.has(e.id) && e.extraction_error ? `<p style="margin:6px 0 0; font-size:12px; color:var(--red);">${escapeHtml(e.extraction_error)}</p>` : ''}
+          <p class="kb-preview" style="margin:6px 0 0; font-size:13px; ${hasContent.has(e.id) ? 'cursor:pointer; color:var(--accent);' : 'font-style:italic; color:var(--muted);'} white-space:pre-wrap;" data-expanded="false">${escapeHtml(entryStatusPreview(e))}</p>
         </div>`).join('');
 
       listEl.querySelectorAll('.kb-entry').forEach(row => {
         const entry = allEntries.find(e => e.id === row.dataset.id);
-        row.querySelector('.kb-preview').addEventListener('click', (ev) => {
-          if (!entry.content) return;
-          const expanded = ev.target.dataset.expanded === 'true';
-          ev.target.textContent = expanded ? entryPreview(entry.content) : entry.content;
-          ev.target.dataset.expanded = expanded ? 'false' : 'true';
+        const preview = row.querySelector('.kb-preview');
+        preview.addEventListener('click', async () => {
+          if (!hasContent.has(entry.id) || preview.dataset.busy) return;
+          if (preview.dataset.expanded === 'true') {
+            preview.textContent = 'Show the text';
+            preview.style.color = 'var(--accent)';
+            preview.dataset.expanded = 'false';
+            return;
+          }
+          preview.dataset.busy = '1';
+          preview.textContent = 'Loading...';
+          try {
+            preview.textContent = await fetchEntryContent(entry.id);
+            preview.style.color = '';
+            preview.dataset.expanded = 'true';
+          } catch (err) {
+            preview.textContent = `Could not load the text: ${friendlyError(err)}`;
+          }
+          delete preview.dataset.busy;
         });
         const openBtn = row.querySelector('.kb-open-file');
         if (openBtn) {
@@ -422,20 +447,46 @@
     }
 
     async function loadEntries(withJobs = true) {
-      if (withJobs) await loadJobs();
-      const { data, error } = await supabaseClient
-        .from('knowledge_entries')
-        .select('*, profiles(full_name)')
-        .order('created_at', { ascending: false });
+      const [, { data, error }, { data: withText }] = await Promise.all([
+        withJobs ? loadJobs() : null,
+        supabaseClient.from('knowledge_entries').select(LIST_COLUMNS).order('created_at', { ascending: false }),
+        // which entries have text, without downloading it
+        supabaseClient.from('knowledge_entries').select('id').not('content', 'is', null),
+      ]);
       allEntries = error ? [] : data;
+      hasContent = new Set((withText || []).map(r => r.id));
+      // Text may have changed (a read finished, an edit); fetch it again when opened
+      Object.keys(contentById).forEach(id => { delete contentById[id]; });
+      if (document.getElementById('kb-search').value.trim()) await runSearch();
+      else renderList();
+    }
+
+    // Search runs on the server over title and the full text (ilike), so the
+    // text never has to be downloaded. A newer search always wins over a slower older one.
+    let searchSeq = 0;
+    async function runSearch() {
+      const seq = ++searchSeq;
+      const q = document.getElementById('kb-search').value.trim();
+      if (!q) { searchMatches = null; renderList(); return; }
+      // Characters that are special in a filter or a like pattern match any single character instead
+      const pattern = `%${q.replace(/[%_*"\\]/g, '_')}%`;
+      const { data, error } = await supabaseClient.from('knowledge_entries').select('id')
+        .or(`title.ilike."${pattern}",content.ilike."${pattern}"`);
+      if (seq !== searchSeq) return;
+      if (error) {
+        document.getElementById('kb-list').innerHTML = `<div class="error-box">Search failed: ${escapeHtml(friendlyError(error))}</div>`;
+        return;
+      }
+      searchMatches = new Set((data || []).map(r => r.id));
       renderList();
     }
-    document.getElementById('kb-search').addEventListener('input', renderList);
+    let searchTimer = null;
+    document.getElementById('kb-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 250); });
     // Results already update as you type - the button and Enter key are for
     // anyone who types something and then looks for a way to "go".
-    document.getElementById('kb-search-btn').addEventListener('click', renderList);
-    document.getElementById('kb-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); renderList(); } });
-    document.getElementById('kb-search-clear').addEventListener('click', () => { document.getElementById('kb-search').value = ''; renderList(); });
+    document.getElementById('kb-search-btn').addEventListener('click', () => { clearTimeout(searchTimer); runSearch(); });
+    document.getElementById('kb-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); runSearch(); } });
+    document.getElementById('kb-search-clear').addEventListener('click', () => { clearTimeout(searchTimer); document.getElementById('kb-search').value = ''; runSearch(); });
     document.getElementById('kb-filter-category').addEventListener('change', renderList);
 
     (async () => {

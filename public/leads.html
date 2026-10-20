@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Leads - Thomson Energy</title>
+<title>Leads - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -57,8 +57,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=103"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     function timeAgo(dateStr) {
       const diffMs = Date.now() - new Date(dateStr).getTime();
@@ -558,15 +558,28 @@
               <div class="empty-icon">&#128274;</div>
               <h2>Not available for your role</h2>
               <p>Leads are limited to Sales, Finance, and Admin accounts.</p>
-              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Projects</a>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Pipeline</a>
             </div>
           </div>`;
         return;
       }
 
+      // ?id= (from the top bar search) opens that lead straight away
+      const deepLeadId = new URLSearchParams(window.location.search).get('id');
+      if (deepLeadId) openLeadById(deepLeadId);
+
       await loadCallbackRequests();
       await loadLeads();
     })();
+
+    async function openLeadById(id) {
+      const [{ data: lead }, { data: linked }] = await Promise.all([
+        supabaseClient.from('leads').select('*').eq('id', id).maybeSingle(),
+        supabaseClient.from('projects').select('id').eq('lead_id', id).limit(1).maybeSingle(),
+      ]);
+      if (!lead) { showToast('That lead could not be found', { error: true }); return; }
+      openLeadDetail(lead, linked ? linked.id : null);
+    }
   </script>
 </body>
 </html>

@@ -10,6 +10,8 @@ Read-only review of every page in `public/` for things that make the app harder 
 
 **Delivery 3 (items 32 to 82, less 33, 35, 49 and 62 which shipped in delivery 1):** shipped 20 Oct 2026, migration 20261107000000.
 
+**Delivery 4 (items 83 to 109, less 93 which shipped in delivery 1 and 101 which moved to the PO plan):** shipped 20 Oct 2026, no migration. Item 107's grouped label count function was left out (needs a migration).
+
 **Moved to the PO plan (20 Oct 2026):** items 101, 121, 125, 126, 128, 134, 135, 136, 137, 139, 140, 146 are purchase order, supplier bill, stock or price list items and are built by the laptop chat with the PO fix plan, see `docs/PO_REVIEW.md`. They are left out of UX deliveries 4 to 6.
 
 **Do first (top ten, best first):** all ten shipped 19 Oct 2026 as delivery 1 (PR on branch `claude/ux-top-ten`, migration 20261104000000).

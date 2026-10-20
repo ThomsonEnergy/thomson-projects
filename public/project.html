@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Project - Thomson Energy</title>
+<title>Job - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=103"></script>
+  <script src="/js/supabase-client.js?v=104"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=10"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -39,7 +39,7 @@
   <script src="/js/job-schedule.js?v=2"></script>
   <script src="/js/assets.js?v=2"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
     const projectId = params.get('id');
@@ -70,8 +70,11 @@
     }
 
     async function loadProject() {
-      const centreCols = await costCentreColumns();
-      const liCols = await lineItemColumns();
+      // Item 96: the slow accrued-labour function starts straight away, alongside the
+      // job itself, instead of after it. Its own failure is logged and skipped below.
+      const accruedPromise = fetchAccruedLabourCost([projectId]).then(byProject => ({ byProject }), err => ({ err }));
+      await getMyRole(); // one profiles read; both column lists below then come from its cache
+      const [centreCols, liCols] = await Promise.all([costCentreColumns(), lineItemColumns()]);
       const { data: project, error } = await supabaseClient
         .from('projects')
         .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), credit_note_claims(*), cost_centre_line_items(${liCols}, rate_tier_id, prebuild_group_id, prebuild_client_description, prebuild_base_quantity), cost_centre_photo_groups(*)),
@@ -88,6 +91,35 @@
         document.getElementById('content').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
         return null;
       }
+      paintJobHeaderEarly(project);
+
+      const isJob = !!project.job_number;
+      const rows = (query) => query.then(({ data }) => data || null);
+      // Everything below only needs the job row, so it all runs at once (item 96):
+      // - Real material cost accrued so far: only PO lines actually received count, so a
+      //   PO that's just been placed doesn't inflate "accrued" before anything's landed
+      //   (every PO line received to this job, whichever PO it is on).
+      // - The same spend per stage: job_material_usage is the authoritative "what actually
+      //   got used against this cost centre" record (stock draws + PO receipts landed
+      //   straight on a job). Each row has exactly one cost_centre_id, so summing here is safe.
+      // - A quote never becomes the job in place: approval spins up a separate project row
+      //   (create-job-from-quote.js), so an approved quote looks up that job for "Go to job".
+      // - A warranty job pulls just enough of the original job (ref + scope of works) for the
+      //   reference card on the Summary tab.
+      // - A job with warranty jobs against it pulls those, for the net warranty cost below.
+      const [accrued, liRows, usageRows, resultingJob, original, warrantyJobs] = await Promise.all([
+        accruedPromise,
+        isJob ? rows(supabaseClient.from('purchase_order_line_items').select('quantity, unit_cost')
+          .eq('received', true).eq('destination_type', 'job').eq('destination_job_id', projectId)) : null,
+        isJob ? rows(supabaseClient.from('job_material_usage').select('cost_centre_id, quantity, unit_cost').eq('project_id', projectId)) : null,
+        !isJob && project.status === 'approved'
+          ? rows(supabaseClient.from('projects').select('id, job_number').eq('source_quote_id', project.id).maybeSingle()) : undefined,
+        project.warranty_of_project_id
+          ? rows(supabaseClient.from('projects').select('id, name, job_number, sow_text').eq('id', project.warranty_of_project_id).maybeSingle()) : undefined,
+        isJob && !project.warranty_of_project_id
+          ? rows(supabaseClient.from('projects').select('id, name, job_number, warranty_outcome, warranty_closed_at, cost_centres(id, invoiced_amount)')
+            .eq('warranty_of_project_id', project.id).order('created_at')) : null,
+      ]);
 
       // Real labour hours/cost per stage - fetched from a serverless
       // function that computes it from time_entries server-side, rather
@@ -100,12 +132,10 @@
       // ordinary_rate/rate_1_5x/rate_2x to whoever's browser loaded this
       // page. See get-accrued-labour-cost.js.
       let accruedByCentre = {};
-      try {
-        const byProject = await fetchAccruedLabourCost([projectId]);
-        accruedByCentre = byProject[projectId]?.byCentre || {};
-        project.labour_budget_percent = byProject[projectId]?.labourBudgetPercent;
-      } catch (err) {
-        console.error('Accrued labour cost fetch failed:', err.message);
+      if (accrued.err) console.error('Accrued labour cost fetch failed:', accrued.err.message);
+      else {
+        accruedByCentre = accrued.byProject[projectId]?.byCentre || {};
+        project.labour_budget_percent = accrued.byProject[projectId]?.labourBudgetPercent;
       }
       for (const centre of project.cost_centres || []) {
         centre.actual_hours = accruedByCentre[centre.id]?.actualHours || 0;
@@ -117,71 +147,18 @@
           .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
       }
 
-      // Real material cost accrued so far - only line items actually
-      // received count, so a PO that's just been placed doesn't inflate
-      // "accrued" before anything's landed.
-      if (project.job_number) {
-        // every PO line received to this job, whichever PO it is on (lines can be moved between jobs)
-        const { data: liRows } = await supabaseClient
-          .from('purchase_order_line_items')
-          .select('quantity, unit_cost')
-          .eq('received', true).eq('destination_type', 'job').eq('destination_job_id', projectId);
-        project.accrued_material_cost = (liRows || []).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
-      } else {
-        project.accrued_material_cost = 0;
+      project.accrued_material_cost = (liRows || []).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
+      const materialByCentre = {};
+      for (const row of usageRows || []) {
+        if (!row.cost_centre_id) continue;
+        materialByCentre[row.cost_centre_id] = (materialByCentre[row.cost_centre_id] || 0) + Number(row.quantity) * Number(row.unit_cost);
+      }
+      for (const centre of project.cost_centres || []) {
+        centre.actual_material_cost = materialByCentre[centre.id] || 0;
       }
 
-      // Same real material spend, but per stage - job_material_usage is the
-      // authoritative "what actually got used against this cost centre"
-      // record (stock draws + PO receipts landed straight on a job), same
-      // role for materials that get_stage_actual_labour_cost's time_entries
-      // query plays for labour. Unlike time_entries there's no split-pending
-      // ambiguity here (each row already has exactly one cost_centre_id),
-      // so summing client-side is safe without the caveats that pushed
-      // actual_labour_cost out to a serverless function instead.
-      if (project.job_number) {
-        const { data: usageRows } = await supabaseClient
-          .from('job_material_usage')
-          .select('cost_centre_id, quantity, unit_cost')
-          .eq('project_id', projectId);
-        const materialByCentre = {};
-        for (const row of usageRows || []) {
-          if (!row.cost_centre_id) continue;
-          materialByCentre[row.cost_centre_id] = (materialByCentre[row.cost_centre_id] || 0) + Number(row.quantity) * Number(row.unit_cost);
-        }
-        for (const centre of project.cost_centres || []) {
-          centre.actual_material_cost = materialByCentre[centre.id] || 0;
-        }
-      } else {
-        for (const centre of project.cost_centres || []) centre.actual_material_cost = 0;
-      }
-
-      // A quote never becomes the job in place any more - approval spins
-      // up a separate project row (see create-job-from-quote.js). Once
-      // approved, this looks up that job so "Go to job" can link straight
-      // to it, rather than just reloading this same page and hoping.
-      if (!project.job_number && project.status === 'approved') {
-        const { data: resultingJob } = await supabaseClient
-          .from('projects')
-          .select('id, job_number')
-          .eq('source_quote_id', project.id)
-          .maybeSingle();
-        project.resulting_job = resultingJob || null;
-      }
-
-      // This job IS a warranty job - pull just enough of the original
-      // job's context (ref + scope of works) for the reference card on
-      // the Summary tab. Photos aren't duplicated here, just linked to -
-      // see the "View original job's documents" link, which points at
-      // the original's own Documents tab instead.
-      if (project.warranty_of_project_id) {
-        const { data: original } = await supabaseClient
-          .from('projects')
-          .select('id, name, job_number, sow_text')
-          .eq('id', project.warranty_of_project_id)
-          .maybeSingle();
-        project.warranty_original = original || null;
-      }
+      if (resultingJob !== undefined) project.resulting_job = resultingJob || null;
+      if (original !== undefined) project.warranty_original = original || null;
 
       // This job HAS warranty jobs against it - net cost of all of them
       // (accrued labour+material, minus whatever each has itself
@@ -192,42 +169,120 @@
       // profit figures already use.
       project.warranty_jobs = [];
       project.net_warranty_cost = 0;
-      if (project.job_number && !project.warranty_of_project_id) {
-        const { data: warrantyJobs } = await supabaseClient
-          .from('projects')
-          .select('id, name, job_number, warranty_outcome, warranty_closed_at, cost_centres(id, invoiced_amount)')
-          .eq('warranty_of_project_id', project.id)
-          .order('created_at');
-        if (warrantyJobs && warrantyJobs.length) {
-          const warrantyIds = warrantyJobs.map(w => w.id);
-          let accruedLabourByProject = {};
-          try {
-            accruedLabourByProject = await fetchAccruedLabourCost(warrantyIds);
-          } catch (err) {
-            console.error('Warranty accrued labour fetch failed:', err.message);
-          }
-          const { data: liRows } = await supabaseClient
-            .from('purchase_order_line_items')
-            .select('destination_job_id, quantity, unit_cost')
-            .eq('received', true).eq('destination_type', 'job').in('destination_job_id', warrantyIds);
-          const materialByProject = {};
-          (liRows || []).forEach(li => {
-            materialByProject[li.destination_job_id] = (materialByProject[li.destination_job_id] || 0) + Number(li.quantity) * Number(li.unit_cost);
-          });
+      if (warrantyJobs && warrantyJobs.length) {
+        const warrantyIds = warrantyJobs.map(w => w.id);
+        const [accruedLabourByProject, warrantyLiRows] = await Promise.all([
+          fetchAccruedLabourCost(warrantyIds).catch(err => { console.error('Warranty accrued labour fetch failed:', err.message); return {}; }),
+          rows(supabaseClient.from('purchase_order_line_items').select('destination_job_id, quantity, unit_cost')
+            .eq('received', true).eq('destination_type', 'job').in('destination_job_id', warrantyIds)),
+        ]);
+        const materialByProject = {};
+        (warrantyLiRows || []).forEach(li => {
+          materialByProject[li.destination_job_id] = (materialByProject[li.destination_job_id] || 0) + Number(li.quantity) * Number(li.unit_cost);
+        });
 
-          project.warranty_jobs = warrantyJobs.map(w => {
-            const labourCost = Object.values(accruedLabourByProject[w.id]?.byCentre || {}).reduce((s, c) => s + Number(c.actualLabourCost || 0), 0);
-            const materialCost = materialByProject[w.id] || 0;
-            const accrued = labourCost + materialCost;
-            const invoicedBack = (w.cost_centres || []).reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
-            const net = Math.max(0, accrued - invoicedBack);
-            return { id: w.id, name: w.name, job_number: w.job_number, warranty_outcome: w.warranty_outcome, warranty_closed_at: w.warranty_closed_at, accrued, invoicedBack, net };
-          });
-          project.net_warranty_cost = project.warranty_jobs.reduce((s, w) => s + w.net, 0);
-        }
+        project.warranty_jobs = warrantyJobs.map(w => {
+          const labourCost = Object.values(accruedLabourByProject[w.id]?.byCentre || {}).reduce((s, c) => s + Number(c.actualLabourCost || 0), 0);
+          const materialCost = materialByProject[w.id] || 0;
+          const accrued = labourCost + materialCost;
+          const invoicedBack = (w.cost_centres || []).reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
+          const net = Math.max(0, accrued - invoicedBack);
+          return { id: w.id, name: w.name, job_number: w.job_number, warranty_outcome: w.warranty_outcome, warranty_closed_at: w.warranty_closed_at, accrued, invoicedBack, net };
+        });
+        project.net_warranty_cost = project.warranty_jobs.reduce((s, w) => s + w.net, 0);
       }
 
       return project;
+    }
+
+    // Item 96: on the first open, the job's name, client and tab title show as soon as the
+    // job row lands, while the money figures are still being worked out. Later reloads
+    // (after a save) skip this so the page on screen is not wiped.
+    function paintJobHeaderEarly(project) {
+      setJobTitle(project);
+      if (document.getElementById('job-tabs')) return;
+      document.getElementById('content').innerHTML = `
+        <h1>${escapeHtml(project.name || '')}</h1>
+        <p class="subtitle">${escapeHtml(project.client_name || '')}</p>
+        <p class="subtitle">Loading...</p>`;
+    }
+
+    // Item 86: the browser tab reads "J7003 Smith reno - TEops" (or Q1234 for a quote).
+    // setPageTitle (supabase-client.js) when it exists also keeps the notification bell's
+    // "(3) " count prefix on our title; until then the bell's rewrites are caught here.
+    function setJobTitle(project) {
+      const num = projectNumberOnly(project);
+      const text = [num !== '-' ? num : '', project.name || ''].filter(Boolean).join(' ') || 'Job';
+      if (typeof setPageTitle === 'function') { setPageTitle(text); return; }
+      window.__jobTitle = `${text} - TEops`;
+      const keep = () => {
+        const prefix = (/^\(\d+\+?\) /.exec(document.title) || [''])[0];
+        if (document.title !== prefix + window.__jobTitle) document.title = prefix + window.__jobTitle;
+      };
+      keep();
+      const titleEl = document.querySelector('title');
+      if (titleEl && !window.__jobTitleWatch) {
+        window.__jobTitleWatch = new MutationObserver(keep);
+        window.__jobTitleWatch.observe(titleEl, { childList: true, characterData: true, subtree: true });
+      }
+    }
+
+    // Item 104: the job's activity log, as renderJobActivityLog (supabase-client.js) draws
+    // it (grouped on Summary, per tab elsewhere), but only the newest 50 entries load at
+    // first; "Show older" fetches the next 50.
+    const JOB_ACTIVITY_PAGE = 50;
+    async function renderJobActivityLogCapped(projectId, containerId, titleId) {
+      const containerEl = document.getElementById(containerId);
+      if (!containerEl) return { setTab() {} };
+      containerEl.classList.add('activity-log-scroll');
+      containerEl.innerHTML = `<p class="subtitle">Loading...</p>`;
+      const entries = [];
+      let tab = 'summary', hasMore = false, loadingMore = false;
+
+      const fetchPage = async () => {
+        const { data, error } = await supabaseClient
+          .from('activity_log')
+          .select('*, profiles(full_name)')
+          .eq('entity_type', 'project')
+          .eq('entity_id', projectId)
+          .order('created_at', { ascending: false })
+          .range(entries.length, entries.length + JOB_ACTIVITY_PAGE); // one extra row says whether there are more
+        if (error) throw error;
+        hasMore = (data || []).length > JOB_ACTIVITY_PAGE;
+        // Paged by position: a new entry since the last page shifts rows down, so skip ones already shown
+        const seen = new Set(entries.map(e => e.id));
+        entries.push(...(data || []).slice(0, JOB_ACTIVITY_PAGE).filter(e => !seen.has(e.id)));
+      };
+
+      const draw = () => {
+        const titleEl = titleId && document.getElementById(titleId);
+        if (titleEl) titleEl.textContent = tab === 'summary' ? 'Activity log' : 'Activity on this tab';
+        let html;
+        if (tab === 'summary') {
+          const lines = groupJobActivity(entries);
+          html = lines.length ? lines.map(l => activityEntryHtml(l.text, l.entry)).join('') : `<p class="subtitle">No activity logged yet.</p>`;
+        } else {
+          const mine = entries.filter(e => jobActivityTab(e.action) === tab);
+          html = mine.length ? mine.map(e => activityEntryHtml(e.description, e)).join('')
+            : `<p class="subtitle">Nothing logged on this tab${hasMore ? ' in the latest entries' : ''} yet.</p>`;
+        }
+        if (hasMore) html += `<button type="button" class="secondary job-activity-more" style="width:100%; margin-top:8px; font-size:13px;"${loadingMore ? ' disabled' : ''}>${loadingMore ? 'Loading...' : 'Show older'}</button>`;
+        containerEl.innerHTML = html;
+        const more = containerEl.querySelector('.job-activity-more');
+        if (more) more.addEventListener('click', async () => {
+          if (loadingMore) return;
+          loadingMore = true; draw();
+          try { await fetchPage(); } catch (err) { showToast(friendlyError(err), { error: true }); }
+          loadingMore = false; draw();
+        });
+      };
+
+      try { await fetchPage(); } catch (err) {
+        containerEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+        return { setTab() {} };
+      }
+      draw();
+      return { setTab(next) { tab = next; draw(); } };
     }
 
     // ============ Full quote editor (ported from new-project.html) ============
@@ -3113,6 +3168,7 @@
       // openInvoiceActualCostsPanel), not a % of a quote that never existed.
       const isQuoteFree = project.proposal_template === 'direct_job';
 
+      setJobTitle(project);
       const content = document.getElementById('content');
       const numberLine = [
         project.job_number ? `J${project.job_number}` : null,
@@ -3875,6 +3931,10 @@
       // Item 32: each tab has its own address (?tab=photos and so on), so a refresh,
       // a shared link or a notification lands on it. replaceState, so Back still leaves the job.
       const tabStrip = document.getElementById('job-tabs');
+      // Item 104: a tab's data loads the first time the tab is opened (a click, ?tab=, or the
+      // job search), not on every job open. Each render() starts its own set, since it draws
+      // fresh panels; a loader runs once per render.
+      const tabLoaders = {};
       function showTab(btn) {
         const panel = btn.dataset.panel;
         tabStrip.querySelectorAll('.settings-tab').forEach(b => b.classList.toggle('active', b === btn));
@@ -3888,6 +3948,8 @@
         const r = btn.getBoundingClientRect(), s = tabStrip.getBoundingClientRect();
         if (r.left < s.left || r.right > s.right) tabStrip.scrollLeft += (r.left - s.left) - (s.width - r.width) / 2;
         jobActivityLog.then(log => log.setTab(panel));
+        const load = tabLoaders[panel];
+        if (load) { delete tabLoaders[panel]; load(); }
       }
       tabStrip.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => showTab(btn)));
       const openTabFromUrl = () => {
@@ -3896,7 +3958,7 @@
         if (btn) btn.click();
       };
 
-      const jobActivityLog = renderJobActivityLog(project.id, 'job-activity-log', 'job-activity-title');
+      const jobActivityLog = renderJobActivityLogCapped(project.id, 'job-activity-log', 'job-activity-title');
 
       if (editMode) {
         wireEditForm(project);
@@ -3944,10 +4006,9 @@
         project.id, 'handover', 'handover', handoverCheckBtn, document.getElementById('handover-check-result')
       ));
 
-      loadDocuments(project.id);
+      tabLoaders.documents = () => { loadDocuments(project.id); wireCompanyDocs(project); };
       wireDocumentUpload(project);
-      wireCompanyDocs(project);
-      if (document.getElementById('site-photos-list')) { loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
+      if (document.getElementById('site-photos-list')) { tabLoaders.photos = () => loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
       if (document.getElementById('clock-here-card')) loadClockHereCard(project);
@@ -4845,8 +4906,15 @@
       }
       const ids = (links || []).map(l => l.thread_id);
       let msgs = [];
-      if (ids.length) ({ data: msgs } = await supabaseClient.from('emails').select('id, thread_id, direction, from_address, to_addresses, body_text, attachments, sent_at, created_by').in('thread_id', ids).order('sent_at', { ascending: false }));
+      if (ids.length) ({ data: msgs } = await supabaseClient.from('emails').select('id, thread_id, direction, from_address, to_addresses, attachments, sent_at, created_by').in('thread_id', ids).order('sent_at', { ascending: false }));
       const byThread = {}; (msgs || []).forEach(m => { (byThread[m.thread_id] ||= []).push(m); });
+      // Item 104: only the newest message per thread shows a snippet, so only its body is fetched.
+      const newestIds = Object.values(byThread).map(list => list[0].id);
+      if (newestIds.length) {
+        const { data: bodies } = await supabaseClient.from('emails').select('id, body_text').in('id', newestIds);
+        const bodyById = Object.fromEntries((bodies || []).map(b => [b.id, b.body_text]));
+        Object.values(byThread).forEach(list => { list[0].body_text = bodyById[list[0].id] || ''; });
+      }
       const sorted = (links || []).slice().sort((a, b) => String(b.email_threads?.last_message_at).localeCompare(String(a.email_threads?.last_message_at)));
       // review requests sent from this job, and what came back
       const { data: reviews } = await supabaseClient.from('review_requests').select('id, client_name, rating, comment, submitted_at, google_clicked_at, created_at').eq('project_id', project.id).order('created_at', { ascending: false });
@@ -6172,8 +6240,55 @@
       return (d.mime_type || '') === 'application/pdf' || /.pdf$/i.test(d.file_name || '');
     }
 
-    async function loadDocuments(projectId) {
+    // Item 104: a list loader that is already running is never started a second time
+    // alongside itself (the tab opening and a save can both ask at once). A call made
+    // meanwhile waits and then runs once more, so it still sees the latest folder and files.
+    function singleFlight(fn) {
+      let running = null, queued = null;
+      const start = (args) => {
+        running = (async () => {
+          try { return await fn(...args); } finally {
+            running = null;
+            if (queued) { const q = queued; queued = null; start(q.args).then(q.resolve, q.reject); }
+          }
+        })();
+        return running;
+      };
+      return (...args) => {
+        if (!running) return start(args);
+        if (!queued) {
+          queued = { args };
+          queued.promise = new Promise((resolve, reject) => { queued.resolve = resolve; queued.reject = reject; });
+        } else queued.args = args;
+        return queued.promise;
+      };
+    }
+
+    // Item 98: signs a whole list of private files in one request. Returns { path: url };
+    // a file that could not be signed is simply missing from it.
+    async function signDocUrls(paths, expiresIn = 300) {
+      const map = {};
+      if (!paths.length) return map;
+      const { data, error } = await supabaseClient.storage.from('project-documents').createSignedUrls(paths, expiresIn);
+      if (error) return map;
+      (data || []).forEach(r => { if (r.signedUrl && !r.error) map[r.path] = r.signedUrl; });
+      return map;
+    }
+
+    // A small resized copy of a private picture for a tile (300px box, keeps its shape).
+    function signDocThumbUrl(path, expiresIn) {
+      return supabaseClient.storage.from('project-documents')
+        .createSignedUrl(path, expiresIn, { transform: { width: 300, height: 300, resize: 'contain', quality: 70 } })
+        .then(({ data }) => data?.signedUrl || null, () => null);
+    }
+
+    function loadDocuments(projectId) {
+      return (loadDocuments.flight ||= singleFlight(loadDocumentsNow))(projectId);
+    }
+
+    async function loadDocumentsNow(projectId) {
       const listEl = document.getElementById('documents-list');
+      if (!listEl) return;
       const pillsEl = document.getElementById('doc-folder-pills');
       const folderSelect = document.getElementById('doc-folder-select');
 
@@ -6195,11 +6310,11 @@
       const folders = [...new Set(['Plans', ...(docs || []).map(d => d.folder)])]
         .sort((a, b) => (a === 'Plans' ? -1 : b === 'Plans' ? 1 : a.localeCompare(b)));
       const folderOptions = ['Plans', 'General', ...folders.filter(f => f !== 'Plans' && f !== 'General')];
-      folderSelect.innerHTML = folderOptions.map(f => `<option value="${f}">${f}</option>`).join('');
+      folderSelect.innerHTML = folderOptions.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
       folderSelect.value = folderOptions.includes(selectedDocFolder) ? selectedDocFolder : 'General';
 
       pillsEl.innerHTML = ['All', ...folders].map(f => `
-        <button type="button" class="secondary doc-folder-pill" data-folder="${f}" style="font-size:12px; padding:6px 12px; ${f === selectedDocFolder ? 'background:var(--accent-dim); color:var(--accent);' : ''}">${f}</button>
+        <button type="button" class="secondary doc-folder-pill" data-folder="${escapeHtml(f)}" style="font-size:12px; padding:6px 12px; ${f === selectedDocFolder ? 'background:var(--accent-dim); color:var(--accent);' : ''}">${escapeHtml(f)}</button>
       `).join('');
       pillsEl.querySelectorAll('.doc-folder-pill').forEach(btn => {
         btn.addEventListener('click', () => { selectedDocFolder = btn.dataset.folder; loadDocuments(projectId); });
@@ -6216,23 +6331,30 @@
       listEl.innerHTML = `<p class="subtitle">Loading previews...</p>`;
 
       // Grid preview instead of a bare filename list - a private bucket
-      // needs a signed URL per file to actually show a thumbnail, so
-      // these are generated once up front rather than one at a time.
-      const signedUrls = await Promise.all(visible.map(d => getSignedDocUrl(d.file_path).catch(() => null)));
+      // needs a signed URL per file to actually show a thumbnail. Item 98:
+      // the whole list is signed in one request, and picture tiles get a
+      // small resized copy instead of the full-size original. The links last
+      // an hour so tiles further down still load when scrolled to.
+      const isImageDoc = (d) => (d.mime_type || '').startsWith('image/');
+      const [signedByPath, thumbUrls] = await Promise.all([
+        signDocUrls(visible.map(d => d.file_path), 3600),
+        Promise.all(visible.map(d => isImageDoc(d) ? signDocThumbUrl(d.file_path, 3600) : null)),
+      ]);
+      const signedUrls = visible.map(d => signedByPath[d.file_path] || null);
 
       listEl.innerHTML = `
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">
           ${visible.map((d, i) => {
             const url = signedUrls[i];
-            const isImage = (d.mime_type || '').startsWith('image/');
+            const isImage = isImageDoc(d);
             const isVideo = (d.mime_type || '').startsWith('video/');
             const isPdf = isPdfDoc(d);
-            const preview = isImage && url
-              ? `<img src="${url}" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0;" />`
+            const preview = isImage && (thumbUrls[i] || url)
+              ? `<img src="${escapeHtml(thumbUrls[i] || url)}"${url ? ` data-full="${escapeHtml(url)}"` : ''} loading="lazy" decoding="async" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0;" />`
               : isVideo && url
-                ? `<video src="${url}" muted preload="metadata" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0; background:#000;"></video>`
+                ? `<video src="${escapeHtml(url)}" muted preload="metadata" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0; background:#000;"></video>`
                 : isPdf
-                  ? `<div class="doc-pdf-thumb" data-path="${escapeHtml(d.file_path)}" style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px; overflow:hidden;">&#128196;</div>`
+                  ? `<div class="doc-pdf-thumb" data-path="${escapeHtml(d.file_path)}"${url ? ` data-url="${escapeHtml(url)}"` : ''} style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px; overflow:hidden;">&#128196;</div>`
                   : `<div style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px;">&#128196;</div>`;
             return `
               <div class="doc-tile" style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
@@ -6245,13 +6367,21 @@
               </div>`;
           }).join('')}
         </div>`;
+      // A picture the resizer cannot handle falls back to the full-size file.
+      // A link that expired while the tab sat open (lazy tiles load late) is signed again.
+      listEl.querySelectorAll('img[data-full]').forEach(img => img.addEventListener('error', () => {
+        const p = img.closest('.doc-tile')?.querySelector('.doc-view-link')?.dataset.path;
+        if (p) signDocThumbUrl(p, 3600).then(u => { img.src = u || img.dataset.full; }).catch(() => { img.src = img.dataset.full; });
+        else if (img.src !== img.dataset.full) img.src = img.dataset.full;
+      }, { once: true }));
 
       // PDFs show their first page like a photo, filled in after the grid
-      // is up so one slow PDF never holds the rest of the tab back.
+      // is up so one slow PDF never holds the rest of the tab back. They
+      // reuse the link signed above (item 98).
       (async () => {
         for (const thumb of listEl.querySelectorAll('.doc-pdf-thumb')) {
           try {
-            const url = await getSignedDocUrl(thumb.dataset.path);
+            const url = thumb.dataset.url || await getSignedDocUrl(thumb.dataset.path);
             const dataUrl = await renderPdfThumbnail(url, 360);
             thumb.innerHTML = `<img src="${dataUrl}" style="width:100%; height:100%; object-fit:cover; object-position:top;" />`;
           } catch { /* keep the document icon */ }
@@ -6281,8 +6411,10 @@
               return;
             }
             if (doc && (doc.mime_type || '').startsWith('image/')) {
-              const images = visible.filter(d => (d.mime_type || '').startsWith('image/'));
-              const imageUrls = await Promise.all(images.map(d => getSignedDocUrl(d.file_path)));
+              const images = visible.filter(isImageDoc);
+              const fresh = await signDocUrls(images.map(d => d.file_path));
+              // One missing file must not stop the viewer opening
+              const imageUrls = await Promise.all(images.map(d => fresh[d.file_path] || getSignedDocUrl(d.file_path).catch(() => '')));
               openPhotoLightbox(imageUrls, images.indexOf(doc), {
                 captions: images.map(d => d.file_name),
                 onMarkup: async (i, blob) => { await saveDocCopy(blob, images[i], 'jpg', 'image/jpeg'); },
@@ -7356,8 +7488,13 @@
     // whole time but never actually shown anywhere - this is the first
     // place they're rendered, so a job with 30+ photos from the field has
     // somewhere to browse them instead of piling up unseen.
-    async function loadSitePhotos(projectId) {
+    function loadSitePhotos(projectId) {
+      return (loadSitePhotos.flight ||= singleFlight(loadSitePhotosNow))(projectId);
+    }
+
+    async function loadSitePhotosNow(projectId) {
       const listEl = document.getElementById('site-photos-list');
+      if (!listEl) return;
       let [{ data: photos, error }, myRole, { data: { session } }] = await Promise.all([
         supabaseClient
           .from('project_photos')
@@ -8027,7 +8164,7 @@
       const session = await requireLogin();
       if (!session) return;
       syncThemeFromProfile();
-      renderMainNav('job-pipeline');
+      renderMainNav('projects');
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();

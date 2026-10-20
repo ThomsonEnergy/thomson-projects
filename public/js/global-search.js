@@ -1,6 +1,6 @@
 // Search box in the top bar that looks across the whole database (jobs,
 // quotes, clients, leads, suppliers, POs, invoices, stock, staff, vehicles,
-// meetings, knowledge). Loaded once by renderMainNav() on any page with the
+// meetings, knowledge, customer equipment). Loaded once by renderMainNav() on any page with the
 // top bar. Every query goes through the logged-in user's own Supabase
 // session, so RLS still decides what each person can see - a table they
 // can't read just comes back empty instead of breaking the rest.
@@ -24,7 +24,8 @@
 
   // Each source is one table. run(q, num) returns rows already shaped as
   // { title, sub, href }. num is the bare number when the search looks like
-  // a job/quote/PO number (e.g. "7004", "J7004", "Q1005").
+  // a job/quote/PO number (e.g. "7004", "J7004", "Q1005"). pricingOnly
+  // groups are left out for Staff, whose Leads and Clients pages are locked.
   const SOURCES = [
     {
       label: 'Jobs & quotes',
@@ -39,21 +40,23 @@
     },
     {
       label: 'Clients',
+      pricingOnly: true,
       run: async (q) => {
         const data = must(await supabaseClient.from('clients')
           .select('id, name, email, phone, address')
           .or(ilikeOr(['name', 'email', 'phone', 'address'], q)).order('name').limit(PER_GROUP));
-        return data.map(c => ({ title: c.name, sub: [c.phone, c.email, c.address].filter(Boolean).join(' · '), href: `/clients.html?q=${enc(c.name || '')}` }));
+        return data.map(c => ({ title: c.name, sub: [c.phone, c.email, c.address].filter(Boolean).join(' · '), href: `/clients.html?id=${enc(c.id)}` }));
       },
     },
     {
       label: 'Leads',
+      pricingOnly: true,
       run: async (q) => {
         const data = must(await supabaseClient.from('leads')
           .select('id, name, email, phone, address_formatted, suburb')
           .or(ilikeOr(['name', 'email', 'phone', 'address_formatted', 'suburb'], q))
           .order('created_at', { ascending: false }).limit(PER_GROUP));
-        return data.map(l => ({ title: l.name || l.email || l.phone || 'Lead', sub: [l.phone, l.address_formatted || l.suburb].filter(Boolean).join(' · '), href: '/leads.html' }));
+        return data.map(l => ({ title: l.name || l.email || l.phone || 'Lead', sub: [l.phone, l.address_formatted || l.suburb].filter(Boolean).join(' · '), href: `/leads.html?id=${enc(l.id)}` }));
       },
     },
     {
@@ -72,7 +75,7 @@
           .select('id, po_number, supplier_name, description')
           .or(ilikeOr(['po_number', 'supplier_name', 'description'], q))
           .order('created_at', { ascending: false }).limit(PER_GROUP));
-        return data.map(po => ({ title: `${po.po_number || 'PO'} - ${po.supplier_name || ''}`, sub: po.description || '', href: `/purchase-orders.html?q=${enc(po.po_number || po.supplier_name || '')}` }));
+        return data.map(po => ({ title: `${po.po_number || 'PO'} - ${po.supplier_name || ''}`, sub: po.description || '', href: `/purchase-orders.html?id=${enc(po.id)}` }));
       },
     },
     {
@@ -83,9 +86,7 @@
           .or(ilikeOr(['invoice_number', 'description'], q))
           .order('created_at', { ascending: false }).limit(PER_GROUP));
         return data.map(inv => {
-          const projectId = inv.project_id || inv.cost_centres?.project_id;
-          const href = inv.invoice_number ? `/invoices.html?q=${enc(inv.invoice_number)}` : (projectId ? `/project.html?id=${projectId}&tab=invoices` : '/invoices.html');
-          return { title: inv.invoice_number || 'Invoice', sub: inv.projects ? projectRef(inv.projects) : (inv.description || ''), href };
+          return { title: inv.invoice_number || 'Invoice', sub: inv.projects ? projectRef(inv.projects) : (inv.description || ''), href: `/invoices.html?id=${enc(inv.id)}` };
         });
       },
     },
@@ -100,6 +101,7 @@
     },
     {
       label: 'Staff',
+      financeOnly: true, // only Admin and Finance can open another person's profile
       run: async (q) => {
         const data = must(await supabaseClient.from('profiles')
           .select('id, full_name').ilike('full_name', `%${q}%`).order('full_name').limit(PER_GROUP));
@@ -121,6 +123,16 @@
           .select('id, title, location').or(ilikeOr(['title', 'location'], q))
           .order('created_at', { ascending: false }).limit(PER_GROUP));
         return data.map(m => ({ title: m.title, sub: m.location || '', href: `/meetings.html?id=${m.id}` }));
+      },
+    },
+    {
+      label: 'Customer equipment',
+      run: async (q) => {
+        const data = must(await supabaseClient.from('customer_assets')
+          .select('id, name, make, model, client_name, site_address, clients(name)')
+          .or(ilikeOr(['name', 'make', 'model', 'serial_numbers', 'client_name', 'site_address'], q))
+          .order('created_at', { ascending: false }).limit(PER_GROUP));
+        return data.map(a => ({ title: [a.name, [a.make, a.model].filter(Boolean).join(' ')].filter(Boolean).join(' · '), sub: [a.clients?.name || a.client_name, a.site_address].filter(Boolean).join(' · '), href: `/assets.html?id=${enc(a.id)}` }));
       },
     },
     {
@@ -174,7 +186,10 @@
     const num = numMatch ? numMatch[1] : null;
     panel.innerHTML = '<div class="gsearch-empty">Searching...</div>';
     showPanel();
-    const groups = await Promise.all(SOURCES.map(s =>
+    let pricing = false, finance = false;
+    try { const role = await getMyRole(); pricing = isPricingRole(role); finance = isFinanceRole(role); } catch (e) { /* treat as Staff */ }
+    if (mySeq !== seq) return;
+    const groups = await Promise.all(SOURCES.filter(s => (pricing || !s.pricingOnly) && (finance || !s.financeOnly)).map(s =>
       s.run(q, num).then(rows => ({ label: s.label, rows }), () => ({ label: s.label, rows: [], failed: true }))));
     if (mySeq !== seq) return; // a newer search has started since
     const filled = groups.filter(g => g.rows.length);
