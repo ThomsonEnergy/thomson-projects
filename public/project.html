@@ -1147,7 +1147,13 @@
 
       document.getElementById('add-row').addEventListener('click', () => addRow());
       document.getElementById('save-edit-btn').addEventListener('click', () => saveEdits(project));
-      document.getElementById('cancel-edit-btn').addEventListener('click', () => { if (editDirty && !confirm('Discard your unsaved changes?')) return; editMode = false; endEditSession(); render(project, true); });
+      document.getElementById('cancel-edit-btn').addEventListener('click', () => {
+        if (editDirty && !confirm('Discard your unsaved changes?')) return;
+        editDirty = false;
+        // Leave through the history entry so the popstate handler renders on the pre-edit URL
+        if (history.state && history.state.teEdit) { history.back(); return; }
+        editMode = false; render(project, true);
+      });
 
       if (isQuoteEdit) {
         templateAnswers = project.template_answers || {};
@@ -3170,7 +3176,7 @@
 
       content.innerHTML = `
         <h1>${escapeHtml(project.name)}</h1>
-        <p class="subtitle">${escapeHtml(project.client_name)} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${project.job_number && project.pipeline_stage ? ` <span class="badge draft" title="Pipeline stage">${escapeHtml(pipelineStageLabel(project.pipeline_stage))}</span>` : ''}${numberLine ? ' &middot; ' + numberLine : ''}${contactLine ? '<br>' + contactLine : ''}</p>
+        <p class="subtitle">${escapeHtml(project.client_name)} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${project.job_number && project.pipeline_stage ? ` <span class="badge draft" id="pipeline-stage-badge" title="Pipeline stage">${escapeHtml(pipelineStageLabel(project.pipeline_stage))}</span>` : ''}${numberLine ? ' &middot; ' + numberLine : ''}${contactLine ? '<br>' + contactLine : ''}</p>
         ${isFrozenQuote && project.approved_at ? `<p class="subtitle" style="margin-top:2px;">Approved ${new Date(project.approved_at).toLocaleDateString('en-AU')}${project.approval_note ? ' - ' + escapeHtml(project.approval_note) : ' - approved online by the client'}${project.approval_email_thread_id ? ` &middot; <a class="link-quiet" href="/inbox.html?thread=${project.approval_email_thread_id}">View the email</a>` : ''}</p>` : ''}
         ${!project.job_number && project.status === 'declined' ? `<div class="error-box" style="margin:6px 0 12px;">${approvalProofHtml(project)}${pricingVisible ? (project.expired ? ' <button type="button" class="secondary vu-extend" data-key="quote" style="font-size:12px; padding:4px 10px; margin-left:6px;">Extend...</button>' : ' <button type="button" class="secondary" id="quote-reopen-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Reopen quote</button>') : ''}</div>` : ''}
         ${!project.job_number && project.status === 'sent' ? `<div id="quote-valid-until">${validUntilHtml(project, 'quote', pricingVisible)}</div>` : ''}
@@ -5609,6 +5615,12 @@
             const top = t.parent_task_id ? tasks.find(p => p.id === t.parent_task_id) : t;
             if (top && top.required_before_scheduling) await refreshPipelineTaskGate(projectId);
             if (done && top && top.task_type === 'handover') await checkAndAdvanceHandover(projectId);
+            // The header badge follows a stage move (Awaiting Action to Ready to Book, handover)
+            const badge = document.getElementById('pipeline-stage-badge');
+            if (badge) {
+              const { data: p } = await supabaseClient.from('projects').select('pipeline_stage').eq('id', projectId).maybeSingle();
+              if (p && p.pipeline_stage) badge.textContent = pipelineStageLabel(p.pipeline_stage);
+            }
           } catch (e) { console.error('Task follow-up failed:', e); }
         })();
       }
