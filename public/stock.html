@@ -192,19 +192,19 @@
           <div class="grid cols-3">
             <div>
               <label>Cost price</label>
-              <input id="mat-cost" type="number" step="0.01" value="${escapeHtml(material?.cost_price || 0)}" />
+              <input id="mat-cost" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(material?.cost_price || 0)}" />
             </div>
             <div>
               <label>Sell price</label>
-              <input id="mat-sell" type="number" step="0.01" value="${escapeHtml(material?.sell_price || 0)}" />
+              <input id="mat-sell" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(material?.sell_price || 0)}" />
             </div>
             <div>
               <label>Warehouse qty</label>
-              <input id="mat-qty" type="number" step="1" value="${escapeHtml(startWarehouseQty)}" />
+              <input id="mat-qty" type="number" inputmode="decimal" step="1" value="${escapeHtml(startWarehouseQty)}" />
             </div>
           </div>
           <label>Minimum quantity - flags for restocking below this</label>
-          <input id="mat-minimum" type="number" step="1" value="${escapeHtml(material?.minimum_quantity || 0)}" />
+          <input id="mat-minimum" type="number" inputmode="decimal" step="1" value="${escapeHtml(material?.minimum_quantity || 0)}" />
           <label>Notes</label>
           <textarea id="mat-notes" style="min-height:60px;">${escapeHtml(material?.notes)}</textarea>
           <div style="margin-top:14px; display:flex; justify-content:space-between;">
@@ -307,6 +307,8 @@
         const msg = overlay.querySelector('#csp-msg');
         const btn = overlay.querySelector('#csp-save-btn');
         const label = btn.textContent;
+        const lineProblem = materialLineRowsProblem('csp-items-container');
+        if (lineProblem) { msg.innerHTML = `<div class="error-box">${escapeHtml(lineProblem)}</div>`; return; }
         btn.disabled = true;
         btn.textContent = 'Creating...';
 
@@ -426,7 +428,7 @@
             created++;
           }
           overlay.remove();
-          alert(`Created ${created} restock purchase order${created === 1 ? '' : 's'}.`);
+          showToast(`Created ${created} restock purchase order${created === 1 ? '' : 's'}.`);
           await loadStockPOs();
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
@@ -480,10 +482,7 @@
       input.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-        overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
-        document.body.appendChild(overlay);
+        const overlay = openModal(`<p class="subtitle">Reading the price list - this can take a little longer for a long document...</p>`, { maxWidth: 400 });
         try {
           const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', file, file.type);
           overlay.remove();

@@ -161,7 +161,7 @@
           <label>Damage to equipment or property</label>${area('d-damage', r.property_damage, 'e.g. Side cutters destroyed, cable end burnt')}
           <div class="grid cols-2">
             <div><label>Who received the report</label>${inp('d-recv', r.report_received_by)}</div>
-            <div><label>Their phone</label>${inp('d-recv-phone', r.report_received_phone)}</div>
+            <div><label>Their phone</label>${inp('d-recv-phone', r.report_received_phone, 'tel')}</div>
           </div>
         </div>
 
@@ -177,7 +177,7 @@
           <label>Address</label>${inp('d-inj-addr', r.injured_address)}
           <div class="grid cols-3">
             <div><label>Date of birth</label>${inp('d-inj-dob', r.injured_dob, 'date')}</div>
-            <div><label>Phone</label>${inp('d-inj-phone', r.injured_phone)}</div>
+            <div><label>Phone</label>${inp('d-inj-phone', r.injured_phone, 'tel')}</div>
             <div><label>Employer</label>${inp('d-inj-emp', r.injured_employer)}</div>
           </div>
           <label>Nature of injury (eg fracture, burn, sprain, foreign body in eye)</label>${inp('d-injury', r.injury_nature)}

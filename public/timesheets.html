@@ -113,6 +113,7 @@
 
     <div class="card" id="approvals-card" style="display:none;">
       <h2>Pending approvals</h2>
+      <div id="approvals-msg"></div>
       <div id="approvals-list"></div>
     </div>
 
@@ -194,8 +195,8 @@
     function breakNoteHtml(breakEntry) {
       if (!breakEntry) return '';
       return breakEntry.break_taken
-        ? `<span class="subtitle" style="font-size:12px;">Break: ${breakEntry.break_minutes}m${breakEntry.break_start ? ' from ' + fmtTime(breakEntry.break_start) : ''}</span>`
-        : `<span style="font-size:12px; color:var(--red);">No break taken${breakEntry.break_skip_reason ? ' - ' + escapeHtml(breakEntry.break_skip_reason) : ''}</span>`;
+        ? `<span class="subtitle small">Break: ${breakEntry.break_minutes}m${breakEntry.break_start ? ' from ' + fmtTime(breakEntry.break_start) : ''}</span>`
+        : `<span class="small" style="color:var(--red);">No break taken${breakEntry.break_skip_reason ? ' - ' + escapeHtml(breakEntry.break_skip_reason) : ''}</span>`;
     }
 
     // Overlapping entries / forgotten clock-outs, with a Fix button that opens
@@ -220,12 +221,12 @@
           ${overlaps.map(o => `
             <div class="day-item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
               <span><strong>${who(o.staffId)}</strong>: ${ref(o.a)} (${range(o.a)}) overlaps ${ref(o.b)} (${range(o.b)})</span>
-              <button type="button" class="secondary fix-day-btn" data-date="${o.date}" data-staff="${o.staffId}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Fix</button>
+              <button type="button" class="secondary fix-day-btn" data-date="${o.date}" data-staff="${o.staffId}" style="flex-shrink:0;">Fix</button>
             </div>`).join('')}
           ${stale.map(s => `
             <div class="day-item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
               <span><strong>${who(s.staff_id)}</strong> is still clocked in to ${ref(s)} since ${fmtDateTime(s.clock_in)} - add the clock-out time</span>
-              <button type="button" class="secondary fix-day-btn" data-date="${sydneyDateKey(new Date(s.clock_in))}" data-staff="${s.staff_id}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Fix</button>
+              <button type="button" class="secondary fix-day-btn" data-date="${sydneyDateKey(new Date(s.clock_in))}" data-staff="${s.staff_id}" style="flex-shrink:0;">Fix</button>
             </div>`).join('')}
         </div>`;
       el.querySelectorAll('.fix-day-btn').forEach(b => b.addEventListener('click', () => {
@@ -342,11 +343,11 @@
             let splitNote = '';
             if (e.project_id) {
               if (e.selected_cost_centre_ids && e.selected_cost_centre_ids.length > 1) {
-                splitNote = `<span class="subtitle" style="font-size:12px;">Split: ${e.selected_cost_centre_ids.map(id => escapeHtml(ccMap[id] || '?')).join(', ')}</span>`;
+                splitNote = `<span class="subtitle small">Split: ${e.selected_cost_centre_ids.map(id => escapeHtml(ccMap[id] || '?')).join(', ')}</span>`;
               } else if (e.cost_centre_id) {
-                splitNote = `<span class="subtitle" style="font-size:12px;">${escapeHtml(ccMap[e.cost_centre_id] || 'Stage selected')}</span>`;
+                splitNote = `<span class="subtitle small">${escapeHtml(ccMap[e.cost_centre_id] || 'Stage selected')}</span>`;
               } else if (e.clock_out) {
-                splitNote = `<span style="font-size:12px; color:var(--red);">No stage selected</span>`;
+                splitNote = `<span class="small" style="color:var(--red);">No stage selected</span>`;
               }
             }
             return `<div class="week-entry-row" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; margin:4px 0; font-size:13px; border-radius:6px; background:var(--surface-2);">
@@ -633,6 +634,12 @@
     let dayBreak = { taken: null, start: '', minutes: 30, skipReason: '' };
 
     async function openDayEditPanel(dateStr, staffId = myUserId, staffName = myProfileName, prefill = null) {
+      if (document.getElementById('day-edit-overlay')) return;
+      const overlay = document.createElement('div');
+      overlay.id = 'day-edit-overlay';
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px; overflow-y:auto;';
+      overlay.innerHTML = `<div class="card" style="max-width:640px; width:100%;"><p class="subtitle" style="margin:0;">Loading ${dayKeyLabel(dateStr)}...</p></div>`;
+      document.body.appendChild(overlay);
       const windowStart = combineDateTime(dateStr, '00:00');
       const windowEnd = new Date(windowStart); windowEnd.setDate(windowEnd.getDate() + 1);
       const { data: existing, error } = await supabaseClient
@@ -643,7 +650,11 @@
         .gte('clock_in', windowStart.toISOString())
         .lt('clock_in', windowEnd.toISOString())
         .order('clock_in');
-      if (error) { alert(friendlyError(error)); return; }
+      if (error) {
+        overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><div class="error-box" style="margin-top:0;">Could not load this day. ${escapeHtml(friendlyError(error))}</div><button type="button" class="secondary" id="day-load-close" style="margin-top:10px;">Close</button></div>`;
+        overlay.querySelector('#day-load-close').addEventListener('click', () => overlay.remove());
+        return;
+      }
 
       dayBlockKeySeq = 0;
       dayBlocks = (existing || []).map(dayBlockFromEntry);
@@ -677,9 +688,6 @@
 
       if (prefillBreak) dayBreak = prefillBreak;
       const isSelf = staffId === myUserId;
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px; overflow-y:auto;';
-      document.body.appendChild(overlay);
 
       async function renderAll() {
         overlay.innerHTML = `
@@ -1139,10 +1147,7 @@
     });
 
     document.getElementById('add-tafe-day-btn').addEventListener('click', () => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:380px; width:100%;">
+      const overlay = openModal(`
           <h2 style="margin-top:0;">TAFE day</h2>
           <p class="subtitle" style="margin-top:0;">Adds an 8 hour TAFE timesheet: 7:00am to 3:30pm with a 30 minute unpaid break at 12:00.</p>
           <label>Which day?</label>
@@ -1151,9 +1156,7 @@
             <button type="button" id="tafe-save">Add TAFE day</button>
             <button type="button" class="secondary" id="tafe-cancel">Cancel</button>
           </div>
-          <div id="tafe-msg" style="margin-top:8px;"></div>
-        </div>`;
-      document.body.appendChild(overlay);
+          <div id="tafe-msg" style="margin-top:8px;"></div>`, { maxWidth: 380 });
       overlay.querySelector('#tafe-cancel').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#tafe-save').addEventListener('click', async () => {
         const msg = overlay.querySelector('#tafe-msg');
@@ -1211,7 +1214,7 @@
         .order('start_date', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!data.length) { listEl.innerHTML = `<p class="subtitle">No leave requests yet.</p>`; return; }
-      const badgeClass = { pending: 'draft', approved: 'accepted', declined: 'draft' };
+      const badgeClass = { pending: 'amber', approved: 'accepted', declined: 'declined' };
       listEl.innerHTML = data.map(l => `
         <div class="project-list-item">
           <div>
@@ -1320,7 +1323,11 @@
         .select('*, profiles(full_name)')
         .eq('status', 'pending')
         .order('start_date');
-      if (error || !data || !data.length) return;
+      if (error || !data) return;
+      if (!data.length) {
+        if (card.style.display === 'block') listEl.innerHTML = '<p class="subtitle">No more requests waiting.</p>';
+        return;
+      }
       card.style.display = 'block';
       listEl.innerHTML = data.map(l => `
         <div class="project-list-item" data-id="${l.id}">
@@ -1335,12 +1342,31 @@
         </div>`).join('');
       listEl.querySelectorAll('.approve-leave-btn, .decline-leave-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          const status = btn.classList.contains('approve-leave-btn') ? 'approved' : 'declined';
-          const { error: updErr } = await supabaseClient
+          const approving = btn.classList.contains('approve-leave-btn');
+          const status = approving ? 'approved' : 'declined';
+          const l = data.find(x => x.id === btn.dataset.id);
+          const who = (l.profiles && l.profiles.full_name) || 'Staff member';
+          const dates = l.start_date === l.end_date ? dayKeyLabel(l.start_date) : `${dayKeyLabel(l.start_date)} to ${dayKeyLabel(l.end_date)}`;
+          const msgEl = document.getElementById('approvals-msg');
+          const rowBtns = btn.parentElement.querySelectorAll('button');
+          const label = btn.textContent;
+          rowBtns.forEach(b => { b.disabled = true; });
+          btn.textContent = approving ? 'Approving...' : 'Declining...';
+          const { data: updated, error: updErr } = await supabaseClient
             .from('leave_requests')
             .update({ status, decided_by: myUserId, decided_at: new Date().toISOString() })
-            .eq('id', btn.dataset.id);
-          if (updErr) { alert(friendlyError(updErr)); return; }
+            .eq('id', l.id)
+            .eq('status', 'pending')
+            .select('id');
+          if (updErr) {
+            rowBtns.forEach(b => { b.disabled = false; });
+            btn.textContent = label;
+            msgEl.innerHTML = `<div class="error-box">Could not ${approving ? 'approve' : 'decline'} ${escapeHtml(who)}'s leave: ${escapeHtml(friendlyError(updErr))}</div>`;
+            return;
+          }
+          msgEl.innerHTML = (updated && updated.length)
+            ? `<div class="success-box">${approving ? 'Approved' : 'Declined'}: ${escapeHtml(who)}, ${escapeHtml(l.leave_type)} leave ${dates}.</div>`
+            : `<div class="error-box">${escapeHtml(who)}'s request was already decided by someone else.</div>`;
           await loadApprovals(myRole);
         });
       });

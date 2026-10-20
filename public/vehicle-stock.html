@@ -174,6 +174,8 @@
         const source = overlay.querySelector('input[name="cp-source"]:checked').value;
         const btn = overlay.querySelector('#cp-save-btn');
         const label = btn.textContent;
+        const lineProblem = materialLineRowsProblem('cp-items-container');
+        if (lineProblem) { msg.innerHTML = `<div class="error-box">${escapeHtml(lineProblem)}</div>`; return; }
         btn.disabled = true;
         btn.textContent = 'Creating...';
 

@@ -222,10 +222,7 @@
     }
 
     async function runStatementExtraction(file) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the statement...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the statement...</p>`, { maxWidth: 400 });
 
       try {
         const fileBase64 = await fileToBase64(file);
@@ -324,10 +321,7 @@
     }
 
     async function runPricelistExtraction(file) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the price list - this can take a little longer for a long document...</p>`, { maxWidth: 400 });
 
       try {
         const fileBase64 = await fileToBase64(file);
@@ -440,8 +434,8 @@
           <label>Type</label>
           <select id="ed-kind"><option value="supplier" ${supplier.kind !== 'contractor' ? 'selected' : ''}>Supplier (goods, materials)</option><option value="contractor" ${supplier.kind === 'contractor' ? 'selected' : ''}>Contractor (labour, services)</option></select>
           <div class="grid cols-2">
-            <div><label>Contact email</label><input id="ed-email" value="${escapeHtml(supplier.contact_email)}" /></div>
-            <div><label>Contact phone</label><input id="ed-phone" value="${escapeHtml(supplier.contact_phone)}" /></div>
+            <div><label>Contact email</label><input id="ed-email" type="email" autocapitalize="off" value="${escapeHtml(supplier.contact_email)}" /></div>
+            <div><label>Contact phone</label><input id="ed-phone" type="tel" value="${escapeHtml(supplier.contact_phone)}" /></div>
           </div>
           <label>Credit terms</label>
           <div class="grid cols-2">
@@ -450,25 +444,25 @@
               <option value="net_days" ${supplier.credit_terms_type === 'net_days' ? 'selected' : ''}>Net days</option>
               <option value="eom_days" ${supplier.credit_terms_type === 'eom_days' ? 'selected' : ''}>Days after end of month</option>
             </select>
-            <input id="ed-terms-days" type="number" value="${escapeHtml(supplier.credit_terms_days)}" />
+            <input id="ed-terms-days" type="number" inputmode="numeric" value="${escapeHtml(supplier.credit_terms_days)}" />
           </div>
           <p class="subtitle" style="margin-top:14px;">Used to match future invoices to this supplier automatically.</p>
           <div class="grid cols-2">
             <div><label style="margin-top:0">Our account number with them</label><input id="ed-account-number" value="${escapeHtml(supplier.our_account_number)}" placeholder="e.g. the \"Charge To\" number on their invoices" /></div>
-            <div><label style="margin-top:0">ABN</label><input id="ed-abn" value="${escapeHtml(supplier.abn)}" /></div>
+            <div><label style="margin-top:0">ABN</label><input id="ed-abn" inputmode="numeric" value="${escapeHtml(supplier.abn)}" /></div>
           </div>
 
           <p class="subtitle" style="margin-top:14px;">Bank details - needed to pay this supplier via Airwallex.</p>
           <label>Account name</label>
           <input id="ed-bank-name" value="${escapeHtml(supplier.bank_account_name)}" />
           <div class="grid cols-2">
-            <div><label>BSB</label><input id="ed-bsb" value="${escapeHtml(supplier.bsb)}" /></div>
-            <div><label>Account number</label><input id="ed-account" value="${escapeHtml(supplier.bank_account_number)}" /></div>
+            <div><label>BSB</label><input id="ed-bsb" inputmode="numeric" value="${escapeHtml(supplier.bsb)}" /></div>
+            <div><label>Account number</label><input id="ed-account" inputmode="numeric" value="${escapeHtml(supplier.bank_account_number)}" /></div>
           </div>
           <p class="subtitle" style="margin-top:14px;">BPAY - if this supplier is paid that way instead.</p>
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Biller code</label><input id="ed-bpay-code" value="${escapeHtml(supplier.bpay_biller_code)}" /></div>
-            <div><label style="margin-top:0">Reference</label><input id="ed-bpay-ref" value="${escapeHtml(supplier.bpay_reference)}" /></div>
+            <div><label style="margin-top:0">Biller code</label><input id="ed-bpay-code" inputmode="numeric" value="${escapeHtml(supplier.bpay_biller_code)}" /></div>
+            <div><label style="margin-top:0">Reference</label><input id="ed-bpay-ref" inputmode="numeric" value="${escapeHtml(supplier.bpay_reference)}" /></div>
           </div>
           <label>Notes</label>
           <textarea id="ed-notes" style="min-height:60px;">${escapeHtml(supplier.notes)}</textarea>
@@ -521,10 +515,7 @@
     // shared with the Suppliers page's own upload-and-detect flow.
 
     async function runExtraction(file) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the invoice...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the invoice...</p>`, { maxWidth: 400 });
 
       try {
         const fileBase64 = await fileToBase64(file);

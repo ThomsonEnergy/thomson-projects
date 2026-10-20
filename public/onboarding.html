@@ -109,14 +109,14 @@
           <input type="date" id="ob-dob" value="${profile.date_of_birth || ''}" style="max-width:220px;" />
 
           <label style="margin-top:14px;">Residential address</label>
-          <input id="ob-address" placeholder="Street address" value="${profile.residential_address || ''}" />
+          <input id="ob-address" placeholder="Street address" value="${escapeHtml(profile.residential_address || '')}" />
           <div class="grid cols-3" style="margin-top:8px;">
-            <input id="ob-suburb" placeholder="Suburb" value="${profile.residential_suburb || ''}" />
+            <input id="ob-suburb" placeholder="Suburb" value="${escapeHtml(profile.residential_suburb || '')}" />
             <select id="ob-state">
               <option value="">State</option>
               ${['NSW', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'].map(s => `<option value="${s}" ${profile.residential_state === s ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
-            <input id="ob-postcode" placeholder="Postcode" value="${profile.residential_postcode || ''}" />
+            <input id="ob-postcode" inputmode="numeric" maxlength="4" autocomplete="postal-code" placeholder="Postcode" value="${escapeHtml(profile.residential_postcode || '')}" />
           </div>
 
           <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
@@ -124,15 +124,15 @@
             <div class="grid cols-3">
               <div>
                 <label style="margin-top:0">Name</label>
-                <input id="ob-em-name" value="${profile.emergency_contact_name || ''}" />
+                <input id="ob-em-name" value="${escapeHtml(profile.emergency_contact_name || '')}" />
               </div>
               <div>
                 <label style="margin-top:0">Phone</label>
-                <input id="ob-em-phone" value="${profile.emergency_contact_phone || ''}" />
+                <input id="ob-em-phone" type="tel" autocomplete="tel" value="${escapeHtml(profile.emergency_contact_phone || '')}" />
               </div>
               <div>
                 <label style="margin-top:0">Relationship</label>
-                <input id="ob-em-relationship" value="${profile.emergency_contact_relationship || ''}" />
+                <input id="ob-em-relationship" value="${escapeHtml(profile.emergency_contact_relationship || '')}" />
               </div>
             </div>
           </div>
@@ -280,7 +280,7 @@
               <div class="grid cols-3" style="margin-top:8px;">
                 <input id="ob-ca-suburb" placeholder="Suburb" />
                 <select id="ob-ca-state"><option value="">State</option>${['NSW', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'].map(s => `<option value="${s}">${s}</option>`).join('')}</select>
-                <input id="ob-ca-postcode" placeholder="Postcode" />
+                <input id="ob-ca-postcode" inputmode="numeric" maxlength="4" autocomplete="postal-code" placeholder="Postcode" />
               </div>
               <button type="button" id="ob-ca-save" style="margin-top:10px;">Save and show my contract</button>
               <div id="ob-ca-msg"></div>

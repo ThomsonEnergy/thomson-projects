@@ -145,7 +145,7 @@
           <select id="sup-kind"><option value="supplier">Supplier (goods, materials)</option><option value="contractor">Contractor (labour, services)</option></select>
           <div class="grid cols-2">
             <div><label>Contact email</label><input id="sup-email" type="email" /></div>
-            <div><label>Contact phone</label><input id="sup-phone" /></div>
+            <div><label>Contact phone</label><input id="sup-phone" type="tel" /></div>
           </div>
           <label>Credit terms</label>
           <div class="grid cols-2">
@@ -217,10 +217,7 @@
     // with the Stock page's own "Upload pricelist" button.
 
     document.getElementById('upload-bill-btn').addEventListener('click', () => pickFileAndRun(async (file) => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the invoice...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the invoice...</p>`, { maxWidth: 400 });
       try {
         const fileBase64 = await fileToBase64(file);
         const { data: { session } } = await supabaseClient.auth.getSession();
@@ -239,10 +236,7 @@
     }));
 
     document.getElementById('upload-pricelist-btn').addEventListener('click', () => pickFileAndRun(async (file) => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the price list - this can take a little longer for a long document...</p>`, { maxWidth: 400 });
       try {
         const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', file, file.type);
         overlay.remove();
@@ -254,10 +248,7 @@
     }));
 
     document.getElementById('upload-statement-btn').addEventListener('click', () => pickFileAndRun(async (file) => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the statement...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the statement...</p>`, { maxWidth: 400 });
       try {
         const data = await runBackgroundExtraction('statement', 'extract-statement-background', file, file.type);
         overlay.remove();
@@ -269,10 +260,7 @@
     }));
 
     document.getElementById('run-payments-btn').addEventListener('click', async () => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:500px; width:100%;"><p class="subtitle">Checking what's due...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Checking what's due...</p>`, { maxWidth: 500 });
 
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
@@ -297,7 +285,7 @@
             <tbody>
               ${data.preview.map(p => `
                 <tr>
-                  <td>${escapeHtml(p.supplierName)}${!p.hasBankDetails ? ' <span class="badge draft" style="color:var(--red);">No bank details</span>' : ''}</td>
+                  <td>${escapeHtml(p.supplierName)}${!p.hasBankDetails ? ' <span class="badge red">No bank details</span>' : ''}</td>
                   <td class="num">${p.billCount}</td>
                   <td class="num">${money(p.total)}</td>
                 </tr>`).join('')}
