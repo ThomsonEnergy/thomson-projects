@@ -247,7 +247,7 @@
       // Clear whatever is under the label so a failed fetch never reads as an empty day
       ['cal-grid', 'day-time-header', 'day-staff-rows', 'mobile-day-list', 'period-badges', 'day-board-notice'].forEach(id => { document.getElementById(id).innerHTML = ''; });
       const msg = document.getElementById('schedule-msg');
-      msg.innerHTML = `<div class="error-box">Couldn't load the schedule: ${escapeHtml(err && err.message ? err.message : err)} <button class="secondary" id="schedule-retry" style="margin-left:8px; padding:6px 12px;">Retry</button></div>`;
+      msg.innerHTML = `<div class="error-box">Couldn't load the schedule: ${escapeHtml(friendlyError(err))} <button class="secondary" id="schedule-retry" style="margin-left:8px; padding:6px 12px;">Retry</button></div>`;
       document.getElementById('schedule-retry').addEventListener('click', retry);
     }
     function firstError(...results) {
@@ -692,7 +692,7 @@
         }
 
         const { error } = await supabaseClient.from('schedule_assignments').insert(insert);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
         // The database moves Ready to Book to Job Booked on this booking (migration 20261023000000).
         overlay.remove();
         await loadDay();
@@ -765,7 +765,7 @@
             block_type: isSiteVisit ? 'site_visit' : 'job',
             assignment_date: dateToStr(dayViewDate), start_time: startTime, end_time: endTime,
           });
-          if (error) { alert(error.message); return; }
+          if (error) { alert(friendlyError(error)); return; }
           // The database moves Ready to Book to Job Booked on this booking (migration 20261023000000).
           await loadDay();
         });
@@ -783,7 +783,7 @@
             staff_id: timeline.dataset.staffId, project_id: null, block_type: category.type, note: category.note,
             assignment_date: dateToStr(dayViewDate), start_time: minutesToTimeStr(startMin), end_time: minutesToTimeStr(startMin + 240),
           });
-          if (error) { alert(error.message); return; }
+          if (error) { alert(friendlyError(error)); return; }
           await loadDay();
         });
       });
@@ -857,13 +857,13 @@
 
     async function deleteBooking(assignment, label) {
       const { error } = await supabaseClient.from('schedule_assignments').delete().eq('id', assignment.id);
-      if (error) { alert(error.message); return false; }
+      if (error) { alert(friendlyError(error)); return false; }
       showUndoToast(`${label} removed`, async () => {
         const { id, staff_id, project_id, assignment_date, notes, start_time, end_time, block_type, note, site_inspection_id, created_by, client_informed_at, client_informed_email_id, time_offer_id } = assignment;
         const { error: restoreErr } = await supabaseClient.from('schedule_assignments').insert({
           id, staff_id, project_id, assignment_date, notes, start_time, end_time, block_type, note, site_inspection_id, created_by, client_informed_at, client_informed_email_id, time_offer_id,
         });
-        if (restoreErr) alert(`Could not undo: ${restoreErr.message}`);
+        if (restoreErr) alert(`Could not undo: ${friendlyError(restoreErr)}`);
         await loadDay();
       });
       return true;
@@ -1022,7 +1022,7 @@
         const { error } = await supabaseClient.from('schedule_assignments')
           .update(patch)
           .eq('id', assignment.id);
-        if (error) alert(error.message);
+        if (error) alert(friendlyError(error));
         await loadDay();
       }
 

@@ -382,7 +382,7 @@
             <button type="button" class="secondary" id="ri-close-btn" style="width:100%; margin-top:14px;">Close</button>`;
           overlay.querySelector('#ri-close-btn').addEventListener('click', () => overlay.remove());
         } catch (err) {
-          msgEl.innerHTML = `<div class="error-box">${escapeHtml((err && err.message) || String(err))}</div>`;
+          msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           btn.disabled = false;
           overlay.querySelector('#ri-cancel-btn').disabled = false;
           btn.textContent = 'Send';
@@ -642,7 +642,7 @@
           await createTafeDay(myUserId, dateStr);
           msg.innerHTML = `<div class="success-box">TAFE day logged for ${new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' })} (8 hours).</div>`;
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         }
         btn.disabled = false;
         return;
@@ -674,14 +674,14 @@
       clockBtn.disabled = true;
       const { data: already, error: openErr } = await supabaseClient.from('time_entries').select('id').eq('staff_id', myUserId).is('clock_out', null).limit(1);
       if (openErr || (already && already.length)) {
-        msg.innerHTML = `<div class="error-box">${openErr ? escapeHtml(openErr.message) : 'You are already clocked in. Clock out (or switch job) first.'}</div>`;
+        msg.innerHTML = `<div class="error-box">${openErr ? escapeHtml(friendlyError(openErr)) : 'You are already clocked in. Clock out (or switch job) first.'}</div>`;
         clockBtn.disabled = false;
         await checkActiveClock();
         return;
       }
       const { error } = await supabaseClient.from('time_entries').insert(entry);
       clockBtn.disabled = false;
-      if (error) { msg.innerHTML = `<div class="error-box">${error.code === '23505' ? 'You are already clocked in.' : error.message}</div>`; await checkActiveClock(); return; }
+      if (error) { msg.innerHTML = `<div class="error-box">${error.code === '23505' ? 'You are already clocked in.' : escapeHtml(friendlyError(error))}</div>`; await checkActiveClock(); return; }
       msg.innerHTML = '';
       selectedClockCostCentres = [];
       selectedClockJobId = null;
@@ -826,7 +826,7 @@
             await loadTasks();
           } catch (err) {
             btn.disabled = false; btn.textContent = label;
-            showTaskError(btn, 'Could not tick that off: ' + ((err && err.message) || String(err)));
+            showTaskError(btn, 'Could not tick that off: ' + friendlyError(err));
           }
         });
       });
@@ -840,7 +840,7 @@
             await loadTasks();
           } catch (err) {
             btn.disabled = false; btn.textContent = label;
-            showTaskError(btn, 'Could not pick that up: ' + ((err && err.message) || String(err)));
+            showTaskError(btn, 'Could not pick that up: ' + friendlyError(err));
           }
         });
       });
@@ -854,7 +854,7 @@
         .order('created_at', { ascending: true });
 
       if (error) {
-        document.getElementById('my-tasks').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+        document.getElementById('my-tasks').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
         return;
       }
 

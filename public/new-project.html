@@ -60,7 +60,7 @@
 
     <div class="card">
       <h2>Project &amp; client</h2>
-      <label>Project name</label>
+      <label>Project name <span class="req" aria-hidden="true">*</span></label>
       <input id="p-name" placeholder="e.g. 14 Miller St - New Build" required />
       <label>Proposal subtitle (optional)</label>
       <input id="p-subtitle" placeholder="e.g. Grid-Connected Solar Photovoltaic System" />
@@ -77,7 +77,7 @@
 
       <div class="grid cols-3" style="margin-top:14px;">
         <div>
-          <label style="margin-top:0">Client name</label>
+          <label style="margin-top:0">Client name <span class="req" aria-hidden="true">*</span></label>
           <input id="p-client" required />
         </div>
         <div>
@@ -86,7 +86,7 @@
         </div>
         <div>
           <label style="margin-top:0">Client phone</label>
-          <input id="p-phone" />
+          <input id="p-phone" type="tel" autocomplete="tel" />
         </div>
       </div>
       <div class="grid cols-3">
@@ -451,12 +451,12 @@
           <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
           <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
         </select>
-        <input class="li-qty" type="number" step="0.01" value="${quantity}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="font-size:13px;" />
+        <input class="li-qty" type="number" inputmode="decimal" step="0.01" value="${quantity}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="font-size:13px;" />
         <select class="li-tier" style="font-size:13px; display:${isLabour ? 'block' : 'none'};">
           <option value="">-- Select tier --</option>
           ${RATE_TIERS.map(t => `<option value="${t.id}" data-rate="${t.sell_rate}" ${rate_tier_id === t.id ? 'selected' : ''}>${t.name} ($${t.sell_rate}/hr)</option>`).join('')}
         </select>
-        <input class="li-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px; display:${isLabour ? 'none' : 'block'};" />
+        <input class="li-cost" type="number" inputmode="decimal" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px; display:${isLabour ? 'none' : 'block'};" />
         <div class="li-total" style="font-size:13px; font-weight:600;">$0.00</div>
         <button type="button" class="secondary li-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
@@ -1108,6 +1108,7 @@
     document.getElementById('save-btn').addEventListener('click', async () => {
       const msg = document.getElementById('msg');
       msg.innerHTML = '';
+      clearFieldFlags();
 
       const btn = document.getElementById('save-btn');
       const label = btn.textContent;
@@ -1171,7 +1172,14 @@
         })).filter(s => s.name);
 
         if (!name || !client_name || stagesPayload.length === 0) {
-          msg.innerHTML = `<div class="error-box">Please fill in the project name, client name, and at least one stage.</div>`;
+          if (!name) flagRequiredField(document.getElementById('p-name'), 'Enter a project name.');
+          else if (!client_name) flagRequiredField(document.getElementById('p-client'), 'Enter the client name, or pick a client above.');
+          else {
+            const firstStage = document.querySelector('.cc-row .cc-name');
+            if (firstStage) flagRequiredField(firstStage, 'Name at least one stage.');
+            else flagRequiredField(document.getElementById('add-row'), 'Add at least one stage.');
+          }
+          msg.innerHTML = `<div class="error-box">Fill in the fields marked * (the first one is highlighted above).</div>`;
           return;
         }
 

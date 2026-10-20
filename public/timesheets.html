@@ -303,7 +303,7 @@
         .gte('clock_in', rangeStart.toISOString())
         .lt('clock_in', rangeEndExclusive.toISOString())
         .order('clock_in');
-      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
       const { data: leave } = await supabaseClient
         .from('leave_requests')
@@ -386,7 +386,7 @@
       el.innerHTML = '<p class="subtitle">Loading...</p>';
 
       const { data: staff, error: staffErr } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
-      if (staffErr) { el.innerHTML = `<div class="error-box">${staffErr.message}</div>`; return; }
+      if (staffErr) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(staffErr))}</div>`; return; }
 
       const rangeStart = weekStart;
       const rangeEndExclusive = addDays(weekStart, 7);
@@ -395,7 +395,7 @@
         .select('staff_id, clock_in, clock_out, break_taken, break_minutes, break_skip_reason')
         .gte('clock_in', rangeStart.toISOString())
         .lt('clock_in', rangeEndExclusive.toISOString());
-      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
       const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
       const entriesFor = (staffId, dStr) => (entries || [])
@@ -491,7 +491,7 @@
           .order('clock_in', { ascending: false }),
         supabaseClient.from('profiles').select('id, full_name'),
       ]);
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No entries this week.</p>`; return; }
 
       listEl.innerHTML = `
@@ -548,7 +548,7 @@
         deleteBtn.textContent = 'Deleting...';
         const { error } = await supabaseClient.from('time_entries').delete().in('id', ids);
         if (error) {
-          msg.innerHTML = `<div class="error-box">${error.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
           deleteBtn.disabled = false;
           refreshDeleteBtn();
           return;
@@ -643,7 +643,7 @@
         .gte('clock_in', windowStart.toISOString())
         .lt('clock_in', windowEnd.toISOString())
         .order('clock_in');
-      if (error) { alert(error.message); return; }
+      if (error) { alert(friendlyError(error)); return; }
 
       dayBlockKeySeq = 0;
       dayBlocks = (existing || []).map(dayBlockFromEntry);
@@ -1129,7 +1129,7 @@
         if (canSeeTeamWeek) await loadTeamWeek();
         await loadTimesheetIssues();
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         btn.disabled = false;
       }
     }
@@ -1167,7 +1167,7 @@
           await refreshWeekViews();
           await loadTimesheetIssues();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           btn.disabled = false;
         }
       });
@@ -1188,7 +1188,7 @@
       try {
       const { error } = await supabaseClient.from('leave_requests').insert({ staff_id: myUserId, start_date, end_date, leave_type, notes });
       msg.innerHTML = error
-        ? `<div class="error-box">${escapeHtml(error.message)}</div>`
+        ? `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`
         : `<div class="success-box">Requested. You'll see it below once it's actioned.</div>`;
       if (!error) {
         document.getElementById('leave-start').value = '';
@@ -1209,7 +1209,7 @@
         .select('*')
         .eq('staff_id', myUserId)
         .order('start_date', { ascending: false });
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!data.length) { listEl.innerHTML = `<p class="subtitle">No leave requests yet.</p>`; return; }
       const badgeClass = { pending: 'draft', approved: 'accepted', declined: 'draft' };
       listEl.innerHTML = data.map(l => `
@@ -1244,7 +1244,7 @@
 
       resultsEl.innerHTML = `<p class="subtitle">Loading...</p>`;
       const { data, error } = await supabaseClient.rpc('get_nonbillable_cost_by_category', { p_start: start, p_end: end });
-      if (error) { resultsEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { resultsEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
       const labels = { quoting: 'Quoting', admin: 'Admin', maintenance: 'Maintenance', tafe: 'TAFE', training: 'Training', other: 'Other' };
       // Old 'office' entries count as Admin.
@@ -1305,7 +1305,7 @@
         }
         msg.innerHTML = html;
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
       }
       btn.disabled = false;
       btn.textContent = 'Push timesheets';
@@ -1340,7 +1340,7 @@
             .from('leave_requests')
             .update({ status, decided_by: myUserId, decided_at: new Date().toISOString() })
             .eq('id', btn.dataset.id);
-          if (updErr) { alert(updErr.message); return; }
+          if (updErr) { alert(friendlyError(updErr)); return; }
           await loadApprovals(myRole);
         });
       });
