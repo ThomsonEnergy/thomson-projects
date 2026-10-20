@@ -589,7 +589,7 @@
           const byJob = {};
           (toBill || []).forEach(v => { if (v.projects) (byJob[v.project_id] = byJob[v.project_id] || { p: v.projects, n: 0 }).n++; });
           Object.values(byJob).forEach(({ p, n }) => {
-            items.push({ group: 'job', label: `${n} variation${n === 1 ? '' : 's'} logged to bill on ${escapeHtml(projectRef(p))}`, link: `/project.html?id=${p.id}` });
+            items.push({ group: 'job', label: `${n} variation${n === 1 ? '' : 's'} logged to bill on ${escapeHtml(projectRef(p))}`, link: `/project.html?id=${p.id}&tab=variations` });
           });
         } catch (err) { console.error('Variation check failed:', err); }
       }

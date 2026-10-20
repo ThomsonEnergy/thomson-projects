@@ -75,7 +75,7 @@ async function approveVariation(supabaseAdmin, entry, how) {
     await supabaseAdmin.rpc('create_notification', {
       p_user: entry.created_by, p_kind: 'variation', p_title: `Variation approved: ${entry.description}`,
       p_body: `${who} approved it ($${total.toFixed(2)} ex GST). It is now a stage on the job.`,
-      p_link: `/project.html?id=${entry.project_id}`, p_actor: how.approvedBy || null, p_dedupe: `variation-approved-${entry.id}`,
+      p_link: `/project.html?id=${entry.project_id}&tab=variations`, p_actor: how.approvedBy || null, p_dedupe: `variation-approved-${entry.id}`,
     });
   }
 
