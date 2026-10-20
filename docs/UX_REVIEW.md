@@ -8,6 +8,8 @@ Read-only review of every page in `public/` for things that make the app harder 
 
 **Delivery 2 (items 1 to 30, less 2, 5 and 19 which shipped in delivery 1):** shipped 19 Oct 2026, no migration.
 
+**Delivery 3 (items 32 to 82, less 33, 35, 49 and 62 which shipped in delivery 1):** shipped 20 Oct 2026, migration 20261107000000.
+
 **Do first (top ten, best first):** all ten shipped 19 Oct 2026 as delivery 1 (PR on branch `claude/ux-top-ten`, migration 20261104000000).
 62. Inputs are 14px so iPhones zoom on every tap
 93. Every page blocks on an unpinned CDN copy of supabase-js
