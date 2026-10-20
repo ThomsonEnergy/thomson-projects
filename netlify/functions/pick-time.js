@@ -7,6 +7,7 @@
 // when someone was booked in the meantime (the page greys that option out and asks again).
 
 const { getAdminClient } = require('./_shared/require-admin');
+const { managerIds } = require('./_shared/agent-log');
 const { sendAsUser } = require('./_shared/send-recorded-email');
 const E = require('./_shared/schedule-emails');
 
@@ -21,6 +22,16 @@ async function senderFor(admin, offer) {
   }
   const { data: a } = await admin.from('profiles').select('id').eq('role', 'admin').eq('active', true).order('created_at').limit(1).maybeSingle();
   return a ? a.id : null;
+}
+
+// Who at the office hears about a pick or a decline: the person who sent the options while they
+// are still with us, otherwise the ops managers.
+async function tellWho(admin, offer) {
+  if (offer.created_by) {
+    const { data: p } = await admin.from('profiles').select('id').eq('id', offer.created_by).eq('active', true).maybeSingle();
+    if (p) return [p.id];
+  }
+  return managerIds(admin);
 }
 
 exports.handler = async (event) => {
@@ -43,9 +54,9 @@ exports.handler = async (event) => {
       const { data: upd } = await admin.from('schedule_time_offers').update({ status: 'declined', client_message: message || null }).eq('id', offer.id).eq('status', 'open').select('id').maybeSingle();
       if (!upd) return json(409, { ok: false, error: 'These options are no longer open. Please contact us.' });
       await admin.from('activity_log').insert({ entity_type: 'project', entity_id: project.id, action: 'time_offer_declined', description: `Client: none of the offered times work${message ? `. "${message}"` : ''}`, changed_by: null });
-      if (offer.created_by) {
+      for (const uid of await tellWho(admin, offer)) {
         await admin.rpc('create_notification', {
-          p_user: offer.created_by, p_kind: 'booking_reminder', p_title: `None of the times suit: ${E.jobTitle(project)}`,
+          p_user: uid, p_kind: 'booking_reminder', p_title: `None of the times suit: ${E.jobTitle(project)}`,
           p_body: message || `${offer.to_name || project.client_name || 'The client'} said none of the options work. Offer new ones or call them.`,
           p_link: link, p_actor: null, p_dedupe: `offer-declined:${offer.id}`,
         });
@@ -69,25 +80,30 @@ exports.handler = async (event) => {
     const who = await E.whoOn(admin, project.id, dates);
     const phone = await E.companyPhone(admin);
 
-    // the confirmation, in the name of whoever sent the options (their signature), kept on the job
+    // the confirmation, in the name of whoever sent the options (their signature), kept on the job.
+    // The booking stands either way (the client chose it); a failed email is said so everywhere.
     const senderId = await senderFor(admin, offer);
+    let emailed = false;
     if (senderId) {
       try {
         const text = E.timeOfferPickedBody({ first: E.firstName(offer.to_name || project.client_name), project, rows, who, phone });
         const sent = await sendAsUser(admin, { userId: senderId, to: offer.to_email, subject: E.subjectFor('time_offer_picked', project), bodyText: text, tagProjectId: project.id, tagKind: 'client' });
         await admin.from('schedule_assignments').update({ client_informed_email_id: sent.emailId }).in('id', ids);
         await admin.from('schedule_emails').insert({ project_id: project.id, kind: 'time_offer_picked', to_email: offer.to_email, subject: sent.subject, email_id: sent.emailId, thread_id: sent.thread.id, assignment_ids: ids, offer_id: offer.id, sent_by: senderId });
+        emailed = true;
       } catch (err) { console.error('pick-time: confirmation email failed:', err.message); }
     }
-    await admin.from('activity_log').insert({ entity_type: 'project', entity_id: project.id, action: 'time_offer_picked', description: `Client picked ${E.whenLines(rows).join('; ')} (${who.join(', ') || 'no one'} booked)`, changed_by: null });
-    if (offer.created_by) {
+    const when = E.whenLines(rows).join('; ');
+    const notSent = emailed ? '' : ' Confirmation email NOT sent: send it from the Schedule tab.';
+    await admin.from('activity_log').insert({ entity_type: 'project', entity_id: project.id, action: 'time_offer_picked', description: `Client picked ${when} (${who.join(', ') || 'no one'} booked).${notSent}`, changed_by: null });
+    for (const uid of await tellWho(admin, offer)) {
       await admin.rpc('create_notification', {
-        p_user: offer.created_by, p_kind: 'booking_reminder', p_title: `Client picked a time: ${E.jobTitle(project)}`,
-        p_body: `${E.whenLines(rows).join('; ')}. ${who.length ? `${E.listNames(who)} booked.` : ''}`.trim(),
+        p_user: uid, p_kind: 'booking_reminder', p_title: `Client picked a time: ${E.jobTitle(project)}`,
+        p_body: `${when}. ${who.length ? `${E.listNames(who)} booked.` : ''}${notSent}`.trim(),
         p_link: link, p_actor: null, p_dedupe: `offer-picked:${offer.id}`,
       });
     }
-    return json(200, { ok: true, booked: rows.map((r) => ({ date: r.assignment_date })), label: E.whenLines(rows).join('; ') });
+    return json(200, { ok: true, booked: rows.map((r) => ({ date: r.assignment_date })), label: when, emailed });
   } catch (err) {
     console.error('pick-time failed:', err);
     return json(500, { ok: false, error: 'Something went wrong. Please try again or contact us.' });

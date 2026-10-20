@@ -32,13 +32,17 @@ exports.handler = async (event) => {
       byProject.set(r.project_id, g);
     }
     const managers = byProject.size ? await managerIds(admin) : [];
+    const makerIds = [...new Set([...byProject.values()].flatMap((g) => [...g.makers]))];
+    const { data: activeMakers } = makerIds.length ? await admin.from('profiles').select('id').in('id', makerIds).eq('active', true) : { data: [] };
+    const active = new Set((activeMakers || []).map((p) => p.id));
     let sent = 0;
     const lines = [];
     for (const [projectId, g] of byProject) {
       const when = E.whenLines(g.rows).join('; ');
       const title = `Client not told yet: ${E.jobTitle(g.project)}`;
       const body = `Booked ${when}. Email the booking to ${g.project.client_name || 'the client'} from the job's Schedule tab, or mark it as told.`;
-      const people = g.makers.size ? [...g.makers] : managers;
+      const makers = [...g.makers].filter((id) => active.has(id)); // someone who has left reminds nobody: the managers hear instead
+      const people = makers.length ? makers : managers;
       for (const uid of people) {
         await admin.rpc('create_notification', { p_user: uid, p_kind: 'booking_reminder', p_title: title, p_body: body, p_link: `/project.html?id=${projectId}&tab=schedule`, p_actor: null, p_dedupe: `book-remind:${projectId}:${today}` });
         sent += 1;

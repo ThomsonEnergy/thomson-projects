@@ -1,4 +1,5 @@
-// Booking emails to the client and the bits every schedule function shares
+// Booking emails to the client and the bits every schedule function shares. The texts end
+// without a sign off: the sender's "Kind regards" and signature are added on sending.
 // (docs/PROJECT_SPEC.md A34): who the email goes to, how dates and times read, the email
 // texts, and the staff notification for a moved or cancelled booking.
 
@@ -36,17 +37,14 @@ function whenLines(rows) {
   let i = 0;
   while (i < list.length) {
     let j = i;
-    while (j + 1 < list.length && list[j + 1].start === list[i].start && list[j + 1].end === list[i].end && nextWorkingDay(list[j].date) === list[j + 1].date) j += 1;
+    // a run is day after day, or Friday straight to Monday (a weekday job skipping the weekend)
+    const joins = (k) => list[k + 1].date === addDays(list[k].date, 1) || (new Date(list[k].date + 'T00:00:00Z').getUTCDay() === 5 && list[k + 1].date === addDays(list[k].date, 3));
+    while (j + 1 < list.length && list[j + 1].start === list[i].start && list[j + 1].end === list[i].end && joins(j)) j += 1;
     const times = `${fmtTime(list[i].start)} to ${fmtTime(list[i].end)}`;
     lines.push(j > i ? `${fmtDay(list[i].date)} to ${fmtDay(list[j].date)}, ${times}` : `${fmtDay(list[i].date)}, ${times}`);
     i = j + 1;
   }
   return lines;
-}
-function nextWorkingDay(ymd) {
-  let d = addDays(ymd, 1);
-  while ([0, 6].includes(new Date(d + 'T00:00:00Z').getUTCDay())) d = addDays(d, 1);
-  return d;
 }
 
 // The job contact's email when there is one, else the client email on the job.
@@ -89,8 +87,6 @@ function bookingConfirmedBody({ first, project, rows, who, phone }) {
     who.length ? `Who: ${listNames(who)}` : null,
     '',
     closeLine(phone),
-    '',
-    'Kind regards,',
   ].filter((l) => l !== null).join('\n');
 }
 
@@ -107,8 +103,6 @@ function bookingMovedBody({ first, project, oldRows, newRows, who, phone }) {
     '',
     'Sorry for the change.',
     closeLine(phone),
-    '',
-    'Kind regards,',
   ].filter((l) => l !== null).join('\n');
 }
 
@@ -121,8 +115,6 @@ function bookingCancelledBody({ first, project, oldRows, phone, withOptions }) {
     withOptions
       ? 'Sorry about that. Below are some times that work for us, pick whichever suits you and we will lock it in.'
       : `Sorry about that. We'll be in touch with new times, or reply to this email or call ${phone} to arrange one.`,
-    '',
-    'Kind regards,',
   ].join('\n');
 }
 
@@ -155,8 +147,6 @@ function timeOfferBody({ first, project, start, end, days, weekdaysOnly, optionD
     who.length ? `${listNames(who)} would be doing the work at ${project.client_address || '[site address]'}.` : null,
     '',
     `Any questions, reply to this email or call ${phone}.`,
-    '',
-    'Kind regards,',
   ].filter((l) => l !== null).join('\n');
 }
 
@@ -171,8 +161,6 @@ function timeOfferPickedBody({ first, project, rows, who, phone }) {
     who.length ? `Who: ${listNames(who)}` : null,
     '',
     `If anything changes, reply to this email or call ${phone}.`,
-    '',
-    'Kind regards,',
   ].filter((l) => l !== null).join('\n');
 }
 

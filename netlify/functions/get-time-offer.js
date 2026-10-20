@@ -16,6 +16,7 @@ exports.handler = async (event) => {
     const admin = getAdminClient();
     const { data: offer } = await admin.from('schedule_time_offers').select('*').eq('token', token).maybeSingle();
     if (!offer) return json(404, { ok: false, error: 'This link is not valid.' });
+    if (offer.status === 'withdrawn') return json(410, { ok: false, error: 'These times are no longer open. Please contact us.' });
     const [{ data: project }, { data: company }, { data: options }, who] = await Promise.all([
       admin.from('projects').select('name, job_number, quote_number, client_address').eq('id', offer.project_id).maybeSingle(),
       admin.from('company_settings').select('company_name, phone, logo_url').eq('id', 1).maybeSingle(),

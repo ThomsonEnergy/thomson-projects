@@ -105,7 +105,8 @@
       try {
         const { res, d } = await post({ date: btn.dataset.date });
         if (res.ok && d.ok) {
-          root.innerHTML = `<div class="card"><h2 style="margin-top:0;">You're booked in</h2><div class="success-box">${esc(d.label || '')}. We've sent you an email to confirm. If anything changes, reply to that email${phoneLine()}.</div></div>`;
+          const follow = d.emailed ? `We've sent you an email to confirm. If anything changes, reply to that email${phoneLine()}.` : `Your time is locked in. If anything changes, let us know${phoneLine() || ' by replying to our email'}.`;
+          root.innerHTML = `<div class="card"><h2 style="margin-top:0;">You're booked in</h2><div class="success-box">${esc(d.label || '')}. ${follow}</div></div>`;
           return;
         }
         problem = d.error || 'Could not book that. Please try again.';

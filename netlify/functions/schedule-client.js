@@ -71,8 +71,10 @@ async function draftFor(admin, project, body, user) {
   const first = rec.first;
   let text = '';
   if (kind === 'booking_confirmed') {
-    const rows = await loadRows(admin, project.id, body.assignmentIds);
-    const who = await E.whoOn(admin, project.id, [...new Set(rows.map((r) => r.assignment_date))]);
+    let rows = await loadRows(admin, project.id, body.assignmentIds);
+    const m = body.move || null; // a move of a day the client never heard of reads as a first confirmation
+    if (m && DATE.test(m.date || '') && TIME.test(m.start || '') && TIME.test(m.end || '')) rows = rows.map((r) => ({ ...r, assignment_date: m.date, start_time: m.start, end_time: m.end }));
+    const who = m ? [...new Set(rows.map((r) => r.profiles && r.profiles.full_name).filter(Boolean))].sort() : await E.whoOn(admin, project.id, [...new Set(rows.map((r) => r.assignment_date))]);
     text = E.bookingConfirmedBody({ first, project, rows, who, phone });
   } else if (kind === 'booking_moved') {
     const rows = await loadRows(admin, project.id, body.assignmentIds);
@@ -135,13 +137,14 @@ exports.handler = async (event) => {
   try {
     const project = await loadProject(admin, body.projectId);
 
+    // the job contact's details are for pricing roles only (client_contacts policy), like every write here
+    if (!PRICING.includes(role)) return json(403, { ok: false, error: 'Only Admin, Finance or Sales can change bookings.' });
+
     if (action === 'recipient') {
       const rec = await E.recipientFor(admin, project);
       return json(200, { ok: true, to: rec.to, name: rec.name, source: rec.source });
     }
     if (action === 'draft') return json(200, { ok: true, ...(await draftFor(admin, project, body, user)) });
-
-    if (!PRICING.includes(role)) return json(403, { ok: false, error: 'Only Admin, Finance or Sales can change bookings.' });
 
     if (action === 'email_booking') {
       const rows = await loadRows(admin, project.id, body.assignmentIds);
@@ -175,17 +178,19 @@ exports.handler = async (event) => {
       let to = null;
       if (body.email) {
         to = cleanTo(body.to);
-        const subject = cleanSubject(body.subject, E.subjectFor('booking_moved', project));
+        const kind = wasInformed ? 'booking_moved' : 'booking_confirmed';
+        const subject = cleanSubject(body.subject, E.subjectFor(kind, project));
         sent = await sendAsUser(admin, { userId: user.id, to, subject, bodyText: cleanBody(body.body), tagProjectId: project.id, tagKind: 'client' });
+        // on record straight away, so a failed update below cannot lose the fact the client was emailed
+        await admin.from('schedule_emails').insert({ project_id: project.id, kind, to_email: to, subject: sent.subject, email_id: sent.emailId, thread_id: sent.thread.id, assignment_ids: ids, sent_by: user.id });
         Object.assign(patch, { client_informed_at: new Date().toISOString(), client_informed_email_id: sent.emailId });
       } else {
         // the client was told the old time: it is tentative again until they hear the new one
         Object.assign(patch, { client_informed_at: null, client_informed_email_id: null });
       }
       const { error } = await admin.from('schedule_assignments').update(patch).in('id', ids);
-      if (error) throw error;
+      if (error) throw new Refused(`${sent ? 'The client was emailed the new time but the bookings could not be moved' : 'The bookings could not be moved'}: ${error.message}. Reload and try again.`, 500);
       const newRows = rows.map((r) => ({ ...r, ...patch }));
-      if (sent) await admin.from('schedule_emails').insert({ project_id: project.id, kind: 'booking_moved', to_email: to, subject: sent.subject, email_id: sent.emailId, thread_id: sent.thread.id, assignment_ids: ids, sent_by: user.id });
       await E.notifyStaff(admin, rows, { title: `Booking moved: ${E.jobTitle(project)}`, body: `Now ${E.whenLines(newRows).join('; ')} (was ${E.whenLines(rows).join('; ')})`, actorId: user.id });
       await log(admin, project.id, 'booking_moved', `Booking moved to ${E.whenLines(newRows).join('; ')} (was ${E.whenLines(rows).join('; ')})${sent ? `, client emailed (${to})` : wasInformed ? ', client not yet told' : ''}`, user.id);
       return json(200, { ok: true });
@@ -207,12 +212,18 @@ exports.handler = async (event) => {
           text += `\n\nOptions (${E.fmtTime(o.start)} to ${E.fmtTime(o.end)}${o.days > 1 ? `, ${o.days} days` : ''}):\n${o.optionDates.map((d) => `- ${E.optionLabel(d, o.days, o.weekdaysOnly)}`).join('\n')}${who.length ? `\n${E.listNames(who)} would be doing the work.` : ''}\n\n[[button: Pick a time that suits you | ${offerUrl(offer)}]]`;
         }
         const subject = cleanSubject(body.subject, E.subjectFor('booking_cancelled', project));
-        sent = await sendAsUser(admin, { userId: user.id, to, subject, bodyText: text, tagProjectId: project.id, tagKind: 'client' });
+        try {
+          sent = await sendAsUser(admin, { userId: user.id, to, subject, bodyText: text, tagProjectId: project.id, tagKind: 'client' });
+        } catch (err) {
+          if (offer) await admin.from('schedule_time_offers').delete().eq('id', offer.id); // not sent, so not open
+          throw err;
+        }
         if (offer) await admin.from('schedule_time_offers').update({ email_id: sent.emailId }).eq('id', offer.id);
+        // on record straight away, before the delete below
+        await admin.from('schedule_emails').insert({ project_id: project.id, kind: offer ? 'time_offer' : 'booking_cancelled', to_email: to, subject: sent.subject, email_id: sent.emailId, thread_id: sent.thread.id, assignment_ids: ids, offer_id: offer ? offer.id : null, sent_by: user.id });
       }
       const { error } = await admin.from('schedule_assignments').delete().in('id', ids);
-      if (error) throw error;
-      if (sent) await admin.from('schedule_emails').insert({ project_id: project.id, kind: offer ? 'time_offer' : 'booking_cancelled', to_email: to, subject: sent.subject, email_id: sent.emailId, thread_id: sent.thread.id, assignment_ids: ids, offer_id: offer ? offer.id : null, sent_by: user.id });
+      if (error) throw new Refused(`${sent ? 'The client was emailed but the bookings could not be removed' : 'The bookings could not be removed'}: ${error.message}. Reload and try again.`, 500);
       await E.notifyStaff(admin, rows, { title: `Booking cancelled: ${E.jobTitle(project)}`, body: E.whenLines(rows).join('; '), actorId: user.id });
       await log(admin, project.id, 'booking_cancelled', `Booking cancelled: ${E.whenLines(rows).join('; ')}${sent ? `, client emailed (${to})${offer ? ' with new time options' : ''}` : ''}`, user.id);
       return json(200, { ok: true, offerId: offer ? offer.id : null });

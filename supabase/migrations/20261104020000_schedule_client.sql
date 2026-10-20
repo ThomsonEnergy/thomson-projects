@@ -113,6 +113,29 @@ $$;
 revoke execute on function public.time_offer_option_dates(date, integer, boolean) from public, anon;
 grant execute on function public.time_offer_option_dates(date, integer, boolean) to authenticated, service_role;
 
+-- A person is free on a day when no booking of theirs overlaps the offer's times and they are
+-- not on approved leave (leave_requests).
+create or replace function public.time_offer_person_busy(p_staff_ids uuid[], p_day date, p_start time, p_end time)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from schedule_assignments s
+    where s.assignment_date = p_day and s.staff_id = any (p_staff_ids)
+      and s.start_time < p_end and p_start < s.end_time
+  ) or exists (
+    select 1 from leave_requests l
+    where l.staff_id = any (p_staff_ids) and l.status = 'approved'
+      and l.start_date <= p_day and l.end_date >= p_day
+  );
+$$;
+
+revoke execute on function public.time_offer_person_busy(uuid[], date, time without time zone, time without time zone) from public, anon, authenticated;
+grant execute on function public.time_offer_person_busy(uuid[], date, time without time zone, time without time zone) to service_role;
+
 -- Each option of an offer with whether every person is still free on every one of its days.
 create or replace function public.time_offer_option_status(p_offer_id uuid)
 returns jsonb
@@ -128,8 +151,7 @@ as $$
     'available', o.start_date >= sydney_today() and not exists (
       select 1
       from time_offer_option_dates(o.start_date, f.days, f.weekdays_only) d
-      join schedule_assignments s on s.assignment_date = d and s.staff_id = any (f.staff_ids)
-      where s.start_time < f.end_time and f.start_time < s.end_time
+      where time_offer_person_busy(f.staff_ids, d, f.start_time, f.end_time)
     )
   ) order by o.start_date), '[]'::jsonb)
   from schedule_time_offers f
@@ -141,7 +163,8 @@ revoke execute on function public.time_offer_option_status(uuid) from public, an
 grant execute on function public.time_offer_option_status(uuid) to service_role;
 
 -- Books the option the client picked: every person in staff_ids for every day of the option,
--- all or nothing, already client informed. Raises 'taken' when someone is no longer free,
+-- all or nothing, already client informed. Raises 'taken' when someone is no longer free (booked
+-- or on approved leave),
 -- 'not_open' when the offer is not open, 'not_an_option' / 'in_the_past' for a bad date.
 -- Called only by the server (pick-time.js) after it checked the private link token.
 create or replace function public.book_time_offer(p_offer_id uuid, p_date date)
@@ -163,16 +186,13 @@ begin
   if not (p_date = any (f.option_dates)) then raise exception 'not_an_option'; end if;
   if p_date < sydney_today() then raise exception 'in_the_past'; end if;
 
-  -- lock the people's rows for those days so two picks cannot both get through
-  perform 1 from schedule_assignments s
-    where s.staff_id = any (f.staff_ids)
-      and s.assignment_date in (select d from time_offer_option_dates(p_date, f.days, f.weekdays_only) d)
-    for update;
+  -- one pick at a time per person (any offer, any job), in a fixed order so two picks cannot
+  -- deadlock; released at commit, so the next pick sees this one's bookings
+  perform pg_advisory_xact_lock(hashtextextended(x::text, 0)) from (select unnest(f.staff_ids) as x order by 1) s;
   if exists (
     select 1
     from time_offer_option_dates(p_date, f.days, f.weekdays_only) d
-    join schedule_assignments s on s.assignment_date = d and s.staff_id = any (f.staff_ids)
-    where s.start_time < f.end_time and f.start_time < s.end_time
+    where time_offer_person_busy(f.staff_ids, d, f.start_time, f.end_time)
   ) then raise exception 'taken'; end if;
 
   select case when job_number is not null then 'job' else 'site_visit' end into v_block from projects where id = f.project_id;
@@ -194,3 +214,9 @@ $$;
 
 revoke execute on function public.book_time_offer(uuid, date) from public, anon, authenticated;
 grant execute on function public.book_time_offer(uuid, date) to service_role;
+
+-- Bookings made before this change were confirmed with the client the old way (by hand), so they
+-- do not read as tentative or set off the 7am reminder. New bookings start not informed.
+update public.schedule_assignments
+set client_informed_at = created_at
+where client_informed_at is null and project_id is not null;
