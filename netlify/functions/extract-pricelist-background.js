@@ -8,9 +8,8 @@
 // frontend creates the job row itself first, calls this, then polls that
 // row for the result rather than waiting on this request's response.
 
-const fetch = require('node-fetch');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { getIntegrationKey } = require('./_shared/get-integration-key');
+const ai = require('./_shared/price-list-ai');
 
 exports.handler = async (event) => {
   const auth = await requirePricingRole(event);
@@ -27,51 +26,14 @@ exports.handler = async (event) => {
     if (downloadErr) throw downloadErr;
     const fileBase64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64');
 
-    const apiKey = await getIntegrationKey('anthropic');
-    const isPdf = mediaType === 'application/pdf';
-
-    const prompt = `This is a supplier price list for an electrical/solar contracting business - potentially many items, not a bill to be paid. Extract:
-
-- supplier: the supplier/vendor's business name shown on the document
-- items: an array, each with:
-  - description: the item/product name or description as written
-  - unit_cost: the price per unit, ex-GST if both are shown, as a plain number (no currency symbols)
-  - part_number: their part/SKU number if shown, otherwise null
-
-Extract every item on the list, however many there are - don't stop early or summarize. If a price genuinely isn't legible for an item, use null for unit_cost rather than guessing.
-
-Respond with ONLY a JSON object shaped like {"supplier": "...", "items": [...]}, no other text, no markdown fences.`;
-
-    const contentBlock = isPdf
-      ? { type: 'document', source: { type: 'base64', media_type: mediaType, data: fileBase64 } }
-      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: fileBase64 } };
-
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-5-5',
-        max_tokens: 8000,
-        messages: [{
-          role: 'user',
-          content: [contentBlock, { type: 'text', text: prompt }],
-        }],
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Anthropic API error: ${res.status} ${text}`);
+    // Shared reader: PDFs a few pages at a time, and a reply cut off by the size limit is
+    // read again as two halves (the old single 8000-token call failed on long lists with
+    // "Unterminated string in JSON").
+    const usage = { input_tokens: 0, output_tokens: 0 };
+    const extracted = await ai.readWholeDocument({ fileBase64, mediaType, usage });
+    if (!extracted.items.length && !extracted.is_price_list) {
+      throw new Error('This does not look like a price list: no priced items were found.');
     }
-
-    const data = await res.json();
-    const raw = data.content.map((b) => b.text || '').join('').trim();
-    const cleaned = raw.replace(/^```json/i, '').replace(/```$/, '').trim();
-    const extracted = JSON.parse(cleaned);
 
     await supabaseAdmin.from('ai_extraction_jobs').update({
       status: 'complete',

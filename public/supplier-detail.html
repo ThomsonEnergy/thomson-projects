@@ -330,15 +330,7 @@
       document.body.appendChild(overlay);
 
       try {
-        const fileBase64 = await fileToBase64(file);
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/extract-pricelist', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ fileBase64, mediaType: file.type }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+        const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', file, file.type);
         overlay.remove();
         await openPricelistReviewPanel(data.items);
       } catch (err) {

@@ -359,7 +359,7 @@
     const to = all.reduce((a, b) => (a > b ? a : b));
     const [{ data: existingAll }, { data: leave }] = await Promise.all([
       supabaseClient.from('schedule_assignments').select('id, staff_id, assignment_date, start_time, end_time, profiles(full_name), projects(name, job_number)').in('staff_id', o.staffIds).gte('assignment_date', from).lte('assignment_date', to),
-      supabaseClient.from('leave_requests').select('staff_id, start_date, end_date, profiles(full_name)').in('staff_id', o.staffIds).eq('status', 'approved').lte('start_date', to).gte('end_date', from),
+      supabaseClient.from('leave_requests').select('staff_id, start_date, end_date, profiles!leave_requests_staff_id_fkey(full_name)').in('staff_id', o.staffIds).eq('status', 'approved').lte('start_date', to).gte('end_date', from),
     ]);
     const existing = (existingAll || []).filter((e) => !(excludeIds && excludeIds.has(e.id)));
     let clashes = 0;
