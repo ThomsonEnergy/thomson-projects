@@ -3,6 +3,7 @@
 // Background function (up to 15 minutes). Started by the Gmail sync (_shared/gmail-sync.js)
 // when new mail came in or work is waiting, by a new Gmail connection, and by the Clean up
 // buttons. Calling it with no body is harmless: it only works through what is waiting.
+//   0. sales@ mail the 5-minute sync ran out of time for (_shared/gmail-sync.js catchUpSharedMailbox).
 //   1. A newly connected My inbox: its last 60 days of mail into TEops.
 //   2. Clean up: the whole-inbox scan by sender, Sparky's suggestions, then the archive /
 //      read / unsubscribe taps (_shared/mailbox-cleanup.js).
@@ -14,7 +15,7 @@
 
 const { getAdminClient } = require('./_shared/require-admin');
 const { gmailRequest } = require('./_shared/google-client');
-const { processMessageId, startMailboxWork } = require('./_shared/gmail-sync');
+const { processMessageId, startMailboxWork, catchUpSharedMailbox } = require('./_shared/gmail-sync');
 const { scanInbox, suggestForSenders, runQueuedActions } = require('./_shared/mailbox-cleanup');
 const { runEmailAgent } = require('./_shared/email-agent');
 const { learnWritingStyle, wantsLearning } = require('./_shared/writing-style');
@@ -70,6 +71,16 @@ exports.handler = () => runAgent('mailbox-work', async () => {
   const usage = { input_tokens: 0, output_tokens: 0 };
   const parts = [];
   let more = false;
+
+  // a sales@ backlog first (up to 6 minutes), so the agent below sorts it in the same run
+  try {
+    const c = await catchUpSharedMailbox(admin, 6 * 60000);
+    if (c.synced) parts.push(`sales@: ${c.synced} email${c.synced === 1 ? '' : 's'} caught up`);
+    if (c.done === false) more = true;
+  } catch (err) {
+    console.error('sales@ catch up failed:', err.message);
+    parts.push(`sales@ catch up: ${String(err.message).slice(0, 120)}`);
+  }
 
   const { data: mailboxes } = await admin.from('mailboxes').select('*').not('connected_at', 'is', null).order('kind', { ascending: false });
   for (const row of (mailboxes || [])) {
