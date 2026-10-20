@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Schedule - Thomson Energy</title>
+<title>Schedule - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
@@ -146,6 +146,9 @@
     .day-board-sidebar { display: none; }
     .mobile-day-list { display: block; }
   }
+  /* The period label doubles as a date jump: an invisible native date input sits over it */
+  .period-jump { position: relative; display: inline-block; cursor: pointer; }
+  .period-jump input[type="date"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; margin: 0; padding: 0; border: 0; }
 </style>
 </head>
 <body>
@@ -169,8 +172,11 @@
 
     <div class="card" id="schedule-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
-        <button class="secondary" id="prev-btn">&larr; Prev</button>
-        <h2 style="margin:0;"><span id="period-label"></span> <span id="period-badges"></span></h2>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="secondary" id="prev-btn">&larr; Prev</button>
+          <button class="secondary" id="today-btn">Today</button>
+        </div>
+        <h2 style="margin:0;"><span class="period-jump" title="Jump to a date"><span id="period-label"></span> &#9662;<input type="date" id="period-jump" aria-label="Jump to a date" /></span> <span id="period-badges"></span></h2>
         <div style="display:flex; gap:8px; align-items:center;">
           <button class="secondary" id="view-month-btn">Month</button>
           <button class="secondary" id="view-day-btn">Day</button>
@@ -204,8 +210,8 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=104"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
     let currentView = 'month';
@@ -238,7 +244,7 @@
     }
 
     let loadSeq = 0; // bumps on every load so a slow older fetch never overwrites a newer one
-    const NAV_BUTTON_IDS = ['prev-btn', 'next-btn', 'view-month-btn', 'view-day-btn'];
+    const NAV_BUTTON_IDS = ['prev-btn', 'today-btn', 'period-jump', 'next-btn', 'view-month-btn', 'view-day-btn'];
     function setScheduleLoading(on) {
       document.getElementById('schedule-card').classList.toggle('is-loading', on);
       NAV_BUTTON_IDS.forEach(id => { document.getElementById(id).disabled = on; });
@@ -263,6 +269,7 @@
     async function loadMonth() {
       const seq = ++loadSeq;
       document.getElementById('period-label').textContent = new Date(viewYear, viewMonth, 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' });
+      document.getElementById('period-jump').value = toDateStr(viewYear, viewMonth, 1);
       document.getElementById('schedule-msg').innerHTML = '';
       setScheduleLoading(true);
       try {
@@ -288,7 +295,7 @@
         const assignmentsByDate = {};
         (assignments || []).forEach(a => { (assignmentsByDate[a.assignment_date] ||= []).push(a); });
 
-        const todayStr = dateToStr(new Date());
+        const todayStr = sydneyDateKey(new Date());
 
         let html = '';
         for (let i = 0; i < totalCells; i++) {
@@ -338,13 +345,14 @@
     async function loadDay() {
       const seq = ++loadSeq;
       document.getElementById('period-label').textContent = dayViewDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      document.getElementById('period-jump').value = dateToStr(dayViewDate);
       document.getElementById('schedule-msg').innerHTML = '';
       setScheduleLoading(true);
       try {
         // A failed staff list at start up is fetched again here, so Retry recovers it
         if (!staffList.length) await loadPickerData();
         const dateStr = dateToStr(dayViewDate);
-        const todayStr = dateToStr(new Date());
+        const todayStr = sydneyDateKey(new Date());
         const isPastDay = dateStr < todayStr;
         document.getElementById('day-board-notice').innerHTML = '';
 
@@ -1154,6 +1162,19 @@
       }
     });
 
+    // Today and the date jump (tap the period label for the native date picker)
+    function goToDate(dateKey) {
+      const [y, m, d] = String(dateKey || '').split('-').map(Number);
+      if (!y || !m || !d) return;
+      viewYear = y; viewMonth = m - 1;
+      dayViewDate = new Date(y, m - 1, d);
+      if (currentView === 'month') loadMonth(); else loadDay();
+    }
+    document.getElementById('today-btn').addEventListener('click', () => goToDate(sydneyDateKey(new Date())));
+    const periodJump = document.getElementById('period-jump');
+    periodJump.addEventListener('change', () => goToDate(periodJump.value));
+    periodJump.addEventListener('click', () => { try { periodJump.showPicker(); } catch (e) { /* the native control opens itself */ } });
+
     async function loadPickerData() {
       const { data: profiles, error } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
       if (error) throw error;
@@ -1180,10 +1201,10 @@
         document.getElementById('day-view').classList.add('schedule-view-only');
         document.getElementById('schedule-subtitle').textContent = 'View only: who is on which job, and who is on leave. Approved leave shows automatically. Only admin, finance and sales can change the schedule.';
       }
-      const now = new Date();
-      viewYear = now.getFullYear();
-      viewMonth = now.getMonth();
-      dayViewDate = new Date(now);
+      const [ty, tm, td] = sydneyDateKey(new Date()).split('-').map(Number);
+      viewYear = ty;
+      viewMonth = tm - 1;
+      dayViewDate = new Date(ty, tm - 1, td);
 
       renderDowRow();
       renderClockedInNowCard(document.getElementById('clocked-in-now'));

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Settings - Thomson Energy</title>
+<title>Settings - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -797,10 +797,11 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let portfolioPhotos = [];
+    let xeroMappingLoaded = false;
     let logoUrl = '';
     let coverPhotoUrl = '';
 
@@ -811,6 +812,8 @@
         document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
         document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+        // Xero Mapping makes a live Xero call: only when the tab is opened
+        if (btn.dataset.panel === 'xero' && !xeroMappingLoaded) { xeroMappingLoaded = true; loadXeroMapping(); }
       });
     });
 
@@ -1704,9 +1707,7 @@
       const askedRow = askedLicence && [...document.querySelectorAll('.my-licence-row')].find(r => r.dataset.id === askedLicence);
       if (askedRow) { askedRow.style.outline = '2px solid var(--accent)'; askedRow.scrollIntoView({ block: 'center' }); }
 
-      await loadMySignedDocs(userId);
-      await loadMyLetters(userId);
-      await loadMyConsent(userId);
+      await Promise.all([loadMySignedDocs(userId), loadMyLetters(userId), loadMyConsent(userId)]);
     }
 
     // AI and location consent (migration 20261018120000). Turning one off
@@ -2871,29 +2872,21 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
-      await loadMyProfile(session.user.id);
-      await loadSettings();
       await applyAdminGating();
-      loadWritingStyles();
-      loadSpellcheckMode();
-      if (myRole === 'admin') {
-        await loadUsers();
-        await loadOnboardingDocs();
-        await loadApiKeys();
-        // Old ?profile=<id> links: employee editing now lives on the staff profile.
-        const deepLinkProfile = new URLSearchParams(location.search).get('profile');
-        if (deepLinkProfile) { window.location.replace(`/staff.html?id=${encodeURIComponent(deepLinkProfile)}&edit=1`); return; }
-      }
-      if (isPricingRoleLocal(myRole)) {
-        await loadXeroMapping();
-        await loadXeroConnection();
-        await loadRateTiers();
-        await loadInspectionTemplates();
-      }
-      // ?panel=<name> opens that tab (e.g. the ops manager's rates review reminder)
+      // Old ?profile=<id> links: employee editing now lives on the staff profile.
+      const deepLinkProfile = myRole === 'admin' && new URLSearchParams(location.search).get('profile');
+      if (deepLinkProfile) { window.location.replace(`/staff.html?id=${encodeURIComponent(deepLinkProfile)}&edit=1`); return; }
+      // ?panel=<name> opens that tab first (e.g. the ops manager's rates review reminder); the loads fill it in after
       const deepLinkPanel = new URLSearchParams(location.search).get('panel');
       const panelBtn = deepLinkPanel && document.querySelector(`.settings-tab[data-panel="${CSS.escape(deepLinkPanel)}"]`);
       if (panelBtn && panelBtn.style.display !== 'none') panelBtn.click();
+
+      const loads = [loadMyProfile(session.user.id), loadSettings(), loadWritingStyles(), loadSpellcheckMode()];
+      // Xero Mapping and connection IDs sit on an admin-only panel; the mapping loads when its tab opens
+      if (myRole === 'admin') loads.push(loadUsers(), loadOnboardingDocs(), loadApiKeys(), loadXeroConnection());
+      if (isPricingRoleLocal(myRole)) loads.push(loadRateTiers(), loadInspectionTemplates());
+      const results = await Promise.allSettled(loads);
+      results.forEach(r => { if (r.status === 'rejected') console.error('Settings load failed', r.reason); });
     })();
   </script>
 </body>

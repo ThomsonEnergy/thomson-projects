@@ -62,19 +62,32 @@ async function openStaffEditor(userId, opts = {}) {
   // directly - the base table's rate columns are locked to admin/
   // finance (or the row's own owner) at the database level, so a
   // direct select on profiles can no longer see them at all.
-  const { data: profile, error } = await supabaseClient.from('profiles')
-    .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id,
-      employment_type, employment_start_date, pay_type, salary_includes_super, has_company_vehicle, has_probationary_period,
-      emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_employee_id`)
-    .eq('id', userId).single();
-  const { data: rates } = await supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle();
-  const { data: sensitive } = await supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', userId).maybeSingle();
-  const { data: licences } = await supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date');
-  const { data: allowances } = await supabaseClient.from('employee_allowances').select('*').eq('profile_id', userId);
-  const { data: rateTiers } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
-  const { data: contract } = await supabaseClient.from('employee_contracts').select('*').eq('profile_id', userId).maybeSingle();
-  const { data: contractTemplate } = await supabaseClient.from('onboarding_documents').select('*').eq('is_contract', true).maybeSingle();
-  const policyStatusHtml = await staffPolicyStatusHtml(userId);
+  // All nine reads at once (they do not depend on each other).
+  const [
+    { data: profile, error },
+    { data: rates },
+    { data: sensitive },
+    { data: licences },
+    { data: allowances },
+    { data: rateTiers },
+    { data: contract },
+    { data: contractTemplate },
+    policyStatusHtml,
+  ] = await Promise.all([
+    supabaseClient.from('profiles')
+      .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id,
+        employment_type, employment_start_date, pay_type, salary_includes_super, has_company_vehicle, has_probationary_period,
+        emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_employee_id`)
+      .eq('id', userId).single(),
+    supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle(),
+    supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', userId).maybeSingle(),
+    supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date'),
+    supabaseClient.from('employee_allowances').select('*').eq('profile_id', userId),
+    supabaseClient.from('billable_rate_tiers').select('*').order('sort_order'),
+    supabaseClient.from('employee_contracts').select('*').eq('profile_id', userId).maybeSingle(),
+    supabaseClient.from('onboarding_documents').select('*').eq('is_contract', true).maybeSingle(),
+    staffPolicyStatusHtml(userId).catch(() => ''),
+  ]);
   if (error) { overlay.querySelector('.card').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
   if (rates) Object.assign(profile, rates);
   if (sensitive) Object.assign(profile, sensitive);
@@ -311,8 +324,27 @@ async function openStaffEditor(userId, opts = {}) {
     overlay.querySelector(sel).addEventListener('change', () => refreshContractAnswerFields(overlay, profile));
   });
 
+  // Unsaved edits: anything typed into the profile fields (Save saves them),
+  // and the contract text (Save draft or Mark ready saves it). The contract
+  // answers and the re-issue fields act through their own buttons.
+  let profileDirty = false;
+  let contractDirty = false;
+  const markDirty = (e) => {
+    const t = e.target;
+    if (t.closest('#contract-answer-fields') || /^reissue-/.test(t.id || '')) return;
+    if (t.id === 'profile-contract-body') contractDirty = true; else profileDirty = true;
+  };
+  overlay.addEventListener('input', markDirty);
+  overlay.addEventListener('change', markDirty);
+  ['#add-licence-btn', '#add-allowance-btn'].forEach(sel => overlay.querySelector(sel).addEventListener('click', () => { profileDirty = true; }));
+  overlay.addEventListener('click', (e) => { if (e.target.closest('.remove-licence-btn, .remove-allowance-btn')) profileDirty = true; });
+
   // Contract and re-issue buttons save on their own, so refresh on close too.
-  overlay.querySelector('#close-profile-btn').addEventListener('click', () => { overlay.remove(); if (opts.onClosed) opts.onClosed(); });
+  overlay.querySelector('#close-profile-btn').addEventListener('click', () => {
+    if ((profileDirty || contractDirty) && !confirm('You have unsaved changes. Close and lose them?')) return;
+    overlay.remove();
+    if (opts.onClosed) opts.onClosed();
+  });
   overlay.querySelector('#save-profile-btn').addEventListener('click', async () => {
     const msg = overlay.querySelector('#profile-panel-msg');
     const saveBtn = overlay.querySelector('#save-profile-btn');
@@ -445,6 +477,7 @@ async function openStaffEditor(userId, opts = {}) {
     overlay.querySelector('#profile-contract-body').style.display = 'block';
     overlay.querySelector('#contract-action-row').style.display = 'flex';
     overlay.querySelector('#mark-contract-ready-btn').disabled = false;
+    contractDirty = false;
     msg.innerHTML = `<div class="success-box">Draft generated - give it a read before marking it ready to sign, particularly anything still in [brackets] it couldn't resolve. You can leave the employee's address as [insert employee address]: it is filled in from their own details when they open the contract to sign.</div>`;
   });
 
@@ -453,6 +486,7 @@ async function openStaffEditor(userId, opts = {}) {
     const { error: saveErr } = await supabaseClient.from('employee_contracts')
       .update({ generated_body: overlay.querySelector('#profile-contract-body').value, updated_at: new Date().toISOString() })
       .eq('profile_id', userId);
+    if (!saveErr) contractDirty = false;
     msg.innerHTML = saveErr ? `<div class="error-box">${saveErr.message}</div>` : `<div class="success-box">Draft saved.</div>`;
   });
 
@@ -462,6 +496,7 @@ async function openStaffEditor(userId, opts = {}) {
       .update({ generated_body: overlay.querySelector('#profile-contract-body').value, status: 'ready_to_sign', updated_at: new Date().toISOString() })
       .eq('profile_id', userId);
     if (readyErr) { msg.innerHTML = `<div class="error-box">${readyErr.message}</div>`; return; }
+    contractDirty = false;
     msg.innerHTML = `<div class="success-box">Ready to sign - it'll now show up in this person's onboarding.</div>`;
     overlay.querySelector('#mark-contract-ready-btn').disabled = true;
   });

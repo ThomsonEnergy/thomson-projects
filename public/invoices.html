@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Invoices - Thomson Energy</title>
+<title>Invoices - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -53,10 +53,20 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let allInvoices = null, allMappings = [];
+    // ?id= (from the top bar search) shows just that invoice until the user asks for all
+    let focusInvoiceId = new URLSearchParams(window.location.search).get('id');
+
+    function clearInvoiceFocus() {
+      if (!focusInvoiceId) return;
+      focusInvoiceId = null;
+      try { history.replaceState(null, '', '/invoices.html'); } catch (e) { /* not supported */ }
+      document.title = 'Invoices - TEops';
+      if (typeof setPageTitle === 'function') setPageTitle('Invoices');
+    }
 
     async function loadInvoices() {
       const listEl = document.getElementById('invoices-list');
@@ -132,13 +142,20 @@
       const now = new Date();
       const isOverdue = (inv) => !inv.paid_at && inv.due_date && new Date(inv.due_date + 'T00:00:00') < now;
 
+      const focusInv = focusInvoiceId && allInvoices.find(inv => inv.id === focusInvoiceId);
+      if (focusInvoiceId && !focusInv) { showToast('That invoice could not be found', { error: true }); clearInvoiceFocus(); }
+      if (focusInv) {
+        const ref = focusInv.invoice_number || 'Invoice';
+        if (typeof setPageTitle === 'function') setPageTitle(ref); else document.title = `${ref} - TEops`;
+      }
       let rows = allInvoices;
-      if (filter === 'unpaid') rows = rows.filter(inv => !inv.paid_at);
+      if (focusInv) rows = [focusInv];
+      else if (filter === 'unpaid') rows = rows.filter(inv => !inv.paid_at);
       else if (filter === 'overdue') rows = rows.filter(inv => isOverdue(inv));
       else if (filter === 'paid') rows = rows.filter(inv => !!inv.paid_at);
       else if (filter === 'no_xero') rows = rows.filter(inv => !inv.xero_invoice_id);
 
-      if (q) {
+      if (q && !focusInv) {
         rows = rows.filter(inv => {
           const project = inv.cost_centres?.projects || inv.projects;
           return [inv.invoice_number, project?.job_number, project?.name, project?.client_name]
@@ -151,7 +168,7 @@
         return;
       }
 
-      listEl.innerHTML = `
+      listEl.innerHTML = (focusInv ? `<p class="subtitle" style="margin:0 0 10px;">Showing ${escapeHtml(focusInv.invoice_number || 'one invoice')} only. <a href="/invoices.html" class="link-quiet" id="inv-show-all">Show all invoices</a></p>` : '') + `
         <table class="responsive-stack">
           <thead><tr><th>Invoice</th><th>Job</th><th>Stage</th><th class="num">Amount</th><th>Sent</th><th>Status</th><th></th></tr></thead>
           <tbody>
@@ -190,6 +207,9 @@
           </tbody>
         </table>`;
 
+      const showAll = listEl.querySelector('#inv-show-all');
+      if (showAll) showAll.addEventListener('click', (e) => { e.preventDefault(); clearInvoiceFocus(); document.getElementById('invoice-filter').value = 'all'; renderInvoiceList(); });
+
       listEl.querySelectorAll('.xero-toggle-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const row = listEl.querySelector(`.xero-row[data-for="${btn.dataset.id}"]`);
@@ -207,8 +227,8 @@
       renderMainNav('invoices');
       // Opened from a search link: show every match, not just unpaid ones
       if (new URLSearchParams(window.location.search).get('q')) document.getElementById('invoice-filter').value = 'all';
-      document.getElementById('invoice-search').addEventListener('input', renderInvoiceList);
-      document.getElementById('invoice-filter').addEventListener('change', renderInvoiceList);
+      document.getElementById('invoice-search').addEventListener('input', () => { clearInvoiceFocus(); renderInvoiceList(); });
+      document.getElementById('invoice-filter').addEventListener('change', () => { clearInvoiceFocus(); renderInvoiceList(); });
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();

@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Incidents - Thomson Energy</title>
+<title>Incidents - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <link rel="stylesheet" href="/css/hr.css?v=2" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
@@ -41,8 +41,8 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script src="/js/hr-templates.js?v=2"></script>
   <script src="/js/hr-shared.js?v=3"></script>
   <script>
@@ -69,8 +69,8 @@
             <thead><tr><th>Ref</th><th>Date</th><th>What happened</th><th>Type</th><th>People</th><th></th></tr></thead>
             <tbody>${list.map(i => {
               const ppl = peopleByIncident[i.id] || [];
-              return `<tr class="inc-row" data-id="${i.id}" style="cursor:pointer;">
-                <td data-label="Ref"><strong>${escapeHtml(incidentRef(i))}</strong></td>
+              return `<tr class="inc-row" data-id="${escapeHtml(i.id)}" style="cursor:pointer;">
+                <td data-label="Ref"><a href="/incident.html?id=${encodeURIComponent(i.id)}" style="color:inherit; text-decoration:none;"><strong>${escapeHtml(incidentRef(i))}</strong></a></td>
                 <td data-label="Date">${hrDate(i.incident_date)}</td>
                 <td data-label="What happened">${escapeHtml(i.title || '-')}${i.site_location ? `<span class="subtitle" style="display:block; font-size:12px;">${escapeHtml(i.site_location)}</span>` : ''}</td>
                 <td data-label="Type">${escapeHtml(INCIDENT_NATURE_LABELS[i.nature])}</td>
@@ -80,7 +80,8 @@
             }).join('')}</tbody></table>` : `<p class="subtitle">${filter === 'open' ? 'No open incidents.' : 'Nothing here yet.'}</p>`}
         </div>`;
       el.querySelectorAll('.f-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.f; render(); }));
-      el.querySelectorAll('.inc-row').forEach(r => r.addEventListener('click', () => { window.location.href = `/incident.html?id=${r.dataset.id}`; }));
+      // The ref is a real link (long-press, new tab, copy); the rest of the row follows it
+      el.querySelectorAll('.inc-row').forEach(r => r.addEventListener('click', (e) => { if (!e.target.closest('a')) r.querySelector('a').click(); }));
     }
 
     (async function () {

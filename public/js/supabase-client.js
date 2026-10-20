@@ -50,7 +50,10 @@ function checkSessionAlive() {
 
 // Another tab in this browser logged out.
 supabaseClient.auth.onAuthStateChange((event) => {
-  if (event === 'SIGNED_OUT') goToLogin();
+  if (event === 'SIGNED_OUT') {
+    try { sessionStorage.removeItem('te-profile'); } catch (e) { /* storage blocked */ }
+    goToLogin();
+  }
 });
 
 // Logged out on another device: recheck when the tab comes back into view,
@@ -77,28 +80,32 @@ async function requireLogin() {
     window.location.href = '/login.html';
     return null;
   }
-  if (!(await checkSessionAlive())) return null;
-
   // Every page calls requireLogin() as its first act, so this is the one
   // shared place to send incomplete onboarding to the onboarding page -
   // covers all pages without editing each one individually. "Finish later"
   // on that page lets them into the app until their next login, with a
   // banner on every page until it's done.
   const path = window.location.pathname;
-  if (!path.endsWith('/onboarding.html') && !path.endsWith('/policy-update.html')) {
-    // Checked together so pages load no slower. A failed pending check
-    // (e.g. code deployed before its migration) never blocks anyone.
-    const [{ data: profile }, pending] = await Promise.all([
-      supabaseClient.from('profiles').select('onboarding_completed_at').eq('id', session.user.id).maybeSingle(),
-      supabaseClient.rpc('my_pending_documents'),
-    ]);
+  const gated = !path.endsWith('/onboarding.html') && !path.endsWith('/policy-update.html');
+  // The session check, the one profile read (shared through getMyProfile by
+  // the nav, theme and role checks) and the pending documents check all go
+  // out together. A failed pending check (e.g. code deployed before its
+  // migration) never blocks anyone.
+  const [alive, profile, pending] = await Promise.all([
+    checkSessionAlive(),
+    getMyProfile(),
+    gated ? supabaseClient.rpc('my_pending_documents') : Promise.resolve(null),
+  ]);
+  if (!alive) return null;
+
+  if (gated) {
     if (profile && !profile.onboarding_completed_at) {
       if (!onboardingDeferred(session)) {
         window.location.href = '/onboarding.html';
         return null;
       }
       showOnboardingBanner();
-    } else if (profile && !pending.error && pending.data && pending.data.length) {
+    } else if (profile && pending && !pending.error && pending.data && pending.data.length) {
       // Onboarding done, but a policy has a new version (or a new policy or
       // consent form was added). Same "later" rule as onboarding: once per
       // login, with a banner until it's signed.
@@ -1833,7 +1840,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
 function renderPhotoThumbs(containerEl, photosArray, onChange) {
   containerEl.innerHTML = photosArray.map((url, i) => `
     <div style="position:relative; display:inline-block; margin:0 8px 8px 0;">
-      <img src="${url}" data-i="${i}" class="thumb-view" style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid var(--border); cursor:pointer;" />
+      <img src="${escapeHtml(isVideoUrl(url) ? url : supaImageVariant(url, 200, 60))}" loading="lazy" data-i="${i}" class="thumb-view" style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid var(--border); cursor:pointer;" />
       <button type="button" data-i="${i}" class="thumb-remove" style="position:absolute; top:-6px; right:-6px; width:20px; height:20px; padding:0; border-radius:50%; font-size:11px; line-height:1;">x</button>
     </div>
   `).join('');
@@ -1855,15 +1862,61 @@ function renderPhotoThumbs(containerEl, photosArray, onChange) {
 let _cachedRole = null;
 async function getMyRole() {
   if (_cachedRole) return _cachedRole;
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) return 'staff';
-  const { data } = await supabaseClient
-    .from('profiles')
-    .select('role')
-    .eq('id', session.user.id)
-    .maybeSingle();
-  _cachedRole = data?.role || 'staff';
+  const profile = await getMyProfile();
+  _cachedRole = profile?.role || 'staff';
   return _cachedRole;
+}
+
+// The logged-in user's own profile row, read once per page (requireLogin
+// starts it, and the nav, theme, role and Home tiles all share that one
+// read). A copy is kept in sessionStorage by user id so the next page can
+// paint its nav straight away from getCachedProfile(); that copy is only
+// for painting, anything that decides access waits for getMyProfile().
+// Returns null when there is no session, no row, or the read failed.
+const PROFILE_CACHE_KEY = 'te-profile';
+const MY_PROFILE_COLS = 'id, role, full_name, theme, home_shortcuts, onboarding_completed_at, active';
+let _profilePromise = null;
+let _myProfile;
+function getMyProfile() {
+  if (_myProfile !== undefined) return Promise.resolve(_myProfile);
+  if (_profilePromise) return _profilePromise;
+  _profilePromise = (async () => {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) return null;
+    const { data, error } = await supabaseClient.from('profiles').select(MY_PROFILE_COLS).eq('id', session.user.id).maybeSingle();
+    if (error) { console.error('getMyProfile failed:', error.message); return null; } // not kept, so the next call tries again
+    _myProfile = data || null;
+    saveCachedProfile(_myProfile);
+    return _myProfile;
+  })().finally(() => { _profilePromise = null; });
+  return _profilePromise;
+}
+function saveCachedProfile(profile) {
+  try {
+    if (profile && profile.id) sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
+    else sessionStorage.removeItem(PROFILE_CACHE_KEY);
+  } catch (e) { /* storage blocked: the next page just reads it again */ }
+}
+// Last page's copy, only if it belongs to whoever is logged in now. Pages await
+// requireLogin (which reads the profile fresh) before the nav paints, so this copy
+// only matters when that fresh read failed; it is used for painting, never access.
+async function getCachedProfile() {
+  if (_myProfile) return _myProfile;
+  try {
+    const raw = sessionStorage.getItem(PROFILE_CACHE_KEY);
+    if (!raw) return null;
+    const copy = JSON.parse(raw);
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    return session && copy && copy.id === session.user.id ? copy : null;
+  } catch (e) { return null; }
+}
+// Keeps this page's copy (and the next page's) in step after the user changes their own row.
+function patchMyProfile(fields) {
+  if (_myProfile) { _myProfile = { ..._myProfile, ...fields }; saveCachedProfile(_myProfile); return; }
+  try {
+    const raw = sessionStorage.getItem(PROFILE_CACHE_KEY);
+    if (raw) sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ ...JSON.parse(raw), ...fields }));
+  } catch (e) { /* storage blocked */ }
 }
 
 function isFinanceRole(role) {
@@ -2100,66 +2153,104 @@ async function findMatchingSupplier(fields) {
   return bestScore >= 0.5 ? { supplier: best, how: 'name' } : null;
 }
 
-// Single source of truth for the main nav - every page calls
+// Browser tab title: "<text> - TEops" (e.g. "J7003 Smith reno - TEops").
+// Kept in window.__teBaseTitle so the notification bell's "(3) " unread
+// prefix is added to this title instead of the one the page loaded with.
+function setPageTitle(text) {
+  const clean = String(text || '').trim();
+  window.__teBaseTitle = clean ? `${clean} - TEops` : 'TEops';
+  if (typeof window.__teApplyTitle === 'function') window.__teApplyTitle();
+  else document.title = window.__teBaseTitle;
+}
+
+// Single source of truth for the main nav: every page calls
 // renderMainNav('key') into empty <nav id="topbar-tabs"> and
 // <div id="mobile-menu-dropdown"> containers, instead of each page
-// hand-maintaining its own copy of the same 13 links (which is exactly
-// how small nav inconsistencies kept creeping in before this existed).
+// hand-maintaining its own copy of the links.
+// group: which menu the page sits in (NAV_GROUPS below, in that order).
+// An item with no group (Pipeline) is a top bar icon, kept here only so
+// its key still works as a Home tile.
+const NAV_GROUPS = [
+  { key: 'sales', label: 'Sales' },
+  { key: 'purchases', label: 'Purchases' },
+  { key: 'team', label: 'Team' },
+  { key: 'office', label: 'Office' },
+];
 const MAIN_NAV_ITEMS = [
-  { key: 'my-day', label: 'My Day', href: '/my-day.html', icon: '&#127749;' },
-  { key: 'chat', label: 'Chat', href: '/chat.html', icon: '&#128172;' },
-  { key: 'inbox', label: 'Inbox', href: '/inbox.html', icon: '&#128231;' },
-  { key: 'leads', label: 'Leads', href: '/leads.html', icon: '&#127919;' },
-  { key: 'quotes', label: 'Quotes', href: '/quotes.html', icon: '&#128221;' },
-  { key: 'projects', label: 'Projects', href: '/projects.html', icon: '&#128202;' },
-  { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html', icon: '&#128203;' },
-  { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;' },
-  { key: 'stcs', label: 'STCs', href: '/stcs.html', icon: '&#9728;', pricingOnly: true },
-  { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html', icon: '&#128230;' },
-  { key: 'tasks', label: 'Tasks', href: '/tasks.html', icon: '&#9989;' },
-  { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;' },
-  { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;' },
-  { key: 'supplier-bills', label: 'Emailed bills', href: '/supplier-bills.html', icon: '&#129534;', pricingOnly: true },
-  { key: 'supplier-checks', label: 'Bill checks', href: '/supplier-checks.html', icon: '&#9989;', pricingOnly: true },
-  { key: 'price-lists', label: 'Price lists', href: '/price-lists.html', icon: '&#127991;', pricingOnly: true },
-  { key: 'ops', label: 'Ops manager', href: '/ops.html', icon: '&#129302;', adminOnly: true },
-  { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;' },
-  { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;' },
-  { key: 'reviews', label: 'Reviews', href: '/reviews.html', icon: '&#11088;' },
-  { key: 'assets', label: 'Assets', href: '/assets.html', icon: '&#128295;' },
-  { key: 'stock', label: 'Stock', href: '/stock.html', icon: '&#128736;' },
-  { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', icon: '&#129513;', pricingOnly: true },
-  { key: 'overheads', label: 'Overheads', href: '/overheads.html', icon: '&#128178;', financeOnly: true },
-  { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html', icon: '&#128218;' },
-  { key: 'documents', label: 'Documents', href: '/documents.html', icon: '&#128196;' },
-  { key: 'support', label: 'Tech Support', href: '/support.html', icon: '&#128222;' },
-  { key: 'team', label: 'Team', href: '/team.html', icon: '&#128101;' },
-  { key: 'incidents', label: 'Incidents', href: '/incidents.html', icon: '&#9888;', financeOnly: true },
-  { key: 'dnsp', label: 'DNSP', href: '/dnsp.html', icon: '&#9889;' },
-  { key: 'fleet', label: 'Fleet', href: '/fleet.html', icon: '&#128666;' },
-  { key: 'bugs', label: 'Bugs & Updates', href: '/bugs.html', icon: '&#128030;' },
-  { key: 'logs', label: 'Logs', href: '/logs.html', icon: '&#128209;', adminOnly: true },
+  // Sales
+  { key: 'leads', label: 'Leads', href: '/leads.html', icon: '&#127919;', group: 'sales', pricingOnly: true },
+  { key: 'quotes', label: 'Quotes', href: '/quotes.html', icon: '&#128221;', group: 'sales' },
+  { key: 'projects', label: 'Jobs', href: '/projects.html', icon: '&#128202;', group: 'sales' },
+  { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;', group: 'sales' },
+  { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;', group: 'sales', pricingOnly: true },
+  { key: 'reviews', label: 'Reviews', href: '/reviews.html', icon: '&#11088;', group: 'sales' },
+  { key: 'inbox', label: 'Inbox', href: '/inbox.html', icon: '&#128231;', group: 'sales' },
+  { key: 'stcs', label: 'STCs', href: '/stcs.html', icon: '&#9728;', group: 'sales', pricingOnly: true },
+  { key: 'assets', label: 'Customer equipment', href: '/assets.html', icon: '&#128295;', group: 'sales' },
+  // Purchases
+  { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html', icon: '&#128230;', group: 'purchases' },
+  { key: 'stock', label: 'Stock', href: '/stock.html', icon: '&#128736;', group: 'purchases' },
+  { key: 'fleet', label: 'Vehicles', href: '/fleet.html', icon: '&#128666;', group: 'purchases' },
+  { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;', group: 'purchases' },
+  { key: 'support', label: 'Tech Support', href: '/support.html', icon: '&#128222;', group: 'purchases' },
+  { key: 'supplier-bills', label: 'Emailed bills', href: '/supplier-bills.html', icon: '&#129534;', group: 'purchases', pricingOnly: true },
+  { key: 'supplier-checks', label: 'Bill checks', href: '/supplier-checks.html', icon: '&#9989;', group: 'purchases', pricingOnly: true },
+  { key: 'price-lists', label: 'Price lists', href: '/price-lists.html', icon: '&#127991;', group: 'purchases', pricingOnly: true },
+  { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', icon: '&#129513;', group: 'purchases', pricingOnly: true },
+  // Team
+  { key: 'my-day', label: 'My Day', href: '/my-day.html', icon: '&#127749;', group: 'team' },
+  { key: 'schedule', label: 'Schedule', href: '/schedule.html', icon: '&#128197;', group: 'team' },
+  { key: 'tasks', label: 'Tasks', href: '/tasks.html', icon: '&#9989;', group: 'team' },
+  { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;', group: 'team' },
+  { key: 'chat', label: 'Chat', href: '/chat.html', icon: '&#128172;', group: 'team' },
+  { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;', group: 'team' },
+  { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html', icon: '&#128218;', group: 'team' },
+  { key: 'documents', label: 'Documents', href: '/documents.html', icon: '&#128196;', group: 'team' },
+  { key: 'incidents', label: 'Incidents', href: '/incidents.html', icon: '&#9888;', group: 'team', financeOnly: true },
+  { key: 'team', label: 'Team', href: '/team.html', icon: '&#128101;', group: 'team' },
+  // Office
+  { key: 'overheads', label: 'Overheads', href: '/overheads.html', icon: '&#128178;', group: 'office', financeOnly: true },
+  { key: 'ops', label: 'Ops manager', href: '/ops.html', icon: '&#129302;', group: 'office', adminOnly: true },
+  { key: 'bugs', label: 'Updates and ideas', href: '/bugs.html', icon: '&#128030;', group: 'office' },
+  { key: 'dnsp', label: 'DNSP', href: '/dnsp.html', icon: '&#9889;', group: 'office' },
+  { key: 'logs', label: 'Logs', href: '/logs.html', icon: '&#128209;', group: 'office', adminOnly: true },
+  { key: 'settings', label: 'Settings', href: '/settings.html', icon: '&#9881;', group: 'office' },
+  // Top bar icon only (renderMainNav adds it), never in a menu group
+  { key: 'job-pipeline', label: 'Pipeline', href: '/dashboard.html', icon: '&#128203;' },
 ];
 
-// Fallback for anyone who hasn't customized their Home page tiles yet
-// (profiles.home_shortcuts is null) - the set that used to be hardcoded
-// on home.html, so existing users see no change until they actually open
-// "Edit" there.
-// Doesn't include Schedule - that's already one click away via its own
-// topbar icon on every page, unlike everything else here.
+// The pages this role may open, in menu order. Home tiles use it too.
+function navItemsForRole(role) {
+  return MAIN_NAV_ITEMS.filter(item =>
+    (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)) && (!item.financeOnly || isFinanceRole(role)));
+}
+
+// Home tiles for anyone who hasn't customized them yet
+// (profiles.home_shortcuts is null). The office roles keep the set that
+// used to be hardcoded on home.html; field staff get their own day-to-day
+// pages instead of office ones they can't open.
 const DEFAULT_HOME_SHORTCUTS = [
   'job-pipeline', 'projects', 'timesheets', 'quotes', 'invoices', 'suppliers',
   'leads', 'clients', 'stock', 'team', 'fleet', 'bugs',
 ];
+const STAFF_DEFAULT_HOME_SHORTCUTS = [
+  'my-day', 'chat', 'tasks', 'timesheets', 'knowledge', 'team', 'documents', 'projects',
+];
+// The tiles this person actually sees. getMyHomeShortcuts() hands back the
+// DEFAULT_HOME_SHORTCUTS array itself when nothing was saved (home.html
+// checks that by identity), and this swaps in the staff set for field staff.
+function effectiveHomeShortcuts(saved, role) {
+  return saved === DEFAULT_HOME_SHORTCUTS && !isPricingRole(role) ? STAFF_DEFAULT_HOME_SHORTCUTS : saved;
+}
+function homeShortcutsFromProfile(profile) {
+  return effectiveHomeShortcuts((profile && profile.home_shortcuts) || DEFAULT_HOME_SHORTCUTS, (profile && profile.role) || 'staff');
+}
 
 let _cachedHomeShortcuts = null;
 async function getMyHomeShortcuts() {
   if (_cachedHomeShortcuts) return _cachedHomeShortcuts;
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) return DEFAULT_HOME_SHORTCUTS;
-  const { data, error } = await supabaseClient.from('profiles').select('home_shortcuts').eq('id', session.user.id).maybeSingle();
-  if (error) console.error('getMyHomeShortcuts failed:', error.message); // surfaced, not swallowed - a column-grant or RLS gap here silently fell back to defaults before
-  _cachedHomeShortcuts = data?.home_shortcuts || DEFAULT_HOME_SHORTCUTS;
+  const profile = await getMyProfile();
+  _cachedHomeShortcuts = (profile && profile.home_shortcuts) || DEFAULT_HOME_SHORTCUTS;
   return _cachedHomeShortcuts;
 }
 async function setMyHomeShortcuts(keys) {
@@ -2168,76 +2259,175 @@ async function setMyHomeShortcuts(keys) {
   const { error } = await supabaseClient.from('profiles').update({ home_shortcuts: keys }).eq('id', session.user.id);
   if (error) { console.error('setMyHomeShortcuts failed:', error.message); throw error; }
   _cachedHomeShortcuts = keys; // only cache once the write's actually confirmed to have gone through
+  patchMyProfile({ home_shortcuts: keys });
 }
 async function toggleHomeShortcut(key) {
-  const current = (await getMyHomeShortcuts()).slice();
+  const current = effectiveHomeShortcuts(await getMyHomeShortcuts(), await getMyRole()).slice();
   const idx = current.indexOf(key);
   if (idx === -1) current.push(key); else current.splice(idx, 1);
   await setMyHomeShortcuts(current);
   return current.includes(key);
 }
 
+// Phone menu: which group is open (one at a time), remembered on this device.
+const NAV_OPEN_GROUP_KEY = 'te-nav-open-group';
+function navOpenGroup() {
+  try { return localStorage.getItem(NAV_OPEN_GROUP_KEY) || ''; } catch (e) { return ''; }
+}
+function setNavOpenGroup(key) {
+  try { if (key) localStorage.setItem(NAV_OPEN_GROUP_KEY, key); else localStorage.removeItem(NAV_OPEN_GROUP_KEY); } catch (e) { /* storage blocked: just not remembered */ }
+}
+
+// Pipeline icon in the top bar, before Schedule. Pages' top bars are
+// hand-written HTML, so it is added here rather than on each page.
+function addPipelineTopbarIcon() {
+  const right = document.querySelector('.topbar-right');
+  if (!right || document.getElementById('pipeline-topbar-link')) return;
+  const link = document.createElement('a');
+  link.href = '/dashboard.html'; link.id = 'pipeline-topbar-link'; link.className = 'topbar-icon-link'; link.title = 'Pipeline';
+  link.innerHTML = '&#128203;';
+  const before = right.querySelector('a.topbar-icon-link[href="/schedule.html"]') || right.querySelector('a.topbar-icon-link[href="/settings.html"]');
+  right.insertBefore(link, before || right.firstChild);
+}
+// Lights up the top bar icon (Pipeline, Schedule, Settings) for the page you are on.
+function markActiveTopbarIcon() {
+  const here = window.location.pathname;
+  document.querySelectorAll('.topbar-right a.topbar-icon-link[href^="/"]').forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === here);
+  });
+}
+
 // Async (unlike before) so an admin-only/pricing-only link can be filtered
 // out for everyone else before it's ever painted, not hidden after the
-// fact - existing callers don't need to change, they just fire-and-forget
+// fact. Existing callers don't need to change, they just fire-and-forget
 // this same as always, nothing downstream awaits it.
 async function renderMainNav(activeKey) {
   const tabsEl = document.getElementById('topbar-tabs');
   const dropdownEl = document.getElementById('mobile-menu-dropdown');
-  const role = await getMyRole();
-  const items = MAIN_NAV_ITEMS.filter(item =>
-    (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)) && (!item.financeOnly || isFinanceRole(role)));
-  // On a computer the top bar only carries starred pages (plus the page you
-  // are on), with everything else under "More", so there is no sideways
-  // scrolling. The phone menu still lists every page. Both are painted from
-  // the same list; the "in bar" ones are just hidden from the desktop menu
-  // by CSS.
-  const paint = (shortcuts) => {
-    const inBar = (item) => shortcuts.includes(item.key) || item.key === activeKey;
+  // Pages with no key of their own (Schedule, Settings, Updates and ideas) are found by address.
+  if (!activeKey) {
+    const here = MAIN_NAV_ITEMS.find(item => item.href === window.location.pathname);
+    activeKey = here ? here.key : null;
+  }
+  addPipelineTopbarIcon();
+  markActiveTopbarIcon();
+
+  // On a computer the top bar carries starred pages (plus the page you are
+  // on), then one button per group that drops down that group's pages. On
+  // a phone (bar collapsed) the ☰ menu has Home, Schedule and starred pages
+  // first, then the groups as headers that open one at a time.
+  let painted = '';
+  const paint = (role, shortcuts) => {
+    const sig = role + '|' + shortcuts.join(',');
+    if (sig === painted) return;
+    painted = sig;
+    const items = navItemsForRole(role);
+    const grouped = items.filter(item => item.group);
+    const inBar = (item) => item.group && (shortcuts.includes(item.key) || item.key === activeKey);
     const starHtml = (key) => {
       const starred = shortcuts.includes(key);
       return `<span class="nav-star ${starred ? 'starred' : ''}" data-key="${key}" title="${starred ? 'Remove from Home page and top bar' : 'Add to Home page and top bar'}" onclick="event.preventDefault(); event.stopPropagation(); window.__onNavStarClick(this);">${starred ? '&#9733;' : '&#9734;'}</span>`;
     };
-    const linkHtml = (item, asTab) =>
-      `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''} ${!asTab && inBar(item) ? 'nav-in-bar' : ''}"><span style="display:flex; align-items:center; gap:5px;">${starHtml(item.key)}${item.label}</span></a>`;
-    const hasMore = items.some(item => !inBar(item));
-    if (tabsEl) tabsEl.innerHTML = items.filter(inBar).map(item => linkHtml(item, true)).join('') +
-      (hasMore ? `<button type="button" class="topbar-tab nav-more-btn" onclick="window.__onNavMoreClick(this)">More &#9662;</button>` : '');
-    if (dropdownEl) dropdownEl.innerHTML = items.map(item => linkHtml(item, false)).join('') +
-      '<a href="#" class="nav-logout" onclick="event.preventDefault(); window.__teLogout();">Log out</a>';
+    const tabHtml = (item) =>
+      `<a href="${item.href}" class="topbar-tab ${item.key === activeKey ? 'active' : ''}"><span style="display:flex; align-items:center; gap:5px;">${starHtml(item.key)}${item.label}</span></a>`;
+    const rowHtml = (item, withStar) =>
+      `<a href="${item.href}" class="${item.key === activeKey ? 'active' : ''}"><span class="nav-row-label">${withStar ? starHtml(item.key) : ''}<span class="nav-row-icon" aria-hidden="true">${item.icon}</span>${item.label}</span></a>`;
+    const groups = NAV_GROUPS.map(g => ({ ...g, items: grouped.filter(item => item.group === g.key) })).filter(g => g.items.length);
+
+    if (tabsEl) tabsEl.innerHTML = grouped.filter(inBar).map(tabHtml).join('') +
+      groups.map(g => `<button type="button" class="topbar-tab nav-group-btn${g.items.some(i => i.key === activeKey) ? ' has-active' : ''}" data-group="${g.key}" aria-haspopup="true" onclick="window.__onNavGroupClick(this)">${g.label} &#9662;</button>`).join('');
+
+    if (dropdownEl) {
+      const openGroup = navOpenGroup();
+      const schedule = items.find(i => i.key === 'schedule');
+      const pinned = [{ key: 'home', label: 'Home', href: '/home.html', icon: '&#127968;' }]
+        .concat(schedule ? [schedule] : [])
+        .concat(grouped.filter(item => shortcuts.includes(item.key) && item.key !== 'schedule'));
+      dropdownEl.innerHTML =
+        `<div class="nav-pinned">${pinned.map(item => rowHtml(item, false)).join('')}</div>` +
+        groups.map(g => `<div class="nav-group${g.key === openGroup ? ' expanded' : ''}" data-group="${g.key}">` +
+          `<button type="button" class="nav-group-head" aria-expanded="${g.key === openGroup}" onclick="window.__onNavGroupHeadClick(this)"><span>${g.label}</span><span class="nav-group-caret" aria-hidden="true">&#9662;</span></button>` +
+          `<div class="nav-group-items">${g.items.map(item => rowHtml(item, true)).join('')}</div></div>`).join('') +
+        '<a href="#" class="nav-logout" onclick="event.preventDefault(); window.__teLogout();">Log out</a>';
+      // Repainted while a laptop group menu was open: keep that group showing.
+      const deskGroup = dropdownEl.dataset.deskGroup;
+      if (deskGroup && dropdownEl.classList.contains('group-mode')) {
+        const g = dropdownEl.querySelector(`.nav-group[data-group="${deskGroup}"]`);
+        if (g) g.classList.add('desk-open'); else dropdownEl.classList.remove('open');
+      }
+    }
   };
-  paint(await getMyHomeShortcuts());
+
+  // Paint straight away from the last page's copy of the profile, then
+  // again (only if anything differs) once this page's read lands.
+  const cached = await getCachedProfile();
+  if (cached) paint(cached.role || 'staff', homeShortcutsFromProfile(cached));
+  { const role = await getMyRole(); paint(role, effectiveHomeShortcuts(await getMyHomeShortcuts(), role)); }
 
   // Delegated via single globals so the inline onclicks above (needed
   // since tabs/dropdown get fully replaced on every paint, which would
   // otherwise leak listeners) have one stable place to call into. A star
-  // repaints the nav so the page moves between the bar and the menu.
+  // repaints the nav so the page moves in or out of the bar.
   window.__onNavStarClick = async (el) => {
     try {
       await toggleHomeShortcut(el.dataset.key);
-      paint(await getMyHomeShortcuts());
+      { const role = await getMyRole(); paint(role, effectiveHomeShortcuts(await getMyHomeShortcuts(), role)); }
     } catch (err) {
-      alert('Could not save that - ' + err.message);
+      alert('Could not save that: ' + err.message);
     }
   };
-  // "More" opens the same dropdown the phone uses, lined up under the button
-  window.__onNavMoreClick = (btn) => {
+  // Laptop: a group button opens the shared dropdown showing just that
+  // group, lined up under the button. A second click on it closes it.
+  window.__onNavGroupClick = (btn) => {
     if (!dropdownEl) return;
+    const key = btn.dataset.group;
+    const wasThis = dropdownEl.classList.contains('open') && dropdownEl.classList.contains('group-mode') && dropdownEl.dataset.deskGroup === key;
+    dropdownEl.querySelectorAll('.nav-group.desk-open').forEach(g => g.classList.remove('desk-open'));
+    if (wasThis) { dropdownEl.classList.remove('open'); return; }
+    const g = dropdownEl.querySelector(`.nav-group[data-group="${key}"]`);
+    if (!g) return;
+    g.classList.add('desk-open');
+    dropdownEl.dataset.deskGroup = key;
+    dropdownEl.classList.add('group-mode', 'open');
     const bar = dropdownEl.parentElement.getBoundingClientRect();
     const left = btn.getBoundingClientRect().left - bar.left;
     dropdownEl.style.setProperty('--more-left', Math.max(8, Math.min(left, bar.width - 268)) + 'px');
-    dropdownEl.classList.toggle('open');
+  };
+  // Phone: tapping a group header opens it and closes the one that was open.
+  window.__onNavGroupHeadClick = (head) => {
+    const g = head.closest('.nav-group');
+    if (!g) return;
+    const opening = !g.classList.contains('expanded');
+    dropdownEl.querySelectorAll('.nav-group.expanded').forEach(o => {
+      o.classList.remove('expanded');
+      const h = o.querySelector('.nav-group-head'); if (h) h.setAttribute('aria-expanded', 'false');
+    });
+    if (opening) { g.classList.add('expanded'); head.setAttribute('aria-expanded', 'true'); }
+    setNavOpenGroup(opening ? g.dataset.group : '');
   };
   if (!window.__navOutsideClose) {
     window.__navOutsideClose = true;
     document.addEventListener('click', (e) => {
       const menu = document.getElementById('mobile-menu-dropdown');
       if (menu && menu.classList.contains('open') && !menu.contains(e.target) &&
-          !e.target.closest('.nav-more-btn, #mobile-menu-btn')) menu.classList.remove('open');
+          !e.target.closest('.nav-group-btn, #mobile-menu-btn')) menu.classList.remove('open');
     });
-    // The ☰ button opens the same menu from the far left, wherever "More" last put it
+    document.addEventListener('keydown', (e) => {
+      const menu = document.getElementById('mobile-menu-dropdown');
+      if (e.key === 'Escape' && menu && menu.classList.contains('open')) menu.classList.remove('open');
+    });
+    // The ☰ button (capture phase, before the page's own toggle) switches
+    // the menu back to the full grouped list and starts it just under the bar.
     const menuBtn = document.getElementById('mobile-menu-btn');
-    if (menuBtn) menuBtn.addEventListener('click', () => dropdownEl && dropdownEl.style.removeProperty('--more-left'), true);
+    if (menuBtn) menuBtn.addEventListener('click', () => {
+      if (!dropdownEl) return;
+      if (dropdownEl.classList.contains('group-mode')) dropdownEl.classList.remove('open');
+      dropdownEl.classList.remove('group-mode');
+      dropdownEl.querySelectorAll('.nav-group.desk-open').forEach(g => g.classList.remove('desk-open'));
+      dropdownEl.style.removeProperty('--more-left');
+      const barEl = dropdownEl.closest('.topbar');
+      if (barEl) dropdownEl.style.setProperty('--menu-top', Math.max(0, Math.round(barEl.getBoundingClientRect().bottom)) + 'px');
+    }, true);
   }
   watchTopbarFit();
   renderAIChatWidget();
@@ -2269,10 +2459,12 @@ function fitTopbar() {
     return right.getBoundingClientRect().right > inner + 0.5;
   };
   const tabs = document.getElementById('topbar-tabs');
-  bar.classList.remove('nav-collapsed', 'search-compact', 'topbar-tight');
+  bar.classList.remove('nav-collapsed', 'search-compact', 'topbar-tight', 'topbar-nologo');
   if (window.innerWidth <= 700 || (tabs && tabs.scrollWidth > tabs.clientWidth + 1) || overflowing()) bar.classList.add('nav-collapsed');
   if (overflowing()) bar.classList.add('search-compact');
   if (overflowing()) bar.classList.add('topbar-tight');
+  // Last resort on small phones: the wordmark goes (Home is the first row of the ☰ menu)
+  if (overflowing() && bar.classList.contains('nav-collapsed')) bar.classList.add('topbar-nologo');
 }
 window.__fitTopbar = fitTopbar;
 
@@ -2295,7 +2487,7 @@ function loadGlobalSearch() {
   if (window.__globalSearchScript || !document.querySelector('.topbar-right')) return;
   window.__globalSearchScript = true;
   const s = document.createElement('script');
-  s.src = '/js/global-search.js?v=3';
+  s.src = '/js/global-search.js?v=4';
   document.head.appendChild(s);
 }
 
@@ -2339,7 +2531,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=13';
+  s.src = '/js/notifications.js?v=14';
   document.head.appendChild(s);
 }
 
@@ -6584,7 +6776,7 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
 // still here; login and home load the animated version themselves. Left off
 // the client-facing pages, which also keeps it out of quote and invoice PDFs.
 (function () {
-  const clientPages = ['quote', 'invoice', 'review', 'letter', 'share-licences'];
+  const clientPages = ['quote', 'invoice', 'review', 'letter', 'share-licences', 'rates', 'po'];
   const page = (location.pathname.split('/').pop() || '').replace(/\.html$/, '');
   if (clientPages.includes(page)) return;
   const start = () => {

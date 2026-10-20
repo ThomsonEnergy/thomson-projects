@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Staff profile - Thomson Energy</title>
+<title>Staff profile - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <link rel="stylesheet" href="/css/hr.css?v=2" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
@@ -38,11 +38,11 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script src="/js/hr-templates.js?v=2"></script>
   <script src="/js/hr-shared.js?v=3"></script>
-  <script src="/js/staff-editor.js?v=6"></script>
+  <script src="/js/staff-editor.js?v=7"></script>
   <script>
     // Staff profile: everything about one team member in one place, laid out
     // like a job (tabs for overview, documents, photos, letters, incidents
@@ -116,7 +116,9 @@
     // ---------- Shell ----------
     function renderShell() {
       const initials = (person.full_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
-      document.title = `${person.full_name || 'Staff'} - Thomson Energy`;
+      // setPageTitle (supabase-client.js, when present) also keeps the notification count prefix in step
+      if (typeof setPageTitle === 'function') setPageTitle(person.full_name || 'Staff');
+      else document.title = `${person.full_name || 'Staff'} - TEops`;
       document.getElementById('content').innerHTML = `
         <div class="staff-head">
           ${person.photo_url ? `<img class="staff-avatar" src="${escapeHtml(person.photo_url)}" alt="" />` : `<div class="staff-avatar-fallback">${escapeHtml(initials)}</div>`}

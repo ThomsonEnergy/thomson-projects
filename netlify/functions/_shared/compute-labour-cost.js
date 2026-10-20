@@ -22,10 +22,12 @@
 // whole day (not per-entry), same as a real payslip would - an entry
 // that pushes the day over a threshold gets split across bands.
 
+// Sydney calendar date as YYYY-MM-DD, DST-safe (Intl handles the
+// offset - naive UTC+10/11 arithmetic would get this wrong twice a year).
+// One formatter, reused: this runs once per time entry.
+const SYDNEY_DATE_FORMAT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' });
 function localDateKey(iso) {
-  // Sydney calendar date as YYYY-MM-DD, DST-safe (Intl handles the
-  // offset - naive UTC+10/11 arithmetic would get this wrong twice a year).
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+  return SYDNEY_DATE_FORMAT.format(new Date(iso));
 }
 function dayOfWeekFromKey(dateKey) {
   // 0=Sunday ... 6=Saturday. Decoded as UTC noon so no server-timezone
@@ -34,6 +36,20 @@ function dayOfWeekFromKey(dateKey) {
 }
 function entryHours(te) {
   return (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000;
+}
+
+// Every row a query matches, 1000 at a time (PostgREST caps a single
+// response, so an unpaged query over months of timesheets would silently
+// come back short). buildQuery returns a fresh ordered query each call.
+const PAGE_SIZE = 1000;
+async function fetchAllRows(buildQuery) {
+  const rows = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) return rows;
+  }
 }
 
 // Band boundaries (cumulative hours that day) for one day's shift, given
@@ -68,29 +84,40 @@ async function computeEntryLabourCosts(supabaseAdmin, timeEntries) {
 
   // The daily threshold is on an employee's TOTAL hours that day across
   // EVERY job, not just whichever project(s) the caller asked about - so
-  // for each (employee, local day) the passed-in entries touch, this
-  // refetches that employee's WHOLE day (every project) to band
-  // correctly, then only the caller's own entries get looked up from the
-  // result. A generous UTC window around the target date, filtered down
-  // to an exact local-date match in JS, sidesteps hand-computing
-  // Sydney's DST-dependent UTC offset.
-  const dayKeys = new Set();
-  (timeEntries || []).forEach(te => dayKeys.add(`${te.staff_id}|${localDateKey(te.clock_in)}`));
+  // for each employee the passed-in entries touch, this fetches their
+  // whole history (every project) over the date span those entries cover,
+  // in ONE paged query per employee (it used to be one query per
+  // staff-day, which grew every month), then bands it in memory by Sydney
+  // local day. A generous UTC window around the span, filtered down to an
+  // exact local-date match in JS, sidesteps hand-computing Sydney's
+  // DST-dependent UTC offset.
+  const daysByStaff = new Map();
+  (timeEntries || []).forEach(te => {
+    if (!daysByStaff.has(te.staff_id)) daysByStaff.set(te.staff_id, new Set());
+    daysByStaff.get(te.staff_id).add(localDateKey(te.clock_in));
+  });
 
   const costById = new Map();
-  await Promise.all([...dayKeys].map(async (key) => {
-    const [staffId, dateKey] = key.split('|');
-    const windowStart = new Date(`${dateKey}T00:00:00Z`); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
-    const windowEnd = new Date(`${dateKey}T00:00:00Z`); windowEnd.setUTCDate(windowEnd.getUTCDate() + 2);
-    const { data: windowEntries } = await supabaseAdmin
+  await Promise.all([...daysByStaff.entries()].map(async ([staffId, dateKeySet]) => {
+    const dateKeys = [...dateKeySet].sort();
+    const windowStart = new Date(`${dateKeys[0]}T00:00:00Z`); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
+    const windowEnd = new Date(`${dateKeys[dateKeys.length - 1]}T00:00:00Z`); windowEnd.setUTCDate(windowEnd.getUTCDate() + 2);
+    const windowEntries = await fetchAllRows(() => supabaseAdmin
       .from('time_entries')
       .select('id, clock_in, clock_out')
       .eq('staff_id', staffId)
       .gte('clock_in', windowStart.toISOString())
       .lt('clock_in', windowEnd.toISOString())
       .not('clock_out', 'is', null)
-      .order('clock_in', { ascending: true });
-    const dayEntries = (windowEntries || []).filter(te => localDateKey(te.clock_in) === dateKey);
+      .order('clock_in', { ascending: true })
+      .order('id', { ascending: true }));
+    const entriesByDay = new Map();
+    windowEntries.forEach(te => {
+      const key = localDateKey(te.clock_in);
+      if (!dateKeySet.has(key)) return;
+      if (!entriesByDay.has(key)) entriesByDay.set(key, []);
+      entriesByDay.get(key).push(te);
+    });
 
     const profile = (allProfiles || []).find(p => p.id === staffId);
     // Falls back to the billable sell rate (times the same multiplier for
@@ -108,20 +135,22 @@ async function computeEntryLabourCosts(supabaseAdmin, timeEntries) {
         ? publicHolidayFull
         : Math.max(0, publicHolidayFull - ordinary),
     };
-    const bands = dayBands(dateKey, holidaySet.has(dateKey), rates);
+    entriesByDay.forEach((dayEntries, dateKey) => {
+      const bands = dayBands(dateKey, holidaySet.has(dateKey), rates);
 
-    let cumulative = 0;
-    dayEntries.forEach(te => {
-      const hours = entryHours(te);
-      const start = cumulative, end = cumulative + hours;
-      let cost = 0;
-      bands.forEach(band => {
-        const overlapStart = Math.max(start, band.from);
-        const overlapEnd = Math.min(end, band.to);
-        if (overlapEnd > overlapStart) cost += (overlapEnd - overlapStart) * band.rate;
+      let cumulative = 0;
+      dayEntries.forEach(te => {
+        const hours = entryHours(te);
+        const start = cumulative, end = cumulative + hours;
+        let cost = 0;
+        bands.forEach(band => {
+          const overlapStart = Math.max(start, band.from);
+          const overlapEnd = Math.min(end, band.to);
+          if (overlapEnd > overlapStart) cost += (overlapEnd - overlapStart) * band.rate;
+        });
+        costById.set(te.id, cost);
+        cumulative = end;
       });
-      costById.set(te.id, cost);
-      cumulative = end;
     });
   }));
   return costById;
@@ -168,12 +197,13 @@ function computeEntryOverheads(timeEntries, rates) {
 // estimated_labour_cost, because Staff can't read that column and were
 // seeing 0% used. Pass rates (from loadOverheadRates) if already loaded.
 async function computeAccruedLabourCost(supabaseAdmin, projectIds, { rates: preloadedRates } = {}) {
-  const [{ data: allTimeEntries }, { data: centres }, rates] = await Promise.all([
-    supabaseAdmin
+  const [allTimeEntries, { data: centres }, rates] = await Promise.all([
+    fetchAllRows(() => supabaseAdmin
       .from('time_entries')
       .select('id, project_id, cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out')
       .in('project_id', projectIds)
-      .not('clock_out', 'is', null),
+      .not('clock_out', 'is', null)
+      .order('id', { ascending: true })),
     supabaseAdmin.from('cost_centres').select('id, project_id, estimated_labour_cost').in('project_id', projectIds),
     preloadedRates || loadOverheadRates(supabaseAdmin),
   ]);

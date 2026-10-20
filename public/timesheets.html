@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Timesheets - Thomson Energy</title>
+<title>Timesheets - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=22" />
+<link rel="stylesheet" href="/css/style.css?v=23" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -156,8 +156,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let myUserId = null;
     let myProfileName = '';
@@ -202,9 +202,9 @@
     // Overlapping entries / forgotten clock-outs, with a Fix button that opens
     // that day for editing. Staff see their own; admin/finance see everyone's.
     const issueNames = {};
-    async function loadTimesheetIssues() {
+    async function loadTimesheetIssues(knownRole) {
       const el = document.getElementById('timesheet-issues');
-      const role = await getMyRole();
+      const role = knownRole || await getMyRole();
       const everyone = role === 'admin' || role === 'finance';
       const { overlaps, stale } = await findTimesheetProblems({ staffId: everyone ? null : myUserId });
       if (!overlaps.length && !stale.length) { el.innerHTML = ''; return; }
@@ -274,15 +274,17 @@
 
     async function refreshWeekViews() {
       renderWeekRange();
-      await loadMyWeek();
       if (canSeeTeamWeek) {
-        await loadTeamWeek();
         // Push-to-Xero dates default to the week currently being reviewed -
         // still editable before pushing, this is just a sensible starting point.
         document.getElementById('xero-push-start').value = localDateStr(weekStart);
         document.getElementById('xero-push-end').value = localDateStr(addDays(weekStart, 6));
       }
-      if (canSeeDevEntries) await loadDevModeEntries();
+      await Promise.all([
+        loadMyWeek(),
+        canSeeTeamWeek ? loadTeamWeek() : null,
+        canSeeDevEntries ? loadDevModeEntries() : null,
+      ]);
     }
 
     document.getElementById('week-prev').addEventListener('click', () => { weekStart = addDays(weekStart, -7); refreshWeekViews(); });
@@ -634,6 +636,8 @@
     let dayBreak = { taken: null, start: '', minutes: 30, skipReason: '' };
 
     async function openDayEditPanel(dateStr, staffId = myUserId, staffName = myProfileName, prefill = null) {
+      // The job list loads in the background; the editor needs it for Recent jobs and stage chips
+      if (window.__tsProjectsReady) await window.__tsProjectsReady;
       if (document.getElementById('day-edit-overlay')) return;
       const overlay = document.createElement('div');
       overlay.id = 'day-edit-overlay';
@@ -1389,7 +1393,7 @@
       } else {
         myProfileName = existingProfile.full_name || '';
       }
-      await syncThemeFromProfile();
+      syncThemeFromProfile(); // cosmetic, never holds up the cards
       renderMainNav('timesheets');
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
@@ -1398,26 +1402,34 @@
       });
 
       const myRole = await getMyRole();
-      await loadProjectOptions();
+      // Every card loads at once; the job list only matters once a day is opened for editing
+      const logFail = (what) => (err) => console.error(`Timesheets: ${what} failed`, err);
+      const projectsReady = loadProjectOptions().catch(logFail('job list'));
+      window.__tsProjectsReady = projectsReady;
       initTeamWeekCard(myRole);
       initDevModeEntriesCard(myRole);
-      await refreshWeekViews();
-      await loadTimesheetIssues();
+      initXeroPayrollCard(myRole);
+      initNonbillableCard(myRole);
+      const issuesReady = loadTimesheetIssues(myRole).catch(logFail('issues'));
+      const cardsReady = Promise.all([
+        refreshWeekViews().catch(logFail('week')),
+        issuesReady,
+        loadMyLeave().catch(logFail('leave')),
+        loadApprovals(myRole).catch(logFail('approvals')),
+      ]);
       const aiPf = aiPrefillRead('timesheet');
+      const fixParams = new URLSearchParams(window.location.search);
+      if (aiPf || fixParams.get('fix')) await Promise.all([projectsReady, issuesReady]);
       if (aiPf) {
         aiPrefillClear();
         const day = /^\d{4}-\d{2}-\d{2}$/.test(aiPf.date || '') ? aiPf.date : localDateStr(new Date());
         openDayEditPanel(day, myUserId, myProfileName, aiPf);
       }
-      const fixParams = new URLSearchParams(window.location.search);
       if (fixParams.get('fix')) {
         const fixStaff = fixParams.get('staff') || myUserId;
         if (fixStaff === myUserId || canSeeTeamWeek) openDayEditPanel(fixParams.get('fix'), fixStaff, issueNames[fixStaff] || '');
       }
-      await loadMyLeave();
-      await loadApprovals(myRole);
-      initXeroPayrollCard(myRole);
-      initNonbillableCard(myRole);
+      await cardsReady;
     })();
   </script>
 </body>
