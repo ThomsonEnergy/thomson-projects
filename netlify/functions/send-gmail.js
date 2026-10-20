@@ -161,7 +161,9 @@ exports.handler = async (event) => {
     });
     if (emailErr) throw emailErr;
 
-    await supabaseAdmin.from('email_threads').update({ last_message_at: nowIso, last_direction: 'outbound', is_read: true }).eq('id', thread.id);
+    // replying claims an unclaimed conversation for the sender, so the team sees who has it
+    const claim = thread.assigned_to ? {} : { assigned_to: user.id, assigned_by: user.id, assigned_at: nowIso };
+    await supabaseAdmin.from('email_threads').update({ last_message_at: nowIso, last_direction: 'outbound', is_read: true, ...claim }).eq('id', thread.id);
 
     if (draftId && UUID.test(draftId)) {
       const { data: draft } = await supabaseAdmin.from('email_drafts').select('*').eq('id', draftId).eq('mailbox_id', mailbox.id).maybeSingle();
