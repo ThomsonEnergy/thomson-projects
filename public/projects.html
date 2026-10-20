@@ -279,7 +279,7 @@
             const matches = otherProjects.filter(p => (p.name || '').toLowerCase().includes(q) || String(p.job_number || '').includes(q) || String(p.quote_number || '').includes(q)).slice(0, 8);
             resultsEl.innerHTML = matches.length
               ? `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-                  ${matches.map(p => `<div class="rh-job-pick" data-id="${p.id}" data-label="${projectRef(p)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
+                  ${matches.map(p => `<div class="rh-job-pick" data-id="${p.id}" data-label="${escapeHtml(projectRef(p))}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))}</div>`).join('')}
                 </div>`
               : `<p class="subtitle" style="margin-top:4px;">No matches.</p>`;
             resultsEl.querySelectorAll('.rh-job-pick').forEach(row => {

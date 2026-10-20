@@ -1367,6 +1367,10 @@
           msgEl.innerHTML = (updated && updated.length)
             ? `<div class="success-box">${approving ? 'Approved' : 'Declined'}: ${escapeHtml(who)}, ${escapeHtml(l.leave_type)} leave ${dates}.</div>`
             : `<div class="error-box">${escapeHtml(who)}'s request was already decided by someone else.</div>`;
+          // Drop the decided row now, so a failed reload on bad signal never leaves it greyed out
+          const row = btn.closest('.project-list-item');
+          if (row) row.remove();
+          if (listEl && !listEl.querySelector('.project-list-item')) listEl.innerHTML = '<p class="subtitle">No more requests waiting.</p>';
           await loadApprovals(myRole);
         });
       });
