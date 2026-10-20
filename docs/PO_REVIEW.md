@@ -105,3 +105,24 @@ Four consolidated deliveries, each to `main` with its migration on production.
 8. **Consumables** (cable ties, screws, tape): track them per job in the stock pull, or flag them "consumable, not tracked" so staff are never asked about them at clock-out? Plan assumes a per-item "Consumable" flag on the Stock page, left out of the clock-out prompt.
 9. **Returns and supplier credits**: gear sent back to the supplier (wrong part, damaged) and their credit note. Not in the workflow above. Plan assumes a "Returned to supplier" action on a received line (comes off the job cost or stock, waits for the credit note, which Tally matches like a bill with a negative total). Build it in Delivery 1, or later?
 10. **Stocktake**: while stock is phased in, a per-location count mode (open the van, walk through every item, type the actual count, one Save, every difference logged as a correction). Build it with Delivery 3, or later?
+
+## Hand-over from the UX review (20 Oct 2026)
+
+The laptop chat owns every purchase order, supplier bill, stock, price list and tools change from here (this plan). The cloud chat's UX deliveries 4 to 6 drop the items below; fold them into the PO deliveries wherever they fit (numbers are `docs/UX_REVIEW.md` items, each has the file and lines):
+
+- **UX 101. Supplier and Stock pages load queries one after another** (public/supplier-detail.html 41-68)
+- **UX 121. PO list defaults to All and loads every PO ever** (public/purchase-orders.html 49, 70-73, 126-148)
+- **UX 125. 'Match to Stock' is a native dropdown of every material, per line** (public/supplier-detail.html 343, 366-369, 632-635)
+- **UX 126. Van and warehouse counts: tap the Qty cell instead of a PO or full edit form** (public/vehicle-stock.html 48-53, 64-122)
+- **UX 128. Price lists: every Apply or Keep reloads five queries and redraws the page** (public/price-lists.html 79-82, 120-158, 129, 135, 172-188)
+- **UX 134. No confirmation or email step after creating a PO** (public/purchase-orders.html 324-325)
+- **UX 135. PO status words are inconsistent and 'Needs approval' is misleading** (public/purchase-orders.html 41, 95, 135)
+- **UX 136. Bills can be approved in two places with different rules** (public/supplier-detail.html 126-131, 162-166)
+- **UX 137. 'Review in full' strands you on the supplier page** (public/supplier-bills.html 206-220)
+- **UX 139. 'Not a price list' has no confirm and cannot be undone** (public/price-lists.html 109-117, 136)
+- **UX 140. 'Supplier lists' tab is really the price search** (public/price-lists.html 52-55, 122-126, 160-170)
+- **UX 146. Stock picker needs the quantity first, then closes on every tap** (public/js/supabase-client.js 4338-4392)
+
+Already shipped by UX delivery 3 on 20 Oct 2026, do not redo: UX 36 Receive all on job POs (`receiveAllPoLines`, one `po_receive_line` call per line), UX 47 PO suggestions with a tick box per stock line taking stock through `po_create_stock_pull` per stage, UX 71 Create PO supplier required except stock pulls (`flagRequiredField`), UX 72 blank unit cost blocks the save (`materialLineRowsProblem`), UX 73 Where from keeps typed lines, UX 80 PO line rows fit a phone (`.pml-lbl`). Shared helpers now in `supabase-client.js` for the PO work: `showToast`, `openModal` (`poOverlay` wraps it), `friendlyError`, `flagRequiredField` / `clearFieldFlags`, `materialLineRowsProblem`.
+
+Stays with the cloud chat: the rest of the UX deliveries (navigation, speed, invoicing and Xero, office pages other than the above, login, chat, inbox, settings, HR) and the booking-with-open-tasks change (plan in the cloud chat, waiting on the owner's yes).
