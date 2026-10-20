@@ -6,8 +6,6 @@
 .kv dd { margin: 0; }
 @media (max-width: 520px) { .kv { grid-template-columns: 1fr; } .kv dd { margin-bottom: 6px; } }
 .tab-count { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: var(--surface-2); font-size: 11px; text-align: center; }
-.badge.red { background: rgba(220, 70, 70, 0.15); color: var(--red); }
-.badge.amber { background: rgba(230, 160, 40, 0.15); color: #c98a12; }
 .callout { border: 1px solid var(--border); background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; font-size: 14px; }
 .callout.red { border-color: var(--red); background: rgba(220, 70, 70, 0.1); }
 .callout.amber { border-color: #c98a12; background: rgba(230, 160, 40, 0.1); }
@@ -27,4 +25,10 @@
   .project-list-item { flex-wrap: wrap; gap: 6px; }
   .project-list-item .row-actions { white-space: normal !important; text-align: left !important; }
   .project-list-item .row-actions button:first-child { margin-left: 0; }
+}
+/* Touch screens: row buttons are 40px tall (style.css) with readable text;
+   the photo remove buttons are wide enough to hit. */
+@media (pointer: coarse) {
+  .row-actions button, .row-actions .btn { font-size: 13px; padding: 8px 12px; }
+  .photo-grid .ph button { min-width: 40px; }
 }
