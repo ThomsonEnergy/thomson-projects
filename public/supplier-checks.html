@@ -58,14 +58,14 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=105"></script>
+  <script src="/js/supabase-client.js?v=106"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let filter = 'approve', bills = [], statements = [], suppliers = [], missing = [];
     const esc = (s) => escapeHtml(s == null ? '' : String(s));
     const dateText = (iso) => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
     const supName = (id) => (suppliers.find(s => s.id === id) || {}).name || 'Unknown supplier';
-    const BAD = ['missing_bill', 'statement_duplicate', 'our_duplicate', 'amount_differs', 'price_higher', 'over_quantity', 'duplicate_number', 'po_total_exceeded', 'no_po', 'not_on_po'];
+    const BAD = ['missing_bill', 'statement_duplicate', 'our_duplicate', 'amount_differs', 'price_higher', 'over_quantity', 'duplicate_number', 'po_total_exceeded', 'no_po', 'not_on_po', 'denied', 'freight'];
 
     async function call(body) {
       const { data: { session } } = await supabaseClient.auth.getSession();

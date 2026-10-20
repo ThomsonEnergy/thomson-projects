@@ -19,7 +19,7 @@ const { gmailRequest } = require('./google-client');
 const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
 const { extractSupplierInvoiceWithUsage } = require('./supplier-invoice-ai');
-const { checkBillAndSiblings, normNum } = require('./bill-check');
+const { checkBillAndSiblings, normNum, isFreight } = require('./bill-check');
 
 const INVOICE_ADDRESS = 'invoice@thomsonenergy.com.au';
 const BILL_LABEL = 'Supplier Bills';
@@ -439,7 +439,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   let po = null;
   if (poId) {
     const { data } = await supabaseAdmin.from('purchase_orders')
-      .select('id, po_number, purchase_order_line_items(id, material_id, description, unit_cost)').eq('id', poId).maybeSingle();
+      .select('id, po_number, po_type, closed_at, purchase_order_line_items(id, material_id, description, unit_cost)').eq('id', poId).maybeSingle();
     if (!data) throw new Error('That PO no longer exists.');
     po = data;
   }
@@ -469,22 +469,32 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   if (billErr) throw billErr;
 
   const poLines = po?.purchase_order_line_items || [];
-  const lines = (ex.line_items || []).filter(l => l.description).map(l => {
+  const poOpen = !!po && po.po_type === 'open' && !po.closed_at; // an open PO takes its lines from the bill
+  const lines = [];
+  for (const l of (ex.line_items || []).filter(l => l.description)) {
     const unitCost = Number(l.unit_cost) || 0;
+    const quantity = Number(l.quantity) || 1;
     let best = null, bestScore = 0;
     poLines.forEach(pl => {
       const score = fuzzyMatchScore(pl.description, l.description);
       if (score > bestScore) { bestScore = score; best = pl; }
     });
-    const poLine = bestScore >= 0.5 ? best : null;
-    let flag = null;
-    if (po && !poLine) flag = 'Not on the linked PO';
+    let poLine = bestScore >= 0.5 ? best : null;
+    let flag = null, resolution = null;
+    if (po && isFreight(l.description)) { poLine = null; flag = 'Freight / delivery charge'; }
+    else if (po && !poLine && poOpen) {
+      const { data: added, error: addErr } = await supabaseAdmin.from('purchase_order_line_items')
+        .insert({ po_id: po.id, description: l.description, quantity, unit_cost: unitCost, added_by: userId }).select('id, material_id').single();
+      if (addErr) throw addErr;
+      poLine = added; resolution = 'added';
+    }
+    else if (po && !poLine) flag = 'Not on the linked PO';
     else if (poLine && unitCost > Number(poLine.unit_cost) * 1.01) flag = `Charged ${money(unitCost)}, PO expected ${money(poLine.unit_cost)}`;
-    return {
+    lines.push({
       bill_id: bill.id, material_id: poLine?.material_id || null, description: l.description,
-      quantity: Number(l.quantity) || 1, unit_cost: unitCost, po_line_item_id: poLine?.id || null, flag_reason: flag,
-    };
-  });
+      quantity, unit_cost: unitCost, po_line_item_id: poLine?.id || null, flag_reason: flag, resolution,
+    });
+  }
   if (lines.length) {
     const { error: lineErr } = await supabaseAdmin.from('supplier_bill_line_items').insert(lines);
     if (lineErr) throw lineErr;

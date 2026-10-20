@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=105"></script>
+  <script src="/js/supabase-client.js?v=106"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const vehicleId = new URLSearchParams(window.location.search).get('id');
@@ -58,10 +58,12 @@
         .eq('vehicle_id', vehicleId)
         .order('created_at', { ascending: false });
 
-      render(vehicle, stockRows || [], pos || []);
+      const billsByPo = await loadBillsForPos((pos || []).map(p => p.id));
+      const myRole = await getMyRole();
+      render(vehicle, stockRows || [], pos || [], billsByPo, myRole);
     }
 
-    function render(vehicle, stockRows, pos) {
+    function render(vehicle, stockRows, pos, billsByPo, myRole) {
       document.getElementById('content').innerHTML = `
         <a href="/fleet.html" class="link-quiet">&larr; Fleet</a>
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-top:8px;">
@@ -100,6 +102,7 @@
                     ${renderPoBadges(po)}
                   </div>
                   ${renderPoLineItemsReceivable(po, true)}
+                  ${renderPoBills(billsByPo[po.id], po, myRole)}
                   ${po.supplier_id && !po.closed_at ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice</button>` : ''}
                 </div>`;
             }).join('')}
@@ -130,6 +133,7 @@
         btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
       });
 
+      wirePoBillButtons(document.getElementById('veh-po-list'), loadVehicleStock);
       wireReceiveLineItemButtons(
         document.getElementById('veh-po-list'),
         pos,
@@ -161,7 +165,7 @@
             <button type="button" class="secondary" id="cp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
           </div>
 
-          <label style="margin-top:14px;">Items</label>
+          ${poTypeChoiceHtml('cp')}
           <div id="cp-items-container"></div>
           <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
 
@@ -207,7 +211,7 @@
 
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: null, vehicle_id: vehicleId, supplier_id: supplierId, supplier_name: supplierName || 'Warehouse', // supplier_name is required
-            po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
+            po_type: supplierId ? readPoTypeChoice(overlay, 'cp') : 'fixed', locked: false, status: 'ordered', amount: 0,
             description: source === 'stock' ? 'Pulled from Warehouse stock' : 'Purchased for vehicle',
           }).select('id, po_number').single();
           if (poErr) throw poErr;
