@@ -2587,12 +2587,12 @@
                     Credit note${cn.reason ? ` - ${escapeHtml(cn.reason)}` : ''} (${new Date(cn.created_at).toLocaleDateString('en-AU')})
                     ${cn.refund ? `<span class="badge info" style="margin-left:4px;">Refunded${cn.refund_reference ? ` - ${escapeHtml(cn.refund_reference)}` : ''}</span>` : `<span class="badge accepted" style="margin-left:4px;">Account credit</span>`}
                     ${cn.xero_credit_note_id ? '<span style="margin-left:6px;">In Xero</span>' : (canIssueCreditNote ? `<button type="button" class="secondary push-credit-note-btn" data-credit-note-id="${cn.id}" style="font-size:11px; padding:4px 8px; margin-left:6px;">Push to Xero</button>` : '')}
-                    ${cn.xero_credit_note_error ? `<span class="error-box" style="display:block; margin-top:4px;">${cn.xero_credit_note_error}</span>` : ''}
+                    ${cn.xero_credit_note_error ? `<span class="error-box" style="display:block; margin-top:4px;">${escapeHtml(cn.xero_credit_note_error)}</span>` : ''}
                   </p>`).join('')}
               </div>` : ''}
           </div>
           <div style="margin-top:12px;">${xeroBreakdownHtml(inv, mappings, clientType)}</div>
-          <div id="invoice-pdf-msg-${inv.id}">${inv.pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${inv.pdf_error}</div>` : ''}</div>
+          <div id="invoice-pdf-msg-${inv.id}">${inv.pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${escapeHtml(inv.pdf_error)}</div>` : ''}</div>
         </div>`).join('') + `<div id="job-invoices-msg"></div>`;
 
       listEl.querySelectorAll('.push-xero-tab-btn').forEach(btn => {
@@ -7808,7 +7808,10 @@
               p_lines: Object.entries(mats).map(([materialId, quantity]) => ({ material_id: materialId, quantity, left_after: null })),
               p_description: 'Stock covering quoted materials (PO suggestions)',
             });
-            if (pullErr) throw pullErr;
+            if (pullErr) {
+              if (/how many are left/i.test(pullErr.message || '')) throw new Error('Stock changed since this opened. Close and open PO suggestions again.');
+              throw pullErr;
+            }
             doneStages.set(stageKey, pull?.po_number || '');
           }
 
@@ -7827,10 +7830,11 @@
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${group.supplierName} (auto-suggested from quote)`);
             await logActivity('project', projectId, 'po_created', `PO ${poNumber || ''} created for ${group.supplierName} (auto-suggested from quote)`);
             await createPoFollowUpTask(projectId, poNumber, group.supplierName);
-            await supabaseClient.from('purchase_order_line_items').insert(
+            const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(
               group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
             doneGroups.set(supplierId, poNumber || '');
+            if (liErr) throw new Error(`PO ${poNumber || ''} was made but its lines failed: ${liErr.message}. Add them on the PO.`);
           }
 
           // Group manually-assigned unassigned items by the supplier picked
@@ -7857,10 +7861,11 @@
             await logActivity('purchase_order', newPo.id, 'created', `PO created for ${supplierName} (auto-suggested, manually assigned)`);
             await logActivity('project', projectId, 'po_created', `PO ${poNumber || ''} created for ${supplierName} (auto-suggested, manually assigned)`);
             await createPoFollowUpTask(projectId, poNumber, supplierName);
-            await supabaseClient.from('purchase_order_line_items').insert(
+            const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(
               items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
             doneGroups.set(`manual:${supplierId}`, poNumber || '');
+            if (liErr) throw new Error(`PO ${poNumber || ''} was made but its lines failed: ${liErr.message}. Add them on the PO.`);
           }
 
           const created = doneGroups.size;
@@ -7870,8 +7875,11 @@
           await loadPurchaseOrders(projectId, centres);
         } catch (err) {
           const done = [...doneStages.values(), ...doneGroups.values()].filter(Boolean);
-          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}${done.length ? ` Already done: ${escapeHtml(done.join(', '))}. Press Confirm again to finish the rest, nothing is repeated.` : ''}</div>`;
-          confirmBtn.disabled = false;
+          // A lost reply may have gone through on the server, so a blind retry could take stock twice
+          const lost = isNetworkError(err);
+          const next = lost ? ' Close this panel and open PO suggestions again: what went through is not suggested twice.' : (done.length ? ' Press Confirm again to finish the rest, nothing is repeated.' : '');
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}${done.length ? ` Already done: ${escapeHtml(done.join(', '))}.` : ''}${next}</div>`;
+          confirmBtn.disabled = lost;
           confirmBtn.textContent = 'Confirm';
         }
       });
