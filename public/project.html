@@ -31,11 +31,12 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=101"></script>
+  <script src="/js/supabase-client.js?v=102"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/feed.js?v=8"></script>
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=6"></script>
+  <script src="/js/job-schedule.js?v=1"></script>
   <script src="/js/assets.js?v=2"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js"></script>
@@ -3053,6 +3054,7 @@
           ${project.job_number && !editMode && pricingVisible ? `<button class="settings-tab" data-panel="invoices">Invoices</button>` : ''}
           ${project.job_number && !editMode && pricingVisible ? `<button class="settings-tab" data-panel="stcs">STCs</button>` : ''}
           <button class="settings-tab" data-panel="details">Details</button>
+          ${!editMode ? `<button class="settings-tab" data-panel="schedule">Schedule</button>` : ''}
           ${!editMode ? `<button class="settings-tab" data-panel="feed">Feed</button>` : ''}
           ${!editMode ? `<button class="settings-tab" data-panel="emails">Emails</button>` : ''}
           ${!editMode ? `<button class="settings-tab" data-panel="documents">Documents</button>` : ''}
@@ -3549,6 +3551,30 @@
             </div>` : ''}
 
             ${!editMode ? `
+            <div class="settings-panel" id="panel-schedule">
+              <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+                  <h2 style="margin:0;">Schedule</h2>
+                  ${pricingVisible && !isFrozenQuote ? `<div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button type="button" id="job-sched-book-btn" style="font-size:12px; padding:6px 12px;">Book people</button>
+                    <button type="button" class="secondary" id="job-sched-email-btn" style="font-size:12px; padding:6px 12px;">Email client booking</button>
+                    <button type="button" class="secondary" id="job-sched-ask-btn" style="font-size:12px; padding:6px 12px;">Ask client to pick a time</button>
+                  </div>` : ''}
+                </div>
+                <p class="subtitle" style="margin:0 0 4px;">Book tentatively as far out as you like: staff see it in My Day straight away. Once the job is sure to go ahead, <b>Email client booking</b> confirms it with the client and the day turns "Client informed". A booking still not informed within 3 days gets a 7am reminder to whoever booked it.</p>
+                <p class="subtitle" id="job-sched-client" style="margin:0 0 12px; font-size:12px;"></p>
+                <div id="job-sched-days"><p class="subtitle">Loading...</p></div>
+              </div>
+              <div class="card">
+                <h2 style="margin:0 0 6px;">Time options sent to the client</h2>
+                <div id="job-sched-offers"><p class="subtitle">Loading...</p></div>
+              </div>
+              <div class="card">
+                <h2 style="margin:0 0 6px;">Schedule emails</h2>
+                <div id="job-sched-emails"><p class="subtitle">Loading...</p></div>
+              </div>
+            </div>` : ''}
+            ${!editMode ? `
             <div class="settings-panel" id="panel-emails">
               <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
@@ -3723,6 +3749,7 @@
       loadJobTasks(project.id);
       initJobSearch(project, pricingVisible);
       initJobEmails(project);
+      initJobSchedule(project, pricingVisible);
       initJobStcs(project, centres);
 
       const hdSaveBtn = document.getElementById('hd-save-btn');
@@ -6852,6 +6879,7 @@
             <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="sched-weekdays" checked style="width:auto;" /> Skip weekends when booking several days</label>
             <label>Note (optional)</label>
             <input id="sched-note" placeholder="e.g. bring the ladder, meet the builder at 7" />
+            ${isJob ? `<label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:10px;"><input type="checkbox" id="sched-email-client" style="width:auto;" /> Email the client this booking (you check the email before it sends)</label>` : ''}
 
             <div id="sched-msg"></div>
             <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -6861,7 +6889,7 @@
             </div>
           </div>`;
 
-        overlay.querySelector('#sched-close-btn').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('#sched-close-btn').addEventListener('click', () => { overlay.remove(); if (window.loadJobSchedule) loadJobSchedule(project); });
         overlay.querySelectorAll('.sched-remove').forEach(btn => btn.addEventListener('click', async () => {
           const { error } = await supabaseClient.from('schedule_assignments').delete().eq('id', btn.dataset.id);
           if (error) { overlay.querySelector('#sched-msg').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
@@ -6916,10 +6944,17 @@
               staff_id: sid, project_id: project.id, block_type: isJob ? 'job' : 'site_visit',
               assignment_date: d, start_time: start, end_time: end, note,
             })));
-            const { error } = await supabaseClient.from('schedule_assignments').insert(rows);
+            const { data: made, error } = await supabaseClient.from('schedule_assignments').insert(rows).select('id');
             if (error) throw error;
             // The database moves Ready to Book to Job Booked on this booking (migration 20261023000000).
             await logActivity('project', project.id, 'staff_scheduled', `Scheduled ${staffIds.length} ${staffIds.length === 1 ? 'person' : 'people'} for ${dates.length} day${dates.length === 1 ? '' : 's'} from ${fmtDay(dates[0])}`);
+            const emailTick = overlay.querySelector('#sched-email-client');
+            if (emailTick && emailTick.checked && window.openEmailBookingOverlay) {
+              overlay.remove();
+              if (window.loadJobSchedule) loadJobSchedule(project);
+              openEmailBookingOverlay(project, (made || []).map(r => r.id));
+              return;
+            }
             await render();
             overlay.querySelector('#sched-msg').innerHTML = `<div class="success-box">Booked ${rows.length} ${rows.length === 1 ? 'slot' : 'slots'}.</div>`;
           } catch (err) {

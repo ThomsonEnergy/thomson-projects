@@ -44,6 +44,12 @@
 [functions.sync-overheads-nightly]
   schedule = "@daily"
 
+# 7am Sydney: a phone notification to whoever made a booking starting within 3 days while the
+# client has not been told - see remind-client-bookings.js. Runs at 20:05 and 21:05 UTC so it
+# lands on 7am with and without daylight saving; only the 7am one does anything.
+[functions.remind-client-bookings]
+  schedule = "5 20,21 * * *"
+
 # Polls sales@thomsonenergy.com.au for new mail every 5 minutes - see
 # sync-gmail.js. The Sync now buttons (Settings, Inbox) call sync-gmail-now.js
 # instead: Netlify does not allow a scheduled function to be called over HTTP.

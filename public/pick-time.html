@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="robots" content="noindex, nofollow" />
+<script>document.documentElement.setAttribute('data-theme', 'navy');</script>
+<title>Pick a time - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=21" />
+<style>
+  body { padding-top: 0; }
+  .pt-head { display:flex; align-items:center; gap:14px; padding:18px 16px; border-bottom:1px solid var(--border); }
+  .pt-head img { height:34px; }
+  .wrap { max-width: 640px; }
+  .pt-fact { display:flex; gap:10px; font-size:14px; margin:4px 0; }
+  .pt-fact .k { color: var(--muted); min-width: 64px; }
+  .pt-opt { display:block; width:100%; text-align:left; margin:8px 0; padding:14px 16px; font-size:16px; border-radius:10px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); cursor:pointer; }
+  .pt-opt:hover:not(:disabled) { border-color: var(--accent); }
+  .pt-opt:disabled { opacity:0.55; cursor:default; }
+  .pt-opt small { display:block; color:var(--muted); font-size:12px; margin-top:2px; }
+  .pt-none { margin-top:18px; font-size:14px; }
+  .pt-none textarea { width:100%; min-height:80px; margin-top:8px; }
+</style>
+</head>
+<body>
+  <div class="pt-head">
+    <img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" />
+  </div>
+  <div class="wrap">
+    <div id="pt-root"><p class="subtitle">Loading...</p></div>
+  </div>
+  <script>
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const root = document.getElementById('pt-root');
+    const token = new URLSearchParams(location.search).get('token') || '';
+    let data = null;
+
+    const notAvailable = (msg) => { root.innerHTML = `<div class="card"><h2 style="margin-top:0;">Not available</h2><p>${esc(msg || 'This link is not available.')}</p></div>`; };
+    const phoneLine = () => (data && data.company && data.company.phone ? ` or call <a href="tel:${esc(String(data.company.phone).replace(/[^+\d]/g, ''))}">${esc(data.company.phone)}</a>` : '');
+
+    async function load() {
+      try {
+        const res = await fetch('/.netlify/functions/get-time-offer?token=' + encodeURIComponent(token));
+        data = await res.json();
+      } catch (e) { data = { ok: false, error: 'Could not load this page. Check your connection and try again.' }; }
+      if (!data.ok) { notAvailable(data.error); return; }
+      render();
+    }
+
+    function render() {
+      const o = data.offer;
+      const who = o.who && o.who.length ? (o.who.length === 1 ? o.who[0] : `${o.who.slice(0, -1).join(', ')} and ${o.who[o.who.length - 1]}`) : '';
+      const facts = `
+        <div class="pt-fact"><span class="k">Job</span><span>${esc(o.job)}</span></div>
+        ${o.address ? `<div class="pt-fact"><span class="k">Where</span><span>${esc(o.address)}</span></div>` : ''}
+        <div class="pt-fact"><span class="k">Time</span><span>${esc(o.start)} to ${esc(o.end)}${o.days > 1 ? `, ${o.days} days${o.weekdays_only ? ' (weekdays)' : ''}` : ''}</span></div>
+        ${who ? `<div class="pt-fact"><span class="k">Who</span><span>${esc(who)}</span></div>` : ''}`;
+      if (o.status === 'picked') {
+        const picked = o.options.find((x) => x.date === o.picked_date);
+        root.innerHTML = `<div class="card"><h2 style="margin-top:0;">You're booked in</h2>${facts}<div class="success-box" style="margin-top:12px;">${esc(picked ? picked.label : o.picked_date)}. We've sent you an email to confirm. If anything changes, reply to that email${phoneLine()}.</div></div>`;
+        return;
+      }
+      if (o.status === 'declined') {
+        root.innerHTML = `<div class="card"><h2 style="margin-top:0;">Thanks, we'll be in touch</h2>${facts}<p style="margin-top:12px;">You let us know none of these times suited. We'll come back to you with new ones${phoneLine()}.</p></div>`;
+        return;
+      }
+      if (o.status !== 'open') { notAvailable(`These times are no longer open. Please contact us${data.company && data.company.phone ? ' on ' + data.company.phone : ''}.`); return; }
+      const open = o.options.filter((x) => !x.past);
+      root.innerHTML = `<div class="card">
+        <h2 style="margin-top:0;">Pick a time that suits you</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Tap one of the options below and we'll lock it in straight away.</p>
+        ${facts}
+        ${o.message ? `<p style="margin-top:12px; white-space:pre-wrap;">${esc(o.message)}</p>` : ''}
+        <div id="pt-options" style="margin-top:14px;">
+          ${open.length ? open.map((x) => `<button type="button" class="pt-opt" data-date="${esc(x.date)}" data-label="${esc(x.label)}" ${x.available ? '' : 'disabled'}>${esc(x.label)}<small>${x.available ? `${esc(o.start)} to ${esc(o.end)}` : 'No longer available'}</small></button>`).join('') : '<p class="subtitle">All of these dates have passed. Please contact us for new ones.</p>'}
+        </div>
+        <div id="pt-msg" style="margin-top:8px;"></div>
+        <div class="pt-none">
+          <a href="#" id="pt-none-link">None of these work for me</a>
+          <div id="pt-none-box" style="display:none;">
+            <textarea id="pt-none-text" placeholder="Tell us what would suit, or anything else we should know (optional)"></textarea>
+            <div style="margin-top:8px; display:flex; gap:8px;"><button type="button" id="pt-none-send">Let us know</button><button type="button" class="secondary" id="pt-none-cancel">Back</button></div>
+          </div>
+        </div>
+      </div>`;
+      root.querySelectorAll('.pt-opt').forEach((b) => b.addEventListener('click', () => pick(b)));
+      document.getElementById('pt-none-link').addEventListener('click', (e) => { e.preventDefault(); document.getElementById('pt-none-box').style.display = ''; e.target.style.display = 'none'; });
+      document.getElementById('pt-none-cancel').addEventListener('click', () => { document.getElementById('pt-none-box').style.display = 'none'; document.getElementById('pt-none-link').style.display = ''; });
+      document.getElementById('pt-none-send').addEventListener('click', decline);
+    }
+
+    async function post(body) {
+      const res = await fetch('/.netlify/functions/pick-time', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, ...body }) });
+      const d = await res.json().catch(() => ({}));
+      return { res, d };
+    }
+
+    async function pick(btn) {
+      if (!confirm(`Book ${btn.dataset.label}?`)) return;
+      root.querySelectorAll('.pt-opt').forEach((b) => { b.disabled = true; });
+      btn.innerHTML = 'Booking...';
+      let problem = null;
+      try {
+        const { res, d } = await post({ date: btn.dataset.date });
+        if (res.ok && d.ok) {
+          const follow = d.emailed ? `We've sent you an email to confirm. If anything changes, reply to that email${phoneLine()}.` : `Your time is locked in. If anything changes, let us know${phoneLine() || ' by replying to our email'}.`;
+          root.innerHTML = `<div class="card"><h2 style="margin-top:0;">You're booked in</h2><div class="success-box">${esc(d.label || '')}. ${follow}</div></div>`;
+          return;
+        }
+        problem = d.error || 'Could not book that. Please try again.';
+        if (d.taken) { await load(); } // the taken option now shows greyed out
+        else render();
+      } catch (err) {
+        problem = err.message;
+        render();
+      }
+      const box = document.getElementById('pt-msg');
+      if (box) box.innerHTML = `<div class="error-box">${esc(problem)}</div>`;
+    }
+
+    async function decline() {
+      const btn = document.getElementById('pt-none-send');
+      btn.disabled = true;
+      try {
+        const { res, d } = await post({ decline: true, message: document.getElementById('pt-none-text').value.trim().slice(0, 1000) });
+        if (!res.ok || !d.ok) throw new Error(d.error || 'Could not send that. Please try again.');
+        root.innerHTML = `<div class="card"><h2 style="margin-top:0;">Thanks, we'll be in touch</h2><p>We'll come back to you with new times${phoneLine()}.</p></div>`;
+      } catch (err) {
+        document.getElementById('pt-msg').innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+        btn.disabled = false;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
