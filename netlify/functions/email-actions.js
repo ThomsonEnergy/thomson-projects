@@ -11,12 +11,16 @@
 //   update_label     { label_id, name?, description?, status? }   delete_label { label_id }
 //   accept_label / dismiss_label   { thread_id }        the agent's suggested new label
 //   accept_job / dismiss_job       { thread_id }        the agent's suggested job
+//   assign           { thread_id, user_id | null }      who is handling it ("I've got this", assign, unassign)
+//   set_auto_labels  { mailbox_id, on }                 let the agent make labels itself (sales@: Admin, Finance, Sales)
 //   save_draft       { draft_id?, mailbox_id, thread_id?, to, cc, subject, body }
 //   discard_draft    { draft_id }
 //   cleanup_scan     { mailbox_id }                    start (or start again) the clean up scan
 //   cleanup_queue    { mailbox_id, senders: [], queue: archive | read | unsubscribe | keep }
 //   cleanup_read_older { mailbox_id, days }
 //   disconnect       { mailbox_id }                    My inbox only
+// A new label, or a changed description, also asks the email agent to sweep the last 60 days
+// of that inbox for it (email_labels.sweep_requested_at, _shared/email-agent.js).
 
 const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
@@ -28,6 +32,7 @@ const {
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 const SECTIONS = ['priority', 'other', 'updates'];
+const PRICING = ['admin', 'finance', 'sales'];
 const addrOf = (raw) => { const m = String(raw || '').match(/<([^>]+)>/); return (m ? m[1] : String(raw || '')).trim().toLowerCase(); };
 const clean = (s, n) => String(s == null ? '' : s).replace(/—/g, ',').trim().slice(0, n);
 
@@ -77,8 +82,9 @@ exports.handler = async (event) => {
     const { data: existing } = await admin.from('email_labels').select('*').eq('mailbox_id', mailbox.id).ilike('name', n.replace(/[%_]/g, '\\$&')).maybeSingle();
     if (existing) return existing;
     const { data: label, error } = await admin.from('email_labels')
-      .insert({ mailbox_id: mailbox.id, name: n, description: clean(description, 300) || null, created_by: userId }).select('*').single();
+      .insert({ mailbox_id: mailbox.id, name: n, description: clean(description, 300) || null, created_by: userId, sweep_requested_at: new Date().toISOString() }).select('*').single();
     if (error) throw error;
+    await startMailboxWork(); // the sweep over the last 60 days
     return label;
   }
   async function applyLabel(t, label, on) {
@@ -149,9 +155,12 @@ exports.handler = async (event) => {
         }
         if (body.description !== undefined) patch.description = clean(body.description, 300) || null;
         if (body.status !== undefined) patch.status = body.status === 'done' ? 'done' : 'open';
+        // a changed description means a different idea of what belongs: sweep again
+        if (patch.description !== undefined && patch.description !== label.description) patch.sweep_requested_at = new Date().toISOString();
         if (Object.keys(patch).length) {
           const { error } = await admin.from('email_labels').update(patch).eq('id', label.id);
           if (error) throw new Refused(error.code === '23505' ? 'There is already a label with that name.' : error.message);
+          if (patch.sweep_requested_at) await startMailboxWork();
         }
         return json(200, { ok: true });
       }
@@ -184,6 +193,35 @@ exports.handler = async (event) => {
       case 'dismiss_job': {
         const t = await ownThread(body.thread_id);
         await admin.from('email_threads').update({ suggested_project_id: null }).eq('id', t.thread.id);
+        return json(200, { ok: true });
+      }
+      case 'assign': {
+        // anyone who can see the conversation (their inbox, sales@, or tagged to a job)
+        const t = body.thread_id ? await threadForUser(admin, body.thread_id, userId) : null;
+        if (!t) throw new Refused('Conversation not found.');
+        const target = body.user_id ? String(body.user_id) : null;
+        if (target) {
+          const { data: p } = await admin.from('profiles').select('id, active').eq('id', target).maybeSingle();
+          if (!p || !p.active) throw new Refused('That person is not an active staff member.');
+          if (t.mailbox.kind === 'personal' && target !== t.mailbox.owner_id) {
+            const { count } = await admin.from('email_job_links').select('id', { count: 'exact', head: true }).eq('thread_id', t.thread.id);
+            if (!count) throw new Refused('Tag the conversation to a job first, so they can see it.');
+          }
+        }
+        const now = new Date().toISOString();
+        await admin.from('email_threads').update({ assigned_to: target, assigned_by: target ? userId : null, assigned_at: target ? now : null }).eq('id', t.thread.id);
+        if (target && target !== userId) {
+          await admin.rpc('create_notification', {
+            p_user: target, p_kind: 'email', p_title: 'Assigned to you: ' + (t.thread.subject || '(no subject)'),
+            p_body: `${await fromName()} asked you to handle this conversation`, p_link: `/inbox.html?thread=${t.thread.id}`, p_actor: userId, p_dedupe: `email_assign:${t.thread.id}:${now}`,
+          });
+        }
+        return json(200, { ok: true });
+      }
+      case 'set_auto_labels': {
+        const mb = await ownMailbox(body.mailbox_id);
+        if (mb.kind === 'shared' && !PRICING.includes(auth.role)) throw new Refused('Only Admin, Finance or Sales can change this for sales@.');
+        await admin.from('mailboxes').update({ auto_labels: !!body.on }).eq('id', mb.id);
         return json(200, { ok: true });
       }
       case 'save_draft': {

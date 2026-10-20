@@ -2,6 +2,9 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 20 Oct 2026
+- LIVE: inbox follow-through. A new label (or a changed description) makes Postie sweep the inbox's last 60 days and file what fits (one notification when done); Postie can make labels itself per inbox (Settings > Email Agent > Labels made by Postie, off by default, duplicate guard, AI tag); every conversation says who replied or who is on it ("I've got this", assign to a staff member, Take over, banner when someone else has it, Priority lists unclaimed first, "Mine" filter, the assignee alone gets the new-mail notification); "Tagged to jobs" view in the inbox sidebar and status plus assign picker on the job's Emails tab. Migration 20261105010000 applied to production. (`docs/PROJECT_SPEC.md` A18)
+
 ## 19 Oct 2026
 - Rule: every plan's best-model line now names the effort too (`Best model: <name>, effort <level>, because ...`), with a guide for picking the level and how to set it in cloud sessions. (`CLAUDE.md`, How the owner works)
 - Fix: PO list page (`public/purchase-orders.html`) showed "more than one relationship was found for purchase_orders and fleet_vehicles" since migration 20261025000000 added `stock_source_vehicle_id`; the embed now names the FK (`fleet_vehicles!vehicle_id`).
