@@ -36,10 +36,13 @@
       <div class="stat"><div class="label">Below minimum</div><div class="value" id="stat-below-minimum">-</div></div>
     </div>
 
+    <div id="stock-checks"></div>
+
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
         <input id="stock-search" placeholder="Search by name, category, or supplier..." style="max-width:320px;" />
         <div>
+          <button class="secondary" id="stocktake-btn" style="margin-right:8px;">Stocktake (Warehouse)</button>
           <button id="create-stock-po-btn" style="margin-right:8px;">+ Create PO</button>
           <button class="secondary" id="suggest-restock-btn" style="margin-right:8px;">Suggest restock PO</button>
           <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
@@ -56,13 +59,50 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=106"></script>
+  <script src="/js/supabase-client.js?v=107"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allMaterials = [];
     let allSuppliers = [];
     let vehicleList = [];
     let locationRows = [];
+    let lowFlags = [];
+    let corrections = []; // last 90 days of count corrections, moves and prices (activity_log on the item)
+    let myRole = 'staff';
+    const dayText = (iso) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'Australia/Sydney' });
+    const placeName = (loc, vehicleId) => loc === 'vehicle' ? (vehicleList.find(v => v.id === vehicleId)?.vehicle_name || vehicleList.find(v => v.id === vehicleId)?.rego || 'a vehicle') : 'Warehouse';
+
+    // Running low flags, parts that need a price, and the last 90 days of count corrections (who, when).
+    function renderStockChecks() {
+      const el = document.getElementById('stock-checks');
+      const needsPrice = allMaterials.filter(m => m.needs_price);
+      const canClear = isPricingRole(myRole);
+      const recent = corrections.filter(c => c.action === 'stock_count_corrected');
+      if (!lowFlags.length && !needsPrice.length && !recent.length) { el.innerHTML = ''; return; }
+      el.innerHTML = `<div class="card">
+        <h2>Stock checks</h2>
+        ${lowFlags.length ? `<p style="margin:8px 0 4px; font-weight:600; font-size:13px;">Running low (flagged from site)</p>
+          ${lowFlags.map(f => `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; font-size:13px; flex-wrap:wrap;">
+            <span><strong>${escapeHtml(f.materials?.name || '')}</strong>${f.materials?.pack_label ? ` <span class="subtitle">(${escapeHtml(f.materials.pack_label)})</span>` : ''} in ${escapeHtml(placeName(f.location_type, f.vehicle_id))} &middot; ${escapeHtml(f.profiles?.full_name || 'someone')}, ${escapeHtml(dayText(f.created_at))}${f.note ? ' &middot; ' + escapeHtml(f.note) : ''}</span>
+            ${canClear ? `<button type="button" class="secondary btn-sm clear-low-btn" data-id="${f.id}">Restocked, clear</button>` : ''}
+          </div>`).join('')}` : ''}
+        ${needsPrice.length ? `<p style="margin:10px 0 4px; font-weight:600; font-size:13px; color:var(--red);">Needs a price (added from site, on jobs at $0 until priced)</p>
+          ${needsPrice.map(m => `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; font-size:13px;">
+            <span>${escapeHtml(m.name)}</span>
+            ${canClear ? `<button type="button" class="secondary btn-sm edit-material-btn" data-id="${m.id}">Set the price</button>` : ''}
+          </div>`).join('')}` : ''}
+        ${recent.length ? `<details style="margin-top:10px;"><summary class="subtitle" style="cursor:pointer;">Count corrections, last 90 days (${recent.length})</summary>
+          ${recent.map(c => `<div style="font-size:12px; padding:3px 0; border-top:1px solid var(--border);">${escapeHtml(dayText(c.created_at))} &middot; <strong>${escapeHtml(c.materials?.name || '')}</strong>: ${escapeHtml(c.description)} <span class="subtitle">(${escapeHtml(c.profiles?.full_name || 'someone')})</span></div>`).join('')}
+        </details>` : ''}
+      </div>`;
+      el.querySelectorAll('.clear-low-btn').forEach(btn => btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const { error } = await supabaseClient.rpc('stock_clear_low', { p_flag_id: btn.dataset.id });
+        if (error) { alert(friendlyError(error)); btn.disabled = false; return; }
+        await loadMaterials();
+      }));
+      el.querySelectorAll('.edit-material-btn').forEach(btn => btn.addEventListener('click', () => openMaterialPanel(allMaterials.find(m => m.id === btn.dataset.id))));
+    }
 
     async function loadMaterials() {
       const listEl = document.getElementById('stock-list');
@@ -74,7 +114,16 @@
       vehicleList = vehicles || [];
       const { data: locations } = await supabaseClient.from('material_stock_by_location').select('*');
       locationRows = locations || [];
+      myRole = await getMyRole();
+      const since = new Date(Date.now() - 90 * 86400000).toISOString();
+      const [{ data: flags }, { data: log }] = await Promise.all([
+        supabaseClient.from('stock_low_flags').select('*, materials(name, pack_label), profiles!stock_low_flags_flagged_by_fkey(full_name)').is('cleared_at', null).order('created_at', { ascending: false }),
+        supabaseClient.from('activity_log').select('id, action, description, created_at, entity_id, profiles!activity_log_changed_by_fkey(full_name)').eq('entity_type', 'material').in('action', ['stock_count_corrected', 'stock_moved', 'priced']).gte('created_at', since).order('created_at', { ascending: false }).limit(300),
+      ]);
+      lowFlags = flags || [];
+      corrections = (log || []).map(c => ({ ...c, materials: allMaterials.find(m => m.id === c.entity_id) }));
 
+      renderStockChecks();
       renderMaterials();
     }
 
@@ -112,9 +161,15 @@
       function stockRowsHtml(rows, showQtyCols) {
         return rows.map(m => {
           const isBelowMin = Number(m.minimum_quantity) > 0 && Number(m.quantity_on_hand) < Number(m.minimum_quantity);
+          const lastFix = corrections.find(c => c.action === 'stock_count_corrected' && c.entity_id === m.id && new Date(c.created_at) > new Date(Date.now() - 30 * 86400000));
+          const chips = [
+            m.needs_price ? '<span class="badge draft" style="color:var(--red);">Needs a price</span>' : '',
+            m.is_consumable ? `<span class="badge draft" title="Counted by the pack, never asked about at clock-out">Consumable${m.pack_label ? ': ' + escapeHtml(m.pack_label) : ''}</span>` : '',
+            lastFix ? `<span class="badge draft" title="${escapeHtml(lastFix.description)}">Count corrected ${escapeHtml(dayText(lastFix.created_at))} by ${escapeHtml(lastFix.profiles?.full_name || 'someone')}</span>` : '',
+          ].filter(Boolean).join(' ');
           return `
           <tr>
-            <td data-label="Name">${escapeHtml(m.name)}</td>
+            <td data-label="Name">${escapeHtml(m.name)}${chips ? `<div style="margin-top:3px; display:flex; gap:4px; flex-wrap:wrap;">${chips}</div>` : ''}</td>
             <td data-label="Category">${escapeHtml(m.category || '-')}</td>
             <td data-label="Supplier">${escapeHtml(m.suppliers?.name || '-')}</td>
             <td class="num" data-label="Cost">${money(m.cost_price)}</td>
@@ -209,6 +264,8 @@
           <input id="mat-count-reason" placeholder="e.g. stocktake, damaged, miscounted" />
           <label>Minimum quantity - flags for restocking below this</label>
           <input id="mat-minimum" type="number" inputmode="decimal" step="1" value="${escapeHtml(material?.minimum_quantity || 0)}" />
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="mat-consumable" style="width:auto;" ${material?.is_consumable ? 'checked' : ''} /> Consumable: counted by the pack, never asked about at clock-out (zip ties, saddles, tape)</label>
+          <input id="mat-pack" placeholder="Pack, e.g. bag of 100" value="${escapeHtml(material?.pack_label)}" />
           <label>Notes</label>
           <textarea id="mat-notes" style="min-height:60px;">${escapeHtml(material?.notes)}</textarea>
           <div style="margin-top:14px; display:flex; justify-content:space-between;">
@@ -250,6 +307,8 @@
           sell_price: parseFloat(overlay.querySelector('#mat-sell').value) || 0,
           minimum_quantity: parseFloat(overlay.querySelector('#mat-minimum').value) || 0,
           notes: overlay.querySelector('#mat-notes').value.trim() || null,
+          is_consumable: overlay.querySelector('#mat-consumable').checked,
+          pack_label: overlay.querySelector('#mat-pack').value.trim() || null,
         };
         let materialId = material ? material.id : null;
         if (material) {
@@ -288,6 +347,7 @@
     }
 
     document.getElementById('add-material-btn').addEventListener('click', () => openMaterialPanel(null));
+    document.getElementById('stocktake-btn').addEventListener('click', () => openStocktakePanel({ loc: 'warehouse', vehicleId: null, placeLabel: 'Warehouse', onDone: loadMaterials }));
 
     document.getElementById('create-stock-po-btn').addEventListener('click', openCreateStockPoPanel);
 
