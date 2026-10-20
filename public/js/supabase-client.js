@@ -2485,7 +2485,7 @@ function loadGlobalSearch() {
   if (window.__globalSearchScript || !document.querySelector('.topbar-right')) return;
   window.__globalSearchScript = true;
   const s = document.createElement('script');
-  s.src = '/js/global-search.js?v=3';
+  s.src = '/js/global-search.js?v=4';
   document.head.appendChild(s);
 }
 
@@ -2529,7 +2529,7 @@ function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=13';
+  s.src = '/js/notifications.js?v=14';
   document.head.appendChild(s);
 }
 

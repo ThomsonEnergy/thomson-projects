@@ -20,7 +20,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 22 | PO, bills, stock from My Day, tools register (review and 4-delivery plan) | Planned, waiting on owner's yes | N | Airwallex payout key for the last step of delivery 1 |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
-| 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 to 3 (items 1 to 82) LIVE 19 to 20 Oct 2026, next delivery 4 (`docs/UX_REVIEW.md`) | N | None |
+| 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 to 4 (items 1 to 109) LIVE 19 to 20 Oct 2026, next delivery 5 (`docs/UX_REVIEW.md`) | N | None |
 | 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Built 19 Oct 2026, LIVE (spec A32) | N | None |
 
 ## High lead time, start now
@@ -448,7 +448,7 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 
 ## 17. User-friendliness upgrades (whole-app review, 19 Oct 2026)
 
-**Status:** owner said yes to building all 168 (19 Oct 2026). Deliveries 1 to 3 (items 1 to 82) LIVE 19 to 20 Oct 2026; next is delivery 4 (items 83 to 109, navigation and speed). Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
+**Status:** owner said yes to building all 168 (19 Oct 2026). Deliveries 1 to 4 (items 1 to 109) LIVE 19 to 20 Oct 2026; next is delivery 5 (items 110 to 146 less the PO items moved to `docs/PO_REVIEW.md`). Waiting with the next migration: `email_label_counts(p_mailbox)` grouped label counts for the Inbox (UX 107, SQL in the delivery 4 PR). Full list with file and line references in `docs/UX_REVIEW.md` (168 items in 10 themes, 125 of them small effort, re-checked after main's 19 Oct fixes). Quote item numbers to pick, for example "UX 1, 2 and 6".
 
 **Do first (top ten, best first):**
 62. Inputs are 14px so iPhones zoom on every tap
@@ -468,7 +468,7 @@ Owner's call: no automatic checks. Instead a whole-site review pass (like `docs/
 
 **PO items handed over (20 Oct 2026):** UX items 101, 121, 125, 126, 128, 134, 135, 136, 137, 139, 140, 146 (POs, supplier bills, stock, price lists) are built with the PO fix plan in `docs/PO_REVIEW.md` by the laptop chat, not in UX deliveries 4 to 6.
 
-**Menu layout (agreed with the owner 20 Oct 2026, first part of delivery 4, UX 83, 84, 87, 91):** Pipeline becomes a top bar icon like Schedule, Settings, Chat and the bell. The menu has four groups, each opening its pages; every page shows its icon. **Sales:** Leads, Quotes, Jobs (renamed from Projects), Invoices, Clients, Reviews, Inbox, STCs, Customer equipment (renamed from Assets). **Purchases:** Purchase Orders, Stock, Vehicles (renamed from Fleet), Suppliers, Tech Support (name unchanged: suppliers' and manufacturers' tech support numbers), Emailed bills, Bill checks, Price lists, Prebuilds, Tools (when built). **Team:** My Day, Schedule, Tasks, Timesheets, Chat, Meetings, Knowledge, Documents, Incidents, Team. **Office:** Overheads, Ops manager, Updates and ideas (renamed from Bugs & Updates), DNSP, Logs, Settings. Roles still hide what they cannot use; stars and Home tiles stay. Waiting on the owner's yes for delivery 4.
+**Menu layout (agreed with the owner 20 Oct 2026, first part of delivery 4, UX 83, 84, 87, 91):** Pipeline becomes a top bar icon like Schedule, Settings, Chat and the bell. The menu has four groups, each opening its pages; every page shows its icon. **Sales:** Leads, Quotes, Jobs (renamed from Projects), Invoices, Clients, Reviews, Inbox, STCs, Customer equipment (renamed from Assets). **Purchases:** Purchase Orders, Stock, Vehicles (renamed from Fleet), Suppliers, Tech Support (name unchanged: suppliers' and manufacturers' tech support numbers), Emailed bills, Bill checks, Price lists, Prebuilds, Tools (when built). **Team:** My Day, Schedule, Tasks, Timesheets, Chat, Meetings, Knowledge, Documents, Incidents, Team. **Office:** Overheads, Ops manager, Updates and ideas (renamed from Bugs & Updates), DNSP, Logs, Settings. Roles still hide what they cannot use; stars and Home tiles stay. LIVE 20 Oct 2026 (delivery 4).
 
 **Themes (item numbers in docs/UX_REVIEW.md):**
 - Clock in, My Day, schedule, timesheets and tasks: items 1 to 18
