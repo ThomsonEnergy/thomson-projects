@@ -115,6 +115,7 @@ Manual steps only a person can do (the code is live):
 - Tagged electrical / solar / general; templates surface the relevant category. Every upload goes through `compressImage()`.
 
 ### A5. Look and feel
+- Phone and readability pass (UX delivery 3, 20 Oct 2026): 44px top bar icons on touch screens with Log out in the menu behind "Log out of TEops?"; every button at least 40px tall on touch screens; all popups go through `openModal` (card scrolls inside itself); muted text, dark theme primary buttons and status badges pass contrast on both themes (`.badge.amber / .green / .red / .info`); pin star visible; text floor 12 to 14px (`.small`, `.tiny`); chat times 12px. Shared feedback: `showToast(message, { error })` for Saved / Sent, `friendlyError(err)` turns network errors into "No signal. Try again when you have reception.", and a red No signal pill on every page when offline (UX 50, 51, 53).
 - TEops wordmark, animated wiring background on login and home. Themes Navy Pro and Dark Trade (per user, saved to Supabase; dark by default on touch devices). No sideways page scroll; global search.
 
 ### A6. Job pipeline (14 stages, migration 112)
@@ -141,6 +142,7 @@ Manual steps only a person can do (the code is live):
 - `materials` table (category, supplier, cost, sell, stock on hand), filled by AI price list extraction (`extract-pricelist.js`). 174 imported; 67 still tagged `Other / Needs Review`.
 
 ### A10. Purchase orders
+- UX delivery 3: Receive all on an open job PO (one `po_receive_line` call per line, server side); PO suggestions on a job show a tick box per stock line with the Warehouse count and take stock off through `po_create_stock_pull` per stage (a closed Stock PO per stage); Create PO requires a supplier except for stock pulls, a blank unit cost blocks the save ("Enter 0 if it is free"), changing Where from no longer wipes typed lines, PO rows fit a phone (UX 36, 47, 71, 72, 73, 80).
 - `purchase-orders.html`: every PO for a job, Stock or a vehicle (vehicle PO with no supplier = pulled from the Warehouse). Searchable material picker; generic-to-specific line reconciliation; invoice upload straight onto a PO; PO-number auto-matching. One shared supplier search-or-create picker on every PO surface.
 - **Open / Closed** (migration 20261025000000, replaces Fixed / Open-ended, Locked and Override): every PO starts Open (anyone adds lines, pricing roles edit lines). **Close PO** (anyone): nothing more added or repriced (database guard), PO approved for payment plus its bills that match it or were accepted (bills with problems still wait on Bill checks; never for a "New, check details" supplier). **Reopen**: Admin/Finance, note required. Optional budget cap.
 - **Stock PO on a job** (`po_create_stock_pull`): job page Create PO (and the Purchase Orders page for a job) has **Where from**: a supplier, Warehouse stock, or a stock vehicle. Stock lines show the app's count there and **Left after you take it**; taking more than the app has needs that box, and whatever is typed becomes the real count (logged on the material: "Warehouse count corrected on PO 2101: app had 0, actually 3 (took 1, 2 left)"). The PO (supplier name Warehouse or the vehicle) is made Closed and received, costed to the job at material cost (`job_material_usage` from_stock). No follow-up task, bill or email. Works for every role.
@@ -228,6 +230,7 @@ Manual steps only a person can do (the code is live):
 - Push: "Create job in Pylon" creates the Pylon project with client and site filled in (`push-to-pylon.js`). Pricing stays in the app.
 
 ### A17. Job page
+- UX delivery 3: the open tab is in the URL (`?tab=`), Staff see Summary, Site Photos, Documents, Feed first, the strip scrolls to the open tab; task ticks, stars, assignees and due dates show at once and save in the background; pipeline stage badge in the header (`PIPELINE_STAGES` shared with the board); Show line items toggles in place; Save, Generate PDF and the site-visit ticks confirm; unsaved quote edits ask before leaving; removing hours, materials or bookings asks first and a stock material goes back on the shelf through `variation_material_delete` (migration 20261107000000); document and site photo Delete only for the uploader or Admin / Finance (project_photos delete policy); photos lazy load grouped by day; feed has Show older notes (UX 32, 34, 37 to 41, 43, 44, 46, 48, 54 to 56).
 - Tabs: Summary · Cost Centres · Purchase Orders · Variations · Invoices · STCs · Details · Feed · Emails · Documents · Site Photos, plus the Activity sidebar.
 - Summary: stat cards, budget bars, "Quoted split" and "Job split" donuts, "On this job now".
 - Labour cost everywhere (job page, Projects list, timesheet drilldown, warranty cost) is wages plus **direct** overhead (each person's direct rate from Overheads, company average for the estimate). Underneath, pricing roles see "incl. overheads $X", which adds **indirect** overhead (plus company overhead on the cost tiles for Finance and Admin). Labour budget % is worked out server-side in `get-accrued-labour-cost.js` so Staff see the same % as Sales (they cannot read `estimated_labour_cost`).
@@ -283,6 +286,7 @@ Manual steps only a person can do (the code is live):
 - "Ask for a review" when emailing a client; no-account review page (stars, comment, optional Google link). Reviews page with average, filters, copy for website.
 
 ### A22. Quote and invoice documents
+- UX delivery 3: "Create invoice" emails the client with the PDF attached and every invoice row has an Email button; the due date fills from the client's payment terms; the client quote page keeps Approve in a bar at the bottom on a phone; the customer invoice and PO pages show a readable summary card above the A4 sheet on a phone (UX 45, 64, 67, 74).
 - Quote: A4 proposal pages (cover, project, scope, investment summary, photos, schedule of rates for estimates, T&Cs); header on every page but the cover.
 - Invoice: A4 template with OVERDUE and PAID stamps; PDF remade when a payment is recorded. Quoted jobs split labour and materials by sell value.
 - **Do-and-charge invoicing:** on a Direct Job, claim several cost centres in one or separate invoices and add Stock materials and prebuilds straight onto the invoice (migration 154, `invoice_line_items`).

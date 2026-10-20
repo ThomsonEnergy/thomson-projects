@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=21" />
+<link rel="stylesheet" href="/css/style.css?v=22" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -58,8 +58,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=102"></script>
-  <script src="/js/email-compose.js?v=6"></script>
+  <script src="/js/supabase-client.js?v=103"></script>
+  <script src="/js/email-compose.js?v=7"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allPos = [];
@@ -141,8 +141,8 @@
           ${renderPoNotes(po)}
           <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
             ${renderPoControls(po, myRole)}
-            ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">Upload invoice for this PO</button>` : ''}
-            <button type="button" class="secondary view-log-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">View log</button>
+            ${po.supplier_id && !po.received ? `<button type="button" class="secondary btn-sm upload-invoice-btn" data-po-id="${po.id}">Upload invoice for this PO</button>` : ''}
+            <button type="button" class="secondary btn-sm view-log-btn" data-po-id="${po.id}">View log</button>
           </div>
           <div id="log-${po.id}" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);"></div>
         </div>`).join('');
@@ -206,8 +206,7 @@
             <select id="np-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}">${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}</select>
           </div>
 
-          <label style="margin-top:14px;">Supplier ${' '}<span class="subtitle" id="np-supplier-hint"></span></label>
-          <p class="subtitle" style="margin:0 0 6px;">Leave blank to pull from Warehouse stock instead.</p>
+          <label style="margin-top:14px;">Supplier <span class="req" id="np-supplier-req" aria-hidden="true">*</span> <span class="subtitle" id="np-supplier-hint"></span></label>
           ${supplierPickerHtml({ search: 'np-supplier-search', results: 'np-supplier-results', selected: 'np-supplier-selected', newSection: 'np-supplier-new-section', newEmail: 'np-supplier-new-email', newPhone: 'np-supplier-new-phone' })}
           <button type="button" class="secondary" id="np-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
 
@@ -225,13 +224,23 @@
         </div>`;
       document.body.appendChild(overlay);
 
+      // A supplier is needed for a Stock PO and for a job PO bought from a
+      // supplier. Blank is fine for a vehicle (a Warehouse pull) and for a
+      // job pulling from stock (the stock pull panel takes over).
+      function supplierNeeded() {
+        const d = overlay.querySelector('#np-dest-type').value;
+        return d === 'stock' || (d === 'job' && overlay.querySelector('#np-source').value === 'supplier');
+      }
       function syncDestSections() {
         const val = overlay.querySelector('#np-dest-type').value;
         overlay.querySelector('#np-job-section').style.display = val === 'job' ? 'block' : 'none';
         overlay.querySelector('#np-vehicle-section').style.display = val === 'vehicle' ? 'block' : 'none';
-        overlay.querySelector('#np-supplier-hint').textContent = val === 'vehicle' ? '(leave blank if pulling from Warehouse stock)' : '';
+        overlay.querySelector('#np-supplier-req').style.display = supplierNeeded() ? '' : 'none';
+        overlay.querySelector('#np-supplier-hint').textContent = val === 'vehicle' ? '(leave blank to pull from Warehouse stock)'
+          : (val === 'job' && overlay.querySelector('#np-source').value !== 'supplier') ? '(not needed: you pick the stock on the next screen)' : '';
       }
       overlay.querySelector('#np-dest-type').addEventListener('change', syncDestSections);
+      overlay.querySelector('#np-source').addEventListener('change', syncDestSections);
       syncDestSections();
 
       let selectedJob = null;
@@ -280,10 +289,13 @@
         btn.disabled = true;
         btn.textContent = 'Creating...';
         try {
+        clearFieldFlags(overlay);
         const destType = overlay.querySelector('#np-dest-type').value;
-        if (destType === 'job' && !selectedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
+        if (destType === 'job' && !selectedJob) { msg.innerHTML = ''; flagRequiredField(jobSearchInput, 'Search for and select a job.'); return; }
         const vehicleId = destType === 'vehicle' ? overlay.querySelector('#np-vehicle-select').value : null;
         const source = overlay.querySelector('#np-source').value;
+        const supplierInput = overlay.querySelector('#np-supplier-search');
+        if (supplierNeeded() && !supplierInput.value.trim()) { msg.innerHTML = ''; flagRequiredField(supplierInput, 'Pick or type a supplier.'); return; }
         if (destType === 'job' && source !== 'supplier') {
           // a stock PO: pick the items and counts on the next panel
           const srcVehicleId = source.startsWith('vehicle:') ? source.slice(8) : null;
@@ -298,6 +310,8 @@
           return;
         }
 
+          const lineProblem = materialLineRowsProblem('np-items-container');
+          if (lineProblem) { msg.innerHTML = `<div class="error-box">${escapeHtml(lineProblem)}</div>`; return; }
           const { data: { user } } = await supabaseClient.auth.getUser();
           const { supplierId, supplierName } = await resolveSupplier();
 
@@ -308,7 +322,7 @@
             po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
             ...readPoNotesFields(overlay, 'np'),
             show_prices: overlay.querySelector('#np-show-prices').checked,
-            description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? 'PO for vehicle' : 'Stock purchase order',
+            description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? (supplierId ? 'PO for vehicle' : 'Pulled from Warehouse stock') : 'Stock purchase order',
           }).select('id, po_number').single();
           if (poErr) throw poErr;
           const destLabel = destType === 'job' ? selectedJob.name : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || 'a vehicle') : 'Stock';

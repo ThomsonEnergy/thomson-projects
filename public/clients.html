@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=21" />
+<link rel="stylesheet" href="/css/style.css?v=22" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
 </head>
@@ -73,7 +73,7 @@
               </div>
               <div>
                 <label style="margin-top:0">Phone</label>
-                <input id="c-phone" />
+                <input id="c-phone" type="tel" autocomplete="tel" />
               </div>
             </div>
             <div class="grid cols-3">
@@ -84,7 +84,7 @@
               </div>
               <div>
                 <label>ABN</label>
-                <input id="c-abn" placeholder="Filled in by the search above, or type one directly" />
+                <input id="c-abn" inputmode="numeric" placeholder="Filled in by the search above, or type one directly" />
               </div>
             </div>
             <div class="grid cols-3">
@@ -174,7 +174,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=102"></script>
+  <script src="/js/supabase-client.js?v=103"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allClients = [];
@@ -213,8 +213,8 @@
           <option value="project_manager" ${contact_type === 'project_manager' ? 'selected' : ''}>Project manager</option>
         </select>
         <input class="ct-name" placeholder="Name" value="${escapeHtml(name)}" style="font-size:13px;" />
-        <input class="ct-phone" placeholder="Phone" value="${escapeHtml(phone)}" style="font-size:13px;" />
-        <input class="ct-email" placeholder="Email" value="${escapeHtml(email)}" style="font-size:13px;" />
+        <input class="ct-phone" type="tel" placeholder="Phone" value="${escapeHtml(phone)}" style="font-size:13px;" />
+        <input class="ct-email" type="email" autocapitalize="off" placeholder="Email" value="${escapeHtml(email)}" style="font-size:13px;" />
         <button type="button" class="secondary ct-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
       row.querySelector('.ct-remove').addEventListener('click', () => row.remove());
@@ -821,7 +821,7 @@
                   <td data-label=""><input type="checkbox" class="incomplete-exclude-checkbox" data-index="${r.index}" /></td>
                   <td data-label="Name">${escapeHtml(r.name)}</td>
                   <td data-label="Email"><input type="email" class="incomplete-email-input" data-index="${r.index}" placeholder="Add an email" /></td>
-                  <td data-label="Phone"><input class="incomplete-phone-input" data-index="${r.index}" placeholder="Add a phone number" /></td>
+                  <td data-label="Phone"><input class="incomplete-phone-input" type="tel" data-index="${r.index}" placeholder="Add a phone number" /></td>
                 </tr>`).join('')}
             </tbody>
           </table>`;

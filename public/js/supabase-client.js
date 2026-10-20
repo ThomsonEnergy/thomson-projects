@@ -15,6 +15,20 @@ function goToLogin() {
   if (!onLoginPage) window.location.href = '/login.html';
 }
 
+// Log out from anywhere (the phone menu row): asks first, ends the session, goes to login.
+window.__teLogout = async () => {
+  if (!confirm('Log out of TEops?')) return;
+  await supabaseClient.auth.signOut();
+  window.location.href = '/login.html';
+};
+// Every page's own #logout-link handler runs after this capture-phase guard, so the same
+// question is asked there without touching those pages.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('#logout-link');
+  if (!a) return;
+  if (!confirm('Log out of TEops?')) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+
 // Asks Supabase whether this browser's session is still alive. Only a
 // definite rejection logs out: offline or a server hiccup leaves it alone.
 let sessionCheck = null;
@@ -843,7 +857,7 @@ async function compressImage(file, maxDimension = 1920, quality = 0.82) {
     const name = file.name.replace(/\.[^.]+$/, '') + '.' + ext;
     return new File([blob], name, { type: outputType });
   } catch (err) {
-    console.warn('compressImage: falling back to original file —', err.message);
+    console.warn('compressImage: falling back to original file:', err.message);
     return file;
   }
 }
@@ -1011,12 +1025,15 @@ function ensureDarkOverlayStyles() {
 // `opts` (optional) turns on naming and markup for callers whose photos are
 // real database rows: { captions: string[], onRename(index, name),
 // onMarkup(index, blob), onClose() }. Without it, it's a plain viewer.
+// onDelete(index) adds a Delete button: it resolves once the photo is gone, the viewer then
+// drops that entry from urls and captions and the caller drops it from its own list.
+// canDelete(index) (optional) returning false hides Delete for that photo.
 function openPhotoLightbox(urls, startIndex = 0, opts = null) {
   let index = startIndex;
   ensureDarkOverlayStyles();
   const overlay = document.createElement('div');
   overlay.className = 'te-dark-overlay';
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:300; display:flex; align-items:center; justify-content:center;';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:300; display:flex; align-items:center; justify-content:center; touch-action:pan-y pinch-zoom;';
   const navBtnStyle = 'position:absolute; top:50%; transform:translateY(-50%); background:rgba(255,255,255,0.1); color:#fff; border:none; width:44px; height:44px; border-radius:50%; font-size:20px; cursor:pointer;';
 
   function close() {
@@ -1025,17 +1042,19 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
   }
 
   function render() {
-    const editable = opts && (opts.onRename || opts.onMarkup);
+    const editable = opts && (opts.onRename || opts.onMarkup || opts.onDelete);
+    const canDel = !!(opts && opts.onDelete && (!opts.canDelete || opts.canDelete(index)));
     overlay.innerHTML = `
-      <button type="button" id="lb-close" style="position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.1); color:#fff; border:none; width:36px; height:36px; border-radius:50%; font-size:18px; cursor:pointer;">&times;</button>
+      <button type="button" id="lb-close" aria-label="Close" style="position:absolute; top:calc(env(safe-area-inset-top, 0px) + 12px); right:12px; background:rgba(255,255,255,0.1); color:#fff; border:none; width:44px; height:44px; border-radius:50%; font-size:24px; cursor:pointer;">&times;</button>
       ${urls.length > 1 ? `<button type="button" id="lb-prev" style="${navBtnStyle} left:16px;">&larr;</button>` : ''}
-      <img src="${urls[index]}" style="max-width:88vw; max-height:${editable ? '74vh' : '85vh'}; object-fit:contain; border-radius:8px;${editable ? ' margin-bottom:60px;' : ''}" />
+      <img src="${escapeHtml(urls[index])}" draggable="false" style="max-width:88vw; max-height:${editable ? '74vh' : '85vh'}; object-fit:contain; border-radius:8px; user-select:none; -webkit-user-drag:none;${editable ? ' margin-bottom:60px;' : ''}" />
       ${urls.length > 1 ? `<button type="button" id="lb-next" style="${navBtnStyle} right:16px;">&rarr;</button>` : ''}
       ${urls.length > 1 ? `<div style="position:absolute; bottom:${editable ? '70px' : '20px'}; left:0; right:0; text-align:center; color:#fff; font-size:13px;">${index + 1} / ${urls.length}</div>` : ''}
       ${editable ? `
         <div style="position:absolute; bottom:14px; left:50%; transform:translateX(-50%); display:flex; gap:8px; align-items:center; width:min(560px, 92vw);">
           ${opts.onRename ? `<input id="lb-name" placeholder="Name this photo..." value="${escapeHtml((opts.captions && opts.captions[index]) || '')}" style="flex:1; margin:0;" />` : '<span style="flex:1;"></span>'}
           ${opts.onMarkup ? `<button type="button" id="lb-markup" style="white-space:nowrap;">Mark up</button>` : ''}
+          ${canDel ? `<span id="lb-del-wrap" style="display:flex; gap:6px; align-items:center;"><button type="button" class="secondary" id="lb-delete" style="white-space:nowrap;">Delete</button></span>` : ''}
         </div>
         <div id="lb-msg" style="position:absolute; bottom:56px; left:0; right:0; text-align:center; color:#fca5a5; font-size:12px;"></div>` : ''}
     `;
@@ -1064,8 +1083,55 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
         });
       });
     }
+    const deleteBtn = overlay.querySelector('#lb-delete');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wrap = overlay.querySelector('#lb-del-wrap');
+        wrap.innerHTML = `<span style="color:#fff; font-size:13px; white-space:nowrap;">Really delete?</span><button type="button" class="danger" id="lb-del-yes">Yes</button><button type="button" class="secondary" id="lb-del-no">No</button>`;
+        const yesBtn = wrap.querySelector('#lb-del-yes');
+        const noBtn = wrap.querySelector('#lb-del-no');
+        noBtn.addEventListener('click', (ev) => { ev.stopPropagation(); render(); });
+        yesBtn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          yesBtn.disabled = true; noBtn.disabled = true; yesBtn.textContent = 'Deleting...';
+          try {
+            await opts.onDelete(index);
+          } catch (err) {
+            const msgEl = overlay.querySelector('#lb-msg');
+            if (msgEl) msgEl.textContent = `Could not delete it: ${friendlyError(err, 'try again')}`;
+            yesBtn.disabled = false; noBtn.disabled = false; yesBtn.textContent = 'Yes';
+            return;
+          }
+          urls.splice(index, 1);
+          if (opts.captions) opts.captions.splice(index, 1);
+          if (!urls.length) close();
+          else { if (index >= urls.length) index = urls.length - 1; render(); }
+        });
+      });
+    }
   }
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  // Swipe left / right moves through the set; only a tap (not a drag) on the dark area closes.
+  let downX = null, downY = null, moved = false;
+  overlay.addEventListener('pointerdown', (e) => {
+    if (!e.isPrimary || e.target.closest('input, textarea, button')) { downX = null; return; }
+    downX = e.clientX; downY = e.clientY; moved = false;
+  });
+  overlay.addEventListener('pointermove', (e) => {
+    if (downX !== null && (Math.abs(e.clientX - downX) > 10 || Math.abs(e.clientY - downY) > 10)) moved = true;
+  });
+  overlay.addEventListener('pointerup', (e) => {
+    if (downX === null) return;
+    const dx = e.clientX - downX, dy = e.clientY - downY;
+    downX = null;
+    const zoomed = window.visualViewport && window.visualViewport.scale > 1.01;
+    if (urls.length > 1 && !zoomed && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+      index = dx < 0 ? (index + 1) % urls.length : (index - 1 + urls.length) % urls.length;
+      render();
+    }
+  });
+  overlay.addEventListener('pointercancel', () => { downX = null; moved = true; });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay && !moved) close(); });
   document.addEventListener('keydown', function onKey(e) {
     if (!document.body.contains(overlay)) { document.removeEventListener('keydown', onKey); return; }
     if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
@@ -2137,7 +2203,8 @@ async function renderMainNav(activeKey) {
     const hasMore = items.some(item => !inBar(item));
     if (tabsEl) tabsEl.innerHTML = items.filter(inBar).map(item => linkHtml(item, true)).join('') +
       (hasMore ? `<button type="button" class="topbar-tab nav-more-btn" onclick="window.__onNavMoreClick(this)">More &#9662;</button>` : '');
-    if (dropdownEl) dropdownEl.innerHTML = items.map(item => linkHtml(item, false)).join('');
+    if (dropdownEl) dropdownEl.innerHTML = items.map(item => linkHtml(item, false)).join('') +
+      '<a href="#" class="nav-logout" onclick="event.preventDefault(); window.__teLogout();">Log out</a>';
   };
   paint(await getMyHomeShortcuts());
 
@@ -2183,7 +2250,17 @@ async function renderMainNav(activeKey) {
 // the tabs fold into the ☰ menu if they don't all fit, then the search box
 // shrinks to an icon, then the icons tighten up. Re-checked whenever the
 // bar changes size or something is added to it (bell, search, a star).
+// Spoken labels for the top bar icons (from their title text) and the menu button, so
+// VoiceOver reads Menu, Search everything, Chat, Notifications, Schedule, Settings.
+function labelTopbarIcons() {
+  document.querySelectorAll('.topbar-icon-link[title]:not([aria-label])').forEach(a => a.setAttribute('aria-label', a.title.replace(/\s*\(.*\)$/, '')));
+  const m = document.getElementById('mobile-menu-btn');
+  if (m && !m.hasAttribute('aria-label')) m.setAttribute('aria-label', 'Menu');
+}
+if (document.readyState !== 'loading') labelTopbarIcons(); else document.addEventListener('DOMContentLoaded', labelTopbarIcons);
+
 function fitTopbar() {
+  labelTopbarIcons();
   const bar = document.querySelector('.topbar');
   const right = bar && bar.querySelector('.topbar-right');
   if (!right) return;
@@ -2218,7 +2295,7 @@ function loadGlobalSearch() {
   if (window.__globalSearchScript || !document.querySelector('.topbar-right')) return;
   window.__globalSearchScript = true;
   const s = document.createElement('script');
-  s.src = '/js/global-search.js?v=2';
+  s.src = '/js/global-search.js?v=3';
   document.head.appendChild(s);
 }
 
@@ -2283,6 +2360,89 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// True when the error is a dropped connection (Safari 'Load failed', Chrome 'Failed to fetch',
+// Firefox 'NetworkError', timeouts, Supabase AuthRetryableFetchError, or the phone says it is
+// offline and the error is the fetch kind), not a refusal from the server.
+function isNetworkError(err) {
+  if (!err) return false;
+  const msg = String(typeof err === 'string' ? err : (err.message || err.error_description || err.error || ''));
+  if (/failed to fetch|load failed|networkerror|network request failed|network connection was lost|internet connection appears to be offline|fetch failed|failed to send a request|err_internet_disconnected|err_network_changed/i.test(msg)) return true;
+  if (err.name === 'AuthRetryableFetchError') return true;
+  return navigator.onLine === false && (err.name === 'TypeError' || err.name === 'AbortError' || /^TypeError/.test(msg));
+}
+
+// The message a person sees for an error: 'No signal...' for a dropped connection, else the
+// error's own message, else the fallback. Returns plain text: wrap it in escapeHtml() when it
+// goes into HTML (alert() and textContent need nothing).
+function friendlyError(err, fallback = 'Something went wrong. Try again.') {
+  if (isNetworkError(err)) return 'No signal. Try again when you have reception.';
+  const msg = typeof err === 'string' ? err : (err && (err.message || err.error_description || err.error)) || '';
+  return String(msg || fallback);
+}
+
+// Short confirmation at the bottom of the screen ('Saved'). One at a time, above modals,
+// plain text (set with textContent). { error: true } gives a red border and keeps it up longer.
+function showToast(message, { error = false, ms } = {}) {
+  document.querySelectorAll('.te-toast').forEach(t => t.remove());
+  const t = document.createElement('div');
+  t.className = 'te-toast';
+  t.setAttribute('role', 'status');
+  t.setAttribute('aria-live', 'polite');
+  t.style.cssText = `position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom, 0px)); transform:translateX(-50%); z-index:2100; max-width:calc(100vw - 32px); background:var(--surface-2); color:var(--text); border:1px solid ${error ? 'var(--red)' : 'var(--border)'}; padding:10px 16px; border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.4); font-size:14px; text-align:center; pointer-events:none;`;
+  t.textContent = String(message == null ? '' : message);
+  (document.body || document.documentElement).appendChild(t);
+  setTimeout(() => t.remove(), ms || (error ? 5000 : 2600));
+  return t;
+}
+
+// Red 'No signal' pill at the top of every page while the browser says it is offline, and a
+// 'Back online' toast when the connection returns. Driven by the online / offline events only.
+function initNoSignalBanner() {
+  if (window.__noSignalBanner) return;
+  window.__noSignalBanner = true;
+  let el = null;
+  const show = () => {
+    if (!document.body) return;
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'no-signal-banner';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      el.textContent = 'No signal';
+      el.style.cssText = 'position:fixed; top:calc(env(safe-area-inset-top, 0px) + 8px); left:50%; transform:translateX(-50%); z-index:2000; background:#b91c1c; color:#fff; padding:6px 14px; border-radius:999px; font-size:13px; font-weight:600; box-shadow:0 4px 14px rgba(0,0,0,0.35); pointer-events:none; white-space:nowrap;';
+    }
+    if (!el.isConnected) document.body.appendChild(el);
+  };
+  const hide = () => {
+    if (el && el.isConnected) { el.remove(); showToast('Back online'); }
+  };
+  window.addEventListener('offline', show);
+  window.addEventListener('online', hide);
+  const first = () => { if (navigator.onLine === false) show(); };
+  if (document.body) first(); else document.addEventListener('DOMContentLoaded', first);
+}
+initNoSignalBanner();
+
+// Points at a required field a Save found empty: red outline, a one-line error under it
+// (under `after` when the field sits in a wrapper), scrolled to the middle of the screen
+// and focused. Call it before the handler's first await so iOS still opens the keyboard.
+// The outline and message clear on the next input in that field or on clearFieldFlags().
+function flagRequiredField(field, message, after = field) {
+  clearFieldFlags();
+  field.classList.add('field-invalid');
+  const note = document.createElement('div');
+  note.className = 'error-box field-error-msg';
+  note.textContent = message;
+  after.insertAdjacentElement('afterend', note);
+  field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (typeof field.focus === 'function') field.focus({ preventScroll: true });
+  field.addEventListener('input', () => { field.classList.remove('field-invalid'); note.remove(); }, { once: true });
+}
+function clearFieldFlags(root = document) {
+  root.querySelectorAll('.field-error-msg').forEach(n => n.remove());
+  root.querySelectorAll('.field-invalid').forEach(n => n.classList.remove('field-invalid'));
 }
 
 // Proxies abn-lookup.js (which itself proxies abr.business.gov.au - needs
@@ -2539,8 +2699,8 @@ function aiProposalCardHtml(p, mi, pi) {
   else if (p.type === 'open_form') foot = aiSafeLink(p.link)
     ? `<div style="margin-top:8px;"><a class="btn" href="${escapeHtml(p.link)}" style="font-size:12px; padding:6px 14px; display:inline-block; text-decoration:none;">Open it to finish</a></div>` : '';
   else foot = `<div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; align-items:center;">
-      <button type="button" data-ai-act="do" data-m="${mi}" data-p="${pi}" style="font-size:12px; padding:5px 12px;">${p.destructive ? 'Yes, remove it' : 'Do it'}</button>
-      <button type="button" class="secondary" data-ai-act="skip" data-m="${mi}" data-p="${pi}" style="font-size:12px; padding:5px 12px;">Skip</button>
+      <button type="button" class="btn-sm" data-ai-act="do" data-m="${mi}" data-p="${pi}">${p.destructive ? 'Yes, remove it' : 'Do it'}</button>
+      <button type="button" class="secondary btn-sm" data-ai-act="skip" data-m="${mi}" data-p="${pi}">Skip</button>
       ${aiSafeLink(p.edit_link) ? `<a href="${escapeHtml(p.edit_link)}" class="link-quiet" style="font-size:12px; margin-left:4px;">Edit it first</a>` : ''}</div>`;
   return `<div style="max-width:85%; margin:-2px 0 10px; padding:9px 11px; border-radius:10px; border:1px dashed var(--accent); background:var(--surface);">
     <div style="font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted);">${p.type === 'open_form' ? 'Filled in for you' : p.state === 'pending' ? 'Waiting for your OK' : 'Change'}</div>
@@ -2848,7 +3008,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     loadError = e;
   }
   if (loadError) {
-    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load your clock-out. Check your signal and try again.${loadError.message ? ` (${escapeHtml(loadError.message)})` : ''}</div><button type="button" class="secondary" id="cko-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load your clock-out. ${escapeHtml(friendlyError(loadError))}</div><button type="button" class="secondary" id="cko-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
     overlay.querySelector('#cko-close-btn').addEventListener('click', () => overlay.remove());
     return;
   }
@@ -3168,7 +3328,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
 
     if (saveError) {
       const msg = overlay.querySelector('#cko-msg');
-      if (msg) msg.innerHTML = `<div class="error-box">${saveError.message}</div>`;
+      if (msg) msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(saveError))}</div>`;
       return;
     }
     // Only asked for an actual job (not a quote/site-visit), and only
@@ -3214,7 +3374,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       const { data: moved, error: mvErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']).select('id');
       const statusMsg = overlay.querySelector('#cko-job-status-msg');
       if (mvErr) {
-        statusMsg.innerHTML = `<div class="error-box">${escapeHtml(mvErr.message)}</div>`;
+        statusMsg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(mvErr))}</div>`;
         lockJobStatus(false);
         return;
       }
@@ -3277,7 +3437,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
           renderStep3();
         }
       } catch (err) {
-        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         btn.textContent = label;
         lockJobStatus(false);
       }
@@ -3296,7 +3456,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         await logActivity('project', project.id, 'job_not_complete', 'Not complete at clock-out - not rebooked, PM to schedule');
         renderStep3();
       } catch (err) {
-        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         lockJobStatus(false);
       }
     });
@@ -3364,7 +3524,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         <input id="cko-note-signed-name" placeholder="Full name" />
         <label>Signature</label>
         <canvas id="cko-note-sig-canvas" width="380" height="120" style="width:100%; max-width:380px; height:120px; border:1px solid var(--border); border-radius:6px; touch-action:none; background:#fff; display:block;"></canvas>
-        <button type="button" class="secondary" id="cko-note-sig-clear-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Clear signature</button>`;
+        <button type="button" class="secondary" id="cko-note-sig-clear-btn" style="margin-top:8px;">Clear signature</button>`;
       sigCanvas = section.querySelector('#cko-note-sig-canvas');
       sigCtx = sigCanvas.getContext('2d');
       sigCtx.strokeStyle = '#000'; sigCtx.lineWidth = 2; sigCtx.lineJoin = 'round'; sigCtx.lineCap = 'round';
@@ -3413,7 +3573,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         labelBtn.style.display = 'none';
         msg.innerHTML = `<div class="success-box">CCEW uploaded. You can view or replace it under Compliance - CCEW on the job page.</div>`;
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message || String(err))}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
       } finally {
         ccewInput.disabled = false;
         ccewInput.value = '';
@@ -3435,7 +3595,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         row.signature_data_url = sigCanvas.toDataURL('image/png');
       }
       const { error } = await supabaseClient.from('project_field_notes').insert(row);
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       overlay.querySelector('#cko-note-text').value = '';
       msg.innerHTML = `<div class="success-box">Note saved.</div>`;
     });
@@ -3638,7 +3798,7 @@ async function openJobClockInModal(project, onDone) {
     loadError = e;
   }
   if (loadError || !user) {
-    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load the job. Check your signal and try again.${loadError && loadError.message ? ` (${escapeHtml(loadError.message)})` : ''}</div><button type="button" class="secondary" id="jci-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load the job. ${escapeHtml(loadError ? friendlyError(loadError) : 'Log in again, then try.')}</div><button type="button" class="secondary" id="jci-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
     overlay.querySelector('#jci-close-btn').addEventListener('click', () => overlay.remove());
     return;
   }
@@ -3684,7 +3844,7 @@ async function openJobClockInModal(project, onDone) {
     if (chosen.length === 1) entry.cost_centre_id = chosen[0];
     else if (chosen.length > 1) entry.selected_cost_centre_ids = chosen;
     const { error } = await supabaseClient.from('time_entries').insert(entry);
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; e.target.disabled = false; return; }
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; e.target.disabled = false; return; }
     overlay.remove();
     if (onDone) await onDone();
   });
@@ -3706,9 +3866,9 @@ function openQuickJobPanel(onCreated) {
   overlay.innerHTML = `
     <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
       <h2>New job - no quote</h2>
-      <p class="subtitle" style="margin-bottom:12px;">Skips the quote/proposal step entirely and goes straight to Ready to Book (Job Booked once someone is scheduled or clocks in). Time and materials get logged against it as normal (timesheets, POs, or manually); invoice it for whatever's actually been spent once it's done.</p>
+      <p class="subtitle" style="margin-bottom:12px;">Creates a job number straight away so you can clock in and log materials.</p>
 
-      <label style="margin-top:0">Job name</label>
+      <label style="margin-top:0">Job name *</label>
       <input id="qj-name" placeholder="e.g. 14 Miller St - Switchboard Repair" />
 
       <label>What's this job about</label>
@@ -3720,8 +3880,8 @@ function openQuickJobPanel(onCreated) {
 
       <div class="grid cols-2" style="margin-top:8px;">
         <div>
-          <label style="margin-top:0">Client name</label>
-          <input id="qj-client-name" required />
+          <label style="margin-top:0">Client name *</label>
+          <input id="qj-client-name" />
         </div>
         <div>
           <label style="margin-top:0">Client email</label>
@@ -3729,7 +3889,7 @@ function openQuickJobPanel(onCreated) {
         </div>
       </div>
       <label>Client phone</label>
-      <input id="qj-client-phone" />
+      <input id="qj-client-phone" type="tel" inputmode="tel" autocomplete="tel" />
 
       <label>Site address</label>
       <input id="qj-address" placeholder="Job site address" />
@@ -3837,13 +3997,14 @@ function openQuickJobPanel(onCreated) {
       overlay.remove();
       if (onCreated) onCreated(project);
     } catch (err) {
-      panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      panelMsg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
       confirmBtn.disabled = false;
       confirmBtn.textContent = 'Create job';
     }
   });
 
   document.body.appendChild(overlay);
+  overlay.querySelector('#qj-name').focus();
 }
 
 // Re-checked any time the handover data fields are saved or a
@@ -4095,11 +4256,11 @@ function openWarrantyJobPanel(originalProject, onCreated) {
         </div>
         <div>
           <label style="margin-top:0">Client email</label>
-          <input id="wj-client-email" type="email" value="${originalProject.client_email || ''}" />
+          <input id="wj-client-email" type="email" value="${escapeHtml(originalProject.client_email || '')}" />
         </div>
       </div>
       <label>Client phone</label>
-      <input id="wj-client-phone" value="${originalProject.client_phone || ''}" />
+      <input id="wj-client-phone" type="tel" autocomplete="tel" value="${escapeHtml(originalProject.client_phone || '')}" />
 
       <label>Site address</label>
       <input id="wj-address" value="${(originalProject.client_address || '').replace(/"/g, '&quot;')}" />
@@ -4539,7 +4700,7 @@ function supplierPickerHtml(ids) {
       <p class="subtitle" style="margin:0 0 8px;">No match - this'll be created as a new supplier.</p>
       <div class="grid cols-2">
         <div><label style="margin-top:0">Contact email</label><input id="${ids.newEmail}" type="email" /></div>
-        <div><label style="margin-top:0">Contact phone</label><input id="${ids.newPhone}" /></div>
+        <div><label style="margin-top:0">Contact phone</label><input id="${ids.newPhone}" type="tel" /></div>
       </div>
     </div>`;
 }
@@ -4783,13 +4944,13 @@ function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
       <input class="li-prebuild-qty" type="number" step="0.01" min="0.01" value="${qtyDisplay}" title="Quantity of this whole prebuild - rescales every component together" style="font-size:13px;" />
       <div class="li-prebuild-total" style="font-size:13px; font-weight:600;">$0.00</div>
       <div style="white-space:nowrap;">
-        <button type="button" class="secondary li-prebuild-toggle" style="font-size:12px; padding:6px 10px;">Components &#9656;</button>
-        <button type="button" class="secondary li-prebuild-remove" style="font-size:12px; padding:6px 10px;">Remove</button>
+        <button type="button" class="secondary btn-sm li-prebuild-toggle">Components &#9656;</button>
+        <button type="button" class="secondary btn-sm li-prebuild-remove">Remove</button>
       </div>
     </div>
     <div class="li-prebuild-components" style="display:none; padding:10px 10px 4px 20px;">
       <div class="li-prebuild-rows"></div>
-      <button type="button" class="secondary li-prebuild-add-component" style="font-size:12px; padding:6px 12px; margin-top:4px;">+ Add component</button>
+      <button type="button" class="secondary btn-sm li-prebuild-add-component" style="margin-top:4px;">+ Add component</button>
     </div>`;
   stageRow.querySelector('.li-rows').appendChild(group);
 
@@ -5020,16 +5181,16 @@ function poPlaceLabel(type) {
 
 function renderPoLineItemsReceivable(po, canEdit) {
   const items = po.purchase_order_line_items || [];
-  const btn = (cls, li, text) => `<button type="button" class="secondary ${cls}" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">${text}</button>`;
+  const btn = (cls, li, text) => `<button type="button" class="secondary btn-sm ${cls}" data-line-id="${li.id}">${text}</button>`;
   // only the roles that can add Stock items (role not loaded yet: shown, and the server checks)
   const canAddStock = canEdit && (!_cachedRole || isPricingRole(_cachedRole));
   const addStock = (li) => (canAddStock && !li.material_id && Number(li.quantity) > 0) ? btn('add-line-to-stock-btn', li, '+ Add to Stock') : '';
-  return items.map(li => {
+  const rows = items.map(li => {
     if (li.received) {
       return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
-        <span>${escapeHtml(li.description)} — ${poLineMoney(li)}</span>
+        <span>${escapeHtml(li.description)} - ${poLineMoney(li)}</span>
         <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-          <span class="badge accepted" style="font-size:11px;">Received - ${poPlaceLabel(li.destination_type)}</span>
+          <span class="badge accepted">Received - ${poPlaceLabel(li.destination_type)}</span>
           ${canEdit ? btn('move-line-item-btn', li, 'Move') + btn('undo-receive-line-item-btn', li, 'Undo received') : ''}
           ${addStock(li)}
         </span>
@@ -5037,8 +5198,8 @@ function renderPoLineItemsReceivable(po, canEdit) {
     }
     const etaLabel = li.backorder_eta ? new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : null;
     return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
-      <span>${escapeHtml(li.description)} — ${poLineMoney(li)}
-        ${li.is_backordered ? `<span class="badge draft" style="font-size:11px; margin-left:6px;">Backordered${etaLabel ? ' - ETA ' + etaLabel : ''}</span>` : ''}
+      <span>${escapeHtml(li.description)} - ${poLineMoney(li)}
+        ${li.is_backordered ? `<span class="badge draft" style="margin-left:6px;">Backordered${etaLabel ? ' - ETA ' + etaLabel : ''}</span>` : ''}
       </span>
       ${canEdit ? `
         <span style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -5046,9 +5207,16 @@ function renderPoLineItemsReceivable(po, canEdit) {
           ${btn('backorder-line-item-btn', li, li.is_backordered ? 'Update backorder' : 'Mark backordered')}
           ${btn('move-line-item-btn', li, 'Move')}
           ${addStock(li)}
-        </span>` : '<span class="subtitle" style="font-size:11px;">Not yet received</span>'}
+        </span>` : '<span class="subtitle small">Not yet received</span>'}
     </div>`;
   }).join('');
+  // One button to receive every open line to the job (job POs only, two or more lines left)
+  const toReceive = items.filter(li => !li.received && !li.is_backordered);
+  const jobRef = po.projects && po.projects.job_number ? 'J' + po.projects.job_number : 'the job';
+  const receiveAllHtml = canEdit && po.project_id && !po.vehicle_id && !po.closed_at && toReceive.length > 1
+    ? `<div style="margin-top:8px;"><button type="button" class="receive-all-po-btn" data-po-id="${escapeHtml(po.id)}">Receive all ${toReceive.length} to ${escapeHtml(jobRef)}</button></div>`
+    : '';
+  return rows + receiveAllHtml;
 }
 
 // Wires up every line button found in the container - call this after rendering a PO list that used
@@ -5072,14 +5240,33 @@ function wireReceiveLineItemButtons(containerEl, allPos, defaultDestinationFor, 
   wire('.move-line-item-btn', (li, po) => openMoveLineItemPanel(li, po, onComplete));
   wire('.undo-receive-line-item-btn', (li, po) => openUndoReceivePanel(li, po, onComplete));
   wire('.add-line-to-stock-btn', (li, po) => openAddLineToStockPanel(li, po, onComplete));
+  containerEl.querySelectorAll('.receive-all-po-btn').forEach(btn => btn.addEventListener('click', () => {
+    const po = allPos.find(p => p.id === btn.dataset.poId);
+    if (po) receiveAllPoLines(po, btn, onComplete);
+  }));
+}
+
+// Shared modal: dark backdrop and a card that scrolls inside itself (at most 88% of the screen
+// tall), so a tall form is never cut off on a phone. innerHtml is the card's content (escape
+// outside text). Returns the overlay; the card is overlay.querySelector('.card').
+// closeOnBackdrop: a tap (not a drag) on the dark area closes it; leave it off on forms so a
+// stray tap never loses typing.
+function openModal(innerHtml, { maxWidth = 460, zIndex = 100, closeOnBackdrop = false } = {}) {
+  const overlay = document.createElement('div');
+  overlay.className = 'te-modal';
+  overlay.style.cssText = `position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:${Number(zIndex) || 100}; padding:16px;`;
+  overlay.innerHTML = `<div class="card" style="max-width:${Number(maxWidth) || 460}px; width:100%; max-height:88vh; overflow-y:auto; overscroll-behavior:contain;">${innerHtml}</div>`;
+  if (closeOnBackdrop) {
+    let downOnBackdrop = false;
+    overlay.addEventListener('pointerdown', (e) => { downOnBackdrop = e.target === overlay; });
+    overlay.addEventListener('click', (e) => { if (downOnBackdrop && e.target === overlay) overlay.remove(); });
+  }
+  document.body.appendChild(overlay);
+  return overlay;
 }
 
 function poOverlay(innerHtml, maxWidth = 420) {
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-  overlay.innerHTML = `<div class="card" style="max-width:${maxWidth}px; width:100%; max-height:88vh; overflow-y:auto;">${innerHtml}</div>`;
-  document.body.appendChild(overlay);
-  return overlay;
+  return openModal(innerHtml, { maxWidth });
 }
 
 async function stockVehicles() {
@@ -5180,6 +5367,28 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
       if (onComplete) await onComplete();
     } finally { btn.disabled = false; btn.textContent = label; }
   });
+}
+
+// Receive every open line on a job PO to the job, one server call per line (each call locks the
+// PO row), then refresh once. Stops at the first failure; earlier lines stay received.
+async function receiveAllPoLines(po, btn, onComplete) {
+  const lines = (po.purchase_order_line_items || []).filter(li => !li.received && !li.is_backordered);
+  if (!lines.length) return;
+  if (!confirm(`Receive all ${lines.length} lines on PO ${po.po_number || ''} to the job? You can still Undo received on any line.`)) return;
+  const label = btn.textContent;
+  btn.disabled = true;
+  let done = 0, failure = null, failedLine = null;
+  try {
+    for (const li of lines) {
+      btn.textContent = `Receiving ${done + 1} of ${lines.length}...`;
+      const { error } = await supabaseClient.rpc('po_receive_line', { p_line_id: li.id, p_dest: 'job', p_vehicle_id: null });
+      if (error && !/already received/i.test(error.message || '')) { failure = error; failedLine = li; break; }
+      done++;
+    }
+  } finally { btn.disabled = false; btn.textContent = label; }
+  if (onComplete) { try { await onComplete(); } catch (e) { console.error('refresh after Receive all failed:', e); } }
+  if (failure) alert(`Received ${done} of ${lines.length}. ${failedLine.description}: ${friendlyError(failure)}`);
+  else showToast(`Received ${done} line${done === 1 ? '' : 's'} to the job`);
 }
 
 // Undo received (e.g. ticked by mistake, or it was really back ordered). Needs a note once the PO is
@@ -5413,7 +5622,7 @@ function openPoNotesPanel(po, onComplete) {
 }
 
 function renderPoControls(po, role) {
-  const b = (cls, text) => `<button type="button" class="secondary ${cls}" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">${text}</button>`;
+  const b = (cls, text) => `<button type="button" class="secondary btn-sm ${cls}" data-po-id="${po.id}">${text}</button>`;
   const open = !po.closed_at;
   return [
     open && !po.stock_source ? b('po-add-item-btn', '+ Add item') : '',
@@ -5462,7 +5671,7 @@ async function openAddPoItemPanel(po, onComplete) {
   const overlay = poOverlay(`
     <h2>Add to PO ${escapeHtml(po.po_number || '')}</h2>
     <div id="api-items"></div>
-    <button type="button" class="secondary" id="api-add-line" style="font-size:12px; padding:6px 10px;">+ Add another</button>
+    <button type="button" class="secondary btn-sm" id="api-add-line">+ Add another</button>
     <div style="margin-top:14px;">
       <button id="api-save-btn">Add</button>
       <button type="button" class="secondary" id="api-cancel-btn">Cancel</button>
@@ -5475,6 +5684,8 @@ async function openAddPoItemPanel(po, onComplete) {
     const btn = overlay.querySelector('#api-save-btn');
     const label = btn.textContent;
     const msg = overlay.querySelector('#api-msg');
+    const lineProblem = materialLineRowsProblem('api-items');
+    if (lineProblem) { msg.innerHTML = `<div class="error-box">${escapeHtml(lineProblem)}</div>`; return; }
     const lines = readMaterialLineRows('api-items');
     if (!lines.length) { msg.innerHTML = `<div class="error-box">Add an item with a quantity.</div>`; return; }
     btn.disabled = true; btn.textContent = 'Adding...';
@@ -5594,7 +5805,7 @@ async function openStockPullPanel({ projectId, jobLabel, centres, source, vehicl
     <select id="sp2-stage"><option value="">Whole job</option>${centres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>` : ''}
     <label>Items</label>
     <div id="sp2-lines"></div>
-    <button type="button" class="secondary" id="sp2-add" style="font-size:12px; padding:6px 10px;">+ Add item</button>
+    <button type="button" class="secondary btn-sm" id="sp2-add">+ Add item</button>
     <div style="margin-top:14px;">
       <button id="sp2-save">Create stock PO</button>
       <button type="button" class="secondary" id="sp2-cancel">Cancel</button>
@@ -5615,7 +5826,7 @@ async function openStockPullPanel({ projectId, jobLabel, centres, source, vehicl
       <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:6px; align-items:end;">
         <div><label style="margin-top:0; font-size:12px;">Taking</label><input class="sp2-qty" type="number" step="1" min="0" value="1" style="font-size:13px;" /></div>
         <div><label style="margin-top:0; font-size:12px;">Left after you take it</label><input class="sp2-left" type="number" step="1" min="0" style="font-size:13px;" /></div>
-        <button type="button" class="secondary sp2-remove" style="padding:6px 10px; font-size:12px;">&times;</button>
+        <button type="button" class="secondary btn-sm sp2-remove">&times;</button>
       </div>`;
     linesEl.appendChild(row);
     const search = row.querySelector('.sp2-search');
@@ -5694,10 +5905,7 @@ function poSourceOptionsHtml(vehicles) {
 // date - a separate status from "received", for when a supplier says an
 // item's delayed rather than it having actually arrived.
 function openBackorderPanel(lineItem, onComplete) {
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-  overlay.innerHTML = `
-    <div class="card" style="max-width:360px; width:100%;">
+  const overlay = openModal(`
       <h2>Backorder</h2>
       <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}</p>
       <label style="margin-top:0">Expected date</label>
@@ -5707,9 +5915,7 @@ function openBackorderPanel(lineItem, onComplete) {
         ${lineItem.is_backordered ? '<button type="button" class="secondary" id="bo-clear-btn">No longer backordered</button>' : ''}
         <button type="button" class="secondary" id="bo-cancel-btn">Cancel</button>
       </div>
-      <div id="bo-msg"></div>
-    </div>`;
-  document.body.appendChild(overlay);
+      <div id="bo-msg"></div>`, { maxWidth: 360 });
 
   overlay.querySelector('#bo-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#bo-save-btn').addEventListener('click', async () => {
@@ -5767,10 +5973,7 @@ function uploadInvoiceForPo(po) {
     const file = e.target.files[0];
     if (!file) return;
 
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-    overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the invoice...</p></div>`;
-    document.body.appendChild(overlay);
+    const overlay = openModal(`<p class="subtitle">Reading the invoice...</p>`, { maxWidth: 400 });
 
     try {
       const fileBase64 = await fileToBase64(file);
@@ -5787,7 +5990,7 @@ function uploadInvoiceForPo(po) {
       }));
       window.location.href = `/supplier-detail.html?id=${po.supplier_id}&resume_upload=1`;
     } catch (err) {
-      overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="uip-close">Close</button>`;
+      overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${escapeHtml(friendlyError(err))}</div><button type="button" class="secondary" id="uip-close">Close</button>`;
       overlay.querySelector('#uip-close').addEventListener('click', () => overlay.remove());
     }
   };
@@ -5809,14 +6012,17 @@ function buildMaterialSearchRow(materials, containerId) {
   row.className = 'po-material-line';
   row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:6px; margin-bottom:6px; position:relative;';
   row.innerHTML = `
-    <div style="position:relative;">
-      <input class="po-line-search" placeholder="Search Stock or type a new item..." autocomplete="off" style="font-size:13px;" />
+    <span class="pml-lbl pml-lbl-item">Item</span>
+    <div class="pml-item" style="position:relative;">
+      <input class="po-line-search" placeholder="Search Stock or type a new item..." autocomplete="off" />
       <input type="hidden" class="po-line-material-id" />
       <div class="po-line-results" style="position:absolute; top:100%; left:0; right:0; z-index:10; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:none;"></div>
     </div>
-    <input class="po-line-qty" type="number" step="1" value="1" placeholder="Qty" style="font-size:13px;" />
-    <input class="po-line-cost" type="number" step="0.01" value="0" placeholder="Unit cost" style="font-size:13px;" />
-    <button type="button" class="secondary po-remove-line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
+    <span class="pml-lbl pml-lbl-qty">Qty</span>
+    <input class="po-line-qty" type="number" inputmode="decimal" min="0" step="1" value="1" placeholder="Qty" />
+    <span class="pml-lbl pml-lbl-cost">Unit cost</span>
+    <input class="po-line-cost" type="number" inputmode="decimal" min="0" step="0.01" value="" placeholder="Unit cost" />
+    <button type="button" class="secondary po-remove-line" aria-label="Remove line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
   document.getElementById(containerId).appendChild(row);
 
   const searchInput = row.querySelector('.po-line-search');
@@ -5871,6 +6077,21 @@ function readMaterialLineRows(containerId) {
     quantity: parseFloat(row.querySelector('.po-line-qty').value) || 0,
     unit_cost: parseFloat(row.querySelector('.po-line-cost').value) || 0,
   })).filter(l => l.description && l.quantity > 0);
+}
+
+// Checked before anything is saved: a named line with no quantity or no unit cost is an error
+// instead of being dropped or ordered at $0. A blank spare row is ignored.
+function materialLineRowsProblem(containerId) {
+  const rows = [...document.querySelectorAll(`#${containerId} .po-material-line`)];
+  for (let i = 0; i < rows.length; i++) {
+    const desc = rows[i].querySelector('.po-line-search').value.trim();
+    if (!desc) continue;
+    const qty = parseFloat(rows[i].querySelector('.po-line-qty').value);
+    const costRaw = rows[i].querySelector('.po-line-cost').value.trim();
+    if (!(qty > 0)) return `Line ${i + 1} (${desc}) has no quantity.`;
+    if (costRaw === '' || isNaN(parseFloat(costRaw))) return `Line ${i + 1} (${desc}) has no unit cost. Enter 0 if it is free.`;
+  }
+  return '';
 }
 
 // Universal activity log - one shared table for every entity type. Call
@@ -6243,6 +6464,28 @@ async function createTafeDay(staffId, dateStr) {
     { ...base, clock_in: t(TAFE_DAY.breakEnd).toISOString(), clock_out: t(TAFE_DAY.end).toISOString() },
   ]);
   if (error) throw error;
+}
+
+// Pipeline stages: board columns in order (dashboard.html) and the stage badge on the job page.
+const PIPELINE_STAGES = [
+  { key: 'lead',              label: 'Lead' },
+  { key: 'draft_quote',       label: 'Draft Quote' },
+  { key: 'quote_sent',        label: 'Quote Sent' },
+  { key: 'quote_approved',    label: 'Quote Approved' },
+  { key: 'deposit_paid',      label: 'Deposit Paid' },
+  { key: 'awaiting_action',   label: 'Awaiting Action' },
+  { key: 'ready_to_book',     label: 'Ready to Book' },
+  { key: 'job_booked',        label: 'Job Booked' },
+  { key: 'job_not_complete',  label: 'Job Not Complete' },
+  { key: 'client_handover',   label: 'Client Handover' },
+  { key: 'ready_to_invoice',  label: 'Ready to Invoice' },
+  { key: 'awaiting_payment',  label: 'Invoice Sent - Awaiting Payment' },
+  { key: 'complete',          label: 'Complete' },
+];
+function pipelineStageLabel(key) {
+  if (key === 'archived') return 'Archived';
+  const s = PIPELINE_STAGES.find(x => x.key === key);
+  return s ? s.label : String(key || '').replace(/_/g, ' ');
 }
 
 function projectRef(project) {

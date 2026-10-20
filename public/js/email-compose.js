@@ -114,9 +114,9 @@ function openEmailComposer(opts) {
       <h2 style="margin-top:0;">${escapeHtml(opts.title || 'New email')}</h2>
       <p class="subtitle" style="margin:0 0 8px; font-size:12px;">Sent from ${escapeHtml(opts.mailbox && opts.mailbox.kind === 'personal' ? opts.mailbox.address : 'sales@thomsonenergy.com.au')} with your name and signature.</p>
       <label style="margin-top:0">To</label>
-      <input id="ec-to" value="${escapeHtml(opts.to || '')}" placeholder="client@example.com (separate several with commas)" />
+      <input id="ec-to" value="${escapeHtml(opts.to || '')}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="client@example.com (separate several with commas)" />
       <label>Cc (optional)</label>
-      <input id="ec-cc" value="${escapeHtml(opts.cc || '')}" />
+      <input id="ec-cc" value="${escapeHtml(opts.cc || '')}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" />
       <label>Subject</label>
       <input id="ec-subject" value="${escapeHtml(opts.subject || '')}" />
       <label>Message</label>

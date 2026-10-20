@@ -30,7 +30,7 @@ exports.handler = async (event) => {
         await supabaseAdmin.rpc('create_notification', {
           p_user: entry.created_by, p_kind: 'variation', p_title: `Variation declined: ${entry.description}`,
           p_body: why ? `Reason: ${why}` : 'The client declined it on the variation page.',
-          p_link: `/project.html?id=${entry.project_id}`, p_actor: null, p_dedupe: `variation-declined-${entry.id}-${now}`,
+          p_link: `/project.html?id=${entry.project_id}&tab=variations`, p_actor: null, p_dedupe: `variation-declined-${entry.id}-${now}`,
         });
       }
       return reply(200, { ok: true });

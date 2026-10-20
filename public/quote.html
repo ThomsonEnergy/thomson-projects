@@ -10,7 +10,7 @@
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/document-fonts.css?v=1" />
-<link rel="stylesheet" href="/css/style.css?v=21" />
+<link rel="stylesheet" href="/css/style.css?v=22" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   /* The proposal is a set of A4 "pages" (black cover, white content pages
@@ -22,6 +22,10 @@
   @page { size: A4; margin: 0; }
 
   body { background: #e6e9ef; }
+  /* The proposal is a light document on every theme, so native pickers and form chrome stay light too. */
+  html, html[data-theme] { color-scheme: light; }
+  /* Sign form fields are white on every theme, so their placeholder needs its own readable grey. */
+  .sign-form input::placeholder, .sign-form textarea::placeholder { color: #6b7280; }
   .qdoc {
     --q-blue: #1a6be6;
     --q-ink: #0a0a0a;
@@ -182,14 +186,27 @@
     .gallery { grid-template-columns: repeat(2, 1fr); }
   }
 
+  /* Phone: a fixed bottom bar with the total and the approve button while there is something to approve.
+     It hides (.away) while the sign form itself is on screen so there are never two approve buttons at once. */
+  .q-approve-bar { display: none; }
+  @media (max-width: 700px) {
+    #print-btn { display: none; }
+    body.has-approve-bar #topbar-total, body.has-approve-bar #topbar-accept { display: none; }
+    body.has-approve-bar .q-approve-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 100; min-height: 48px; padding: 6px 14px calc(6px + env(safe-area-inset-bottom)); align-items: center; justify-content: space-between; gap: 12px; background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 16px rgba(0,0,0,0.18); }
+    body.has-approve-bar .q-approve-bar.away { display: none; }
+    .q-approve-bar .ab-total span { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .q-approve-bar .ab-total b { font-size: 17px; color: var(--text); }
+    body.has-approve-bar .wrap { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+  }
+
   /* When the PDF is made (?print=1) the page is laid out at true sheet width before it is cut into
      sheets, so what is measured is exactly what is printed, whatever size the window is. */
-  .as-paper .topbar, .as-paper #accept-error { display: none !important; }
+  .as-paper .topbar, .as-paper #accept-error, .as-paper .q-approve-bar { display: none !important; }
   .as-paper .wrap { max-width: none !important; width: 794px !important; margin: 0 !important; padding: 0 !important; }
   .as-paper .pg { width: 794px; max-width: none; margin: 0; box-shadow: none; }
 
   @media print {
-    .topbar, #accept-error { display: none !important; }
+    .topbar, #accept-error, .q-approve-bar { display: none !important; }
     html, body { background: #fff !important; }
     .wrap { max-width: none !important; width: 210mm !important; margin: 0 !important; padding: 0 !important; }
     .pg { width: 210mm; max-width: none; margin: 0; box-shadow: none; min-height: 297mm; page-break-after: always; break-after: page; }
@@ -207,7 +224,7 @@
     <div class="topbar-right">
       <div id="topbar-total" style="text-align:right;"></div>
       <div id="topbar-accept"></div>
-      <button class="secondary" onclick="window.print()">Print / Save as PDF</button>
+      <button class="secondary" id="print-btn" onclick="window.print()">Print / Save as PDF</button>
     </div>
   </div>
 
@@ -215,8 +232,9 @@
     <div id="accept-error"></div>
     <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading your proposal...</p></div>
   </div>
+  <div id="approve-bar" class="q-approve-bar"></div>
 
-  <script src="/js/supabase-client.js?v=102"></script>
+  <script src="/js/supabase-client.js?v=103"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
@@ -447,11 +465,11 @@
     document.addEventListener('pointerup', sigStop);
     document.addEventListener('pointercancel', sigStop);
     document.addEventListener('click', async (e) => {
-      const t = e.target.closest ? e.target.closest('#vs-jump, #vs-clear, #vs-sign, #vs-decline-open, #vs-decline') : null;
+      const t = e.target.closest ? e.target.closest('#vs-jump, #vs-jump-bar, #vs-clear, #vs-sign, #vs-decline-open, #vs-decline') : null;
       if (!t) return;
       if (t.id === 'vs-decline-open') { document.getElementById('vs-decline-form').style.display = 'block'; t.style.display = 'none'; return; }
       if (t.id === 'vs-decline') {
-        if (!confirm(`Decline this ${variationToken ? 'variation' : 'quote'}?`)) return;
+        const declineLabel = t.textContent;
         t.disabled = true; t.textContent = 'Declining...';
         try {
           const res = await fetch('/.netlify/functions/decline-by-client', {
@@ -463,11 +481,11 @@
           window.location.reload();
         } catch (err) {
           document.getElementById('vs-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
-          t.disabled = false; t.textContent = 'Decline';
+          t.disabled = false; t.textContent = declineLabel;
         }
         return;
       }
-      if (t.id === 'vs-jump') { const s = document.getElementById('var-sign-section'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+      if (t.id === 'vs-jump' || t.id === 'vs-jump-bar') { const s = document.getElementById('var-sign-section'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
       const canvas = document.getElementById('vs-canvas');
       if (t.id === 'vs-clear') { canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); sigHasInk = false; return; }
       const msg = document.getElementById('vs-msg');
@@ -805,7 +823,7 @@
             ${validLine(project.valid_until, docNoun)}
             <p class="note-line" style="margin-bottom:12px;">By signing you accept this ${docNoun} and its terms and conditions.</p>
             <label style="display:block; font-size:12px; color:var(--q-grey); margin-bottom:4px;">Your full name</label>
-            <input id="vs-name" placeholder="Full name" style="${quoteSignInputStyle}" />
+            <input id="vs-name" placeholder="Full name" autocomplete="name" style="${quoteSignInputStyle}" />
             <label style="display:block; font-size:12px; color:var(--q-grey); margin:12px 0 4px;">Signature (draw with your finger or mouse)</label>
             <canvas id="vs-canvas" width="620" height="170" style="border:1px solid #c9ced8; border-radius:6px; background:#fff; touch-action:none; width:100%; max-width:620px; height:170px; display:block;"></canvas>
             <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
@@ -859,7 +877,7 @@
             ${validLine(v.valid_until, 'variation')}
             <p class="note-line" style="margin-bottom:12px;">By signing you approve this variation at the price above. It is then added to your original quote and invoiced when the work is done.</p>
             <label style="display:block; font-size:12px; color:var(--q-grey); margin-bottom:4px;">Your full name</label>
-            <input id="vs-name" placeholder="Full name" style="${inputStyle}" />
+            <input id="vs-name" placeholder="Full name" autocomplete="name" style="${inputStyle}" />
             <label style="display:block; font-size:12px; color:var(--q-grey); margin:12px 0 4px;">Signature (draw with your finger or mouse)</label>
             <canvas id="vs-canvas" width="620" height="170" style="border:1px solid #c9ced8; border-radius:6px; background:#fff; touch-action:none; width:100%; max-width:620px; height:170px; display:block;"></canvas>
             <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
@@ -933,15 +951,36 @@
         });
       });
 
+      const topTotal = money(vInfo ? varLinesTotal(thisVariation.lines) * 1.1 : (stcTotal > 0 ? totalAfterStc : totalIncGst));
       document.getElementById('topbar-total').innerHTML = `
         <p class="subtitle" style="margin:0 0 2px; font-size:10px; text-transform:uppercase; letter-spacing:0.04em;">${vInfo ? 'This variation' : 'Total'}</p>
-        <p style="margin:0; font-weight:700; font-size:16px;">${money(vInfo ? varLinesTotal(thisVariation.lines) * 1.1 : (stcTotal > 0 ? totalAfterStc : totalIncGst))}</p>
+        <p style="margin:0; font-weight:700; font-size:16px;">${topTotal}</p>
       `;
       document.getElementById('topbar-accept').innerHTML = vInfo
         ? (isAccepted ? `<span class="badge accepted">Variation approved</span>` : thisVariation.approval_status === 'declined' ? `<span class="badge">${thisVariation.expired ? 'Expired' : 'Declined'}</span>` : (thisVariation.approval_status === 'sent' ? `<button type="button" id="vs-jump">Review &amp; sign</button>` : ''))
         : isDeclined ? `<span class="badge">${project.expired ? 'Expired' : 'Declined'}</span>` : isAccepted
           ? `<span class="badge accepted">${template === 'quick_estimate' ? 'Estimate accepted' : 'Quote accepted'}</span>`
           : `<button type="button" id="vs-jump">${template === 'quick_estimate' ? 'Approve estimate' : 'Approve quote'}</button>`;
+
+      // Phone bottom bar: same logic as #topbar-accept, shown only while there is something to approve.
+      const approveLabel = vInfo
+        ? (!isAccepted && thisVariation.approval_status === 'sent' ? 'Review & sign' : '')
+        : (!isDeclined && !isAccepted ? (template === 'quick_estimate' ? 'Approve estimate' : 'Approve quote') : '');
+      const bar = document.getElementById('approve-bar');
+      if (approveLabel) {
+        bar.innerHTML = `<div class="ab-total"><span>${vInfo ? 'This variation' : 'Total'}</span><b>${topTotal}</b></div><button type="button" id="vs-jump-bar">${escapeHtml(approveLabel)}</button>`;
+        document.body.classList.add('has-approve-bar');
+      } else {
+        bar.innerHTML = '';
+        document.body.classList.remove('has-approve-bar');
+      }
+      // Hide the bar while the sign form is on screen so there are not two approve buttons at once.
+      if (window.__approveIO) window.__approveIO.disconnect();
+      const signSec = document.getElementById('var-sign-section');
+      if (approveLabel && signSec && 'IntersectionObserver' in window) {
+        window.__approveIO = new IntersectionObserver(([en]) => bar.classList.toggle('away', en.isIntersecting), { threshold: 0.15 });
+        window.__approveIO.observe(signSec);
+      }
 
       const acceptBtn = document.getElementById('accept-btn');
       if (acceptBtn) {

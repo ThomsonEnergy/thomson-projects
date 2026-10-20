@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=21" />
+<link rel="stylesheet" href="/css/style.css?v=22" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -41,24 +41,11 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=102"></script>
+  <script src="/js/supabase-client.js?v=103"></script>
   <script src="/js/theme.js"></script>
   <script>
-    const STAGES = [
-      { key: 'lead',              label: 'Lead' },
-      { key: 'draft_quote',       label: 'Draft Quote' },
-      { key: 'quote_sent',        label: 'Quote Sent' },
-      { key: 'quote_approved',    label: 'Quote Approved' },
-      { key: 'deposit_paid',      label: 'Deposit Paid' },
-      { key: 'awaiting_action',   label: 'Awaiting Action' },
-      { key: 'ready_to_book',     label: 'Ready to Book' },
-      { key: 'job_booked',        label: 'Job Booked' },
-      { key: 'job_not_complete',  label: 'Job Not Complete' },
-      { key: 'client_handover',   label: 'Client Handover' },
-      { key: 'ready_to_invoice',  label: 'Ready to Invoice' },
-      { key: 'awaiting_payment',  label: 'Invoice Sent - Awaiting Payment' },
-      { key: 'complete',          label: 'Complete' },
-    ];
+    // Board columns in order, shared with the job page's stage badge (supabase-client.js).
+    const STAGES = PIPELINE_STAGES;
     // A quote (no J number yet) only moves between the quote stages here: approving it has to go
     // through Mark approved on the quote (or the client signing), which makes the job and deposit.
     const QUOTE_STAGES = ['lead', 'draft_quote', 'quote_sent'];

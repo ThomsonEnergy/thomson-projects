@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=21" />
+<link rel="stylesheet" href="/css/style.css?v=22" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -53,7 +53,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=102"></script>
+  <script src="/js/supabase-client.js?v=103"></script>
   <script src="/js/theme.js"></script>
   <script>
     let allInvoices = null, allMappings = [];
@@ -173,13 +173,13 @@
                   <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
                   <td data-label="Status">
                     ${inv.paid_at ? '<span class="badge accepted">Paid</span>'
-                      : overdue ? '<span class="badge draft" style="color:var(--red);">Overdue</span>'
+                      : overdue ? '<span class="badge red">Overdue</span>'
                       : '<span class="badge sent">Awaiting payment</span>'}
                     ${inv.xero_invoice_id ? '' : '<span class="subtitle" style="font-size:11px; display:block;">Not yet in Xero</span>'}
                   </td>
                   <td data-label="">
                     <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:8px;">View</a>
-                    ${project && projectId ? `<a class="link-quiet" href="/project.html?id=${projectId}" style="font-size:12px; margin-right:8px;">Job</a>` : ''}
+                    ${project && projectId ? `<a class="link-quiet" href="/project.html?id=${projectId}&tab=invoices" style="font-size:12px; margin-right:8px;">Job</a>` : ''}
                     <button type="button" class="secondary xero-toggle-btn" data-id="${inv.id}" style="font-size:12px; padding:4px 8px;">Xero breakdown</button>
                   </td>
                 </tr>

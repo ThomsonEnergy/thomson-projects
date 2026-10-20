@@ -29,15 +29,15 @@ function ensureFeedStyles() {
     img.fd-avatar { display:block; object-fit:cover; background:var(--surface-2); }
     .fd-who { flex:1; min-width:0; }
     .fd-name { font-weight:700; font-size:14px; color:var(--text); }
-    .fd-time { font-size:12px; color:var(--muted); }
-    .fd-pill { display:inline-block; background:var(--accent-dim); color:var(--accent); padding:2px 9px; border-radius:999px; font-weight:600; font-size:12px; text-decoration:none; }
+    .fd-time { font-size:13px; color:var(--muted); }
+    .fd-pill { display:inline-block; background:var(--accent-dim); color:var(--accent); padding:2px 9px; border-radius:999px; font-weight:600; font-size:13px; text-decoration:none; }
     .fd-body { color:var(--text); margin:10px 0 0; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; }
-    .fd-tags { margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; color:var(--muted); }
+    .fd-tags { margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:13px; color:var(--muted); }
     .fd-actions { display:flex; gap:4px; margin-top:12px; padding-top:8px; border-top:1px solid var(--border); }
     .fd-actions button, .fd-delete { background:none; border:none; color:var(--muted); cursor:pointer; font-size:13px; padding:5px 10px; border-radius:6px; width:auto; }
     .fd-actions button:hover, .fd-delete:hover { background:var(--surface-2); color:var(--text); }
     .fd-actions button.liked { color:var(--accent); font-weight:700; }
-    .fd-delete { font-size:12px; flex:none; }
+    .fd-delete { font-size:13px; flex:none; }
     .fd-comments { margin-top:12px; display:flex; flex-direction:column; gap:10px; }
     .fd-comment { display:flex; gap:10px; align-items:flex-start; }
     .fd-bubble { background:var(--surface-2); border:1px solid var(--border); border-radius:4px 14px 14px 14px; padding:8px 12px; min-width:0; flex:1; max-width:680px; }
@@ -80,9 +80,9 @@ async function mountFeedComposer(el, opts) {
   const staff = (await feedStaff()).filter(s => s.id !== opts.myUserId);
   el.innerHTML = `
     <textarea class="feed-new-text" placeholder="${opts.projectId ? 'Write a note about this job...' : 'Post something to the team...'}" style="min-height:70px;"></textarea>
-    <div class="feed-tagged" style="margin-top:6px; font-size:12px; color:var(--muted);"></div>
+    <div class="feed-tagged" style="margin-top:6px; font-size:13px; color:var(--muted);"></div>
     <div class="feed-tag-panel" style="display:none; margin-top:6px; padding:10px; border:1px solid var(--border); border-radius:8px; max-height:180px; overflow-y:auto;">
-      <p class="subtitle" style="margin:0 0 6px; font-size:12px;">They'll get a notification on their Home page.</p>
+      <p class="subtitle" style="margin:0 0 6px; font-size:13px;">They'll get a notification on their Home page.</p>
       <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:4px 12px;">
         ${staff.map(s => `<label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="checkbox" class="feed-tag-check" value="${s.id}" data-name="${escapeHtml(s.full_name || 'Unnamed')}" style="width:auto;" /> ${escapeHtml(s.full_name || 'Unnamed')}</label>`).join('')}
       </div>
@@ -140,9 +140,12 @@ async function mountFeedComposer(el, opts) {
 // as a notification until the job itself is opened.
 async function renderFeedList(el, opts) {
   ensureFeedStyles();
+  // Kept on the list element so likes, comments and new posts (which all
+  // reload the list) keep a longer list; a fresh page starts at 30.
+  const limit = el._feedLimit || opts.limit || 30;
   let q = supabaseClient.from('feed_posts')
     .select('*, profiles(full_name, photo_url), projects(id, name, job_number, quote_number)')
-    .order('created_at', { ascending: false }).limit(opts.limit || 30);
+    .order('created_at', { ascending: false }).limit(limit);
   q = opts.projectId ? q.eq('project_id', opts.projectId) : q.or('project_id.is.null,show_on_home.eq.true');
   const { data: posts, error } = await q;
   if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
@@ -210,8 +213,18 @@ async function renderFeedList(el, opts) {
         </div>
       </article>`;
   }).join('');
+  if (posts.length >= limit) {
+    el.insertAdjacentHTML('beforeend', `<button type="button" class="secondary feed-older-btn" style="width:100%; margin-top:4px;">${opts.projectId ? 'Show older notes' : 'Show older posts'}</button>`);
+  }
 
   const reload = () => renderFeedList(el, opts);
+  const olderBtn = el.querySelector('.feed-older-btn');
+  if (olderBtn) olderBtn.addEventListener('click', () => {
+    olderBtn.disabled = true;
+    olderBtn.textContent = 'Loading...';
+    el._feedLimit = limit * 2;
+    reload();
+  });
   el.querySelectorAll('.feed-like-btn[data-liked]').forEach(btn => btn.addEventListener('click', async () => {
     const postId = btn.dataset.postId;
     if (btn.dataset.liked === 'true') await supabaseClient.from('feed_likes').delete().eq('post_id', postId).eq('author_id', opts.myUserId);

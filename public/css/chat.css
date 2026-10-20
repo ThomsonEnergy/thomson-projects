@@ -32,7 +32,7 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 .ch-item.unread .ch-name { font-weight: 800; }
 .ch-item .ch-last { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ch-item .ch-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: none; }
-.ch-item .ch-when { font-size: 11px; color: var(--muted); }
+.ch-item .ch-when { font-size: 12px; color: var(--muted); }
 .ch-badge { min-width: 19px; height: 19px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: var(--accent-contrast); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 .ch-badge.at { background: #e5484d; color: #fff; }
 .ch-item.muted .ch-badge { background: var(--surface-2); color: var(--muted); }
@@ -50,7 +50,7 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 
 .ch-msgs { flex: 1; overflow-y: auto; padding: 10px 0 6px; min-height: 0; overscroll-behavior: contain; }
 .ch-day { text-align: center; margin: 14px 0 6px; }
-.ch-day span { font-size: 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
+.ch-day span { font-size: 12px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
 .ch-more-older { text-align: center; padding: 6px; }
 .ch-more-older button { font-size: 12px; padding: 4px 12px; }
 
@@ -65,7 +65,7 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 .cm-main { flex: 1; min-width: 0; }
 .cm-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .cm-head b { font-size: 14px; }
-.cm-time, .cm-edited { font-size: 11px; color: var(--muted); }
+.cm-time, .cm-edited { font-size: 12px; color: var(--muted); }
 .cm-body { font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cm-body a { color: var(--accent); }
 .cm-body .cm-at { color: var(--accent); font-weight: 600; background: var(--accent-dim); border-radius: 4px; padding: 0 3px; }
@@ -87,7 +87,7 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 .cm:hover .cm-more, .cm-more:focus { opacity: 1; }
 @media (pointer: coarse) { .cm-more { opacity: .55; } }
 .cm.pending { opacity: .65; }
-.cm-status { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.cm-status { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .cm-status.err { color: var(--red); }
 .cm-bot-typing { padding: 4px 14px 8px 60px; font-size: 13px; color: var(--muted); font-style: italic; }
 
@@ -147,4 +147,13 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 }
 @media (min-width: 701px) and (max-width: 1100px) {
   .chat-app.thread-open { grid-template-columns: 260px minmax(0, 1fr) 320px; }
+}
+
+/* Touch screens: buttons get their 40px height from style.css. Yes / No /
+   Undo links get real width. The message menu button stays small: long press
+   opens the same menu, and a 40px box would cover the next message. */
+@media (pointer: coarse) {
+  .cm-link { padding: 0 10px; font-size: 13px; }
+  .cm-more { min-height: 0; }
+  .cc-x { min-height: 0; }
 }

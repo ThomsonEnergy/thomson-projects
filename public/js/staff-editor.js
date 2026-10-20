@@ -119,7 +119,7 @@ async function openStaffEditor(userId, opts = {}) {
     <input id="profile-name-input" value="${staffEditorEscAttr(profile.full_name)}" />
 
     <label>Mobile number</label>
-    <input id="profile-mobile-input" value="${staffEditorEscAttr(profile.mobile_number)}" />
+    <input id="profile-mobile-input" type="tel" autocomplete="tel" value="${staffEditorEscAttr(profile.mobile_number)}" />
 
     <label>Notes</label>
     <textarea id="profile-notes-input" style="min-height:70px;">${escapeHtml(profile.notes)}</textarea>

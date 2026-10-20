@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=21" />
+<link rel="stylesheet" href="/css/style.css?v=22" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .mt-tabs { display:flex; gap:6px; margin:14px 0 4px; flex-wrap:wrap; }
@@ -91,7 +91,7 @@
     <div id="mt-detail-view" style="display:none;"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=102"></script>
+  <script src="/js/supabase-client.js?v=103"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/meeting-recorder.js?v=1"></script>
   <script>
@@ -120,13 +120,6 @@
     function staffOptions(selectedId, blankLabel) {
       return (blankLabel ? `<option value="">${escapeHtml(blankLabel)}</option>` : '') +
         staff.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${escapeHtml(s.full_name || 'Unnamed')}</option>`).join('');
-    }
-    function showToast(msg) {
-      const t = document.createElement('div');
-      t.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--surface-2); color:var(--text); border:1px solid var(--border); padding:10px 16px; border-radius:8px; z-index:300; box-shadow:0 4px 14px rgba(0,0,0,.4);';
-      t.textContent = msg;
-      document.body.appendChild(t);
-      setTimeout(() => t.remove(), 2600);
     }
     function modal(html) {
       const overlay = document.createElement('div');

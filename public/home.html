@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=21" />
+<link rel="stylesheet" href="/css/style.css?v=22" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .home-grid { display:grid; gap:20px; align-items:start; }
@@ -129,8 +129,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=102"></script>
-  <script src="/js/feed.js?v=9"></script>
+  <script src="/js/supabase-client.js?v=103"></script>
+  <script src="/js/feed.js?v=10"></script>
   <script src="/js/theme.js"></script>
   <script src="/js/circuit-background.js?v=17"></script>
   <script>
@@ -589,7 +589,7 @@
           const byJob = {};
           (toBill || []).forEach(v => { if (v.projects) (byJob[v.project_id] = byJob[v.project_id] || { p: v.projects, n: 0 }).n++; });
           Object.values(byJob).forEach(({ p, n }) => {
-            items.push({ group: 'job', label: `${n} variation${n === 1 ? '' : 's'} logged to bill on ${escapeHtml(projectRef(p))}`, link: `/project.html?id=${p.id}` });
+            items.push({ group: 'job', label: `${n} variation${n === 1 ? '' : 's'} logged to bill on ${escapeHtml(projectRef(p))}`, link: `/project.html?id=${p.id}&tab=variations` });
           });
         } catch (err) { console.error('Variation check failed:', err); }
       }

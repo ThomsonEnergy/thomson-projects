@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=21" />
+<link rel="stylesheet" href="/css/style.css?v=22" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .day-item {
@@ -56,7 +56,7 @@
             <input id="clock-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
             <div id="clock-job-results"></div>
             <div id="clock-job-selected" class="subtitle" style="margin-top:4px;"></div>
-            <button type="button" class="secondary" id="new-quick-job-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">+ New job (no quote)</button>
+            <button type="button" class="secondary" id="new-quick-job-btn" style="margin-top:8px;">+ New job (no quote)</button>
           </div>
         </div>
         <div id="clock-category-row" style="margin-top:10px;">
@@ -91,8 +91,8 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
         <h2 style="margin:0;">Your schedule</h2>
         <div style="display:flex; gap:6px;">
-          <button type="button" class="secondary" id="my-sched-day-btn" style="font-size:12px; padding:6px 10px;">Day</button>
-          <button type="button" class="secondary" id="my-sched-week-btn" style="font-size:12px; padding:6px 10px;">Week</button>
+          <button type="button" class="secondary" id="my-sched-day-btn">Day</button>
+          <button type="button" class="secondary" id="my-sched-week-btn">Week</button>
         </div>
       </div>
       <div id="my-schedule-view"><p class="subtitle">Loading...</p></div>
@@ -111,7 +111,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=102"></script>
+  <script src="/js/supabase-client.js?v=103"></script>
   <script src="/js/template-questions.js"></script>
   <script src="/js/theme.js"></script>
   <script>
@@ -159,7 +159,7 @@
         document.getElementById('clock-active').style.display = 'none';
         document.getElementById('clock-heading').textContent = 'Clock';
         checking.style.display = 'block';
-        checking.innerHTML = '<div class="error-box">Could not check your clock, check your signal. <button type="button" class="secondary" id="clock-retry-btn" style="margin-left:8px; font-size:12px; padding:4px 10px;">Retry</button></div>';
+        checking.innerHTML = '<div class="error-box">Could not check your clock, check your signal. <button type="button" class="secondary" id="clock-retry-btn" style="margin-left:8px;">Retry</button></div>';
         document.getElementById('clock-retry-btn').addEventListener('click', () => {
           checking.innerHTML = '<p class="subtitle" style="margin:0;">Checking your clock...</p>';
           checkActiveClock();
@@ -382,7 +382,7 @@
             <button type="button" class="secondary" id="ri-close-btn" style="width:100%; margin-top:14px;">Close</button>`;
           overlay.querySelector('#ri-close-btn').addEventListener('click', () => overlay.remove());
         } catch (err) {
-          msgEl.innerHTML = `<div class="error-box">${escapeHtml((err && err.message) || String(err))}</div>`;
+          msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           btn.disabled = false;
           overlay.querySelector('#ri-cancel-btn').disabled = false;
           btn.textContent = 'Send';
@@ -642,7 +642,7 @@
           await createTafeDay(myUserId, dateStr);
           msg.innerHTML = `<div class="success-box">TAFE day logged for ${new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' })} (8 hours).</div>`;
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         }
         btn.disabled = false;
         return;
@@ -674,14 +674,14 @@
       clockBtn.disabled = true;
       const { data: already, error: openErr } = await supabaseClient.from('time_entries').select('id').eq('staff_id', myUserId).is('clock_out', null).limit(1);
       if (openErr || (already && already.length)) {
-        msg.innerHTML = `<div class="error-box">${openErr ? escapeHtml(openErr.message) : 'You are already clocked in. Clock out (or switch job) first.'}</div>`;
+        msg.innerHTML = `<div class="error-box">${openErr ? escapeHtml(friendlyError(openErr)) : 'You are already clocked in. Clock out (or switch job) first.'}</div>`;
         clockBtn.disabled = false;
         await checkActiveClock();
         return;
       }
       const { error } = await supabaseClient.from('time_entries').insert(entry);
       clockBtn.disabled = false;
-      if (error) { msg.innerHTML = `<div class="error-box">${error.code === '23505' ? 'You are already clocked in.' : error.message}</div>`; await checkActiveClock(); return; }
+      if (error) { msg.innerHTML = `<div class="error-box">${error.code === '23505' ? 'You are already clocked in.' : escapeHtml(friendlyError(error))}</div>`; await checkActiveClock(); return; }
       msg.innerHTML = '';
       selectedClockCostCentres = [];
       selectedClockJobId = null;
@@ -726,7 +726,7 @@
         <div class="day-item">
           <div>
             ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${escapeHtml(task.description)}</a>` : `<span>${escapeHtml(task.description)}</span>`}
-            ${notes.length ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">${notes.join(' &middot; ')}</p>` : ''}
+            ${notes.length ? `<p class="subtitle small" style="margin:2px 0 0;">${notes.join(' &middot; ')}</p>` : ''}
           </div>
           <div class="day-item-actions">
             ${showPickUp ? `<button type="button" class="secondary pick-up-btn" data-id="${task.id}">I can do this</button>` : ''}
@@ -774,7 +774,7 @@
             </details>`;
         }).join('') : '<p class="subtitle">None.</p>';
         const more = !showAll && groups.length > JOBS_SHOWN
-          ? `<button type="button" class="secondary show-more-tasks-btn" data-section="${sectionKey}" style="font-size:12px; padding:6px 10px;">Show all (${groups.length} jobs)</button>`
+          ? `<button type="button" class="secondary show-more-tasks-btn" data-section="${sectionKey}">Show all (${groups.length} jobs)</button>`
           : '';
         return `
           <div style="margin-bottom:14px;">
@@ -826,7 +826,7 @@
             await loadTasks();
           } catch (err) {
             btn.disabled = false; btn.textContent = label;
-            showTaskError(btn, 'Could not tick that off: ' + ((err && err.message) || String(err)));
+            showTaskError(btn, 'Could not tick that off: ' + friendlyError(err));
           }
         });
       });
@@ -840,7 +840,7 @@
             await loadTasks();
           } catch (err) {
             btn.disabled = false; btn.textContent = label;
-            showTaskError(btn, 'Could not pick that up: ' + ((err && err.message) || String(err)));
+            showTaskError(btn, 'Could not pick that up: ' + friendlyError(err));
           }
         });
       });
@@ -854,7 +854,7 @@
         .order('created_at', { ascending: true });
 
       if (error) {
-        document.getElementById('my-tasks').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+        document.getElementById('my-tasks').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
         return;
       }
 

@@ -10,7 +10,7 @@
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/document-fonts.css?v=1" />
-<link rel="stylesheet" href="/css/style.css?v=21" />
+<link rel="stylesheet" href="/css/style.css?v=22" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   /* Same A4 sheets as invoice.html (794 x 1123 px at 96 dpi), without the payment parts. */
@@ -76,6 +76,25 @@
   .as-paper .topbar { display: none !important; }
   .as-paper .wrap { max-width: none !important; width: 794px !important; margin: 0 !important; padding: 0 !important; }
   .as-paper .inv-sheet { margin: 0; box-shadow: none; }
+  /* Phone: a plain full-size summary card above the zoomed A4 sheet (never printed, never in the PDF).
+     The 8px wrap gutter keeps the zoomed sheet (window width minus 16px) on screen. */
+  .doc-sum { display: none; }
+  @media (max-width: 839px) {
+    .wrap { padding-left: 8px !important; padding-right: 8px !important; }
+    .doc-sum { display: block; background: #fff; color: #0a0a0a; border-radius: 12px; padding: 18px 16px; margin: 0 0 18px; box-shadow: 0 4px 18px rgba(15,23,42,0.12); font-size: 16px; line-height: 1.45; }
+    .doc-sum .ds-kicker { font-size: 14px; font-weight: 600; color: #4b5563; }
+    .doc-sum .ds-amount { font-size: 34px; font-weight: 700; margin: 2px 0; }
+    .doc-sum h3 { font-size: 16px; margin: 16px 0 6px; padding-top: 14px; border-top: 1px solid #e5e7eb; }
+    .doc-sum .ds-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+    .doc-sum .ds-row .k { color: #4b5563; }
+    .doc-sum .ds-row .v { font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+    .doc-sum .ds-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
+    .doc-sum .ds-item .q { font-weight: 700; white-space: nowrap; }
+    .doc-sum .ds-note { font-size: 14px; color: #4b5563; margin: 14px 0 0; }
+    .doc-sum a { color: #0b3d91; }
+  }
+  @media print { .doc-sum { display: none !important; } }
+  .as-paper .doc-sum { display: none !important; }
 </style>
 </head>
 <body>
@@ -88,7 +107,7 @@
     <div id="content"><p class="subtitle">Loading the purchase order...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=102"></script>
+  <script src="/js/supabase-client.js?v=103"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -184,8 +203,32 @@
           </div>
         </div>`;
 
+      // Phone: a plain summary card above the A4 sheet (the CSS shows it only under 840px; never in the PDF).
+      const sumRows = detailRows.filter(([k]) => k !== 'Reference');
+      const itemsHtml = lines.length ? lines.map((l) => {
+        const qty = Number(l.quantity) || 0;
+        return `<div class="ds-item"><span>${esc(l.description)}${showPrices ? `<br><small>${money(l.unit_cost)} each</small>` : ''}</span><span class="q">x ${esc(poQty(l.quantity))}${showPrices ? `<br>${money(qty * (Number(l.unit_cost) || 0))}` : ''}</span></div>`;
+      }).join('') : '<div class="ds-item">Items to be confirmed</div>';
+      const summaryHtml = isPrint ? '' : `
+        <div class="doc-sum">
+          <div class="ds-kicker">Purchase order</div>
+          <div class="ds-amount">${esc(po.po_number)}</div>
+          <div>Order date ${esc(dateText(orderDate))}${po.supplier_name ? `<br>For ${esc(po.supplier_name)}` : ''}</div>
+          ${sumRows.map(([k, v]) => `<div class="ds-row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}
+          <h3>Items</h3>
+          ${itemsHtml}
+          ${showPrices ? `
+          <div class="ds-row"><span class="k">Sub-total ex GST</span><span class="v">${money(subtotal)}</span></div>
+          <div class="ds-row"><span class="k">GST</span><span class="v">${money(gst)}</span></div>
+          <div class="ds-row"><span class="k">Total inc GST</span><span class="v">${money(total)}</span></div>` : ''}
+          ${po.supplier_notes ? `<h3>Notes</h3><div style="white-space:pre-wrap;">${esc(po.supplier_notes)}</div>` : ''}
+          <p style="margin:14px 0 0;">Please quote <b>${esc(po.po_number)}</b> on your invoice and delivery docket, and email invoices to <a href="${esc('mailto:' + INVOICES_EMAIL)}">${esc(INVOICES_EMAIL)}</a>.</p>
+          ${s.phone ? `<p style="margin:6px 0 0;">Questions: <a href="${esc('tel:' + String(s.phone).replace(/[^+\d]/g, ''))}">${esc(s.phone)}</a></p>` : ''}
+          <p class="ds-note">The full purchase order is below. Use Print / Save as PDF for a copy.</p>
+        </div>`;
+
       // ---- build the sheets, moving rows onto a new sheet whenever one fills up (as invoice.html) ----
-      content.innerHTML = '<div class="inv-sheets" id="inv-sheets"></div>';
+      content.innerHTML = summaryHtml + '<div class="inv-sheets" id="inv-sheets"></div>';
       const host = document.getElementById('inv-sheets');
       const sheets = [];
       const addSheet = () => {
