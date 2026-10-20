@@ -56,7 +56,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allMaterials = [];
@@ -172,6 +172,7 @@
 
     function openMaterialPanel(material) {
       const startWarehouseQty = Number(material ? (locationRows.find(r => r.material_id === material.id && r.location_type === 'warehouse')?.quantity || 0) : 0);
+      const vehicleQty = (v) => Number(material ? (locationRows.find(r => r.material_id === material.id && r.location_type === 'vehicle' && r.vehicle_id === v.id)?.quantity || 0) : 0);
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
@@ -203,6 +204,9 @@
               <input id="mat-qty" type="number" inputmode="decimal" step="1" value="${escapeHtml(startWarehouseQty)}" />
             </div>
           </div>
+          ${vehicleList.length ? `<div class="grid cols-3">${vehicleList.map(v => `<div><label>${escapeHtml(v.vehicle_name || v.rego)} qty</label><input class="mat-vqty" data-vehicle-id="${escapeHtml(v.id)}" data-start="${vehicleQty(v)}" type="number" inputmode="decimal" step="1" value="${vehicleQty(v)}" /></div>`).join('')}</div>` : ''}
+          <label>Why the count changed <span class="subtitle">(needed when you change a count; logged on the item)</span></label>
+          <input id="mat-count-reason" placeholder="e.g. stocktake, damaged, miscounted" />
           <label>Minimum quantity - flags for restocking below this</label>
           <input id="mat-minimum" type="number" inputmode="decimal" step="1" value="${escapeHtml(material?.minimum_quantity || 0)}" />
           <label>Notes</label>
@@ -229,8 +233,15 @@
         btn.textContent = 'Saving...';
         try {
         const quantityValue = parseFloat(overlay.querySelector('#mat-qty').value) || 0;
-        // only the Warehouse row, and only when the person changed it (vehicles are counted separately)
-        const warehouseChanged = quantityValue !== startWarehouseQty;
+        // counts: only the places the person changed, each through the logged server step
+        const countChanges = [];
+        if (quantityValue !== startWarehouseQty) countChanges.push({ loc: 'warehouse', vehicleId: null, qty: quantityValue });
+        overlay.querySelectorAll('.mat-vqty').forEach(inp => {
+          const q = parseFloat(inp.value) || 0;
+          if (q !== Number(inp.dataset.start)) countChanges.push({ loc: 'vehicle', vehicleId: inp.dataset.vehicleId, qty: q });
+        });
+        const countReason = overlay.querySelector('#mat-count-reason').value.trim();
+        if (countChanges.length && material && !countReason) { msg.innerHTML = `<div class="error-box">Say why the count changed.</div>`; return; }
         const fields = {
           name,
           category: overlay.querySelector('#mat-category').value.trim() || null,
@@ -240,16 +251,21 @@
           minimum_quantity: parseFloat(overlay.querySelector('#mat-minimum').value) || 0,
           notes: overlay.querySelector('#mat-notes').value.trim() || null,
         };
+        let materialId = material ? material.id : null;
         if (material) {
-          const { error } = await supabaseClient.from('materials').update(fields).eq('id', material.id);
+          const { data: upd, error } = await supabaseClient.from('materials').update(fields).eq('id', material.id).select('id');
           if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-          if (warehouseChanged) await setWarehouseStock(material.id, quantityValue);
-          await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
+          if (!upd || !upd.length) { msg.innerHTML = `<div class="error-box">Only Admin, Finance or Sales can change an item's details. Counts can still be corrected below.</div>`; }
+          else await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
         } else {
           const { data: newMat, error } = await supabaseClient.from('materials').insert(fields).select('id').single();
           if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-          if (warehouseChanged) await setWarehouseStock(newMat.id, quantityValue);
+          materialId = newMat.id;
           await logActivity('material', newMat.id, 'created', `Material "${name}" added`);
+        }
+        for (const c of countChanges) {
+          try { await setStockCount(materialId, c.loc, c.vehicleId, c.qty, material ? countReason : 'Added to Stock'); }
+          catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; return; }
         }
         overlay.remove();
         await loadMaterials();
@@ -455,11 +471,11 @@
           <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
             <div style="display:flex; justify-content:space-between;">
               <strong>${escapeHtml(po.suppliers?.name || po.supplier_name || 'Unknown supplier')}${po.po_number ? ' (' + escapeHtml(po.po_number) + ')' : ''}</strong>
-              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : escapeHtml(po.status)}</span>
+              ${renderPoBadges(po)}
             </div>
             <p class="subtitle" style="margin:4px 0 8px;">${escapeHtml(po.description)} - ${money(total)}</p>
             ${renderPoLineItemsReceivable(po, true)}
-            ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice</button>` : ''}
+            ${po.supplier_id && !po.closed_at ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice</button>` : ''}
           </div>`;
       }).join('');
 

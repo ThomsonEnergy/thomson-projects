@@ -58,14 +58,14 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let filter = 'approve', bills = [], statements = [], suppliers = [], missing = [];
     const esc = (s) => escapeHtml(s == null ? '' : String(s));
     const dateText = (iso) => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
     const supName = (id) => (suppliers.find(s => s.id === id) || {}).name || 'Unknown supplier';
-    const BAD = ['missing_bill', 'statement_duplicate', 'our_duplicate', 'amount_differs', 'price_higher', 'over_quantity', 'duplicate_number', 'po_total_exceeded'];
+    const BAD = ['missing_bill', 'statement_duplicate', 'our_duplicate', 'amount_differs', 'price_higher', 'over_quantity', 'duplicate_number', 'po_total_exceeded', 'no_po', 'not_on_po'];
 
     async function call(body) {
       const { data: { session } } = await supabaseClient.auth.getSession();
@@ -125,7 +125,7 @@
       if (b.file_path) actions += `<button type="button" class="secondary" data-file="${esc(b.file_path)}">Open bill</button>`;
       return `<div class="bc-item">
         <div class="bc-head"><span><strong>${esc(supName(b.supplier_id))}</strong> bill ${esc(b.bill_number || '(no number)')} ${status}</span><strong>${money(b.amount)}</strong></div>
-        <div class="bc-meta">${b.bill_date ? dateText(b.bill_date) + ' · ' : ''}${b.purchase_orders ? esc(b.purchase_orders.po_number) + (b.purchase_orders.received ? ' (received)' : ' (not received yet)') : 'No PO'}${b.resolved_note ? ' · ' + esc(b.resolved_note) : ''}</div>
+        <div class="bc-meta">${b.bill_date ? dateText(b.bill_date) + ' · ' : ''}${b.purchase_orders ? esc(b.purchase_orders.po_number) + (b.purchase_orders.closed_at ? ' (closed)' : b.purchase_orders.received ? ' (all received, not closed yet)' : ' (not received yet)') : 'No PO'}${b.approved_for_payment && b.pay_on ? ' · pay on ' + dateText(b.pay_on) : ''}${b.resolved_note ? ' · ' + esc(b.resolved_note) : ''}</div>
         ${issues.map(i => `<div class="bc-issue ${BAD.includes(i.kind) ? 'bad' : ''}">${esc(i.text)}</div>`).join('')}
         <div class="bc-actions">${actions}</div></div>`;
     }
@@ -157,7 +157,7 @@
       const counts = { approve: toApprove.length, problems: problems.length, statements: stIssues, missing: missing.length };
       document.querySelectorAll('#bc-filters button').forEach(b => { const base = b.textContent.replace(/ \(\d+\)$/, ''); b.textContent = counts[b.dataset.f] ? `${base} (${counts[b.dataset.f]})` : base; });
 
-      if (filter === 'approve') body.innerHTML = toApprove.length ? toApprove.map(b => billHtml(b, 'approve')).join('') : '<p class="subtitle">Nothing waiting. Bills that match their PO and are approved when the PO is received do not show here.</p>';
+      if (filter === 'approve') body.innerHTML = toApprove.length ? toApprove.map(b => billHtml(b, 'approve')).join('') : '<p class="subtitle">Nothing waiting. Bills that match their PO are approved when the PO is closed, so they do not show here.</p>';
       else if (filter === 'problems') body.innerHTML = problems.length ? problems.sort((a, b) => (a.check_status === 'no_po') - (b.check_status === 'no_po')).map(b => billHtml(b, 'problems')).join('') : '<p class="subtitle">No bills with problems.</p>';
       else if (filter === 'statements') body.innerHTML = statements.length ? statements.map(statementHtml).join('') : '<p class="subtitle">No statements yet. Emailed statements are picked up within the hour; you can also upload one on a supplier\'s page.</p>';
       else body.innerHTML = missing.length ? missing.map(s => `<div class="bc-item"><div class="bc-head"><strong>${esc(s.name)}</strong><span class="bc-chip bad">No statement for last month</span></div>
@@ -200,7 +200,7 @@
 
     async function load() {
       const [b, st, sup] = await Promise.all([
-        supabaseClient.from('supplier_bills').select('id, supplier_id, bill_number, bill_date, amount, paid, approved_for_payment, check_status, check_issues, query_sent_at, query_reply_at, resolved_note, file_path, purchase_orders(po_number, received)').order('bill_date', { ascending: false }).limit(1000),
+        supabaseClient.from('supplier_bills').select('id, supplier_id, bill_number, bill_date, amount, paid, approved_for_payment, check_status, check_issues, query_sent_at, query_reply_at, resolved_note, file_path, pay_on, purchase_orders(po_number, received, closed_at)').order('bill_date', { ascending: false }).limit(1000),
         supabaseClient.from('supplier_statements').select('id, supplier_id, statement_date, total_amount, file_path, status, lines, issues, our_unpaid, supplier_name_read, file_name, error, query_sent_at, query_reply_at, created_at').order('created_at', { ascending: false }).limit(100),
         supabaseClient.from('suppliers').select('id, name').order('name'),
       ]);

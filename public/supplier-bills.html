@@ -64,7 +64,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const FILTERS = {
@@ -230,7 +230,7 @@
       const [inbox, sup, pos] = await Promise.all([
         supabaseClient.from('supplier_bill_inbox').select('*').order('created_at', { ascending: false }).limit(300),
         supabaseClient.from('suppliers').select('id, name').order('name'),
-        supabaseClient.from('purchase_orders').select('id, po_number, description, supplier_id, status, projects(name, job_number, quote_number)').not('status', 'in', '(paid,invoiced)').order('created_at', { ascending: false }),
+        supabaseClient.from('purchase_orders').select('id, po_number, description, supplier_id, status, projects(name, job_number, quote_number)').is('closed_at', null).order('created_at', { ascending: false }),
       ]);
       if (inbox.error) { document.getElementById('sb-list').innerHTML = `<div class="error-box">${esc(inbox.error.message)}</div>`; return; }
       all = inbox.data || []; suppliers = sup.data || []; openPOs = pos.data || [];

@@ -1178,7 +1178,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     if (!res.ok) throw new Error('Could not load the photo');
     bitmap = await createImageBitmap(await res.blob());
   } catch (err) {
-    overlay.innerHTML = `<p style="color:#fca5a5;">${err.message}</p><button type="button" id="mk-err-close">Close</button>`;
+    overlay.innerHTML = `<p style="color:#fca5a5;">${escapeHtml(err.message)}</p><button type="button" id="mk-err-close">Close</button>`;
     overlay.querySelector('#mk-err-close').addEventListener('click', () => overlay.remove());
     return;
   }
@@ -4411,7 +4411,7 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
       overlay.remove();
       if (onScheduled) onScheduled(inspection);
     } catch (err) {
-      msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       confirmBtn.disabled = false;
       confirmBtn.textContent = 'Schedule';
     }
@@ -4508,7 +4508,7 @@ function openWarrantyJobPanel(originalProject, onCreated) {
       overlay.remove();
       if (onCreated) onCreated(project);
     } catch (err) {
-      panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      panelMsg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       confirmBtn.disabled = false;
       confirmBtn.textContent = 'Create warranty job';
     }
@@ -5257,7 +5257,7 @@ function wireUploadInvoiceButton(btnEl, msgEl) {
         msgEl.innerHTML = '';
         await resolveSupplierAndHandoff(data.extracted, 'bill', data.extracted, file);
       } catch (err) {
-        msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       }
     };
     input.click();
@@ -5345,7 +5345,7 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
       bpay_reference: extracted.bpay_reference || null,
     }).select('id').single();
     if (error) {
-      overlay.querySelector('.card').innerHTML = `<h2>Couldn't create the supplier</h2><div class="error-box">${error.message}</div><button type="button" class="secondary" id="rs-new-err-close">Close</button>`;
+      overlay.querySelector('.card').innerHTML = `<h2>Couldn't create the supplier</h2><div class="error-box">${escapeHtml(error.message)}</div><button type="button" class="secondary" id="rs-new-err-close">Close</button>`;
       overlay.querySelector('#rs-new-err-close').addEventListener('click', () => overlay.remove());
       return;
     }
@@ -5595,7 +5595,7 @@ function openUndoReceivePanel(lineItem, po, onComplete) {
       <label>Expected date (optional)</label>
       <input type="date" id="ur-eta" />
     </div>
-    <label>Note ${approved ? '(needed: this PO is approved for payment)' : '(needed if a bill on it is approved for payment)'}</label>
+    <label>Note ${po.closed_at ? '(needed: this PO is closed, undoing reopens it - Admin or Finance only)' : approved ? '(needed: this PO is approved for payment)' : '(needed if a bill on it is approved for payment)'}</label>
     <textarea id="ur-note" style="min-height:60px;" placeholder="Why it isn't received"></textarea>
     <div style="margin-top:14px;">
       <button id="ur-confirm-btn">Undo received</button>
@@ -5759,10 +5759,20 @@ function poShowPricesHtml(prefix) {
   return `<label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:10px;"><input type="checkbox" id="${prefix}-show-prices" style="width:auto;" /> Show prices on the PO sent to the supplier</label>`;
 }
 
-// Open / Closed and the rest of a PO's buttons. role decides Edit lines (pricing) and Reopen (Admin/Finance).
+// A PO's state, kept by the database from its lines (migration 20261108000000):
+// Ordered (nothing in yet), Part received, All received (close it to approve its bills), Closed (approved).
+function poStatusLabel(po) {
+  if (po.closed_at) return 'Closed';
+  if (po.status === 'received') return 'All received';
+  if (po.status === 'part_received') return 'Part received';
+  return 'Ordered';
+}
+
+// Status badge plus the Stock PO badge. role decides Edit lines (pricing) and Reopen (Admin/Finance) below.
 function renderPoBadges(po) {
+  const cls = po.closed_at ? 'accepted' : po.status === 'received' ? 'sent' : 'draft';
   const stock = po.stock_source ? `<span class="badge draft" style="margin-left:6px;">Stock PO, from ${escapeHtml(po.supplier_name || 'Warehouse')}</span>` : '';
-  return `<span class="badge ${po.closed_at ? 'accepted' : 'draft'}" style="margin-left:6px;">${po.closed_at ? 'Closed' : 'Open'}</span>${stock}`;
+  return `<span class="badge ${cls}" style="margin-left:6px;">${poStatusLabel(po)}</span>${stock}`;
 }
 
 // The two notes on a PO: for the supplier (printed on po.html) and internal (staff only).
@@ -5823,9 +5833,45 @@ function renderPoControls(po, role) {
     !po.stock_source ? b('po-view-pdf-btn', 'View PO') : '',
     b('po-notes-btn', po.supplier_notes || po.internal_notes ? 'Edit notes' : '+ Notes'),
     !po.stock_source ? b('po-prices-btn', `Prices on PO: ${po.show_prices ? 'On' : 'Off'}`) : '',
-    open ? b('po-close-btn', 'Close PO') : '',
+    open ? (po.status === 'received'
+      ? `<button type="button" class="btn-sm po-close-btn" data-po-id="${po.id}" style="background:var(--green); border-color:var(--green); color:#fff;">All received: close and approve</button>`
+      : b('po-close-btn', 'Close PO')) : '',
     !open && isFinanceRole(role) ? b('po-reopen-btn', 'Reopen') : '',
   ].join('');
+}
+
+// Close a PO (the approval step). Every line must be received, back ordered or moved off; back ordered
+// lines are the closer's call: wait, or close now and cancel them off the PO. The server checks the same.
+async function closePurchaseOrder(po, onComplete) {
+  const lines = po.purchase_order_line_items || [];
+  const lineText = (li) => `${li.description} x${poQty(li.quantity)}`;
+  const notIn = lines.filter(li => !li.received && !li.is_backordered);
+  if (notIn.length) {
+    alert(`Not received yet: ${notIn.map(lineText).join(', ')}. Receive it, mark it back ordered, or move it off the PO before closing.`);
+    return;
+  }
+  const backordered = lines.filter(li => !li.received && li.is_backordered);
+  const choice = await new Promise(resolve => {
+    const overlay = openModal(`
+      <h2>Close PO ${escapeHtml(po.po_number || '')}</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Closing approves it for payment, with its bills that match it. Nothing more can be added or received unless Admin or Finance reopen it.</p>
+      ${backordered.length ? `<div class="error-box" style="margin-bottom:10px;">Back ordered: ${escapeHtml(backordered.map(lineText).join(', '))}.<br />Wait for it, or close now and cancel it off the PO.</div>` : ''}
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        ${backordered.length
+          ? `<button type="button" id="cl-cancel-bo">Close now, cancel the back order${backordered.length === 1 ? '' : 's'}</button>
+             <button type="button" class="secondary" id="cl-wait">Wait for it</button>`
+          : `<button type="button" id="cl-close">Close and approve</button>
+             <button type="button" class="secondary" id="cl-wait">Not yet</button>`}
+      </div>`, { maxWidth: 420 });
+    overlay.querySelector('#cl-wait').addEventListener('click', () => { overlay.remove(); resolve(null); });
+    overlay.querySelector('#cl-close')?.addEventListener('click', () => { overlay.remove(); resolve({ cancelBackorders: false }); });
+    overlay.querySelector('#cl-cancel-bo')?.addEventListener('click', () => { overlay.remove(); resolve({ cancelBackorders: true }); });
+  });
+  if (!choice) return;
+  const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: true, p_note: null, p_cancel_backorders: choice.cancelBackorders });
+  if (error) { alert(friendlyError(error)); return; }
+  showToast(`PO ${po.po_number || ''} closed and approved for payment`);
+  if (onComplete) await onComplete();
 }
 
 function wirePoControls(containerEl, allPos, onComplete) {
@@ -5842,18 +5888,13 @@ function wirePoControls(containerEl, allPos, onComplete) {
   });
   wire('.po-email-btn', (po, btn) => emailPurchaseOrder(po, btn));
   wire('.po-view-pdf-btn', (po) => window.open(`/po.html?token=${po.po_token}`, '_blank'));
-  wire('.po-close-btn', async (po) => {
-    if (!confirm(`Close PO ${po.po_number || ''}? Nothing more can be added, and it is approved for payment (with any bills on it that match it).`)) return;
-    const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: true, p_note: null });
-    if (error) { alert(error.message); return; }
-    if (onComplete) await onComplete();
-  });
+  wire('.po-close-btn', (po) => closePurchaseOrder(po, onComplete));
   wire('.po-reopen-btn', async (po) => {
     const note = prompt(`Why is PO ${po.po_number || ''} being reopened?`);
     if (note === null) return;
     if (!note.trim()) { alert('Add a note saying why.'); return; }
-    const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: false, p_note: note.trim() });
-    if (error) { alert(error.message); return; }
+    const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: false, p_note: note.trim(), p_cancel_backorders: false });
+    if (error) { alert(friendlyError(error)); return; }
     if (onComplete) await onComplete();
   });
 }
@@ -6394,7 +6435,7 @@ async function renderActivityLog(entityType, entityId, containerId) {
     .eq('entity_id', entityId)
     .order('created_at', { ascending: false });
 
-  if (error) { containerEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+  if (error) { containerEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
   if (!entries.length) { containerEl.innerHTML = `<p class="subtitle">No activity logged yet.</p>`; return; }
 
   containerEl.innerHTML = entries.map(e => activityEntryHtml(e.description, e)).join('');
@@ -6492,7 +6533,7 @@ async function renderJobActivityLog(projectId, containerId, titleId) {
     .eq('entity_type', 'project')
     .eq('entity_id', projectId)
     .order('created_at', { ascending: false });
-  if (error) { containerEl.innerHTML = `<div class="error-box">${error.message}</div>`; return { setTab() {} }; }
+  if (error) { containerEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return { setTab() {} }; }
   entries = data || [];
   draw();
   return { setTab(next) { tab = next; draw(); } };
@@ -6574,40 +6615,16 @@ async function deleteProject(projectId) {
   if (error) throw error;
 }
 
-// The two correct ways to change a material's Warehouse stock - used
-// everywhere Warehouse quantity changes, so material_stock_by_location
-// (and the trigger-maintained materials.quantity_on_hand total) never
-// drifts out of sync the way direct writes to quantity_on_hand did.
-
-// Adds (or subtracts, if negative) a quantity - for bills arriving,
-// materials being drawn for a job, etc. Never goes below zero.
-async function adjustWarehouseStock(materialId, quantityDelta) {
-  const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', materialId).eq('location_type', 'warehouse').maybeSingle();
-  if (whRow) {
-    await supabaseClient.from('material_stock_by_location').update({
-      quantity: Math.max(0, Number(whRow.quantity) + quantityDelta), updated_at: new Date().toISOString(),
-    }).eq('id', whRow.id);
-  } else {
-    await supabaseClient.from('material_stock_by_location').insert({
-      material_id: materialId, location_type: 'warehouse', quantity: Math.max(0, quantityDelta),
-    });
-  }
-}
-
-// Sets Warehouse quantity to an exact value - for manual admin edits
-// where the person is stating "we have X of these", not adding to
-// whatever's already recorded.
-async function setWarehouseStock(materialId, absoluteQuantity) {
-  const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('id').eq('material_id', materialId).eq('location_type', 'warehouse').maybeSingle();
-  if (whRow) {
-    await supabaseClient.from('material_stock_by_location').update({
-      quantity: Math.max(0, absoluteQuantity), updated_at: new Date().toISOString(),
-    }).eq('id', whRow.id);
-  } else {
-    await supabaseClient.from('material_stock_by_location').insert({
-      material_id: materialId, location_type: 'warehouse', quantity: Math.max(0, absoluteQuantity),
-    });
-  }
+// The only way a count is changed by hand: one server step (stock_set_count), locked and logged on
+// the item with who and why. Receiving, moving and stock pulls change counts through the po_ steps.
+// locationType 'warehouse' or 'vehicle' (with the vehicle id). Returns the new count.
+async function setStockCount(materialId, locationType, vehicleId, newQuantity, reason) {
+  const { data, error } = await supabaseClient.rpc('stock_set_count', {
+    p_material_id: materialId, p_loc: locationType, p_vehicle_id: vehicleId || null,
+    p_new: Number(newQuantity) || 0, p_reason: (reason || '').trim() || null,
+  });
+  if (error) throw error;
+  return data;
 }
 
 // Consistent number-first formatting for jobs and quotes, used

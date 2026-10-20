@@ -38,7 +38,7 @@
 
     <div class="grid cols-3">
       <div class="stat"><div class="label">Pending (not received)</div><div class="value" id="stat-pending">-</div></div>
-      <div class="stat"><div class="label">Needs approval</div><div class="value" id="stat-needs-approval" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:4px;" title="Click to see the list">-</div></div>
+      <div class="stat"><div class="label">Ready to close</div><div class="value" id="stat-needs-approval" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:4px;" title="Every line received: close them to approve their bills">-</div></div>
       <div class="stat"><div class="label">Received this month</div><div class="value" id="stat-received-month">-</div></div>
     </div>
 
@@ -48,7 +48,7 @@
         <select id="po-filter">
           <option value="all">All</option>
           <option value="pending">Pending only</option>
-          <option value="needs_approval">Needs approval</option>
+          <option value="needs_approval">Ready to close</option>
           <option value="received">Received only</option>
           <option value="open">Open</option>
           <option value="closed">Closed</option>
@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=104"></script>
+  <script src="/js/supabase-client.js?v=105"></script>
   <script src="/js/email-compose.js?v=7"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -94,9 +94,9 @@
     function renderStats() {
       const pending = allPos.filter(po => !po.received);
       const pendingTotal = pending.reduce((s, po) => s + poTotal(po), 0);
-      const needsApproval = pending.filter(po => (po.purchase_order_line_items || []).some(li => !li.received)).length;
-      const now = new Date();
-      const receivedThisMonth = allPos.filter(po => po.received && po.received_at && new Date(po.received_at).getMonth() === now.getMonth() && new Date(po.received_at).getFullYear() === now.getFullYear());
+      const needsApproval = allPos.filter(po => !po.closed_at && po.status === 'received').length;
+      const thisMonth = sydneyDateKey(new Date()).slice(0, 7); // Sydney month, not the browser's
+      const receivedThisMonth = allPos.filter(po => po.received && po.received_at && sydneyDateKey(new Date(po.received_at)).startsWith(thisMonth));
       const receivedTotal = receivedThisMonth.reduce((s, po) => s + poTotal(po), 0);
 
       document.getElementById('stat-pending').textContent = money(pendingTotal);
@@ -141,8 +141,7 @@
               ${renderPoBadges(po)}
             </div>
             <div>
-              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : escapeHtml(po.status)}</span>
-              <span style="font-weight:600; margin-left:8px;">${money(poTotal(po))}</span>
+              <span style="font-weight:600;">${money(poTotal(po))}</span>
             </div>
           </div>
           <p class="subtitle" style="margin:6px 0;">${escapeHtml(po.description)}</p>
@@ -150,7 +149,7 @@
           ${renderPoNotes(po)}
           <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
             ${renderPoControls(po, myRole)}
-            ${po.supplier_id && !po.received ? `<button type="button" class="secondary btn-sm upload-invoice-btn" data-po-id="${po.id}">Upload invoice for this PO</button>` : ''}
+            ${po.supplier_id && !po.closed_at ? `<button type="button" class="secondary btn-sm upload-invoice-btn" data-po-id="${po.id}">Upload invoice for this PO</button>` : ''}
             <button type="button" class="secondary btn-sm view-log-btn" data-po-id="${po.id}">View log</button>
           </div>
           <div id="log-${po.id}" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);"></div>
