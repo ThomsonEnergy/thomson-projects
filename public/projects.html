@@ -133,7 +133,7 @@
       });
 
       // The list paints as soon as the jobs land; costs fill in after.
-      costsLoaded = false;
+      costsLoaded = !(projects && projects.length);
       allRows = buildRows({}, {}, {});
       renderProjects();
       if (!projects || !projects.length) return;
@@ -237,7 +237,7 @@
           withReasons.push({ project, reasons });
         }
 
-        if (!confirm(`Delete ${withReasons.length} project${withReasons.length === 1 ? '' : 's'} permanently? This can't be undone.\n\n${withReasons.map(w => `${projectRef(w.project)}${w.reasons.length ? ' (' + w.reasons.join(', ') + ')' : ''}`).join('\n')}`)) {
+        if (!confirm(`Delete ${withReasons.length} job${withReasons.length === 1 ? '' : 's'} permanently? This can't be undone.\n\n${withReasons.map(w => `${projectRef(w.project)}${w.reasons.length ? ' (' + w.reasons.join(', ') + ')' : ''}`).join('\n')}`)) {
           deleteBtn.disabled = false;
           refreshDeleteBtn();
           return;
@@ -260,10 +260,10 @@
             await deleteProject(project.id);
           }
           const deletedCount = withReasons.length - skipped.length;
-          msg.innerHTML = `<div class="success-box">Deleted ${deletedCount} project${deletedCount === 1 ? '' : 's'}.${skipped.length ? ` Skipped: ${skipped.map(p => projectRef(p)).join(', ')}.` : ''}</div>`;
+          msg.innerHTML = `<div class="success-box">Deleted ${deletedCount} job${deletedCount === 1 ? '' : 's'}.${skipped.length ? ` Skipped: ${escapeHtml(skipped.map(p => projectRef(p)).join(', '))}.` : ''}</div>`;
           await loadProjects();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           deleteBtn.disabled = false;
           refreshDeleteBtn();
         }
