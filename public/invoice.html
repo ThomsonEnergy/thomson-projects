@@ -96,6 +96,25 @@
   .as-paper .inv-sheet { margin: 0; box-shadow: none; }
   .as-paper .inv-pay-btn { display: none !important; }
   .as-paper .inv-paylink { display: inline-block !important; }
+  /* Phone: a plain full-size summary card above the zoomed A4 sheet (never printed, never in the PDF).
+     The 8px wrap gutter keeps the zoomed sheet (window width minus 16px) on screen. */
+  .doc-sum { display: none; }
+  @media (max-width: 839px) {
+    .wrap { padding-left: 8px !important; padding-right: 8px !important; }
+    .doc-sum { display: block; background: #fff; color: #0a0a0a; border-radius: 12px; padding: 18px 16px; margin: 0 0 18px; box-shadow: 0 4px 18px rgba(15,23,42,0.12); font-size: 16px; line-height: 1.45; }
+    .doc-sum .ds-kicker { font-size: 14px; font-weight: 600; color: #4b5563; }
+    .doc-sum .ds-amount { font-size: 34px; font-weight: 700; margin: 2px 0; }
+    .doc-sum .ds-due.overdue { color: #b42318; font-weight: 700; }
+    .doc-sum .ds-pay { display: flex; justify-content: center; width: 100%; min-height: 52px; margin-top: 14px; background: #0b3d91; color: #fff; font-size: 17px; font-weight: 700; border-radius: 10px; }
+    .doc-sum h3 { font-size: 16px; margin: 16px 0 6px; padding-top: 14px; border-top: 1px solid #e5e7eb; }
+    .doc-sum .ds-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+    .doc-sum .ds-row .k { color: #4b5563; }
+    .doc-sum .ds-row .v { font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+    .doc-sum .ds-note { font-size: 14px; color: #4b5563; margin: 14px 0 0; }
+    .doc-sum a { color: #0b3d91; }
+  }
+  @media print { .doc-sum { display: none !important; } }
+  .as-paper .doc-sum { display: none !important; }
 </style>
 </head>
 <body>
@@ -295,8 +314,34 @@
           </div>
         </div>`;
 
+      // Phone: a plain summary card above the A4 sheet (the CSS shows it only under 840px; never in the PDF).
+      const invNo = String(inv.invoice_number).replace(/^INV-?/i, '');
+      const dueText = isPaid ? 'Paid in full, thank you' : (isOverdue ? 'Overdue, was due ' + dateText(dueDate) : (dueDate ? 'Please pay by ' + dateText(dueDate) : 'Please pay on receipt'));
+      const bankRows = [
+        s.bank_name ? ['Bank', s.bank_name] : null,
+        s.bank_account_name ? ['Account name', s.bank_account_name] : null,
+        s.bank_bsb ? ['BSB', s.bank_bsb] : null,
+        s.bank_account_number ? ['Account no.', s.bank_account_number] : null,
+        ['Reference', inv.invoice_number],
+      ].filter(Boolean);
+      const summaryHtml = isPrint ? '' : `
+        <div class="doc-sum">
+          <div class="ds-kicker">Tax invoice ${esc(invNo)}${isDeposit ? ' &middot; Deposit' : ''}</div>
+          <div class="ds-amount">${money(balanceDue)}</div>
+          <div class="ds-due${isOverdue ? ' overdue' : ''}">${esc(dueText)}</div>
+          ${isPaid ? '' : `
+          <button type="button" id="sum-pay-btn" class="ds-pay" data-token="${esc(token)}">Pay online now</button>
+          <div id="sum-pay-msg"></div>
+          <h3>Or pay by bank transfer</h3>
+          ${bankRows.map(([k, v]) => `<div class="ds-row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}
+          ${s.payment_details_text ? `<div style="white-space:pre-wrap; margin-top:6px;">${esc(s.payment_details_text)}</div>` : ''}
+          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? '<div>Contact us for payment details.</div>' : ''}
+          ${s.phone ? `<div style="margin-top:8px;">Card over the phone: <a href="${esc('tel:' + String(s.phone).replace(/[^+\d]/g, ''))}">${esc(s.phone)}</a></div>` : ''}`}
+          <p class="ds-note">The full invoice is below. Use Print / Save as PDF for a copy.</p>
+        </div>`;
+
       // ---- build the sheets, moving rows onto a new sheet whenever one fills up ----
-      content.innerHTML = '<div class="inv-sheets" id="inv-sheets"></div>';
+      content.innerHTML = summaryHtml + '<div class="inv-sheets" id="inv-sheets"></div>';
       const host = document.getElementById('inv-sheets');
       const sheets = [];
       const addSheet = () => {
@@ -353,31 +398,33 @@
       // a phone is narrower than a sheet: shrink the sheets to fit rather than reflowing them
       if (!isPrint && window.innerWidth < 840) host.style.zoom = String(Math.max(0.3, (window.innerWidth - 16) / 794));
 
+      // Pay online: the sheet's button and the phone summary card's button start the same payment.
       const payBtn = document.getElementById('pay-online-btn');
-      // opened from the "Pay online now" link in the PDF: go straight to the card payment
-      if (payBtn && !isPrint && new URLSearchParams(window.location.search).get('pay') === '1') setTimeout(() => payBtn.click(), 300);
-      if (payBtn) {
-        payBtn.addEventListener('click', async () => {
-          const msgEl = document.getElementById('pay-online-msg');
-          payBtn.disabled = true;
-          payBtn.textContent = 'Preparing secure payment...';
-          msgEl.innerHTML = '';
-          try {
-            const res = await fetch('/.netlify/functions/get-or-create-payment-link', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: payBtn.dataset.token }),
-            });
-            const result = await res.json();
-            if (!res.ok || !result.ok) throw new Error(result.error || 'Could not start payment');
-            window.location.href = result.url;
-          } catch (err) {
-            msgEl.innerHTML = `<p style="color:#c0392b; margin:6px 0 0;">${esc(err.message)}</p>`;
-            payBtn.disabled = false;
-            payBtn.textContent = 'Pay online now';
-          }
-        });
+      const sumPayBtn = document.getElementById('sum-pay-btn');
+      const payButtons = [payBtn, sumPayBtn].filter(Boolean);
+      async function startPayment(btn, msgEl) {
+        payButtons.forEach((b) => { b.disabled = true; });
+        btn.textContent = 'Preparing secure payment...';
+        msgEl.innerHTML = '';
+        try {
+          const res = await fetch('/.netlify/functions/get-or-create-payment-link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: btn.dataset.token }),
+          });
+          const result = await res.json();
+          if (!res.ok || !result.ok) throw new Error(result.error || 'Could not start payment');
+          window.location.href = result.url;
+        } catch (err) {
+          msgEl.innerHTML = `<p style="color:#c0392b; margin:6px 0 0;">${esc(err.message)}</p>`;
+          payButtons.forEach((b) => { b.disabled = false; b.textContent = 'Pay online now'; });
+        }
       }
+      if (payBtn) payBtn.addEventListener('click', () => startPayment(payBtn, document.getElementById('pay-online-msg')));
+      if (sumPayBtn) sumPayBtn.addEventListener('click', () => startPayment(sumPayBtn, document.getElementById('sum-pay-msg')));
+      // opened from the "Pay online now" link in the PDF or email: go straight to the card payment
+      const autoPayBtn = (sumPayBtn && window.innerWidth < 840) ? sumPayBtn : payBtn;
+      if (autoPayBtn && !isPrint && new URLSearchParams(window.location.search).get('pay') === '1') setTimeout(() => autoPayBtn.click(), 300);
     }
 
     load().then(async () => {
