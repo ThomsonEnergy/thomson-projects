@@ -240,6 +240,28 @@
 
     let editMode = false;
     let showLineItems = false;
+    // Item 55: unsaved quote / stage edits are protected. Cancel asks only when
+    // something changed; closing the tab, a menu link or Back (iPhone swipe) asks too.
+    let editDirty = false;
+    let editProject = null;
+    const EDIT_LEAVE_MSG = 'You have unsaved changes. Leave without saving?';
+    function endEditSession() { editDirty = false; if (history.state && history.state.teEdit) history.back(); }
+    window.addEventListener('beforeunload', (e) => { if (editMode && editDirty) { e.preventDefault(); e.returnValue = ''; } });
+    window.addEventListener('popstate', () => {
+      if (!editMode) return;
+      if (editDirty && !confirm(EDIT_LEAVE_MSG)) { history.pushState({ teEdit: true }, '', location.href); return; }
+      editMode = false;
+      editDirty = false;
+      render(editProject, true);
+    });
+    document.addEventListener('click', (e) => {
+      if (!editMode || !editDirty) return;
+      const a = e.target.closest('a[href]');
+      if (!a || a.target === '_blank') return;
+      const href = a.getAttribute('href') || '';
+      if (href.startsWith('#') || href.startsWith('tel:') || href.startsWith('mailto:')) return;
+      if (!confirm(EDIT_LEAVE_MSG)) { e.preventDefault(); e.stopPropagation(); } else editDirty = false;
+    }, true);
     let selectedDocFolder = 'All';
     let RATE_TIERS = [];
     let companySettings = {};
@@ -871,6 +893,8 @@
 
     async function enterEditMode(project) {
       editMode = true;
+      editDirty = false;
+      editProject = project;
       try {
         if (!RATE_TIERS.length) {
           const { data: tiersData } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
@@ -882,6 +906,8 @@
           companySettings = settingsRow || {};
         }
         render(project, true);
+        // One history entry for the editing session, so Back leaves the editor, not the page.
+        if (!(history.state && history.state.teEdit)) history.pushState({ teEdit: true }, '', location.href);
       } catch (err) {
         // Was previously a silent no-op on failure - the click looked like
         // it did nothing at all, with the real error only visible in the
@@ -898,6 +924,17 @@
       // the Details tab (client/template/SOW/deposit/Pylon/T&Cs) stays
       // read-only, so all of that wiring below is quote-edit only.
       const isQuoteEdit = !project.job_number;
+
+      // Item 55: any typed change, select change, file pick or button press in the
+      // editor counts as a change. .job-tab-main is rebuilt by every render, so
+      // these listeners never stack.
+      const editArea = document.querySelector('.job-tab-main');
+      if (editArea) {
+        const markDirty = () => { editDirty = true; };
+        editArea.addEventListener('input', markDirty);
+        editArea.addEventListener('change', markDirty);
+        editArea.addEventListener('click', (e) => { if (e.target.closest('button, .template-option')) markDirty(); });
+      }
 
       try {
       if (isQuoteEdit) {
@@ -1110,7 +1147,7 @@
 
       document.getElementById('add-row').addEventListener('click', () => addRow());
       document.getElementById('save-edit-btn').addEventListener('click', () => saveEdits(project));
-      document.getElementById('cancel-edit-btn').addEventListener('click', () => { editMode = false; render(project, true); });
+      document.getElementById('cancel-edit-btn').addEventListener('click', () => { if (editDirty && !confirm('Discard your unsaved changes?')) return; editMode = false; endEditSession(); render(project, true); });
 
       if (isQuoteEdit) {
         templateAnswers = project.template_answers || {};
@@ -1535,6 +1572,7 @@
 
         autoGenerateQuotePdf(project);
         editMode = false;
+        endEditSession();
         const refreshed = await loadProject();
         const myRole = await getMyRole();
         if (refreshed) render(refreshed, isPricingRole(myRole));
@@ -3017,9 +3055,28 @@
       const overallBudgetPercent = project.labour_budget_percent ?? (labourSellTotal > 0 ? Math.round((actualLabourTotal / labourSellTotal) * 100) : 0);
       const overallIsOver = overallBudgetPercent > 100;
 
+      // Item 32: one list of job tabs. Field staff (no pricing) get Summary, Site
+      // Photos, Documents and Feed first; office order is unchanged.
+      const tabDefs = [
+        { panel: 'summary', label: 'Summary', show: true },
+        { panel: 'costcentres', label: 'Cost Centres', show: true },
+        { panel: 'pos', label: 'Purchase Orders', show: !!project.job_number && !editMode },
+        { panel: 'variations', label: 'Variations', show: !!project.job_number && !editMode },
+        { panel: 'invoices', label: 'Invoices', show: !!project.job_number && !editMode && pricingVisible },
+        { panel: 'stcs', label: 'STCs', show: !!project.job_number && !editMode && pricingVisible },
+        { panel: 'details', label: 'Details', show: true },
+        { panel: 'schedule', label: 'Schedule', show: !editMode },
+        { panel: 'feed', label: 'Feed', show: !editMode },
+        { panel: 'emails', label: 'Emails', show: !editMode },
+        { panel: 'documents', label: 'Documents', show: !editMode },
+        { panel: 'photos', label: 'Site Photos', show: !editMode },
+      ];
+      const FIELD_TABS_FIRST = ['summary', 'photos', 'documents', 'feed'];
+      const tabsInOrder = pricingVisible ? tabDefs : [...FIELD_TABS_FIRST.map(p => tabDefs.find(d => d.panel === p)), ...tabDefs.filter(d => !FIELD_TABS_FIRST.includes(d.panel))];
+
       content.innerHTML = `
         <h1>${escapeHtml(project.name)}</h1>
-        <p class="subtitle">${escapeHtml(project.client_name)} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${numberLine ? ' &middot; ' + numberLine : ''}${contactLine ? '<br>' + contactLine : ''}</p>
+        <p class="subtitle">${escapeHtml(project.client_name)} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${project.job_number && project.pipeline_stage ? ` <span class="badge draft" title="Pipeline stage">${escapeHtml(pipelineStageLabel(project.pipeline_stage))}</span>` : ''}${numberLine ? ' &middot; ' + numberLine : ''}${contactLine ? '<br>' + contactLine : ''}</p>
         ${isFrozenQuote && project.approved_at ? `<p class="subtitle" style="margin-top:2px;">Approved ${new Date(project.approved_at).toLocaleDateString('en-AU')}${project.approval_note ? ' - ' + escapeHtml(project.approval_note) : ' - approved online by the client'}${project.approval_email_thread_id ? ` &middot; <a class="link-quiet" href="/inbox.html?thread=${project.approval_email_thread_id}">View the email</a>` : ''}</p>` : ''}
         ${!project.job_number && project.status === 'declined' ? `<div class="error-box" style="margin:6px 0 12px;">${approvalProofHtml(project)}${pricingVisible ? (project.expired ? ' <button type="button" class="secondary vu-extend" data-key="quote" style="font-size:12px; padding:4px 10px; margin-left:6px;">Extend...</button>' : ' <button type="button" class="secondary" id="quote-reopen-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Reopen quote</button>') : ''}</div>` : ''}
         ${!project.job_number && project.status === 'sent' ? `<div id="quote-valid-until">${validUntilHtml(project, 'quote', pricingVisible)}</div>` : ''}
@@ -3047,18 +3104,7 @@
           <div id="job-search-results"></div>
         </div>` : ''}
         <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
-          <button class="settings-tab active" data-panel="summary">Summary</button>
-          <button class="settings-tab" data-panel="costcentres">Cost Centres</button>
-          ${project.job_number && !editMode ? `<button class="settings-tab" data-panel="pos">Purchase Orders</button>` : ''}
-          ${project.job_number && !editMode ? `<button class="settings-tab" data-panel="variations">Variations</button>` : ''}
-          ${project.job_number && !editMode && pricingVisible ? `<button class="settings-tab" data-panel="invoices">Invoices</button>` : ''}
-          ${project.job_number && !editMode && pricingVisible ? `<button class="settings-tab" data-panel="stcs">STCs</button>` : ''}
-          <button class="settings-tab" data-panel="details">Details</button>
-          ${!editMode ? `<button class="settings-tab" data-panel="schedule">Schedule</button>` : ''}
-          ${!editMode ? `<button class="settings-tab" data-panel="feed">Feed</button>` : ''}
-          ${!editMode ? `<button class="settings-tab" data-panel="emails">Emails</button>` : ''}
-          ${!editMode ? `<button class="settings-tab" data-panel="documents">Documents</button>` : ''}
-          ${!editMode ? `<button class="settings-tab" data-panel="photos">Site Photos</button>` : ''}
+          ${tabsInOrder.filter(d => d.show).map(d => `<button class="settings-tab${d.panel === 'summary' ? ' active' : ''}" data-panel="${d.panel}">${d.label}</button>`).join('')}
         </div>
 
         <div class="job-tab-layout">
@@ -3066,6 +3112,15 @@
 
             <div class="settings-panel active${!editMode ? ' job-card-grid' : ''}" id="panel-summary">
               ${!editMode ? '<div id="clock-here-card"></div>' : ''}
+              ${!editMode ? `
+              <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                  <h2 style="margin:0;">Tasks</h2>
+                  <button type="button" id="add-task-btn" class="secondary">+ Add task</button>
+                </div>
+                <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
+              </div>
+              ` : ''}
               ${!editMode && (project.notes || (TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length)) ? `
               <div class="card">
                 ${project.notes ? `
@@ -3224,16 +3279,6 @@
               </div>
               ` : ''}
 
-              ${!editMode ? `
-              <div class="card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                  <h2 style="margin:0;">Tasks</h2>
-                  <button type="button" id="add-task-btn" class="secondary">+ Add task</button>
-                </div>
-                <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
-              </div>
-              ` : ''}
-
               ${pricingVisible ? `
                 <div class="grid ${project.job_number ? 'cols-2' : ''}">
                   <div class="card">
@@ -3314,8 +3359,8 @@
                           <td class="num" data-label="Invoiced">${moneyOrHidden(c.invoiced_amount)}</td>
                         ` : ''}
                       </tr>
-                      ${showLineItems ? (c.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order).map(li => `
-                        <tr class="li-detail-row" style="background:var(--surface-2);">
+                      ${(c.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order).map(li => `
+                        <tr class="li-detail-row" style="background:var(--surface-2);${showLineItems ? '' : ' display:none;'}">
                           <td data-label="#"></td>
                           <td data-label="Stage" style="padding-left:24px; font-size:13px; color:var(--muted);">&#8627; ${escapeHtml(li.description)}${li.item_type === 'labour' ? ` (${li.quantity} hrs)` : ` (x${li.quantity})`}</td>
                           ${pricingVisible ? `
@@ -3324,7 +3369,7 @@
                             <td class="num" data-label="Materials"></td>
                             <td class="num" data-label="Invoiced"></td>
                           ` : ''}
-                        </tr>`).join('') : ''}`).join('')}
+                        </tr>`).join('')}`).join('')}
                   </tbody>
                 </table>
               </div>
@@ -3608,6 +3653,7 @@
                 <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:400;">
                   <input type="checkbox" id="proj-needs-visit" style="width:auto;" ${project.needs_site_visit ? 'checked' : ''} /> Needs a site visit
                 </label>
+                <div id="proj-needs-visit-msg"></div>
                 <div id="proj-inspection-area" style="margin-top:10px;"></div>
               </div>
 
@@ -3643,7 +3689,7 @@
                   <button type="button" class="secondary" id="generate-quote-pdf-btn" style="${project.quote_pdf_path ? 'font-size:12px; padding:6px 10px;' : ''}">${project.quote_pdf_path ? 'Regenerate' : 'Generate PDF'}</button>
                   ${project.quote_pdf_generated_at ? `<span class="subtitle" style="font-size:11px;">Generated ${new Date(project.quote_pdf_generated_at).toLocaleString('en-AU')}</span>` : ''}
                 </div>
-                <div id="quote-pdf-msg">${project.quote_pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${project.quote_pdf_error}</div>` : ''}</div>
+                <div id="quote-pdf-msg">${project.quote_pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${escapeHtml(project.quote_pdf_error)}</div>` : ''}</div>
                 ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * (project.deposit_percent / 100))}) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
                 ${project.proposal_template === 'solar' && project.pylon_link ? `
                   <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
@@ -3726,20 +3772,35 @@
         </div>
       `;
 
-      document.querySelectorAll('#job-tabs .settings-tab').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('#job-tabs .settings-tab').forEach(b => b.classList.remove('active'));
-          document.querySelectorAll('.job-tab-main .settings-panel').forEach(p => p.classList.remove('active'));
-          btn.classList.add('active');
-          document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
-          jobActivityLog.then(log => log.setTab(btn.dataset.panel));
-        });
-      });
+      // Item 32: each tab has its own address (?tab=photos and so on), so a refresh,
+      // a shared link or a notification lands on it. replaceState, so Back still leaves the job.
+      const tabStrip = document.getElementById('job-tabs');
+      function showTab(btn) {
+        const panel = btn.dataset.panel;
+        tabStrip.querySelectorAll('.settings-tab').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('.job-tab-main .settings-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + panel));
+        try {
+          const url = new URL(location.href);
+          if (panel === 'summary') url.searchParams.delete('tab'); else url.searchParams.set('tab', panel);
+          history.replaceState(history.state, '', url);
+        } catch (e) {}
+        // Scroll the strip sideways only, never the page.
+        const r = btn.getBoundingClientRect(), s = tabStrip.getBoundingClientRect();
+        if (r.left < s.left || r.right > s.right) tabStrip.scrollLeft += (r.left - s.left) - (s.width - r.width) / 2;
+        jobActivityLog.then(log => log.setTab(panel));
+      }
+      tabStrip.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => showTab(btn)));
+      const openTabFromUrl = () => {
+        const want = new URLSearchParams(location.search).get('tab');
+        const btn = want && [...tabStrip.querySelectorAll('.settings-tab')].find(b => b.dataset.panel === want);
+        if (btn) btn.click();
+      };
 
       const jobActivityLog = renderJobActivityLog(project.id, 'job-activity-log', 'job-activity-title');
 
       if (editMode) {
         wireEditForm(project);
+        openTabFromUrl();
         return;
       }
 
@@ -3806,7 +3867,6 @@
           await renderFeedList(document.getElementById('job-feed-list'), feedOpts);
           await renderJobChat(document.getElementById('job-chat-list'), project.id);
         });
-        if (new URLSearchParams(window.location.search).get('tab') === 'feed') feedTab.click();
       }
       if (document.getElementById('variations-list')) loadVariationEntries(project, pricingVisible);
       if (document.getElementById('ccew-section')) initCcewSection(project);
@@ -3837,9 +3897,15 @@
           const { error } = await supabaseClient.from('cost_centres').insert({ project_id: project.id, name, sort_order: nextSort, markup_percent: markup, quoted_amount: 0 });
           if (error) throw error;
           await logActivity('project', project.id, 'cost_centre_added', `Cost centre added: ${name}`);
-          window.location.reload();
+          // Redraw in place; the tab is in the URL, so render lands back on Invoices.
+          const refreshed = await loadProject();
+          if (refreshed) {
+            render(refreshed, pricingVisible);
+            const m = document.getElementById('add-cost-centre-msg');
+            if (m) m.innerHTML = '<div class="success-box" style="margin-top:6px; font-size:12px;">Cost centre added.</div>';
+          }
         } catch (err) {
-          msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           addCostCentreBtn.disabled = false;
         }
       });
@@ -3883,9 +3949,22 @@
       }
       if (needsVisitCheckbox) {
         needsVisitCheckbox.addEventListener('change', async (e) => {
-          project.needs_site_visit = e.target.checked;
-          await supabaseClient.from('projects').update({ needs_site_visit: project.needs_site_visit }).eq('id', project.id);
-          await refreshProjectInspectionArea();
+          const checked = e.target.checked;
+          const msgEl = document.getElementById('proj-needs-visit-msg');
+          needsVisitCheckbox.disabled = true;
+          msgEl.innerHTML = '';
+          try {
+            const { error } = await supabaseClient.from('projects').update({ needs_site_visit: checked }).eq('id', project.id);
+            if (error) throw error;
+            project.needs_site_visit = checked;
+            msgEl.innerHTML = '<div class="success-box" style="margin-top:6px; font-size:12px;">Saved.</div>';
+            await refreshProjectInspectionArea();
+          } catch (err) {
+            e.target.checked = !checked;
+            msgEl.innerHTML = `<div class="error-box" style="margin-top:6px; font-size:12px;">${escapeHtml(friendlyError(err))}</div>`;
+          } finally {
+            needsVisitCheckbox.disabled = false;
+          }
         });
         refreshProjectInspectionArea();
       }
@@ -3963,20 +4042,38 @@
         msgEl.innerHTML = '';
         try {
           await generateClientPdf('quote', project.id);
-          loadProject();
         } catch (err) {
-          msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           generateQuotePdfBtn.disabled = false;
           generateQuotePdfBtn.textContent = project.quote_pdf_path ? 'Regenerate' : 'Generate PDF';
+          return;
         }
+        // Redraw with View PDF and stay on Details (used to call loadProject() and show nothing).
+        const refreshed = await loadProject();
+        if (!refreshed) return;
+        render(refreshed, pricingVisible);
+        document.querySelector('#job-tabs .settings-tab[data-panel="details"]')?.click();
+        const m = document.getElementById('quote-pdf-msg');
+        if (m) m.innerHTML = '<div class="success-box" style="margin-top:8px; font-size:12px;">PDF ready.</div>';
       });
 
       const lahaToggle = document.getElementById('laha-approved-toggle');
       if (lahaToggle) lahaToggle.addEventListener('change', async (e) => {
-        const { error } = await supabaseClient.from('projects').update({ laha_approved: e.target.checked }).eq('id', project.id);
+        const checked = e.target.checked;
         const msgEl = document.getElementById('laha-approved-msg');
-        msgEl.innerHTML = error ? `<div class="error-box">${error.message}</div>` : '';
-        if (!error) project.laha_approved = e.target.checked;
+        lahaToggle.disabled = true;
+        msgEl.innerHTML = '';
+        try {
+          const { error } = await supabaseClient.from('projects').update({ laha_approved: checked }).eq('id', project.id);
+          if (error) throw error;
+          project.laha_approved = checked;
+          msgEl.innerHTML = '<div class="success-box" style="margin-top:6px; font-size:12px;">Saved.</div>';
+        } catch (err) {
+          e.target.checked = !checked;
+          msgEl.innerHTML = `<div class="error-box" style="margin-top:6px; font-size:12px;">${escapeHtml(friendlyError(err))}</div>`;
+        } finally {
+          lahaToggle.disabled = false;
+        }
       });
       document.querySelectorAll('.push-xero-btn').forEach(btn => {
         btn.addEventListener('click', () => pushExistingInvoiceToXero(btn));
@@ -3985,10 +4082,11 @@
       const editToggleBtn = document.getElementById('edit-toggle-btn');
       if (editToggleBtn) editToggleBtn.addEventListener('click', () => enterEditMode(project));
 
-      document.getElementById('toggle-line-items-btn').addEventListener('click', () => {
+      document.getElementById('toggle-line-items-btn').addEventListener('click', (e) => {
+        // Show or hide the rows in place: no re-render, so search text, scroll and unsaved notes stay.
         showLineItems = !showLineItems;
-        render(project, pricingVisible);
-        document.querySelector('#job-tabs .settings-tab[data-panel="costcentres"]').click();
+        document.querySelectorAll('#panel-costcentres .li-detail-row').forEach(r => { r.style.display = showLineItems ? '' : 'none'; });
+        e.currentTarget.textContent = showLineItems ? 'Hide line items' : 'Show line items';
       });
 
       const scheduleStaffBtn = document.getElementById('schedule-staff-btn');
@@ -4147,6 +4245,8 @@
         }
       });
 
+      // Last, after every tab-specific click listener is attached: open the tab named in the URL.
+      openTabFromUrl();
     }
 
     // Records what the client said outside the app, for a quote or a fixed-price variation:
@@ -4723,7 +4823,6 @@
       tab.addEventListener('click', load);
       document.getElementById('job-email-new-btn').addEventListener('click', () => openJobEmailComposer(project));
       document.getElementById('job-email-tag-btn').addEventListener('click', () => openTagEmailModal({ projectId: project.id, onSaved: () => loadJobEmails(project) }));
-      if (new URLSearchParams(window.location.search).get('tab') === 'emails') tab.click();
     }
 
     // ---------- STCs (job_stcs, migration 147) ----------
@@ -4739,7 +4838,6 @@
         if (!loaded) { loaded = true; await loadJobStcs(project, centres); }
         openJobStcForm(project, centres, null);
       });
-      if (new URLSearchParams(window.location.search).get('tab') === 'stcs') tab.click();
     }
 
     let jobStcSettings = null;
@@ -5151,15 +5249,16 @@
         .jt-group h3 { font-size:14px; margin:0 0 6px; }
         .jt-item { border-bottom:1px solid var(--border); }
         .jt-item.sub { margin-left:30px; }
-        .jt-row { display:flex; align-items:flex-start; gap:10px; padding:9px 0; }
-        .jt-check { width:20px; height:20px; margin-top:2px; flex-shrink:0; cursor:pointer; }
+        .jt-row { display:flex; align-items:flex-start; gap:4px; padding:9px 0; }
+        .jt-check-hit { flex:0 0 48px; align-self:stretch; display:flex; justify-content:center; align-items:flex-start; margin:-9px 0; padding:9px 0; min-height:44px; cursor:pointer; }
+        .jt-check { width:26px; height:26px; margin:0; padding:0; flex-shrink:0; cursor:pointer; }
         .jt-main { flex:1; min-width:0; cursor:pointer; }
         .jt-title { font-size:15px; color:var(--text); word-break:break-word; }
         .jt-item.done .jt-title { text-decoration:line-through; color:var(--muted); }
         .jt-meta { font-size:12px; color:var(--muted); margin-top:2px; }
-        .jt-star { background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; padding:0 4px; line-height:1; }
+        .jt-star { background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer; padding:0; line-height:1; min-width:44px; min-height:44px; margin:-9px 0; display:inline-flex; align-items:center; justify-content:center; }
         .jt-star.on { color:#e0a030; }
-        .jt-detail { padding:2px 0 12px 30px; display:grid; gap:8px; }
+        .jt-detail { padding:2px 0 12px 52px; display:grid; gap:8px; }
         .jt-detail label { margin:0; font-size:12px; color:var(--muted); }
         .jt-detail textarea { min-height:60px; }
         .jt-detail-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
@@ -5191,10 +5290,11 @@
       const addBtn = document.getElementById('add-task-btn');
       if (addBtn) addBtn.onclick = () => openAddTaskPanel(projectId);
 
-      const [{ data: tasks, error }, { data: staff }, { data: taskPhotos }] = await Promise.all([
+      const [{ data: tasks, error }, { data: staff }, { data: taskPhotos }, { data: { session } }] = await Promise.all([
         supabaseClient.from('job_tasks').select('*').eq('project_id', projectId).order('created_at', { ascending: true }),
         supabaseClient.from('profiles').select('id, full_name, active'),
         supabaseClient.from('project_photos').select('id, url, task_id').eq('project_id', projectId).not('task_id', 'is', null).order('created_at'),
+        supabaseClient.auth.getSession(),
       ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
@@ -5207,7 +5307,7 @@
           : `<p class="subtitle">${outstanding.length} task${outstanding.length === 1 ? '' : 's'} outstanding${requiredOutstanding.length ? `, <span style="color:var(--red);">${requiredOutstanding.length} required before scheduling</span>` : ''}.</p>`;
       }
 
-      listEl._jt = { projectId, tasks: tasks || [], staff: staff || [], photos: taskPhotos || [] };
+      listEl._jt = { projectId, tasks: tasks || [], staff: staff || [], photos: taskPhotos || [], userId: session?.user?.id || null };
       bindJobTaskEvents(listEl);
       renderJobTasks(listEl);
       if (focusSelector) { const f = listEl.querySelector(focusSelector); if (f) f.focus(); }
@@ -5219,7 +5319,31 @@
         || String(a.created_at).localeCompare(String(b.created_at));
     }
 
-    function renderJobTasks(listEl) {
+    // Item 34: ticks, stars, assignees and due dates change on screen straight
+    // away and save in the background; a failed save flips back with a red note.
+    function renderJobTasks(listEl) { listEl.innerHTML = jobTasksHtml(listEl); }
+
+    // Redraws one task's title and meta line only, leaving its open detail panel and focus alone.
+    function jtRefreshRow(listEl, id) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = jobTasksHtml(listEl);
+      const fresh = tmp.querySelector(`.jt-item[data-id="${id}"] > .jt-row .jt-main`);
+      const live = listEl.querySelector(`.jt-item[data-id="${id}"] > .jt-row .jt-main`);
+      if (fresh && live) live.replaceWith(fresh);
+    }
+
+    // Red note under a task row (anchor is an element or a task id). Cleared by the next redraw.
+    function jtShowError(listEl, anchor, message) {
+      listEl.querySelectorAll('.jt-err').forEach(el => el.remove());
+      const box = document.createElement('div');
+      box.className = 'error-box jt-err';
+      box.style.cssText = 'margin:4px 0 8px; font-size:13px;';
+      box.textContent = message;
+      const target = anchor instanceof Element ? anchor : listEl.querySelector(`.jt-item[data-id="${anchor}"] > .jt-row`);
+      if (target) target.after(box); else listEl.prepend(box);
+    }
+
+    function jobTasksHtml(listEl) {
       const { tasks, staff, photos } = listEl._jt;
       const photosOf = (id) => photos.filter(p => p.task_id === id);
       const staffName = (id) => (staff.find(s => s.id === id) || {}).full_name || 'Someone';
@@ -5246,7 +5370,7 @@
         return `
           <div class="jt-item ${isSub ? 'sub' : ''} ${t.completed ? 'done' : ''}" data-id="${t.id}">
             <div class="jt-row">
-              <input type="checkbox" class="jt-check" data-id="${t.id}" ${t.completed ? 'checked' : ''} title="${t.completed ? 'Mark as not done' : 'Tick off'}" />
+              <label class="jt-check-hit" title="${t.completed ? 'Mark as not done' : 'Tick off'}"><input type="checkbox" class="jt-check" data-id="${t.id}" ${t.completed ? 'checked' : ''} /></label>
               <div class="jt-main" data-toggle="${t.id}">
                 <div class="jt-title">${escapeHtml(t.description)}</div>
                 ${bits.length ? `<div class="jt-meta">${bits.join(' &middot; ')}</div>` : ''}
@@ -5294,7 +5418,7 @@
           </div>`;
       }
 
-      listEl.innerHTML = JT_GROUPS.map(g => {
+      return JT_GROUPS.map(g => {
         const tops = tasks.filter(t => !t.parent_task_id && jtGroupOf(t) === g.key);
         const openTops = tops.filter(t => !t.completed).sort(jtSort);
         const doneTops = tops.filter(t => t.completed).sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
@@ -5317,41 +5441,88 @@
       const state = () => listEl._jt;
       const find = (id) => state().tasks.find(t => t.id === id);
       const reload = (focus) => loadJobTasks(state().projectId, focus);
-      const patch = async (id, fields) => {
-        const { error } = await supabaseClient.from('job_tasks').update(fields).eq('id', id);
-        if (error) alert('Could not save that: ' + error.message);
-        return !error;
+      const save = async (id, fields) => {
+        try {
+          const { error } = await supabaseClient.from('job_tasks').update(fields).eq('id', id);
+          return error || null;
+        } catch (err) { return err; }
       };
+      // Saves for one task run in order, so a quick tick then untick land in order.
+      const chains = new Map();
+      const queued = (id, fn) => {
+        const p = (chains.get(id) || Promise.resolve()).then(fn, fn);
+        chains.set(id, p);
+        return p;
+      };
+      const patch = async (id, fields) => {
+        const err = await save(id, fields);
+        if (err) jtShowError(listEl, id, 'Could not save that: ' + friendlyError(err));
+        return !err;
+      };
+      // Change on screen first, save in the background, flip back with a note if the save fails.
+      async function optimistic(t, fields, failText, rowOnly) {
+        const before = {};
+        Object.keys(fields).forEach(k => { before[k] = t[k]; });
+        Object.assign(t, fields);
+        const redraw = () => (rowOnly ? jtRefreshRow(listEl, t.id) : renderJobTasks(listEl));
+        redraw();
+        const err = await queued(t.id, () => save(t.id, fields));
+        if (err) {
+          Object.assign(t, before);
+          redraw();
+          jtShowError(listEl, t.id, failText + ': ' + friendlyError(err));
+        }
+        return !err;
+      }
 
       async function setCompleted(t, done) {
-        const { projectId, tasks } = state();
-        const { data: { user } } = await supabaseClient.auth.getUser();
-        const now = new Date().toISOString();
-        const fields = done ? { completed: true, completed_by: user.id, completed_at: now } : { completed: false, completed_by: null, completed_at: null };
+        const { projectId, tasks, userId } = state();
+        const fields = done ? { completed: true, completed_by: userId, completed_at: new Date().toISOString() } : { completed: false, completed_by: null, completed_at: null };
         // A task is only done once every subtask is ticked (the database
         // enforces this too, for every other place tasks get ticked).
         const openSubs = done && !t.parent_task_id ? tasks.filter(x => x.parent_task_id === t.id && !x.completed) : [];
         if (openSubs.length) {
-          alert(`Tick off its ${openSubs.length} open subtask${openSubs.length === 1 ? '' : 's'} first.`);
           jtExpanded.add(t.id);
-          await reload();
+          renderJobTasks(listEl);
+          jtShowError(listEl, t.id, `Tick off its ${openSubs.length} open subtask${openSubs.length === 1 ? '' : 's'} first.`);
           return;
         }
-        if (!(await patch(t.id, fields))) { await reload(); return; }
-        if (!done && t.parent_task_id) {
-          const parent = tasks.find(p => p.id === t.parent_task_id);
-          if (parent && parent.completed) await patch(parent.id, fields);
+        // Reopening a subtask reopens its ticked parent too.
+        const parent = !done && t.parent_task_id ? tasks.find(p => p.id === t.parent_task_id && p.completed) : null;
+        const snap = (x) => ({ completed: x.completed, completed_by: x.completed_by, completed_at: x.completed_at });
+        const tBefore = snap(t), parentBefore = parent ? snap(parent) : null;
+        Object.assign(t, fields);
+        if (parent) Object.assign(parent, fields);
+        renderJobTasks(listEl);
+        const err = await queued(t.id, () => save(t.id, fields));
+        if (err) {
+          Object.assign(t, tBefore);
+          if (parent) Object.assign(parent, parentBefore);
+          renderJobTasks(listEl);
+          jtShowError(listEl, t.id, (done ? 'Could not tick that off: ' : 'Could not reopen that: ') + friendlyError(err));
+          return;
         }
-        await logActivity('project', projectId, done ? 'task_completed' : 'task_reopened', `Task ${done ? 'completed' : 'reopened'}: ${t.description || ''}`);
-        const top = t.parent_task_id ? tasks.find(p => p.id === t.parent_task_id) : t;
-        if (top && top.required_before_scheduling) await refreshPipelineTaskGate(projectId);
-        if (done && top && top.task_type === 'handover') await checkAndAdvanceHandover(projectId);
-        await reload();
+        if (parent) {
+          const err2 = await queued(parent.id, () => save(parent.id, fields));
+          if (err2) {
+            Object.assign(parent, parentBefore);
+            renderJobTasks(listEl);
+            jtShowError(listEl, parent.id, 'Could not reopen the main task: ' + friendlyError(err2));
+          }
+        }
+        // Follow-ups (activity log, scheduling gate, handover advance) run without holding the screen.
+        (async () => {
+          try {
+            await logActivity('project', projectId, done ? 'task_completed' : 'task_reopened', `Task ${done ? 'completed' : 'reopened'}: ${t.description || ''}`);
+            const top = t.parent_task_id ? tasks.find(p => p.id === t.parent_task_id) : t;
+            if (top && top.required_before_scheduling) await refreshPipelineTaskGate(projectId);
+            if (done && top && top.task_type === 'handover') await checkAndAdvanceHandover(projectId);
+          } catch (e) { console.error('Task follow-up failed:', e); }
+        })();
       }
 
       async function addTask(description, groupKey, parentId) {
-        const { projectId, tasks } = state();
-        const { data: { user } } = await supabaseClient.auth.getUser();
+        const { projectId, tasks, userId } = state();
         const parent = parentId ? find(parentId) : null;
         const siblings = tasks.filter(t => (t.parent_task_id || null) === (parentId || null) && (parent || jtGroupOf(t) === groupKey));
         // Tasks made before ordering existed have no position yet - number
@@ -5364,12 +5535,13 @@
         const max = ordered.reduce((m, t) => Math.max(m, t.sort_order ?? 0), 0);
         const { error } = await supabaseClient.from('job_tasks').insert({
           project_id: projectId, description, task_type: parent ? parent.task_type : groupKey,
-          parent_task_id: parentId || null, sort_order: max + 1, created_by: user.id,
+          parent_task_id: parentId || null, sort_order: max + 1, created_by: userId,
         });
-        if (error) { alert('Could not add that: ' + error.message); return; }
+        if (error) throw error;
         if (!parentId) await logActivity('project', projectId, 'task_added', `Task added: ${description}`);
         if (parentId) jtExpanded.add(parentId);
         await reload(parentId ? `.jt-sub-add[data-parent="${parentId}"]` : `.jt-quick[data-type="${groupKey}"]`);
+        return true;
       }
 
       async function move(t, dir) {
@@ -5400,13 +5572,14 @@
           }
           const t = find(actEl.dataset.id);
           if (!t) return;
-          if (act === 'star') { await patch(t.id, { starred: !t.starred }); await reload(); }
+          if (act === 'star') await optimistic(t, { starred: !t.starred }, 'Could not star that');
           else if (act === 'up') await move(t, -1);
           else if (act === 'down') await move(t, 1);
           else if (act === 'delete') {
             const subs = state().tasks.filter(x => x.parent_task_id === t.id).length;
             if (!confirm(subs ? `Delete this task and its ${subs} subtask${subs === 1 ? '' : 's'}?` : 'Delete this task?')) return;
-            await supabaseClient.from('job_tasks').delete().eq('id', t.id);
+            const { error } = await supabaseClient.from('job_tasks').delete().eq('id', t.id);
+            if (error) { jtShowError(listEl, t.id, 'Could not delete that: ' + friendlyError(error)); return; }
             jtExpanded.delete(t.id);
             if (t.required_before_scheduling) await refreshPipelineTaskGate(state().projectId);
             await logActivity('project', state().projectId, 'task_deleted', `Task deleted: ${t.description || ''}`);
@@ -5448,8 +5621,14 @@
           return;
         }
         if (el.classList.contains('jt-check')) await setCompleted(t, el.checked);
-        else if (el.classList.contains('jt-assign')) { await patch(t.id, { assigned_to_user_id: el.value || null, assigned_to_role: el.value ? null : t.assigned_to_role }); await reload(); }
-        else if (el.classList.contains('jt-due')) { await patch(t.id, { due_date: el.value || null }); await reload(); }
+        else if (el.classList.contains('jt-assign')) {
+          const ok = await optimistic(t, { assigned_to_user_id: el.value || null, assigned_to_role: el.value ? null : t.assigned_to_role }, 'Could not change who it is for', true);
+          if (!ok) el.value = t.assigned_to_user_id || '';
+        }
+        else if (el.classList.contains('jt-due')) {
+          const ok = await optimistic(t, { due_date: el.value || null }, 'Could not change the due date', true);
+          if (!ok) el.value = t.due_date || '';
+        }
         else if (el.classList.contains('jt-move') && el.value) {
           const parentId = el.value === '__top' ? null : el.value;
           const siblings = state().tasks.filter(x => (x.parent_task_id || null) === parentId);
@@ -5471,8 +5650,17 @@
           e.preventDefault();
           const text = el.value.trim();
           if (!text) return;
+          if (el.disabled) return;
           el.disabled = true;
-          await addTask(text, el.dataset.type, el.dataset.parent || null);
+          let ok = false;
+          try {
+            ok = await addTask(text, el.dataset.type, el.dataset.parent || null);
+          } catch (err) {
+            jtShowError(listEl, el, 'Could not add that: ' + friendlyError(err));
+          } finally {
+            // On success the list reloads (new empty box, focused); on failure this box keeps its text.
+            if (el.isConnected) { el.disabled = false; if (!ok) el.focus(); }
+          }
         } else if (el.classList.contains('jt-title-edit')) { e.preventDefault(); el.blur(); }
       });
 
@@ -6277,9 +6465,9 @@
             <div style="font-weight:600; font-size:13px; margin-bottom:6px;">Hours${hoursTotal ? ` <span class="subtitle" style="font-weight:400;">(${qtyText(hoursTotal)} total)</span>` : ''}</div>
             ${Object.keys(clockedByStaff).length ? Object.entries(clockedByStaff).map(([name, h]) => `<div style="font-size:13px; padding:3px 0;">Clocked: ${escapeHtml(name)} &middot; ${qtyText(h)} hrs</div>`).join('') : ''}
             ${hrs.map(h => `
-              <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:3px 0;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:13px; padding:3px 0;">
                 <span>${fmtDate(h.work_date)} &middot; ${escapeHtml((h.profiles && h.profiles.full_name) || 'Someone')} &middot; ${qtyText(h.hours)} hrs <span class="subtitle">(logged by hand)</span>${h.note ? ' &middot; ' + escapeHtml(h.note) : ''}</span>
-                ${canRemove(h) ? `<button type="button" class="secondary var-hours-del" data-id="${h.id}" style="font-size:11px; padding:2px 8px;">&times;</button>` : ''}
+                ${canRemove(h) ? `<button type="button" class="secondary var-hours-del" data-id="${h.id}" style="font-size:18px; line-height:1; min-width:40px; min-height:40px; padding:0 10px;" title="Remove" aria-label="Remove">&times;</button>` : ''}
               </div>`).join('')}
             ${!hrs.length && !Object.keys(clockedByStaff).length ? `<p class="subtitle" style="margin:0; font-size:12px;">${r.hours ? r.hours + ' hrs noted when this was logged. ' : ''}No time yet - clock in to "${escapeHtml('Variation ' + (r.variation_number || ''))}" on My Day, or log hours by hand below.</p>` : ''}
             ${open ? `
@@ -6294,9 +6482,9 @@
           <div style="margin-top:12px; padding-top:10px; border-top:0.5px solid var(--border);">
             <div style="font-weight:600; font-size:13px; margin-bottom:6px;">Materials</div>
             ${mats.length ? mats.map(m => `
-              <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:3px 0;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:13px; padding:3px 0;">
                 <span>${qtyText(m.quantity)} &times; ${escapeHtml(m.description)}${m.kind === 'prebuild' ? ' <span class="subtitle">(prebuild)</span>' : ''}${m.kind === 'other' ? ' <span class="subtitle">(not from Stock)</span>' : ''}</span>
-                ${open && (pricingVisible || m.created_by === user.id) ? `<button type="button" class="secondary var-mat-del" data-id="${m.id}" style="font-size:11px; padding:2px 8px;">&times;</button>` : ''}
+                ${open && (pricingVisible || m.created_by === user.id) ? `<button type="button" class="secondary var-mat-del" data-id="${m.id}" style="font-size:18px; line-height:1; min-width:40px; min-height:40px; padding:0 10px;" title="Remove" aria-label="Remove">&times;</button>` : ''}
               </div>`).join('') : `<p class="subtitle" style="margin:0; font-size:12px;">None added yet.</p>`}
             ${open ? `
               <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
@@ -6347,8 +6535,11 @@
         await reload();
       }));
       listEl.querySelectorAll('.var-hours-del').forEach(btn => btn.addEventListener('click', async () => {
+        const h = (hourRows || []).find(x => x.id === btn.dataset.id);
+        if (!confirm(h ? `Remove ${qtyText(h.hours)} hrs for ${(h.profiles && h.profiles.full_name) || 'Someone'} on ${fmtDate(h.work_date)}?` : 'Remove these hours?')) return;
+        btn.disabled = true;
         const { error: dErr } = await supabaseClient.from('job_variation_hours').delete().eq('id', btn.dataset.id);
-        if (dErr) { alert(dErr.message); return; }
+        if (dErr) { alert('Could not remove the hours: ' + friendlyError(dErr)); btn.disabled = false; return; }
         await reload();
       }));
 
@@ -6379,11 +6570,11 @@
 
       listEl.querySelectorAll('.var-mat-del').forEach(btn => btn.addEventListener('click', async () => {
         const m = (matRows || []).find(x => x.id === btn.dataset.id);
-        if (m && m.stock_deducted && m.material_id) {
-          try { await adjustWarehouseStock(m.material_id, Number(m.quantity)); } catch (e) { console.error('Could not put stock back:', e); }
-        }
-        const { error: dErr } = await supabaseClient.from('job_variation_materials').delete().eq('id', btn.dataset.id);
-        if (dErr) { alert(dErr.message); return; }
+        if (!confirm(`Remove ${m ? qtyText(m.quantity) + ' x ' + m.description : 'this material'}?${m && m.stock_deducted && m.material_id ? ' It goes back into Warehouse stock.' : ''}`)) return;
+        btn.disabled = true;
+        // Stock goes back on the Warehouse shelf and the row is deleted in one database step, all or nothing.
+        const { error: dErr } = await supabaseClient.rpc('variation_material_delete', { p_id: btn.dataset.id });
+        if (dErr) { alert('Could not remove it, nothing was changed: ' + friendlyError(dErr)); btn.disabled = false; return; }
         await reload();
       }));
 
@@ -6859,7 +7050,7 @@
                 ${booked.map(b => `
                   <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--border); ${b.assignment_date < todayIso ? 'opacity:0.6;' : ''}">
                     <span style="font-size:13px;">${fmtDay(b.assignment_date)}, ${hhmm(b.start_time)}-${hhmm(b.end_time)} - <strong>${escapeHtml((b.profiles && b.profiles.full_name) || 'Someone')}</strong>${b.note ? ' (' + escapeHtml(b.note) + ')' : ''}</span>
-                    <button type="button" class="secondary sched-remove" data-id="${b.id}" style="font-size:11px; padding:4px 8px; flex-shrink:0;">Remove</button>
+                    <button type="button" class="secondary sched-remove" data-id="${b.id}" style="font-size:13px; min-height:40px; padding:0 12px; flex-shrink:0;">Remove</button>
                   </div>`).join('')}
               </div>` : ''}
 
@@ -6891,8 +7082,11 @@
 
         overlay.querySelector('#sched-close-btn').addEventListener('click', () => { overlay.remove(); if (window.loadJobSchedule) loadJobSchedule(project); });
         overlay.querySelectorAll('.sched-remove').forEach(btn => btn.addEventListener('click', async () => {
+          const b = (booked || []).find(x => x.id === btn.dataset.id);
+          if (!confirm(b ? `Remove ${(b.profiles && b.profiles.full_name) || 'this person'}'s booking on ${fmtDay(b.assignment_date)}, ${hhmm(b.start_time)}-${hhmm(b.end_time)}?` : 'Remove this booking?')) return;
+          btn.disabled = true;
           const { error } = await supabaseClient.from('schedule_assignments').delete().eq('id', btn.dataset.id);
-          if (error) { overlay.querySelector('#sched-msg').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+          if (error) { overlay.querySelector('#sched-msg').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; btn.disabled = false; return; }
           await render();
         }));
 
