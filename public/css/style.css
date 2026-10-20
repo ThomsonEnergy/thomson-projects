@@ -811,7 +811,7 @@ html[data-theme="navy"] .success-box {
 }
 
 /* ===================================================================
-   Responsive tables — stack into cards on narrow screens instead of
+   Responsive tables: stack into cards on narrow screens instead of
    overflowing horizontally. Opt-in via class="responsive-stack" plus
    data-label on each <td> (JS supplies the label per row).
    =================================================================== */
