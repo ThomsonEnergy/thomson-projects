@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 19 Oct 2026 (Knowledge Base background reader plan)
+Last updated 20 Oct 2026 (PO, bills, stock and tools review plan)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -17,6 +17,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
 | 8 | invoice@ supplier bill intake agent | Live 18 Oct 2026, suggest-only for 2 weeks | N | Owner checks matches, then auto-save on |
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
+| 22 | PO, bills, stock from My Day, tools register (review and 4-delivery plan) | Planned, waiting on owner's yes | N | Airwallex payout key for the last step of delivery 1 |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
 | 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 (top ten) and 2 (items 1 to 30) LIVE 19 Oct 2026, next delivery 3 (`docs/UX_REVIEW.md`) | N | None |
@@ -541,3 +542,7 @@ Why: the owner books jobs tentatively about 3 weeks out (staff see it in My Day,
 Later: nothing yet.
 
 Built 19 Oct 2026, migration 20261104020000. Detail in `docs/PROJECT_SPEC.md` A34. Later ideas: SMS the booking instead of email for clients with no email address; a company word list for the spell check.
+
+## 22. PO, supplier bills, stock from My Day and the tools register (reviewed 20 Oct 2026)
+
+Full review, bug list, gaps and the four-delivery plan are in `docs/PO_REVIEW.md`. In short: delivery 1 fixes the PO, bill and stock rules (bill save never touches stock, Close is the approval, pay-on date, mark paid and a pay batch, one server function for every stock count change); delivery 2 shows bills and their lines in red on the PO with Add to PO and Query supplier, and lets an open PO fill from the invoice; delivery 3 adds Used stock on My Day and the clock-out prompt, adding a missing part with "Needs a price", and the adjustment history on Stock; delivery 4 is the tools and equipment register (Tools PO, any PO line marked as a tool, serial / photo / receipt over $500). Tools register detail from item 1 moves there when built.
