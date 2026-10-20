@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Projects - Thomson Energy</title>
+<title>Pipeline - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -30,8 +30,8 @@
   <div class="wrap wide">
     <div style="display:flex; justify-content:space-between; align-items:start; flex-wrap:wrap; gap:12px;">
       <div>
-        <h1>Job pipeline</h1>
-        <p class="subtitle">Every project, left to right through its lifecycle. Quote Approved through Job Booked move automatically (quote approval, deposit paid, mandatory tasks, scheduling). A job is only Job Booked while someone is scheduled to it or clocked into it.</p>
+        <h1>Pipeline</h1>
+        <p class="subtitle">Every job, left to right through its lifecycle. Quote Approved through Job Booked move automatically (quote approval, deposit paid, mandatory tasks, scheduling). A job is only Job Booked while someone is scheduled to it or clocked into it.</p>
       </div>
       <button class="secondary" id="new-direct-job-btn">+ New job (no quote)</button>
     </div>
@@ -132,7 +132,7 @@
             <span class="count">${byStage[stage.key].length}</span>
           </div>
           <div class="pipeline-column-body">
-            ${byStage[stage.key].length ? byStage[stage.key].map(p => cardHtml(p)).join('') : `<div class="pipeline-column-empty">No projects here</div>`}
+            ${byStage[stage.key].length ? byStage[stage.key].map(p => cardHtml(p)).join('') : `<div class="pipeline-column-empty">Nothing here</div>`}
           </div>
         </div>
       `).join('');
@@ -158,7 +158,7 @@
         const n = body.querySelectorAll('.pipeline-card').length;
         col.querySelector('.pipeline-column-header .count').textContent = n;
         const empty = body.querySelector('.pipeline-column-empty');
-        if (n === 0 && !empty) body.insertAdjacentHTML('beforeend', '<div class="pipeline-column-empty">No projects here</div>');
+        if (n === 0 && !empty) body.insertAdjacentHTML('beforeend', '<div class="pipeline-column-empty">Nothing here</div>');
         if (n > 0 && empty) empty.remove();
       }
 

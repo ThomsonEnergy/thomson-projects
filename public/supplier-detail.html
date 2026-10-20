@@ -72,6 +72,8 @@
 
     function render(supplier, summary, bills, flaggedItems, pos) {
       const terms = supplier.credit_terms_type === 'cod' ? 'COD' : `${supplier.credit_terms_days} ${CREDIT_TERMS_LABELS[supplier.credit_terms_type]}`;
+      if (typeof setPageTitle === 'function') setPageTitle(supplier.name || 'Supplier');
+      else document.title = `${supplier.name || 'Supplier'} - TEops`;
 
       document.getElementById('content').innerHTML = `
         <a href="/suppliers.html" class="link-quiet">&larr; Suppliers</a>

@@ -170,11 +170,37 @@
     el.querySelectorAll('.ch-item').forEach(n => n.addEventListener('click', () => openChannel(n.dataset.id)));
   }
 
+  // ---------- phone history ----------
+  // Phones: opening a conversation or thread adds a history entry, so the
+  // iPhone back swipe returns to the list instead of leaving Chat. The back
+  // buttons step back through that entry; popstate runs the same close code.
+  function setUrl(url, push) {
+    if (push && isPhone()) history.pushState({ teChat: 1 }, '', url);
+    else history.replaceState(history.state, '', url);
+  }
+  function goBack(fallback) {
+    if (isPhone() && history.state && history.state.teChat) history.back();
+    else fallback();
+  }
+  function closeConv() {
+    closeThread(true);
+    app.classList.remove('show-conv'); S.current = null; renderList();
+  }
+  window.addEventListener('popstate', async () => {
+    const p = new URLSearchParams(location.search);
+    const c = p.get('c'), t = p.get('t');
+    if (!c) { if (S.current) closeConv(); return; }
+    if (!S.current || S.current.id !== c) await openChannel(c, { keepUrl: true });
+    if (t) { if (!S.threadRoot || S.threadRoot.id !== t) await openThread(t, { keepUrl: true }); }
+    else if (S.threadRoot) closeThread(true);
+  });
+
   // ---------- conversation ----------
   async function openChannel(id, opts = {}) {
     let c = chanById(id);
     if (!c) { await loadChannels(); c = chanById(id); }
     if (!c) { toast('That chat could not be found, or you are not in it.'); return; }
+    const wasOpen = app.classList.contains('show-conv');
     S.current = c; S.messages = []; S.hasOlder = false;
     closeThread(true);
     app.classList.add('show-conv');
@@ -190,12 +216,12 @@
       </div>
       <div class="ch-msgs" id="ch-msgs"><p class="subtitle" style="padding:14px;">Loading...</p></div>
       <div id="ch-composer"></div>`;
-    document.getElementById('ch-back').addEventListener('click', () => { app.classList.remove('show-conv'); S.current = null; renderList(); history.replaceState(null, '', '/chat.html'); });
+    document.getElementById('ch-back').addEventListener('click', () => goBack(() => { closeConv(); history.replaceState(null, '', '/chat.html'); }));
     document.getElementById('ch-mute').addEventListener('click', toggleMute);
     const st = document.getElementById('ch-settings');
     if (st) st.addEventListener('click', () => channelModal(c));
     mountComposer(document.getElementById('ch-composer'), { channelId: c.id, parentId: null, placeholder: c.kind === 'dm' ? 'Message' : `Message #${c.name}` });
-    if (!opts.keepUrl) history.replaceState(null, '', `/chat.html?c=${c.id}`);
+    if (!opts.keepUrl) setUrl(`/chat.html?c=${c.id}`, !wasOpen);
 
     try {
       S.messages = await fetchMessages(c.id);
@@ -394,6 +420,7 @@
   async function openThread(rootId, opts = {}) {
     const root = findMsg(rootId) || (await supabaseClient.from('chat_messages').select('*').eq('id', rootId).maybeSingle()).data;
     if (!root) return;
+    const wasOpen = !!S.threadRoot;
     S.threadRoot = root;
     const { data } = await supabaseClient.from('chat_messages').select('*').eq('parent_id', rootId).order('created_at').limit(300);
     S.threadMsgs = data || [];
@@ -408,12 +435,12 @@
       </div>
       <div class="ch-msgs" id="th-msgs"></div>
       <div id="th-composer"></div>`;
-    document.getElementById('th-back').addEventListener('click', () => closeThread());
-    document.getElementById('th-close').addEventListener('click', () => closeThread());
+    document.getElementById('th-back').addEventListener('click', () => goBack(() => closeThread()));
+    document.getElementById('th-close').addEventListener('click', () => goBack(() => closeThread()));
     mountComposer(document.getElementById('th-composer'), { channelId: root.channel_id, parentId: root.id, placeholder: 'Reply in thread' });
     renderThread();
     if (opts.messageId) flashMessage(opts.messageId);
-    history.replaceState(null, '', `/chat.html?c=${root.channel_id}&t=${root.id}`);
+    if (!opts.keepUrl) setUrl(`/chat.html?c=${root.channel_id}&t=${root.id}`, !wasOpen);
   }
   function renderThread() {
     const el = document.getElementById('th-msgs');
@@ -432,7 +459,7 @@
     S.threadRoot = null; S.threadMsgs = [];
     app.classList.remove('thread-open', 'show-thread');
     document.getElementById('ch-thread').innerHTML = '';
-    if (!silent && S.current) history.replaceState(null, '', `/chat.html?c=${S.current.id}`);
+    if (!silent && S.current) history.replaceState(history.state, '', `/chat.html?c=${S.current.id}`);
   }
 
   // ---------- message actions ----------
@@ -911,7 +938,7 @@
         markRead();
       }
     }
-    if (S.threadRoot) openThread(S.threadRoot.id);
+    if (S.threadRoot) openThread(S.threadRoot.id, { keepUrl: true });
     flush();
   }
 
@@ -968,7 +995,12 @@
 
     const params = new URLSearchParams(location.search);
     const c = params.get('c');
-    if (c) {
+    if (c && isPhone()) {
+      // Opened from a link or notification: put the list behind it so back lands there.
+      history.replaceState(null, '', '/chat.html');
+      await openChannel(c, { messageId: params.get('t') ? null : params.get('m') });
+      if (params.get('t')) await openThread(params.get('t'), { messageId: params.get('m') });
+    } else if (c) {
       await openChannel(c, { messageId: params.get('t') ? null : params.get('m'), keepUrl: true });
       if (params.get('t')) await openThread(params.get('t'), { messageId: params.get('m') });
     } else if (!isPhone()) {

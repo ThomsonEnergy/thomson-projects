@@ -558,15 +558,28 @@
               <div class="empty-icon">&#128274;</div>
               <h2>Not available for your role</h2>
               <p>Leads are limited to Sales, Finance, and Admin accounts.</p>
-              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Projects</a>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Pipeline</a>
             </div>
           </div>`;
         return;
       }
 
+      // ?id= (from the top bar search) opens that lead straight away
+      const deepLeadId = new URLSearchParams(window.location.search).get('id');
+      if (deepLeadId) openLeadById(deepLeadId);
+
       await loadCallbackRequests();
       await loadLeads();
     })();
+
+    async function openLeadById(id) {
+      const [{ data: lead }, { data: linked }] = await Promise.all([
+        supabaseClient.from('leads').select('*').eq('id', id).maybeSingle(),
+        supabaseClient.from('projects').select('id').eq('lead_id', id).limit(1).maybeSingle(),
+      ]);
+      if (!lead) { showToast('That lead could not be found', { error: true }); return; }
+      openLeadDetail(lead, linked ? linked.id : null);
+    }
   </script>
 </body>
 </html>

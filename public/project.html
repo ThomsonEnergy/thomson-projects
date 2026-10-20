@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Project - Thomson Energy</title>
+<title>Job - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -70,8 +70,11 @@
     }
 
     async function loadProject() {
-      const centreCols = await costCentreColumns();
-      const liCols = await lineItemColumns();
+      // Item 96: the slow accrued-labour function starts straight away, alongside the
+      // job itself, instead of after it. Its own failure is logged and skipped below.
+      const accruedPromise = fetchAccruedLabourCost([projectId]).then(byProject => ({ byProject }), err => ({ err }));
+      await getMyRole(); // one profiles read; both column lists below then come from its cache
+      const [centreCols, liCols] = await Promise.all([costCentreColumns(), lineItemColumns()]);
       const { data: project, error } = await supabaseClient
         .from('projects')
         .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), credit_note_claims(*), cost_centre_line_items(${liCols}, rate_tier_id, prebuild_group_id, prebuild_client_description, prebuild_base_quantity), cost_centre_photo_groups(*)),
@@ -88,6 +91,35 @@
         document.getElementById('content').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
         return null;
       }
+      paintJobHeaderEarly(project);
+
+      const isJob = !!project.job_number;
+      const rows = (query) => query.then(({ data }) => data || null);
+      // Everything below only needs the job row, so it all runs at once (item 96):
+      // - Real material cost accrued so far: only PO lines actually received count, so a
+      //   PO that's just been placed doesn't inflate "accrued" before anything's landed
+      //   (every PO line received to this job, whichever PO it is on).
+      // - The same spend per stage: job_material_usage is the authoritative "what actually
+      //   got used against this cost centre" record (stock draws + PO receipts landed
+      //   straight on a job). Each row has exactly one cost_centre_id, so summing here is safe.
+      // - A quote never becomes the job in place: approval spins up a separate project row
+      //   (create-job-from-quote.js), so an approved quote looks up that job for "Go to job".
+      // - A warranty job pulls just enough of the original job (ref + scope of works) for the
+      //   reference card on the Summary tab.
+      // - A job with warranty jobs against it pulls those, for the net warranty cost below.
+      const [accrued, liRows, usageRows, resultingJob, original, warrantyJobs] = await Promise.all([
+        accruedPromise,
+        isJob ? rows(supabaseClient.from('purchase_order_line_items').select('quantity, unit_cost')
+          .eq('received', true).eq('destination_type', 'job').eq('destination_job_id', projectId)) : null,
+        isJob ? rows(supabaseClient.from('job_material_usage').select('cost_centre_id, quantity, unit_cost').eq('project_id', projectId)) : null,
+        !isJob && project.status === 'approved'
+          ? rows(supabaseClient.from('projects').select('id, job_number').eq('source_quote_id', project.id).maybeSingle()) : undefined,
+        project.warranty_of_project_id
+          ? rows(supabaseClient.from('projects').select('id, name, job_number, sow_text').eq('id', project.warranty_of_project_id).maybeSingle()) : undefined,
+        isJob && !project.warranty_of_project_id
+          ? rows(supabaseClient.from('projects').select('id, name, job_number, warranty_outcome, warranty_closed_at, cost_centres(id, invoiced_amount)')
+            .eq('warranty_of_project_id', project.id).order('created_at')) : null,
+      ]);
 
       // Real labour hours/cost per stage - fetched from a serverless
       // function that computes it from time_entries server-side, rather
@@ -100,12 +132,10 @@
       // ordinary_rate/rate_1_5x/rate_2x to whoever's browser loaded this
       // page. See get-accrued-labour-cost.js.
       let accruedByCentre = {};
-      try {
-        const byProject = await fetchAccruedLabourCost([projectId]);
-        accruedByCentre = byProject[projectId]?.byCentre || {};
-        project.labour_budget_percent = byProject[projectId]?.labourBudgetPercent;
-      } catch (err) {
-        console.error('Accrued labour cost fetch failed:', err.message);
+      if (accrued.err) console.error('Accrued labour cost fetch failed:', accrued.err.message);
+      else {
+        accruedByCentre = accrued.byProject[projectId]?.byCentre || {};
+        project.labour_budget_percent = accrued.byProject[projectId]?.labourBudgetPercent;
       }
       for (const centre of project.cost_centres || []) {
         centre.actual_hours = accruedByCentre[centre.id]?.actualHours || 0;
@@ -117,71 +147,18 @@
           .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
       }
 
-      // Real material cost accrued so far - only line items actually
-      // received count, so a PO that's just been placed doesn't inflate
-      // "accrued" before anything's landed.
-      if (project.job_number) {
-        // every PO line received to this job, whichever PO it is on (lines can be moved between jobs)
-        const { data: liRows } = await supabaseClient
-          .from('purchase_order_line_items')
-          .select('quantity, unit_cost')
-          .eq('received', true).eq('destination_type', 'job').eq('destination_job_id', projectId);
-        project.accrued_material_cost = (liRows || []).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
-      } else {
-        project.accrued_material_cost = 0;
+      project.accrued_material_cost = (liRows || []).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
+      const materialByCentre = {};
+      for (const row of usageRows || []) {
+        if (!row.cost_centre_id) continue;
+        materialByCentre[row.cost_centre_id] = (materialByCentre[row.cost_centre_id] || 0) + Number(row.quantity) * Number(row.unit_cost);
+      }
+      for (const centre of project.cost_centres || []) {
+        centre.actual_material_cost = materialByCentre[centre.id] || 0;
       }
 
-      // Same real material spend, but per stage - job_material_usage is the
-      // authoritative "what actually got used against this cost centre"
-      // record (stock draws + PO receipts landed straight on a job), same
-      // role for materials that get_stage_actual_labour_cost's time_entries
-      // query plays for labour. Unlike time_entries there's no split-pending
-      // ambiguity here (each row already has exactly one cost_centre_id),
-      // so summing client-side is safe without the caveats that pushed
-      // actual_labour_cost out to a serverless function instead.
-      if (project.job_number) {
-        const { data: usageRows } = await supabaseClient
-          .from('job_material_usage')
-          .select('cost_centre_id, quantity, unit_cost')
-          .eq('project_id', projectId);
-        const materialByCentre = {};
-        for (const row of usageRows || []) {
-          if (!row.cost_centre_id) continue;
-          materialByCentre[row.cost_centre_id] = (materialByCentre[row.cost_centre_id] || 0) + Number(row.quantity) * Number(row.unit_cost);
-        }
-        for (const centre of project.cost_centres || []) {
-          centre.actual_material_cost = materialByCentre[centre.id] || 0;
-        }
-      } else {
-        for (const centre of project.cost_centres || []) centre.actual_material_cost = 0;
-      }
-
-      // A quote never becomes the job in place any more - approval spins
-      // up a separate project row (see create-job-from-quote.js). Once
-      // approved, this looks up that job so "Go to job" can link straight
-      // to it, rather than just reloading this same page and hoping.
-      if (!project.job_number && project.status === 'approved') {
-        const { data: resultingJob } = await supabaseClient
-          .from('projects')
-          .select('id, job_number')
-          .eq('source_quote_id', project.id)
-          .maybeSingle();
-        project.resulting_job = resultingJob || null;
-      }
-
-      // This job IS a warranty job - pull just enough of the original
-      // job's context (ref + scope of works) for the reference card on
-      // the Summary tab. Photos aren't duplicated here, just linked to -
-      // see the "View original job's documents" link, which points at
-      // the original's own Documents tab instead.
-      if (project.warranty_of_project_id) {
-        const { data: original } = await supabaseClient
-          .from('projects')
-          .select('id, name, job_number, sow_text')
-          .eq('id', project.warranty_of_project_id)
-          .maybeSingle();
-        project.warranty_original = original || null;
-      }
+      if (resultingJob !== undefined) project.resulting_job = resultingJob || null;
+      if (original !== undefined) project.warranty_original = original || null;
 
       // This job HAS warranty jobs against it - net cost of all of them
       // (accrued labour+material, minus whatever each has itself
@@ -192,42 +169,62 @@
       // profit figures already use.
       project.warranty_jobs = [];
       project.net_warranty_cost = 0;
-      if (project.job_number && !project.warranty_of_project_id) {
-        const { data: warrantyJobs } = await supabaseClient
-          .from('projects')
-          .select('id, name, job_number, warranty_outcome, warranty_closed_at, cost_centres(id, invoiced_amount)')
-          .eq('warranty_of_project_id', project.id)
-          .order('created_at');
-        if (warrantyJobs && warrantyJobs.length) {
-          const warrantyIds = warrantyJobs.map(w => w.id);
-          let accruedLabourByProject = {};
-          try {
-            accruedLabourByProject = await fetchAccruedLabourCost(warrantyIds);
-          } catch (err) {
-            console.error('Warranty accrued labour fetch failed:', err.message);
-          }
-          const { data: liRows } = await supabaseClient
-            .from('purchase_order_line_items')
-            .select('destination_job_id, quantity, unit_cost')
-            .eq('received', true).eq('destination_type', 'job').in('destination_job_id', warrantyIds);
-          const materialByProject = {};
-          (liRows || []).forEach(li => {
-            materialByProject[li.destination_job_id] = (materialByProject[li.destination_job_id] || 0) + Number(li.quantity) * Number(li.unit_cost);
-          });
+      if (warrantyJobs && warrantyJobs.length) {
+        const warrantyIds = warrantyJobs.map(w => w.id);
+        const [accruedLabourByProject, warrantyLiRows] = await Promise.all([
+          fetchAccruedLabourCost(warrantyIds).catch(err => { console.error('Warranty accrued labour fetch failed:', err.message); return {}; }),
+          rows(supabaseClient.from('purchase_order_line_items').select('destination_job_id, quantity, unit_cost')
+            .eq('received', true).eq('destination_type', 'job').in('destination_job_id', warrantyIds)),
+        ]);
+        const materialByProject = {};
+        (warrantyLiRows || []).forEach(li => {
+          materialByProject[li.destination_job_id] = (materialByProject[li.destination_job_id] || 0) + Number(li.quantity) * Number(li.unit_cost);
+        });
 
-          project.warranty_jobs = warrantyJobs.map(w => {
-            const labourCost = Object.values(accruedLabourByProject[w.id]?.byCentre || {}).reduce((s, c) => s + Number(c.actualLabourCost || 0), 0);
-            const materialCost = materialByProject[w.id] || 0;
-            const accrued = labourCost + materialCost;
-            const invoicedBack = (w.cost_centres || []).reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
-            const net = Math.max(0, accrued - invoicedBack);
-            return { id: w.id, name: w.name, job_number: w.job_number, warranty_outcome: w.warranty_outcome, warranty_closed_at: w.warranty_closed_at, accrued, invoicedBack, net };
-          });
-          project.net_warranty_cost = project.warranty_jobs.reduce((s, w) => s + w.net, 0);
-        }
+        project.warranty_jobs = warrantyJobs.map(w => {
+          const labourCost = Object.values(accruedLabourByProject[w.id]?.byCentre || {}).reduce((s, c) => s + Number(c.actualLabourCost || 0), 0);
+          const materialCost = materialByProject[w.id] || 0;
+          const accrued = labourCost + materialCost;
+          const invoicedBack = (w.cost_centres || []).reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
+          const net = Math.max(0, accrued - invoicedBack);
+          return { id: w.id, name: w.name, job_number: w.job_number, warranty_outcome: w.warranty_outcome, warranty_closed_at: w.warranty_closed_at, accrued, invoicedBack, net };
+        });
+        project.net_warranty_cost = project.warranty_jobs.reduce((s, w) => s + w.net, 0);
       }
 
       return project;
+    }
+
+    // Item 96: on the first open, the job's name, client and tab title show as soon as the
+    // job row lands, while the money figures are still being worked out. Later reloads
+    // (after a save) skip this so the page on screen is not wiped.
+    function paintJobHeaderEarly(project) {
+      setJobTitle(project);
+      if (document.getElementById('job-tabs')) return;
+      document.getElementById('content').innerHTML = `
+        <h1>${escapeHtml(project.name || '')}</h1>
+        <p class="subtitle">${escapeHtml(project.client_name || '')}</p>
+        <p class="subtitle">Loading...</p>`;
+    }
+
+    // Item 86: the browser tab reads "J7003 Smith reno - TEops" (or Q1234 for a quote).
+    // setPageTitle (supabase-client.js) when it exists also keeps the notification bell's
+    // "(3) " count prefix on our title; until then the bell's rewrites are caught here.
+    function setJobTitle(project) {
+      const num = projectNumberOnly(project);
+      const text = [num !== '-' ? num : '', project.name || ''].filter(Boolean).join(' ') || 'Job';
+      if (typeof setPageTitle === 'function') { setPageTitle(text); return; }
+      window.__jobTitle = `${text} - TEops`;
+      const keep = () => {
+        const prefix = (/^\(\d+\+?\) /.exec(document.title) || [''])[0];
+        if (document.title !== prefix + window.__jobTitle) document.title = prefix + window.__jobTitle;
+      };
+      keep();
+      const titleEl = document.querySelector('title');
+      if (titleEl && !window.__jobTitleWatch) {
+        window.__jobTitleWatch = new MutationObserver(keep);
+        window.__jobTitleWatch.observe(titleEl, { childList: true, characterData: true, subtree: true });
+      }
     }
 
     // ============ Full quote editor (ported from new-project.html) ============
@@ -3113,6 +3110,7 @@
       // openInvoiceActualCostsPanel), not a % of a quote that never existed.
       const isQuoteFree = project.proposal_template === 'direct_job';
 
+      setJobTitle(project);
       const content = document.getElementById('content');
       const numberLine = [
         project.job_number ? `J${project.job_number}` : null,
@@ -3875,6 +3873,10 @@
       // Item 32: each tab has its own address (?tab=photos and so on), so a refresh,
       // a shared link or a notification lands on it. replaceState, so Back still leaves the job.
       const tabStrip = document.getElementById('job-tabs');
+      // Item 104: a tab's data loads the first time the tab is opened (a click, ?tab=, or the
+      // job search), not on every job open. Each render() starts its own set, since it draws
+      // fresh panels; a loader runs once per render.
+      const tabLoaders = {};
       function showTab(btn) {
         const panel = btn.dataset.panel;
         tabStrip.querySelectorAll('.settings-tab').forEach(b => b.classList.toggle('active', b === btn));
@@ -3888,6 +3890,8 @@
         const r = btn.getBoundingClientRect(), s = tabStrip.getBoundingClientRect();
         if (r.left < s.left || r.right > s.right) tabStrip.scrollLeft += (r.left - s.left) - (s.width - r.width) / 2;
         jobActivityLog.then(log => log.setTab(panel));
+        const load = tabLoaders[panel];
+        if (load) { delete tabLoaders[panel]; load(); }
       }
       tabStrip.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => showTab(btn)));
       const openTabFromUrl = () => {
@@ -3896,7 +3900,7 @@
         if (btn) btn.click();
       };
 
-      const jobActivityLog = renderJobActivityLog(project.id, 'job-activity-log', 'job-activity-title');
+      const jobActivityLog = renderJobActivityLogCapped(project.id, 'job-activity-log', 'job-activity-title');
 
       if (editMode) {
         wireEditForm(project);
@@ -3944,10 +3948,9 @@
         project.id, 'handover', 'handover', handoverCheckBtn, document.getElementById('handover-check-result')
       ));
 
-      loadDocuments(project.id);
+      tabLoaders.documents = () => { loadDocuments(project.id); wireCompanyDocs(project); };
       wireDocumentUpload(project);
-      wireCompanyDocs(project);
-      if (document.getElementById('site-photos-list')) { loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
+      if (document.getElementById('site-photos-list')) { tabLoaders.photos = () => loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
       if (document.getElementById('clock-here-card')) loadClockHereCard(project);

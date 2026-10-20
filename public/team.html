@@ -577,16 +577,18 @@
         const initials = (p.full_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
         const myLicences = (licences || []).filter(l => l.profile_id === p.id);
         const email = emailById[p.id];
+        const canOpen = teamCanEditTitles || p.id === teamMyId;
+        const name = escapeHtml(p.full_name || 'Unnamed');
         return `
-          <div class="team-card${teamCanEditTitles || p.id === teamMyId ? ' clickable' : ''}" data-id="${p.id}" ${teamCanEditTitles || p.id === teamMyId ? 'title="Open profile"' : ''}>
+          <div class="team-card${canOpen ? ' clickable' : ''}" data-id="${escapeHtml(p.id)}" ${canOpen ? 'title="Open profile"' : ''}>
             ${p.photo_url
-              ? `<img class="team-avatar" src="${p.photo_url}" />`
-              : `<div class="team-avatar-fallback">${initials}</div>`}
-            <p style="font-weight:600; margin:0 0 2px;">${p.full_name || 'Unnamed'}</p>
-            <p class="subtitle job-title-display" style="margin:0 0 6px;">${p.job_title || roleLabels[p.role] || p.role}</p>
+              ? `<img class="team-avatar" src="${escapeHtml(p.photo_url)}" alt="" />`
+              : `<div class="team-avatar-fallback">${escapeHtml(initials)}</div>`}
+            <p style="font-weight:600; margin:0 0 2px;">${canOpen ? `<a class="team-card-link" href="/staff.html?id=${encodeURIComponent(p.id)}" style="color:inherit; text-decoration:none;">${name}</a>` : name}</p>
+            <p class="subtitle job-title-display" style="margin:0 0 6px;">${escapeHtml(p.job_title || roleLabels[p.role] || p.role)}</p>
             ${teamCanEditTitles ? `<button type="button" class="secondary edit-title-btn" style="font-size:11px; padding:3px 8px; margin-bottom:6px;">Edit title</button>` : ''}
-            ${p.mobile_number ? `<p class="subtitle" style="margin:0 0 4px; font-size:12px;"><a class="link-quiet" href="tel:${p.mobile_number}">${p.mobile_number}</a></p>` : ''}
-            ${email ? `<p class="subtitle" style="margin:0 0 6px; font-size:12px;"><a class="link-quiet" href="mailto:${email}">${email}</a></p>` : ''}
+            ${p.mobile_number ? `<p class="subtitle" style="margin:0 0 4px; font-size:12px;"><a class="link-quiet" href="tel:${escapeHtml(p.mobile_number)}">${escapeHtml(p.mobile_number)}</a></p>` : ''}
+            ${email ? `<p class="subtitle" style="margin:0 0 6px; font-size:12px;"><a class="link-quiet" href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></p>` : ''}
             ${myLicences.length ? `
               <div style="text-align:left; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
                 ${myLicences.map(l => `<p style="margin:0 0 4px; font-size:11px;">${escapeHtml(l.licence_name)}: ${l.licence_number ? escapeHtml(l.licence_number) : '<span class="subtitle">no number set</span>'}</p>`).join('')}
@@ -595,11 +597,12 @@
       }).join('');
 
       // A card opens that person's staff profile: admin/finance can open
-      // anyone's, everyone else only their own. Clicks on the phone/email
-      // links or the job title editor inside a card don't count.
+      // anyone's, everyone else only their own. The name is a real link
+      // (long-press, new tab, copy); a click anywhere else on the card
+      // follows it, except the phone/email links and the job title editor.
       listEl.querySelectorAll('.team-card.clickable').forEach(card => card.addEventListener('click', (e) => {
         if (e.target.closest('a, button, input')) return;
-        window.location.href = `/staff.html?id=${encodeURIComponent(card.dataset.id)}`;
+        card.querySelector('.team-card-link').click();
       }));
       if (teamCanEditTitles) {
         listEl.querySelectorAll('.edit-title-btn').forEach(btn => {
@@ -608,7 +611,7 @@
             const display = card.querySelector('.job-title-display');
             const current = display.textContent;
             display.outerHTML = `<div class="job-title-edit" style="display:flex; gap:6px; margin-bottom:6px;">
-              <input class="job-title-input" value="${current}" style="margin:0; font-size:13px; padding:6px 8px;" />
+              <input class="job-title-input" value="${escapeHtml(current)}" style="margin:0; font-size:13px; padding:6px 8px;" />
               <button type="button" class="job-title-save-btn" style="font-size:11px; padding:3px 8px;">Save</button>
             </div>`;
             btn.style.display = 'none';

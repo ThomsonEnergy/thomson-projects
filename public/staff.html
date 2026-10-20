@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Staff profile - Thomson Energy</title>
+<title>Staff profile - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -116,7 +116,9 @@
     // ---------- Shell ----------
     function renderShell() {
       const initials = (person.full_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
-      document.title = `${person.full_name || 'Staff'} - Thomson Energy`;
+      // setPageTitle (supabase-client.js, when present) also keeps the notification count prefix in step
+      if (typeof setPageTitle === 'function') setPageTitle(person.full_name || 'Staff');
+      else document.title = `${person.full_name || 'Staff'} - TEops`;
       document.getElementById('content').innerHTML = `
         <div class="staff-head">
           ${person.photo_url ? `<img class="staff-avatar" src="${escapeHtml(person.photo_url)}" alt="" />` : `<div class="staff-avatar-fallback">${escapeHtml(initials)}</div>`}

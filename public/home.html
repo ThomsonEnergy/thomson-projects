@@ -266,12 +266,26 @@
     // getMyHomeShortcuts in supabase-client.js) - the same starred set the
     // topbar tabs' star toggle writes to, so starring a tab up top and
     // editing the order here are two views onto the one list.
-    async function renderQuickNav() {
+    // Same role rules as the menu, so Home never offers a tile that then
+    // says "Not available for your role".
+    function homeNavItemsFor(role) {
+      return MAIN_NAV_ITEMS.filter(item => (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)) && (!item.financeOnly || isFinanceRole(role)));
+    }
+    // Field staff who have never edited their tiles start on the pages they
+    // actually use; admin, finance and sales keep the office set.
+    const STAFF_HOME_SHORTCUTS = ['my-day', 'chat', 'tasks', 'timesheets', 'knowledge', 'team', 'documents', 'projects'];
+    async function homeShortcutsFor(role) {
+      const saved = await getMyHomeShortcuts();
+      if (saved === DEFAULT_HOME_SHORTCUTS && !isPricingRole(role)) return STAFF_HOME_SHORTCUTS;
+      return saved;
+    }
+
+    async function renderQuickNav(role = myRole) {
       const el = document.getElementById('quick-nav');
-      const role = await getMyRole();
-      const available = MAIN_NAV_ITEMS.filter(item => (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)));
+      if (!role) role = await getMyRole();
+      const available = homeNavItemsFor(role);
       const byKey = {}; available.forEach(i => { byKey[i.key] = i; });
-      const shortcuts = await getMyHomeShortcuts();
+      const shortcuts = await homeShortcutsFor(role);
       const ordered = shortcuts.map(k => byKey[k]).filter(Boolean);
       el.innerHTML = ordered.length
         ? ordered.map(item => `<a href="${item.href}"><span class="icon">${item.icon}</span>${item.label}</a>`).join('')
@@ -305,10 +319,10 @@
       document.body.appendChild(overlay);
 
       (async () => {
-        const role = await getMyRole();
-        const available = MAIN_NAV_ITEMS.filter(item => (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)));
+        const role = myRole || await getMyRole();
+        const available = homeNavItemsFor(role);
         const byKey = {}; available.forEach(i => { byKey[i.key] = i; });
-        let shortcuts = (await getMyHomeShortcuts()).filter(k => byKey[k]);
+        let shortcuts = (await homeShortcutsFor(role)).filter(k => byKey[k]);
         const notShown = () => available.filter(i => !shortcuts.includes(i.key));
         // Hoisted above render() so it survives the re-renders a drag
         // itself triggers (each swap rebuilds the whole list, which would
@@ -458,15 +472,67 @@
       const items = [];
       const today = new Date();
       const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const in30 = new Date(today.getTime() + 30 * 86400000);
+      const in30Str = `${in30.getFullYear()}-${String(in30.getMonth() + 1).padStart(2, '0')}-${String(in30.getDate()).padStart(2, '0')}`;
+      const isPricing = ['admin', 'finance', 'sales'].includes(myRole);
+      const isFinance = myRole === 'admin' || myRole === 'finance';
+      const isAdmin = myRole === 'admin';
+      const none = { data: null };
+
+      // Overlapping timesheet entries and forgotten clock-outs - your own, or
+      // everyone's for admin/finance. The names lookup needs the problems
+      // first, so this one runs as its own little chain.
+      const timesheetProblems = async () => {
+        const { overlaps, stale } = await findTimesheetProblems({ staffId: isFinance ? null : myUserId });
+        let people = [];
+        if (overlaps.length || stale.length) {
+          const ids = [...new Set([...overlaps.map(o => o.staffId), ...stale.map(s => s.staff_id)])];
+          const { data } = await supabaseClient.from('profiles').select('id, full_name').in('id', ids);
+          people = data || [];
+        }
+        return { data: { overlaps, stale, people } };
+      };
+
+      // Every check is independent, so they all go out at once; a failed
+      // one just leaves its own lines out.
+      const queries = {
+        myTasks: supabaseClient.from('job_tasks').select('id').eq('completed', false)
+          .or(`assigned_to_user_id.eq.${myUserId},assigned_to_role.eq.${myRole}`),
+        meetingActs: supabaseClient.from('job_tasks')
+          .select('id, description, due_date, remind_at, completed, followed_up_at, assigned_to_user_id, meeting_id, meetings(id, title, created_by)')
+          .not('meeting_id', 'is', null).is('followed_up_at', null),
+        tags: supabaseClient.from('feed_mentions')
+          .select('post_id, comment_id, feed_comments(message, profiles(full_name)), feed_posts(message, project_id, profiles(full_name), projects(id, name, job_number, quote_number))')
+          .eq('profile_id', myUserId).is('seen_at', null).order('created_at', { ascending: false }),
+        notComplete: supabaseClient.from('projects').select('id, name, job_number').eq('pipeline_stage', 'job_not_complete'),
+        draftQuotes: isPricing ? supabaseClient.from('projects').select('id, name, quote_number').eq('pipeline_stage', 'draft_quote') : none,
+        invoices: isPricing ? supabaseClient.from('invoices').select('id, invoice_number, sent_at, paid_at, labour_amount, material_amount, stc_amount').is('paid_at', null) : none,
+        timesheets: timesheetProblems(),
+        assets: isPricing ? supabaseClient.from('customer_assets')
+          .select('id, next_service_due, service_interval_months, warranty_expires, clients(email)')
+          .eq('status', 'active').eq('reminders_paused', false) : none,
+        assetLog: isPricing ? supabaseClient.from('asset_reminder_log').select('asset_id, kind, sent_at').gte('sent_at', new Date(Date.now() - 60 * 86400000).toISOString()) : none,
+        toBill: isPricing ? supabaseClient.from('job_variation_entries').select('project_id, projects(id, name, job_number)').eq('status', 'to_bill') : none,
+        pendingLeave: isFinance ? supabaseClient.from('leave_requests').select('id, profiles!leave_requests_staff_id_fkey(full_name)').eq('status', 'pending') : none,
+        allContracts: isFinance ? supabaseClient.from('employee_contracts').select('profile_id, status') : none,
+        activeStaff: isFinance ? supabaseClient.from('profiles').select('id, full_name').eq('active', true) : none,
+        myContract: supabaseClient.from('employee_contracts').select('status').eq('profile_id', myUserId).maybeSingle(),
+        credentials: isAdmin ? supabaseClient.from('company_credentials').select('name, expiry_date, notes').not('expiry_date', 'is', null).lte('expiry_date', in30Str) : none,
+        expiringLicences: isAdmin ? supabaseClient.from('profile_licences').select('profile_id, licence_name, expiry_date, notes').not('expiry_date', 'is', null).lte('expiry_date', in30Str) : none,
+        staffForLicences: isAdmin ? supabaseClient.from('profiles').select('id, full_name') : none,
+      };
+      const keys = Object.keys(queries);
+      const results = await Promise.all(keys.map(k => Promise.resolve(queries[k]).catch(err => {
+        console.error(`Needs attention check ${k} failed:`, err);
+        return { data: null, failed: true };
+      })));
+      const r = {};
+      const failed = {};
+      keys.forEach((k, i) => { r[k] = results[i].data; failed[k] = !!(results[i].failed || results[i].error); });
 
       // Tasks assigned to you or your role
-      const { data: myTasks } = await supabaseClient
-        .from('job_tasks')
-        .select('id')
-        .eq('completed', false)
-        .or(`assigned_to_user_id.eq.${myUserId},assigned_to_role.eq.${myRole}`);
-      if (myTasks && myTasks.length) {
-        items.push({ group: 'job', label: `${myTasks.length} task${myTasks.length === 1 ? '' : 's'} assigned to you`, link: '/tasks.html' });
+      if (r.myTasks && r.myTasks.length) {
+        items.push({ group: 'job', label: `${r.myTasks.length} task${r.myTasks.length === 1 ? '' : 's'} assigned to you`, link: '/tasks.html' });
       }
 
       // Follow-ups from meetings: reminders that have come due, anything
@@ -474,11 +540,8 @@
       // "yes, that was followed up" confirmation.
       try {
         const nowIso = new Date().toISOString();
-        const { data: meetingActs } = await supabaseClient.from('job_tasks')
-          .select('id, description, due_date, remind_at, completed, followed_up_at, assigned_to_user_id, meeting_id, meetings(id, title, created_by)')
-          .not('meeting_id', 'is', null).is('followed_up_at', null);
         let awaiting = 0, awaitingMeeting = null;
-        (meetingActs || []).forEach(t => {
+        (r.meetingActs || []).forEach(t => {
           const link = `/meetings.html?id=${t.meeting_id}`;
           const title = t.meetings ? escapeHtml(t.meetings.title) : 'a meeting';
           const snippet = escapeHtml(t.description.length > 60 ? t.description.slice(0, 60) + '...' : t.description);
@@ -493,10 +556,7 @@
 
       // Posts someone's tagged you in that you haven't opened yet.
       try {
-        const { data: tags } = await supabaseClient.from('feed_mentions')
-          .select('post_id, comment_id, feed_comments(message, profiles(full_name)), feed_posts(message, project_id, profiles(full_name), projects(id, name, job_number, quote_number))')
-          .eq('profile_id', myUserId).is('seen_at', null).order('created_at', { ascending: false });
-        (tags || []).forEach(t => {
+        (r.tags || []).forEach(t => {
           const post = t.feed_posts;
           if (!post) return;
           // Tagged in a comment: say who commented and show the comment; in a
@@ -514,29 +574,15 @@
       } catch (err) { console.error('Tag check failed:', err); }
 
       // Jobs flagged Not Complete - relevant to everyone, no $ involved
-      const { data: notComplete } = await supabaseClient
-        .from('projects')
-        .select('id, name, job_number')
-        .eq('pipeline_stage', 'job_not_complete');
-      (notComplete || []).forEach(p => {
+      (r.notComplete || []).forEach(p => {
         items.push({ group: 'job', label: `Job flagged not complete: #${p.job_number || '-'} ${escapeHtml(p.name)}`, link: `/project.html?id=${p.id}` });
       });
 
-      const isPricing = ['admin', 'finance', 'sales'].includes(myRole);
       if (isPricing) {
-        const { data: draftQuotes } = await supabaseClient
-          .from('projects')
-          .select('id, name, quote_number')
-          .eq('pipeline_stage', 'draft_quote');
-        (draftQuotes || []).forEach(p => {
+        (r.draftQuotes || []).forEach(p => {
           items.push({ group: 'quotes', label: `Draft quote needs finishing: ${escapeHtml(projectRef(p))}`, link: `/new-project.html?id=${p.id}` });
         });
-
-        const { data: invoices } = await supabaseClient
-          .from('invoices')
-          .select('id, invoice_number, sent_at, paid_at, labour_amount, material_amount, stc_amount')
-          .is('paid_at', null);
-        (invoices || []).forEach(inv => {
+        (r.invoices || []).forEach(inv => {
           const daysSince = (today - new Date(inv.sent_at)) / 86400000;
           if (daysSince > 14) {
             items.push({ group: 'invoices', label: `Overdue: invoice ${escapeHtml(inv.invoice_number)} (${Math.floor(daysSince)} days)`, link: '/invoices.html' });
@@ -544,15 +590,11 @@
         });
       }
 
-      // Overlapping timesheet entries and forgotten clock-outs - your own, or
-      // everyone's for admin/finance. Links straight to the day to fix.
+      // Timesheet problems link straight to the day to fix.
       try {
-        const everyone = myRole === 'admin' || myRole === 'finance';
-        const { overlaps, stale } = await findTimesheetProblems({ staffId: everyone ? null : myUserId });
-        if (overlaps.length || stale.length) {
-          const ids = [...new Set([...overlaps.map(o => o.staffId), ...stale.map(s => s.staff_id)])];
-          const { data: people } = await supabaseClient.from('profiles').select('id, full_name').in('id', ids);
-          const nameOf = (id) => (id === myUserId ? 'Your' : escapeHtml((people || []).find(p => p.id === id)?.full_name || 'A staff member') + "'s");
+        if (r.timesheets) {
+          const { overlaps, stale, people } = r.timesheets;
+          const nameOf = (id) => (id === myUserId ? 'Your' : escapeHtml(people.find(p => p.id === id)?.full_name || 'A staff member') + "'s");
           const ref = (e) => (e.projects ? escapeHtml(projectRef(e.projects)) : 'General / Office');
           overlaps.forEach(o => {
             items.push({ group: 'timesheets', label: `${nameOf(o.staffId)} timesheet overlaps on ${new Date(o.date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}: ${ref(o.a)} and ${ref(o.b)} - fix it`, link: `/timesheets.html?fix=${o.date}&staff=${o.staffId}` });
@@ -566,14 +608,11 @@
       // Customer servicing / warranty reminders waiting to be reviewed and sent.
       if (isPricing) {
         try {
-          const { data: assets } = await supabaseClient.from('customer_assets')
-            .select('id, next_service_due, service_interval_months, warranty_expires, clients(email)')
-            .eq('status', 'active').eq('reminders_paused', false);
-          const { data: log } = await supabaseClient.from('asset_reminder_log').select('asset_id, kind, sent_at').gte('sent_at', new Date(Date.now() - 60 * 86400000).toISOString());
+          const log = r.assetLog;
           const daysTo = (iso) => Math.round((new Date(iso + 'T00:00:00') - new Date(todayStr + 'T00:00:00')) / 86400000);
           const done = (id, kind) => (log || []).some(l => l.asset_id === id && l.kind === kind);
           let due = 0;
-          (assets || []).forEach(a => {
+          (r.assets || []).forEach(a => {
             if (!(a.clients && a.clients.email)) return;
             if (a.service_interval_months && a.next_service_due && daysTo(a.next_service_due) <= 30 && !done(a.id, 'service')) due++;
             if (a.warranty_expires && daysTo(a.warranty_expires) <= 90 && daysTo(a.warranty_expires) >= 0 && !done(a.id, 'warranty')) due++;
@@ -585,21 +624,16 @@
       // Out-of-scope work logged on jobs that nobody's billed or waived yet.
       if (isPricing) {
         try {
-          const { data: toBill } = await supabaseClient.from('job_variation_entries').select('project_id, projects(id, name, job_number)').eq('status', 'to_bill');
           const byJob = {};
-          (toBill || []).forEach(v => { if (v.projects) (byJob[v.project_id] = byJob[v.project_id] || { p: v.projects, n: 0 }).n++; });
+          (r.toBill || []).forEach(v => { if (v.projects) (byJob[v.project_id] = byJob[v.project_id] || { p: v.projects, n: 0 }).n++; });
           Object.values(byJob).forEach(({ p, n }) => {
             items.push({ group: 'job', label: `${n} variation${n === 1 ? '' : 's'} logged to bill on ${escapeHtml(projectRef(p))}`, link: `/project.html?id=${p.id}&tab=variations` });
           });
         } catch (err) { console.error('Variation check failed:', err); }
       }
 
-      if (myRole === 'admin' || myRole === 'finance') {
-        const { data: pendingLeave } = await supabaseClient
-          .from('leave_requests')
-          .select('id, profiles!leave_requests_staff_id_fkey(full_name)')
-          .eq('status', 'pending');
-        (pendingLeave || []).forEach(lr => {
+      if (isFinance) {
+        (r.pendingLeave || []).forEach(lr => {
           items.push({ group: 'admin', label: `Leave request pending: ${lr.profiles ? escapeHtml(lr.profiles.full_name) : 'a staff member'}`, link: '/timesheets.html' });
         });
 
@@ -608,12 +642,8 @@
         // visibility that one's still outstanding for an active staff
         // member - easy to lose track of otherwise since nothing else
         // surfaces it once someone's already using the app day to day.
-        const [{ data: allContracts }, { data: activeStaff }] = await Promise.all([
-          supabaseClient.from('employee_contracts').select('profile_id, status'),
-          supabaseClient.from('profiles').select('id, full_name').eq('active', true),
-        ]);
-        (activeStaff || []).forEach(s => {
-          const c = (allContracts || []).find(x => x.profile_id === s.id);
+        (r.activeStaff || []).forEach(s => {
+          const c = (r.allContracts || []).find(x => x.profile_id === s.id);
           if (!c || c.status !== 'signed') {
             items.push({ group: 'admin', label: `Employment contract not completed: ${escapeHtml(s.full_name || 'a staff member')}${c ? ` (${c.status.replace(/_/g, ' ')})` : ' (not started)'}`, link: '/settings.html' });
           }
@@ -622,8 +652,9 @@
 
       // Your own employment contract, if not yet fully signed - the same
       // reason as above, just addressed to you instead of Finance/Admin.
-      const { data: myContract } = await supabaseClient.from('employee_contracts').select('status').eq('profile_id', myUserId).maybeSingle();
-      if (!myContract || myContract.status !== 'signed') {
+      // Skipped when the check itself failed, rather than nagging wrongly.
+      const myContract = r.myContract;
+      if (!failed.myContract && (!myContract || myContract.status !== 'signed')) {
         items.push({
           group: 'admin',
           label: `Your employment contract isn't completed yet${myContract?.status === 'ready_to_sign' ? " - it's ready for you to sign" : ' - still being prepared'}`,
@@ -631,27 +662,14 @@
         });
       }
 
-      if (myRole === 'admin') {
-        const in30 = new Date(today.getTime() + 30 * 86400000);
-        const in30Str = `${in30.getFullYear()}-${String(in30.getMonth() + 1).padStart(2, '0')}-${String(in30.getDate()).padStart(2, '0')}`;
-
-        const { data: credentials } = await supabaseClient
-          .from('company_credentials')
-          .select('name, expiry_date, notes')
-          .not('expiry_date', 'is', null)
-          .lte('expiry_date', in30Str);
-        (credentials || []).forEach(c => {
+      if (isAdmin) {
+        (r.credentials || []).forEach(c => {
           const isExpired = c.expiry_date < todayStr;
           items.push({ group: 'licences', label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${escapeHtml(c.name)} (${new Date(c.expiry_date).toLocaleDateString('en-AU')})${c.notes ? `. Note: ${escapeHtml(c.notes)}` : ''}`, link: '/team.html' });
         });
-
-        const [{ data: expiringLicences }, { data: staffForLicences }] = await Promise.all([
-          supabaseClient.from('profile_licences').select('profile_id, licence_name, expiry_date, notes').not('expiry_date', 'is', null).lte('expiry_date', in30Str),
-          supabaseClient.from('profiles').select('id, full_name'),
-        ]);
-        (expiringLicences || []).forEach(l => {
+        (r.expiringLicences || []).forEach(l => {
           const isExpired = l.expiry_date < todayStr;
-          const who = (staffForLicences || []).find(s => s.id === l.profile_id)?.full_name || 'a staff member';
+          const who = (r.staffForLicences || []).find(s => s.id === l.profile_id)?.full_name || 'a staff member';
           items.push({ group: 'licences', label: `${isExpired ? 'Expired' : 'Expiring soon'}: ${escapeHtml(who)}'s ${escapeHtml(l.licence_name)} (${new Date(l.expiry_date).toLocaleDateString('en-AU')})${l.notes ? `. Note: ${escapeHtml(l.notes)}` : ''}`, link: '/team.html' });
         });
       }
@@ -925,20 +943,30 @@
         window.location.href = '/login.html';
       });
 
-      const { data: profile } = await supabaseClient.from('profiles').select('role, full_name').eq('id', myUserId).maybeSingle();
+      // Every card loads at once and paints itself as soon as its own data
+      // lands. The clock, schedule and calls only need who you are, so they
+      // start before the profile read; the tiles go first once the role is
+      // known (the shortcuts read runs alongside the profile read).
+      const cards = [refreshClockButton(), loadMySchedule(), loadMyCalls(), loadCallbackRequestsHome()];
+      const [{ data: profile }] = await Promise.all([
+        typeof getMyProfile === 'function'
+          ? getMyProfile().then(data => ({ data }))
+          : supabaseClient.from('profiles').select('role, full_name').eq('id', myUserId).maybeSingle(),
+        getMyHomeShortcuts().catch(() => null),
+      ]);
       myRole = profile?.role || 'staff';
       myName = profile?.full_name || '';
       const firstName = myName ? myName.split(' ')[0] : '';
       loadDailyGreeting(firstName);
 
-      await refreshClockButton();
-      await renderQuickNav();
-      loadMySchedule();
-      await loadMyCalls();
-      await loadCallbackRequestsHome();
-      await loadActionItems();
-      await mountFeedComposer(document.getElementById('feed-composer'), { myUserId, onPosted: loadFeed });
-      await loadFeed();
+      cards.unshift(renderQuickNav(myRole));
+      cards.push(
+        loadActionItems(),
+        mountFeedComposer(document.getElementById('feed-composer'), { myUserId, onPosted: loadFeed }),
+        loadFeed(),
+      );
+      const results = await Promise.allSettled(cards);
+      results.forEach(r => { if (r.status === 'rejected') console.error('Home card failed to load:', r.reason); });
     })();
   </script>
 </body>

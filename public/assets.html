@@ -38,7 +38,7 @@
     <p class="subtitle">What we've installed for each customer, with warranty and servicing dates - so we can remind them when a service is due or a warranty is running out, and let owners of particular equipment know about news.</p>
 
     <div class="asset-tabs">
-      <button type="button" class="secondary active" data-tab="list">All assets</button>
+      <button type="button" class="secondary active" data-tab="list">All equipment</button>
       <button type="button" class="secondary" data-tab="reminders" id="tab-reminders-btn">Reminders due</button>
       <button type="button" class="secondary" data-tab="campaign">Email owners</button>
     </div>
@@ -46,7 +46,7 @@
     <!-- All assets -->
     <div class="card" id="tab-list">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
-        <h2 style="margin:0;">Assets</h2>
+        <h2 style="margin:0;">Equipment</h2>
         <button id="add-asset-btn">+ Add asset</button>
       </div>
       <div class="grid cols-3" style="margin-bottom:12px;">
@@ -338,6 +338,13 @@
       document.getElementById('camp-type').insertAdjacentHTML('beforeend', typeOpts);
       await loadAll();
       if (window.location.hash === '#reminders') showTab('reminders');
+      // ?id= (from the top bar search) opens that piece of equipment straight away
+      const deepAssetId = new URLSearchParams(window.location.search).get('id');
+      if (deepAssetId) {
+        const asset = allAssets.find(a => a.id === deepAssetId);
+        if (asset) openAssetPanel({ asset, onSaved: loadAll });
+        else showToast('That equipment could not be found', { error: true });
+      }
     })();
   </script>
 </body>
