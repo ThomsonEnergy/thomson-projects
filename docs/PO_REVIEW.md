@@ -106,6 +106,34 @@ Four consolidated deliveries, each to `main` with its migration on production.
 9. **Returns and supplier credits**: gear sent back to the supplier (wrong part, damaged) and their credit note. Not in the workflow above. Plan assumes a "Returned to supplier" action on a received line (comes off the job cost or stock, waits for the credit note, which Tally matches like a bill with a negative total). Build it in Delivery 1, or later?
 10. **Stocktake**: while stock is phased in, a per-location count mode (open the van, walk through every item, type the actual count, one Save, every difference logged as a correction). Build it with Delivery 3, or later?
 
+## Owner's answers (20 Oct 2026, cloud chat)
+
+Everything not listed here is as the plan recommends.
+
+1. Close with back ordered lines: the closer picks per PO (close now cancels the back order off the PO, or wait).
+2. Approve for payment: **Sales too** (Admin, Finance and Sales), through the server function with who and when recorded.
+3. Pay-on date: later of the supplier's terms date and our approval date. Yes.
+4. Airwallex: build the pay batch and the Paid button now; Airwallex send is its own delivery once the payout key and beneficiaries exist.
+5. Staff adding a missing part from My Day: yes. It is flagged **Needs a price** in two places: on the job (the stock PO line and the job's cost shows "price missing" until set) and in the Stock list.
+6. Tools: $500 ex GST, under $500 listed without the serial and photo rule. Also add **perishables** (drill bits, hole saws, blades) as a tools category. Every tool and perishable sits **in a vehicle or the Warehouse** (location is required) and is adjusted as they break: status broken / replaced / lost, with who and when, so the Tools page always shows what is where and what needs replacing.
+7. Freight: **no cap, always red**, so we always see we were charged. Every red line (freight or any other line item) gets **Accept** or **Deny charge**; Deny sends a please-explain email to the supplier (the existing Query supplier email, one line per denied charge, bill stays unapproved until resolved).
+8. Consumables (zip ties, saddles, screws, tape): yes, flag them. How they are tracked is below.
+9. Returns and supplier credits: later, after the four deliveries.
+10. Stocktake mode: with Delivery 3.
+
+### Consumables: how to track them without counting zip ties
+
+Nobody counts 367 zip ties. Consumables are tracked by the **pack**, not the piece:
+
+- A consumable's stock unit is its pack (bag of 100 ties, box of 100 saddles, roll of tape). Cost per pack, minimum in packs. The Stock page shows "3 bags" not "367".
+- The stock pull takes whole packs ("grabbed a bag of ties" = 1). Open packs are ignored. Consumables are left out of the clock-out "Did you take any stock?" list.
+- **Running low**: one tap on the van or Warehouse stock page, and a short "Anything running low?" list of consumables on the clock-out prompt (tap the item, done). It raises a restock suggestion for Admin / Finance on the Stock page and the ops digest; no count needed.
+- Low-stock alert from the pack minimum, the same as every other item.
+- Monthly quick check in the stocktake mode (Delivery 3): consumables show as OK / Low / Out, no numbers.
+- Later (not now): usage-based depletion from job materials and prebuild ratios (10 x 4m conduit used means about 40 saddles), suggested by the AI and confirmed by a person, once a few months of job data exist. Logged in `docs/IDEAS_BACKLOG.md` item 22.
+
+No weekly manual adjustment is needed.
+
 ## Hand-over from the UX review (20 Oct 2026)
 
 The laptop chat owns every purchase order, supplier bill, stock, price list and tools change from here (this plan). The cloud chat's UX deliveries 4 to 6 drop the items below; fold them into the PO deliveries wherever they fit (numbers are `docs/UX_REVIEW.md` items, each has the file and lines):
