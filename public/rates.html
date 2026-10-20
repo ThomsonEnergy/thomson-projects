@@ -93,6 +93,9 @@
     <div id="content" class="qdoc"><p class="subtitle" style="padding:24px;">Loading...</p></div>
   </div>
 
+  <!-- A public customer page: supabase-client.js skips the staff wiring background
+       (circuit-background.js) when this function already exists. -->
+  <script>window.addCircuitBackground = function () {};</script>
   <script src="/js/supabase-client.js?v=103"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
   <script>

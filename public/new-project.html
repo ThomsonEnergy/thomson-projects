@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>New quote - Thomson Energy</title>
+<title>New quote - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -1382,6 +1382,9 @@
       }
       document.getElementById('page-title').textContent = 'Edit quote';
       currentJobNumber = project.job_number;
+      // Browser tab and history read "Q1234 Smith reno - TEops"
+      const tabTitle = [project.quote_number ? `Q${project.quote_number}` : '', project.name || ''].filter(Boolean).join(' ') || 'Edit quote';
+      if (typeof setPageTitle === 'function') setPageTitle(tabTitle); else document.title = `${tabTitle} - TEops`;
       document.getElementById('page-numbers').textContent = [
         project.quote_number ? `Q${project.quote_number}` : null,
         project.job_number ? `J${project.job_number}` : null,
@@ -1499,7 +1502,7 @@
               <div class="empty-icon">&#128274;</div>
               <h2>Not available for your role</h2>
               <p>Quoting and pricing are limited to Sales, Finance, and Admin accounts. Ask an admin if you need access.</p>
-              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Projects</a>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Pipeline</a>
             </div>
           </div>`;
         return;

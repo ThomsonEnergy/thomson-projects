@@ -227,6 +227,62 @@
       }
     }
 
+    // Item 104: the job's activity log, as renderJobActivityLog (supabase-client.js) draws
+    // it (grouped on Summary, per tab elsewhere), but only the newest 50 entries load at
+    // first; "Show older" fetches the next 50.
+    const JOB_ACTIVITY_PAGE = 50;
+    async function renderJobActivityLogCapped(projectId, containerId, titleId) {
+      const containerEl = document.getElementById(containerId);
+      if (!containerEl) return { setTab() {} };
+      containerEl.classList.add('activity-log-scroll');
+      containerEl.innerHTML = `<p class="subtitle">Loading...</p>`;
+      const entries = [];
+      let tab = 'summary', hasMore = false, loadingMore = false;
+
+      const fetchPage = async () => {
+        const { data, error } = await supabaseClient
+          .from('activity_log')
+          .select('*, profiles(full_name)')
+          .eq('entity_type', 'project')
+          .eq('entity_id', projectId)
+          .order('created_at', { ascending: false })
+          .range(entries.length, entries.length + JOB_ACTIVITY_PAGE); // one extra row says whether there are more
+        if (error) throw error;
+        hasMore = (data || []).length > JOB_ACTIVITY_PAGE;
+        entries.push(...(data || []).slice(0, JOB_ACTIVITY_PAGE));
+      };
+
+      const draw = () => {
+        const titleEl = titleId && document.getElementById(titleId);
+        if (titleEl) titleEl.textContent = tab === 'summary' ? 'Activity log' : 'Activity on this tab';
+        let html;
+        if (tab === 'summary') {
+          const lines = groupJobActivity(entries);
+          html = lines.length ? lines.map(l => activityEntryHtml(l.text, l.entry)).join('') : `<p class="subtitle">No activity logged yet.</p>`;
+        } else {
+          const mine = entries.filter(e => jobActivityTab(e.action) === tab);
+          html = mine.length ? mine.map(e => activityEntryHtml(e.description, e)).join('')
+            : `<p class="subtitle">Nothing logged on this tab${hasMore ? ' in the latest entries' : ''} yet.</p>`;
+        }
+        if (hasMore) html += `<button type="button" class="secondary job-activity-more" style="width:100%; margin-top:8px; font-size:13px;"${loadingMore ? ' disabled' : ''}>${loadingMore ? 'Loading...' : 'Show older'}</button>`;
+        containerEl.innerHTML = html;
+        const more = containerEl.querySelector('.job-activity-more');
+        if (more) more.addEventListener('click', async () => {
+          if (loadingMore) return;
+          loadingMore = true; draw();
+          try { await fetchPage(); } catch (err) { showToast(friendlyError(err), { error: true }); }
+          loadingMore = false; draw();
+        });
+      };
+
+      try { await fetchPage(); } catch (err) {
+        containerEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+        return { setTab() {} };
+      }
+      draw();
+      return { setTab(next) { tab = next; draw(); } };
+    }
+
     // ============ Full quote editor (ported from new-project.html) ============
     // Lets a quote (no job_number yet) be edited entirely on this page instead
     // of navigating to new-project.html's separate scrolling form. Deliberately
@@ -4848,8 +4904,15 @@
       }
       const ids = (links || []).map(l => l.thread_id);
       let msgs = [];
-      if (ids.length) ({ data: msgs } = await supabaseClient.from('emails').select('id, thread_id, direction, from_address, to_addresses, body_text, attachments, sent_at, created_by').in('thread_id', ids).order('sent_at', { ascending: false }));
+      if (ids.length) ({ data: msgs } = await supabaseClient.from('emails').select('id, thread_id, direction, from_address, to_addresses, attachments, sent_at, created_by').in('thread_id', ids).order('sent_at', { ascending: false }));
       const byThread = {}; (msgs || []).forEach(m => { (byThread[m.thread_id] ||= []).push(m); });
+      // Item 104: only the newest message per thread shows a snippet, so only its body is fetched.
+      const newestIds = Object.values(byThread).map(list => list[0].id);
+      if (newestIds.length) {
+        const { data: bodies } = await supabaseClient.from('emails').select('id, body_text').in('id', newestIds);
+        const bodyById = Object.fromEntries((bodies || []).map(b => [b.id, b.body_text]));
+        Object.values(byThread).forEach(list => { list[0].body_text = bodyById[list[0].id] || ''; });
+      }
       const sorted = (links || []).slice().sort((a, b) => String(b.email_threads?.last_message_at).localeCompare(String(a.email_threads?.last_message_at)));
       // review requests sent from this job, and what came back
       const { data: reviews } = await supabaseClient.from('review_requests').select('id, client_name, rating, comment, submitted_at, google_clicked_at, created_at').eq('project_id', project.id).order('created_at', { ascending: false });
@@ -6175,8 +6238,55 @@
       return (d.mime_type || '') === 'application/pdf' || /.pdf$/i.test(d.file_name || '');
     }
 
-    async function loadDocuments(projectId) {
+    // Item 104: a list loader that is already running is never started a second time
+    // alongside itself (the tab opening and a save can both ask at once). A call made
+    // meanwhile waits and then runs once more, so it still sees the latest folder and files.
+    function singleFlight(fn) {
+      let running = null, queued = null;
+      const start = (args) => {
+        running = (async () => {
+          try { return await fn(...args); } finally {
+            running = null;
+            if (queued) { const q = queued; queued = null; start(q.args).then(q.resolve, q.reject); }
+          }
+        })();
+        return running;
+      };
+      return (...args) => {
+        if (!running) return start(args);
+        if (!queued) {
+          queued = { args };
+          queued.promise = new Promise((resolve, reject) => { queued.resolve = resolve; queued.reject = reject; });
+        } else queued.args = args;
+        return queued.promise;
+      };
+    }
+
+    // Item 98: signs a whole list of private files in one request. Returns { path: url };
+    // a file that could not be signed is simply missing from it.
+    async function signDocUrls(paths, expiresIn = 300) {
+      const map = {};
+      if (!paths.length) return map;
+      const { data, error } = await supabaseClient.storage.from('project-documents').createSignedUrls(paths, expiresIn);
+      if (error) return map;
+      (data || []).forEach(r => { if (r.signedUrl && !r.error) map[r.path] = r.signedUrl; });
+      return map;
+    }
+
+    // A small resized copy of a private picture for a tile (300px box, keeps its shape).
+    function signDocThumbUrl(path, expiresIn) {
+      return supabaseClient.storage.from('project-documents')
+        .createSignedUrl(path, expiresIn, { transform: { width: 300, height: 300, resize: 'contain', quality: 70 } })
+        .then(({ data }) => data?.signedUrl || null, () => null);
+    }
+
+    function loadDocuments(projectId) {
+      return (loadDocuments.flight ||= singleFlight(loadDocumentsNow))(projectId);
+    }
+
+    async function loadDocumentsNow(projectId) {
       const listEl = document.getElementById('documents-list');
+      if (!listEl) return;
       const pillsEl = document.getElementById('doc-folder-pills');
       const folderSelect = document.getElementById('doc-folder-select');
 
@@ -6219,23 +6329,30 @@
       listEl.innerHTML = `<p class="subtitle">Loading previews...</p>`;
 
       // Grid preview instead of a bare filename list - a private bucket
-      // needs a signed URL per file to actually show a thumbnail, so
-      // these are generated once up front rather than one at a time.
-      const signedUrls = await Promise.all(visible.map(d => getSignedDocUrl(d.file_path).catch(() => null)));
+      // needs a signed URL per file to actually show a thumbnail. Item 98:
+      // the whole list is signed in one request, and picture tiles get a
+      // small resized copy instead of the full-size original. The links last
+      // an hour so tiles further down still load when scrolled to.
+      const isImageDoc = (d) => (d.mime_type || '').startsWith('image/');
+      const [signedByPath, thumbUrls] = await Promise.all([
+        signDocUrls(visible.map(d => d.file_path), 3600),
+        Promise.all(visible.map(d => isImageDoc(d) ? signDocThumbUrl(d.file_path, 3600) : null)),
+      ]);
+      const signedUrls = visible.map(d => signedByPath[d.file_path] || null);
 
       listEl.innerHTML = `
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">
           ${visible.map((d, i) => {
             const url = signedUrls[i];
-            const isImage = (d.mime_type || '').startsWith('image/');
+            const isImage = isImageDoc(d);
             const isVideo = (d.mime_type || '').startsWith('video/');
             const isPdf = isPdfDoc(d);
-            const preview = isImage && url
-              ? `<img src="${url}" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0;" />`
+            const preview = isImage && (thumbUrls[i] || url)
+              ? `<img src="${escapeHtml(thumbUrls[i] || url)}"${url ? ` data-full="${escapeHtml(url)}"` : ''} loading="lazy" decoding="async" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0;" />`
               : isVideo && url
-                ? `<video src="${url}" muted preload="metadata" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0; background:#000;"></video>`
+                ? `<video src="${escapeHtml(url)}" muted preload="metadata" style="width:100%; height:110px; object-fit:cover; border-radius:8px 8px 0 0; background:#000;"></video>`
                 : isPdf
-                  ? `<div class="doc-pdf-thumb" data-path="${escapeHtml(d.file_path)}" style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px; overflow:hidden;">&#128196;</div>`
+                  ? `<div class="doc-pdf-thumb" data-path="${escapeHtml(d.file_path)}"${url ? ` data-url="${escapeHtml(url)}"` : ''} style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px; overflow:hidden;">&#128196;</div>`
                   : `<div style="width:100%; height:110px; border-radius:8px 8px 0 0; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:32px;">&#128196;</div>`;
             return `
               <div class="doc-tile" style="border:1px solid var(--border); border-radius:8px; overflow:hidden;">
@@ -6248,13 +6365,18 @@
               </div>`;
           }).join('')}
         </div>`;
+      // A picture the resizer cannot handle falls back to the full-size file.
+      listEl.querySelectorAll('img[data-full]').forEach(img => img.addEventListener('error', () => {
+        if (img.src !== img.dataset.full) img.src = img.dataset.full;
+      }, { once: true }));
 
       // PDFs show their first page like a photo, filled in after the grid
-      // is up so one slow PDF never holds the rest of the tab back.
+      // is up so one slow PDF never holds the rest of the tab back. They
+      // reuse the link signed above (item 98).
       (async () => {
         for (const thumb of listEl.querySelectorAll('.doc-pdf-thumb')) {
           try {
-            const url = await getSignedDocUrl(thumb.dataset.path);
+            const url = thumb.dataset.url || await getSignedDocUrl(thumb.dataset.path);
             const dataUrl = await renderPdfThumbnail(url, 360);
             thumb.innerHTML = `<img src="${dataUrl}" style="width:100%; height:100%; object-fit:cover; object-position:top;" />`;
           } catch { /* keep the document icon */ }
@@ -6284,8 +6406,9 @@
               return;
             }
             if (doc && (doc.mime_type || '').startsWith('image/')) {
-              const images = visible.filter(d => (d.mime_type || '').startsWith('image/'));
-              const imageUrls = await Promise.all(images.map(d => getSignedDocUrl(d.file_path)));
+              const images = visible.filter(isImageDoc);
+              const fresh = await signDocUrls(images.map(d => d.file_path));
+              const imageUrls = await Promise.all(images.map(d => fresh[d.file_path] || getSignedDocUrl(d.file_path)));
               openPhotoLightbox(imageUrls, images.indexOf(doc), {
                 captions: images.map(d => d.file_name),
                 onMarkup: async (i, blob) => { await saveDocCopy(blob, images[i], 'jpg', 'image/jpeg'); },
@@ -7359,8 +7482,13 @@
     // whole time but never actually shown anywhere - this is the first
     // place they're rendered, so a job with 30+ photos from the field has
     // somewhere to browse them instead of piling up unseen.
-    async function loadSitePhotos(projectId) {
+    function loadSitePhotos(projectId) {
+      return (loadSitePhotos.flight ||= singleFlight(loadSitePhotosNow))(projectId);
+    }
+
+    async function loadSitePhotosNow(projectId) {
       const listEl = document.getElementById('site-photos-list');
+      if (!listEl) return;
       let [{ data: photos, error }, myRole, { data: { session } }] = await Promise.all([
         supabaseClient
           .from('project_photos')

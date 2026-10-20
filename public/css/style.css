@@ -254,16 +254,58 @@ body {
 .mobile-menu-dropdown a.active { color: var(--accent); }
 .mobile-menu-dropdown a .tab-total { color: var(--muted); font-size: 12px; font-weight: 500; }
 
-/* On a computer the bar holds starred pages only; the rest sit in this
-   "More" menu (the phone dropdown, anchored under the button). */
-.nav-more-btn {
+/* Menu rows: star (laptop), icon, label. Built by renderMainNav. */
+.nav-row-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nav-row-icon { width: 22px; flex-shrink: 0; text-align: center; font-size: 16px; line-height: 1; }
+/* Home, Schedule and starred pages at the top of the phone menu */
+.nav-pinned { display: flex; flex-direction: column; border-bottom: 3px solid var(--border); }
+/* The four groups (Sales, Purchases, Team, Office). Phone: headers that open
+   one at a time. Laptop: each group button shows just its group (group-mode). */
+.nav-group { display: flex; flex-direction: column; border-bottom: 1px solid var(--border); }
+.nav-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 15px 20px;
+  background: var(--surface-2);
+  border: none;
+  border-radius: 0;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+}
+.nav-group-caret { color: var(--muted); transition: transform 0.15s ease; }
+.nav-group.expanded .nav-group-caret { transform: rotate(180deg); }
+.nav-group-items { display: none; flex-direction: column; }
+.nav-group.expanded .nav-group-items { display: flex; }
+.nav-group-items a { padding-left: 24px; }
+.mobile-menu-dropdown.group-mode .nav-pinned,
+.mobile-menu-dropdown.group-mode .nav-group-head,
+.mobile-menu-dropdown.group-mode .nav-group:not(.desk-open) { display: none; }
+.mobile-menu-dropdown.group-mode .nav-group { border-bottom: none; }
+.mobile-menu-dropdown.group-mode .nav-group.desk-open .nav-group-items { display: flex; }
+.mobile-menu-dropdown.group-mode .nav-group-items a { padding-left: 16px; }
+
+/* On a computer the bar holds starred pages, then one button per group
+   that opens the dropdown anchored under it. */
+.nav-group-btn {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
+  border-radius: 0;
+  margin: 0;
   font-family: inherit;
   cursor: pointer;
   flex-shrink: 0;
 }
+.nav-group-btn.has-active { color: var(--text); }
 @media (min-width: 701px) {
   .mobile-menu-dropdown {
     top: 76px;
@@ -276,8 +318,23 @@ body {
     border-radius: 10px;
   }
   .mobile-menu-dropdown a { padding: 11px 16px; font-size: 13px; }
-  .mobile-menu-dropdown a.nav-in-bar { display: none; }
+  .nav-group-head { padding: 11px 16px; }
 }
+/* Phones: the ☰ menu fills the screen under the bar and scrolls on its own */
+@media (max-width: 700px) {
+  .mobile-menu-dropdown {
+    position: fixed;
+    top: var(--menu-top, 64px);
+    bottom: 0;
+    left: 0;
+    right: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+.topbar-icon-link.active { color: var(--accent); }
 
 @media (max-width: 700px) {
   .topbar { padding: 0 14px; gap: 10px; height: 64px; }
@@ -288,10 +345,10 @@ body {
 }
 
 /* Set by fitTopbar() when the tabs don't all fit: the bar swaps to the ☰
-   button, whose menu then lists every page (not just the un-starred ones). */
+   button, whose menu lists every page by group. */
 .topbar.nav-collapsed .topbar-tabs { display: none; }
 .topbar.nav-collapsed .mobile-menu-btn { display: flex; }
-.topbar.nav-collapsed .mobile-menu-dropdown a.nav-in-bar { display: flex; }
+.topbar.topbar-nologo .topbar-logo { display: none; }
 .topbar.topbar-tight .topbar-right { gap: 0; }
 .topbar.topbar-tight .topbar-logo img { height: 34px; }
 /* Touch screens: every top bar icon is a 44px box, and the unread badges sit

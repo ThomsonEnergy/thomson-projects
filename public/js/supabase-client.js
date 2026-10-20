@@ -2151,6 +2151,16 @@ async function findMatchingSupplier(fields) {
   return bestScore >= 0.5 ? { supplier: best, how: 'name' } : null;
 }
 
+// Browser tab title: "<text> - TEops" (e.g. "J7003 Smith reno - TEops").
+// Kept in window.__teBaseTitle so the notification bell's "(3) " unread
+// prefix is added to this title instead of the one the page loaded with.
+function setPageTitle(text) {
+  const clean = String(text || '').trim();
+  window.__teBaseTitle = clean ? `${clean} - TEops` : 'TEops';
+  if (typeof window.__teApplyTitle === 'function') window.__teApplyTitle();
+  else document.title = window.__teBaseTitle;
+}
+
 // Single source of truth for the main nav: every page calls
 // renderMainNav('key') into empty <nav id="topbar-tabs"> and
 // <div id="mobile-menu-dropdown"> containers, instead of each page
@@ -2444,10 +2454,12 @@ function fitTopbar() {
     return right.getBoundingClientRect().right > inner + 0.5;
   };
   const tabs = document.getElementById('topbar-tabs');
-  bar.classList.remove('nav-collapsed', 'search-compact', 'topbar-tight');
+  bar.classList.remove('nav-collapsed', 'search-compact', 'topbar-tight', 'topbar-nologo');
   if (window.innerWidth <= 700 || (tabs && tabs.scrollWidth > tabs.clientWidth + 1) || overflowing()) bar.classList.add('nav-collapsed');
   if (overflowing()) bar.classList.add('search-compact');
   if (overflowing()) bar.classList.add('topbar-tight');
+  // Last resort on small phones: the wordmark goes (Home is the first row of the ☰ menu)
+  if (overflowing() && bar.classList.contains('nav-collapsed')) bar.classList.add('topbar-nologo');
 }
 window.__fitTopbar = fitTopbar;
 

@@ -24,14 +24,16 @@ function detectDeviceDefaultTheme() {
 const TE_THEME_DEFAULT = detectDeviceDefaultTheme();
 
 function applyThemeInstant() {
-  const saved = localStorage.getItem(TE_THEME_KEY) || TE_THEME_DEFAULT;
+  let saved = TE_THEME_DEFAULT;
+  try { saved = localStorage.getItem(TE_THEME_KEY) || TE_THEME_DEFAULT; } catch (e) { /* storage blocked */ }
   document.documentElement.setAttribute('data-theme', saved);
   return saved;
 }
 
 function setTheme(name) {
   document.documentElement.setAttribute('data-theme', name);
-  localStorage.setItem(TE_THEME_KEY, name);
+  try { localStorage.setItem(TE_THEME_KEY, name); } catch (e) { /* storage blocked */ }
+  if (typeof patchMyProfile === 'function') patchMyProfile({ theme: name });
   document.dispatchEvent(new CustomEvent('te-theme-changed', { detail: name }));
   // Best-effort save to the user's profile. Table may not exist yet if
   // migration_006 hasn't been run - fail silently either way, local
@@ -52,11 +54,13 @@ async function syncThemeFromProfile() {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) return;
 
-  const { data, error } = await supabaseClient
-    .from('profiles')
-    .select('theme')
-    .eq('id', session.user.id)
-    .maybeSingle();
+  // Shares the page's one profile read (getMyProfile in supabase-client.js).
+  let data = null, error = null;
+  if (typeof getMyProfile === 'function') {
+    data = await getMyProfile();
+  } else {
+    ({ data, error } = await supabaseClient.from('profiles').select('theme').eq('id', session.user.id).maybeSingle());
+  }
 
   if (error || !data) {
     // No profile row yet - create one from whatever's showing locally.
@@ -65,9 +69,11 @@ async function syncThemeFromProfile() {
     return;
   }
 
-  if (data.theme && data.theme !== localStorage.getItem(TE_THEME_KEY)) {
+  let local = null;
+  try { local = localStorage.getItem(TE_THEME_KEY); } catch (e) { /* storage blocked */ }
+  if (data.theme && data.theme !== local) {
     document.documentElement.setAttribute('data-theme', data.theme);
-    localStorage.setItem(TE_THEME_KEY, data.theme);
+    try { localStorage.setItem(TE_THEME_KEY, data.theme); } catch (e) { /* storage blocked */ }
   }
 }
 
