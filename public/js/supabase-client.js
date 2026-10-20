@@ -2368,7 +2368,7 @@ function escapeHtml(s) {
 function isNetworkError(err) {
   if (!err) return false;
   const msg = String(typeof err === 'string' ? err : (err.message || err.error_description || err.error || ''));
-  if (/failed to fetch|load failed|networkerror|network request failed|network connection was lost|internet connection appears to be offline|fetch failed|failed to send a request|err_internet_disconnected|err_network_changed|timed? ?out/i.test(msg)) return true;
+  if (/failed to fetch|load failed|networkerror|network request failed|network connection was lost|internet connection appears to be offline|fetch failed|failed to send a request|err_internet_disconnected|err_network_changed/i.test(msg)) return true;
   if (err.name === 'AuthRetryableFetchError') return true;
   return navigator.onLine === false && (err.name === 'TypeError' || err.name === 'AbortError' || /^TypeError/.test(msg));
 }
@@ -5386,7 +5386,7 @@ async function receiveAllPoLines(po, btn, onComplete) {
       done++;
     }
   } finally { btn.disabled = false; btn.textContent = label; }
-  if (onComplete) await onComplete();
+  if (onComplete) { try { await onComplete(); } catch (e) { console.error('refresh after Receive all failed:', e); } }
   if (failure) alert(`Received ${done} of ${lines.length}. ${failedLine.description}: ${friendlyError(failure)}`);
   else showToast(`Received ${done} line${done === 1 ? '' : 's'} to the job`);
 }
