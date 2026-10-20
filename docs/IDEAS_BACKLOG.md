@@ -17,7 +17,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
 | 8 | invoice@ supplier bill intake agent | Live 18 Oct 2026, suggest-only for 2 weeks | N | Owner checks matches, then auto-save on |
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
-| 22 | PO, bills, stock from My Day, tools register (review and 4-delivery plan) | Planned, waiting on owner's yes | N | Airwallex payout key for the last step of delivery 1 |
+| 22 | PO, bills, stock from My Day, tools register (review and 4-delivery plan) | Built 20 Oct 2026, all four LIVE (spec A10, A11c, A12, A12a) | N | Airwallex payouts still to build (needs the payout key) |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
 | 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 to 4 (items 1 to 109) LIVE 19 to 20 Oct 2026, next delivery 5 (`docs/UX_REVIEW.md`) | N | None |
@@ -59,7 +59,7 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 - Image compressed via `compressImage()` on upload.
 
 ### Tools and equipment register
-- New page. Not the same as `assets.html` (customer assets) or `fleet.html` (vehicles). Not started.
+- **Built 20 Oct 2026** as `tools.html` (spec A12a): register with location (Warehouse or vehicle), status, serial / photo / receipt rule over $500, Tools POs and tool lines on any PO, By vehicle view for perishables. Still to come from the list below: AI flagging on bills, test and tag reminders, Xero fixed asset push.
 - Fields: item, serial number, purchase date, cost, supplier, assigned to (person or vehicle), location, warranty expiry.
 - **AI flagging on supplier bills:** tool-like lines (drill, test instrument) flagged "move to assets instead of materials?", accept or deny, never automatic. Extends supplier invoice extraction.
 - **Compliance:** test and tag and calibration due dates, with reminders before they lapse.
