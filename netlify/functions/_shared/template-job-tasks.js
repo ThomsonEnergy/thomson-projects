@@ -42,6 +42,28 @@ function tasksFor(template, a) {
     if (yes('repeat_issue')) rows.push(handover('Note the root cause and recommend any follow-up work to the client'));
   }
 
+  // Battery proposal, or Solar with Batteries as well (create-default-job-tasks.js adds these
+  // next to the solar ones). Rules: CER Cheaper Home Batteries Program, SAA, AS/NZS 5139.
+  if (template === 'battery') {
+    rows.push(pre('Check the battery and inverter are on the CEC approved product list on the day of ordering (the list changes)'));
+    rows.push(pre('Confirm the installer on the job holds SAA grid connected battery systems (GCBS) accreditation'));
+    rows.push(pre(`Lodge the DNSP connection application for the battery${a.dnsp ? ` (${a.dnsp})` : ''}${a.export_limit && a.export_limit !== 'Not known yet' ? `, export limit ${a.export_limit}` : ''}`));
+    if (a.vpp_capable !== 'Yes') rows.push(pre('Battery not confirmed VPP capable: confirm with the supplier before ordering (required for the federal discount)'));
+    if (a.cec_listed !== 'Yes') rows.push(pre('Battery not confirmed on the CEC approved list: confirm before ordering'));
+    if (a.location_clear !== 'Yes') rows.push(pre('Agree a battery location that meets AS/NZS 5139 (not a habitable room, clear of exits, clearances, temperature) with the client'));
+    if (a.first_battery !== 'Yes') rows.push(pre('Confirm no earlier battery discount claim at this address (one per premises)'));
+    if (a.solar_commissioned_first !== 'Yes') rows.push(pre('Plan the solar commissioning before or with the battery (a battery with no solar is not eligible)'));
+    if (a.state_rebate === 'Yes') rows.push(pre('Check the state rebate or loan paperwork can be stacked with the federal discount and lodge it'));
+    if (a.backup_needs) rows.push(pre(`Design the backup circuits: ${a.backup_needs}`));
+    if (a.internet === 'No') rows.push(pre('No internet at the site: arrange a 4G modem or SIM for battery monitoring and VPP'));
+
+    rows.push(handover('Photograph the installed battery location showing the AS/NZS 5139 clearances and signage (caption the photo "battery")'));
+    rows.push(handover('Record the battery and inverter serial numbers under Installed equipment'));
+    rows.push(handover('Register the battery for VPP / monitoring and show the client the app'));
+    rows.push(handover('Test the backup circuits with the grid off and show the client what stays on'));
+    rows.push(handover('Create the Formbay battery job (BSTC) and upload the compliance documents'));
+  }
+
   return rows;
 }
 

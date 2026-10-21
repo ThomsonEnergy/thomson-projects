@@ -112,8 +112,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=110"></script>
-  <script src="/js/template-questions.js"></script>
+  <script src="/js/supabase-client.js?v=111"></script>
+  <script src="/js/template-questions.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let myUserId, myRole;
@@ -230,8 +230,8 @@
           ${project.notes ? `
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">Notes</p>
             <p class="subtitle" style="margin:0 0 12px; white-space:pre-wrap;">${escapeHtml(project.notes)}</p>` : ''}
-          ${TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length ? `
-            <p style="margin:0 0 4px; font-weight:600; font-size:13px;">${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</p>
+          ${Object.keys(project.template_answers || {}).length ? `
+            <p style="margin:0 0 4px; font-weight:600; font-size:13px;">Pre-quote information</p>
             <div style="margin:0 0 12px;">${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}</div>` : ''}
           ${project.installer_summary ? `
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">Installer summary</p>

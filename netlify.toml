@@ -1,6 +1,11 @@
 [build]
   publish = "public"
   functions = "netlify/functions"
+
+# The pre-quote question list is one file shared by the browser (quote pages) and the functions
+# (ready-to-send gate, job tasks): make sure the bundler ships it with every function.
+[functions]
+  included_files = ["public/js/template-questions.js"]
   # Points branch deploys and previews at the staging Supabase branch when
   # SUPABASE_URL / SUPABASE_ANON_KEY are set for that context. Production is
   # left as is. See scripts/write-config.js and docs/ENV_VARS.md.

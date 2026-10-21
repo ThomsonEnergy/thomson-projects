@@ -29,9 +29,9 @@ exports.handler = async (event) => {
   if (!auth) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
 
   try {
-    const { projectName, brief, stageNames = [], stageDescriptions = {}, documentPaths = [], style = 'story', template = '' } = JSON.parse(event.body);
-    if (!brief) {
-      return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'A project brief is required' }) };
+    const { projectName, brief = '', stageNames = [], stageDescriptions = {}, documentPaths = [], style = 'story', template = '', templateAnswers = '', customerGets = '', withBattery = false } = JSON.parse(event.body);
+    if (!brief && !templateAnswers) {
+      return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'A project brief or the pre-quote answers are required' }) };
     }
 
     const apiKey = await getIntegrationKey('anthropic');
@@ -84,14 +84,22 @@ THIS DOCUMENT IS AN ESTIMATE. Whatever the style above says, it must clearly lis
 - Put "Exclusions" after "Inclusions". Do not leave either list out.
 ` : '';
 
+    // Battery jobs (a Battery proposal, or Solar with Batteries as well): what the client must be
+    // told and what the installer must get right. Sources: docs/BATTERY_QUOTE_COMPLIANCE_REQUIREMENTS.md.
+    const batteryRule = (withBattery || template === 'battery') ? `
+BATTERY: this job includes a home battery. The scope must cover, in plain words: the battery's usable capacity in kWh and the make and model where given; which circuits are backed up in a blackout (and that the rest are not); where the battery is mounted and that the location meets AS/NZS 5139 (not in a habitable room, clear of exits, with the required clearances and signage); whether it is a hybrid (DC coupled) or AC coupled system; that the battery is VPP capable and registered for monitoring; the network (DNSP) connection application; commissioning and a demonstration of the backup; and that the federal Cheaper Home Batteries discount (shown as an STC credit on the price) depends on the battery being on the CEC approved list, 5 to 100 kWh usable (the discount covers the first 50 kWh), designed and installed by an installer accredited with Solar Accreditation Australia for grid connected battery systems, the first claim at the address and the solar being commissioned before or with it. State these as what is being done, not as a legal lecture.
+` : '';
+
+    const typeLine = { solar: 'a grid-connected solar PV system', battery: 'a home battery storage system', renovation: 'a renovation', service_work: 'service work', quick_estimate: 'an estimate', new_build: 'a new build' }[template] || 'electrical work';
     const promptText = `You are writing a scope-of-works document for an electrical contractor's client-facing quote.
 
 Project: ${projectName || 'This project'}
-Brief from the contractor: ${brief}
-
+Type of job: ${typeLine}${withBattery && template !== 'battery' ? ' with a battery as well' : ''}
+Brief from the contractor: ${brief || '(none typed, use the pre-quote answers below)'}
+${customerGets ? `\nWhat the customer is getting (from the design and the stages):\n${customerGets}\n` : ''}${templateAnswers ? `\nPre-quote information gathered from the client (internal notes: use them so the scope fits this site, never list them back as a questionnaire, and leave out anything the client would not expect to see, such as medical equipment or access codes):\n${templateAnswers}\n` : ''}
 Stages in this quote:
 ${stageList}
-
+${batteryRule}
 ${docBlocks.length ? 'Reference any attached plans, drawings, or electricity bills where relevant to ground the scope in what they actually show (e.g. existing switchboard capacity, circuit count, meter details).' : ''}
 
 ${styleGuide}

@@ -30,7 +30,7 @@
   <div class="wrap">
     <h1 id="page-title">New quote</h1>
     <p class="subtitle" id="page-numbers"></p>
-    <p class="subtitle">Break the job into stages, each priced separately.</p>
+    <p class="subtitle">Gather the information first, price the stages, then generate the scope of works at the end. Save at any point.</p>
 
     <div class="card">
       <h2>Proposal template</h2>
@@ -38,6 +38,7 @@
       <div class="grid cols-3" id="template-picker">
         <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
         <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
+        <button type="button" class="secondary template-option" data-template="battery">Battery Proposal</button>
         <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
         <button type="button" class="secondary template-option" data-template="renovation">Renovation</button>
         <button type="button" class="secondary template-option" data-template="service_work">Service Work</button>
@@ -52,9 +53,10 @@
       <textarea id="p-estimate-disclaimer" style="min-height:80px;"></textarea>
     </div>
 
-    <div class="card" id="template-questions-card" style="display:none;">
-      <h2 id="template-questions-title"></h2>
-      <p class="subtitle" style="margin-bottom:10px;">Answers here set up this job's task list once the quote is approved - not shown to the client.</p>
+    <div class="card" id="template-questions-card">
+      <h2 id="template-questions-title">Pre-quote information</h2>
+      <p class="subtitle" style="margin-bottom:6px;">What you learned on the phone, by email or on site. Change it any time. Questions marked * must be answered before the quote is sent. Not shown to the client; it shapes the scope of works and the job's task list.</p>
+      <div id="site-inspection-note"></div>
       <div class="grid cols-2" id="template-questions"></div>
     </div>
 
@@ -123,7 +125,7 @@
 
     <div class="card" id="pylon-card">
       <h2>Pylon system design</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Start here for a solar job: create the design/quote in Pylon first, then paste the resulting proposal link below before filling in the scope of works and pricing.</p>
+      <p class="subtitle" style="margin-bottom:10px;">Create the design in Pylon, paste the proposal link, and pull the equipment list so the quote names real panels, inverters and batteries.</p>
       <button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:6px;">Create job in Pylon &rarr;</button>
       <div id="pylon-create-msg"></div>
       <label style="margin-top:10px;">Pylon proposal link</label>
@@ -141,8 +143,69 @@
     </div>
 
     <div class="card">
-      <h2>Write the scope of works with AI</h2>
-      <p class="subtitle" style="margin-bottom:10px;">A few rough notes, plus anything useful to attach - plans, drawings, or an electricity bill. Drafts each stage's description first, then a full scope of works using those.</p>
+      <h2>Stages / cost centres</h2>
+      <p class="subtitle" style="margin-bottom:10px;"><strong>All amounts ex GST.</strong> Enter labour and materials ex GST; GST is added once at the end of the quote. Stages can be left for later, the quote saves without them.</p>
+      <div class="grid cols-3" style="margin-bottom:16px;">
+        <div>
+          <label style="margin-top:0">Default markup %</label>
+          <input id="default-markup" type="number" step="1" value="45" />
+        </div>
+        <div class="stc-only">
+          <label style="margin-top:0">Default $ per STC</label>
+          <input id="default-stc-price" type="number" step="0.01" value="35" />
+        </div>
+        <div class="stc-only">
+          <label style="margin-top:0">Default STC zone</label>
+          <select id="default-stc-zone">
+            ${STC_ZONES.map(z => `<option value="${z.rating}" ${z.rating === 1.382 ? 'selected' : ''}>${z.label}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="cc-rows"></div>
+      <button type="button" class="secondary" id="add-row">+ Add stage</button>
+    </div>
+
+    <div class="card">
+      <h2>Total</h2>
+      <div class="stat" style="max-width:220px;">
+        <div class="label">Quoted total (ex GST)</div>
+        <div class="value" id="total-display">$0.00</div>
+      </div>
+      <p class="subtitle" style="margin-top:6px;">GST and any STC credit are added on the proposal's Investment summary.</p>
+    </div>
+
+    <div class="card" id="deposit-card">
+      <h2>Payment schedule</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Shown to the client on the proposal. The remainder is invoiced stage by stage as each is completed.</p>
+      <div style="max-width:160px;">
+        <label style="margin-top:0">Deposit %</label>
+        <input id="p-deposit" type="number" step="1" value="10" />
+      </div>
+
+      <div style="margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border);">
+        <label style="margin-top:0">Custom milestones (optional)</label>
+        <p class="subtitle" style="margin-bottom:8px;">Replaces the schedule shown to the client above with your own named stages - e.g. "10% deposit, 40% on ordering materials, 20% on booking install day, 30% on commissioning". Doesn't change what's automatically invoiced when the quote's approved - that's still the Deposit % above.</p>
+        <div id="milestone-rows"></div>
+        <button type="button" class="secondary" id="add-milestone-btn" style="font-size:12px; padding:6px 10px;">+ Add milestone</button>
+        <p class="subtitle" id="milestone-total-note" style="margin-top:6px;"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Living away from home</h2>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:400;">
+        <input type="checkbox" id="p-laha-approved" style="width:auto;" /> LAHA approved for this job
+      </label>
+      <p class="subtitle" style="margin-top:6px;">For jobs more than 100km from base with a Mobilisation stage already covering travel/LAHA in the quote. Once approved, staff clocking out of this job are asked whether they stayed overnight, and the allowance gets added to their pay automatically.</p>
+    </div>
+
+    <div class="card">
+      <h2>What the customer gets</h2>
+      <p class="subtitle" style="margin-bottom:8px;">Built from the pre-quote answers, the Pylon equipment and the stages above. The AI writes the scope of works from this plus your notes below.</p>
+      <div id="customer-gets" class="readout" style="white-space:pre-wrap; min-height:48px;"></div>
+
+      <h2 style="margin-top:18px;">Write the scope of works with AI</h2>
+      <p class="subtitle" style="margin-bottom:10px;">A few rough notes (saved with the quote), plus anything useful to attach - plans, drawings, or an electricity bill. Drafts each stage's description first, then a full scope of works. Run it again any time the answers or stages change.</p>
       <textarea id="p-brief" placeholder="e.g. Single storey new build, 3 bed 2 bath, standard fitout, ducted air con, solar-ready switchboard"></textarea>
 
       <div id="lead-attachments-import"></div>
@@ -180,65 +243,10 @@
       <div id="reference-msg"></div>
     </div>
 
-    <div class="card">
-      <h2>Stages / cost centres</h2>
-      <div class="grid cols-3" style="margin-bottom:16px;">
-        <div>
-          <label style="margin-top:0">Default markup %</label>
-          <input id="default-markup" type="number" step="1" value="45" />
-        </div>
-        <div>
-          <label style="margin-top:0">Default $ per STC</label>
-          <input id="default-stc-price" type="number" step="0.01" value="35" />
-        </div>
-        <div>
-          <label style="margin-top:0">Default STC zone</label>
-          <select id="default-stc-zone">
-            ${STC_ZONES.map(z => `<option value="${z.rating}" ${z.rating === 1.382 ? 'selected' : ''}>${z.label}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div id="cc-rows"></div>
-      <button type="button" class="secondary" id="add-row">+ Add stage</button>
-    </div>
-
-    <div class="card">
-      <h2>Total</h2>
-      <div class="stat" style="max-width:220px;">
-        <div class="label">Quoted total</div>
-        <div class="value" id="total-display">$0.00</div>
-      </div>
-    </div>
-
-    <div class="card" id="deposit-card">
-      <h2>Payment schedule</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Shown to the client on the proposal. The remainder is invoiced stage by stage as each is completed.</p>
-      <div style="max-width:160px;">
-        <label style="margin-top:0">Deposit %</label>
-        <input id="p-deposit" type="number" step="1" value="10" />
-      </div>
-
-      <div style="margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border);">
-        <label style="margin-top:0">Custom milestones (optional)</label>
-        <p class="subtitle" style="margin-bottom:8px;">Replaces the schedule shown to the client above with your own named stages - e.g. "10% deposit, 40% on ordering materials, 20% on booking install day, 30% on commissioning". Doesn't change what's automatically invoiced when the quote's approved - that's still the Deposit % above.</p>
-        <div id="milestone-rows"></div>
-        <button type="button" class="secondary" id="add-milestone-btn" style="font-size:12px; padding:6px 10px;">+ Add milestone</button>
-        <p class="subtitle" id="milestone-total-note" style="margin-top:6px;"></p>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Living away from home</h2>
-      <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:400;">
-        <input type="checkbox" id="p-laha-approved" style="width:auto;" /> LAHA approved for this job
-      </label>
-      <p class="subtitle" style="margin-top:6px;">For jobs more than 100km from base with a Mobilisation stage already covering travel/LAHA in the quote. Once approved, staff clocking out of this job are asked whether they stayed overnight, and the allowance gets added to their pay automatically.</p>
-    </div>
-
-    <div class="card" id="solar-compliance-card" style="display:none;">
-      <h2>Compliance checklist</h2>
-      <p class="subtitle" style="margin-bottom:10px;">What NETCC and the Clean Energy Regulator require before this quote is sent - checked against this job's own data, not a guess.</p>
-      <button type="button" class="secondary" id="compliance-check-btn">Check compliance</button>
+    <div class="card" id="solar-compliance-card">
+      <h2>Ready to send?</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Checks the pre-quote answers, pricing and terms, plus what NETCC, the Clean Energy Regulator and SAA require on a solar or battery quote. The same check runs before the quote is emailed or moved to Quote Sent.</p>
+      <button type="button" class="secondary" id="compliance-check-btn">Check now</button>
       <div id="compliance-check-result" style="margin-top:12px;"></div>
     </div>
 
@@ -252,9 +260,10 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=110"></script>
-  <script src="/js/template-questions.js"></script>
-  <script src="/js/email-compose.js?v=7"></script>
+  <script src="/js/supabase-client.js?v=111"></script>
+  <script src="/js/template-questions.js?v=2"></script>
+  <script src="/js/prebuild-form.js?v=1"></script>
+  <script src="/js/email-compose.js?v=8"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const editId = new URLSearchParams(window.location.search).get('id');
@@ -350,13 +359,23 @@
         singleStage: false,
         showDeposit: true,
         showPylon: false,
+        showStc: false,
       },
       solar: {
-        note: 'Pylon design link is prominent on the cover page. Defaults to a single stage - add more if needed.',
+        note: 'Asks the solar questions (grid, existing system, roof, switchboard, supply) and tick Batteries as well to add the battery set. Pylon design on the cover. STC credit per stage.',
         photoCategory: 'solar',
         singleStage: false,
         showDeposit: true,
         showPylon: true,
+        showStc: true,
+      },
+      battery: {
+        note: 'Battery system proposal. Asks the battery questions (usable kWh, backup, location to AS/NZS 5139, CEC list, VPP, federal discount) and checks the SAA and Clean Energy Regulator rules before sending. Battery pages on the proposal.',
+        photoCategory: 'solar',
+        singleStage: false,
+        showDeposit: true,
+        showPylon: true,
+        showStc: true,
       },
       renovation: {
         note: 'Multi-stage renovation with a deposit. Asks reno-specific questions (asbestos, switchboard, approvals, occupancy) that set up the pre-work and handover tasks.',
@@ -406,8 +425,6 @@
 
       const questionsEl = document.getElementById('template-questions');
       Object.assign(templateAnswers, readTemplateAnswers(questionsEl));
-      document.getElementById('template-questions-card').style.display = TEMPLATE_QUESTIONS[template] ? 'block' : 'none';
-      document.getElementById('template-questions-title').textContent = TEMPLATE_QUESTION_TITLES[template] || '';
       renderTemplateQuestions(questionsEl, template, templateAnswers);
 
       document.getElementById('pylon-card').style.display = info.showPylon ? 'block' : 'none';
@@ -415,7 +432,59 @@
         document.getElementById('p-pylon-link').value = '';
         document.getElementById('p-pylon-id').value = '';
       }
-      document.getElementById('solar-compliance-card').style.display = info.showPylon ? 'block' : 'none';
+      // STC credit only belongs on a Solar or Battery proposal (an older stage that already has a
+      // total keeps showing it so nothing is hidden).
+      document.querySelectorAll('.stc-only').forEach(el => { el.style.display = info.showStc ? '' : 'none'; });
+      document.querySelectorAll('.cc-stc-block').forEach(el => {
+        const total = parseFloat(el.querySelector('.cc-stc-total').value) || 0;
+        el.style.display = (info.showStc || total > 0) ? '' : 'none';
+      });
+      renderCustomerGets();
+    }
+
+    // Pre-quote answers: the "Batteries as well" answer adds or removes the battery questions, and
+    // every answer feeds the "What the customer gets" panel.
+    document.getElementById('template-questions').addEventListener('change', (e) => {
+      const el = e.target.closest('.tq-input');
+      if (!el) return;
+      Object.assign(templateAnswers, readTemplateAnswers(document.getElementById('template-questions')));
+      if (el.dataset.qid === 'with_battery') {
+        if (!templateAnswers.with_battery) delete templateAnswers.with_battery;
+        renderTemplateQuestions(document.getElementById('template-questions'), currentTemplate, templateAnswers);
+      }
+      renderCustomerGets();
+    });
+
+    // Plain lines describing what the customer is getting: the Pylon equipment, the answers that
+    // shape the system, and the stages. Shown above the AI brief and sent with it.
+    function customerGetsLines() {
+      const a = Object.assign({}, templateAnswers, readTemplateAnswers(document.getElementById('template-questions')));
+      const lines = [];
+      const pylon = pylonSystemSummary(lastPylonData).replace(/&middot;/g, ',');
+      if (pylon) lines.push(`System (Pylon): ${pylon}`);
+      const pick = (id, label) => { if (a[id]) lines.push(`${label}: ${a[id]}`); };
+      pick('grid_type', 'Grid'); pick('existing_system', 'Existing system'); pick('existing_system_detail', 'Existing system details');
+      pick('phases', 'Supply'); pick('roof_type', 'Roof'); pick('export_limit', 'Export limit'); pick('daily_usage', 'Daily use');
+      if (quoteHasBattery(currentTemplate, a)) {
+        pick('battery_kwh_wanted', 'Battery usable kWh'); pick('backup_needs', 'Backup'); pick('coupling', 'Coupling');
+        pick('battery_location', 'Battery location'); pick('existing_pv', 'Existing PV');
+        if (a.vpp_capable) lines.push(`VPP capable: ${a.vpp_capable}`);
+      }
+      pick('fault', 'Request'); pick('deadline', 'Deadline');
+      const stages = [...document.querySelectorAll('.cc-row')].map(r => {
+        const name = r.querySelector('.cc-name').value.trim();
+        const desc = r.querySelector('.cc-desc').value.trim();
+        return name ? (desc ? `${name}: ${desc}` : name) : '';
+      }).filter(Boolean);
+      if (stages.length) lines.push(`Stages: ${stages.join('; ')}`);
+      return lines;
+    }
+
+    function renderCustomerGets() {
+      const el = document.getElementById('customer-gets');
+      if (!el) return;
+      const lines = customerGetsLines();
+      el.textContent = lines.length ? lines.join('\n') : 'Nothing yet. Answer the pre-quote questions, pull the Pylon design or add a stage.';
     }
 
     document.querySelectorAll('.template-option').forEach(btn => {
@@ -563,9 +632,10 @@
     // ---------- stages ----------
 
     let pylonKw = null;
+    let lastPylonData = null;
 
     function addRow({
-      name = '', description = '', markup_percent = null, stc_total = 0,
+      name = '', description = '', markup_percent = null, stc_total = 0, stc_quantity = null,
       stc_system_kw = null, stc_zone_rating = null, stc_install_year = null, stc_price_per_certificate = null,
       lineItems = [], photoGroups = [],
     } = {}) {
@@ -591,7 +661,7 @@
         </div>
 
         <div style="margin-top:12px;">
-          <label style="margin-top:0">Line items</label>
+          <label style="margin-top:0">Line items <span style="color:var(--muted); font-weight:400;">(unit costs ex GST, GST is added at the end of the quote)</span></label>
           <div class="li-rows"></div>
           <button type="button" class="secondary prebuild-add" style="font-size:12px; padding:6px 12px;">+ Search material / prebuild</button>
           <button type="button" class="secondary li-add" style="font-size:12px; padding:6px 12px;">+ Add custom line</button>
@@ -605,11 +675,11 @@
 
         <div class="cc-row-costs" style="grid-template-columns: 1fr 1fr 0.7fr 1fr;">
           <div>
-            <label style="margin-top:0">Labour total</label>
+            <label style="margin-top:0">Labour total (ex GST)</label>
             <div class="readout cc-labour-total">$0.00</div>
           </div>
           <div>
-            <label style="margin-top:0">Materials total</label>
+            <label style="margin-top:0">Materials total (ex GST)</label>
             <div class="readout cc-material-total">$0.00</div>
           </div>
           <div>
@@ -617,13 +687,18 @@
             <input class="cc-markup" type="number" step="1" value="${defaultMarkup}" />
           </div>
           <div>
-            <label style="margin-top:0">Sale price</label>
+            <label style="margin-top:0">Sale price (ex GST)</label>
             <div class="readout cc-sale-price">$0.00</div>
           </div>
         </div>
-        <div style="margin-top:10px; padding:12px; background:var(--surface-2); border-radius:8px;">
+        <div class="cc-stc-block" style="margin-top:10px; padding:12px; background:var(--surface-2); border-radius:8px; display:${(TEMPLATE_INFO[currentTemplate].showStc || stc_total > 0) ? '' : 'none'};">
           <label style="margin-top:0; font-weight:600;">STC credit (optional)</label>
+          <p class="subtitle" style="margin:2px 0 0; font-size:12px;">Type the number of STCs, or the system size and the count fills itself. A typed count wins.</p>
           <div class="grid cols-4" style="margin-top:6px;">
+            <div>
+              <label style="margin-top:0; font-size:12px;">Number of STCs</label>
+              <input class="cc-stc-qty" type="number" inputmode="numeric" step="1" min="0" value="${stc_quantity ?? ''}" placeholder="e.g. 85" />
+            </div>
             <div>
               <label style="margin-top:0; font-size:12px;">System size (kW)</label>
               <input class="cc-stc-kw" type="number" step="0.01" value="${defaultStcKw}" placeholder="0.00" />
@@ -653,29 +728,41 @@
       rowsEl.appendChild(div);
       renumberStages();
 
-      function recalcStc() {
+      // Number of STCs: typed straight in (batteries: from usable kWh), or filled from the system
+      // size calculator. Typing a size refills the count; a typed count is what the total uses.
+      function recalcStc(fromSize) {
         const kw = parseFloat(div.querySelector('.cc-stc-kw').value) || 0;
         const zoneRating = parseFloat(div.querySelector('.cc-stc-zone').value) || 0;
         const installYear = parseInt(div.querySelector('.cc-stc-year').value, 10) || new Date().getFullYear();
         const price = parseFloat(div.querySelector('.cc-stc-price').value) || 0;
-        const qty = calculateStcQuantity({ kw, zoneRating, installYear });
+        const qtyEl = div.querySelector('.cc-stc-qty');
+        if (fromSize || !qtyEl.value) {
+          const calc = calculateStcQuantity({ kw, zoneRating, installYear });
+          if (calc) qtyEl.value = calc;
+        }
+        const qty = parseFloat(qtyEl.value) || 0;
         div.querySelector('.cc-stc-calc-line').textContent = qty
           ? `= ${qty} STCs x ${money(price)} = ${money(qty * price)}`
           : '';
         if (qty) div.querySelector('.cc-stc-total').value = (qty * price).toFixed(2);
       }
-      div.querySelectorAll('.cc-stc-kw, .cc-stc-zone, .cc-stc-year, .cc-stc-price').forEach(el => {
-        el.addEventListener('input', recalcStc);
-        el.addEventListener('change', recalcStc);
+      div.querySelectorAll('.cc-stc-kw, .cc-stc-zone, .cc-stc-year').forEach(el => {
+        el.addEventListener('input', () => recalcStc(true));
+        el.addEventListener('change', () => recalcStc(true));
       });
-      recalcStc();
+      div.querySelectorAll('.cc-stc-qty, .cc-stc-price').forEach(el => {
+        el.addEventListener('input', () => recalcStc(false));
+        el.addEventListener('change', () => recalcStc(false));
+      });
+      recalcStc(stc_quantity == null && !!defaultStcKw);
 
       div.querySelector('.cc-markup').addEventListener('input', () => updateStageTotals(div));
-      div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); });
+      div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); renderCustomerGets(); });
+      div.querySelector('.cc-desc').addEventListener('input', renderCustomerGets);
       div.querySelector('.li-add').addEventListener('click', () => addLineItem(div));
       div.querySelector('.prebuild-add').addEventListener('click', () => openStockPicker(div));
       div.querySelector('.pg-add').addEventListener('click', () => addPhotoGroup(div));
-      div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateTotal(); renumberStages(); });
+      div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateTotal(); renumberStages(); renderCustomerGets(); });
       if (TEMPLATE_INFO[currentTemplate].singleStage) {
         div.querySelector('.remove-row').style.display = 'none';
       }
@@ -792,8 +879,12 @@
       const rows = [...document.querySelectorAll('.cc-row')];
       const stageNames = rows.map(r => r.dataset.name).filter(Boolean);
 
-      if (!brief) { msg.innerHTML = `<div class="error-box">Add a few notes first.</div>`; return; }
-      if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first.</div>`; return; }
+      Object.assign(templateAnswers, readTemplateAnswers(document.getElementById('template-questions')));
+      const answersText = templateAnswersText(currentTemplate, templateAnswers);
+      const customerGets = customerGetsLines().join('\n');
+      const withBattery = quoteHasBattery(currentTemplate, templateAnswers);
+      if (!brief && !answersText) { msg.innerHTML = `<div class="error-box">Add a few notes first, or answer the pre-quote questions.</div>`; return; }
+      if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first (a name is enough, the AI fills in the rest).</div>`; return; }
 
       btn.disabled = true;
       msg.innerHTML = '';
@@ -804,7 +895,7 @@
         const scopeRes = await fetch('/.netlify/functions/generate-scope', {
           method: 'POST',
           headers: aiHeaders,
-          body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames }),
+          body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames, templateAnswers: answersText, customerGets, template: currentTemplate, withBattery }),
         });
         const scopeJson = await scopeRes.json();
         if (!scopeJson.ok) throw new Error(scopeJson.error);
@@ -840,11 +931,15 @@
             documentPaths: sowDocs.map(d => d.path),
             style: sowStyle,
             template: currentTemplate,
+            templateAnswers: answersText,
+            customerGets,
+            withBattery,
           }),
         });
         const sowJson = await sowRes.json();
         if (!sowJson.ok) throw new Error(sowJson.error);
         document.getElementById('p-sow').value = sowJson.sow;
+        renderCustomerGets();
 
         msg.innerHTML = `<div class="success-box">Stage names, descriptions, and scope of works drafted. Review and edit as needed.</div>`;
       } catch (err) {
@@ -972,6 +1067,8 @@
         });
         const json = await res.json();
         if (!json.ok) throw new Error(json.error);
+        lastPylonData = json.pylonData || null;
+        renderCustomerGets();
         const summary = pylonSystemSummary(json.pylonData);
         msg.innerHTML = `<div class="success-box">Pulled from Pylon.${summary ? ' ' + summary : ' No hardware summary came back - check the function logs against the field names in the Pylon API docs.'}</div>`;
       } catch (err) {
@@ -982,74 +1079,10 @@
     document.getElementById('compliance-check-btn').addEventListener('click', async () => {
       const resultEl = document.getElementById('compliance-check-result');
       if (!editId) {
-        resultEl.innerHTML = `<div class="error-box">Save this quote first, then come back to run the compliance check.</div>`;
+        resultEl.innerHTML = `<div class="error-box">Save this quote first, then come back to run the check.</div>`;
         return;
       }
-      const btn = document.getElementById('compliance-check-btn');
-      btn.disabled = true;
-      btn.textContent = 'Checking...';
-      resultEl.innerHTML = '';
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const checkRes = await fetch('/.netlify/functions/check-solar-compliance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ projectId: editId, phase: 'quote' }),
-        });
-        const checkJson = await checkRes.json();
-        if (!checkJson.ok) throw new Error(checkJson.error);
-
-        if (!checkJson.missing.length) {
-          resultEl.innerHTML = `<div class="success-box">Everything on the checklist is in place.</div>`;
-          return;
-        }
-
-        resultEl.innerHTML = `
-          <div class="error-box">
-            <p style="margin:0 0 8px; font-weight:600;">${checkJson.missing.length} thing${checkJson.missing.length === 1 ? '' : 's'} missing:</p>
-            <ul style="margin:0 0 10px; padding-left:18px;">${checkJson.missing.map(m => `<li>${m.label}</li>`).join('')}</ul>
-            <button type="button" class="secondary" id="create-compliance-tasks-btn">Create tasks for these</button>
-          </div>`;
-
-        document.getElementById('create-compliance-tasks-btn').addEventListener('click', async (e) => {
-          const createBtn = e.target;
-          createBtn.disabled = true;
-          createBtn.textContent = 'Creating...';
-          try {
-            const { data: proj } = await supabaseClient.from('projects').select('pylon_data').eq('id', editId).single();
-            const pylonData = proj?.pylon_data || {};
-            const equipment = {
-              panels: pylonData.module_types || [],
-              inverters: pylonData.inverter_types || [],
-              batteries: pylonData.storage_types || [],
-            };
-            const wordRes = await fetch('/.netlify/functions/generate-solar-tasks', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ missing: checkJson.missing, equipment }),
-            });
-            const wordJson = await wordRes.json();
-            if (!wordJson.ok) throw new Error(wordJson.error);
-
-            const { data: { user } } = await supabaseClient.auth.getUser();
-            const { error: insErr } = await supabaseClient.from('job_tasks').insert(
-              wordJson.tasks.map(t => ({
-                project_id: editId, description: t.description, task_type: 'quote', created_by: user.id,
-              }))
-            );
-            if (insErr) throw insErr;
-            resultEl.innerHTML = `<div class="success-box">${wordJson.tasks.length} task${wordJson.tasks.length === 1 ? '' : 's'} added - see the Tasks card on the quote page.</div>`;
-          } catch (err) {
-            createBtn.disabled = false;
-            createBtn.textContent = 'Create tasks for these';
-            resultEl.insertAdjacentHTML('beforeend', `<div class="error-box">${err.message}</div>`);
-          }
-        });
-      } catch (err) {
-        resultEl.innerHTML = `<div class="error-box">${err.message}</div>`;
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Check compliance';
-      }
+      await runComplianceCheck(editId, 'quote', 'quote', document.getElementById('compliance-check-btn'), resultEl);
     });
 
     // ---------- save (create or update) ----------
@@ -1135,6 +1168,7 @@
           description: row.querySelector('.cc-desc').value.trim(),
           markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
           stc_total: parseFloat(row.querySelector('.cc-stc-total').value) || 0,
+          stc_quantity: parseFloat(row.querySelector('.cc-stc-qty').value) || null,
           stc_system_kw: parseFloat(row.querySelector('.cc-stc-kw').value) || null,
           stc_zone_rating: parseFloat(row.querySelector('.cc-stc-zone').value) || 1.382,
           stc_install_year: parseInt(row.querySelector('.cc-stc-year').value, 10) || null,
@@ -1171,15 +1205,12 @@
           })).filter(pg => pg.description || pg.photos.length),
         })).filter(s => s.name);
 
-        if (!name || !client_name || stagesPayload.length === 0) {
+        // A draft saves with a name and a client; stages can come later (the ready-to-send
+        // check stops it going out without a priced stage).
+        if (!name || !client_name) {
           if (!name) flagRequiredField(document.getElementById('p-name'), 'Enter a project name.');
-          else if (!client_name) flagRequiredField(document.getElementById('p-client'), 'Enter the client name, or pick a client above.');
-          else {
-            const firstStage = document.querySelector('.cc-row .cc-name');
-            if (firstStage) flagRequiredField(firstStage, 'Name at least one stage.');
-            else flagRequiredField(document.getElementById('add-row'), 'Add at least one stage.');
-          }
-          msg.innerHTML = `<div class="error-box">${(!name || !client_name) ? 'Fill in the fields marked * (the first one is highlighted above).' : 'Name at least one stage (highlighted above).'}</div>`;
+          else flagRequiredField(document.getElementById('p-client'), 'Enter the client name, or pick a client above.');
+          msg.innerHTML = `<div class="error-box">Fill in the fields marked * (the first one is highlighted above).</div>`;
           return;
         }
 
@@ -1206,6 +1237,7 @@
         const projectFields = {
           name, client_id: clientId, client_name, client_email, client_phone, client_address, client_site_id,
           sow_text, proposal_subtitle, terms_text,
+          sow_brief: document.getElementById('p-brief').value.trim(),
           notes: document.getElementById('p-notes').value.trim() || null,
           deposit_percent, pylon_link, pylon_project_id,
           laha_approved: document.getElementById('p-laha-approved').checked,
@@ -1264,11 +1296,15 @@
           if (msErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(msErr.message)}</div>`; return; }
         }
 
-        const { data: insertedStages, error: ccErr } = await supabaseClient
-          .from('cost_centres')
-          .insert(stagesPayload.map(({ lineItems, photoGroups, ...s }) => ({ ...s, project_id: projectId })))
-          .select();
-        if (ccErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(ccErr.message)}</div>`; return; }
+        let insertedStages = [];
+        if (stagesPayload.length) {
+          const { data: ccRows, error: ccErr } = await supabaseClient
+            .from('cost_centres')
+            .insert(stagesPayload.map(({ lineItems, photoGroups, ...s }) => ({ ...s, project_id: projectId })))
+            .select();
+          if (ccErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(ccErr.message)}</div>`; return; }
+          insertedStages = ccRows || [];
+        }
 
         const allLineItems = [];
         const allPhotoGroups = [];
@@ -1291,7 +1327,10 @@
         // it is waiting on the job card by the time the work is booked.
         if (sow_text && sow_text.trim()) { try { await requestInstallerSummary(projectId, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
 
-        try { const { data: tk } = await supabaseClient.from('projects').select('quote_token').eq('id', projectId).single(); autoGenerateQuotePdf({ id: projectId, quote_token: tk && tk.quote_token, proposal_template: currentTemplate }); } catch (e) { /* the Generate PDF button is still there */ }
+        // No PDF until there is something priced to show.
+        if (stagesPayload.some(st => st.quoted_amount > 0)) {
+          try { const { data: tk } = await supabaseClient.from('projects').select('quote_token').eq('id', projectId).single(); autoGenerateQuotePdf({ id: projectId, quote_token: tk && tk.quote_token, proposal_template: currentTemplate }); } catch (e) { /* the Generate PDF button is still there */ }
+        }
         navigated = true;
         window.location.href = `/project.html?id=${projectId}`;
       } finally {
@@ -1418,6 +1457,7 @@
         });
       }
       document.getElementById('p-sow').value = project.sow_text || '';
+      document.getElementById('p-brief').value = project.sow_brief || '';
       document.getElementById('p-terms').value = project.terms_text || '';
       document.getElementById('p-deposit').value = project.deposit_percent;
       document.getElementById('p-laha-approved').checked = !!project.laha_approved;
@@ -1431,6 +1471,8 @@
       referencePhotos = (project.reference_photos || []).map(p => p.url || p);
       renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
       pylonKw = project.pylon_data?.summary?.dc_output_kw || null;
+      lastPylonData = project.pylon_data || null;
+      showSiteInspectionNote({ projectId: project.id, leadId: project.lead_id });
 
       const stages = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       stages.forEach(stage => {
@@ -1439,6 +1481,7 @@
           description: stage.description,
           markup_percent: stage.markup_percent,
           stc_total: stage.stc_total || 0,
+          stc_quantity: stage.stc_quantity,
           stc_system_kw: stage.stc_system_kw,
           stc_zone_rating: stage.stc_zone_rating,
           stc_install_year: stage.stc_install_year,
@@ -1455,6 +1498,24 @@
         });
       });
       updateTotal();
+      renderCustomerGets();
+    }
+
+    // A completed (or booked) site inspection for this quote or its lead: its answers are the
+    // best source for the questions above, so link it from the card.
+    async function showSiteInspectionNote({ projectId, leadId }) {
+      const el = document.getElementById('site-inspection-note');
+      if (!el) return;
+      let q = supabaseClient.from('site_inspections').select('id, status, completed_at, lead_id, project_id').order('created_at', { ascending: false }).limit(1);
+      if (projectId && leadId) q = q.or(`project_id.eq.${projectId},lead_id.eq.${leadId}`);
+      else if (projectId) q = q.eq('project_id', projectId);
+      else if (leadId) q = q.eq('lead_id', leadId);
+      else return;
+      const { data } = await q;
+      const insp = data && data[0];
+      if (!insp) return;
+      const done = insp.status === 'completed';
+      el.innerHTML = `<p class="subtitle" style="margin:0 0 8px;">Site inspection: <span class="badge ${done ? 'accepted' : 'sent'}">${escapeHtml(insp.status.replace('_', ' '))}</span>${done && insp.completed_at ? ' on ' + new Date(insp.completed_at).toLocaleDateString('en-AU') : ''} &middot; <a class="link-quiet" href="/site-inspection.html?id=${insp.id}" target="_blank">open the checklist &rarr;</a>${done ? ' and copy what it found into the answers below.' : ''}</p>`;
     }
 
     // ---------- address autocomplete ----------
@@ -1527,8 +1588,10 @@
         const requestedTemplate = (aiPf && TEMPLATE_INFO[aiPf.template] ? aiPf.template : null) || params.get('template') || 'new_build';
         applyTemplate(requestedTemplate, true);
         document.getElementById('p-terms').value = companySettings.default_terms || '';
-        ['Site Power', 'Rough In', 'Fit Off', 'Finishing Touches'].forEach(n => addRow({ name: n }));
+        const seedStages = { solar: ['Solar system'], battery: ['Battery system'] }[requestedTemplate] || ['Site Power', 'Rough In', 'Fit Off', 'Finishing Touches'];
+        seedStages.forEach(n => addRow({ name: n }));
         updateTotal();
+        renderCustomerGets();
 
         // Converting a lead (see leads.html) - prefill the client/site
         // details it already captured rather than making staff retype
@@ -1557,6 +1620,7 @@
             document.getElementById('p-notes').value = `Website enquiry (${sourceLabels[lead.source] || lead.source}), ${new Date(lead.created_at).toLocaleDateString('en-AU')}.\n\n${lead.ai_summary ? lead.ai_summary + '\n\n' : ''}${qanda}`;
 
             offerLeadAttachmentImport(prefillLeadId);
+            showSiteInspectionNote({ leadId: prefillLeadId });
           }
         }
 

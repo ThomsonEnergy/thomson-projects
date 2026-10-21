@@ -31,49 +31,7 @@
     <h1>Prebuilds</h1>
     <p class="subtitle">Reusable supply-and-install packages. Staff pick these on a quote and set a quantity - every component scales automatically.</p>
 
-    <div class="card">
-      <h2 id="pb-form-heading">Add a prebuild</h2>
-      <div class="grid cols-3">
-        <div>
-          <label style="margin-top:0">Name</label>
-          <input id="pb-name" placeholder="e.g. 70mm Battery Cable - short, quick to recognise" />
-        </div>
-        <div>
-          <label style="margin-top:0">Internal part number (optional)</label>
-          <input id="pb-part-number" placeholder="Internal only, not a supplier SKU" />
-        </div>
-        <div>
-          <label style="margin-top:0">Category</label>
-          <select id="pb-category">
-            <option value="Electrical">Electrical</option>
-            <option value="Solar">Solar</option>
-          </select>
-        </div>
-      </div>
-      <div class="grid cols-3">
-        <div>
-          <label style="margin-top:0">Subcategory</label>
-          <select id="pb-subcategory"></select>
-        </div>
-      </div>
-
-      <label>Client-facing description</label>
-      <p class="subtitle" style="margin:0 0 8px;">What the client sees on the proposal - not the name above. Add components below first so the AI has something real to describe, or write your own.</p>
-      <textarea id="pb-client-desc" style="min-height:110px;" placeholder="e.g. SUPPLY AND INSTALL NEW 70MM BATTERY CABLE&#10;&#10;Supply and installation of..."></textarea>
-      <button type="button" class="secondary" id="pb-generate-btn" style="margin-top:8px;">&#10024; Generate with AI</button>
-      <button type="button" class="secondary" id="pb-cleanup-btn" style="margin-top:8px;">&#129529; Cleanup with AI</button>
-      <p class="subtitle" style="margin:4px 0 0;">Cleanup rewrites the wording/formatting of what's in the box above right now - use it after you've generated a draft and then edited it by hand, instead of generating a fresh one from scratch.</p>
-      <div id="pb-generate-msg"></div>
-
-      <label>Components</label>
-      <div id="pb-components"></div>
-      <button type="button" class="secondary" id="pb-add-component" style="margin-top:6px;">+ Add component</button>
-      <div style="margin-top:14px;">
-        <button id="pb-save-btn">Save prebuild</button>
-        <button class="secondary" id="pb-clear-btn" type="button">Clear form</button>
-      </div>
-      <div id="pb-msg"></div>
-    </div>
+    <div class="card" id="pb-form-root"></div>
 
     <div class="card">
       <h2>Library</h2>
@@ -82,148 +40,13 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=110"></script>
+  <script src="/js/supabase-client.js?v=111"></script>
+  <script src="/js/prebuild-form.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
-    const PREBUILD_SUBCATEGORIES = {
-      Electrical: ['Lighting', 'Power', 'Trenching', 'Cable Runs'],
-      Solar: ['Panels', 'Batteries', 'Inverters'],
-    };
-    let editingPrebuildId = null;
+    // The form itself is shared with the quote pages: js/prebuild-form.js.
     let allPrebuilds = [];
-
-    function refreshSubcategoryOptions() {
-      const cat = document.getElementById('pb-category').value;
-      document.getElementById('pb-subcategory').innerHTML = PREBUILD_SUBCATEGORIES[cat]
-        .map(s => `<option value="${s}">${s}</option>`).join('');
-    }
-    document.getElementById('pb-category').addEventListener('change', refreshSubcategoryOptions);
-
-    function addComponentRow({ item_type = 'material', description = '', quantity = 1, unit_cost = '' } = {}) {
-      const row = document.createElement('div');
-      row.className = 'pb-component-row';
-      row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.7fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
-      row.innerHTML = `
-        <div style="position:relative;">
-          <input class="pbc-desc" placeholder="e.g. Downlight fitting" value="${escapeHtml(description)}" style="font-size:13px;" autocomplete="off" />
-          <div class="pbc-results" style="position:absolute; top:100%; left:0; right:0; z-index:10; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:none;"></div>
-        </div>
-        <select class="pbc-type" style="font-size:13px;">
-          <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
-          <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
-        </select>
-        <input class="pbc-qty" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(quantity)}" placeholder="Qty/hrs" style="font-size:13px;" />
-        <input class="pbc-cost" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(unit_cost)}" placeholder="Unit cost $" style="font-size:13px;" />
-        <button type="button" class="secondary pbc-remove" style="padding:6px 10px; font-size:12px;">x</button>
-      `;
-      row.querySelector('.pbc-remove').addEventListener('click', () => row.remove());
-
-      // Type-ahead against Stock materials, same search-or-type-new pattern
-      // as the PO line picker (buildMaterialSearchRow in supabase-client.js)
-      // - picking a result fills description + unit cost from Stock;
-      // typing without picking just keeps it as free text. Materials only,
-      // not prebuilds - a prebuild containing another prebuild isn't a case
-      // the data model (or the UI here) supports.
-      const descInput = row.querySelector('.pbc-desc');
-      const costInput = row.querySelector('.pbc-cost');
-      const resultsEl = row.querySelector('.pbc-results');
-      descInput.addEventListener('input', async () => {
-        const q = descInput.value.trim().toLowerCase();
-        if (row.querySelector('.pbc-type').value !== 'material' || q.length < 2) { resultsEl.style.display = 'none'; return; }
-        const materials = await getMaterials();
-        const matches = materials.filter(m => matchesAllWords(m.name, q)).slice(0, 8);
-        if (!matches.length) { resultsEl.style.display = 'none'; return; }
-        resultsEl.innerHTML = matches.map(m => `<div class="pbc-pick" data-name="${escapeHtml(m.name)}" data-cost="${escapeHtml(m.cost_price)}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(m.name)} <span class="subtitle">(${money(m.cost_price)})</span></div>`).join('');
-        resultsEl.style.display = 'block';
-        resultsEl.querySelectorAll('.pbc-pick').forEach(pick => {
-          pick.addEventListener('click', () => {
-            descInput.value = pick.dataset.name;
-            costInput.value = pick.dataset.cost;
-            resultsEl.style.display = 'none';
-          });
-        });
-      });
-      descInput.addEventListener('blur', () => setTimeout(() => { resultsEl.style.display = 'none'; }, 200));
-
-      document.getElementById('pb-components').appendChild(row);
-    }
-    document.getElementById('pb-add-component').addEventListener('click', () => addComponentRow());
-
-    function clearPrebuildForm() {
-      editingPrebuildId = null;
-      document.getElementById('pb-form-heading').textContent = 'Add a prebuild';
-      document.getElementById('pb-name').value = '';
-      document.getElementById('pb-part-number').value = '';
-      document.getElementById('pb-client-desc').value = '';
-      document.getElementById('pb-category').value = 'Electrical';
-      refreshSubcategoryOptions();
-      document.getElementById('pb-components').innerHTML = '';
-      addComponentRow();
-      document.getElementById('pb-msg').innerHTML = '';
-      document.getElementById('pb-generate-msg').innerHTML = '';
-    }
-    document.getElementById('pb-clear-btn').addEventListener('click', clearPrebuildForm);
-
-    document.getElementById('pb-generate-btn').addEventListener('click', async () => {
-      const btn = document.getElementById('pb-generate-btn');
-      const msg = document.getElementById('pb-generate-msg');
-      const name = document.getElementById('pb-name').value.trim();
-      if (!name) { msg.innerHTML = `<div class="error-box">Give it a name first.</div>`; return; }
-
-      const components = [...document.querySelectorAll('.pb-component-row')].map(row => ({
-        item_type: row.querySelector('.pbc-type').value,
-        description: row.querySelector('.pbc-desc').value.trim(),
-      })).filter(c => c.description);
-
-      btn.disabled = true;
-      btn.textContent = 'Generating...';
-      msg.innerHTML = '';
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/generate-prebuild-description', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ name, components }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not generate a description');
-        document.getElementById('pb-client-desc').value = data.description;
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
-      }
-      btn.disabled = false;
-      btn.textContent = '✨ Generate with AI';
-    });
-
-    document.getElementById('pb-cleanup-btn').addEventListener('click', async () => {
-      const btn = document.getElementById('pb-cleanup-btn');
-      const msg = document.getElementById('pb-generate-msg');
-      const current = document.getElementById('pb-client-desc').value.trim();
-      if (!current) { msg.innerHTML = `<div class="error-box">Nothing to clean up yet - write or generate a description first.</div>`; return; }
-
-      btn.disabled = true;
-      btn.textContent = 'Cleaning up...';
-      msg.innerHTML = '';
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/cleanup-text', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({
-            text: current,
-            instructions: `This is a client-facing prebuild description for an Australian electrical/solar contractor's quoting system, in this exact house format: an ALL CAPS "SUPPLY AND INSTALL NEW ..." (or similar - matching whatever action the text describes) title line, then a blank line, then one short trade-language paragraph closing with the relevant AS/NZS standard(s). Keep that exact format. Never attribute the work to a specific qualification level (e.g. "licensed electrician", "licensed electrical specialist") - apprentices do this work too.`,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not clean this up');
-        document.getElementById('pb-client-desc').value = data.text;
-        msg.innerHTML = `<div class="success-box">Cleaned up.</div>`;
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
-      }
-      btn.disabled = false;
-      btn.textContent = '🧹 Cleanup with AI';
-    });
+    let prebuildForm = null;
 
     async function loadPrebuilds() {
       const listEl = document.getElementById('pb-list');
@@ -272,16 +95,7 @@
       listEl.querySelectorAll('.pb-edit-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const pb = allPrebuilds.find(p => p.id === btn.dataset.id);
-          editingPrebuildId = pb.id;
-          document.getElementById('pb-form-heading').textContent = `Edit prebuild - ${pb.name}`;
-          document.getElementById('pb-name').value = pb.name;
-          document.getElementById('pb-part-number').value = pb.internal_part_number || '';
-          document.getElementById('pb-client-desc').value = pb.client_description || '';
-          document.getElementById('pb-category').value = pb.category;
-          refreshSubcategoryOptions();
-          document.getElementById('pb-subcategory').value = pb.subcategory || '';
-          document.getElementById('pb-components').innerHTML = '';
-          (pb.prebuild_components || []).sort((a, b) => a.sort_order - b.sort_order).forEach(addComponentRow);
+          prebuildForm.loadForEdit(pb);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         });
       });
@@ -295,62 +109,6 @@
       });
     }
     document.getElementById('pb-search').addEventListener('input', renderPrebuildList);
-
-    document.getElementById('pb-save-btn').addEventListener('click', async () => {
-      const msg = document.getElementById('pb-msg');
-      const name = document.getElementById('pb-name').value.trim();
-      if (!name) {
-        msg.innerHTML = `<div class="error-box">Name is required.</div>`;
-        return;
-      }
-      const btn = document.getElementById('pb-save-btn');
-      const label = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = 'Saving...';
-      try {
-      const components = [...document.querySelectorAll('.pb-component-row')].map((row, i) => ({
-        item_type: row.querySelector('.pbc-type').value,
-        description: row.querySelector('.pbc-desc').value.trim(),
-        quantity: parseFloat(row.querySelector('.pbc-qty').value) || 0,
-        unit_cost: parseFloat(row.querySelector('.pbc-cost').value) || 0,
-        sort_order: i,
-      })).filter(c => c.description);
-
-      const prebuildFields = {
-        name,
-        internal_part_number: document.getElementById('pb-part-number').value.trim(),
-        client_description: document.getElementById('pb-client-desc').value.trim(),
-        category: document.getElementById('pb-category').value,
-        subcategory: document.getElementById('pb-subcategory').value,
-      };
-
-      const wasEditing = !!editingPrebuildId;
-      let prebuildId = editingPrebuildId;
-      if (editingPrebuildId) {
-        const { error } = await supabaseClient.from('prebuilds').update(prebuildFields).eq('id', editingPrebuildId);
-        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-        await supabaseClient.from('prebuild_components').delete().eq('prebuild_id', editingPrebuildId);
-      } else {
-        const { data: inserted, error } = await supabaseClient.from('prebuilds').insert(prebuildFields).select().single();
-        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-        prebuildId = inserted.id;
-      }
-
-      if (components.length) {
-        const { error: compErr } = await supabaseClient
-          .from('prebuild_components')
-          .insert(components.map(c => ({ ...c, prebuild_id: prebuildId })));
-        if (compErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(compErr.message)}</div>`; return; }
-      }
-
-      clearPrebuildForm();
-      showToast(wasEditing ? `Updated ${name}.` : `Saved ${name}.`);
-      await loadPrebuilds();
-      } finally {
-        btn.disabled = false;
-        btn.textContent = label;
-      }
-    });
 
     (async () => {
       const session = await requireLogin();
@@ -366,7 +124,9 @@
       const role = await getMyRole();
       if (!isPricingRole(role)) { window.location.href = '/home.html'; return; }
 
-      clearPrebuildForm();
+      const formRoot = document.getElementById('pb-form-root');
+      formRoot.innerHTML = prebuildFormHtml();
+      prebuildForm = mountPrebuildForm(formRoot, { onSaved: loadPrebuilds });
       await loadPrebuilds();
     })();
   </script>
