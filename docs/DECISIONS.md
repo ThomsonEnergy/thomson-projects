@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 21 Oct 2026
+- Confirmed LIVE: sales@ sync caught up after PR #153 (89 emails in the first background run, J7028 Tony Adams' reply on the job, starting point moving every run).
+- Planned: Investment breakdown page on proposals (toggle per quote, default off, prebuilds as their client description, no line prices) plus a fix for Jasper's My inbox sync, which never finishes a Gmail page. Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 23)
+
 ## 20 Oct 2026
 - Fixed: proposal payment schedule cut off at the bottom of the Investment summary (that page was never split into A4 sheets). Schedule set tighter; it moves to the next sheet with the valid-until line and approve link when it does not fit; many cost centres carry on over extra sheets with headings repeated. No migration. (`docs/PROJECT_SPEC.md` A22)
 - Fixed: client replies on sales@ (for example J7028 Tony Adams) not showing in TEops. The sales@ sync had not saved its Gmail starting point since 9 Oct: it checked each message one by one and refetched drafts every run, so it never finished a batch in time, and Netlify retried it three times every 5 minutes. Now page by page with the starting point saved after each page, one lock, a 10 second budget, and the backlog finished by the background mailbox run. No migration. (`docs/PROJECT_SPEC.md` A18)
