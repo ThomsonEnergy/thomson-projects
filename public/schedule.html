@@ -14,10 +14,14 @@
 <link rel="stylesheet" href="/css/style.css?v=23" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
-  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
   .cal-dow { text-align: center; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 6px; }
   .cal-day {
-    min-height: 90px;
+    height: 120px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -27,7 +31,11 @@
   }
   .cal-day.other-month { opacity: 0.35; }
   .cal-day.today { border-color: var(--accent); }
-  .cal-day .day-num { font-weight: 600; margin-bottom: 4px; }
+  .cal-day .day-num { font-weight: 600; margin-bottom: 4px; flex: none; }
+  .cal-day .day-count { font-weight: 400; color: var(--muted); font-size: 10.5px; margin-left: 4px; }
+  .cal-chips { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+  .cal-chips.has-more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent); padding-bottom: 8px; }
+  .cal-chips.has-more.at-end { -webkit-mask-image: none; mask-image: none; }
   .cal-chip {
     display: block;
     background: var(--accent-dim);
@@ -36,9 +44,9 @@
     padding: 1px 5px;
     margin-bottom: 2px;
     font-size: 10.5px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.3;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .cal-chip.leave { background: var(--red); color: #fff; opacity: 0.85; }
   .cal-day.holiday { background: var(--surface-1); opacity: 0.6; }
@@ -48,7 +56,7 @@
     padding: 1px 5px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em;
   }
   @media (max-width: 800px) {
-    .cal-day { min-height: 60px; font-size: 10.5px; }
+    .cal-day { height: 80px; font-size: 10.5px; }
   }
 
   .day-board { display: flex; gap: 16px; align-items: flex-start; }
@@ -266,6 +274,8 @@
       document.getElementById('cal-dow-row').innerHTML = days.map(d => `<div class="cal-dow">${d}</div>`).join('');
     }
 
+    const BLOCK_LABELS = { site_inspection: 'Inspection', site_visit: 'Site visit', training: 'Training', office: 'Admin', other: 'Other' };
+
     async function loadMonth() {
       const seq = ++loadSeq;
       document.getElementById('period-label').textContent = new Date(viewYear, viewMonth, 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' });
@@ -306,14 +316,33 @@
           const dayAssignments = assignmentsByDate[dateStr] || [];
           const dayLeave = (leave || []).filter(l => dateStr >= l.start_date && dateStr <= l.end_date);
 
+          // One chip per job per day (names listed on it), leave stays per person.
+          const groups = new Map();
+          dayAssignments.forEach(a => {
+            const label = a.projects ? projectRef(a.projects) : (BLOCK_LABELS[a.block_type] || 'Job');
+            const key = (a.project_id || '') + '|' + (a.project_id ? '' : (a.block_type || ''));
+            if (!groups.has(key)) groups.set(key, { label, names: [] });
+            const first = (((a.profiles && a.profiles.full_name) || 'Staff').split(' ')[0]);
+            const g = groups.get(key);
+            if (!g.names.includes(first)) g.names.push(first);
+          });
+          const chips = dayLeave.map(l => `<span class="cal-chip leave">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff')} (leave)</span>`).join('')
+            + [...groups.values()].map(g => {
+              const text = `${g.label} \u00b7 ${g.names.join(', ')}`;
+              return `<span class="cal-chip" title="${escapeHtml(text)}">${escapeHtml(text)}</span>`;
+            }).join('');
+
           html += `
             <div class="cal-day ${isOtherMonth ? 'other-month' : ''} ${dateStr === todayStr ? 'today' : ''} ${isHoliday ? 'holiday' : ''}" data-date="${dateStr}">
-              <div class="day-num">${cellDate.getDate()}${isHoliday ? '<span class="holiday-badge">Public holiday</span>' : ''}</div>
-              ${dayLeave.map(l => `<span class="cal-chip leave">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff')} (leave)</span>`).join('')}
-              ${dayAssignments.map(a => `<span class="cal-chip">${escapeHtml((a.profiles && a.profiles.full_name) || 'Staff')} &middot; ${escapeHtml(a.projects ? projectRef(a.projects) : 'Job')}</span>`).join('')}
+              <div class="day-num">${cellDate.getDate()}${isHoliday ? '<span class="holiday-badge">Public holiday</span>' : ''}${dayAssignments.length ? `<span class="day-count" title="${dayAssignments.length} booking${dayAssignments.length === 1 ? '' : 's'}">&middot; ${dayAssignments.length}</span>` : ''}</div>
+              <div class="cal-chips">${chips}</div>
             </div>`;
         }
         document.getElementById('cal-grid').innerHTML = html;
+        document.querySelectorAll('#cal-grid .cal-chips').forEach(el => {
+          const update = () => { el.classList.toggle('at-end', el.scrollTop + el.clientHeight >= el.scrollHeight - 2); };
+          if (el.scrollHeight > el.clientHeight + 2) { el.classList.add('has-more'); el.addEventListener('scroll', update, { passive: true }); }
+        });
 
         document.querySelectorAll('.cal-day').forEach(cell => {
           cell.addEventListener('click', () => {
