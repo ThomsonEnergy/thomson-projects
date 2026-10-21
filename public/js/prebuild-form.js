@@ -51,6 +51,8 @@ function prebuildFormHtml({ heading = 'Add a prebuild', inPopup = false } = {}) 
     <label>Components <span style="color:var(--muted); font-weight:400;">(unit costs ex GST)</span></label>
     <div class="pb-components"></div>
     <button type="button" class="secondary pb-add-component" style="margin-top:6px;">+ Add component</button>
+    <button type="button" class="secondary pb-suggest-btn" style="margin-top:6px;" title="Guesses the parts and labour from the name and description, matched to Stock. Tagged until you check them.">&#10024; Suggest components with AI</button>
+    <div class="pb-suggest-msg"></div>
     <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
       <button type="button" class="pb-save-btn">Save prebuild</button>
       <button type="button" class="secondary pb-clear-btn">${inPopup ? 'Cancel' : 'Clear form'}</button>
@@ -68,7 +70,7 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
   }
   $('.pb-category').addEventListener('change', refreshSubcategoryOptions);
 
-  function addComponentRow({ item_type = 'material', description = '', quantity = 1, unit_cost = '' } = {}) {
+  function addComponentRow({ item_type = 'material', description = '', quantity = 1, unit_cost = '', ai = false, matched = true } = {}) {
     const row = document.createElement('div');
     row.className = 'pb-component-row';
     row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.7fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
@@ -82,10 +84,26 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
         <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
       </select>
       <input class="pbc-qty" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(quantity)}" placeholder="Qty/hrs" style="font-size:13px;" />
-      <input class="pbc-cost" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(unit_cost)}" placeholder="Unit cost $" style="font-size:13px;" />
+      <input class="pbc-cost" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(unit_cost ?? '')}" placeholder="${matched ? 'Unit cost $' : 'Needs a price'}" style="font-size:13px;${matched ? '' : ' border-color:#d97706;'}" />
       <button type="button" class="secondary pbc-remove" style="padding:6px 10px; font-size:12px;">x</button>
     `;
     row.querySelector('.pbc-remove').addEventListener('click', () => row.remove());
+
+    // An AI suggested row stays tagged (amber edge) until a person confirms or edits it; the form
+    // will not save while a tag is left, so nothing guessed lands in the library unchecked.
+    if (ai) {
+      row.dataset.aiSuggested = '1';
+      row.style.borderLeft = '4px solid #d97706';
+      row.style.paddingLeft = '6px';
+      const tag = document.createElement('div');
+      tag.className = 'pbc-ai-tag';
+      tag.style.cssText = 'grid-column:1 / -1; display:flex; gap:8px; align-items:center; font-size:11px; margin:-2px 0 4px;';
+      tag.innerHTML = `<span class="badge amber">AI suggested, check</span>${matched ? '' : '<span class="subtitle" style="font-size:11px;">Not in Stock: type the cost or add it to Stock</span>'}<button type="button" class="secondary pbc-ai-confirm" style="padding:2px 8px; font-size:11px;">Confirm</button>`;
+      row.appendChild(tag);
+      const clearTag = () => { delete row.dataset.aiSuggested; row.style.borderLeft = ''; row.style.paddingLeft = ''; tag.remove(); };
+      tag.querySelector('.pbc-ai-confirm').addEventListener('click', clearTag);
+      row.querySelectorAll('.pbc-desc, .pbc-qty, .pbc-cost, .pbc-type').forEach(el => el.addEventListener('change', clearTag));
+    }
 
     // Type-ahead against Stock materials, same search-or-type-new pattern as the PO line picker:
     // picking a result fills description + unit cost from Stock; typing without picking keeps it
@@ -114,6 +132,39 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
     $('.pb-components').appendChild(row);
   }
   $('.pb-add-component').addEventListener('click', () => addComponentRow());
+
+  // Item 25: guess the components from the name and description, matched to Stock. Rows arrive
+  // tagged for a person to check; an unmatched part has no cost (never invented).
+  $('.pb-suggest-btn').addEventListener('click', async () => {
+    const btn = $('.pb-suggest-btn');
+    const msg = $('.pb-suggest-msg');
+    const name = $('.pb-name').value.trim();
+    const description = $('.pb-client-desc').value.trim();
+    if (!name && !description) { msg.innerHTML = `<div class="error-box">Give it a name or a description first.</div>`; return; }
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = 'Working out the parts...';
+    msg.innerHTML = '';
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/suggest-prebuild-components', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ name, description, category: $('.pb-category').value, subcategory: $('.pb-subcategory').value }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Could not suggest components');
+      // Drop the one empty starter row so the list is not a blank line then the suggestions.
+      [...root.querySelectorAll('.pb-component-row')].forEach(r => { if (!r.querySelector('.pbc-desc').value.trim()) r.remove(); });
+      (data.components || []).forEach(c => addComponentRow({ ...c, unit_cost: c.unit_cost ?? '', ai: true, matched: c.matched }));
+      const unmatched = (data.components || []).filter(c => !c.matched && c.item_type === 'material').length;
+      msg.innerHTML = `<div class="success-box">${data.components.length} component${data.components.length === 1 ? '' : 's'} suggested and tagged. Check each one (Confirm, edit or remove) before saving.${unmatched ? ` ${unmatched} not in Stock: add a cost by hand.` : ''}</div>`;
+    } catch (err) {
+      msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+    }
+    btn.disabled = false;
+    btn.textContent = label;
+  });
 
   function readComponents(withCosts) {
     return [...root.querySelectorAll('.pb-component-row')].map((row, i) => ({
@@ -214,6 +265,10 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
     const msg = $('.pb-msg');
     const name = $('.pb-name').value.trim();
     if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
+    if (root.querySelector('.pb-component-row[data-ai-suggested="1"]')) {
+      msg.innerHTML = `<div class="error-box">Check the AI suggested components first: press Confirm, edit, or remove each tagged row.</div>`;
+      return;
+    }
     const btn = $('.pb-save-btn');
     const label = btn.textContent;
     btn.disabled = true;

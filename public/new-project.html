@@ -163,6 +163,8 @@
       </div>
       <div id="cc-rows"></div>
       <button type="button" class="secondary" id="add-row">+ Add stage</button>
+      <button type="button" class="secondary" id="suggest-prebuilds-btn" title="Reads the scope of works and the pre-quote answers and adds prebuilds from the library to each stage, tagged for you to check">&#10024; Suggest prebuilds with AI</button>
+      <div id="suggest-prebuilds-msg"></div>
     </div>
 
     <div class="card">
@@ -260,9 +262,9 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=111"></script>
+  <script src="/js/supabase-client.js?v=112"></script>
   <script src="/js/template-questions.js?v=2"></script>
-  <script src="/js/prebuild-form.js?v=1"></script>
+  <script src="/js/prebuild-form.js?v=2"></script>
   <script src="/js/email-compose.js?v=8"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -489,6 +491,15 @@
 
     document.querySelectorAll('.template-option').forEach(btn => {
       btn.addEventListener('click', () => applyTemplate(btn.dataset.template, true));
+    });
+
+    document.getElementById('suggest-prebuilds-btn').addEventListener('click', () => {
+      Object.assign(templateAnswers, readTemplateAnswers(document.getElementById('template-questions')));
+      suggestStagePrebuilds({
+        projectId: editId, template: currentTemplate,
+        sow: document.getElementById('p-sow').value, answersText: templateAnswersText(currentTemplate, templateAnswers),
+        btnEl: document.getElementById('suggest-prebuilds-btn'), msgEl: document.getElementById('suggest-prebuilds-msg'),
+      });
     });
 
     // ---------- line items ----------
@@ -1196,6 +1207,7 @@
               prebuild_group_id: li.dataset.prebuildGroupId || null,
               prebuild_client_description: li.dataset.prebuildClientDescription || null,
               prebuild_base_quantity: li.dataset.prebuildBaseQuantity ? parseFloat(li.dataset.prebuildBaseQuantity) : null,
+              ai_suggested: !!(li.closest('.li-prebuild-group') && li.closest('.li-prebuild-group').dataset.aiSuggested === '1'),
             };
           }).filter(li => li.description),
           photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
@@ -1491,6 +1503,7 @@
             .map(li => ({
               description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id,
               prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description, prebuild_base_quantity: li.prebuild_base_quantity,
+              ai_suggested: li.ai_suggested,
             })),
           photoGroups: (stage.cost_centre_photo_groups || [])
             .sort((a, b) => a.sort_order - b.sort_order)

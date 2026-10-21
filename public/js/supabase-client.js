@@ -5344,7 +5344,7 @@ function addPrebuildToStage(stageRow, prebuild, qty = 1) {
     // qty typed into the picker, which only sets the starting point.
     prebuild_base_quantity: parseFloat(comp.quantity) || 0,
   }));
-  renderPrebuildGroup(stageRow, groupId, clientDescription, components);
+  return renderPrebuildGroup(stageRow, groupId, clientDescription, components);
 }
 
 // Ready-to-send check for a quote (backlog item 24): required pre-quote answers, a priced stage,
@@ -5580,6 +5580,61 @@ function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
   rowsEl.addEventListener('click', (e) => { if (e.target.classList.contains('li-remove')) recalcGroupTotal(); });
 
   recalcGroupTotal();
+  return group;
+}
+
+// Item 25: a prebuild group the AI added stays tagged "AI added, check" (amber edge, the reason,
+// a Confirm button) until a person confirms or removes it. Saved as ai_suggested on each of its
+// lines, and the ready-to-send gate lists any still tagged.
+function markPrebuildGroupAi(group, reason) {
+  if (!group || group.dataset.aiSuggested === '1') return;
+  group.dataset.aiSuggested = '1';
+  group.style.borderLeft = '4px solid #d97706';
+  const header = group.querySelector('.li-prebuild-header > div');
+  const tag = document.createElement('div');
+  tag.className = 'li-ai-tag';
+  tag.style.cssText = 'display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:11px; margin-top:4px;';
+  tag.innerHTML = `<span class="badge amber">AI added, check</span>${reason ? `<span class="subtitle" style="font-size:11px;">${escapeHtml(reason)}</span>` : ''}<button type="button" class="secondary btn-sm li-ai-confirm">Confirm</button>`;
+  header.appendChild(tag);
+  tag.querySelector('.li-ai-confirm').addEventListener('click', () => { delete group.dataset.aiSuggested; group.style.borderLeft = ''; tag.remove(); });
+}
+
+// Item 25: AI picks prebuilds from the library for each stage, from the scope of works, the
+// pre-quote answers and the stage names. Each is added to its stage through the normal prebuild
+// path and tagged for a person to confirm. Works on both quote pages (#cc-rows).
+async function suggestStagePrebuilds({ projectId = null, template = '', sow = '', answersText = '', btnEl, msgEl }) {
+  const rows = [...document.querySelectorAll('#cc-rows .cc-row')];
+  const stages = rows.map(r => ({ name: r.querySelector('.cc-name').value.trim(), description: r.querySelector('.cc-desc').value.trim() }));
+  if (!stages.some(s => s.name)) { msgEl.innerHTML = `<div class="error-box">Name at least one stage first.</div>`; return; }
+  if (!sow.trim() && !answersText.trim()) { msgEl.innerHTML = `<div class="error-box">Write or generate the scope of works first, or answer the pre-quote questions, so the AI knows what the job is.</div>`; return; }
+  btnEl.disabled = true;
+  const label = btnEl.textContent;
+  btnEl.textContent = 'Reading the scope...';
+  msgEl.innerHTML = '';
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const res = await fetch('/.netlify/functions/suggest-stage-prebuilds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ projectId, template, stages, sow, answersText }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) throw new Error(json.error || 'Could not suggest prebuilds');
+    const picks = json.suggestions || [];
+    if (!picks.length) { msgEl.innerHTML = `<div class="success-box">${json.note || 'No prebuild in the library clearly fits this scope. Add them by hand with + Search material / prebuild.'}</div>`; return; }
+    picks.forEach(s => {
+      const row = rows[s.stageIndex];
+      if (!row) return;
+      const group = addPrebuildToStage(row, s.prebuild, s.quantity);
+      markPrebuildGroupAi(group, s.reason);
+    });
+    msgEl.innerHTML = `<div class="success-box">${picks.length} prebuild${picks.length === 1 ? '' : 's'} added and tagged "AI added, check". Open each stage, press Confirm or Remove on every tagged one; the quote cannot be sent with a tag left.</div>`;
+  } catch (err) {
+    msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+  } finally {
+    btnEl.disabled = false;
+    btnEl.textContent = label;
+  }
 }
 
 // Renders a stage's saved line items into its editor, collapsing any that
@@ -5596,7 +5651,8 @@ function renderStageLineItems(stageRow, lineItems) {
     if (li.prebuild_group_id) {
       const groupMembers = lineItems.filter(m => m.prebuild_group_id === li.prebuild_group_id);
       groupMembers.forEach(m => rendered.add(m.id));
-      renderPrebuildGroup(stageRow, li.prebuild_group_id, li.prebuild_client_description, groupMembers);
+      const group = renderPrebuildGroup(stageRow, li.prebuild_group_id, li.prebuild_client_description, groupMembers);
+      if (groupMembers.some(m => m.ai_suggested)) markPrebuildGroupAi(group, '');
     } else {
       rendered.add(li.id);
       addLineItem(stageRow, li);

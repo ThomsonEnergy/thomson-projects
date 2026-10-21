@@ -23,7 +23,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 to 4 (items 1 to 109) LIVE 19 to 20 Oct 2026, next delivery 5 (`docs/UX_REVIEW.md`) | N | None |
 | 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Built 19 Oct 2026, LIVE (spec A32) | N | None |
 | 24 | Gather first, generate last: pre-quote information, Battery proposals, send gate | Built 21 Oct 2026, LIVE (spec A3), migration 20261115000000 | N | Owner to record SAA GCBS (battery) accreditation under Team with "battery" in the licence name |
-| 25 | AI guesses prebuild components and prebuilds per cost centre (highlighted to check) | Planned 21 Oct 2026, second delivery after 24 | N | Item 24 on main |
+| 25 | AI guesses prebuild components and prebuilds per cost centre (highlighted to check) | Built 21 Oct 2026, LIVE (spec A3), migration 20261116000000 | N | None |
 
 ## High lead time, start now
 
@@ -592,7 +592,9 @@ Owner's ask (21 Oct 2026): a quote should start by gathering information (on the
 
 Migration: one small file (`battery` template value, `projects.sow_brief`, `cost_centres.stc_quantity`), run on production after the yes. No staging (paused).
 
-## 25. AI guesses the parts: prebuild components from the description, prebuilds on cost centres from the scope (planned 21 Oct 2026, second delivery after item 24)
+## 25. AI guesses the parts: prebuild components from the description, prebuilds on cost centres from the scope (built 21 Oct 2026, migration 20261116000000)
+
+Live: see `docs/PROJECT_SPEC.md` A3 "AI guesses the parts". Built as planned (points 1 to 3). The plan as agreed follows.
 
 Owner's ask (21 Oct 2026): on the Prebuilds page, the AI should guess the materials (components) a prebuild needs from its name and description, not only write the description from the components. On a quote, the AI should read the scope of works (and the pre-quote answers) and suggest prebuilds from the library to add to each cost centre, with the AI-added ones highlighted so a person checks them before the quote goes out.
 
