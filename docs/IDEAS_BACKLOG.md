@@ -24,7 +24,8 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Built 19 Oct 2026, LIVE (spec A32) | N | None |
 | 24 | Gather first, generate last: pre-quote information, Battery proposals, send gate | Built 21 Oct 2026, LIVE (spec A3), migration 20261115000000 | N | Owner to record SAA GCBS (battery) accreditation under Team with "battery" in the licence name |
 | 25 | AI guesses prebuild components and prebuilds per cost centre (highlighted to check) | Built 21 Oct 2026, LIVE (spec A3), migration 20261116000000 | N | None |
-| 26 | STCs and BSTCs separate on quote stages and the proposal | Planned 21 Oct 2026, waiting on owner's yes (A or B) | N | Owner: does Xero need BSTC income on its own account? |
+| 26 | STCs and BSTCs separate | Folded into item 27 (credits at quote level, not per stage) | N | See 27 |
+| 27 | Quote in steps: create, pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level | Planned 21 Oct 2026, waiting on owner's yes | N | None |
 
 ## High lead time, start now
 
@@ -625,4 +626,24 @@ Owner's ask (21 Oct 2026): make BSTCs (battery certificates) and STCs (solar PV 
 **Option B: separate all the way through invoices and Xero.** Everything in A plus `bstc_amount` on `invoice_claims`, `invoices` and credit note claims, "BSTC Credit" line in Xero on new `bstc_credits_individual` / `bstc_credits_company` mappings (Settings > Xero Mapping), both lines on the invoice PDF and the invoices list, `get_invoice_balance_due` and the paid-amount maths updated, credit note reversal per kind. Only worth it if Xero needs BSTC income on its own account.
 
 Best model: Fable 5.1, effort xhigh (money and a migration that re-declares `get_quote_by_token`).
+
+## 27. Quote in steps: create first, then pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level (planned 21 Oct 2026, waiting on owner's yes)
+
+Owner's ask (21 Oct 2026, after item 24 went live): creating a quote should be just the client details and the proposal type, then Create. Everything else is added to the saved quote afterwards, in order: pre-quote information, a site visit if needed, the quote (pricing), then the scope of works, then send. STCs and BSTCs are entered on the quote, not inside a cost centre; which stage they are claimed against can be chosen later. Supersedes item 26 (which put BSTCs on the stage).
+
+**Plan:**
+1. **Create quote (`new-project.html` shrinks).** Proposal type buttons, project name, client (search or new), site address, payment terms, notes. "Create quote" draws the Q number, saves the draft and opens the quote at step 1. Lead, email and assistant prefills still land here. The long form is retired; everything below moves to the quote's own page.
+2. **Quote steps on the quote's page (`project.html`, quotes without a job number).** A step bar under the heading: 1 Pre-quote info, 2 Site visit, 3 Pricing, 4 Scope of works, 5 Send. Each step is a card with its own Save, so a phone can do one step at a time; a tick shows when a step is done, and any step can be reopened. The whole-form "Edit / Save changes" mode goes for quotes (jobs keep the cost centre editor as now).
+   - 1 Pre-quote info: the question card from item 24 (source, date, who, the type's questions, Batteries as well), lead attachments offered, Save answers.
+   - 2 Site visit: "Needs a site visit" with Book (picks the inspection checklist template, makes the `site_inspections` row, link to fill it on site), or "No site visit needed" with a one-line reason; status and the completed answers shown here.
+   - 3 Pricing: Pylon (solar and battery), stages and line items (the existing cost centre editor), deposit and milestones, investment breakdown tick, and the new quote-level credits (point 3).
+   - 4 Scope of works: What the customer gets, brief and documents, style, Generate, the scope text with Cleanup, reference photos, proposal subtitle, terms.
+   - 5 Send: Ready to send check (item 24 gate), Make PDF and preview, Email quote to client, valid until.
+3. **STC and BSTC credits on the quote, not the stage.** New columns on `projects`: `stc_quantity`, `stc_system_kw`, `stc_zone_rating`, `stc_install_year`, `stc_price_per_certificate`, `stc_total`, `bstc_quantity`, `bstc_price_per_certificate`, `bstc_total`, and `stc_cost_centre_id` / `bstc_cost_centre_id` (optional: the stage each credit is claimed with; blank means the last stage). Two blocks on step 3: "STC credit (solar)" (count, or system size with zone and year to fill the count, $ per STC, total) and "BSTC credit (battery)" (count and $ per BSTC, total); shown on Solar and Battery proposals, the BSTC block only when the quote has a battery. The migration copies each existing quote's stage STC totals up to the quote (sum; count and price from the first stage that has them) so nothing changes on live quotes; the stage columns stay for history and stop being shown.
+4. **Proposal:** two lines on the Investment summary, STC credit and BSTC credit (inc GST for a company client as now), total after both; `get_quote_by_token` returns the quote-level figures (function re-declared in the migration).
+5. **Invoices and Xero:** one credit per claim and one "STC Credit" Xero line as now. The credit remaining is the quote's STC plus BSTC totals less every claim's `stc_amount` on the job; it is offered on the claim for the linked stage (or the last stage) once that stage is fully claimed. `create-job-from-quote.js` carries the quote-level figures onto the job.
+6. **STCs tab:** the PV row offered from the quote's STC count, a battery row from the BSTC count.
+7. **Ready to send:** the solar and battery STC rules read the quote-level figures.
+
+Best model: Fable 5.1, effort xhigh (money on live quotes, a migration that moves data and re-declares `get_quote_by_token`, and the quote page rebuilt in steps).
 
