@@ -236,19 +236,13 @@ async function syncPersonalMailbox(supabaseAdmin, mailbox, startedAt, budgetMs) 
       return { synced, done: true, inbound };
     }
     const history = page.history || [];
-    const ids = [...new Set(history.flatMap((h) => (h.messagesAdded || []).map((m) => m.message.id)))];
-    for (const id of ids) {
-      // out of time part way through a page: the starting point stays put and the next run
-      // does this page again (what is already saved is skipped quickly)
-      if (Date.now() - startedAt > budgetMs) return { synced, done: false, inbound };
-      try {
-        const seen = await processMessageId(supabaseAdmin, id, null, mailbox);
-        if (seen.inbound) inbound += 1;
-      } catch (err) {
-        if (err.status !== 404 && !/not found/i.test(err.message || '')) throw err;
-      }
-      synced += 1;
-    }
+    const msgs = history.flatMap((h) => (h.messagesAdded || []).map((m) => m.message));
+    // out of time part way through a page: the starting point stays put and the next run
+    // does this page again (what is already saved is ruled out in one query)
+    const ctx = { synced: 0, bills: 0, priceLists: 0, inbound: 0, billLabelId: null };
+    const finished = await saveNewMessages(supabaseAdmin, msgs, mailbox, ctx, startedAt, budgetMs);
+    synced += ctx.synced; inbound += ctx.inbound;
+    if (!finished) return { synced, done: false, inbound };
     await applyLabelChanges(supabaseAdmin, mailbox, history);
     pageToken = page.nextPageToken;
     // move the starting point on: to the last change on this page, or to "now" at the end
@@ -309,7 +303,8 @@ const releaseSharedSync = (admin) => admin.from('api_keys').update({ key_value: 
 
 const SKIP_LABELS = ['DRAFT', 'SPAM', 'TRASH'];
 
-// Saves the messages sales@ has that TEops does not, 4 at a time. msgs: [{ id, labelIds? }].
+// Saves the messages a mailbox has that TEops does not, 4 at a time. msgs: [{ id, labelIds? }].
+// shared: the mailboxes row (sales@ or a personal one).
 // Drafts, spam and bin are left out without fetching them (every draft save is a new message
 // in Gmail's history). Returns false if time ran out first.
 async function saveNewMessages(admin, msgs, shared, ctx, startedAt, budgetMs) {
@@ -323,7 +318,7 @@ async function saveNewMessages(admin, msgs, shared, ctx, startedAt, budgetMs) {
     (data || []).forEach((e) => known.add(e.gmail_message_id));
   }
   const todo = ids.filter((id) => !known.has(id));
-  if (todo.length && ctx.billLabelId === undefined) ctx.billLabelId = await getBillLabelId();
+  if (todo.length && ctx.billLabelId === undefined) ctx.billLabelId = await getBillLabelId(); // sales@ only; personal runs pass null
   let next = 0, outOfTime = false;
   await Promise.all(Array.from({ length: Math.min(4, todo.length) }, async () => {
     while (next < todo.length) {

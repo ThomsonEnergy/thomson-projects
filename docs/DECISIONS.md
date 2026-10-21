@@ -4,7 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 21 Oct 2026
 - Confirmed LIVE: sales@ sync caught up after PR #153 (89 emails in the first background run, J7028 Tony Adams' reply on the job, starting point moving every run).
-- Planned: Investment breakdown page on proposals (toggle per quote, default off, prebuilds as their client description, no line prices) plus a fix for Jasper's My inbox sync, which never finishes a Gmail page. Waiting on owner's yes. (`docs/IDEAS_BACKLOG.md` item 23)
+- LIVE: Investment breakdown page on proposals (tick box on the quote edit form, off by default; each stage's items by description and quantity, prebuilds as one line, no item prices, stage price last; long stages carry on over extra sheets). Migration 20261114000000 applied to production. My inbox sync now uses the sales@ page logic (Jasper's had never finished a page). (`docs/PROJECT_SPEC.md` A22, A18; `docs/IDEAS_BACKLOG.md` item 23)
 
 ## 20 Oct 2026
 - Fixed: proposal payment schedule cut off at the bottom of the Investment summary (that page was never split into A4 sheets). Schedule set tighter; it moves to the next sheet with the valid-until line and approve link when it does not fit; many cost centres carry on over extra sheets with headings repeated. No migration. (`docs/PROJECT_SPEC.md` A22)
