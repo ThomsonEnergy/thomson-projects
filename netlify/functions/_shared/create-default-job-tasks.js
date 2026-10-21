@@ -1,20 +1,21 @@
 // Called from create-job-from-quote.js right after a job's cost centres
-// are copied over from its source quote. Only does anything for a solar
-// job (proposal_template === 'solar'), or a renovation / service work job
-// (their tasks come from the quote's answers - see template-job-tasks.js).
+// are copied over from its source quote. Does something for a solar job,
+// a battery job, a solar job with Batteries as well (template_answers.
+// with_battery), and a renovation / service work job (their tasks come
+// from the quote's answers - see template-job-tasks.js).
 //
 // Inserts two batches of job_tasks:
 //  - prejob (before install): one "order <gear>" task per item Pylon has
 //    designed for this job, using the description straight from Pylon -
 //    no AI needed here, it's a direct 1:1 template, and using the real
 //    description means it can't be wrong about which panel/inverter/
-//    battery is meant.
+//    battery is meant; plus the battery pre-job tasks from the answers.
 //  - handover (after install): whatever the deterministic compliance
 //    rules in _shared/solar-compliance-rules.js say is still missing at
 //    the moment the job is created (almost everything, since none of the
 //    install-time fields exist yet), worded into specific task text by
 //    _shared/word-solar-tasks.js the same way the quote-page checklist
-//    does it.
+//    does it; plus the battery handover tasks.
 //
 // Best-effort: if the AI wording step fails (e.g. no Anthropic key set
 // yet), falls back to the plain rule labels rather than blocking job
@@ -23,16 +24,20 @@
 const { evaluate } = require('./solar-compliance-rules');
 const { wordSolarTasks } = require('./word-solar-tasks');
 const { tasksFor } = require('./template-job-tasks');
+const { quoteHasBattery } = require('../../../public/js/template-questions.js');
 
 async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
-  if (job.proposal_template === 'renovation' || job.proposal_template === 'service_work') {
-    const rows = tasksFor(job.proposal_template, job.template_answers || {}).map((t) => ({ ...t, project_id: job.id }));
+  const template = job.proposal_template;
+  const answers = job.template_answers || {};
+  if (template === 'renovation' || template === 'service_work') {
+    const rows = tasksFor(template, answers).map((t) => ({ ...t, project_id: job.id }));
     if (!rows.length) return;
     const { error } = await supabaseAdmin.from('job_tasks').insert(rows);
     if (error) console.error('Failed to insert default job tasks:', error.message);
     return;
   }
-  if (job.proposal_template !== 'solar') return;
+  const withBattery = quoteHasBattery(template, answers);
+  if (template !== 'solar' && template !== 'battery') return;
 
   const pylonData = job.pylon_data || {};
   const equipment = {
@@ -56,20 +61,32 @@ async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
     });
   });
 
+  // Battery pre-job and handover tasks from the answers (template-job-tasks.js).
+  if (withBattery) {
+    tasksFor('battery', answers).forEach((t) => rows.push({ ...t, project_id: job.id }));
+  }
+
   const { data: licences } = await supabaseAdmin
     .from('profile_licences')
     .select('licence_name, profiles!profile_licences_profile_id_fkey!inner(active)')
     .eq('profiles.active', true);
+  const licenceNames = (licences || []).map((l) => l.licence_name || '');
 
-  const solarCentres = (newStages || []).filter((c) => c.stc_system_kw != null || c.stc_total != null);
+  const solarCentres = (newStages || []).filter((c) => c.stc_system_kw != null || c.stc_total != null || c.stc_quantity != null);
   const ctx = {
     project: job,
+    template,
+    answers,
+    withBattery,
     equipment,
     solarCentres,
     quotedTotal: (newStages || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0),
     hasAccreditedStaff:
-      (licences || []).some((l) => /saa|accreditation/i.test(l.licence_name || '')) &&
-      (licences || []).some((l) => /electrical/i.test(l.licence_name || '')),
+      licenceNames.some((n) => /saa|accreditation/i.test(n)) &&
+      licenceNames.some((n) => /electrical/i.test(n)),
+    hasBatteryAccreditedStaff: licenceNames.some((n) => /saa|accreditation/i.test(n) && /batter/i.test(n)),
+    hasBatteryAssetSerial: false, // a fresh job has nothing installed yet
+    hasBatteryLocationPhoto: false,
     hasComplianceCertDoc: false, // legacy folder check; a fresh job has no CCEW yet, so the Upload the CCEW task is always created
     hasOwnerDeclarationDoc: false,
   };

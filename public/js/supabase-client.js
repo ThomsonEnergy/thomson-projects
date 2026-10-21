@@ -4442,6 +4442,10 @@ async function checkAndAdvanceHandover(projectId) {
       && !!(project.inverter_serial_numbers || '').trim() && !!project.formbay_lodgement_status;
     if (!dataComplete) return;
   }
+  // A battery job needs the NMI and the Formbay lodgement; serials live on the Installed equipment card.
+  if (project.proposal_template === 'battery') {
+    if (!(project.nmi || '').trim() || !project.formbay_lodgement_status) return;
+  }
 
   const { data: outstanding } = await supabaseClient
     .from('job_tasks')
@@ -4783,8 +4787,10 @@ const STC_STATUSES = [
 ];
 const stcStatusLabel = (v) => (STC_STATUSES.find(s => s.value === v) || { label: v || '-' }).label;
 
-// Number of STCs a quote stage was priced on: from the calculator inputs, or the $ total / price per STC.
+// Number of STCs a quote stage was priced on: the count typed on the stage, else the calculator
+// inputs, else the $ total / price per STC.
 function stcCountForStage(stage) {
+  if (Number(stage.stc_quantity) > 0) return Math.round(Number(stage.stc_quantity));
   const qty = calculateStcQuantity({ kw: Number(stage.stc_system_kw) || 0, zoneRating: Number(stage.stc_zone_rating) || 0, installYear: stage.stc_install_year });
   if (qty) return qty;
   const price = Number(stage.stc_price_per_certificate) || 35;
@@ -5257,13 +5263,28 @@ async function openStockPicker(stageRow) {
       <label>Search</label>
       <input id="stock-pick-search" placeholder="Name, category..." autocomplete="off" />
       <div id="stock-pick-results" style="margin-top:8px;"></div>
-      <div style="margin-top:16px; text-align:right;">
+      <div style="margin-top:16px; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="secondary" id="stock-pick-new-prebuild" title="Make a prebuild the library does not have yet, save it to the library and add it to this stage">+ New prebuild</button>
         <button type="button" class="secondary" id="stock-pick-cancel">Cancel</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('#stock-pick-cancel').addEventListener('click', () => overlay.remove());
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  // Found the library has no prebuild for this? Make it here (same form as the Prebuilds page,
+  // js/prebuild-form.js): saved to the library, then added to the stage like any picked prebuild.
+  overlay.querySelector('#stock-pick-new-prebuild').addEventListener('click', () => {
+    if (typeof openPrebuildForm !== 'function') { alert('The prebuild form did not load. Refresh the page and try again.'); return; }
+    const qty = parseFloat(overlay.querySelector('#stock-pick-qty').value) || 1;
+    overlay.remove();
+    openPrebuildForm({
+      onSaved: (prebuild) => {
+        _prebuildsCache = null;
+        addPrebuildToStage(stageRow, prebuild, qty);
+      },
+    });
+  });
 
   const resultsEl = overlay.querySelector('#stock-pick-results');
   function renderResults() {
@@ -5297,31 +5318,160 @@ async function openStockPicker(stageRow) {
           return;
         }
         const prebuild = prebuilds.find(p => p.id === row.dataset.id);
-        // One group id shared by every component this click adds - lets the
-        // client-facing quote collapse them back into a single line (the
-        // prebuild's own client_description) while staff still see and can
-        // edit each component individually here. A second "Add prebuild"
-        // for the same prebuild gets its own group, so it collapses on its
-        // own rather than merging with the first.
-        const groupId = crypto.randomUUID();
-        const clientDescription = prebuild.client_description || prebuild.name;
-        const components = (prebuild.prebuild_components || []).map(comp => ({
-          description: `${prebuild.name} - ${comp.description}`,
-          item_type: comp.item_type,
-          quantity: (parseFloat(comp.quantity) || 0) * qty,
-          unit_cost: comp.unit_cost,
-          // Un-multiplied - the group's own quantity control rescales from
-          // this base rather than the qty typed into this picker, which
-          // only sets the starting point.
-          prebuild_base_quantity: parseFloat(comp.quantity) || 0,
-        }));
-        renderPrebuildGroup(stageRow, groupId, clientDescription, components);
+        addPrebuildToStage(stageRow, prebuild, qty);
         overlay.remove();
       });
     });
   }
   overlay.querySelector('#stock-pick-search').addEventListener('input', renderResults);
   renderResults();
+}
+
+// Adds one prebuild (with its prebuild_components) to a stage as a collapsed group. One group id
+// is shared by every component this call adds - lets the client-facing quote collapse them back
+// into a single line (the prebuild's own client_description) while staff still see and can edit
+// each component individually. A second add of the same prebuild gets its own group, so it
+// collapses on its own rather than merging with the first.
+function addPrebuildToStage(stageRow, prebuild, qty = 1) {
+  const groupId = crypto.randomUUID();
+  const clientDescription = prebuild.client_description || prebuild.name;
+  const components = (prebuild.prebuild_components || []).map(comp => ({
+    description: `${prebuild.name} - ${comp.description}`,
+    item_type: comp.item_type,
+    quantity: (parseFloat(comp.quantity) || 0) * qty,
+    unit_cost: comp.unit_cost,
+    // Un-multiplied - the group's own quantity control rescales from this base rather than the
+    // qty typed into the picker, which only sets the starting point.
+    prebuild_base_quantity: parseFloat(comp.quantity) || 0,
+  }));
+  renderPrebuildGroup(stageRow, groupId, clientDescription, components);
+}
+
+// Ready-to-send check for a quote (backlog item 24): required pre-quote answers, a priced stage,
+// deposit and terms, plus the NETCC / CER / SAA rules for solar and battery quotes. Runs
+// check-solar-compliance (phase 'quote') and shows what is missing, with a button that turns the
+// gaps into job tasks. `taskType` is the job_tasks.task_type the created tasks get.
+async function runComplianceCheck(projectId, phase, taskType, btnEl, resultEl) {
+  btnEl.disabled = true;
+  const originalLabel = btnEl.textContent;
+  btnEl.textContent = 'Checking...';
+  resultEl.innerHTML = '';
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const checkRes = await fetch('/.netlify/functions/check-solar-compliance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ projectId, phase }),
+    });
+    const checkJson = await checkRes.json();
+    if (!checkJson.ok) throw new Error(checkJson.error);
+
+    if (!checkJson.missing.length) {
+      resultEl.innerHTML = `<div class="success-box">Everything on the checklist is in place.</div>`;
+      return;
+    }
+
+    resultEl.innerHTML = `
+      <div class="error-box">
+        <p style="margin:0 0 8px; font-weight:600;">${checkJson.missing.length} thing${checkJson.missing.length === 1 ? '' : 's'} missing:</p>
+        <ul style="margin:0 0 10px; padding-left:18px;">${checkJson.missing.map(m => `<li>${escapeHtml(m.label)}</li>`).join('')}</ul>
+        <button type="button" class="secondary create-compliance-tasks-btn">Create tasks for these</button>
+      </div>`;
+
+    resultEl.querySelector('.create-compliance-tasks-btn').addEventListener('click', async (e) => {
+      const createBtn = e.target;
+      createBtn.disabled = true;
+      createBtn.textContent = 'Creating...';
+      try {
+        const { data: proj } = await supabaseClient.from('projects').select('pylon_data').eq('id', projectId).single();
+        const pylonData = proj?.pylon_data || {};
+        const equipment = {
+          panels: pylonData.module_types || [],
+          inverters: pylonData.inverter_types || [],
+          batteries: pylonData.storage_types || [],
+        };
+        const wordRes = await fetch('/.netlify/functions/generate-solar-tasks', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ missing: checkJson.missing, equipment }),
+        });
+        const wordJson = await wordRes.json();
+        if (!wordJson.ok) throw new Error(wordJson.error);
+
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const { error: insErr } = await supabaseClient.from('job_tasks').insert(
+          wordJson.tasks.map(t => ({ project_id: projectId, description: t.description, task_type: taskType, created_by: user.id }))
+        );
+        if (insErr) throw insErr;
+        resultEl.innerHTML = `<div class="success-box">${wordJson.tasks.length} task${wordJson.tasks.length === 1 ? '' : 's'} added.</div>`;
+        if (typeof loadJobTasks === 'function' && document.getElementById('job-tasks-list')) await loadJobTasks(projectId);
+      } catch (err) {
+        createBtn.disabled = false;
+        createBtn.textContent = 'Create tasks for these';
+        resultEl.insertAdjacentHTML('beforeend', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
+      }
+    });
+  } catch (err) {
+    resultEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+  } finally {
+    btnEl.disabled = false;
+    btnEl.textContent = originalLabel;
+  }
+}
+
+// Ready-to-send gate before a quote is emailed or moved to Quote Sent. Resolves true when it may
+// go: nothing missing, or Admin / Finance chose Send anyway with a reason (saved on the quote and
+// written to the activity log). Resolves false to stop. A check that cannot run also stops it.
+async function quoteSendGate(project) {
+  let checkJson;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const res = await fetch('/.netlify/functions/check-solar-compliance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ projectId: project.id, phase: 'quote' }),
+    });
+    checkJson = await res.json();
+    if (!checkJson.ok) throw new Error(checkJson.error);
+  } catch (err) {
+    showToast('Could not run the ready-to-send check: ' + friendlyError(err), { error: true });
+    return false;
+  }
+  const missing = checkJson.missing || [];
+  if (!missing.length) return true;
+
+  const role = await getMyRole();
+  const canOverride = role === 'admin' || role === 'finance';
+  return new Promise((resolve) => {
+    const overlay = openModal(`
+      <h2>Not ready to send</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Fix these on the quote first${canOverride ? ', or send anyway with a reason (kept on the quote and in the log)' : ''}:</p>
+      <ul style="margin:0 0 12px; padding-left:18px;">${missing.map(m => `<li>${escapeHtml(m.label)}</li>`).join('')}</ul>
+      ${canOverride ? `<label style="margin-top:0">Reason for sending anyway</label><input id="gate-reason" placeholder="e.g. client needs a budget figure today, design to follow" />` : ''}
+      <div style="margin-top:14px; display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+        <button type="button" class="secondary" id="gate-cancel">Back to the quote</button>
+        ${canOverride ? `<button type="button" id="gate-send">Send anyway</button>` : ''}
+      </div>
+      <div id="gate-msg"></div>`, { maxWidth: 520 });
+    overlay.querySelector('#gate-cancel').addEventListener('click', () => { overlay.remove(); resolve(false); });
+    const sendBtn = overlay.querySelector('#gate-send');
+    if (sendBtn) sendBtn.addEventListener('click', async () => {
+      const reason = overlay.querySelector('#gate-reason').value.trim();
+      if (!reason) { overlay.querySelector('#gate-msg').innerHTML = `<div class="error-box">Enter a reason first.</div>`; return; }
+      sendBtn.disabled = true;
+      try {
+        const { error } = await supabaseClient.from('projects')
+          .update({ send_gate_override_reason: reason, send_gate_override_at: new Date().toISOString() })
+          .eq('id', project.id);
+        if (error) throw error;
+        await logActivity('project', project.id, 'send_gate_override', `Sent with ready-to-send gaps: ${reason}. Missing: ${missing.map(m => m.label).join('; ')}`);
+        overlay.remove();
+        resolve(true);
+      } catch (err) {
+        sendBtn.disabled = false;
+        overlay.querySelector('#gate-msg').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+      }
+    });
+  });
 }
 
 // Renders one "prebuild instance" as a single collapsed control in a

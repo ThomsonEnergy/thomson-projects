@@ -41,7 +41,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=110"></script>
+  <script src="/js/supabase-client.js?v=111"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // Board columns in order, shared with the job page's stage badge (supabase-client.js).
@@ -188,6 +188,13 @@
         const newStage = sel.value;
         if (newStage === oldStage) return;
         card.querySelector('.pipeline-card-error')?.remove();
+        // Ready-to-send gate on a quote (same check as Email quote to client).
+        if (newStage === 'quote_sent' && oldStage === 'draft_quote') {
+          sel.disabled = true;
+          const ok = await quoteSendGate({ id: card.dataset.id });
+          sel.disabled = false;
+          if (!ok) { sel.value = oldStage; return; }
+        }
         sel.disabled = true;
         const { data: row, error: updateErr } = await supabaseClient
           .from('projects')

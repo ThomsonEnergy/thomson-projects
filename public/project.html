@@ -31,11 +31,12 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=110"></script>
-  <script src="/js/template-questions.js"></script>
+  <script src="/js/supabase-client.js?v=111"></script>
+  <script src="/js/template-questions.js?v=2"></script>
+  <script src="/js/prebuild-form.js?v=1"></script>
   <script src="/js/feed.js?v=10"></script>
   <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=7"></script>
+  <script src="/js/email-compose.js?v=8"></script>
   <script src="/js/job-schedule.js?v=2"></script>
   <script src="/js/assets.js?v=2"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
@@ -334,8 +335,12 @@
         photoCategory: 'electrical', singleStage: false, showDeposit: true, showPylon: false,
       },
       solar: {
-        note: 'Pylon design link is prominent on the cover page. Defaults to a single stage - add more if needed.',
-        photoCategory: 'solar', singleStage: false, showDeposit: true, showPylon: true,
+        note: 'Asks the solar questions (grid, existing system, roof, switchboard, supply) and tick Batteries as well to add the battery set. Pylon design on the cover. STC credit per stage.',
+        photoCategory: 'solar', singleStage: false, showDeposit: true, showPylon: true, showStc: true,
+      },
+      battery: {
+        note: 'Battery system proposal. Asks the battery questions (usable kWh, backup, location to AS/NZS 5139, CEC list, VPP, federal discount) and checks the SAA and Clean Energy Regulator rules before sending. Battery pages on the proposal.',
+        photoCategory: 'solar', singleStage: false, showDeposit: true, showPylon: true, showStc: true,
       },
       renovation: {
         note: 'Multi-stage renovation with a deposit. Asks reno-specific questions (asbestos, switchboard, approvals, occupancy) that set up the pre-work and handover tasks.',
@@ -492,7 +497,7 @@
     function markupOr45(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 45; }
 
     function addRow({
-      id = '', name = '', description = '', markup_percent = null, stc_total = 0,
+      id = '', name = '', description = '', markup_percent = null, stc_total = 0, stc_quantity = null,
       stc_system_kw = null, stc_zone_rating = null, stc_install_year = null, stc_price_per_certificate = null,
       lineItems = [], photoGroups = [],
     } = {}) {
@@ -518,7 +523,7 @@
           </div>
         </div>
         <div style="margin-top:12px;">
-          <label style="margin-top:0">Line items</label>
+          <label style="margin-top:0">Line items <span style="color:var(--muted); font-weight:400;">(unit costs ex GST, GST is added at the end of the quote)</span></label>
           <div class="li-rows"></div>
           <button type="button" class="secondary prebuild-add" style="font-size:12px; padding:6px 12px;">+ Search material / prebuild</button>
           <button type="button" class="secondary li-add" style="font-size:12px; padding:6px 12px;">+ Add custom line</button>
@@ -529,14 +534,16 @@
           <button type="button" class="secondary pg-add" style="font-size:12px; padding:6px 12px;">+ Add photo group</button>
         </div>
         <div class="cc-row-costs" style="grid-template-columns: 1fr 1fr 0.7fr 1fr;">
-          <div><label style="margin-top:0">Labour total</label><div class="readout cc-labour-total">$0.00</div></div>
-          <div><label style="margin-top:0">Materials total</label><div class="readout cc-material-total">$0.00</div></div>
+          <div><label style="margin-top:0">Labour total (ex GST)</label><div class="readout cc-labour-total">$0.00</div></div>
+          <div><label style="margin-top:0">Materials total (ex GST)</label><div class="readout cc-material-total">$0.00</div></div>
           <div><label style="margin-top:0">Markup %</label><input class="cc-markup" type="number" step="1" value="${defaultMarkup}" /></div>
-          <div><label style="margin-top:0">Sale price</label><div class="readout cc-sale-price">$0.00</div></div>
+          <div><label style="margin-top:0">Sale price (ex GST)</label><div class="readout cc-sale-price">$0.00</div></div>
         </div>
-        <div style="margin-top:10px; padding:12px; background:var(--surface-2); border-radius:8px;">
+        <div class="cc-stc-block" style="margin-top:10px; padding:12px; background:var(--surface-2); border-radius:8px; display:${((TEMPLATE_INFO[currentTemplate] || {}).showStc || stc_total > 0) ? '' : 'none'};">
           <label style="margin-top:0; font-weight:600;">STC credit (optional)</label>
+          <p class="subtitle" style="margin:2px 0 0; font-size:12px;">Type the number of STCs, or the system size and the count fills itself. A typed count wins.</p>
           <div class="grid cols-4" style="margin-top:6px;">
+            <div><label style="margin-top:0; font-size:12px;">Number of STCs</label><input class="cc-stc-qty" type="number" inputmode="numeric" step="1" min="0" value="${stc_quantity ?? ''}" placeholder="e.g. 85" /></div>
             <div><label style="margin-top:0; font-size:12px;">System size (kW)</label><input class="cc-stc-kw" type="number" step="0.01" value="${defaultStcKw}" placeholder="0.00" /></div>
             <div>
               <label style="margin-top:0; font-size:12px;">Zone rating</label>
@@ -557,30 +564,42 @@
       rowsEl.appendChild(div);
       renumberEditStages();
 
-      function recalcStc() {
+      // Number of STCs: typed straight in (batteries: from usable kWh), or filled from the system
+      // size calculator. Typing a size refills the count; a typed count is what the total uses.
+      function recalcStc(fromSize) {
         const kw = parseFloat(div.querySelector('.cc-stc-kw').value) || 0;
         const zoneRating = parseFloat(div.querySelector('.cc-stc-zone').value) || 0;
         const installYear = parseInt(div.querySelector('.cc-stc-year').value, 10) || new Date().getFullYear();
         const price = parseFloat(div.querySelector('.cc-stc-price').value) || 0;
-        const qty = calculateStcQuantity({ kw, zoneRating, installYear });
+        const qtyEl = div.querySelector('.cc-stc-qty');
+        if (fromSize || !qtyEl.value) {
+          const calc = calculateStcQuantity({ kw, zoneRating, installYear });
+          if (calc) qtyEl.value = calc;
+        }
+        const qty = parseFloat(qtyEl.value) || 0;
         div.querySelector('.cc-stc-calc-line').textContent = qty
           ? `= ${qty} STCs x ${money(price)} = ${money(qty * price)}`
           : '';
         if (qty) div.querySelector('.cc-stc-total').value = (qty * price).toFixed(2);
       }
-      div.querySelectorAll('.cc-stc-kw, .cc-stc-zone, .cc-stc-year, .cc-stc-price').forEach(el => {
-        el.addEventListener('input', recalcStc);
-        el.addEventListener('change', recalcStc);
+      div.querySelectorAll('.cc-stc-kw, .cc-stc-zone, .cc-stc-year').forEach(el => {
+        el.addEventListener('input', () => recalcStc(true));
+        el.addEventListener('change', () => recalcStc(true));
       });
-      recalcStc();
+      div.querySelectorAll('.cc-stc-qty, .cc-stc-price').forEach(el => {
+        el.addEventListener('input', () => recalcStc(false));
+        el.addEventListener('change', () => recalcStc(false));
+      });
+      recalcStc(stc_quantity == null && !!defaultStcKw);
 
       div.querySelector('.cc-markup').addEventListener('input', () => updateStageTotals(div));
-      div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); });
+      div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); renderCustomerGets(); });
+      div.querySelector('.cc-desc').addEventListener('input', renderCustomerGets);
       div.querySelector('.li-add').addEventListener('click', () => addLineItem(div));
       div.querySelector('.prebuild-add').addEventListener('click', () => openStockPicker(div));
       div.querySelector('.pg-add').addEventListener('click', () => addPhotoGroup(div));
-      div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateEditTotal(); renumberEditStages(); });
-      if (TEMPLATE_INFO[currentTemplate].singleStage) div.querySelector('.remove-row').style.display = 'none';
+      div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateEditTotal(); renumberEditStages(); renderCustomerGets(); });
+      if ((TEMPLATE_INFO[currentTemplate] || {}).singleStage) div.querySelector('.remove-row').style.display = 'none';
 
       renderStageLineItems(div, lineItems);
 
@@ -666,12 +685,53 @@
 
       const questionsEl = document.getElementById('template-questions');
       Object.assign(templateAnswers, readTemplateAnswers(questionsEl));
-      document.getElementById('template-questions-card').style.display = TEMPLATE_QUESTIONS[template] ? 'block' : 'none';
-      document.getElementById('template-questions-title').textContent = TEMPLATE_QUESTION_TITLES[template] || '';
       renderTemplateQuestions(questionsEl, template, templateAnswers);
 
       document.getElementById('pylon-card').style.display = info.showPylon ? 'block' : 'none';
       if (!info.showPylon) { document.getElementById('p-pylon-link').value = ''; document.getElementById('p-pylon-id').value = ''; }
+      // STC credit only belongs on a Solar or Battery proposal (an older stage that already has a
+      // total keeps showing it so nothing is hidden).
+      document.querySelectorAll('.stc-only').forEach(el => { el.style.display = info.showStc ? '' : 'none'; });
+      document.querySelectorAll('.cc-stc-block').forEach(el => {
+        const total = parseFloat(el.querySelector('.cc-stc-total').value) || 0;
+        el.style.display = (info.showStc || total > 0) ? '' : 'none';
+      });
+      renderCustomerGets();
+    }
+
+    let lastPylonData = null;
+
+    // Plain lines describing what the customer is getting: the Pylon equipment, the answers that
+    // shape the system, and the stages. Shown above the AI brief and sent with it.
+    function customerGetsLines() {
+      const qEl = document.getElementById('template-questions');
+      const a = Object.assign({}, templateAnswers, qEl ? readTemplateAnswers(qEl) : {});
+      const lines = [];
+      const pylon = pylonSystemSummary(lastPylonData).replace(/&middot;/g, ',');
+      if (pylon) lines.push(`System (Pylon): ${pylon}`);
+      const pick = (id, label) => { if (a[id]) lines.push(`${label}: ${a[id]}`); };
+      pick('grid_type', 'Grid'); pick('existing_system', 'Existing system'); pick('existing_system_detail', 'Existing system details');
+      pick('phases', 'Supply'); pick('roof_type', 'Roof'); pick('export_limit', 'Export limit'); pick('daily_usage', 'Daily use');
+      if (quoteHasBattery(currentTemplate, a)) {
+        pick('battery_kwh_wanted', 'Battery usable kWh'); pick('backup_needs', 'Backup'); pick('coupling', 'Coupling');
+        pick('battery_location', 'Battery location'); pick('existing_pv', 'Existing PV');
+        if (a.vpp_capable) lines.push(`VPP capable: ${a.vpp_capable}`);
+      }
+      pick('fault', 'Request'); pick('deadline', 'Deadline');
+      const stages = [...document.querySelectorAll('#cc-rows .cc-row')].map(r => {
+        const name = r.querySelector('.cc-name').value.trim();
+        const desc = r.querySelector('.cc-desc').value.trim();
+        return name ? (desc ? `${name}: ${desc}` : name) : '';
+      }).filter(Boolean);
+      if (stages.length) lines.push(`Stages: ${stages.join('; ')}`);
+      return lines;
+    }
+
+    function renderCustomerGets() {
+      const el = document.getElementById('customer-gets');
+      if (!el) return;
+      const lines = customerGetsLines();
+      el.textContent = lines.length ? lines.join('\n') : 'Nothing yet. Answer the pre-quote questions, pull the Pylon design or add a stage.';
     }
 
     function setSelectedEditClient(client) {
@@ -773,6 +833,7 @@
           <div class="grid cols-3" id="template-picker">
             <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
             <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
+            <button type="button" class="secondary template-option" data-template="battery">Battery Proposal</button>
             <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
             <button type="button" class="secondary template-option" data-template="renovation">Renovation</button>
             <button type="button" class="secondary template-option" data-template="service_work">Service Work</button>
@@ -786,9 +847,10 @@
           <textarea id="p-estimate-disclaimer" style="min-height:80px;"></textarea>
         </div>
 
-        <div class="card" id="template-questions-card" style="display:none;">
-          <h2 id="template-questions-title"></h2>
-          <p class="subtitle" style="margin-bottom:10px;">Answers here set up this job's task list once the quote is approved - not shown to the client.</p>
+        <div class="card" id="template-questions-card">
+          <h2 id="template-questions-title">Pre-quote information</h2>
+          <p class="subtitle" style="margin-bottom:6px;">What you learned on the phone, by email or on site. Change it any time. Questions marked * must be answered before the quote is sent. Not shown to the client; it shapes the scope of works and the job's task list.</p>
+          <div id="site-inspection-note"></div>
           <div class="grid cols-2" id="template-questions"></div>
         </div>
 
@@ -848,7 +910,7 @@
 
         <div class="card" id="pylon-card">
           <h2>Pylon system design</h2>
-          <p class="subtitle" style="margin-bottom:10px;">Start here for a solar job: create the design/quote in Pylon first, then paste the resulting proposal link below before filling in the scope of works and pricing.</p>
+          <p class="subtitle" style="margin-bottom:10px;">Create the design in Pylon, paste the proposal link, and pull the equipment list so the quote names real panels, inverters and batteries.</p>
           <button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:6px;">Create job in Pylon &rarr;</button>
           <div id="pylon-create-msg"></div>
           <label style="margin-top:10px;">Pylon proposal link</label>
@@ -861,8 +923,12 @@
         </div>
 
         <div class="card">
-          <h2>Write the scope of works with AI</h2>
-          <p class="subtitle" style="margin-bottom:10px;">A few rough notes, plus anything useful to attach - plans, drawings, or an electricity bill.</p>
+          <h2>What the customer gets</h2>
+          <p class="subtitle" style="margin-bottom:8px;">Built from the pre-quote answers, the Pylon equipment and the stages (Cost Centres tab). The AI writes the scope of works from this plus your notes below.</p>
+          <div id="customer-gets" class="readout" style="white-space:pre-wrap; min-height:48px;"></div>
+
+          <h2 style="margin-top:18px;">Write the scope of works with AI</h2>
+          <p class="subtitle" style="margin-bottom:10px;">A few rough notes (saved with the quote), plus anything useful to attach - plans, drawings, or an electricity bill. Run it again any time the answers or stages change.</p>
           <textarea id="p-brief" placeholder="e.g. Single storey new build, 3 bed 2 bath, standard fitout, ducted air con, solar-ready switchboard"></textarea>
           <label>Supporting documents (optional)</label>
           <div id="sow-doc-list" style="margin-bottom:8px;"></div>
@@ -905,13 +971,13 @@
           </div>
         </div>
 
-        <div class="card" id="solar-compliance-card" style="${project.proposal_template === 'solar' ? '' : 'display:none;'}">
-          <h2>Compliance checklist</h2>
-          <p class="subtitle" style="margin-bottom:10px;">What NETCC and the Clean Energy Regulator require before this quote is sent - checked against this job's own data, not a guess.</p>
-          <button type="button" class="secondary" id="compliance-check-btn">Check compliance</button>
+        <div class="card" id="solar-compliance-card">
+          <h2>Ready to send?</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Checks the pre-quote answers, pricing and terms, plus what NETCC, the Clean Energy Regulator and SAA require on a solar or battery quote. The same check runs before the quote is emailed or moved to Quote Sent.</p>
+          <button type="button" class="secondary" id="compliance-check-btn">Check now</button>
           <div id="compliance-check-result" style="margin-top:12px;"></div>
 
-          <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
+          <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border); ${['solar', 'battery'].includes(project.proposal_template) ? '' : 'display:none;'}">
             <h2 style="font-size:15px;">Documents to gather from the customer</h2>
             <p class="subtitle" style="margin-bottom:10px;">Work through these with the customer - answers and photos save as you go.</p>
             <div id="quote-doc-checklist"><p class="subtitle">Loading...</p></div>
@@ -928,10 +994,11 @@
       return `
         <div class="card">
           <h2>Stages / cost centres</h2>
+          <p class="subtitle" style="margin-bottom:10px;"><strong>All amounts ex GST.</strong> Enter labour and materials ex GST; GST is added once at the end of the quote.</p>
           <div class="grid cols-3" style="margin-bottom:16px;">
             <div><label style="margin-top:0">Default markup %</label><input id="default-markup" type="number" step="1" value="45" /></div>
-            <div><label style="margin-top:0">Default $ per STC</label><input id="default-stc-price" type="number" step="0.01" value="35" /></div>
-            <div>
+            <div class="stc-only" style="display:${['solar', 'battery'].includes(currentTemplate) ? '' : 'none'};"><label style="margin-top:0">Default $ per STC</label><input id="default-stc-price" type="number" step="0.01" value="35" /></div>
+            <div class="stc-only" style="display:${['solar', 'battery'].includes(currentTemplate) ? '' : 'none'};">
               <label style="margin-top:0">Default STC zone</label>
               <select id="default-stc-zone">
                 ${STC_ZONES.map(z => `<option value="${z.rating}" ${z.rating === 1.382 ? 'selected' : ''}>${z.label}</option>`).join('')}
@@ -943,7 +1010,8 @@
         </div>
         <div class="card">
           <h2>Total</h2>
-          <div class="stat" style="max-width:220px;"><div class="label">Quoted total</div><div class="value" id="total-display">$0.00</div></div>
+          <div class="stat" style="max-width:220px;"><div class="label">Quoted total (ex GST)</div><div class="value" id="total-display">$0.00</div></div>
+          <p class="subtitle" style="margin-top:6px;">GST and any STC credit are added on the proposal's Investment summary.</p>
         </div>`;
     }
 
@@ -995,6 +1063,19 @@
       try {
       if (isQuoteEdit) {
       document.querySelectorAll('.template-option').forEach(btn => btn.addEventListener('click', () => applyEditTemplate(btn.dataset.template, true)));
+
+      // Pre-quote answers: the "Batteries as well" answer adds or removes the battery questions,
+      // and every answer feeds the "What the customer gets" panel.
+      document.getElementById('template-questions').addEventListener('change', (e) => {
+        const el = e.target.closest('.tq-input');
+        if (!el) return;
+        Object.assign(templateAnswers, readTemplateAnswers(document.getElementById('template-questions')));
+        if (el.dataset.qid === 'with_battery') {
+          if (!templateAnswers.with_battery) delete templateAnswers.with_battery;
+          renderTemplateQuestions(document.getElementById('template-questions'), currentTemplate, templateAnswers);
+        }
+        renderCustomerGets();
+      });
 
       sitePicker = attachSitePicker(document.getElementById('p-site-pick'), document.getElementById('p-address'));
       document.getElementById('clear-client-btn').addEventListener('click', () => {
@@ -1057,8 +1138,12 @@
         const projectName = document.getElementById('p-name').value.trim();
         const rows = [...document.querySelectorAll('#cc-rows .cc-row')];
         const stageNames = rows.map(r => r.dataset.name).filter(Boolean);
-        if (!brief) { msg.innerHTML = `<div class="error-box">Add a few notes first.</div>`; return; }
-        if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first.</div>`; return; }
+        Object.assign(templateAnswers, readTemplateAnswers(document.getElementById('template-questions')));
+        const answersText = templateAnswersText(currentTemplate, templateAnswers);
+        const customerGets = customerGetsLines().join('\n');
+        const withBattery = quoteHasBattery(currentTemplate, templateAnswers);
+        if (!brief && !answersText) { msg.innerHTML = `<div class="error-box">Add a few notes first, or answer the pre-quote questions.</div>`; return; }
+        if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first (Cost Centres tab; a name is enough, the AI fills in the rest).</div>`; return; }
 
         btn.disabled = true;
         msg.innerHTML = '';
@@ -1068,7 +1153,7 @@
           const aiHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${aiSession.access_token}` };
           const scopeRes = await fetch('/.netlify/functions/generate-scope', {
             method: 'POST', headers: aiHeaders,
-            body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames }),
+            body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames, templateAnswers: answersText, customerGets, template: currentTemplate, withBattery }),
           });
           const scopeJson = await scopeRes.json();
           if (!scopeJson.ok) throw new Error(scopeJson.error);
@@ -1091,12 +1176,13 @@
             body: JSON.stringify({
               projectName: projectName || 'This project', brief, stageNames: updatedStageNames,
               stageDescriptions: updatedDescriptions, documentPaths: sowDocs.map(d => d.path),
-              style: sowStyle, template: currentTemplate,
+              style: sowStyle, template: currentTemplate, templateAnswers: answersText, customerGets, withBattery,
             }),
           });
           const sowJson = await sowRes.json();
           if (!sowJson.ok) throw new Error(sowJson.error);
           document.getElementById('p-sow').value = sowJson.sow;
+          renderCustomerGets();
           msg.innerHTML = `<div class="success-box">Stage names, descriptions, and scope of works drafted. Review and edit as needed.</div>`;
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
@@ -1185,6 +1271,8 @@
           });
           const json = await res.json();
           if (!json.ok) throw new Error(json.error);
+          lastPylonData = json.pylonData || null;
+          renderCustomerGets();
           const summary = pylonSystemSummary(json.pylonData);
           msg.innerHTML = `<div class="success-box">Pulled from Pylon.${summary ? ' ' + summary : ' No hardware summary came back - check the function logs against the field names in the Pylon API docs.'}</div>`;
         } catch (err) {
@@ -1223,6 +1311,7 @@
         document.getElementById('p-address').value = project.client_address || '';
         document.getElementById('p-notes').value = project.notes || '';
         document.getElementById('p-sow').value = project.sow_text || '';
+        document.getElementById('p-brief').value = project.sow_brief || '';
         document.getElementById('p-terms').value = project.terms_text || '';
         document.getElementById('p-deposit').value = project.deposit_percent;
         document.getElementById('p-breakdown').checked = !!project.show_investment_breakdown;
@@ -1234,6 +1323,7 @@
         renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
         sowDocs = [];
         renderEditSowDocList();
+        showSiteInspectionNote(project);
 
         if (project.client_id) {
           const { data: client } = await supabaseClient.from('clients').select('*').eq('id', project.client_id).maybeSingle();
@@ -1259,12 +1349,13 @@
       }
 
       pylonKw = project.pylon_data?.summary?.dc_output_kw || null;
+      lastPylonData = project.pylon_data || null;
       const stages = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
       stages.forEach(stage => {
         addRow({
           id: stage.id,
           name: stage.name, description: stage.description, markup_percent: stage.markup_percent, stc_total: stage.stc_total || 0,
-          stc_system_kw: stage.stc_system_kw, stc_zone_rating: stage.stc_zone_rating,
+          stc_quantity: stage.stc_quantity, stc_system_kw: stage.stc_system_kw, stc_zone_rating: stage.stc_zone_rating,
           stc_install_year: stage.stc_install_year, stc_price_per_certificate: stage.stc_price_per_certificate,
           lineItems: (stage.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order)
             .map(li => ({
@@ -1277,6 +1368,7 @@
       });
       if (!stages.length) addRow({ name: 'Stage 1' });
       updateEditTotal();
+      renderCustomerGets();
       if (isQuoteEdit) loadEditAddressAutocomplete(companySettings.google_maps_api_key);
       } catch (err) {
         // wireEditForm runs un-awaited from render() (it's called without
@@ -1288,6 +1380,20 @@
         console.error('wireEditForm failed:', err);
         alert('The editor loaded but hit an error setting up: ' + friendlyError(err));
       }
+    }
+
+    // A completed (or booked) site inspection for this quote or its lead: its answers are the
+    // best source for the pre-quote questions, so link it from the card.
+    async function showSiteInspectionNote(project) {
+      const el = document.getElementById('site-inspection-note');
+      if (!el) return;
+      let q = supabaseClient.from('site_inspections').select('id, status, completed_at').order('created_at', { ascending: false }).limit(1);
+      q = project.lead_id ? q.or(`project_id.eq.${project.id},lead_id.eq.${project.lead_id}`) : q.eq('project_id', project.id);
+      const { data } = await q;
+      const insp = data && data[0];
+      if (!insp) return;
+      const done = insp.status === 'completed';
+      el.innerHTML = `<p class="subtitle" style="margin:0 0 8px;">Site inspection: <span class="badge ${done ? 'accepted' : 'sent'}">${escapeHtml(insp.status.replace('_', ' '))}</span>${done && insp.completed_at ? ' on ' + new Date(insp.completed_at).toLocaleDateString('en-AU') : ''} &middot; <a class="link-quiet" href="/site-inspection.html?id=${insp.id}" target="_blank">open the checklist &rarr;</a>${done ? ' and copy what it found into the answers below.' : ''}</p>`;
     }
 
     // Presents the choice - quick note vs full signed Variation - for a set
@@ -1421,6 +1527,7 @@
         description: row.querySelector('.cc-desc').value.trim(),
         markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
         stc_total: parseFloat(row.querySelector('.cc-stc-total').value) || 0,
+        stc_quantity: parseFloat(row.querySelector('.cc-stc-qty').value) || null,
         stc_system_kw: parseFloat(row.querySelector('.cc-stc-kw').value) || null,
         stc_zone_rating: parseFloat(row.querySelector('.cc-stc-zone').value) || 1.382,
         stc_install_year: parseInt(row.querySelector('.cc-stc-year').value, 10) || null,
@@ -1457,7 +1564,8 @@
         })).filter(pg => pg.description || pg.photos.length),
       })).filter(s => s.name);
 
-      if (stagesPayload.length === 0) {
+      // A job always has a stage; a quote can save without one until it is sent.
+      if (stagesPayload.length === 0 && isJob) {
         msg.innerHTML = `<div class="error-box">Add at least one stage.</div>`;
         return;
       }
@@ -1511,6 +1619,7 @@
           const projectFields = {
             name, client_id: clientId, client_name, client_email, client_phone, client_address, client_site_id, notes,
             sow_text, proposal_subtitle, terms_text, deposit_percent, show_investment_breakdown, pylon_link, pylon_project_id,
+            sow_brief: document.getElementById('p-brief').value.trim(),
             reference_photos: referencePhotos.map(url => ({ url })),
             cover_photos: coverPhotos,
             proposal_template: currentTemplate,
@@ -1634,7 +1743,8 @@
         const sowNow = document.getElementById('p-sow');
         if (sowNow && sowNow.value.trim()) { try { await requestInstallerSummary(project.id, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
 
-        autoGenerateQuotePdf(project);
+        // No PDF until there is something priced to show.
+        if (isJob || stagesPayload.some(st => st.quoted_amount > 0)) autoGenerateQuotePdf(project);
         editMode = false;
         endEditSession();
         const refreshed = await loadProject();
@@ -3280,13 +3390,13 @@
                 <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
               </div>
               ` : ''}
-              ${!editMode && (project.notes || (TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length)) ? `
+              ${!editMode && (project.notes || Object.keys(project.template_answers || {}).length) ? `
               <div class="card">
                 ${project.notes ? `
                   <h2>Notes</h2>
-                  <p style="white-space:pre-wrap; margin:0 0 ${TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length ? '18px' : '0'};">${escapeHtml(project.notes)}</p>` : ''}
-                ${TEMPLATE_QUESTIONS[project.proposal_template] && Object.keys(project.template_answers || {}).length ? `
-                  <h2>${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</h2>
+                  <p style="white-space:pre-wrap; margin:0 0 ${Object.keys(project.template_answers || {}).length ? '18px' : '0'};">${escapeHtml(project.notes)}</p>` : ''}
+                ${Object.keys(project.template_answers || {}).length ? `
+                  <h2>Pre-quote information</h2>
                   ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}` : ''}
               </div>` : ''}
               ${project.job_number && !editMode ? `
@@ -3795,9 +3905,9 @@
 
             <div class="settings-panel${!editMode ? ' job-card-grid' : ''}" id="panel-details">
               ${editMode && !project.job_number ? editorPanelHtml(project) : `
-              ${TEMPLATE_QUESTIONS[project.proposal_template] ? `
+              ${Object.keys(project.template_answers || {}).length ? `
               <div class="card">
-                <h2>${TEMPLATE_QUESTION_TITLES[project.proposal_template]}</h2>
+                <h2>Pre-quote information</h2>
                 ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}
               </div>` : ''}
               <div class="card">
@@ -4182,9 +4292,13 @@
       if (emailQuoteBtn) emailQuoteBtn.addEventListener('click', async () => {
         const msgEl = document.getElementById('quote-pdf-msg');
         const label = emailQuoteBtn.textContent;
-        emailQuoteBtn.disabled = true; emailQuoteBtn.textContent = 'Making the PDF...';
+        emailQuoteBtn.disabled = true; emailQuoteBtn.textContent = 'Checking...';
         msgEl.innerHTML = '';
         try {
+          // Ready-to-send gate: stops on missing pre-quote answers, pricing or compliance items
+          // unless Admin / Finance send anyway with a reason.
+          if (!(await quoteSendGate(project))) { emailQuoteBtn.disabled = false; emailQuoteBtn.textContent = label; return; }
+          emailQuoteBtn.textContent = 'Making the PDF...';
           await generateClientPdf('quote', project.id);
           const { data: fresh } = await supabaseClient.from('projects').select('quote_pdf_path, quote_pdf_generated_at').eq('id', project.id).single();
           if (fresh) Object.assign(project, fresh);
@@ -4668,72 +4782,7 @@
     // check-solar-compliance.js for the given phase, shows what's missing,
     // and offers to turn the gaps into job_tasks via generate-solar-tasks.js
     // (see those functions for what's actually deterministic vs AI-worded).
-    async function runComplianceCheck(projectId, phase, taskType, btnEl, resultEl) {
-      btnEl.disabled = true;
-      const originalLabel = btnEl.textContent;
-      btnEl.textContent = 'Checking...';
-      resultEl.innerHTML = '';
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const checkRes = await fetch('/.netlify/functions/check-solar-compliance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ projectId, phase }),
-        });
-        const checkJson = await checkRes.json();
-        if (!checkJson.ok) throw new Error(checkJson.error);
-
-        if (!checkJson.missing.length) {
-          resultEl.innerHTML = `<div class="success-box">Everything on the checklist is in place.</div>`;
-          return;
-        }
-
-        resultEl.innerHTML = `
-          <div class="error-box">
-            <p style="margin:0 0 8px; font-weight:600;">${checkJson.missing.length} thing${checkJson.missing.length === 1 ? '' : 's'} missing:</p>
-            <ul style="margin:0 0 10px; padding-left:18px;">${checkJson.missing.map(m => `<li>${escapeHtml(m.label)}</li>`).join('')}</ul>
-            <button type="button" class="secondary create-compliance-tasks-btn">Create tasks for these</button>
-          </div>`;
-
-        resultEl.querySelector('.create-compliance-tasks-btn').addEventListener('click', async (e) => {
-          const createBtn = e.target;
-          createBtn.disabled = true;
-          createBtn.textContent = 'Creating...';
-          try {
-            const { data: proj } = await supabaseClient.from('projects').select('pylon_data').eq('id', projectId).single();
-            const pylonData = proj?.pylon_data || {};
-            const equipment = {
-              panels: pylonData.module_types || [],
-              inverters: pylonData.inverter_types || [],
-              batteries: pylonData.storage_types || [],
-            };
-            const wordRes = await fetch('/.netlify/functions/generate-solar-tasks', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ missing: checkJson.missing, equipment }),
-            });
-            const wordJson = await wordRes.json();
-            if (!wordJson.ok) throw new Error(wordJson.error);
-
-            const { data: { user } } = await supabaseClient.auth.getUser();
-            const { error: insErr } = await supabaseClient.from('job_tasks').insert(
-              wordJson.tasks.map(t => ({ project_id: projectId, description: t.description, task_type: taskType, created_by: user.id }))
-            );
-            if (insErr) throw insErr;
-            resultEl.innerHTML = `<div class="success-box">${wordJson.tasks.length} task${wordJson.tasks.length === 1 ? '' : 's'} added.</div>`;
-            if (typeof loadJobTasks === 'function' && document.getElementById('job-tasks-list')) await loadJobTasks(projectId);
-          } catch (err) {
-            createBtn.disabled = false;
-            createBtn.textContent = 'Create tasks for these';
-            resultEl.insertAdjacentHTML('beforeend', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
-          }
-        });
-      } catch (err) {
-        resultEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-      } finally {
-        btnEl.disabled = false;
-        btnEl.textContent = originalLabel;
-      }
-    }
+    // runComplianceCheck(projectId, phase, taskType, btnEl, resultEl) is shared: js/supabase-client.js
 
     // Sales-facing "documents to gather from the customer" checklist -
     // separate from the automatic Pylon/system checks above. Same

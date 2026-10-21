@@ -22,7 +22,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
 | 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 to 4 (items 1 to 109) LIVE 19 to 20 Oct 2026, next delivery 5 (`docs/UX_REVIEW.md`) | N | None |
 | 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Built 19 Oct 2026, LIVE (spec A32) | N | None |
-| 24 | Gather first, generate last: pre-quote information, Battery proposals, send gate | Planned 21 Oct 2026, waiting on owner's yes | N | Owner to confirm the CER battery program changes from 1 May 2026 |
+| 24 | Gather first, generate last: pre-quote information, Battery proposals, send gate | Built 21 Oct 2026, LIVE (spec A3), migration 20261115000000 | N | Owner to record SAA GCBS (battery) accreditation under Team with "battery" in the licence name |
 | 25 | AI guesses prebuild components and prebuilds per cost centre (highlighted to check) | Planned 21 Oct 2026, second delivery after 24 | N | Item 24 on main |
 
 ## High lead time, start now
@@ -568,7 +568,9 @@ Built as planned (points 1 to 5), detail in `docs/PROJECT_SPEC.md` A22.
 
 Also found and fixed in the same delivery: Jasper's own My inbox has never finished a Gmail history page (last synced never), the same one-by-one fault fixed for sales@ on 20 Oct. Fix: the personal sync uses the sales@ page logic (known mail ruled out in one query, drafts skipped, 4 at a time).
 
-## 24. Gather first, generate last: pre-quote information, Battery proposals, send gate (planned 21 Oct 2026, waiting on owner's yes)
+## 24. Gather first, generate last: pre-quote information, Battery proposals, send gate (built 21 Oct 2026, migration 20261115000000)
+
+Live: see `docs/PROJECT_SPEC.md` A3 "Gather first, generate last". Built as planned (points 1 to 11) with two corrections from the research: the federal discount covers batteries of 5 to 100 kWh usable (paid on the first 50 kWh, tiered from 1 May 2026), and SAA runs battery work as its own class (grid connected battery systems, GCBS) rather than an endorsement; the gate looks for a Team licence named with "SAA" and "battery". The "what the customer gets" panel is built in the browser from the answers, Pylon and the stages (no new column). The plan as agreed follows.
 
 Owner's ask (21 Oct 2026): a quote should start by gathering information (on the phone or at a site visit), which can be changed at any time, with questions that fit the proposal type (a Solar proposal asks solar questions), then generate what the customer gets and the scope of works from that at the end, not be pushed into writing the scope straight away. Batteries become their own proposal, a Solar proposal can tick Batteries as well, battery quotes follow the SAA and Clean Energy Regulator battery rules, and nothing is sent until every pre-quote item is checked.
 
