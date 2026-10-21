@@ -306,7 +306,12 @@ function loadPdfLib() {
 }
 
 // Renders one page of an already-loaded pdf.js document to a JPEG data URL,
-// scaled so its longest edge is `longEdge` pixels.
+// scaled so its longest edge is `longEdge` pixels. width/height are the page
+// as shown (its crop box, in points, after the page's own rotation). toPdf is
+// the matrix that takes a point on that shown page (x right, y up, origin at
+// its bottom-left corner) to the PDF's own coordinates, so anything drawn on
+// the picture can be written back onto the page exactly where it was drawn,
+// whatever the page's box origin, crop or rotation.
 async function renderPdfPageToDataUrl(pdf, pageNumber, longEdge) {
   const page = await pdf.getPage(pageNumber);
   const base = page.getViewport({ scale: 1 });
@@ -319,7 +324,20 @@ async function renderPdfPageToDataUrl(pdf, pageNumber, longEdge) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvasContext: ctx, viewport }).promise;
-  return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), width: base.width, height: base.height };
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), width: base.width, height: base.height, toPdf: pdfPageMatrix(base) };
+}
+
+// The matrix (a b c d e f) from "shown page" space (x right, y up, origin at the
+// bottom-left of what pdf.js drew) to PDF user space, worked out from the
+// viewport's own transform so it matches the picture pixel for pixel.
+function pdfPageMatrix(viewport) {
+  const [a, b, c, d, e, f] = viewport.transform; // user space -> canvas (y down)
+  const det = a * d - b * c;
+  if (!det) return null;
+  const toUser = (cx, cy) => [(d * (cx - e) - c * (cy - f)) / det, (-b * (cx - e) + a * (cy - f)) / det];
+  const shown = (x, y) => toUser(x, viewport.height - y); // shown page (y up) -> canvas -> user
+  const o = shown(0, 0), px = shown(1, 0), py = shown(0, 1);
+  return [px[0] - o[0], px[1] - o[1], py[0] - o[0], py[1] - o[1], o[0], o[1]];
 }
 
 // First-page thumbnail of a PDF at a URL, as a data URL (for tiles that
@@ -337,10 +355,21 @@ async function renderPdfThumbnail(url, longEdge = 360) {
 // image pixels, y down) onto a PDF page as real vector graphics. Throws if
 // anything can't be drawn (e.g. text pdf-lib can't encode) so the caller can
 // fall back to flattening that page.
-function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
+// `shown` is what renderPdfPageToDataUrl returned for the page ({ width,
+// height, toPdf }): the shapes are placed on the page as it was shown and the
+// whole lot is wrapped in that one transform, so they land where they were
+// drawn even when the page's box does not start at 0,0, is cropped, or is
+// rotated. Without it the page's own media box is used as is.
+function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H, shown = null) {
   const { rgb, LineCapStyle } = PDFLib;
-  const { width: pw, height: ph } = page.getSize();
+  const { width: pw, height: ph } = shown || page.getSize();
   const k = pw / W;
+  if (shown && shown.toPdf) {
+    if (!PDFLib.concatTransformationMatrix || !PDFLib.pushGraphicsState) throw new Error('PDF editor cannot place the markup');
+    page.pushOperators(PDFLib.pushGraphicsState(), PDFLib.concatTransformationMatrix(...shown.toPdf));
+  }
+  try { drawShapesInPageSpace(); } finally { if (shown && shown.toPdf) page.pushOperators(PDFLib.popGraphicsState()); }
+  function drawShapesInPageSpace() {
   const X = (x) => x * k;
   const Y = (y) => ph - y * k;
   const map = { X, Y, k, ph };
@@ -456,17 +485,91 @@ function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
       }
     }
   }
+  }
+}
+
+// Pinch to zoom (two fingers), ctrl/cmd + wheel and, when `dragPans` is on, a
+// one-finger or mouse drag to pan, on a scrolling `holder` whose zoomed
+// picture getEl() returns. setZoom(z) applies a level; the helper keeps the
+// point under the fingers still and (listening in the capture phase) stops a
+// second finger reaching the picture's own handlers, so a pinch over the
+// markup canvas never draws. onPinchStart lets the editor drop a stroke the
+// first finger had started. Returns zoomAt / zoomBy for buttons.
+function wirePinchZoom(holder, getEl, { getZoom, setZoom, min = 1, max = 8, dragPans = false, onPinchStart } = {}) {
+  const pointers = new Map();
+  let pinch = null; // { dist, zoom } while two fingers are down
+  let drag = null;  // { x, y, left, top } while one finger / the mouse pans
+  let lastMid = null;
+  const zoomAt = (z, cx, cy) => {
+    z = Math.min(max, Math.max(min, z));
+    const el = getEl();
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const fx = r.width ? (cx - r.left) / r.width : 0.5, fy = r.height ? (cy - r.top) / r.height : 0.5;
+    setZoom(z);
+    const n = el.getBoundingClientRect();
+    holder.scrollLeft += (n.left + fx * n.width) - cx;
+    holder.scrollTop += (n.top + fy * n.height) - cy;
+  };
+  holder.addEventListener('pointerdown', (e) => {
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { dist: Math.max(1, Math.hypot(a[0] - b[0], a[1] - b[1])), zoom: getZoom() };
+      lastMid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      drag = null;
+      if (onPinchStart) onPinchStart();
+      e.stopPropagation();
+    } else if (pointers.size === 1 && dragPans) {
+      drag = { x: e.clientX, y: e.clientY, left: holder.scrollLeft, top: holder.scrollTop };
+    }
+  }, true);
+  holder.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pinch && pointers.size >= 2) {
+      const [a, b] = [...pointers.values()];
+      const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      holder.scrollLeft -= mid[0] - lastMid[0];
+      holder.scrollTop -= mid[1] - lastMid[1];
+      lastMid = mid;
+      zoomAt(pinch.zoom * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.dist, mid[0], mid[1]);
+      e.stopPropagation();
+      e.preventDefault();
+    } else if (drag) {
+      holder.scrollLeft = drag.left - (e.clientX - drag.x);
+      holder.scrollTop = drag.top - (e.clientY - drag.y);
+    }
+  }, true);
+  const up = (e) => {
+    const wasPinch = !!pinch;
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (!pointers.size) drag = null;
+    if (wasPinch) e.stopPropagation();
+  };
+  holder.addEventListener('pointerup', up, true);
+  holder.addEventListener('pointercancel', up, true);
+  holder.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    zoomAt(getZoom() * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
+  }, { passive: false });
+  const zoomBy = (f) => { const r = holder.getBoundingClientRect(); zoomAt(getZoom() * f, r.left + r.width / 2, r.top + r.height / 2); };
+  return { zoomAt, zoomBy };
 }
 
 // Shared in-app PDF viewer - one place quotes, invoices, documents and signed
 // onboarding documents all show up. Pages are rendered to images (pdf.js)
-// so a PDF looks and behaves like a photo: click through the pages, and -
-// when `opts.projectId` is given - mark a page up with the same editor
-// photos use. "Save marked-up copy" writes a NEW PDF into that project's
-// Documents (the original is never changed): untouched pages are kept as
-// they were, marked-up pages are replaced with the annotated picture.
-// opts: { projectId, folder, onSaved, bucket }. Falls back to the browser's own PDF
-// viewer in an iframe if pdf.js can't be loaded.
+// so a PDF looks and behaves like a photo: click through the pages, zoom
+// (buttons, pinch, ctrl + wheel) and - when `opts.projectId` is given - mark
+// a page up with the same editor photos use. "Save markup" either replaces
+// the document that was opened (new file stored, its row pointed at it, the
+// old file removed) or saves a new document with a name of your choosing;
+// untouched pages are kept as they were, marked-up pages get the drawings as
+// vectors over the original page (flattened to a picture only if that fails).
+// opts: { projectId, folder, onSaved, bucket, startPage }. Falls back to the
+// browser's own PDF viewer in an iframe if pdf.js can't be loaded.
 async function openPdfViewer(path, title, opts = {}) {
   ensureDarkOverlayStyles();
   const overlay = document.createElement('div');
@@ -522,7 +625,8 @@ async function openPdfViewer(path, title, opts = {}) {
   const rendered = {};            // pageIndex -> { dataUrl, width, height }
   const annotated = new Map();    // pageIndex -> { blob (flattened JPEG), shapes, width, height }
   const annotatedUrls = new Map(); // pageIndex -> object URL of that blob (for display only)
-  let index = 0;
+  let index = Math.min(Math.max(0, parseInt(opts.startPage, 10) || 0), pageCount - 1);
+  let zoom = 1; // 1 = the page fitted to the screen; kept while paging
 
   async function pageImage(i) {
     if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
@@ -619,14 +723,19 @@ async function openPdfViewer(path, title, opts = {}) {
         ${docRowId ? `<button type="button" class="secondary" id="pv-rename" style="padding:6px 12px;">Rename page</button>` : ''}
         ${canMarkup ? `<button type="button" id="pv-markup" style="padding:6px 12px;">Mark up this page</button>` : ''}
         ${canMarkup ? `<button type="button" class="secondary" id="pv-planpages" style="padding:6px 12px;">Copy page into plan pages</button>` : ''}
-        ${canMarkup && annotated.size ? `<button type="button" id="pv-save" style="padding:6px 12px;">Save marked-up copy (${annotated.size} page${annotated.size === 1 ? '' : 's'})</button>` : ''}
+        ${canMarkup && annotated.size ? `<button type="button" id="pv-save" style="padding:6px 12px;">Save markup (${annotated.size} page${annotated.size === 1 ? '' : 's'})</button>` : ''}
+        <span style="display:inline-flex; gap:4px; align-items:center;">
+          <button type="button" class="secondary" id="pv-zoom-out" aria-label="Zoom out" style="padding:6px 12px;">&minus;</button>
+          <button type="button" class="secondary" id="pv-zoom-fit" style="padding:6px 10px; font-size:12px; min-width:52px;">${Math.round(zoom * 100)}%</button>
+          <button type="button" class="secondary" id="pv-zoom-in" aria-label="Zoom in" style="padding:6px 12px;">+</button>
+        </span>
         <a id="pv-download" class="link-quiet" href="${signedUrl}" target="_blank" style="color:#fff; font-size:13px;">Download original</a>
         <button type="button" class="secondary" id="pv-close" style="padding:6px 12px;">Close</button>
       </div>
       ${pageCount > 1 && pageNames.some(Boolean) ? `<div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;">${Array.from({ length: pageCount }, (_, i) => `<button type="button" class="secondary pv-tab" data-i="${i}" style="padding:5px 12px; font-size:12px; ${i === index ? 'outline:2px solid #fff;' : ''}">${escapeHtml(pageLabel(i))}</button>`).join('')}</div>` : ''}
       <div id="pv-msg" style="color:#fca5a5; font-size:12px; min-height:14px;"></div>
-      <div style="flex:1; min-height:0; width:100%; overflow:auto; display:flex; justify-content:center;">
-        <p id="pv-loading" style="color:#fff;">Rendering page...</p>
+      <div id="pv-holder" style="flex:1; min-height:0; width:100%; overflow:auto; display:flex; touch-action:none; overscroll-behavior:contain; cursor:grab;">
+        <p id="pv-loading" style="color:#fff; margin:0 auto;">Rendering page...</p>
       </div>`;
     overlay.querySelector('#pv-close').addEventListener('click', close);
     if (pageCount > 1) {
@@ -637,7 +746,26 @@ async function openPdfViewer(path, title, opts = {}) {
     const img = await pageImage(index);
     const holder = overlay.querySelector('#pv-loading') && overlay.querySelector('#pv-loading').parentElement;
     if (!holder) return; // navigated away / closed while rendering
-    holder.innerHTML = `<img src="${img.url}" style="max-width:100%; max-height:100%; object-fit:contain; background:#fff; border-radius:4px; align-self:flex-start;" />`;
+    // At 100% the page fits the space (contain); zoomed in, its width is that
+    // fitted width times the zoom and the holder scrolls. margin:auto (not
+    // justify-content) centres a small page without clipping a big one's left edge.
+    holder.innerHTML = `<img id="pv-page" src="${img.url}" draggable="false" style="max-width:100%; max-height:100%; object-fit:contain; background:#fff; border-radius:4px; align-self:flex-start; margin:0 auto; user-select:none; -webkit-user-drag:none;" />`;
+    const pageEl = holder.querySelector('#pv-page');
+    const fitWidth = () => {
+      const iw = pageEl.naturalWidth || 1, ih = pageEl.naturalHeight || 1;
+      return Math.min(holder.clientWidth, holder.clientHeight * iw / ih, iw);
+    };
+    const applyZoom = () => {
+      if (zoom <= 1) { zoom = 1; pageEl.style.width = ''; pageEl.style.maxWidth = '100%'; pageEl.style.maxHeight = '100%'; }
+      else { pageEl.style.maxWidth = 'none'; pageEl.style.maxHeight = 'none'; pageEl.style.width = `${Math.round(fitWidth() * zoom)}px`; }
+      const fitBtn = overlay.querySelector('#pv-zoom-fit');
+      if (fitBtn) fitBtn.textContent = `${Math.round(zoom * 100)}%`;
+    };
+    if (pageEl.complete && pageEl.naturalWidth) applyZoom(); else pageEl.addEventListener('load', applyZoom, { once: true });
+    const zoomer = wirePinchZoom(holder, () => pageEl, { getZoom: () => zoom, setZoom: (z) => { zoom = z; applyZoom(); }, min: 1, max: 8, dragPans: true });
+    overlay.querySelector('#pv-zoom-in').addEventListener('click', () => zoomer.zoomBy(1.5));
+    overlay.querySelector('#pv-zoom-out').addEventListener('click', () => zoomer.zoomBy(1 / 1.5));
+    overlay.querySelector('#pv-zoom-fit').addEventListener('click', () => { zoom = 1; applyZoom(); });
 
     overlay.querySelectorAll('.pv-tab').forEach(b => b.addEventListener('click', () => { index = parseInt(b.dataset.i, 10); render(); }));
     const renameBtn = overlay.querySelector('#pv-rename');
@@ -668,6 +796,7 @@ async function openPdfViewer(path, title, opts = {}) {
           otherSummaries: others.map(a => summariseMarkup(a.shapes)),
           inheritedScale: (others.map(a => a.shapes.find(sh => sh.type === 'scale')).find(Boolean)) || null,
         } : {};
+        planExtra.saveLabel = 'Done, back to the document';
         openPhotoMarkup(rendered[pageIndex].dataUrl, async (blob, shapes, size) => {
           if (annotatedUrls.has(pageIndex)) URL.revokeObjectURL(annotatedUrls.get(pageIndex));
           annotated.set(pageIndex, { blob, shapes, width: size.width, height: size.height });
@@ -677,60 +806,112 @@ async function openPdfViewer(path, title, opts = {}) {
       });
     }
     const saveBtn = overlay.querySelector('#pv-save');
-    if (saveBtn) saveBtn.addEventListener('click', async () => {
-      const msgEl = overlay.querySelector('#pv-msg');
-      saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; msgEl.textContent = '';
+    if (saveBtn) saveBtn.addEventListener('click', openSaveDialog);
+  }
+
+  // Builds the marked-up PDF: untouched pages as they were, each marked-up
+  // page with its drawings laid over the ORIGINAL page as vector shapes (text
+  // stays selectable, file stays small), placed with the renderer's own
+  // page transform so they sit exactly where they were drawn. Only if that
+  // fails is the page swapped for the flattened picture.
+  async function buildMarkedUpPdf() {
+    const PDFLib = await loadPdfLib();
+    const doc = await PDFLib.PDFDocument.load(bytes);
+    const font = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+    for (const [i, a] of annotated) {
+      if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
+      const { width, height } = rendered[i];
+      const page = doc.getPage(i);
+      let drawn = false;
+      try { drawShapesOnPdfPage(PDFLib, page, font, a.shapes, a.width, a.height, rendered[i]); drawn = true; }
+      catch (shapeErr) { console.warn('Could not draw markup as vectors, flattening this page instead:', shapeErr.message); }
+      if (!drawn) {
+        const jpg = await doc.embedJpg(await a.blob.arrayBuffer());
+        doc.insertPage(i, [width, height]).drawImage(jpg, { x: 0, y: 0, width, height });
+        doc.removePage(i + 1);
+      }
+    }
+    return doc.save();
+  }
+
+  // Save markup: replace the document that was opened (keeps its name and
+  // tile; the new file is stored, the row pointed at it and the old file
+  // removed) or save a new document with a name of your choosing. Either
+  // way the saved document opens straight back up on the same page.
+  function openSaveDialog() {
+    const cleanTitle = String(title || 'Document').replace(/\.pdf$/i, '').replace(/(\s*\(marked up\)|\s*-\s*marked up(\s+\d+)?)+$/i, '').trim() || 'Document';
+    const suggested = `${cleanTitle} - marked up` === String(title || '').replace(/\.pdf$/i, '').trim() ? `${cleanTitle} - marked up 2` : `${cleanTitle} - marked up`;
+    const canReplace = !!docRowId;
+    const dlg = document.createElement('div');
+    dlg.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:350; display:flex; align-items:center; justify-content:center; padding:16px;';
+    dlg.innerHTML = `
+      <div class="card" style="max-width:460px; width:100%; max-height:90vh; overflow-y:auto;">
+        <h2>Save markup</h2>
+        <p class="subtitle" style="margin-bottom:10px;">${annotated.size} page${annotated.size === 1 ? '' : 's'} marked up. The drawings are kept as part of the PDF.</p>
+        ${canReplace ? `<label style="display:flex; align-items:flex-start; gap:8px; font-weight:400; margin-top:0;"><input type="radio" name="pv-save-how" value="replace" checked style="width:auto; margin-top:3px;" /> <span><strong>Replace this document</strong><br /><span class="subtitle">${escapeHtml(title || 'Document')} is updated in place.</span></span></label>` : ''}
+        <label style="display:flex; align-items:flex-start; gap:8px; font-weight:400; margin-top:${canReplace ? '8px' : '0'};"><input type="radio" name="pv-save-how" value="new" ${canReplace ? '' : 'checked'} style="width:auto; margin-top:3px;" /> <span><strong>Save as a new document</strong><br /><span class="subtitle">The one you opened stays as it is.</span></span></label>
+        <div id="pv-save-new" style="margin-top:8px; ${canReplace ? 'display:none;' : ''}">
+          <label>Name</label>
+          <input id="pv-save-name" value="${escapeHtml(suggested)}" />
+        </div>
+        <div id="pv-save-msg"></div>
+        <div style="margin-top:12px; display:flex; gap:8px;">
+          <button type="button" id="pv-save-go">Save</button>
+          <button type="button" class="secondary" id="pv-save-cancel">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(dlg);
+    const how = () => (dlg.querySelector('input[name="pv-save-how"]:checked') || {}).value || 'new';
+    dlg.querySelectorAll('input[name="pv-save-how"]').forEach(r => r.addEventListener('change', () => { dlg.querySelector('#pv-save-new').style.display = how() === 'new' ? '' : 'none'; }));
+    dlg.querySelector('#pv-save-cancel').addEventListener('click', () => dlg.remove());
+    dlg.querySelector('#pv-save-go').addEventListener('click', async () => {
+      const msgEl = dlg.querySelector('#pv-save-msg');
+      const goBtn = dlg.querySelector('#pv-save-go');
+      const replace = how() === 'replace' && canReplace;
+      const newName = dlg.querySelector('#pv-save-name').value.trim().replace(/\.pdf$/i, '');
+      if (!replace && !newName) { msgEl.innerHTML = '<div class="error-box">Give the new document a name.</div>'; return; }
+      goBtn.disabled = true; goBtn.textContent = 'Saving...'; msgEl.innerHTML = '';
       try {
-        const PDFLib = await loadPdfLib();
-        const doc = await PDFLib.PDFDocument.load(bytes);
-        const font = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
-        for (const [i, a] of annotated) {
-          if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
-          const { width, height } = rendered[i];
-          const page = doc.getPage(i);
-          const size = page.getSize();
-          // Normal case: lay the drawings over the ORIGINAL page as vector
-          // shapes, so its text stays selectable and the file stays small.
-          // Only when the page is rotated or cropped in a way the shapes
-          // wouldn't line up with does it fall back to swapping in the
-          // flattened picture of the page.
-          const lineUp = page.getRotation().angle === 0 && Math.abs(size.width - width) < 1.5 && Math.abs(size.height - height) < 1.5;
-          let drawn = false;
-          if (lineUp) {
-            try { drawShapesOnPdfPage(PDFLib, page, font, a.shapes, a.width, a.height); drawn = true; }
-            catch (shapeErr) { console.warn('Could not draw markup as vectors, flattening this page instead:', shapeErr.message); }
-          }
-          if (!drawn) {
-            const jpg = await doc.embedJpg(await a.blob.arrayBuffer());
-            doc.insertPage(i, [width, height]).drawImage(jpg, { x: 0, y: 0, width, height });
-            doc.removePage(i + 1);
-          }
-        }
-        const outBytes = await doc.save();
+        const outBytes = await buildMarkedUpPdf();
         const { data: { user } } = await supabaseClient.auth.getUser();
         const outPath = `documents/${opts.projectId}/${Date.now()}-marked-up.pdf`;
         const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(outPath, new Blob([outBytes], { type: 'application/pdf' }), { contentType: 'application/pdf' });
         if (upErr) throw upErr;
-        const baseName = String(title || 'Document').replace(/\.pdf$/i, '');
-        const { error: insErr } = await supabaseClient.from('project_documents').insert({
-          project_id: opts.projectId, folder: opts.folder || 'Marked up', file_path: outPath,
-          file_name: `${baseName} (marked up).pdf`, mime_type: 'application/pdf', uploaded_by: user.id,
-          page_names: pageNames.some(Boolean) ? pageNames : null,
-          // Counts of what's now marked up, so the job/quote can export a
-          // schedule PDF later (carries forward what was already on the plan).
-          plan_summary: (() => {
-            if (typeof mergePlanSummary !== 'function') return planSummary;
-            const merged = mergePlanSummary(planSummary, annotated);
-            return planSummaryIsEmpty(merged) ? null : merged;
-          })(),
-        });
-        if (insErr) throw insErr;
+        // Counts of what's now marked up, so the job/quote can export a
+        // schedule PDF later (carries forward what was already on the plan).
+        const summary = (() => {
+          if (typeof mergePlanSummary !== 'function') return planSummary;
+          const merged = mergePlanSummary(planSummary, annotated);
+          return planSummaryIsEmpty(merged) ? null : merged;
+        })();
+        const names = pageNames.some(Boolean) ? pageNames : null;
+        let savedTitle = title;
+        if (replace) {
+          const { data: updated, error: updErr } = await supabaseClient.from('project_documents')
+            .update({ file_path: outPath, page_names: names, plan_summary: summary }).eq('id', docRowId).select('id, file_name');
+          if (updErr) throw updErr;
+          if (!updated || !updated.length) throw new Error('Could not update the document. Refresh and try again.');
+          savedTitle = updated[0].file_name || title;
+          // A leftover file is harmless; the row no longer points at it.
+          await supabaseClient.storage.from('project-documents').remove([path]).catch(() => {});
+        } else {
+          savedTitle = `${newName}.pdf`;
+          const { error: insErr } = await supabaseClient.from('project_documents').insert({
+            project_id: opts.projectId, folder: opts.folder || 'Marked up', file_path: outPath,
+            file_name: savedTitle, mime_type: 'application/pdf', uploaded_by: user.id,
+            page_names: names, plan_summary: summary,
+          });
+          if (insErr) throw insErr;
+        }
+        dlg.remove();
         annotatedUrls.forEach(u => URL.revokeObjectURL(u));
         close();
         if (opts.onSaved) opts.onSaved();
+        if (typeof showToast === 'function') showToast(replace ? `Saved over ${savedTitle}` : `Saved as ${savedTitle}`);
+        openPdfViewer(outPath, savedTitle, { ...opts, startPage: index });
       } catch (err) {
-        msgEl.textContent = `Could not save: ${err.message}`;
-        saveBtn.disabled = false; saveBtn.textContent = `Save marked-up copy (${annotated.size} page${annotated.size === 1 ? '' : 's'})`;
+        msgEl.innerHTML = `<div class="error-box">Could not save: ${escapeHtml(err.message)}</div>`;
+        goBtn.disabled = false; goBtn.textContent = 'Save';
       }
     });
   }
@@ -1193,6 +1374,8 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   let tool = 'pen', colour = COLOURS[0], sizeIdx = 1;
   let fillMode = 0; // boxes only: 0 outline, 1 solid fill, 2 see-through highlight
   const FILL_LABELS = ['Outline', 'Solid fill', 'Highlight'];
+  // The PDF viewer hands the page back to itself to be saved from there, so its button says so.
+  const saveLabel = extra.saveLabel || 'Save marked-up copy';
   // initialShapes lets a caller reopen earlier work (the PDF viewer does, so
   // a marked-up page can be edited again as shapes, not as a flattened picture).
   const shapes = initialShapes ? JSON.parse(JSON.stringify(initialShapes)) : [];
@@ -1272,16 +1455,49 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       <button type="button" class="secondary" id="mk-toggle-tools" style="padding:6px 12px; font-size:13px;">Hide tools</button>
       <span id="mk-summary" style="color:#fff; font-size:13px; display:none;"></span>
       <button type="button" class="secondary" id="mk-undo2" style="padding:6px 12px; font-size:13px; display:none;">Undo</button>
+      <span style="display:inline-flex; gap:4px; align-items:center;">
+        <button type="button" class="secondary" id="mk-zoom-out" aria-label="Zoom out" style="padding:6px 12px; font-size:13px;">&minus;</button>
+        <button type="button" class="secondary" id="mk-zoom-fit" style="padding:6px 10px; font-size:12px; min-width:52px;">100%</button>
+        <button type="button" class="secondary" id="mk-zoom-in" aria-label="Zoom in" style="padding:6px 12px; font-size:13px;">+</button>
+      </span>
+      <span style="color:#94a3b8; font-size:11px;">Pinch (or ctrl + scroll) to zoom, two fingers to pan</span>
     </div>
-    <canvas id="mk-canvas" width="${W}" height="${H}" style="max-width:94vw; max-height:${plan ? '52vh' : '62vh'}; touch-action:none; border-radius:6px; cursor:crosshair; flex-shrink:0;"></canvas>
+    <div id="mk-zoom" style="max-width:94vw; max-height:${plan ? '52vh' : '62vh'}; overflow:auto; flex-shrink:0; touch-action:none; overscroll-behavior:contain; border-radius:6px;">
+      <canvas id="mk-canvas" width="${W}" height="${H}" style="display:block; touch-action:none; cursor:crosshair;"></canvas>
+    </div>
     <div id="mk-msg" style="color:#fca5a5; font-size:12px;"></div>
     <div style="display:flex; gap:8px;">
-      <button type="button" id="mk-save">Save marked-up copy</button>
+      <button type="button" id="mk-save">${escapeHtml(saveLabel)}</button>
       <button type="button" class="secondary" id="mk-cancel">Cancel</button>
     </div>`;
 
   const canvas = overlay.querySelector('#mk-canvas');
   const ctx = canvas.getContext('2d');
+  // Zoom: 100% is the page fitted to the space the canvas has; above that the
+  // canvas is shown bigger and its holder scrolls. Drawing already maps the
+  // pointer through the canvas's on-screen size, so nothing else changes.
+  const zoomHolder = overlay.querySelector('#mk-zoom');
+  let zoom = 1;
+  const fitScale = () => {
+    const maxW = Math.max(100, window.innerWidth * 0.94), maxH = Math.max(100, window.innerHeight * (plan ? 0.52 : 0.62));
+    return Math.min(1, maxW / W, maxH / H);
+  };
+  const applyZoom = () => {
+    canvas.style.width = `${Math.round(W * fitScale() * zoom)}px`;
+    overlay.querySelector('#mk-zoom-fit').textContent = `${Math.round(zoom * 100)}%`;
+  };
+  applyZoom();
+  const onResize = () => { if (document.body.contains(overlay)) applyZoom(); else window.removeEventListener('resize', onResize); };
+  window.addEventListener('resize', onResize);
+  const zoomer = wirePinchZoom(zoomHolder, () => canvas, {
+    getZoom: () => zoom, setZoom: (z) => { zoom = z; applyZoom(); }, min: 1, max: 8,
+    // A second finger means zoom, not draw: drop whatever the first finger started.
+    onPinchStart: () => { current = null; dragging = null; resizing = null; pendingTap = null; redraw(); },
+  });
+  overlay.querySelector('#mk-zoom-in').addEventListener('click', () => zoomer.zoomBy(1.5));
+  overlay.querySelector('#mk-zoom-out').addEventListener('click', () => zoomer.zoomBy(1 / 1.5));
+  overlay.querySelector('#mk-zoom-fit').addEventListener('click', () => { zoom = 1; applyZoom(); });
+  let pendingTap = null; // { tool, x, y }: a tap that acts when the finger lifts, so a pinch never places anything
   const baseWidth = () => Math.max(3, W / 300) * SIZES[sizeIdx];
   const symbolSide = () => Math.max(22, W / 45) * SYMBOL_SIZES[sizeIdx];
   const ppm = () => (plan ? scalePxPerMetre(shapes) : null);
@@ -1708,9 +1924,11 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       redraw();
       return;
     }
-    if (tool === 'erase') {
-      const hit = shapeAt(x, y);
-      if (hit) { shapes.splice(shapes.indexOf(hit), 1); redraw(); }
+    // Taps (delete, place a symbol, add a cable point) act when the finger
+    // lifts, so two fingers landing to zoom never delete or place anything.
+    if (tool === 'erase' || tool === 'symbol' || tool === 'cable') {
+      if (tool === 'cable' && !ppm()) { window.alert('Set the scale first (use "Set scale" on something you know the length of) so cable lengths can be measured.'); return; }
+      pendingTap = { tool, x, y };
       return;
     }
     if (tool === 'text') {
@@ -1720,19 +1938,6 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
         // Straight into Move so the text can be dragged to the right spot.
         setTool('move');
       }
-      return;
-    }
-    if (tool === 'symbol') {
-      const side = symbolSide();
-      shapes.push({ type: 'symbol', symbolId: currentSymbol, colour, side, width: Math.max(1.5, side * 0.06), x1: x - side / 2, y1: y - side / 2, ...(circuit ? { label: circuit } : {}) });
-      redraw();
-      return;
-    }
-    if (tool === 'cable') {
-      if (!ppm()) { window.alert('Set the scale first (use "Set scale" on something you know the length of) so cable lengths can be measured.'); return; }
-      if (!cableDraft) cableDraft = { type: 'cable', colour, width: baseWidth(), cable: cableName(), points: [[x, y]] };
-      else cableDraft.points.push([x, y]);
-      refreshControls(); redraw();
       return;
     }
     canvas.setPointerCapture(e.pointerId);
@@ -1780,6 +1985,23 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     }
   });
   const finish = () => {
+    if (pendingTap) {
+      const { tool: t, x, y } = pendingTap;
+      pendingTap = null;
+      if (t === 'erase') {
+        const hit = shapeAt(x, y);
+        if (hit) { shapes.splice(shapes.indexOf(hit), 1); redraw(); }
+      } else if (t === 'symbol') {
+        const side = symbolSide();
+        shapes.push({ type: 'symbol', symbolId: currentSymbol, colour, side, width: Math.max(1.5, side * 0.06), x1: x - side / 2, y1: y - side / 2, ...(circuit ? { label: circuit } : {}) });
+        redraw();
+      } else if (t === 'cable') {
+        if (!cableDraft) cableDraft = { type: 'cable', colour, width: baseWidth(), cable: cableName(), points: [[x, y]] };
+        else cableDraft.points.push([x, y]);
+        refreshControls(); redraw();
+      }
+      return;
+    }
     if (resizing) { resizing = null; redraw(); return; }
     if (dragging) { dragging = null; redraw(); return; }
     if (!current) return;
@@ -1802,7 +2024,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     redraw();
   };
   canvas.addEventListener('pointerup', finish);
-  canvas.addEventListener('pointercancel', finish);
+  canvas.addEventListener('pointercancel', () => { pendingTap = null; finish(); });
 
   overlay.querySelector('#mk-save').addEventListener('click', async () => {
     const saveBtn = overlay.querySelector('#mk-save');
@@ -1825,7 +2047,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       overlay.remove();
     } catch (err) {
       msgEl.textContent = err.message;
-      saveBtn.disabled = false; saveBtn.textContent = 'Save marked-up copy';
+      saveBtn.disabled = false; saveBtn.textContent = saveLabel;
     }
   });
 

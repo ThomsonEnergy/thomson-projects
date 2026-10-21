@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 21 Oct 2026
+- Fixed (J7040): plan markup landed shifted on pages whose box does not start at 0,0 or is rotated (the PDF writer used pdf-lib's media box; the drawings now go through the renderer's own page transform, rotated pages keep vector markup). Save markup now asks Replace this document or Save as new with a name (no more stacked "(marked up)" copies) and reopens the saved document. Zoom (+ / -, pinch, ctrl + scroll) in the PDF viewer and the markup editor. No migration, supabase-client.js v110. (`docs/PROJECT_SPEC.md` A17)
 - Confirmed LIVE: sales@ sync caught up after PR #153 (89 emails in the first background run, J7028 Tony Adams' reply on the job, starting point moving every run).
 - LIVE: Investment breakdown page on proposals (tick box on the quote edit form, off by default; each stage's items by description and quantity, prebuilds as one line, no item prices, stage price last; long stages carry on over extra sheets). Migration 20261114000000 applied to production. My inbox sync now uses the sales@ page logic (Jasper's had never finished a page). (`docs/PROJECT_SPEC.md` A22, A18; `docs/IDEAS_BACKLOG.md` item 23)
 
