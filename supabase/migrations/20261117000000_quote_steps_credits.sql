@@ -16,8 +16,12 @@ alter table public.projects add column if not exists bstc_quantity numeric;
 alter table public.projects add column if not exists bstc_price_per_certificate numeric;
 alter table public.projects add column if not exists bstc_total numeric(12,2) default 0 not null;
 alter table public.projects add column if not exists bstc_not_claimed boolean default false not null;
-alter table public.projects add column if not exists stc_cost_centre_id uuid references public.cost_centres(id) on delete set null;
-alter table public.projects add column if not exists bstc_cost_centre_id uuid references public.cost_centres(id) on delete set null;
+-- Plain ids on purpose, not foreign keys: a third foreign key between projects and cost_centres
+-- makes every PostgREST embed between the two ambiguous ("more than one relationship was found"),
+-- and the app embeds them on most pages. A stage that no longer exists simply means "last stage"
+-- (quoteCreditSummary in project.html).
+alter table public.projects add column if not exists stc_cost_centre_id uuid;
+alter table public.projects add column if not exists bstc_cost_centre_id uuid;
 create index if not exists projects_stc_cost_centre_id_idx on public.projects (stc_cost_centre_id);
 create index if not exists projects_bstc_cost_centre_id_idx on public.projects (bstc_cost_centre_id);
 alter table public.projects add column if not exists site_visit_decision text;

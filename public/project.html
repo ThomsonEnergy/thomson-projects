@@ -1866,11 +1866,14 @@
       let stcApplied = 0, bstcApplied = 0;
       centres.forEach(c => { const s = stageClaimSummary(c); stcApplied += s.stcApplied; bstcApplied += s.bstcApplied; });
       const last = centres[centres.length - 1];
+      // the chosen stage is a plain id (no foreign key, see migration 20261117000000): a stage that
+      // has since been removed falls back to the last stage
+      const stageOrLast = (id) => (id && centres.some(c => c.id === id)) ? id : ((last && last.id) || null);
       return {
         stcRemaining: Math.max(0, Number(project.stc_total || 0) - stcApplied),
         bstcRemaining: Math.max(0, Number(project.bstc_total || 0) - bstcApplied),
-        stcStageId: project.stc_cost_centre_id || (last && last.id) || null,
-        bstcStageId: project.bstc_cost_centre_id || (last && last.id) || null,
+        stcStageId: stageOrLast(project.stc_cost_centre_id),
+        bstcStageId: stageOrLast(project.bstc_cost_centre_id),
         stcApplied, bstcApplied,
       };
     }
