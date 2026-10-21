@@ -3,7 +3,10 @@
 const SUPABASE_URL = 'https://ziakpklnzkbbjjnqgkmz.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InppYWtwa2xuemtiYmpqbnFna216Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcwOTg2OTIsImV4cCI6MjEwMjY3NDY5Mn0.xuEorSGdx9rI_ySM6V4MOxoQLOTD1OCWdrSXKMKnFAE';
 
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// The browser must never serve an API answer from its cache: on 21 Oct 2026 a short-lived
+// "more than one relationship" error (a 300, which browsers may cache) kept coming back from disk
+// cache for ten minutes after the database was fixed. no-cache makes every request go to Supabase.
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { 'Cache-Control': 'no-cache' } } });
 
 // Logging out anywhere ends every session for that user (signOut's default
 // scope is global), but other tabs and devices keep a copy of the old token
