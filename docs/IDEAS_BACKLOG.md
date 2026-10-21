@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 20 Oct 2026 (PO, bills, stock and tools review plan)
+Last updated 21 Oct 2026 (quote workflow plan, item 24)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -22,6 +22,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
 | 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 to 4 (items 1 to 109) LIVE 19 to 20 Oct 2026, next delivery 5 (`docs/UX_REVIEW.md`) | N | None |
 | 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Built 19 Oct 2026, LIVE (spec A32) | N | None |
+| 24 | Gather first, generate last: pre-quote information, Battery proposals, send gate | Planned 21 Oct 2026, waiting on owner's yes | N | Owner to confirm the CER battery program changes from 1 May 2026 |
 
 ## High lead time, start now
 
@@ -565,3 +566,20 @@ Plan:
 Built as planned (points 1 to 5), detail in `docs/PROJECT_SPEC.md` A22.
 
 Also found and fixed in the same delivery: Jasper's own My inbox has never finished a Gmail history page (last synced never), the same one-by-one fault fixed for sales@ on 20 Oct. Fix: the personal sync uses the sales@ page logic (known mail ruled out in one query, drafts skipped, 4 at a time).
+
+## 24. Gather first, generate last: pre-quote information, Battery proposals, send gate (planned 21 Oct 2026, waiting on owner's yes)
+
+Owner's ask (21 Oct 2026): a quote should start by gathering information (on the phone or at a site visit), which can be changed at any time, with questions that fit the proposal type (a Solar proposal asks solar questions), then generate what the customer gets and the scope of works from that at the end, not be pushed into writing the scope straight away. Batteries become their own proposal, a Solar proposal can tick Batteries as well, battery quotes follow the SAA and Clean Energy Regulator battery rules, and nothing is sent until every pre-quote item is checked.
+
+**Today:** `new-project.html` is one long form: type, questions (renovation and service work only), client, Pylon, AI scope brief (not saved, one use), scope text, photos, stages (a named stage is required to save), payment, T&Cs, compliance (solar only, after saving). Solar has no questions, batteries exist only as Pylon pull data, and sending a quote checks nothing.
+
+**Plan:**
+1. **Battery proposal.** `battery` added to `projects_proposal_template_check` (migration), a Battery button on the new quote and quote edit pages, battery cover photo and a "Your system" page on the proposal (battery make, model, usable kWh, backup circuits, VPP, rebate line). Solar proposal gets a tick "Batteries as well" (saved in `template_answers.with_battery`); ticked, it takes the battery questions and rules too. Battery STC credit uses the existing per-stage STC fields (count typed in, $ per STC as now), no new money logic.
+2. **Pre-quote information card** at the top of every quote (new and edit), editable any time, saved on `projects.template_answers` (already jsonb): where it came from (phone, site visit, client email) and when; questions per type. Solar: grid, off-grid or VPP interest; existing solar or battery to tie into; life-support equipment on site; roof type and condition; storeys; switchboard and main switch; single or 3 phase; NMI and DNSP; export limit; daily use or bill attached; shading; access. Battery (Battery proposal, or Solar with Batteries as well): usable kWh wanted and what must stay on in a blackout; existing PV size and inverter; hybrid or AC coupled; where it goes (not a habitable room, clearances per AS/NZS 5139, indoor or outdoor, distance to the switchboard); VPP capable; on the CEC approved list; usable size 5 to 50 kWh; first battery at this address (one claim per premises); solar commissioned before the battery; state rebate as well; internet for monitoring. Each question says whether it is needed before sending. New build, renovation and service work keep their questions, moved into the same card. Completed site inspection answers show on the card with a link.
+3. **Save at any point.** A draft saves with name and client only; stages are optional until the quote is sent (PDF not made while there are no priced stages). The AI brief is saved (`projects.sow_brief`, same migration) so it can be edited later.
+4. **Generate last.** The page runs in order: type, client and site, pre-quote information, design and pricing (Pylon and stages), then "What the customer gets" (system summary from the answers, Pylon equipment and stages) and the scope of works generated from the brief, answers, equipment and stages (`generate-scope.js`, `generate-sow.js` take `templateAnswers`, `equipment` and `template`; battery wording covers backup circuits, location, VPP, rebate and AS/NZS 5139). Regenerate or edit any time; the installer summary follows as now.
+5. **Ready to send gate.** `check-solar-compliance.js` becomes a per-type readiness check: required pre-quote answers, at least one priced stage, deposit, terms; the existing solar rules; new battery rules (model and usable kWh set, on the CEC list, VPP capable, 5 to 50 kWh, first battery at the premises, location answered, a staff member with SAA accreditation plus the battery endorsement on file). "Email quote to client" and moving to Quote Sent show the gaps and stop; Admin and Finance may send anyway with a reason that is logged on the quote.
+6. **Job tasks on approval.** Battery jobs (and Solar with Batteries) get pre-job and handover tasks from the answers: CEC list check at install time, DNSP battery application, VPP registration, AS/NZS 5139 location sign-off with a photo, battery serials, Formbay battery job (`template-job-tasks.js`, `create-default-job-tasks.js`).
+7. **Rules on paper.** `docs/BATTERY_QUOTE_COMPLIANCE_REQUIREMENTS.md` written from the CER Cheaper Home Batteries Program pages, the CER battery inspection checklist and SAA, like the solar one; the rule file in code cites it. Open points to confirm with the owner: the program changes from 1 May 2026 (CER has announced them, detail not yet read) and the exact SAA battery endorsement wording.
+
+Migration: one small file (constraint value and `sow_brief`), run on production after the yes. No staging (paused).
