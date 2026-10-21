@@ -111,7 +111,7 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
       const stageName = c.cost_centres?.name || 'Stage';
       // A $0 Labour line only when the stage has nothing else (e.g. a
       // do-and-charge invoice that's only Stock added in the builder skips it).
-      if (Number(c.labour_amount) > 0 || !(Number(c.material_amount) > 0 || Number(c.stc_amount) > 0)) {
+      if (Number(c.labour_amount) > 0 || !(Number(c.material_amount) > 0 || Number(c.stc_amount) > 0 || Number(c.bstc_amount) > 0)) {
         lineItems.push({
           Description: `${stageName} - Labour`,
           Quantity: 1,
@@ -135,6 +135,17 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
           Description: `${stageName} - STC Credit`,
           Quantity: 1,
           UnitAmount: -Number(c.stc_amount),
+          AccountCode: stcMap.xero_account_code,
+          TaxType: stcMap.xero_tax_type,
+        });
+      }
+      // Battery certificates: their own line (Formbay approves and pays them separately), same account.
+      if (Number(c.bstc_amount) > 0) {
+        if (!stcMap) throw new Error(`No Xero mapping found for STC credits (${clientType}) - set it up in Settings > Xero Mapping first.`);
+        lineItems.push({
+          Description: `${stageName} - BSTC Credit`,
+          Quantity: 1,
+          UnitAmount: -Number(c.bstc_amount),
           AccountCode: stcMap.xero_account_code,
           TaxType: stcMap.xero_tax_type,
         });
@@ -174,6 +185,18 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
         Description: 'STC Credit',
         Quantity: 1,
         UnitAmount: -Number(invoice.stc_amount),
+        AccountCode: stcMap.xero_account_code,
+        TaxType: stcMap.xero_tax_type,
+      });
+    }
+    if (Number(invoice.bstc_amount) > 0) {
+      if (!stcMap) {
+        throw new Error(`No Xero mapping found for STC credits (${clientType}) - set it up in Settings > Xero Mapping first.`);
+      }
+      lineItems.push({
+        Description: 'BSTC Credit',
+        Quantity: 1,
+        UnitAmount: -Number(invoice.bstc_amount),
         AccountCode: stcMap.xero_account_code,
         TaxType: stcMap.xero_tax_type,
       });

@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=112"></script>
+  <script src="/js/supabase-client.js?v=113"></script>
   <script src="/js/template-questions.js?v=2"></script>
   <script src="/js/prebuild-form.js?v=2"></script>
   <script src="/js/feed.js?v=10"></script>
@@ -539,9 +539,9 @@
           <div><label style="margin-top:0">Markup %</label><input class="cc-markup" type="number" step="1" value="${defaultMarkup}" /></div>
           <div><label style="margin-top:0">Sale price (ex GST)</label><div class="readout cc-sale-price">$0.00</div></div>
         </div>
-        <div class="cc-stc-block" style="margin-top:10px; padding:12px; background:var(--surface-2); border-radius:8px; display:${((TEMPLATE_INFO[currentTemplate] || {}).showStc || stc_total > 0) ? '' : 'none'};">
-          <label style="margin-top:0; font-weight:600;">STC credit (optional)</label>
-          <p class="subtitle" style="margin:2px 0 0; font-size:12px;">Type the number of STCs, or the system size and the count fills itself. A typed count wins.</p>
+        <div class="cc-stc-block" style="margin-top:10px; padding:12px; background:var(--surface-2); border-radius:8px; display:${stc_total > 0 ? '' : 'none'};">
+          <label style="margin-top:0; font-weight:600;">STC credit on this stage (older quote)</label>
+          <p class="subtitle" style="margin:2px 0 0; font-size:12px;">Credits now sit on the quote itself (Pricing step, STC and BSTC). This stage still carries its old figure; clear it once the quote-level credit is set.</p>
           <div class="grid cols-4" style="margin-top:6px;">
             <div><label style="margin-top:0; font-size:12px;">Number of STCs</label><input class="cc-stc-qty" type="number" inputmode="numeric" step="1" min="0" value="${stc_quantity ?? ''}" placeholder="e.g. 85" /></div>
             <div><label style="margin-top:0; font-size:12px;">System size (kW)</label><input class="cc-stc-kw" type="number" step="0.01" value="${defaultStcKw}" placeholder="0.00" /></div>
@@ -691,10 +691,11 @@
       if (!info.showPylon) { document.getElementById('p-pylon-link').value = ''; document.getElementById('p-pylon-id').value = ''; }
       // STC credit only belongs on a Solar or Battery proposal (an older stage that already has a
       // total keeps showing it so nothing is hidden).
-      document.querySelectorAll('.stc-only').forEach(el => { el.style.display = info.showStc ? '' : 'none'; });
+      // Credits sit on the quote (item 27): the per-stage block only shows an older stage's leftover.
+      document.querySelectorAll('.stc-only').forEach(el => { el.style.display = 'none'; });
       document.querySelectorAll('.cc-stc-block').forEach(el => {
         const total = parseFloat(el.querySelector('.cc-stc-total').value) || 0;
-        el.style.display = (info.showStc || total > 0) ? '' : 'none';
+        el.style.display = total > 0 ? '' : 'none';
       });
       renderCustomerGets();
     }
@@ -997,8 +998,8 @@
           <p class="subtitle" style="margin-bottom:10px;"><strong>All amounts ex GST.</strong> Enter labour and materials ex GST; GST is added once at the end of the quote.</p>
           <div class="grid cols-3" style="margin-bottom:16px;">
             <div><label style="margin-top:0">Default markup %</label><input id="default-markup" type="number" step="1" value="45" /></div>
-            <div class="stc-only" style="display:${['solar', 'battery'].includes(currentTemplate) ? '' : 'none'};"><label style="margin-top:0">Default $ per STC</label><input id="default-stc-price" type="number" step="0.01" value="35" /></div>
-            <div class="stc-only" style="display:${['solar', 'battery'].includes(currentTemplate) ? '' : 'none'};">
+            <div class="stc-only" style="display:none;"><label style="margin-top:0">Default $ per STC</label><input id="default-stc-price" type="number" step="0.01" value="35" /></div>
+            <div class="stc-only" style="display:none;">
               <label style="margin-top:0">Default STC zone</label>
               <select id="default-stc-zone">
                 ${STC_ZONES.map(z => `<option value="${z.rating}" ${z.rating === 1.382 ? 'selected' : ''}>${z.label}</option>`).join('')}
@@ -1045,78 +1046,11 @@
       }
     }
 
-    async function wireEditForm(project) {
-      // Once a job number exists, editing is scoped to Cost Centres only -
-      // the Details tab (client/template/SOW/deposit/Pylon/T&Cs) stays
-      // read-only, so all of that wiring below is quote-edit only.
-      const isQuoteEdit = !project.job_number;
+    // ---------- shared wiring for the quote editor and the quote steps (item 27) ----------
+    // Each wires the ids it finds; the quote steps panel and the full editor use the same ids.
 
-      // Item 55: any typed change, select change, file pick or button press in the
-      // editor counts as a change. .job-tab-main is rebuilt by every render, so
-      // these listeners never stack.
-      const editArea = document.querySelector('.job-tab-main');
-      if (editArea) {
-        const markDirty = () => { editDirty = true; };
-        editArea.addEventListener('input', markDirty);
-        editArea.addEventListener('change', markDirty);
-        editArea.addEventListener('click', (e) => { if (e.target.closest('button, .template-option')) markDirty(); });
-      }
-
-      try {
-      if (isQuoteEdit) {
-      document.querySelectorAll('.template-option').forEach(btn => btn.addEventListener('click', () => applyEditTemplate(btn.dataset.template, true)));
-
-      // Pre-quote answers: the "Batteries as well" answer adds or removes the battery questions,
-      // and every answer feeds the "What the customer gets" panel.
-      document.getElementById('template-questions').addEventListener('change', (e) => {
-        const el = e.target.closest('.tq-input');
-        if (!el) return;
-        Object.assign(templateAnswers, readTemplateAnswers(document.getElementById('template-questions')));
-        if (el.dataset.qid === 'with_battery') {
-          if (!templateAnswers.with_battery) delete templateAnswers.with_battery;
-          renderTemplateQuestions(document.getElementById('template-questions'), currentTemplate, templateAnswers);
-        }
-        renderCustomerGets();
-      });
-
-      sitePicker = attachSitePicker(document.getElementById('p-site-pick'), document.getElementById('p-address'));
-      document.getElementById('clear-client-btn').addEventListener('click', () => {
-        document.getElementById('client-search-input').value = '';
-        setSelectedEditClient(null);
-        loadEditJobContactPickers(null);
-      });
-
-      let clientSearchTimeout = null;
-      document.getElementById('client-search-input').addEventListener('input', (e) => {
-        clearTimeout(clientSearchTimeout);
-        const q = e.target.value.trim();
-        const resultsEl = document.getElementById('client-search-results');
-        if (q.length < 2) { resultsEl.style.display = 'none'; return; }
-        clientSearchTimeout = setTimeout(async () => {
-          const { data, error } = await supabaseClient.from('clients').select('*')
-            .or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(8);
-          if (error || !data || !data.length) {
-            resultsEl.innerHTML = `<div style="padding:10px 12px; font-size:13px; color:var(--muted);">No matches</div>`;
-            resultsEl.style.display = 'block';
-            return;
-          }
-          resultsEl.innerHTML = data.map(c => `
-            <div class="client-result" data-id="${c.id}" style="padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">
-              <div style="font-weight:600;">${escapeHtml(c.name)}</div>
-              <div style="color:var(--muted); font-size:12px;">${[c.email, c.phone].filter(Boolean).map(escapeHtml).join(' &middot; ')}</div>
-            </div>`).join('');
-          resultsEl.querySelectorAll('.client-result').forEach(row => {
-            row.addEventListener('click', () => {
-              const client = data.find(c => c.id === row.dataset.id);
-              document.getElementById('client-search-input').value = client.name;
-              setSelectedEditClient(client);
-              loadEditJobContactPickers(client.id);
-            });
-          });
-          resultsEl.style.display = 'block';
-        }, 250);
-      });
-
+    // Supporting documents, Generate scope of works with AI, reference photos.
+    function wireScopeTools(project) {
       document.getElementById('sow-doc-file').addEventListener('change', async () => {
         const fileInput = document.getElementById('sow-doc-file');
         const msg = document.getElementById('sow-doc-msg');
@@ -1208,6 +1142,10 @@
         } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
       });
 
+    }
+
+    // Deposit milestones list.
+    function wireMilestoneEditor(project) {
       (project.payment_milestones || []).slice().sort((a, b) => a.sort_order - b.sort_order).forEach(m => {
         document.getElementById('milestone-rows').insertAdjacentHTML('beforeend', milestoneRowHtml(m));
       });
@@ -1219,6 +1157,10 @@
         refreshMilestoneTotal();
       });
 
+    }
+
+    // Create job in Pylon and Pull from Pylon.
+    function wirePylonCard(project) {
       document.getElementById('pylon-create-btn').addEventListener('click', async () => {
         const btn = document.getElementById('pylon-create-btn');
         const msg = document.getElementById('pylon-create-msg');
@@ -1282,6 +1224,10 @@
         }
       });
 
+    }
+
+    // Ready to send check and the documents-to-gather checklist.
+    function wireComplianceCard(project) {
       const complianceBtn = document.getElementById('compliance-check-btn');
       if (complianceBtn) {
         complianceBtn.addEventListener('click', () => runComplianceCheck(
@@ -1289,6 +1235,85 @@
         ));
       }
       if (document.getElementById('quote-doc-checklist')) loadQuoteComplianceChecklist(project);
+    }
+
+    async function wireEditForm(project) {
+      // Once a job number exists, editing is scoped to Cost Centres only -
+      // the Details tab (client/template/SOW/deposit/Pylon/T&Cs) stays
+      // read-only, so all of that wiring below is quote-edit only.
+      const isQuoteEdit = !project.job_number;
+
+      // Item 55: any typed change, select change, file pick or button press in the
+      // editor counts as a change. .job-tab-main is rebuilt by every render, so
+      // these listeners never stack.
+      const editArea = document.querySelector('.job-tab-main');
+      if (editArea) {
+        const markDirty = () => { editDirty = true; };
+        editArea.addEventListener('input', markDirty);
+        editArea.addEventListener('change', markDirty);
+        editArea.addEventListener('click', (e) => { if (e.target.closest('button, .template-option')) markDirty(); });
+      }
+
+      try {
+      if (isQuoteEdit) {
+      document.querySelectorAll('.template-option').forEach(btn => btn.addEventListener('click', () => applyEditTemplate(btn.dataset.template, true)));
+
+      // Pre-quote answers: the "Batteries as well" answer adds or removes the battery questions,
+      // and every answer feeds the "What the customer gets" panel.
+      document.getElementById('template-questions').addEventListener('change', (e) => {
+        const el = e.target.closest('.tq-input');
+        if (!el) return;
+        Object.assign(templateAnswers, readTemplateAnswers(document.getElementById('template-questions')));
+        if (el.dataset.qid === 'with_battery') {
+          if (!templateAnswers.with_battery) delete templateAnswers.with_battery;
+          renderTemplateQuestions(document.getElementById('template-questions'), currentTemplate, templateAnswers);
+        }
+        renderCustomerGets();
+      });
+
+      sitePicker = attachSitePicker(document.getElementById('p-site-pick'), document.getElementById('p-address'));
+      document.getElementById('clear-client-btn').addEventListener('click', () => {
+        document.getElementById('client-search-input').value = '';
+        setSelectedEditClient(null);
+        loadEditJobContactPickers(null);
+      });
+
+      let clientSearchTimeout = null;
+      document.getElementById('client-search-input').addEventListener('input', (e) => {
+        clearTimeout(clientSearchTimeout);
+        const q = e.target.value.trim();
+        const resultsEl = document.getElementById('client-search-results');
+        if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+        clientSearchTimeout = setTimeout(async () => {
+          const { data, error } = await supabaseClient.from('clients').select('*')
+            .or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(8);
+          if (error || !data || !data.length) {
+            resultsEl.innerHTML = `<div style="padding:10px 12px; font-size:13px; color:var(--muted);">No matches</div>`;
+            resultsEl.style.display = 'block';
+            return;
+          }
+          resultsEl.innerHTML = data.map(c => `
+            <div class="client-result" data-id="${c.id}" style="padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">
+              <div style="font-weight:600;">${escapeHtml(c.name)}</div>
+              <div style="color:var(--muted); font-size:12px;">${[c.email, c.phone].filter(Boolean).map(escapeHtml).join(' &middot; ')}</div>
+            </div>`).join('');
+          resultsEl.querySelectorAll('.client-result').forEach(row => {
+            row.addEventListener('click', () => {
+              const client = data.find(c => c.id === row.dataset.id);
+              document.getElementById('client-search-input').value = client.name;
+              setSelectedEditClient(client);
+              loadEditJobContactPickers(client.id);
+            });
+          });
+          resultsEl.style.display = 'block';
+        }, 250);
+      });
+
+      wireScopeTools(project);
+      wireMilestoneEditor(project);
+      wirePylonCard(project);
+      wireComplianceCard(project);
+
       } // end isQuoteEdit-only wiring
 
       document.getElementById('add-row').addEventListener('click', () => addRow());
@@ -1527,13 +1552,8 @@
       });
     }
 
-    async function saveEdits(project) {
-      const msg = document.getElementById('edit-msg');
-      const saveBtn = document.getElementById('save-edit-btn');
-      msg.innerHTML = '';
-
-      const isJob = !!project.job_number;
-
+    // The stages as typed in the editor (#cc-rows), with their line items and photo groups.
+    function readStagesPayload() {
       const stageRows = [...document.querySelectorAll('#cc-rows .cc-row')];
       const stagesPayload = stageRows.map((row, i) => ({
         id: row.dataset.id || null,
@@ -1578,6 +1598,55 @@
           sort_order: j,
         })).filter(pg => pg.description || pg.photos.length),
       })).filter(s => s.name);
+      return stagesPayload;
+    }
+
+    // Writes the stages non-destructively: existing stages are updated in place (their ids stay for
+    // invoices, POs and time), new ones inserted, line items and photo groups replaced, removed
+    // stages deleted. The caller has already checked removed stages carry nothing.
+    async function applyStagesPayload(project, stagesPayload, removedCentres) {
+      for (const s of stagesPayload) {
+        const { id, lineItems, photoGroups, ...fields } = s;
+        let centreId = id;
+        if (centreId) {
+          const { error } = await supabaseClient.from('cost_centres').update(fields).eq('id', centreId);
+          if (error) throw error;
+        } else {
+          const { data: newCentre, error } = await supabaseClient.from('cost_centres').insert({ ...fields, project_id: project.id }).select().single();
+          if (error) throw error;
+          centreId = newCentre.id;
+        }
+
+        const { error: delLiErr } = await supabaseClient.from('cost_centre_line_items').delete().eq('cost_centre_id', centreId);
+        if (delLiErr) throw delLiErr;
+        if (lineItems.length) {
+          const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(lineItems.map(li => ({ ...li, cost_centre_id: centreId })));
+          if (liErr) throw liErr;
+        }
+
+        const { error: delPgErr } = await supabaseClient.from('cost_centre_photo_groups').delete().eq('cost_centre_id', centreId);
+        if (delPgErr) throw delPgErr;
+        if (photoGroups.length) {
+          const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(photoGroups.map(pg => ({ ...pg, cost_centre_id: centreId })));
+          if (pgErr) throw pgErr;
+        }
+      }
+
+      if (removedCentres.length) {
+        const { error: delCentreErr } = await supabaseClient.from('cost_centres').delete().in('id', removedCentres.map(c => c.id));
+        if (delCentreErr) throw delCentreErr;
+      }
+
+    }
+
+    async function saveEdits(project) {
+      const msg = document.getElementById('edit-msg');
+      const saveBtn = document.getElementById('save-edit-btn');
+      msg.innerHTML = '';
+
+      const isJob = !!project.job_number;
+
+      const stagesPayload = readStagesPayload();
 
       // A job always has a stage; a quote can save without one until it is sent.
       if (stagesPayload.length === 0 && isJob) {
@@ -1714,37 +1783,7 @@
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving...';
       try {
-        for (const s of stagesPayload) {
-          const { id, lineItems, photoGroups, ...fields } = s;
-          let centreId = id;
-          if (centreId) {
-            const { error } = await supabaseClient.from('cost_centres').update(fields).eq('id', centreId);
-            if (error) throw error;
-          } else {
-            const { data: newCentre, error } = await supabaseClient.from('cost_centres').insert({ ...fields, project_id: project.id }).select().single();
-            if (error) throw error;
-            centreId = newCentre.id;
-          }
-
-          const { error: delLiErr } = await supabaseClient.from('cost_centre_line_items').delete().eq('cost_centre_id', centreId);
-          if (delLiErr) throw delLiErr;
-          if (lineItems.length) {
-            const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(lineItems.map(li => ({ ...li, cost_centre_id: centreId })));
-            if (liErr) throw liErr;
-          }
-
-          const { error: delPgErr } = await supabaseClient.from('cost_centre_photo_groups').delete().eq('cost_centre_id', centreId);
-          if (delPgErr) throw delPgErr;
-          if (photoGroups.length) {
-            const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(photoGroups.map(pg => ({ ...pg, cost_centre_id: centreId })));
-            if (pgErr) throw pgErr;
-          }
-        }
-
-        if (removedCentres.length) {
-          const { error: delCentreErr } = await supabaseClient.from('cost_centres').delete().in('id', removedCentres.map(c => c.id));
-          if (delCentreErr) throw delCentreErr;
-        }
+        await applyStagesPayload(project, stagesPayload, removedCentres);
 
         await logStageChanges(project.id, existingCentres, stagesPayload);
 
@@ -1792,12 +1831,12 @@
       const legacyInvoices = (c.invoices || []).map(inv => ({
         invoice_number: inv.invoice_number, invoice_token: inv.invoice_token, sent_at: inv.sent_at, created_at: inv.created_at,
         paid_at: inv.paid_at, xero_invoice_id: inv.xero_invoice_id, id: inv.id,
-        labour_amount: inv.labour_amount, material_amount: inv.material_amount, stc_amount: inv.stc_amount,
+        labour_amount: inv.labour_amount, material_amount: inv.material_amount, stc_amount: inv.stc_amount, bstc_amount: inv.bstc_amount,
       }));
       const claimInvoices = (c.invoice_claims || []).map(ic => ({
         invoice_number: ic.invoices?.invoice_number, invoice_token: ic.invoices?.invoice_token, sent_at: ic.invoices?.sent_at, created_at: ic.invoices?.created_at,
         paid_at: ic.invoices?.paid_at, xero_invoice_id: ic.invoices?.xero_invoice_id, id: ic.invoices?.id,
-        labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount,
+        labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount, bstc_amount: ic.bstc_amount,
       }));
       // Credit notes count as negative claims in the same timeline, so a
       // stage's remaining-to-claim balance correctly goes back up once one
@@ -1807,15 +1846,33 @@
       const creditLines = (c.credit_note_claims || []).map(cn => ({
         invoice_number: null, invoice_token: null, sent_at: cn.created_at, created_at: cn.created_at,
         paid_at: null, xero_invoice_id: null, id: cn.id, isCredit: true,
-        labour_amount: -(Number(cn.labour_amount) || 0), material_amount: -(Number(cn.material_amount) || 0), stc_amount: -(Number(cn.stc_amount) || 0),
+        labour_amount: -(Number(cn.labour_amount) || 0), material_amount: -(Number(cn.material_amount) || 0), stc_amount: -(Number(cn.stc_amount) || 0), bstc_amount: -(Number(cn.bstc_amount) || 0),
       }));
       const stageInvoices = [...legacyInvoices, ...claimInvoices, ...creditLines].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
       const quotedAmt = Number(c.quoted_amount) || 0;
       const remaining = Math.max(0, quotedAmt - claimedTotal);
       const stcApplied = stageInvoices.reduce((s, inv) => s + Number(inv.stc_amount || 0), 0);
+      const bstcApplied = stageInvoices.reduce((s, inv) => s + Number(inv.bstc_amount || 0), 0);
+      // Per-stage remaining is legacy (credits now sit on the quote, see quoteCreditSummary).
       const stcRemaining = Math.max(0, Number(c.stc_total || 0) - stcApplied);
-      return { stageInvoices, claimedTotal, quotedAmt, remaining, stcApplied, stcRemaining };
+      return { stageInvoices, claimedTotal, quotedAmt, remaining, stcApplied, bstcApplied, stcRemaining };
+    }
+
+    // The quote's STC and BSTC credits (item 27): what is left of each after every claim and credit
+    // note on the job, and which stage each is claimed with (its chosen stage, else the last stage).
+    function quoteCreditSummary(project) {
+      const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+      let stcApplied = 0, bstcApplied = 0;
+      centres.forEach(c => { const s = stageClaimSummary(c); stcApplied += s.stcApplied; bstcApplied += s.bstcApplied; });
+      const last = centres[centres.length - 1];
+      return {
+        stcRemaining: Math.max(0, Number(project.stc_total || 0) - stcApplied),
+        bstcRemaining: Math.max(0, Number(project.bstc_total || 0) - bstcApplied),
+        stcStageId: project.stc_cost_centre_id || (last && last.id) || null,
+        bstcStageId: project.bstc_cost_centre_id || (last && last.id) || null,
+        stcApplied, bstcApplied,
+      };
     }
 
     // Splits a stage's claimed $ into labour/materials (the two income lines
@@ -2323,7 +2380,13 @@
     // panel in per-stage mode with just that one stage checked - the entry
     // point from a single stage's own "Create & send next claim" button.
     function openInvoiceProjectPanel(project, pricingVisible, opts = {}) {
-      const centres = (project.cost_centres || []).map(c => ({ centre: c, ...stageClaimSummary(c) })).filter(x => x.remaining > 0.004);
+      const credit = quoteCreditSummary(project);
+      const centres = (project.cost_centres || []).map(c => ({
+        centre: c, ...stageClaimSummary(c),
+        // the quote's credits are offered on the stage each is claimed with, once that stage is fully claimed
+        stcRemaining: c.id === credit.stcStageId ? credit.stcRemaining : 0,
+        bstcRemaining: c.id === credit.bstcStageId ? credit.bstcRemaining : 0,
+      })).filter(x => x.remaining > 0.004 || x.stcRemaining > 0 || x.bstcRemaining > 0);
       // opts.variationsOnly (from the Variations tab) opens the panel even when no stage
       // has anything left to claim, and starts it claiming 0% of the quote so only
       // the logged variations go on the invoice unless you change that.
@@ -2357,7 +2420,7 @@
                 ${centres.map(x => `
                   <tr>
                     <td data-label=""><input type="checkbox" class="inv-stage-check" data-id="${x.centre.id}" style="width:auto;" ${opts.preselectCentreId ? (opts.preselectCentreId === x.centre.id ? 'checked' : '') : 'checked'} /></td>
-                    <td data-label="Stage">${escapeHtml(x.centre.name)}${x.stcRemaining > 0 ? `<br><span class="subtitle" style="font-size:11px;">${money(x.stcRemaining)} STC credit outstanding</span>` : ''}</td>
+                    <td data-label="Stage">${escapeHtml(x.centre.name)}${x.stcRemaining > 0 ? `<br><span class="subtitle" style="font-size:11px;">${money(x.stcRemaining)} STC credit outstanding</span>` : ''}${x.bstcRemaining > 0 ? `<br><span class="subtitle" style="font-size:11px;">${money(x.bstcRemaining)} BSTC credit outstanding</span>` : ''}</td>
                     <td class="num" data-label="Remaining">${money(x.remaining)}</td>
                     <td class="num" data-label="Claim %"><input type="number" inputmode="numeric" class="inv-stage-pct" data-id="${x.centre.id}" min="0" max="100" step="1" value="${!opts.preselectCentreId || opts.preselectCentreId === x.centre.id ? 100 : 0}" style="width:70px;" /></td>
                     <td class="num" data-label="Claim $"><input type="number" inputmode="decimal" class="inv-stage-amt" data-id="${x.centre.id}" step="0.01" style="width:100px;" /></td>
@@ -2431,8 +2494,9 @@
             const amt = allocated[x.centre.id] || 0;
             const { labourAmount, materialAmount } = splitLabourMaterial(x.centre, amt);
             const stcAmount = amt >= x.remaining - 0.01 ? x.stcRemaining : 0; // full stage claimed -> pick up its STC credit too
-            return { costCentreId: x.centre.id, labourAmount, materialAmount, stcAmount, claimPercent: x.quotedAmt > 0 ? Math.round(((x.claimedTotal + amt) / x.quotedAmt) * 10000) / 100 : null };
-          }).filter(c => c.labourAmount + c.materialAmount + c.stcAmount > 0);
+            const bstcAmount = amt >= x.remaining - 0.01 ? x.bstcRemaining : 0;
+            return { costCentreId: x.centre.id, labourAmount, materialAmount, stcAmount, bstcAmount, claimPercent: x.quotedAmt > 0 ? Math.round(((x.claimedTotal + amt) / x.quotedAmt) * 10000) / 100 : null };
+          }).filter(c => c.labourAmount + c.materialAmount + c.stcAmount + c.bstcAmount > 0);
         }
 
         return centres
@@ -2442,9 +2506,10 @@
             const amt = Math.max(0, Math.min(x.remaining, parseFloat(amtInput.value) || 0));
             const { labourAmount, materialAmount } = splitLabourMaterial(x.centre, amt);
             const stcAmount = amt >= x.remaining - 0.01 ? x.stcRemaining : 0;
-            return { costCentreId: x.centre.id, labourAmount, materialAmount, stcAmount, claimPercent: x.quotedAmt > 0 ? Math.round(((x.claimedTotal + amt) / x.quotedAmt) * 10000) / 100 : null };
+            const bstcAmount = amt >= x.remaining - 0.01 ? x.bstcRemaining : 0;
+            return { costCentreId: x.centre.id, labourAmount, materialAmount, stcAmount, bstcAmount, claimPercent: x.quotedAmt > 0 ? Math.round(((x.claimedTotal + amt) / x.quotedAmt) * 10000) / 100 : null };
           })
-          .filter(c => c.labourAmount + c.materialAmount + c.stcAmount > 0);
+          .filter(c => c.labourAmount + c.materialAmount + c.stcAmount + c.bstcAmount > 0);
       }
 
       function refreshStagePctFromDollar(centreId) {
@@ -2523,7 +2588,7 @@
         // Same sum as the invoice's Balance due (calculate_balance_due): labour + materials,
         // plus 10% GST, less the STC credit (plus GST on it for a company client).
         let subtotal = claims.reduce((s, c) => s + c.labourAmount + c.materialAmount, 0);
-        const stc = claims.reduce((s, c) => s + c.stcAmount, 0);
+        const stc = claims.reduce((s, c) => s + c.stcAmount + (c.bstcAmount || 0), 0);
         varItems.forEach((it) => {
           const t = varTotals(it);
           const el = overlay.querySelector(`.inv-var[data-id="${it.id}"] .inv-var-total`);
@@ -2587,7 +2652,7 @@
             const bdata = await bres.json();
             if (!bres.ok || !bdata.ok) throw new Error(bdata.error || 'Could not price the variations');
             bdata.claims.forEach((c) => {
-              claims.push({ costCentreId: c.costCentreId, labourAmount: c.labourAmount, materialAmount: c.materialAmount, stcAmount: 0, claimPercent: c.claimPercent });
+              claims.push({ costCentreId: c.costCentreId, labourAmount: c.labourAmount, materialAmount: c.materialAmount, stcAmount: 0, bstcAmount: 0, claimPercent: c.claimPercent });
               variationEntryIds.push(c.variationId);
             });
           }
@@ -2839,12 +2904,12 @@
       const isMultiStage = invoice.invoice_claims && invoice.invoice_claims.length > 0;
       const rows = isMultiStage
         ? invoice.invoice_claims.slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
-            .map(ic => ({ id: ic.id, cost_centre_id: ic.cost_centre_id, stageName: ic.cost_centres?.name || 'Stage', labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0 }))
+            .map(ic => ({ id: ic.id, cost_centre_id: ic.cost_centre_id, stageName: ic.cost_centres?.name || 'Stage', labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0, bstc: Number(ic.bstc_amount) || 0 }))
         : [{
             id: null,
             cost_centre_id: invoice.cost_centre_id || null,
             stageName: invoice.cost_centre_id ? (invoice.cost_centres?.name || 'Stage') : (invoice.description || 'Invoice'),
-            labour: Number(invoice.labour_amount) || 0, material: Number(invoice.material_amount) || 0, stc: Number(invoice.stc_amount) || 0,
+            labour: Number(invoice.labour_amount) || 0, material: Number(invoice.material_amount) || 0, stc: Number(invoice.stc_amount) || 0, bstc: Number(invoice.bstc_amount) || 0,
           }];
 
       const overlay = document.createElement('div');
@@ -2864,7 +2929,7 @@
             </div>
           </div>
           <table>
-            <thead><tr><th>Stage</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">STC credit</th></tr></thead>
+            <thead><tr><th>Stage</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">STC credit</th><th class="num">BSTC credit</th></tr></thead>
             <tbody>
               ${rows.map((r, i) => `
                 <tr>
@@ -2872,6 +2937,7 @@
                   <td class="num"><input type="number" step="0.01" class="ei-labour" data-i="${i}" value="${r.labour}" style="width:100px;" /></td>
                   <td class="num"><input type="number" step="0.01" class="ei-material" data-i="${i}" value="${r.material}" style="width:100px;" /></td>
                   <td class="num"><input type="number" step="0.01" class="ei-stc" data-i="${i}" value="${r.stc}" style="width:100px;" /></td>
+                  <td class="num"><input type="number" step="0.01" class="ei-bstc" data-i="${i}" value="${r.bstc}" style="width:100px;" /></td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -2890,11 +2956,12 @@
           labour: parseFloat(overlay.querySelector(`.ei-labour[data-i="${i}"]`).value) || 0,
           material: parseFloat(overlay.querySelector(`.ei-material[data-i="${i}"]`).value) || 0,
           stc: parseFloat(overlay.querySelector(`.ei-stc[data-i="${i}"]`).value) || 0,
+          bstc: parseFloat(overlay.querySelector(`.ei-bstc[data-i="${i}"]`).value) || 0,
         }));
       }
       function updateTotal() {
         const vals = readValues();
-        const total = vals.reduce((s, r) => s + r.labour + r.material - r.stc, 0);
+        const total = vals.reduce((s, r) => s + r.labour + r.material - r.stc - r.bstc, 0);
         overlay.querySelector('#ei-total').textContent = money(total);
       }
       overlay.querySelectorAll('input').forEach(inp => inp.addEventListener('input', updateTotal));
@@ -2921,23 +2988,24 @@
             if (isMultiStage) {
               for (let i = 0; i < rows.length; i++) {
                 const o = rows[i], r = newRows[i];
-                await mustUpdate('invoice_claims', { labour_amount: r.labour, material_amount: r.material, stc_amount: r.stc }, r.id, `the ${r.stageName} claim`);
-                undo.push(() => supabaseClient.from('invoice_claims').update({ labour_amount: o.labour, material_amount: o.material, stc_amount: o.stc }).eq('id', o.id));
+                await mustUpdate('invoice_claims', { labour_amount: r.labour, material_amount: r.material, stc_amount: r.stc, bstc_amount: r.bstc }, r.id, `the ${r.stageName} claim`);
+                undo.push(() => supabaseClient.from('invoice_claims').update({ labour_amount: o.labour, material_amount: o.material, stc_amount: o.stc, bstc_amount: o.bstc }).eq('id', o.id));
               }
             }
 
             const totalLabour = newRows.reduce((s, r) => s + r.labour, 0);
             const totalMaterial = newRows.reduce((s, r) => s + r.material, 0);
             const totalStc = newRows.reduce((s, r) => s + r.stc, 0);
+            const totalBstc = newRows.reduce((s, r) => s + r.bstc, 0);
             const newDate = overlay.querySelector('#ei-date').value;
             const newDueDate = overlay.querySelector('#ei-due-date').value || null;
             await mustUpdate('invoices', {
-              labour_amount: totalLabour, material_amount: totalMaterial, stc_amount: totalStc,
+              labour_amount: totalLabour, material_amount: totalMaterial, stc_amount: totalStc, bstc_amount: totalBstc,
               sent_at: newDate ? new Date(newDate).toISOString() : invoice.sent_at,
               due_date: newDueDate,
             }, invoice.id, `invoice ${invoice.invoice_number}`);
             undo.push(() => supabaseClient.from('invoices').update({
-              labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount,
+              labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount, bstc_amount: invoice.bstc_amount,
               sent_at: invoice.sent_at, due_date: invoice.due_date,
             }).eq('id', invoice.id));
 
@@ -2987,33 +3055,34 @@
       const isMultiStage = invoice.invoice_claims && invoice.invoice_claims.length > 0;
       const originalRows = isMultiStage
         ? invoice.invoice_claims.slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
-            .map(ic => ({ cost_centre_id: ic.cost_centre_id, stageName: ic.cost_centres?.name || 'Stage', labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0 }))
+            .map(ic => ({ cost_centre_id: ic.cost_centre_id, stageName: ic.cost_centres?.name || 'Stage', labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0, bstc: Number(ic.bstc_amount) || 0 }))
         : [{
             cost_centre_id: invoice.cost_centre_id || null,
             stageName: invoice.cost_centre_id ? (invoice.cost_centres?.name || 'Stage') : (invoice.description || 'Invoice'),
-            labour: Number(invoice.labour_amount) || 0, material: Number(invoice.material_amount) || 0, stc: Number(invoice.stc_amount) || 0,
+            labour: Number(invoice.labour_amount) || 0, material: Number(invoice.material_amount) || 0, stc: Number(invoice.stc_amount) || 0, bstc: Number(invoice.bstc_amount) || 0,
           }];
 
       const { data: priorCredits } = await supabaseClient
         .from('credit_note_claims')
-        .select('cost_centre_id, labour_amount, material_amount, stc_amount, credit_notes!inner(invoice_id)')
+        .select('cost_centre_id, labour_amount, material_amount, stc_amount, bstc_amount, credit_notes!inner(invoice_id)')
         .eq('credit_notes.invoice_id', invoice.id);
       const alreadyCreditedByCentre = {};
       (priorCredits || []).forEach(pc => {
-        const cur = alreadyCreditedByCentre[pc.cost_centre_id] || { labour: 0, material: 0, stc: 0 };
+        const cur = alreadyCreditedByCentre[pc.cost_centre_id] || { labour: 0, material: 0, stc: 0, bstc: 0 };
         cur.labour += Number(pc.labour_amount) || 0;
         cur.material += Number(pc.material_amount) || 0;
         cur.stc += Number(pc.stc_amount) || 0;
+        cur.bstc += Number(pc.bstc_amount) || 0;
         alreadyCreditedByCentre[pc.cost_centre_id] = cur;
       });
 
       const rows = originalRows.map(r => {
-        const already = alreadyCreditedByCentre[r.cost_centre_id] || { labour: 0, material: 0, stc: 0 };
+        const already = alreadyCreditedByCentre[r.cost_centre_id] || { labour: 0, material: 0, stc: 0, bstc: 0 };
         return {
           cost_centre_id: r.cost_centre_id, stageName: r.stageName,
-          maxLabour: Math.max(0, r.labour - already.labour), maxMaterial: Math.max(0, r.material - already.material), maxStc: Math.max(0, r.stc - already.stc),
+          maxLabour: Math.max(0, r.labour - already.labour), maxMaterial: Math.max(0, r.material - already.material), maxStc: Math.max(0, r.stc - already.stc), maxBstc: Math.max(0, r.bstc - already.bstc),
         };
-      }).filter(r => r.maxLabour + r.maxMaterial + r.maxStc > 0.004);
+      }).filter(r => r.maxLabour + r.maxMaterial + r.maxStc + r.maxBstc > 0.004);
 
       if (!rows.length) {
         alert('This invoice has already been fully credited - there\'s nothing left to credit.');
@@ -3027,7 +3096,7 @@
           <h2>Issue credit note - ${invoice.invoice_number}</h2>
           <p class="subtitle" style="margin-bottom:12px;">Defaults to a full credit of what's left claimable on this invoice - reduce any amount for a partial credit. This creates the credit note here; push it to Xero separately once you're happy with it.</p>
           <table>
-            <thead><tr><th>Stage</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">STC</th></tr></thead>
+            <thead><tr><th>Stage</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">STC</th><th class="num">BSTC</th></tr></thead>
             <tbody>
               ${rows.map((r, i) => `
                 <tr>
@@ -3035,6 +3104,7 @@
                   <td class="num"><input type="number" step="0.01" min="0" max="${r.maxLabour}" class="cn-labour" data-i="${i}" value="${r.maxLabour.toFixed(2)}" style="width:100px;" /></td>
                   <td class="num"><input type="number" step="0.01" min="0" max="${r.maxMaterial}" class="cn-material" data-i="${i}" value="${r.maxMaterial.toFixed(2)}" style="width:100px;" /></td>
                   <td class="num"><input type="number" step="0.01" min="0" max="${r.maxStc}" class="cn-stc" data-i="${i}" value="${r.maxStc.toFixed(2)}" style="width:90px;" /></td>
+                  <td class="num"><input type="number" step="0.01" min="0" max="${r.maxBstc}" class="cn-bstc" data-i="${i}" value="${r.maxBstc.toFixed(2)}" style="width:90px;" /></td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -3063,6 +3133,7 @@
           labour: Math.min(r.maxLabour, Math.max(0, parseFloat(overlay.querySelector(`.cn-labour[data-i="${i}"]`).value) || 0)),
           material: Math.min(r.maxMaterial, Math.max(0, parseFloat(overlay.querySelector(`.cn-material[data-i="${i}"]`).value) || 0)),
           stc: Math.min(r.maxStc, Math.max(0, parseFloat(overlay.querySelector(`.cn-stc[data-i="${i}"]`).value) || 0)),
+          bstc: Math.min(r.maxBstc, Math.max(0, parseFloat(overlay.querySelector(`.cn-bstc[data-i="${i}"]`).value) || 0)),
         }));
       }
       function updateTotal() {
@@ -3081,7 +3152,7 @@
         saveBtn.disabled = true;
         saveBtn.textContent = 'Creating...';
         try {
-          const claims = readValues().filter(r => r.labour + r.material + r.stc > 0.004);
+          const claims = readValues().filter(r => r.labour + r.material + r.stc + r.bstc > 0.004);
           if (!claims.length) throw new Error('Enter at least one non-zero credit amount');
 
           const { data: { session } } = await supabaseClient.auth.getSession();
@@ -3093,7 +3164,7 @@
               reason: overlay.querySelector('#cn-reason').value.trim() || null,
               refund: overlay.querySelector('#cn-refund').checked,
               refundReference: overlay.querySelector('#cn-refund-ref').value.trim() || null,
-              claims: claims.map(c => ({ costCentreId: c.cost_centre_id, labourAmount: c.labour, materialAmount: c.material, stcAmount: c.stc })),
+              claims: claims.map(c => ({ costCentreId: c.cost_centre_id, labourAmount: c.labour, materialAmount: c.material, stcAmount: c.stc, bstcAmount: c.bstc })),
             }),
           });
           const data = await res.json();
@@ -3237,6 +3308,483 @@
       });
     }
 
+    // ---------- the quote in steps (item 27) ----------
+    // Create is just client details and the proposal type (new-project.html); everything else is
+    // done here on the saved quote, one card per step, each with its own Save.
+
+    function quoteStepTicks(project, centres) {
+      const answers = project.template_answers || {};
+      const quoted = (centres || []).reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
+      return {
+        1: !!answers.info_source && missingRequiredAnswers(project.proposal_template, answers).length === 0,
+        2: project.site_visit_decision === 'not_needed' || (project.site_visit_decision === 'needed' && !!project.site_visit_done),
+        3: quoted > 0,
+        4: !!(project.sow_text || '').trim(),
+        5: ['sent', 'accepted', 'approved'].includes(project.status),
+      };
+    }
+
+    function quoteStepsBarHtml(project, centres) {
+      const ticks = quoteStepTicks(project, centres);
+      const steps = [[1, 'Pre-quote info'], [2, 'Site visit'], [3, 'Pricing'], [4, 'Scope of works'], [5, 'Send']];
+      return steps.map(([n, label]) => `<a class="btn secondary qstep-link" href="#qstep-${n}" data-step="${n}" style="font-size:13px; padding:8px 12px; ${ticks[n] ? 'border-color:var(--green);' : ''}">${ticks[n] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}${n}. ${label}</a>`).join('');
+    }
+
+    function quoteStepsPanelHtml(project, centres) {
+      const template = project.proposal_template || 'new_build';
+      const info = TEMPLATE_INFO[template] || TEMPLATE_INFO.new_build;
+      const ticks = quoteStepTicks(project, centres);
+      const stepHead = (n, title, note) => `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;"><h2 style="margin:0;" id="qstep-${n}-head">${ticks[n] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}${n}. ${title}</h2></div><p class="subtitle" style="margin:0 0 12px;">${note}</p>`;
+      const stageOptions = (selected) => `<option value="">Last stage</option>${(centres || []).map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}`;
+      const quoteUrl = `${shareOrigin()}/quote.html?token=${project.quote_token}`;
+      return `
+            <div class="settings-panel active" id="panel-quote">
+              <div class="card" style="padding:12px 16px;">
+                <div id="quote-steps-bar" style="display:flex; gap:8px; flex-wrap:wrap;">${quoteStepsBarHtml(project, centres)}</div>
+              </div>
+
+              <div class="card" id="qstep-1">
+                ${stepHead(1, 'Pre-quote information', 'What you learned on the phone, by email or on site. Change it any time. Questions marked * must be answered before the quote is sent. Not shown to the client; it shapes the scope of works and the job\'s task list.')}
+                <div class="grid cols-3" style="margin-bottom:6px;">
+                  <div>
+                    <label style="margin-top:0">Proposal type</label>
+                    <select id="qs1-template">
+                      ${['new_build', 'solar', 'battery', 'quick_estimate', 'renovation', 'service_work'].map(t => `<option value="${t}" ${t === template ? 'selected' : ''}>${{ new_build: 'New Build', solar: 'Solar Proposal', battery: 'Battery Proposal', quick_estimate: 'Quick Estimate', renovation: 'Renovation', service_work: 'Service Work' }[t]}</option>`).join('')}
+                    </select>
+                  </div>
+                </div>
+                <div id="site-inspection-note"></div>
+                <div class="grid cols-2" id="template-questions"></div>
+                <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                  <button type="button" id="qs1-save">Save answers</button>
+                  <span class="subtitle" id="qs1-missing" style="font-size:12px;"></span>
+                </div>
+                <div id="qs1-msg"></div>
+              </div>
+
+              <div class="card" id="qstep-2">
+                ${stepHead(2, 'Site visit', 'Book an inspection if the phone call left questions (roof, switchboard, battery spot), or say it is not needed and why.')}
+                <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:10px;">
+                  <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="qs2-decision" value="needed" ${project.site_visit_decision === 'needed' ? 'checked' : ''} style="width:auto;" /> Needs a site visit</label>
+                  <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="qs2-decision" value="not_needed" ${project.site_visit_decision === 'not_needed' ? 'checked' : ''} style="width:auto;" /> No site visit needed</label>
+                </div>
+                <div id="qs2-reason-wrap" style="${project.site_visit_decision === 'not_needed' ? '' : 'display:none;'}">
+                  <label style="margin-top:0">Why not</label>
+                  <input id="qs2-reason" placeholder="e.g. Standard tin roof, photos from the client are enough" value="${escapeHtml(project.site_visit_reason || '')}" />
+                </div>
+                <div id="qs2-inspection-area" style="margin-top:10px;"></div>
+                <div style="margin-top:14px;"><button type="button" id="qs2-save">Save site visit</button></div>
+                <div id="qs2-msg"></div>
+              </div>
+
+              <div class="card" id="qstep-3">
+                ${stepHead(3, 'Pricing', '<strong>All amounts ex GST.</strong> Enter labour and materials ex GST; GST is added once on the proposal\'s Investment summary. Stages, deposit, and the STC and BSTC credits.')}
+
+                <div id="pylon-card" style="${info.showPylon ? '' : 'display:none;'} margin-bottom:16px; padding:12px; background:var(--surface-2); border-radius:8px;">
+                  <label style="margin-top:0; font-weight:600;">Pylon system design</label>
+                  <p class="subtitle" style="margin:2px 0 8px;">Create the design in Pylon, paste the proposal link, and pull the equipment list so the quote names real panels, inverters and batteries.</p>
+                  <button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:6px;">Create job in Pylon &rarr;</button>
+                  <div id="pylon-create-msg"></div>
+                  <label style="margin-top:10px;">Pylon proposal link</label>
+                  <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." value="${escapeHtml(project.pylon_link || '')}" />
+                  <div class="grid cols-3" style="margin-top:10px;">
+                    <div style="grid-column: span 2;"><label>Pylon project ID (optional, for pulling system data)</label><input id="p-pylon-id" placeholder="Requires a Pylon API key set up under Settings > API Keys" value="${escapeHtml(project.pylon_project_id || '')}" /></div>
+                    <div style="display:flex; align-items:end;"><button type="button" class="secondary" id="pylon-pull-btn" style="width:100%;">Pull from Pylon</button></div>
+                  </div>
+                  <div id="pylon-msg"></div>
+                </div>
+
+                <label style="margin-top:0; font-weight:600;">Stages / cost centres</label>
+                <div class="grid cols-3" style="margin:6px 0 12px;">
+                  <div><label style="margin-top:0">Default markup %</label><input id="default-markup" type="number" step="1" value="45" /></div>
+                  <div class="stc-only" style="display:none;"><label style="margin-top:0">Default $ per STC</label><input id="default-stc-price" type="number" step="0.01" value="35" /></div>
+                  <div class="stc-only" style="display:none;"><label style="margin-top:0">Default STC zone</label><select id="default-stc-zone">${STC_ZONES.map(z => `<option value="${z.rating}" ${z.rating === 1.382 ? 'selected' : ''}>${z.label}</option>`).join('')}</select></div>
+                </div>
+                <div id="cc-rows"></div>
+                <button type="button" class="secondary" id="add-row">+ Add stage</button>
+                <button type="button" class="secondary" id="suggest-prebuilds-btn" title="Reads the scope of works and the pre-quote answers and adds prebuilds from the library to each stage, tagged for you to check">&#10024; Suggest prebuilds with AI</button>
+                <div id="suggest-prebuilds-msg"></div>
+                <p style="margin:12px 0 0; font-size:15px;">Quoted total (ex GST): <strong id="total-display">$0.00</strong></p>
+
+                <div style="margin-top:18px; padding:12px; background:var(--surface-2); border-radius:8px; ${['solar', 'battery'].includes(template) || Number(project.stc_total) > 0 || Number(project.bstc_total) > 0 ? '' : 'display:none;'}" id="credits-card">
+                  <label style="margin-top:0; font-weight:600;">STC and BSTC credits</label>
+                  <p class="subtitle" style="margin:2px 0 10px;">Two lines on the proposal, claimed with the stage picked here (blank: the last stage). Ex GST; a company client sees GST added on the proposal and the invoice. BSTCs are approved and paid by Formbay separately, so they stay separate here and on the invoice.</p>
+                  <div id="stc-credit-block">
+                    <label style="margin-top:0;">STC credit (solar)</label>
+                    <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">Type the number of STCs, or the system size and the count fills itself. A typed count wins.</p>
+                    <div class="grid cols-4">
+                      <div><label style="margin-top:0; font-size:12px;">Number of STCs</label><input id="q-stc-qty" type="number" inputmode="numeric" step="1" min="0" value="${project.stc_quantity ?? ''}" placeholder="e.g. 85" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">System size (kW)</label><input id="q-stc-kw" type="number" step="0.01" value="${project.stc_system_kw ?? (project.pylon_data?.summary?.dc_output_kw || '')}" placeholder="0.00" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">Zone rating</label><select id="q-stc-zone">${STC_ZONES.map(z => `<option value="${z.rating}" ${Number(project.stc_zone_rating || 1.382) === z.rating ? 'selected' : ''}>${z.label}</option>`).join('')}</select></div>
+                      <div><label style="margin-top:0; font-size:12px;">Install year</label><input id="q-stc-year" type="number" step="1" value="${project.stc_install_year || new Date().getFullYear()}" /></div>
+                    </div>
+                    <div class="grid cols-4" style="margin-top:6px;">
+                      <div><label style="margin-top:0; font-size:12px;">$ per STC</label><input id="q-stc-price" type="number" step="0.01" value="${project.stc_price_per_certificate ?? 35}" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">STC total ($)</label><input id="q-stc-total" type="number" step="0.01" value="${project.stc_total || ''}" placeholder="0.00" /></div>
+                      <div style="grid-column: span 2;"><label style="margin-top:0; font-size:12px;">Claimed with stage</label><select id="q-stc-stage">${stageOptions(project.stc_cost_centre_id)}</select></div>
+                    </div>
+                    <p class="subtitle" id="q-stc-calc" style="margin:6px 0 0;"></p>
+                  </div>
+                  <div id="bstc-credit-block" style="margin-top:14px; padding-top:12px; border-top:0.5px solid var(--border); ${quoteHasBattery(template, project.template_answers || {}) || Number(project.bstc_total) > 0 ? '' : 'display:none;'}">
+                    <label style="margin-top:0;">BSTC credit (battery)</label>
+                    <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">Type the number of BSTCs from Pylon or Formbay (TEops does not work out the tiered battery factor). Total is count x price.</p>
+                    <div class="grid cols-4">
+                      <div><label style="margin-top:0; font-size:12px;">Number of BSTCs</label><input id="q-bstc-qty" type="number" inputmode="numeric" step="1" min="0" value="${project.bstc_quantity ?? ''}" placeholder="e.g. 90" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">$ per BSTC</label><input id="q-bstc-price" type="number" step="0.01" value="${project.bstc_price_per_certificate ?? 35}" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">BSTC total ($)</label><input id="q-bstc-total" type="number" step="0.01" value="${project.bstc_total || ''}" placeholder="0.00" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">Claimed with stage</label><select id="q-bstc-stage">${stageOptions(project.bstc_cost_centre_id)}</select></div>
+                    </div>
+                    <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-weight:400;"><input type="checkbox" id="q-bstc-none" style="width:auto;" ${project.bstc_not_claimed ? 'checked' : ''} /> No BSTC on this quote on purpose (the ready-to-send check then passes without a count)</label>
+                  </div>
+                </div>
+
+                <div id="deposit-card" style="margin-top:18px; ${info.showDeposit ? '' : 'display:none;'}">
+                  <label style="margin-top:0; font-weight:600;">Payment schedule</label>
+                  <div style="max-width:160px;"><label style="margin-top:6px;">Deposit %</label><input id="p-deposit" type="number" step="1" value="${project.deposit_percent ?? 10}" /></div>
+                  <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:400; cursor:pointer;"><input type="checkbox" id="p-breakdown" style="width:auto; margin:0;" ${project.show_investment_breakdown ? 'checked' : ''} /> Show investment breakdown (a page after the Investment summary listing each stage's items, prebuilds by their client description, no item prices)</label>
+                  <div style="margin-top:12px;">
+                    <label style="margin-top:0">Custom milestones (optional)</label>
+                    <p class="subtitle" style="margin-bottom:8px;">Replaces the schedule shown to the client with your own named stages. Doesn't change what's invoiced when the quote's approved - that's still the Deposit % above.</p>
+                    <div id="milestone-rows"></div>
+                    <button type="button" class="secondary" id="add-milestone-btn" style="font-size:12px; padding:6px 10px;">+ Add milestone</button>
+                    <p class="subtitle" id="milestone-total-note" style="margin-top:6px;"></p>
+                  </div>
+                </div>
+                <div id="estimate-disclaimer-card" style="margin-top:14px; ${template === 'quick_estimate' ? '' : 'display:none;'}">
+                  <label style="margin-top:0; font-weight:600;">Estimate wording</label>
+                  <textarea id="p-estimate-disclaimer" style="min-height:70px;">${escapeHtml(project.estimate_disclaimer_text || '')}</textarea>
+                </div>
+                <div style="margin-top:14px;"><button type="button" id="qs3-save">Save pricing</button></div>
+                <div id="qs3-msg"></div>
+              </div>
+
+              <div class="card" id="qstep-4">
+                ${stepHead(4, 'Scope of works', 'Built from the answers, the Pylon equipment and the stages. The AI writes the scope from that plus your notes; run it again any time the answers or stages change.')}
+                <label style="margin-top:0; font-weight:600;">What the customer gets</label>
+                <div id="customer-gets" class="readout" style="white-space:pre-wrap; min-height:48px;"></div>
+
+                <label style="margin-top:14px; font-weight:600;">Write the scope of works with AI</label>
+                <textarea id="p-brief" placeholder="A few rough notes, e.g. 10 kW on the north face, hybrid inverter, 13.5 kWh battery in the garage, backup for fridge and lights">${escapeHtml(project.sow_brief || '')}</textarea>
+                <label>Supporting documents (optional)</label>
+                <div id="sow-doc-list" style="margin-bottom:8px;"></div>
+                <input type="file" id="sow-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple />
+                <div id="sow-doc-msg"></div>
+                <label style="margin-top:12px;">Scope of works style</label>
+                <div style="display:flex; gap:16px; margin-bottom:4px; flex-wrap:wrap;">
+                  <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="sow-style" value="story" checked style="width:auto;" /> Story-flowing (residential homeowners)</label>
+                  <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="sow-style" value="structured" style="width:auto;" /> Structured &amp; numbered (commercial builders)</label>
+                </div>
+                <button type="button" id="generate-scope-btn" style="margin-top:10px;">Generate scope of works with AI</button>
+                <div id="generate-msg"></div>
+
+                <label style="margin-top:16px; font-weight:600;">Scope of works document</label>
+                <p class="subtitle" style="margin:2px 0 6px;">Shown as its own section in the proposal, above the pricing table.</p>
+                <textarea id="p-sow" style="min-height:240px;" placeholder="Paste your scope of works here, or generate it above...">${escapeHtml(project.sow_text || '')}</textarea>
+
+                <label style="margin-top:14px;">Proposal subtitle (optional)</label>
+                <input id="p-subtitle" placeholder="e.g. Grid-Connected Solar Photovoltaic System" value="${escapeHtml(project.proposal_subtitle || '')}" />
+
+                <label style="margin-top:14px; font-weight:600;">What it will look like</label>
+                <p class="subtitle" style="margin:2px 0 6px;">Reference photos, renders, or similar completed jobs.</p>
+                <div id="reference-thumbs" style="margin-bottom:10px;"></div>
+                <input type="file" id="reference-file" accept="image/*" multiple />
+                <div id="reference-msg"></div>
+
+                <label style="margin-top:14px; font-weight:600;">Terms and conditions</label>
+                <textarea id="p-terms" style="min-height:140px;">${escapeHtml(project.terms_text || '')}</textarea>
+                <div style="margin-top:14px;"><button type="button" id="qs4-save">Save scope of works</button></div>
+                <div id="qs4-msg"></div>
+              </div>
+
+              <div class="card" id="qstep-5">
+                ${stepHead(5, 'Send', 'The ready-to-send check runs here and again when you email the quote or move it to Quote Sent. Admin and Finance can send anyway with a reason.')}
+                <button type="button" class="secondary" id="compliance-check-btn">Check now</button>
+                <div id="compliance-check-result" style="margin-top:12px;"></div>
+                <div style="margin-top:16px; ${['solar', 'battery'].includes(template) ? '' : 'display:none;'}">
+                  <label style="margin-top:0; font-weight:600;">Documents to gather from the customer</label>
+                  <p class="subtitle" style="margin:2px 0 8px;">Work through these with the customer - answers and photos save as you go.</p>
+                  <div id="quote-doc-checklist"><p class="subtitle">Loading...</p></div>
+                </div>
+                <div style="margin-top:18px; padding-top:14px; border-top:0.5px solid var(--border);">
+                  <label style="margin-top:0; font-weight:600;">Client quote link</label>
+                  <p class="subtitle" style="margin:2px 0 8px;">Share this link with the client, or email them the quote directly.</p>
+                  <input readonly value="${quoteUrl}" style="margin-bottom:10px;" onclick="this.select()" />
+                  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <button type="button" id="email-quote-btn">Email quote to client</button>
+                    ${project.quote_pdf_path ? `<button type="button" class="secondary" id="view-quote-pdf-btn">View PDF</button>` : ''}
+                    <button type="button" class="secondary" id="generate-quote-pdf-btn" style="${project.quote_pdf_path ? 'font-size:12px; padding:6px 10px;' : ''}">${project.quote_pdf_path ? 'Regenerate PDF' : 'Generate PDF'}</button>
+                    ${project.quote_pdf_generated_at ? `<span class="subtitle" style="font-size:11px;">Generated ${new Date(project.quote_pdf_generated_at).toLocaleString('en-AU')}</span>` : ''}
+                  </div>
+                  <div id="quote-pdf-msg">${project.quote_pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${escapeHtml(project.quote_pdf_error)}</div>` : ''}</div>
+                  ${project.status === 'sent' ? `<p class="subtitle" style="margin-top:10px;">Sent${project.sent_at ? ' ' + new Date(project.sent_at).toLocaleDateString('en-AU') : ''}${project.valid_until ? ', valid until ' + new Date(project.valid_until + 'T00:00:00').toLocaleDateString('en-AU') : ''}.</p>` : ''}
+                </div>
+              </div>
+            </div>`;
+    }
+
+    async function wireQuoteSteps(project) {
+      try {
+        if (!RATE_TIERS.length) {
+          const { data: tiersData } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
+          RATE_TIERS = tiersData || [];
+        }
+        if (!Object.keys(companySettings).length) {
+          const { data: settingsRow } = await supabaseClient.from('company_settings')
+            .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
+          companySettings = settingsRow || {};
+        }
+        currentTemplate = project.proposal_template || 'new_build';
+        templateAnswers = project.template_answers || {};
+        lastPylonData = project.pylon_data || null;
+        pylonKw = project.pylon_data?.summary?.dc_output_kw || null;
+        sowDocs = [];
+        referencePhotos = (project.reference_photos || []).map(p => p.url || p);
+        const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
+        const refreshBar = () => { const bar = document.getElementById('quote-steps-bar'); if (bar) bar.innerHTML = quoteStepsBarHtml(project, project.cost_centres || []); };
+        const say = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+        const busy = (btn, on, label) => { btn.disabled = on; btn.textContent = on ? 'Saving...' : label; };
+
+        // ----- step 1: pre-quote information -----
+        const qEl = document.getElementById('template-questions');
+        renderTemplateQuestions(qEl, currentTemplate, templateAnswers);
+        const showMissing = () => {
+          const miss = missingRequiredAnswers(currentTemplate, Object.assign({}, templateAnswers, readTemplateAnswers(qEl)));
+          say('qs1-missing', miss.length ? `${miss.length} required answer${miss.length === 1 ? '' : 's'} still blank` : 'All required answers in.');
+        };
+        showMissing();
+        qEl.addEventListener('change', (e) => {
+          const el = e.target.closest('.tq-input');
+          if (!el) return;
+          Object.assign(templateAnswers, readTemplateAnswers(qEl));
+          if (el.dataset.qid === 'with_battery') {
+            if (!templateAnswers.with_battery) delete templateAnswers.with_battery;
+            renderTemplateQuestions(qEl, currentTemplate, templateAnswers);
+            const bb = document.getElementById('bstc-credit-block');
+            if (bb) bb.style.display = quoteHasBattery(currentTemplate, templateAnswers) || Number(project.bstc_total) > 0 ? '' : 'none';
+          }
+          showMissing();
+          renderCustomerGets();
+        });
+        document.getElementById('qs1-template').addEventListener('change', (e) => {
+          currentTemplate = e.target.value;
+          Object.assign(templateAnswers, readTemplateAnswers(qEl));
+          renderTemplateQuestions(qEl, currentTemplate, templateAnswers);
+          showMissing();
+        });
+        showSiteInspectionNote(project);
+        document.getElementById('qs1-save').addEventListener('click', async () => {
+          const btn = document.getElementById('qs1-save');
+          busy(btn, true, 'Save answers');
+          try {
+            const answers = Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
+            // blanked answers drop out
+            Object.keys(answers).forEach(k => { if (!String(answers[k] ?? '').trim()) delete answers[k]; });
+            const changedTemplate = currentTemplate !== (project.proposal_template || 'new_build');
+            const { error } = await supabaseClient.from('projects').update({ template_answers: answers, proposal_template: currentTemplate }).eq('id', project.id);
+            if (error) throw error;
+            project.template_answers = answers;
+            templateAnswers = answers;
+            showToast('Answers saved.');
+            if (changedTemplate) { project.proposal_template = currentTemplate; const refreshed = await loadProject(); if (refreshed) render(refreshed, true); return; }
+            const h = document.getElementById('qstep-1-head');
+            if (h) h.innerHTML = `${quoteStepTicks(project, centres)[1] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}1. Pre-quote information`;
+            refreshBar();
+          } catch (err) {
+            say('qs1-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
+          } finally { busy(btn, false, 'Save answers'); }
+        });
+
+        // ----- step 2: site visit -----
+        const inspArea = document.getElementById('qs2-inspection-area');
+        async function refreshInspectionArea() {
+          const insp = await findLinkedSiteInspection(project);
+          project.site_visit_done = !!(insp && insp.status === 'completed');
+          const decision = (document.querySelector('input[name="qs2-decision"]:checked') || {}).value || project.site_visit_decision;
+          if (insp) {
+            inspArea.innerHTML = `<a class="link-quiet" href="/site-inspection.html?id=${insp.id}">Site inspection - <span class="badge ${insp.status === 'completed' ? 'accepted' : 'sent'}">${insp.status.replace('_', ' ')}</span> &rarr;</a>${insp.status === 'completed' ? ' <span class="subtitle">Copy what it found into the pre-quote answers above.</span>' : ''}`;
+          } else if (decision === 'needed') {
+            inspArea.innerHTML = `<button type="button" class="secondary" id="qs2-schedule-btn" style="font-size:12px; padding:6px 10px;">Schedule inspection</button>`;
+            inspArea.querySelector('#qs2-schedule-btn').addEventListener('click', () => openScheduleInspectionPanel(project, 'project', () => { refreshInspectionArea(); refreshBar(); }));
+          } else {
+            inspArea.innerHTML = '';
+          }
+          refreshBar();
+        }
+        document.querySelectorAll('input[name="qs2-decision"]').forEach(r => r.addEventListener('change', () => {
+          document.getElementById('qs2-reason-wrap').style.display = r.value === 'not_needed' && r.checked ? '' : 'none';
+          refreshInspectionArea();
+        }));
+        refreshInspectionArea();
+        document.getElementById('qs2-save').addEventListener('click', async () => {
+          const btn = document.getElementById('qs2-save');
+          const decision = (document.querySelector('input[name="qs2-decision"]:checked') || {}).value || null;
+          if (!decision) { say('qs2-msg', `<div class="error-box">Pick one: needs a site visit, or not needed.</div>`); return; }
+          busy(btn, true, 'Save site visit');
+          try {
+            const reason = decision === 'not_needed' ? (document.getElementById('qs2-reason').value.trim() || null) : null;
+            const { error } = await supabaseClient.from('projects').update({ site_visit_decision: decision, site_visit_reason: reason, needs_site_visit: decision === 'needed' }).eq('id', project.id);
+            if (error) throw error;
+            project.site_visit_decision = decision; project.site_visit_reason = reason; project.needs_site_visit = decision === 'needed';
+            showToast('Saved.');
+            say('qs2-msg', '');
+            await refreshInspectionArea();
+          } catch (err) {
+            say('qs2-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
+          } finally { busy(btn, false, 'Save site visit'); }
+        });
+
+        // ----- step 3: pricing -----
+        centres.forEach(stage => {
+          addRow({
+            id: stage.id,
+            name: stage.name, description: stage.description, markup_percent: stage.markup_percent, stc_total: stage.stc_total || 0,
+            stc_quantity: stage.stc_quantity, stc_system_kw: stage.stc_system_kw, stc_zone_rating: stage.stc_zone_rating,
+            stc_install_year: stage.stc_install_year, stc_price_per_certificate: stage.stc_price_per_certificate,
+            lineItems: (stage.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order)
+              .map(li => ({
+                id: li.id, description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id,
+                prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description, prebuild_base_quantity: li.prebuild_base_quantity,
+                ai_suggested: li.ai_suggested,
+              })),
+            photoGroups: (stage.cost_centre_photo_groups || []).slice().sort((a, b) => a.sort_order - b.sort_order)
+              .map(pg => ({ description: pg.description, photos: (pg.photos || []).map(p => p.url || p) })),
+          });
+        });
+        if (!centres.length) addRow({ name: { solar: 'Solar system', battery: 'Battery system' }[currentTemplate] || 'Stage 1' });
+        updateEditTotal();
+        document.getElementById('add-row').addEventListener('click', () => addRow());
+        document.getElementById('suggest-prebuilds-btn').addEventListener('click', () => {
+          Object.assign(templateAnswers, readTemplateAnswers(qEl));
+          suggestStagePrebuilds({
+            projectId: project.id, template: currentTemplate,
+            sow: document.getElementById('p-sow').value, answersText: templateAnswersText(currentTemplate, templateAnswers),
+            btnEl: document.getElementById('suggest-prebuilds-btn'), msgEl: document.getElementById('suggest-prebuilds-msg'),
+          });
+        });
+        wirePylonCard(project);
+        wireMilestoneEditor(project);
+
+        // credits: STC count from the size calculator unless typed; totals = count x price
+        const stcCalc = (fromSize) => {
+          const qtyEl = document.getElementById('q-stc-qty');
+          const kw = parseFloat(document.getElementById('q-stc-kw').value) || 0;
+          const zone = parseFloat(document.getElementById('q-stc-zone').value) || 0;
+          const year = parseInt(document.getElementById('q-stc-year').value, 10) || new Date().getFullYear();
+          const price = parseFloat(document.getElementById('q-stc-price').value) || 0;
+          if (fromSize || !qtyEl.value) { const calc = calculateStcQuantity({ kw, zoneRating: zone, installYear: year }); if (calc) qtyEl.value = calc; }
+          const qty = parseFloat(qtyEl.value) || 0;
+          document.getElementById('q-stc-calc').textContent = qty ? `= ${qty} STCs x ${money(price)} = ${money(qty * price)}` : '';
+          if (qty) document.getElementById('q-stc-total').value = (qty * price).toFixed(2);
+        };
+        ['q-stc-kw', 'q-stc-zone', 'q-stc-year'].forEach(id => document.getElementById(id).addEventListener('input', () => stcCalc(true)));
+        ['q-stc-qty', 'q-stc-price'].forEach(id => document.getElementById(id).addEventListener('input', () => stcCalc(false)));
+        if (!project.stc_quantity && document.getElementById('q-stc-kw').value) stcCalc(true); else stcCalc(false);
+        const bstcCalc = () => {
+          const qty = parseFloat(document.getElementById('q-bstc-qty').value) || 0;
+          const price = parseFloat(document.getElementById('q-bstc-price').value) || 0;
+          if (qty) document.getElementById('q-bstc-total').value = (qty * price).toFixed(2);
+        };
+        ['q-bstc-qty', 'q-bstc-price'].forEach(id => document.getElementById(id).addEventListener('input', bstcCalc));
+
+        document.getElementById('qs3-save').addEventListener('click', async () => {
+          const btn = document.getElementById('qs3-save');
+          const msg = document.getElementById('qs3-msg');
+          msg.innerHTML = '';
+          busy(btn, true, 'Save pricing');
+          try {
+            const stagesPayload = readStagesPayload();
+            const existingCentres = project.cost_centres || [];
+            const keptIds = stagesPayload.map(st => st.id).filter(Boolean);
+            const removedCentres = existingCentres.filter(c => !keptIds.includes(c.id));
+            for (const centre of removedCentres) {
+              const reasons = await checkCostCentreHasActivity(centre);
+              if (reasons.length) throw new Error(`Can't remove "${centre.name}" - it ${reasons.join(', ')}. Adjust its line items instead of deleting the stage, or add it back.`);
+            }
+            await applyStagesPayload(project, stagesPayload, removedCentres);
+            await logStageChanges(project.id, existingCentres, stagesPayload);
+
+            const num = (id) => { const v = parseFloat(document.getElementById(id).value); return Number.isFinite(v) ? v : null; };
+            const fields = {
+              deposit_percent: parseFloat(document.getElementById('p-deposit').value) || 0,
+              show_investment_breakdown: document.getElementById('p-breakdown').checked,
+              pylon_link: document.getElementById('p-pylon-link').value.trim(),
+              pylon_project_id: document.getElementById('p-pylon-id').value.trim(),
+              estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
+              stc_quantity: num('q-stc-qty'), stc_system_kw: num('q-stc-kw'), stc_zone_rating: num('q-stc-zone') || 1.382,
+              stc_install_year: parseInt(document.getElementById('q-stc-year').value, 10) || null,
+              stc_price_per_certificate: num('q-stc-price'), stc_total: num('q-stc-total') || 0,
+              stc_cost_centre_id: document.getElementById('q-stc-stage').value || null,
+              bstc_quantity: num('q-bstc-qty'), bstc_price_per_certificate: num('q-bstc-price'), bstc_total: num('q-bstc-total') || 0,
+              bstc_cost_centre_id: document.getElementById('q-bstc-stage').value || null,
+              bstc_not_claimed: document.getElementById('q-bstc-none').checked,
+            };
+            const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
+            if (error) throw error;
+
+            await supabaseClient.from('payment_milestones').delete().eq('project_id', project.id);
+            const milestonesPayload = readMilestones();
+            if (milestonesPayload.length) {
+              const { error: msErr } = await supabaseClient.from('payment_milestones').insert(milestonesPayload.map(m => ({ ...m, project_id: project.id })));
+              if (msErr) throw msErr;
+            }
+            await logActivity('project', project.id, 'stage_updated', 'Quote pricing updated');
+            showToast('Pricing saved.');
+            if (stagesPayload.some(st => st.quoted_amount > 0)) autoGenerateQuotePdf(project);
+            const refreshed = await loadProject();
+            if (refreshed) { render(refreshed, true); const t = document.querySelector('#job-tabs .settings-tab[data-panel="quote"]'); if (t) t.click(); const el = document.getElementById('qstep-3'); if (el) el.scrollIntoView({ block: 'start' }); }
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+            busy(btn, false, 'Save pricing');
+          }
+        });
+
+        // ----- step 4: scope of works -----
+        renderEditSowDocList();
+        renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
+        wireScopeTools(project);
+        renderCustomerGets();
+        document.getElementById('qs4-save').addEventListener('click', async () => {
+          const btn = document.getElementById('qs4-save');
+          busy(btn, true, 'Save scope of works');
+          try {
+            const fields = {
+              sow_text: document.getElementById('p-sow').value,
+              sow_brief: document.getElementById('p-brief').value.trim(),
+              proposal_subtitle: document.getElementById('p-subtitle').value.trim(),
+              terms_text: document.getElementById('p-terms').value,
+              reference_photos: referencePhotos.map(url => ({ url })),
+            };
+            const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
+            if (error) throw error;
+            Object.assign(project, fields);
+            showToast('Scope of works saved.');
+            if (fields.sow_text.trim()) { try { await requestInstallerSummary(project.id, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
+            if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
+            const h = document.getElementById('qstep-4-head');
+            if (h) h.innerHTML = `${fields.sow_text.trim() ? '<span style="color:var(--green);">&#10003;</span> ' : ''}4. Scope of works`;
+            refreshBar();
+            say('qs4-msg', '');
+          } catch (err) {
+            say('qs4-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
+          } finally { busy(btn, false, 'Save scope of works'); }
+        });
+
+        // ----- step 5: send ----- (the email and PDF buttons are wired with the rest of the page)
+        wireComplianceCard(project);
+
+        // step links scroll to their card
+        document.querySelectorAll('.qstep-link').forEach(a => a.addEventListener('click', (e) => {
+          e.preventDefault();
+          const el = document.getElementById(`qstep-${a.dataset.step}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }));
+      } catch (err) {
+        console.error('wireQuoteSteps failed:', err);
+        const bar = document.getElementById('quote-steps-bar');
+        if (bar) bar.insertAdjacentHTML('afterend', `<div class="error-box">The quote steps hit an error setting up: ${escapeHtml(friendlyError(err))}</div>`);
+      }
+    }
+
     function render(project, pricingVisible) {
       const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const quoted = centres.reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
@@ -3289,6 +3837,9 @@
       // A quote that's been approved is a frozen historical record - the
       // job it became is a separate project, edited from there instead.
       const isFrozenQuote = !project.job_number && project.status === 'approved';
+      // A quote still being built runs in steps (item 27): Pre-quote info, Site visit, Pricing,
+      // Scope of works, Send. Its own tab, open by default.
+      const isStepQuote = !project.job_number && !isFrozenQuote && pricingVisible && !editMode;
       // Skipped the quote/estimate step entirely (dashboard.html's
       // "+ New job (no quote)") - quoted_amount is 0 on its one cost
       // centre, so every quote/estimate/% figure above is meaningless for
@@ -3342,6 +3893,7 @@
       // Item 32: one list of job tabs. Field staff (no pricing) get Summary, Site
       // Photos, Documents and Feed first; office order is unchanged.
       const tabDefs = [
+        { panel: 'quote', label: 'Quote', show: isStepQuote },
         { panel: 'summary', label: 'Summary', show: true },
         { panel: 'costcentres', label: 'Cost Centres', show: true },
         { panel: 'pos', label: 'Purchase Orders', show: !!project.job_number && !editMode },
@@ -3388,13 +3940,15 @@
           <div id="job-search-results"></div>
         </div>` : ''}
         <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
-          ${tabsInOrder.filter(d => d.show).map(d => `<button class="settings-tab${d.panel === 'summary' ? ' active' : ''}" data-panel="${d.panel}">${d.label}</button>`).join('')}
+          ${tabsInOrder.filter(d => d.show).map(d => `<button class="settings-tab${d.panel === (isStepQuote ? 'quote' : 'summary') ? ' active' : ''}" data-panel="${d.panel}">${d.label}</button>`).join('')}
         </div>
 
         <div class="job-tab-layout">
           <div class="job-tab-main">
 
-            <div class="settings-panel active${!editMode ? ' job-card-grid' : ''}" id="panel-summary">
+            ${isStepQuote ? quoteStepsPanelHtml(project, centres) : ''}
+
+            <div class="settings-panel${isStepQuote ? '' : ' active'}${!editMode ? ' job-card-grid' : ''}" id="panel-summary">
               ${!editMode ? '<div id="clock-here-card"></div>' : ''}
               ${!editMode ? `
               <div class="card">
@@ -3962,7 +4516,7 @@
               </div>`;
               })()}
 
-              ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) ? `
+              ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) && !isStepQuote ? `
               <div class="card">
                 <h2>Client quote link</h2>
                 <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
@@ -4374,6 +4928,7 @@
 
       const editToggleBtn = document.getElementById('edit-toggle-btn');
       if (editToggleBtn) editToggleBtn.addEventListener('click', () => enterEditMode(project));
+      if (document.getElementById('panel-quote')) wireQuoteSteps(project);
 
       document.getElementById('toggle-line-items-btn').addEventListener('click', (e) => {
         // Show or hide the rows in place: no re-render, so search text, scroll and unsaved notes stay.
@@ -4530,7 +5085,7 @@
             if (msErr) throw msErr;
           }
 
-          window.location.href = `/new-project.html?id=${newProject.id}`;
+          window.location.href = `/project.html?id=${newProject.id}&tab=quote`;
         } catch (err) {
           document.getElementById('action-msg').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           btn.disabled = false;
@@ -5085,14 +5640,17 @@
       if (r.error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(r.error))}</div>`; return; }
       jobStcSettings = s.data || { stc_expected_sale_price: 39.25, stc_fee_per_certificate: 1 };
       jobStcRows = r.data || [];
-      const quoteCount = centres.reduce((n, c) => n + stcCountForStage(c), 0);
+      // The quote's own counts (item 27), else worked back from the stages for older jobs.
+      const quoteCount = Number(project.stc_quantity) > 0 ? Math.round(Number(project.stc_quantity)) : centres.reduce((n, c) => n + stcCountForStage(c), 0);
+      const quoteBstcCount = Number(project.bstc_quantity) > 0 ? Math.round(Number(project.bstc_quantity)) : 0;
+      const quoteLine = [quoteCount ? `${quoteCount} STCs` : '', quoteBstcCount ? `${quoteBstcCount} BSTCs` : ''].filter(Boolean).join(' and ');
       const sm8Box = sm8StcsBox(project, centres);
       const wireSm8 = () => el.querySelectorAll('.job-stc-sm8-add').forEach(b => b.addEventListener('click', () => {
         const x = project.sm8_stcs[Number(b.dataset.i)];
         openJobStcForm(project, centres, null, { stc_type: x.type, stc_count: x.count, booked_price: x.price, notes: `From ServiceM8 job #${project.sm8_job_number || ''}: ${x.label || ''}`.trim() });
       }));
       if (!jobStcRows.length) {
-        el.innerHTML = `${sm8Box}<p class="subtitle">No STCs recorded on this job yet.${quoteCount ? ` The quote credited ${quoteCount} STCs; press + Add STCs to start tracking them.` : ''}</p><div id="job-stc-form"></div>`;
+        el.innerHTML = `${sm8Box}<p class="subtitle">No STCs recorded on this job yet.${quoteLine ? ` The quote credited ${quoteLine}; press + Add STCs to start tracking them (one row for the solar STCs, one for the battery BSTCs).` : ''}</p><div id="job-stc-form"></div>`;
         wireSm8();
         return;
       }
@@ -5121,7 +5679,7 @@
           <tbody>${body}</tbody>
           ${jobStcRows.length > 1 ? `<tfoot><tr><td colspan="2"><strong>Total</strong></td><td class="num">${tot.count}</td><td class="num">${money(tot.booked)}</td><td colspan="3"></td><td class="num">${money(tot.net)}</td><td class="num">${money(tot.gain)}</td><td></td></tr></tfoot>` : ''}
         </table>
-        ${quoteCount && quoteCount !== tot.count ? `<p class="subtitle" style="margin-top:8px;">The quote credited ${quoteCount} STCs; ${tot.count} are recorded here.</p>` : ''}
+        ${quoteLine && (quoteCount + quoteBstcCount) !== tot.count ? `<p class="subtitle" style="margin-top:8px;">The quote credited ${quoteLine}; ${tot.count} are recorded here.</p>` : ''}
         <div id="job-stc-form"></div>`;
       el.querySelectorAll('.job-stc-edit').forEach(b => b.addEventListener('click', () => openJobStcForm(project, centres, jobStcRows.find(x => x.id === b.dataset.id))));
       wireSm8();
@@ -5138,7 +5696,7 @@
       const labels = { pv: 'solar STCs', bstc: 'battery STCs', swh: 'hot water STCs' };
       const pending = list.map((x, i) => ({ ...x, i, recorded: jobStcRows.some(r => r.stc_type === x.type) })).filter(x => !x.recorded);
       const sm8Total = list.reduce((s, x) => s + (Number(x.total) || 0), 0);
-      const stageCredit = centres.reduce((s, c) => s + (Number(c.stc_total) || 0), 0);
+      const stageCredit = (Number(project.stc_total) || 0) + (Number(project.bstc_total) || 0) || centres.reduce((s, c) => s + (Number(c.stc_total) || 0), 0);
       const creditDone = stageCredit >= sm8Total - 0.01;
       if (!pending.length && creditDone) return '';
       return `
@@ -5156,10 +5714,11 @@
     function openJobStcForm(project, centres, row, prefill = null) {
       const holder = document.getElementById('job-stc-form');
       if (!holder) return;
-      const quoteCount = centres.reduce((n, c) => n + stcCountForStage(c), 0);
-      const quotePrice = (centres.find(c => Number(c.stc_price_per_certificate) > 0) || {}).stc_price_per_certificate || 35;
+      const quoteCount = Number(project.stc_quantity) > 0 ? Math.round(Number(project.stc_quantity)) : centres.reduce((n, c) => n + stcCountForStage(c), 0);
+      const quotePrice = Number(project.stc_price_per_certificate) > 0 ? Number(project.stc_price_per_certificate) : ((centres.find(c => Number(c.stc_price_per_certificate) > 0) || {}).stc_price_per_certificate || 35);
       const paid = !!(row && (row.formbay_payment_advice_lines || []).length);
-      const v = row || { stc_type: 'pv', stc_count: jobStcRows.length ? '' : (quoteCount || ''), booked_price: quotePrice, status: project.formbay_lodgement_status || 'not_lodged', formbay_job_id: project.formbay_lodgement_id || '', ...(prefill || {}) };
+      const bstcOffered = Number(project.bstc_quantity) > 0 && jobStcRows.some(r => r.stc_type === 'pv') && !jobStcRows.some(r => r.stc_type === 'battery');
+      const v = row || { stc_type: bstcOffered ? 'battery' : 'pv', stc_count: bstcOffered ? Math.round(Number(project.bstc_quantity)) : (jobStcRows.length ? '' : (quoteCount || '')), booked_price: bstcOffered ? (Number(project.bstc_price_per_certificate) || quotePrice) : quotePrice, status: project.formbay_lodgement_status || 'not_lodged', formbay_job_id: project.formbay_lodgement_id || '', ...(prefill || {}) };
       holder.innerHTML = `
         <div style="margin-top:14px; padding:14px; background:var(--surface-2); border-radius:8px;">
           <h3 style="margin:0 0 8px;">${row ? 'Edit STCs' : 'Add STCs'}</h3>
