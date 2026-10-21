@@ -551,7 +551,7 @@ Built 19 Oct 2026, migration 20261104020000. Detail in `docs/PROJECT_SPEC.md` A3
 
 Full review, bug list, gaps and the four-delivery plan are in `docs/PO_REVIEW.md`. In short: delivery 1 fixes the PO, bill and stock rules (bill save never touches stock, Close is the approval, pay-on date, mark paid and a pay batch, one server function for every stock count change); delivery 2 shows bills and their lines in red on the PO with Add to PO and Query supplier, and lets an open PO fill from the invoice; delivery 3 adds Used stock on My Day and the clock-out prompt, adding a missing part with "Needs a price", and the adjustment history on Stock; delivery 4 is the tools and equipment register (Tools PO, any PO line marked as a tool, serial / photo / receipt over $500). Tools register detail from item 1 moves there when built. Owner's answers to the 10 questions are in `docs/PO_REVIEW.md`. Parked for later: returns to supplier and credit notes; usage-based consumable depletion (AI suggests pack use from job materials and prebuild ratios, a person confirms) once a few months of job data exist.
 
-## 23. Investment breakdown page on proposals (planned 21 Oct 2026, waiting on owner's yes)
+## 23. Investment breakdown page on proposals (built 21 Oct 2026, migration 20261114000000)
 
 Owner's ask: a toggle on the quote, default off, that adds an "Investment breakdown" page straight after the Investment summary listing each stage's line items; a prebuild shows as its client description, never its parts.
 
@@ -562,4 +562,6 @@ Plan:
 4. No line prices on the page: 4 of 12 priced stages have a hand-set stage price that differs from the sum of their lines, so line prices would not add up for the client. The click-to-open stage lines on the web summary already show line prices; the plan leaves that as is unless the owner says otherwise.
 5. Variation approval pages and quick estimates: no breakdown.
 
-Also found (same delivery if the owner agrees): Jasper's own My inbox has never finished a Gmail history page (last synced never), the same one-by-one fault fixed for sales@ on 20 Oct. Fix: the personal sync uses the sales@ page logic (known mail ruled out in one query, drafts skipped, 4 at a time).
+Built as planned (points 1 to 5), detail in `docs/PROJECT_SPEC.md` A22.
+
+Also found and fixed in the same delivery: Jasper's own My inbox has never finished a Gmail history page (last synced never), the same one-by-one fault fixed for sales@ on 20 Oct. Fix: the personal sync uses the sales@ page logic (known mail ruled out in one query, drafts skipped, 4 at a time).

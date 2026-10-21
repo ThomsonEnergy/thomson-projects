@@ -895,6 +895,7 @@
         <div class="card" id="deposit-card">
           <h2>Payment schedule</h2>
           <div style="max-width:160px;"><label style="margin-top:0">Deposit %</label><input id="p-deposit" type="number" step="1" value="10" /></div>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:400; cursor:pointer;"><input type="checkbox" id="p-breakdown" style="width:auto; margin:0;" /> Show investment breakdown (a page after the Investment summary listing each stage's items, prebuilds by their client description, no item prices)</label>
           <div style="margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border);">
             <label style="margin-top:0">Custom milestones (optional)</label>
             <p class="subtitle" style="margin-bottom:8px;">Replaces the schedule shown to the client above with your own named stages - e.g. "10% deposit, 40% on ordering materials, 20% on booking install day, 30% on commissioning". Doesn't change what's automatically invoiced when the quote's approved - that's still the Deposit % above.</p>
@@ -1224,6 +1225,7 @@
         document.getElementById('p-sow').value = project.sow_text || '';
         document.getElementById('p-terms').value = project.terms_text || '';
         document.getElementById('p-deposit').value = project.deposit_percent;
+        document.getElementById('p-breakdown').checked = !!project.show_investment_breakdown;
         document.getElementById('p-pylon-link').value = project.pylon_link || '';
         document.getElementById('p-pylon-id').value = project.pylon_project_id || '';
 
@@ -1476,6 +1478,7 @@
         const proposal_subtitle = document.getElementById('p-subtitle').value.trim();
         const terms_text = document.getElementById('p-terms').value;
         const deposit_percent = parseFloat(document.getElementById('p-deposit').value) || 0;
+        const show_investment_breakdown = document.getElementById('p-breakdown').checked;
         const pylon_link = document.getElementById('p-pylon-link').value.trim();
         const pylon_project_id = document.getElementById('p-pylon-id').value.trim();
 
@@ -1507,7 +1510,7 @@
 
           const projectFields = {
             name, client_id: clientId, client_name, client_email, client_phone, client_address, client_site_id, notes,
-            sow_text, proposal_subtitle, terms_text, deposit_percent, pylon_link, pylon_project_id,
+            sow_text, proposal_subtitle, terms_text, deposit_percent, show_investment_breakdown, pylon_link, pylon_project_id,
             reference_photos: referencePhotos.map(url => ({ url })),
             cover_photos: coverPhotos,
             proposal_template: currentTemplate,

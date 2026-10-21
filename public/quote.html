@@ -156,6 +156,13 @@
   .qtable.ps td { padding: 7px 8px 7px 0; font-size: 12.5px; }
   .note-line.ps { font-size: 11px; margin-top: 8px; }
 
+  /* Investment breakdown: one block per stage, compact rows, the stage price as the last row */
+  .sec-title.bd { margin: 18px 0 2px; font-size: 15px; }
+  .qtable.bd th { font-size: 12px; padding: 4px 8px 5px 0; }
+  .qtable.bd td { padding: 5px 8px 5px 0; font-size: 12px; }
+  .qtable.bd .sub td { font-weight: 600; border-bottom: 2px solid var(--q-ink); }
+  .breakdown .bd-stage { break-inside: avoid; }
+
   .pg.invest { padding-top: 0; }
   .invest-top { background: #000; color: #fff; margin: 0 -64px 34px; padding: 48px 64px 44px; position: relative; }
   .invest-top .pg-head { margin-bottom: 36px; }
@@ -782,6 +789,32 @@
           </div>
         </section>`;
 
+      // 4b. Investment breakdown (a tick box on the quote, off by default): each stage's items,
+      // description and quantity only. Prebuilds come from get_quote_by_token as one line with
+      // their client description. Stage prices stay as the summary shows them (a hand-set stage
+      // price does not always equal its items, so item prices are not shown). Not on variation
+      // pages or quick estimates. Long lists carry on over extra sheets (paginateToA4).
+      const showBreakdown = !!project.show_investment_breakdown && !vInfo && template !== 'quick_estimate'
+        && centres.some(c => (c.line_items || []).length);
+      const breakdownHtml = showBreakdown ? `
+        <section class="pg">
+          ${slabsSvg('light')}
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">Investment<br>breakdown</h1>
+            <div class="rows breakdown">${centres.filter(c => (c.line_items || []).length).map(c => `
+              <div class="bd-stage">
+                <div class="sec-title bd">${esc(c.name)}</div>
+                <table class="qtable bd split">
+                  <thead><tr><th>Item</th><th class="num">Qty</th></tr></thead>
+                  <tbody>${c.line_items.map(li => `<tr><td>${esc(li.description)}</td><td class="num">${c.is_variation ? '' : fmtQty(li.quantity, li.item_type)}</td></tr>`).join('')}
+                  <tr class="sub"><td>${esc(c.name)}${c.is_variation ? ' (variation)' : ''}, ex GST</td><td class="num">${money(c.quoted_amount)}</td></tr></tbody>
+                </table>
+              </div>`).join('')}</div>
+            <p class="note-line">Quantities are what the price above covers. Prebuilt assemblies are listed as one item.</p>
+          </div>
+        </section>` : '';
+
       // 5. Photos (only when the quote has its own)
       const stagePhotosHtml = centres.some(c => (c.photo_groups || []).length) ? centres.filter(c => (c.photo_groups || []).length).map(c => `
         <div class="sec-title" style="margin-top:22px;">${esc(c.name)}</div>
@@ -948,7 +981,7 @@
       // original quote rather than repeating it.
       content.innerHTML = vInfo
         ? coverHtml + variationPageHtml
-        : coverHtml + introHtml + scopeHtml + investHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
+        : coverHtml + introHtml + scopeHtml + investHtml + breakdownHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
 
       content.querySelectorAll('.stage-summary-row').forEach(row => {
         row.addEventListener('click', () => {
@@ -1039,10 +1072,16 @@
       const takeLast = (body) => {
         const last = body.lastElementChild;
         if (!last || last.tagName === 'H1') return null;
-        // a block kept whole (the payment schedule and approve link) that is on its own and still too tall for a
-        // sheet is opened up, so its table can carry on over the page instead
-        if (last.classList.contains('keep') && body.children.length < 2) {
+        // a block kept whole (the payment schedule and approve link, a breakdown stage) that is on its
+        // own under the title and still too tall for a sheet is opened up, so its table can carry on
+        // over the page instead of leaving the title alone on a sheet
+        const alone = body.children.length < 2 || (body.children.length === 2 && body.firstElementChild.tagName === 'H1');
+        if (last.classList.contains('keep') && alone) {
           last.replaceWith(...last.children);
+          return takeLast(body);
+        }
+        if (WRAPS.test(last.className) && last.children.length === 1 && last.lastElementChild.classList.contains('bd-stage') && alone) {
+          last.replaceWith(...last.lastElementChild.children);
           return takeLast(body);
         }
         // a long table (many cost centres or milestones) moves its last row on; the column headings
@@ -1053,6 +1092,8 @@
             const lastRow = rows[rows.length - 1];
             const els = [lastRow];
             if (lastRow.classList.contains('stage-detail-row') && lastRow.previousElementSibling) els.unshift(lastRow.previousElementSibling);
+            // a stage price row goes with the item above it, never alone at the top of a sheet
+            if (lastRow.classList.contains('sub') && rows.length > 2) els.unshift(lastRow.previousElementSibling);
             return { table: last, els };
           }
         }
