@@ -40,6 +40,11 @@ const GENERAL_QUOTE_RULES = [
     label: 'Confirm the quote has terms and conditions text (warranty details, cooling-off rights) - prefilled from Settings, but check it hasn\'t been cleared for this job',
     check: (ctx) => !!(ctx.project.terms_text || '').trim(),
   },
+  {
+    id: 'ai_lines_confirmed',
+    label: 'Confirm or remove the prebuilds the AI added (tagged "AI added, check" on the stages)',
+    check: (ctx) => !(ctx.unconfirmedAiLines > 0),
+  },
 ];
 
 // Solar proposals (and the solar side of a Solar + Batteries quote).

@@ -31,9 +31,9 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=111"></script>
+  <script src="/js/supabase-client.js?v=112"></script>
   <script src="/js/template-questions.js?v=2"></script>
-  <script src="/js/prebuild-form.js?v=1"></script>
+  <script src="/js/prebuild-form.js?v=2"></script>
   <script src="/js/feed.js?v=10"></script>
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=8"></script>
@@ -1007,6 +1007,8 @@
           </div>
           <div id="cc-rows"></div>
           <button type="button" class="secondary" id="add-row">+ Add stage</button>
+          ${!(editProject && editProject.job_number) ? `<button type="button" class="secondary" id="suggest-prebuilds-btn" title="Reads the scope of works and the pre-quote answers and adds prebuilds from the library to each stage, tagged for you to check">&#10024; Suggest prebuilds with AI</button>
+          <div id="suggest-prebuilds-msg"></div>` : ''}
         </div>
         <div class="card">
           <h2>Total</h2>
@@ -1290,6 +1292,17 @@
       } // end isQuoteEdit-only wiring
 
       document.getElementById('add-row').addEventListener('click', () => addRow());
+      const suggestBtn = document.getElementById('suggest-prebuilds-btn');
+      if (suggestBtn) suggestBtn.addEventListener('click', () => {
+        const qEl = document.getElementById('template-questions');
+        if (qEl) Object.assign(templateAnswers, readTemplateAnswers(qEl));
+        const sowEl = document.getElementById('p-sow');
+        suggestStagePrebuilds({
+          projectId: project.id, template: currentTemplate,
+          sow: sowEl ? sowEl.value : (project.sow_text || ''), answersText: templateAnswersText(currentTemplate, templateAnswers),
+          btnEl: suggestBtn, msgEl: document.getElementById('suggest-prebuilds-msg'),
+        });
+      });
       document.getElementById('save-edit-btn').addEventListener('click', () => saveEdits(project));
       document.getElementById('cancel-edit-btn').addEventListener('click', () => {
         if (editDirty && !confirm('Discard your unsaved changes?')) return;
@@ -1361,6 +1374,7 @@
             .map(li => ({
               id: li.id, description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id,
               prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description, prebuild_base_quantity: li.prebuild_base_quantity,
+              ai_suggested: li.ai_suggested,
             })),
           photoGroups: (stage.cost_centre_photo_groups || []).slice().sort((a, b) => a.sort_order - b.sort_order)
             .map(pg => ({ description: pg.description, photos: (pg.photos || []).map(p => p.url || p) })),
@@ -1555,6 +1569,7 @@
             prebuild_group_id: li.dataset.prebuildGroupId || null,
             prebuild_client_description: li.dataset.prebuildClientDescription || null,
             prebuild_base_quantity: li.dataset.prebuildBaseQuantity ? parseFloat(li.dataset.prebuildBaseQuantity) : null,
+            ai_suggested: !!(li.closest('.li-prebuild-group') && li.closest('.li-prebuild-group').dataset.aiSuggested === '1'),
           };
         }).filter(li => li.description),
         photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({

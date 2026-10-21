@@ -32,7 +32,7 @@ exports.handler = async (event) => {
     const { supabaseAdmin } = auth;
 
     const [{ data: project, error: projErr }, { data: docs }, { data: licences }, { data: assets }, { data: photos }] = await Promise.all([
-      supabaseAdmin.from('projects').select('*, cost_centres(*)').eq('id', projectId).single(),
+      supabaseAdmin.from('projects').select('*, cost_centres(*, cost_centre_line_items(ai_suggested))').eq('id', projectId).single(),
       supabaseAdmin.from('project_documents').select('folder').eq('project_id', projectId),
       supabaseAdmin.from('profile_licences').select('licence_name, profiles!profile_licences_profile_id_fkey!inner(active)').eq('profiles.active', true),
       supabaseAdmin.from('customer_assets').select('asset_type, serial_numbers').eq('project_id', projectId),
@@ -63,6 +63,7 @@ exports.handler = async (event) => {
       equipment,
       solarCentres,
       quotedTotal,
+      unconfirmedAiLines: (project.cost_centres || []).reduce((n, c) => n + (c.cost_centre_line_items || []).filter((li) => li.ai_suggested).length, 0),
       hasAccreditedStaff:
         licenceNames.some((n) => /saa|accreditation/i.test(n)) &&
         licenceNames.some((n) => /electrical/i.test(n)),
