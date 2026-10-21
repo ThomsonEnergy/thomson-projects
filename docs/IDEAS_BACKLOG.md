@@ -23,6 +23,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 to 4 (items 1 to 109) LIVE 19 to 20 Oct 2026, next delivery 5 (`docs/UX_REVIEW.md`) | N | None |
 | 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Built 19 Oct 2026, LIVE (spec A32) | N | None |
 | 24 | Gather first, generate last: pre-quote information, Battery proposals, send gate | Planned 21 Oct 2026, waiting on owner's yes | N | Owner to confirm the CER battery program changes from 1 May 2026 |
+| 25 | AI guesses prebuild components and prebuilds per cost centre (highlighted to check) | Planned 21 Oct 2026, second delivery after 24 | N | Item 24 on main |
 
 ## High lead time, start now
 
@@ -588,3 +589,16 @@ Owner's ask (21 Oct 2026): a quote should start by gathering information (on the
 11. **Prebuilds page.** The page already has a form (name, part number, category, client description, components with a Stock type-ahead, Save prebuild) for pricing roles. Owner says creating a prebuild from there does not work for them: test it end to end in the build, fix what stops it (first suspects: the Stock type-ahead swallowing the typed description, and the category or subcategory list) and make the empty form the obvious "New prebuild" at the top of the page with a clear Save and a toast.
 
 Migration: one small file (`battery` template value, `projects.sow_brief`, `cost_centres.stc_quantity`), run on production after the yes. No staging (paused).
+
+## 25. AI guesses the parts: prebuild components from the description, prebuilds on cost centres from the scope (planned 21 Oct 2026, second delivery after item 24)
+
+Owner's ask (21 Oct 2026): on the Prebuilds page, the AI should guess the materials (components) a prebuild needs from its name and description, not only write the description from the components. On a quote, the AI should read the scope of works (and the pre-quote answers) and suggest prebuilds from the library to add to each cost centre, with the AI-added ones highlighted so a person checks them before the quote goes out.
+
+**Order:** build after item 24 is on `main`, as its own delivery. Both touch the same files (`new-project.html`, `project.html`, `prebuilds.html`, the prebuild and scope functions), so two chats working at once would collide; one chat does 24, then any chat picks this up from this note.
+
+**Plan:**
+1. **Prebuild components from the description** (`prebuilds.html`, new `suggest-prebuild-components.js`, pricing roles only). Button "Suggest components with AI" next to Generate: sends the name, client description, category and the Stock list (name, category, cost) to the model, which returns components (type labour or material, description, quantity, Stock match when one fits). Rows land in the form marked "AI suggested, check" (amber left border and tag) until edited or ticked Confirm; a Stock match fills the unit cost from Stock, an unmatched part is typed with cost blank and flagged Needs a price. Nothing saves until Save prebuild. Also fix `generate-prebuild-description.js`, which has no caller check today: add `requirePricingRole` (it spends the Anthropic key).
+2. **Prebuilds on cost centres from the scope** (`new-project.html`, `project.html` quote edit, new `suggest-stage-prebuilds.js`, pricing roles only). After the scope of works is generated or pasted, a button "Suggest prebuilds for each stage": sends the stage names and descriptions, the scope, the pre-quote answers and the prebuild library (name, category, subcategory, client description, component count) and gets back, per stage, prebuilds to add with a quantity and one line of reasoning. Each lands on the stage through the same path as the picker (labour line at the stage's rates, materials line marked up) and carries `ai_suggested: true` on the line item (jsonb or a boolean column, decided with the item 24 migration if built together) so the stage shows it with an amber tag "AI added, check" and a Confirm tick; the sale price updates as usual. Confirm clears the tag; Remove drops the lines. The ready-to-send gate (item 24 point 5) lists any unconfirmed AI line as a gap.
+3. **Never silent:** the AI only suggests from the library and Stock, never invents prices; a quote cannot be sent with an unconfirmed AI line; the Logs page records each suggestion run (who, quote, how many lines).
+
+Migration: `cost_centre_line_items.ai_suggested boolean default false` (or folded into item 24's migration if the owner says yes to both at once).
