@@ -3,6 +3,7 @@
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
 ## 21 Oct 2026
+- Planned (waiting on owner's yes): schedule month view fix, equal columns, fixed cell height with a scrolling chip list, booking count on the day number, one chip per job per day. Also confirmed: the schedule shows bookings only; a timesheet added later with no booking never appears on it (possible follow-up listed). (`docs/IDEAS_BACKLOG.md` item 28)
 - Decided: STC and BSTC credits stay separate through invoices and Xero (two lines, same chart of accounts code, no new mapping) because Formbay approves and pays them separately; item 27 point 5 updated. (`docs/IDEAS_BACKLOG.md` item 27)
 - Planned (waiting on owner's yes): quote in steps. Create is just client details and proposal type; then on the saved quote: pre-quote info, site visit if needed, pricing, scope of works, send, each its own card with its own Save. STC and BSTC credits move from the stage to the quote (stage to claim against chosen later). Supersedes item 26. (`docs/IDEAS_BACKLOG.md` item 27)
 - Planned (waiting on owner's yes): STCs and BSTCs separate on quote stages and the proposal (Option A, quote and proposal only, one credit on the invoice as now) or Option B (through invoices and Xero on its own account). (`docs/IDEAS_BACKLOG.md` item 26)

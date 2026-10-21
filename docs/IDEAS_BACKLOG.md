@@ -647,3 +647,16 @@ Owner's ask (21 Oct 2026, after item 24 went live): creating a quote should be j
 
 Best model: Fable 5.1, effort xhigh (money on live quotes, a migration that moves data and re-declares `get_quote_by_token`, and the quote page rebuilt in steps).
 
+
+## 28. Schedule month view: equal columns, fixed cell height with scroll, one chip per job (planned 21 Oct 2026, waiting on owner's yes)
+
+Found from the owner's photo of the October 2026 month view: columns come out uneven (Sun, Fri and Sat squeezed narrow, Mon to Thu wide) because the grid uses `1fr` columns, and busy days grow the row because cells have a minimum height and no maximum.
+
+Plan, one file (`public/schedule.html`), no migration:
+
+1. Equal columns (`minmax(0, 1fr)` and `min-width: 0` on the cell) so every day is the same width.
+2. Fixed cell height (about 120px desktop, 80px phone). The chip list inside scrolls when it overflows, with a faint fade at the bottom. The whole cell still clicks through to Day view.
+3. A muted booking count next to the day number (for example "21 · 7").
+4. One chip per job per day ("J7004 Florist power relocation · Guy, Casey") instead of one per person. Leave chips stay per person.
+
+Confirmed the same day, how the schedule and timesheets relate (no change planned unless the owner asks): both views show bookings (`schedule_assignments`) only. A time entry never creates a booking. On past days, Day view locks a booking to its real clocked times when there is matching clocked time, and removes a booking nobody clocked on to. Clocked time with no booking (for example a timesheet added later because someone forgot to log in) shows nowhere on the schedule. Possible follow-up if wanted: show it on past days as a grey "worked, not booked" block.
