@@ -24,6 +24,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 18 | Knowledge Base background reader (server OCR, per-page search for Sparky) | Built 19 Oct 2026, LIVE (spec A32) | N | None |
 | 24 | Gather first, generate last: pre-quote information, Battery proposals, send gate | Built 21 Oct 2026, LIVE (spec A3), migration 20261115000000 | N | Owner to record SAA GCBS (battery) accreditation under Team with "battery" in the licence name |
 | 25 | AI guesses prebuild components and prebuilds per cost centre (highlighted to check) | Built 21 Oct 2026, LIVE (spec A3), migration 20261116000000 | N | None |
+| 26 | STCs and BSTCs separate on quote stages and the proposal | Planned 21 Oct 2026, waiting on owner's yes (A or B) | N | Owner: does Xero need BSTC income on its own account? |
 
 ## High lead time, start now
 
@@ -606,3 +607,22 @@ Owner's ask (21 Oct 2026): on the Prebuilds page, the AI should guess the materi
 3. **Never silent:** the AI only suggests from the library and Stock, never invents prices; a quote cannot be sent with an unconfirmed AI line; the Logs page records each suggestion run (who, quote, how many lines).
 
 Migration: `cost_centre_line_items.ai_suggested boolean default false` (or folded into item 24's migration if the owner says yes to both at once).
+
+## 26. STCs and BSTCs separate (planned 21 Oct 2026, waiting on owner's yes)
+
+Owner's ask (21 Oct 2026): make BSTCs (battery certificates) and STCs (solar PV certificates) separate on a quote, not one combined "STC credit".
+
+**Today:** one STC credit block per stage (count, system size, zone, year, $ per STC, total) and one "STC credit" line on the proposal, one `stc_amount` per invoice claim and one "STC Credit" Xero line on the `stc_credits_individual` / `stc_credits_company` mapping. The job's STCs tab already keeps PV, battery and hot water rows apart (`job_stcs.stc_type`), and Formbay pays them apart.
+
+**Option A (recommended): separate on the quote and the proposal, one credit on the invoice.**
+1. Migration: `cost_centres.bstc_quantity`, `cost_centres.bstc_price_per_certificate`, `cost_centres.bstc_total` (default 0); `get_quote_by_token` returns `bstc_total` per stage.
+2. Stage card: the existing block becomes "STC credit (solar)" with the count or system size as now; a second block "BSTC credit (battery)" with number of BSTCs and $ per BSTC (count typed in from Pylon or Formbay, TEops does not work the tiered battery factor out), total = count x price. Shown on Solar and Battery proposals only, the BSTC block only when the quote has a battery.
+3. Proposal Investment summary: two lines, "STC credit" and "BSTC credit" (company clients inc GST on both, as now), total after both. Investment breakdown unchanged.
+4. Invoices and Xero unchanged: the stage's claimable credit is STC total plus BSTC total, still one `stc_amount` per claim and one "STC Credit" Xero line (Xero books both to the same STC income account today, `docs/BUSINESS_FACTS.md`: $35 per certificate either way).
+5. Job STCs tab: the first PV row is offered from the STC count and a battery row from the BSTC count.
+6. Ready-to-send: a battery quote with batteries must have a BSTC count and total (or zero on purpose, ticked).
+
+**Option B: separate all the way through invoices and Xero.** Everything in A plus `bstc_amount` on `invoice_claims`, `invoices` and credit note claims, "BSTC Credit" line in Xero on new `bstc_credits_individual` / `bstc_credits_company` mappings (Settings > Xero Mapping), both lines on the invoice PDF and the invoices list, `get_invoice_balance_due` and the paid-amount maths updated, credit note reversal per kind. Only worth it if Xero needs BSTC income on its own account.
+
+Best model: Fable 5.1, effort xhigh (money and a migration that re-declares `get_quote_by_token`).
+
