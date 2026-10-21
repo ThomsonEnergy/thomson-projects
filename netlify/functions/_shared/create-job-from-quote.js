@@ -49,7 +49,7 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
       const share = Number(c.quoted_amount) / totalQuoted;
       const amount = Math.round(depositTotal * share * 100) / 100;
       const { labourAmount, materialAmount } = splitLabourMaterial(c, amount);
-      return { cost_centre_id: c.id, labour_amount: labourAmount, material_amount: materialAmount, stc_amount: 0, claim_percent: depositPercent };
+      return { cost_centre_id: c.id, labour_amount: labourAmount, material_amount: materialAmount, stc_amount: 0, bstc_amount: 0, claim_percent: depositPercent };
     })
     .filter(c => c.labour_amount + c.material_amount > 0);
   if (!claimRows.length) return null;
@@ -82,6 +82,7 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
       labour_amount: totalLabour,
       material_amount: totalMaterial,
       stc_amount: 0,
+      bstc_amount: 0,
       claim_percent: depositPercent,
       sent_at: invoiceDate,
       due_date: dueDate,
@@ -168,6 +169,12 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
       cover_photos: quote.cover_photos,
       proposal_template: quote.proposal_template,
       template_answers: quote.template_answers,
+      // STC and BSTC credits live on the quote (item 27); the stage each is claimed with is
+      // re-pointed at the job's own stages below.
+      stc_quantity: quote.stc_quantity, stc_system_kw: quote.stc_system_kw, stc_zone_rating: quote.stc_zone_rating,
+      stc_install_year: quote.stc_install_year, stc_price_per_certificate: quote.stc_price_per_certificate, stc_total: quote.stc_total || 0,
+      bstc_quantity: quote.bstc_quantity, bstc_price_per_certificate: quote.bstc_price_per_certificate, bstc_total: quote.bstc_total || 0,
+      bstc_not_claimed: !!quote.bstc_not_claimed,
       laha_approved: quote.laha_approved,
       estimate_disclaimer_text: quote.estimate_disclaimer_text,
       project_manager_contact_id: quote.project_manager_contact_id,
@@ -213,6 +220,16 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
     })))
     .select();
   if (stagesErr) throw stagesErr;
+
+  // The credits' claim stages point at the quote's stages; point them at the job's copies.
+  const stageIdMap = Object.fromEntries(stages.map((s, i) => [s.id, newStages[i] && newStages[i].id]));
+  const creditStages = {};
+  if (quote.stc_cost_centre_id && stageIdMap[quote.stc_cost_centre_id]) creditStages.stc_cost_centre_id = stageIdMap[quote.stc_cost_centre_id];
+  if (quote.bstc_cost_centre_id && stageIdMap[quote.bstc_cost_centre_id]) creditStages.bstc_cost_centre_id = stageIdMap[quote.bstc_cost_centre_id];
+  if (Object.keys(creditStages).length) {
+    const { error: csErr } = await supabaseAdmin.from('projects').update(creditStages).eq('id', job.id);
+    if (csErr) throw csErr;
+  }
 
   const allLineItems = [];
   const allPhotoGroups = [];

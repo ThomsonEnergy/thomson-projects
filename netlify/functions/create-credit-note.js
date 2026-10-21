@@ -39,13 +39,14 @@ exports.handler = async (event) => {
         labour_amount: Number(c.labourAmount) || 0,
         material_amount: Number(c.materialAmount) || 0,
         stc_amount: Number(c.stcAmount) || 0,
+        bstc_amount: Number(c.bstcAmount) || 0,
       }))
-      .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount) > 0);
+      .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount + c.bstc_amount) > 0);
     if (!claimRows.length) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'At least one stage needs a non-zero credit amount' }) };
     }
     // No negative parts: Xero only takes positive lines, so a negative one would make the app and Xero disagree.
-    if (claimRows.some(c => c.labour_amount < 0 || c.material_amount < 0 || c.stc_amount < 0)) {
+    if (claimRows.some(c => c.labour_amount < 0 || c.material_amount < 0 || c.stc_amount < 0 || c.bstc_amount < 0)) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'Credit amounts can not be negative.' }) };
     }
 
@@ -65,26 +66,27 @@ exports.handler = async (event) => {
     if (invoice.invoice_claims && invoice.invoice_claims.length) {
       invoice.invoice_claims.forEach(ic => {
         originalByCentre[ic.cost_centre_id] = {
-          labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0,
+          labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0, bstc: Number(ic.bstc_amount) || 0,
         };
       });
     } else if (invoice.cost_centre_id) {
-      const { data: legacyInv } = await supabaseAdmin.from('invoices').select('labour_amount, material_amount, stc_amount').eq('id', invoiceId).single();
+      const { data: legacyInv } = await supabaseAdmin.from('invoices').select('labour_amount, material_amount, stc_amount, bstc_amount').eq('id', invoiceId).single();
       originalByCentre[invoice.cost_centre_id] = {
-        labour: Number(legacyInv.labour_amount) || 0, material: Number(legacyInv.material_amount) || 0, stc: Number(legacyInv.stc_amount) || 0,
+        labour: Number(legacyInv.labour_amount) || 0, material: Number(legacyInv.material_amount) || 0, stc: Number(legacyInv.stc_amount) || 0, bstc: Number(legacyInv.bstc_amount) || 0,
       };
     }
 
     const { data: priorCredits } = await supabaseAdmin
       .from('credit_note_claims')
-      .select('cost_centre_id, labour_amount, material_amount, stc_amount, credit_notes!inner(invoice_id)')
+      .select('cost_centre_id, labour_amount, material_amount, stc_amount, bstc_amount, credit_notes!inner(invoice_id)')
       .eq('credit_notes.invoice_id', invoiceId);
     const alreadyCreditedByCentre = {};
     (priorCredits || []).forEach(pc => {
-      const cur = alreadyCreditedByCentre[pc.cost_centre_id] || { labour: 0, material: 0, stc: 0 };
+      const cur = alreadyCreditedByCentre[pc.cost_centre_id] || { labour: 0, material: 0, stc: 0, bstc: 0 };
       cur.labour += Number(pc.labour_amount) || 0;
       cur.material += Number(pc.material_amount) || 0;
       cur.stc += Number(pc.stc_amount) || 0;
+      cur.bstc += Number(pc.bstc_amount) || 0;
       alreadyCreditedByCentre[pc.cost_centre_id] = cur;
     });
 
@@ -93,10 +95,11 @@ exports.handler = async (event) => {
       if (!original) {
         return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'This invoice has no claim against that stage' }) };
       }
-      const already = alreadyCreditedByCentre[c.cost_centre_id] || { labour: 0, material: 0, stc: 0 };
+      const already = alreadyCreditedByCentre[c.cost_centre_id] || { labour: 0, material: 0, stc: 0, bstc: 0 };
       if (already.labour + c.labour_amount > original.labour + 0.01
         || already.material + c.material_amount > original.material + 0.01
-        || already.stc + c.stc_amount > original.stc + 0.01) {
+        || already.stc + c.stc_amount > original.stc + 0.01
+        || already.bstc + c.bstc_amount > (original.bstc || 0) + 0.01) {
         return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'That credit amount exceeds what this invoice actually claimed on that stage (after any earlier credit notes).' }) };
       }
     }

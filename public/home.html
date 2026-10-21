@@ -129,7 +129,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=112"></script>
+  <script src="/js/supabase-client.js?v=113"></script>
   <script src="/js/feed.js?v=10"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/circuit-background.js?v=17"></script>
@@ -506,7 +506,7 @@
           .eq('profile_id', myUserId).is('seen_at', null).order('created_at', { ascending: false }),
         notComplete: supabaseClient.from('projects').select('id, name, job_number').eq('pipeline_stage', 'job_not_complete'),
         draftQuotes: isPricing ? supabaseClient.from('projects').select('id, name, quote_number').eq('pipeline_stage', 'draft_quote') : none,
-        invoices: isPricing ? supabaseClient.from('invoices').select('id, invoice_number, sent_at, paid_at, labour_amount, material_amount, stc_amount').is('paid_at', null) : none,
+        invoices: isPricing ? supabaseClient.from('invoices').select('id, invoice_number, sent_at, paid_at, labour_amount, material_amount, stc_amount, bstc_amount').is('paid_at', null) : none,
         timesheets: timesheetProblems(),
         assets: isPricing ? supabaseClient.from('customer_assets')
           .select('id, next_service_due, service_interval_months, warranty_expires, clients(email)')
@@ -580,7 +580,7 @@
 
       if (isPricing) {
         (r.draftQuotes || []).forEach(p => {
-          items.push({ group: 'quotes', label: `Draft quote needs finishing: ${escapeHtml(projectRef(p))}`, link: `/new-project.html?id=${p.id}` });
+          items.push({ group: 'quotes', label: `Draft quote needs finishing: ${escapeHtml(projectRef(p))}`, link: `/project.html?id=${p.id}&tab=quote` });
         });
         (r.invoices || []).forEach(inv => {
           const daysSince = (today - new Date(inv.sent_at)) / 86400000;
