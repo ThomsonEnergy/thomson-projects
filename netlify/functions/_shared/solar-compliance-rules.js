@@ -66,8 +66,8 @@ const SOLAR_QUOTE_RULES = [
   },
   {
     id: 'stc_figures_present',
-    label: 'Enter the STC count or system size on every stage that includes solar, so the STC credit shown to the client is real, not blank',
-    check: (ctx) => ctx.solarCentres.every((c) => (Number(c.stc_quantity) > 0 || Number(c.stc_system_kw) > 0) && Number(c.stc_total) > 0),
+    label: 'Enter the STC count (or system size) and $ per STC on the quote\'s STC credit, so the credit shown to the client is real, not blank',
+    check: (ctx) => (Number(ctx.project.stc_quantity) > 0 || Number(ctx.project.stc_system_kw) > 0) && Number(ctx.project.stc_total) > 0,
   },
 ];
 
@@ -111,6 +111,11 @@ const BATTERY_QUOTE_RULES = [
     id: 'battery_location_clear',
     label: 'Confirm the battery location is clear of habitable rooms, exits and heat with AS/NZS 5139 clearances (answer Yes, or pick another spot)',
     check: (ctx) => yes(ctx, 'location_clear'),
+  },
+  {
+    id: 'bstc_figures_present',
+    label: 'Enter the BSTC count and $ per BSTC on the quote\'s BSTC credit (or tick "No BSTC on this quote")',
+    check: (ctx) => !!ctx.project.bstc_not_claimed || (Number(ctx.project.bstc_quantity) > 0 && Number(ctx.project.bstc_total) > 0),
   },
   {
     id: 'battery_accreditation_on_file',
@@ -184,7 +189,7 @@ function rulesFor(phase, ctx) {
   if (phase === 'quote') {
     const rules = [...GENERAL_QUOTE_RULES];
     if (template === 'solar') rules.push(...SOLAR_QUOTE_RULES);
-    if (template === 'battery') rules.push(SOLAR_QUOTE_RULES[2], SOLAR_QUOTE_RULES[3]); // deposit and STC figures apply to battery STCs too
+    if (template === 'battery') rules.push(SOLAR_QUOTE_RULES[2]); // a deposit applies to a battery quote too; its certificates are the BSTC rule
     if (withBattery) rules.push(...BATTERY_QUOTE_RULES);
     return rules;
   }

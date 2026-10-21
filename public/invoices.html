@@ -53,7 +53,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=112"></script>
+  <script src="/js/supabase-client.js?v=113"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allInvoices = null, allMappings = [];
@@ -94,7 +94,7 @@
       let total = 0, thisMonth = 0;
 
       data.forEach(inv => {
-        const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
+        const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0) - Number(inv.bstc_amount || 0);
         const sentAt = new Date(inv.sent_at);
         total += amount;
         if (sentAt >= startOfMonth) thisMonth += amount;
@@ -116,7 +116,7 @@
         // Fallback (no credit notes): the same sum calculate_balance_due does.
         const sub = r2(Number(inv.labour_amount || 0) + Number(inv.material_amount || 0));
         const project = inv.cost_centres?.projects || inv.projects;
-        const stc = Number(inv.stc_amount || 0);
+        const stc = Number(inv.stc_amount || 0) + Number(inv.bstc_amount || 0);
         const stcIncGst = project?.clients?.client_type === 'company' ? r2(stc * 1.10) : r2(stc);
         return { inv, due: r2(sub + r2(sub * 0.10) - stcIncGst) };
       })).then((rows) => {
@@ -179,7 +179,7 @@
               const projectId = cc?.project_id || inv.project_id;
               const clientType = project?.clients?.client_type || 'individual';
               const stageLabel = cc ? (cc.name || '-') : (claimStages.length ? (claimStages.length > 1 ? `${claimStages.length} stages` : claimStages[0]) : '-');
-              const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
+              const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0) - Number(inv.bstc_amount || 0);
               const overdue = isOverdue(inv);
               return `
                 <tr>

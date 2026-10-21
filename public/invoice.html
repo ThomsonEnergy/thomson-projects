@@ -127,7 +127,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=112"></script>
+  <script src="/js/supabase-client.js?v=113"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -165,13 +165,15 @@
       // for a company (stc_credit_inc_gst, migration 153).
       const isCompanyClient = inv.client_type === 'company';
       const stcAmount = inv.stc_credit_inc_gst != null ? Number(inv.stc_credit_inc_gst) : (Number(inv.stc_amount) || 0);
+      // Battery certificates on their own line (item 27), same GST treatment.
+      const bstcAmount = inv.bstc_credit_inc_gst != null ? Number(inv.bstc_credit_inc_gst) : (Number(inv.bstc_amount) || 0);
       const subtotal = labourAmount + materialAmount;
       const gst = Math.round(subtotal * 0.10 * 100) / 100;
       const totalIncGst = subtotal + gst;
       // Balance due comes straight from the server (the same number the card payment charges),
       // never recalculated here, so the two can never drift apart.
       const balanceDue = Number(inv.balance_due);
-      const amountApplied = Math.max(0, Math.round((totalIncGst - stcAmount - balanceDue) * 100) / 100);
+      const amountApplied = Math.max(0, Math.round((totalIncGst - stcAmount - bstcAmount - balanceDue) * 100) / 100);
       const isPaid = !!inv.paid_at;
       const isDeposit = !!(inv.is_deposit || /^deposit$/i.test(inv.description || ''));
       const dueDate = inv.due_date ? new Date(inv.due_date + 'T00:00:00') : null;
@@ -284,6 +286,7 @@
               <div><span class="k">GST</span><span class="v">${money(gst)}</span></div>
               <div><span class="k">Total inc GST</span><span class="v">${money(totalIncGst)}</span></div>
               ${stcAmount > 0 ? `<div><span class="k">STC Credit${isCompanyClient ? ' (inc GST)' : ''}</span><span class="v">-${money(stcAmount)}</span></div>` : ''}
+              ${bstcAmount > 0 ? `<div><span class="k">BSTC Credit (battery)${isCompanyClient ? ' (inc GST)' : ''}</span><span class="v">-${money(bstcAmount)}</span></div>` : ''}
               <div><span class="k">Amount Applied</span><span class="v">${money(amountApplied)}</span></div>
               <div><span class="k">Balance Due</span><span class="v">${money(balanceDue)}</span></div>
             </div>

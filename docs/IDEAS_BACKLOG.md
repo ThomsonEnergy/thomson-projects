@@ -25,7 +25,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 24 | Gather first, generate last: pre-quote information, Battery proposals, send gate | Built 21 Oct 2026, LIVE (spec A3), migration 20261115000000 | N | Owner to record SAA GCBS (battery) accreditation under Team with "battery" in the licence name |
 | 25 | AI guesses prebuild components and prebuilds per cost centre (highlighted to check) | Built 21 Oct 2026, LIVE (spec A3), migration 20261116000000 | N | None |
 | 26 | STCs and BSTCs separate | Folded into item 27 (credits at quote level, not per stage) | N | See 27 |
-| 27 | Quote in steps: create, pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level | Planned 21 Oct 2026, waiting on owner's yes | N | None |
+| 27 | Quote in steps: create, pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level | Built 21 Oct 2026, LIVE (spec A3), migration 20261117000000 | N | None |
 
 ## High lead time, start now
 
@@ -627,7 +627,9 @@ Owner's ask (21 Oct 2026): make BSTCs (battery certificates) and STCs (solar PV 
 
 Best model: Fable 5.1, effort xhigh (money and a migration that re-declares `get_quote_by_token`).
 
-## 27. Quote in steps: create first, then pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level (planned 21 Oct 2026, waiting on owner's yes)
+## 27. Quote in steps: create first, then pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level (built 21 Oct 2026, migration 20261117000000)
+
+Live: see `docs/PROJECT_SPEC.md` A3 "Quote in steps". Built as planned (points 1 to 7, point 5 in the two-lines-same-account form). The plan as agreed follows.
 
 Owner's ask (21 Oct 2026, after item 24 went live): creating a quote should be just the client details and the proposal type, then Create. Everything else is added to the saved quote afterwards, in order: pre-quote information, a site visit if needed, the quote (pricing), then the scope of works, then send. STCs and BSTCs are entered on the quote, not inside a cost centre; which stage they are claimed against can be chosen later. Supersedes item 26 (which put BSTCs on the stage).
 

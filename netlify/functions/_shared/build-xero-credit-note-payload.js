@@ -123,6 +123,16 @@ async function buildXeroCreditNotePayload(supabaseAdmin, creditNoteId) {
         TaxType: stcMap.xero_tax_type,
       });
     }
+    if (Number(c.bstc_amount) > 0) {
+      if (!stcMap) throw new Error(`No Xero mapping found for STC credits (${clientType}) - set it up in Settings > Xero Mapping first.`);
+      lineItems.push({
+        Description: `${stageName} - BSTC credit reversal (${invoice.invoice_number})`,
+        Quantity: 1,
+        UnitAmount: -Number(c.bstc_amount),
+        AccountCode: stcMap.xero_account_code,
+        TaxType: stcMap.xero_tax_type,
+      });
+    }
   });
   if (!lineItems.length) throw new Error('This credit note has no amounts on it');
 

@@ -62,16 +62,17 @@ exports.handler = async (event) => {
         labour_amount: r2((Number(c.labourAmount) || 0) + priced.labour),
         material_amount: r2((Number(c.materialAmount) || 0) + priced.material),
         stc_amount: Number(c.stcAmount) || 0,
+        bstc_amount: Number(c.bstcAmount) || 0, // battery credit, kept apart from the solar one
         claim_percent: c.claimPercent != null ? Number(c.claimPercent) : null,
         _items: priced.rows,
       }))
-      .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount) > 0);
+      .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount + c.bstc_amount) > 0);
     if (!claimRows.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'At least one cost centre needs a non-zero claim amount' }) };
     }
     // Server-side limits (the panel limits them too): no negative parts, and a quoted stage can't
     // be claimed past what is left of it (a cent of rounding allowed). Bug review M9.
-    if (claimRows.some(c => c.labour_amount < 0 || c.material_amount < 0 || c.stc_amount < 0)) {
+    if (claimRows.some(c => c.labour_amount < 0 || c.material_amount < 0 || c.stc_amount < 0 || c.bstc_amount < 0)) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Claim amounts can not be negative.' }) };
     }
     // Stock / prebuild items added on the invoice are extra on top, so only the typed claim is limited.
@@ -92,6 +93,7 @@ exports.handler = async (event) => {
     const totalLabour = claimRows.reduce((s, c) => s + c.labour_amount, 0);
     const totalMaterial = claimRows.reduce((s, c) => s + c.material_amount, 0);
     const totalStc = claimRows.reduce((s, c) => s + c.stc_amount, 0);
+    const totalBstc = claimRows.reduce((s, c) => s + c.bstc_amount, 0);
     const totalAmount = totalLabour + totalMaterial;
 
     // Always auto-assigned, never user-typed - a manually-entered number
@@ -174,6 +176,7 @@ exports.handler = async (event) => {
         labour_amount: totalLabour,
         material_amount: totalMaterial,
         stc_amount: totalStc,
+        bstc_amount: totalBstc,
         claim_percent: overallClaimPercent,
         sent_at: invoiceDate,
         due_date: dueDate,
