@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 22 Oct 2026
+
+- Apple Developer Program enrolment (ID 58NBR3V7K9) never confirmed; support case 103004717118 opened 22 Oct. Rented developer accounts ruled out. Detail in `docs/EXTERNAL_ACCOUNTS.md`.
+
 ## 21 Oct 2026
 - Hotfix LIVE: after the relationship error was fixed in the database, Chrome kept replaying the cached 300 answer from disk for the same request URL (seen in the network tab, "(disk cache)"). The Supabase client now sends Cache-Control: no-cache on every request (supabase-client.js v114), so an API answer is never served from the browser cache again. (`public/js/supabase-client.js`)
 - Hotfix LIVE: every page errored with "more than one relationship was found for 'projects' and 'cost_centres'" minutes after item 27 went live. The two new claim-stage columns on projects were foreign keys to cost_centres, which made a third relationship between the tables and every PostgREST embed between them ambiguous. The constraints were dropped on production and the migration file changed to plain uuid columns; a removed stage falls back to the last stage. Rule: never add a second foreign key between two tables the app embeds (projects, cost_centres, profiles, clients) without naming the key on every embed first; see the `profile_licences` rule of 20 Oct. (`supabase/migrations/20261117000000_quote_steps_credits.sql`)
