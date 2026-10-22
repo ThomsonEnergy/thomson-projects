@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 21 Oct 2026 (quote workflow plan, item 24)
+Last updated 22 Oct 2026 (simpler purchase orders plan, item 31)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -26,6 +26,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 25 | AI guesses prebuild components and prebuilds per cost centre (highlighted to check) | Built 21 Oct 2026, LIVE (spec A3), migration 20261116000000 | N | None |
 | 26 | STCs and BSTCs separate | Folded into item 27 (credits at quote level, not per stage) | N | See 27 |
 | 27 | Quote in steps: create, pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level | Built 21 Oct 2026, LIVE (spec A3), migration 20261117000000 | N | None |
+| 31 | Simpler purchase orders (short list, one PO page, tick-to-receive, short Create panel) | Planned 22 Oct 2026, waiting on owner's yes | N | None, no migration |
 
 ## High lead time, start now
 
@@ -706,7 +707,27 @@ No money or stock change. One small migration, `?v=` bumps on feed.js, supabase-
 
 As built: the post, tags and photo links are made in one database call, `create_feed_post` (security invoker, so the table policies check the caller). A post can be photos only with no message. Possible follow-ups: photos on Home-only posts (no job), and showing a post's photos as "on the feed" on the Site Photos tab.
 
-## 31. Notifications in three places: bell, Messages, ops manager (planned 22 Oct 2026, waiting on owner's yes)
+## 31. Simpler purchase orders (planned 22 Oct 2026, waiting on owner's yes)
+
+**Why:** the owner finds purchase orders overwhelming. Read-only look at `purchase-orders.html`, the job page Purchase orders tab (`project.html` `loadPurchaseOrders`, `openCreatePoPanel`) and the shared card code in `supabase-client.js` (`renderPoLineItemsReceivable`, `renderPoControls`, `renderPoBills`) found:
+
+1. **Everything is open at once.** The list loads every PO ever made with every line and every bill line, filter defaulting to All (UX 121 never shipped). Each card shows all its lines, each line with up to five buttons (Receive, Mark backordered, Move, + Add to Stock, Tool?), the notes, every bill with its lines and Accept / Deny / Undo buttons, then up to nine PO buttons (+ Add item, Edit lines, Email PO, View PO, Notes, Prices on PO, Close PO, Upload invoice, View log). A ten-line PO is over fifty buttons on one card and the page is a wall of them.
+2. **No place to look at one PO.** `?id=` from the top bar search is the only one-PO view; the job page repeats the same wall per job.
+3. **Receiving asks a question it already knows the answer to.** Each line opens a panel asking "Send to" when the answer is nearly always the PO's own destination. Receive all exists on job POs only.
+4. **The Create panel asks for everything up front.** Destination, tools kind and place, job, where from, supplier, upload-invoice-instead, fixed or open PO, lines, supplier notes, internal notes, show prices; on the job page also stage, description, budget cap and attach a document. Most are rarely used. After Create nothing says which PO number was made or offers Email now (UX 134).
+5. **Two sets of words.** Badges say Ordered / Part received / All received / Closed; the filter says Pending only / Received only / Ready to close / Open / Closed, mixing the received and closed axes; the three tiles mix money and counts.
+
+**Plan (one delivery, no migration):**
+
+1. **Short list.** `purchase-orders.html` becomes one row per PO: PO number, supplier, where it is going, total, one status chip, "3 of 8 received", and a red dot when a bill line needs a decision. Tap a row to open the PO. Loads open POs only (lines and bill counts, not bill lines); Closed loads when asked for. Tabs instead of the six-way select: **Open**, **Ready to close**, **Closed**; search stays. Three tappable tiles: Waiting on delivery, Ready to close, Bills needing a decision (counts, same words as the tabs).
+2. **One PO, one page.** New `purchase-order.html?id=` (the top bar search and the job page link to it). Header: PO number, supplier, destination, status, total. One big **next step** button that changes with the state: Email to supplier (never emailed, from the activity log), Receive (something ordered), Close and approve (all received), Decide on bill lines (a red bill line). Lines as a plain list with a tick box each; per-line extras (Backorder, Move, Add to Stock, Tool) under one small "..." per line. PO extras (Notes, Prices on PO, View PDF, Edit lines, Add item, Upload invoice, Log, Reopen) under one **More** menu. Bills in their own section, folded unless a line needs a decision. Notes shown only when there are notes.
+3. **Tick to receive.** Tick the lines that arrived (Select all), then one button "Receive N to J7040" (or to Stock, the van, the Tools register), the destination preset from the PO; a small "Somewhere else" link opens today's panel for the odd line. Same on job, Stock, vehicle and Tools POs, one `po_receive_line` call per line as `receiveAllPoLines` does now.
+4. **Short Create panel.** What is it for (Job / Stock / Vehicle / Tools) and supplier, then lines. Everything else under one **More options** fold (open PO, stage, description, notes, prices shown, budget cap, attach a document, upload the invoice instead). After Create: "PO1234 created for Supplier" with **Email it now** and **Open it**. Same panel on the job page, Stock and vehicle pages.
+5. **Job page Purchase orders tab** shows the same short rows linking to the PO page, with Create PO and Suggest POs as now.
+6. **One set of words** everywhere: Ordered, Part received, All received (ready to close), Closed.
+
+No money or stock rule changes: every receive, move, close and bill decision keeps calling the same database functions. Files: `purchase-orders.html`, new `purchase-order.html`, `supabase-client.js` (shared row, next step, tick-to-receive), `project.html`, `stock.html`, `vehicle-stock.html`, `global-search.js`, `style.css`, `?v=` bumps. Roles unchanged (staff receive, pricing roles edit lines and decide on bills, Admin / Finance reopen).
+## 32. Notifications in three places: bell, Messages, ops manager (planned 22 Oct 2026, waiting on owner's yes)
 
 **Today:** every notification kind lands in the one bell (`public/js/notifications.js`), pushes to the phone, and only disappears when tapped or "Mark all read". Opening an email in the Inbox or a chat does not mark its bell row read. The owner's bell on 22 Oct 2026: 79 unread, of which 45 emails, 13 emailed supplier bills, 7 Knowledge Base reads, 5 ops digests, and 9 real items (bookings, licences, a tag, a statement, a price list, a worker alert). Chats (16 rows) also land there. The Ops page `Needs me` card already lists emailed bills, bill checks, statements, price list changes and worker tasks from their own tables, so the bell rows for those are doubles.
 
