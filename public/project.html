@@ -1249,6 +1249,24 @@
         });
       }
 
+      // The same switch as step 3's tick (projects.show_roi): this one saves on its own so the page
+      // can be taken off a proposal without going through Save pricing.
+      const showRoi = document.getElementById('bill-show-roi');
+      if (showRoi) showRoi.addEventListener('change', async () => {
+        const on = showRoi.checked;
+        try {
+          const { error } = await supabaseClient.from('projects').update({ show_roi: on }).eq('id', project.id);
+          if (error) throw error;
+          project.show_roi = on;
+          const step3 = document.getElementById('p-show-roi');
+          if (step3) step3.checked = on;
+          showToast(on ? 'Savings estimate will show on the proposal.' : 'Savings estimate taken off the proposal.');
+          renderReading();
+          if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
+        } catch (err) { showRoi.checked = !on; showToast(friendlyError(err), { error: true }); }
+      });
+      const step3Roi = document.getElementById('p-show-roi');
+      if (step3Roi && showRoi) step3Roi.addEventListener('change', () => { showRoi.checked = step3Roi.checked; });
       qEl.addEventListener('change', () => { if (project.bill_reading) renderReading(); });
       ['q-stc-kw', 'q-stc-zone', 'q-battery-kwh'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', () => { if (project.bill_reading) renderReading(); }); });
       loadBillDocs(project.id).then(() => { renderList(); renderReading(); });
@@ -3574,6 +3592,7 @@
                     <button type="button" class="secondary" id="bill-read-btn" disabled>&#10024; Read bill with AI</button>
                     <span class="subtitle" id="bill-read-when" style="font-size:12px;"></span>
                   </div>
+                  <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-weight:400; cursor:pointer;"><input type="checkbox" id="bill-show-roi" style="width:auto; margin:0;" ${project.show_roi === false ? '' : 'checked'} /> Show the savings estimate on the proposal (saves straight away; same switch as on step 3)</label>
                   <div id="bill-read-msg"></div>
                   <div id="bill-reading"></div>
                 </div>
