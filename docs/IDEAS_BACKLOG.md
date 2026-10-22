@@ -686,3 +686,16 @@ Migration: `projects.bill_reading jsonb`, `projects.sow_documents jsonb`, `proje
 Added with the owner's yes (22 Oct 2026): **the proposal shows the return on investment.** A "Your savings" page on Solar and Battery proposals, between Your system and the Investment summary, from the bill reading and the quote: use now and bills now, solar generated, stored for the evening, used at home, sent to the grid, bought from the grid after, estimated bills after, estimated saving a year, the investment after the credits, payback years, yearly return, 10 and 25 year savings (prices up 3% a year, panels down 0.5% a year), emissions avoided, and the assumptions in a note. The maths is one shared file (`public/js/solar-roi.js`: the sizing, the scenarios with and without the system, the rows and the assumptions text) used by the quote page preview, the proposal and the reader, so staff and client see the same figures. Caps keep it honest: panels cover at most 90% of daytime use, the battery at most 80% of evening use over a year. The solar size is the quote's STC system size (or the Pylon design), the battery size the "Usable kWh wanted" answer, the price the total after the STC and BSTC credits. Step 3 has a tick "Show the savings estimate on the proposal" (on by default).
 
 Sizes stay suggestions: "Use as system size (step 3)" and "Use as usable kWh wanted" buttons fill the fields, then Save as usual. The Pylon "View interactive design & ROI" link stays as it was.
+
+## 30. Tag people in site photos (planned 22 Oct 2026, waiting on owner's yes)
+
+**Today:** a site photo (`project_photos`) has a caption, who took it and when. There is no way to say who is in the picture, and no way to find every photo a person is in.
+
+**Plan:**
+
+1. **Table `project_photo_tags`** (migration): `photo_id` (FK `project_photos`, cascade), `profile_id` (FK `profiles`), `tagged_by`, `created_at`, unique on photo and person, index on each FK. Fast RLS `to authenticated`: anyone logged in reads and adds; the tagger, the photo's uploader, the tagged person, or Admin / Finance removes. A trigger on insert calls `create_notification` ("<name> tagged you in a photo", job label, link to the job's Site Photos tab, dedupe `phototag:<photo>:<person>`), skipped when you tag yourself.
+2. **Lightbox (`openPhotoLightbox`, supabase-client.js):** a "People" row under the name box: chips with each tagged name and an x, plus "+ Tag" which opens a search list of active staff (type to filter, tap to tag). Saves straight away, works on the phone, no page reload.
+3. **Site Photos tab (`project.html`):** each tile shows "with Jasper, Tom" under the caption; a "Person" dropdown at the top (Everyone, Me, then each person who is tagged on this job) filters the grid and the lightbox set.
+4. **Global search:** a tagged name matches the photo (the search already matches captions).
+
+No money or stock change. One small migration, `?v=` bumps on supabase-client.js and project.html scripts.
