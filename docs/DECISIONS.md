@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 22 Oct 2026
 
+- Planned (waiting on owner's yes): electricity bill reader on the quote. Found the step 5 checklist keeps one bill page and no AI reads it, and step 4 documents are lost on reload. Plan: bill card on step 1 (many pages or a PDF, private), Read bill with AI into `projects.bill_reading`, solar and battery sizing worked out in code, answers and STC size prefilled, checklist items take several files, step 4 documents saved. (`docs/IDEAS_BACKLOG.md` item 29)
 - Apple Developer Program enrolment (ID 58NBR3V7K9) never confirmed; support case 103004717118 opened 22 Oct. Rented developer accounts ruled out. Detail in `docs/EXTERNAL_ACCOUNTS.md`.
 
 ## 21 Oct 2026
