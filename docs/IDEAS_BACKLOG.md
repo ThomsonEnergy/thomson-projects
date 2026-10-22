@@ -756,3 +756,20 @@ No money or stock rule changes: every receive, move, close and bill decision kee
 
 No money or stock change. One small migration; `?v=` bumps on notifications.js, supabase-client.js and the pages that reference it; ops-digest.js, push.js, inbox.html and ops.html change.
 
+
+## 33. Contacts on every job: on site, client, Thomson Energy (planned 22 Oct 2026, waiting on owner's yes)
+
+**Today:** a job can only link five of the client's saved contacts (`projects.project_manager_contact_id`, `site_contact_id`, `job_contact_id`, `sales_contact_id`, `accounts_contact_id`), picked in the quote edit form from `client_contacts`. That table is readable by pricing roles only, so Staff on site never see the "Who's running this job" card on the Details tab, and there is nowhere to put the owner, the renter, the builder or another trade, nor who at Thomson Energy is running the job. At clock-out, everyone on the job is asked "How's the job?" (Complete / Not complete, back next working day), whoever they are.
+
+**Plan:**
+
+1. **New table `job_contacts`** (migration 20261121000000): one row per person on a job (quotes too, same project id), `side` (`site`, `client`, `thomson`), `role`, `name`, `company`, `phone`, `email`, `notes`, `profile_id` (Thomson side, one of our people), `client_contact_id` (set when picked from the client's saved contacts), `sort_order`, `created_by`, `created_at`. One Thomson site manager per job (partial unique index). Fast RLS: every active user reads, adds, edits and removes (a tradie adds the builder's number on site). Indexes on every FK. Backfill: the five existing links on every job and quote become client-side rows.
+   - **On site** roles: Owner, Renter, Builder, Other trade, Real estate agent, Strata, Other.
+   - **Client** roles: Project manager, Site manager, Job contact, Accounts, Sales, Other.
+   - **Thomson Energy** roles: Site manager, Project manager, Sales manager, Other.
+2. **Contacts tab on the job page** (`project.html`, every role, after Summary): three sections with an Add button each. On site and Client rows take role, name, company, phone, email and notes; the Client section also offers "Pick from the client's saved contacts" for pricing roles (fills the row and links it). The Thomson Energy section picks an active staff member and a role. Edit and Remove on each row, tap to call and email, an activity line on add and remove. The old "Who's running this job" card and the edit-form pickers go (their rows are carried into the tab). Quote contacts copy onto the job when the quote becomes a job (`create-job-from-quote.js`).
+3. **Summary tab** gets a short "Key people" line: site contact, client site manager and Thomson site manager with tap-to-call, so a tradie never hunts for the number.
+4. **Booking emails** (`_shared/schedule-emails.js`): the recipient is the job's first client-side contact with an email (Job contact, then Site manager, then Project manager), else the client's email as now.
+5. **Clock-out** (`supabase-client.js`): the "How's the job?" step shows only to the job's Thomson Energy site manager. "Not complete" gets a day picker (next working day preselected, any day in the next 7, the window `book_back_after_clockout` already allows). A job with no site manager set asks everyone, as today. Only the site manager's own booking is made; the crew stays with the PM to schedule.
+
+No money or stock change. One migration; `?v=` bump on supabase-client.js; project.html, schedule-emails.js and create-job-from-quote.js change.
