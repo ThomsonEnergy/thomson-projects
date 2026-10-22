@@ -141,6 +141,12 @@
   .totals .big { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 26px; margin-top: 14px; }
   .totals .stc { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 20px; color: #15803d; margin-top: 12px; }
   .note-line { font-size: 12px; color: var(--q-grey); line-height: 1.55; margin-top: 12px; }
+  /* Your savings: three small pictures in a row, then the table */
+  .roi-charts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 6px 0 18px; break-inside: avoid; page-break-inside: avoid; }
+  .roi-charts:has(> :only-child) { grid-template-columns: 1fr 1fr; }
+  .roi-fig { margin: 0; }
+  .roi-fig figcaption { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--q-blue); margin-bottom: 4px; }
+  .roi-fig svg { display: block; }
   .sec-title { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 19px; text-transform: uppercase; margin: 36px 0 6px; }
   .sor .pg-title { margin-bottom: 22px; }
   .sor .sor-h { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 14px; text-transform: uppercase; margin: 16px 0 5px; }
@@ -250,7 +256,7 @@
 
   <script src="/js/supabase-client.js?v=115"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=3"></script>
+  <script src="/js/solar-roi.js?v=4"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -764,7 +770,7 @@
       const roiAnswers = data.roi_answers || {};
       const roiSolarKw = template === 'battery' ? 0 : (Number(project.stc_system_kw) || Number(pd.summary && pd.summary.dc_output_kw) || 0);
       const roiHasBattery = template === 'battery' || (template === 'solar' && roiAnswers.with_battery === 'Yes'); // as quoteHasBattery() in template-questions.js
-      const roiBatteryKwh = roiHasBattery ? (parseFloat(roiAnswers.battery_kwh_wanted) || 0) : 0;
+      const roiBatteryKwh = roiHasBattery ? (Number(project.battery_kwh) || parseFloat(roiAnswers.battery_kwh_wanted) || 0) : 0; // what we are quoting, else what was asked for
       const roiNetCost = stcTotal > 0 ? totalAfterStc : totalIncGst;
       const roiWanted = (template === 'solar' || template === 'battery') && project.show_roi !== false && !vInfo;
       // The page shows whatever we have (never a figure that rests on a guess), then "to give you Y
@@ -790,6 +796,7 @@
           <div class="pg-body">
             <h1 class="pg-title">Your<br>savings</h1>
             <p class="pg-lead">${savingsLead}</p>
+            ${roi ? roiChartsHtml(roi, money, { dollars: pres.dollars }) : ''}
             ${pres.rows.length ? `
             <table class="qtable">
               <thead><tr><th>Each year</th><th class="num">Estimate</th></tr></thead>
