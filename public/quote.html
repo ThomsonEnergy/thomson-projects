@@ -250,7 +250,7 @@
 
   <script src="/js/supabase-client.js?v=114"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=1"></script>
+  <script src="/js/solar-roi.js?v=2"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -765,9 +765,29 @@
       const roiSolarKw = template === 'battery' ? 0 : (Number(project.stc_system_kw) || Number(pd.summary && pd.summary.dc_output_kw) || 0);
       const roiHasBattery = template === 'battery' || (template === 'solar' && roiAnswers.with_battery === 'Yes'); // as quoteHasBattery() in template-questions.js
       const roiBatteryKwh = roiHasBattery ? (parseFloat(roiAnswers.battery_kwh_wanted) || 0) : 0;
-      const roi = ((template === 'solar' || template === 'battery') && project.show_roi !== false && !vInfo && project.bill_reading)
-        ? roiFor({ reading: project.bill_reading, answers: roiAnswers, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: stcTotal > 0 ? totalAfterStc : totalIncGst, zoneRating: Number(project.stc_zone_rating) || 1.382 })
+      const roiNetCost = stcTotal > 0 ? totalAfterStc : totalIncGst;
+      const roiWanted = (template === 'solar' || template === 'battery') && project.show_roi !== false && !vInfo;
+      // Anything that matters missing (no bill, no usage, no rates, no bill total, no existing solar
+      // size, no system size or price): no figures at all. The page asks the customer for what we
+      // need, when it is theirs to give; gaps only the office can fill mean no page.
+      const roiGapList = roiWanted ? roiGaps({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost }) : [];
+      const roiBlocking = roiGapList.filter(g => g.blocking);
+      const roiAsks = roiBlocking.filter(g => g.client).map(g => g.client);
+      const roiNotes = roiGapList.filter(g => !g.blocking && g.client).map(g => g.client);
+      const roi = (roiWanted && !roiBlocking.length)
+        ? roiFor({ reading: project.bill_reading, answers: roiAnswers, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382 })
         : null;
+      const savingsAskHtml = (roiWanted && roiBlocking.length && roiAsks.length) ? `
+        <section class="pg">
+          ${slabsSvg('light')}
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">Your<br>savings</h1>
+            <p class="pg-lead">We want your savings estimate to be accurate, not a guess, so we have not put figures here yet. To work out what this system will save you each year, how soon it pays for itself and what it saves over 10 and 25 years, we need:</p>
+            <div class="rows">${roiAsks.map(t => `<p class="pg-lead" style="margin-bottom:8px;">&bull; ${esc(t.charAt(0).toUpperCase() + t.slice(1))}</p>`).join('')}</div>
+            <p class="pg-lead" style="margin-top:14px;">Send it to us (a photo of each page is fine) and we will update this proposal with your figures.</p>
+          </div>
+        </section>` : '';
       const savingsHtml = roi ? `
         <section class="pg">
           ${slabsSvg('light')}
@@ -779,9 +799,10 @@
               <thead><tr><th>Each year</th><th class="num">Estimate</th></tr></thead>
               <tbody>${roiRows(roi, money).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num" style="white-space:normal;">${esc(v)}</td></tr>`).join('')}</tbody>
             </table>
+            ${roiNotes.length ? `<p class="note-line">To make this more accurate, send us ${esc(roiNotes.join('; '))}.</p>` : ''}
             <p class="note-line">${esc(roiAssumptionsText(roi))}</p>
           </div>
-        </section>` : '';
+        </section>` : savingsAskHtml;
 
       // 4. Investment and payment schedule
       const milestones = data.payment_milestones || [];
