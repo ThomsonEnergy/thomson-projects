@@ -182,6 +182,33 @@ function roiFor({ reading, answers, newSolarKw, batteryKwh, netCost, zoneRating 
   };
 }
 
+// What is missing for an honest savings estimate. A `blocking` gap keeps every figure off the
+// proposal: it asks the customer for what it needs (the `client` text) instead of showing numbers
+// built on defaults. Gaps with no client text are the staff's to fix (size, price). The rest are
+// warnings only: the figures show, with the assumption declared.
+function roiGaps({ reading, answers, template, newSolarKw, batteryKwh, netCost }) {
+  const gaps = [];
+  const a = answers || {};
+  const r = reading || null;
+  const m = billMetrics(r);
+  const hasBattery = template === 'battery' || (template === 'solar' && a.with_battery === 'Yes');
+  if (!r) {
+    gaps.push({ key: 'bill', blocking: true, staff: 'No electricity bill read yet: add every page above and press Read bill with AI.', client: 'a recent electricity bill, every page, so we can see how much power you use and what you pay for it' });
+  } else {
+    if (!m.dailyKwh) gaps.push({ key: 'usage', blocking: true, staff: 'The bill gives no usage in kWh (no total kWh with the number of days, and no daily average).', client: 'the page of your bill with the usage table (kWh used and the number of days in the period)' });
+    if (roiNum(r.usage_rate_c_per_kwh) == null) gaps.push({ key: 'rate', blocking: true, staff: `No usage rate (c/kWh) on the bill; the preview assumes ${ROI_ASSUMPTIONS.defaultUsageRateCents} c/kWh.`, client: 'the page of your bill that shows your rates (cents per kWh, and the daily supply charge)' });
+    if (roiNum(r.bill_total) == null) gaps.push({ key: 'total', blocking: true, staff: 'No bill total found; the preview rebuilds a yearly bill from use and rates.', client: 'the page of your bill with the total amount for the period' });
+    if (m.days && m.days < 28) gaps.push({ key: 'short', blocking: false, staff: `A ${m.days} day bill: the yearly figures are scaled up from it. A full quarterly bill is better.`, client: 'a full quarterly bill if you have one (the one we have covers only a short period)' });
+    if ((m.hasSolarAlready || template === 'battery') && !existingSolarKw(a)) gaps.push({ key: 'existing', blocking: true, staff: `${template === 'battery' ? 'A battery quote' : 'The bill shows solar export'} but no existing solar size in the answers (Existing system details or Existing PV size, in kW).`, client: 'the size of your existing solar system in kW (on the inverter label or your original paperwork)' });
+    if (roiNum(r.supply_charge_c_per_day) == null) gaps.push({ key: 'supply', blocking: false, staff: `No daily supply charge on the bill; ${ROI_ASSUMPTIONS.defaultSupplyChargeCents} c/day assumed.`, client: null });
+    if (!m.split) gaps.push({ key: 'tou', blocking: false, staff: `No time-of-use split on the bill: ${Math.round((1 - ROI_ASSUMPTIONS.daytimeShare) * 100)}% of use assumed to be outside daylight.`, client: null });
+  }
+  if (template !== 'battery' && !(roiNum(newSolarKw) > 0)) gaps.push({ key: 'size', blocking: true, staff: 'No system size: set it on step 3 (STC system size) or pull the Pylon design.', client: null });
+  if (hasBattery && !(roiNum(batteryKwh) > 0)) gaps.push({ key: 'battery', blocking: true, staff: 'No battery size: answer "Usable kWh wanted" on step 1.', client: null });
+  if (!(roiNum(netCost) > 0)) gaps.push({ key: 'price', blocking: true, staff: 'No price yet: the payback needs a priced stage on step 3.', client: null });
+  return gaps;
+}
+
 function annualUseCost(m) {
   return (m.annualKwh || 0) * m.usageRate / 100;
 }
@@ -216,5 +243,5 @@ function roiAssumptionsText(roi) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, billMetrics, suggestSizes, roiFor, roiRows, roiAssumptionsText, existingSolarKw };
+  module.exports = { ROI_ASSUMPTIONS, billMetrics, suggestSizes, roiFor, roiRows, roiAssumptionsText, roiGaps, existingSolarKw };
 }

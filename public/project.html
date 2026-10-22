@@ -33,7 +33,7 @@
 
   <script src="/js/supabase-client.js?v=114"></script>
   <script src="/js/template-questions.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=1"></script>
+  <script src="/js/solar-roi.js?v=2"></script>
   <script src="/js/prebuild-form.js?v=2"></script>
   <script src="/js/feed.js?v=10"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -1176,7 +1176,15 @@
         const when = document.getElementById('bill-read-when');
         const r = project.bill_reading;
         if (!out || !when) return;
-        if (!r) { out.innerHTML = ''; when.textContent = ''; return; }
+        const gaps = roiGaps({ reading: r, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost() });
+        const blocking = gaps.filter(g => g.blocking);
+        const warnings = gaps.filter(g => !g.blocking);
+        const gapsHtml = (blocking.length || warnings.length) ? `
+          <div style="margin-top:10px; padding:10px 12px; border-radius:8px; border:1px solid ${blocking.length ? 'var(--red, #c0392b)' : 'var(--border)'}; background:var(--surface);">
+            ${blocking.length ? `<strong style="font-size:13px;">Missing for the savings estimate</strong><p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${project.show_roi === false ? 'The savings page is switched off on step 3.' : 'The proposal shows no figures while these are missing. It asks the customer for what it needs instead; the rest is ours to fill in.'}</p><ul style="margin:0 0 6px 18px; padding:0; font-size:13px;">${blocking.map(g => `<li>${escapeHtml(g.staff)}${g.client ? ` <span class="subtitle">(the proposal asks the customer for ${escapeHtml(g.client)})</span>` : ''}</li>`).join('')}</ul>` : ''}
+            ${warnings.length ? `<strong style="font-size:13px;">Assumed</strong><ul style="margin:2px 0 0 18px; padding:0; font-size:12px; color:var(--muted);">${warnings.map(g => `<li>${escapeHtml(g.staff)}</li>`).join('')}</ul>` : ''}
+          </div>` : '';
+        if (!r) { out.innerHTML = gapsHtml; when.textContent = ''; return; }
         when.textContent = r.read_at ? `Read ${new Date(r.read_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}${r.pages ? `, ${r.pages} file${r.pages === 1 ? '' : 's'}` : ''}` : '';
         const m = billMetrics(r);
         const fmt = (v, unit) => (v == null ? '-' : `${v}${unit || ''}`);
@@ -1197,6 +1205,7 @@
         const cell = (k, v) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`;
         out.innerHTML = `
           <table style="margin-top:10px; font-size:13px;"><tbody>${rows.map(([k, v]) => cell(k, v)).join('')}</tbody></table>
+          ${gapsHtml}
           <div style="margin-top:12px;">
             <label style="margin-top:0; font-weight:600;">Suggested size</label>
             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0;">
@@ -1207,7 +1216,7 @@
           </div>
           ${roi ? `
           <div style="margin-top:12px;">
-            <label style="margin-top:0; font-weight:600;">Savings estimate (as the proposal shows it)</label>
+            <label style="margin-top:0; font-weight:600;">Savings estimate${blocking.length ? ' (preview only: not on the proposal until the gaps above are filled)' : ' (as the proposal shows it)'}</label>
             <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${roi.newSolarKw ? `${roi.newSolarKw} kW of solar` : ''}${roi.newSolarKw && roi.batteryKwh ? ' and ' : ''}${roi.batteryKwh ? `a ${roi.batteryKwh} kWh battery` : ''}${roi.existingKw ? ` on top of the existing ${roi.existingKw} kW` : ''}${roi.netCost ? ` at ${money(roi.netCost)} after the credits (step 3)` : ' (no price on step 3 yet)'}. Follows the pricing and the answers; the tick on step 3 hides it from the proposal.</p>
             <table style="font-size:13px;"><tbody>${roiRows(roi, money).map(([k, v]) => cell(k, v)).join('')}</tbody></table>
           </div>` : `<p class="subtitle" style="margin-top:10px; font-size:12px;">The savings estimate appears once a system size (step 3) or a battery size (Usable kWh wanted, above) is set.</p>`}`;
