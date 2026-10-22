@@ -662,3 +662,23 @@ Built, one file (`public/schedule.html`), no migration. Chips wrap onto two line
 4. One chip per job per day ("J7004 Florist power relocation · Guy, Casey") instead of one per person. Leave chips stay per person.
 
 Confirmed the same day, how the schedule and timesheets relate (no change planned unless the owner asks): both views show bookings (`schedule_assignments`) only. A time entry never creates a booking. On past days, Day view locks a booking to its real clocked times when there is matching clocked time, and removes a booking nobody clocked on to. Clocked time with no booking (for example a timesheet added later because someone forgot to log in) shows nowhere on the schedule. Possible follow-up if wanted: show it on past days as a grey "worked, not booked" block.
+
+## 29. Electricity bill reader on the quote: all pages, read by AI, solar and battery sizing (planned 22 Oct 2026, waiting on owner's yes)
+
+Owner's report: the bill upload on quotes takes one page when bills run 3 to 6 pages, and the AI does not read the page that is uploaded. Found:
+
+- The "Documents to gather from the customer" checklist on step 5 (Send) has an "Electricity bill" photo item that keeps one file only (the input is single-file and only the first upload is saved, `quote_compliance_answers.photo_path`), lands in the public site-photos bucket, and no AI ever reads it.
+- The "Supporting documents" on step 4 (Scope of works) take several files and PDFs and the AI does read them, but only to word the scope, and the list is thrown away on every page load (`sowDocs = []`), so a bill attached yesterday is not there today.
+
+Plan (one delivery, migration plus code):
+
+1. **Electricity bill card on step 1 (Pre-quote information)** for Solar and Battery quotes: upload several photos or a multi-page PDF (phone camera or files), stored privately in `project-documents` under `bills/<quote id>/` and listed as `project_documents` rows in a new folder "Electricity bill" (so they show on the Documents tab too). Each page is listed with Remove; more pages can be added later.
+2. **Read bill with AI** (new `read-electricity-bill.js`, pricing roles): every page goes to the model in one call; it returns a fixed JSON: retailer, NMI, billing period and days, total kWh, daily average, peak / shoulder / off-peak and controlled load kWh where shown, solar export kWh and feed-in rate, usage rates c/kWh, daily supply charge, bill total, and anything that hints at supply (single or three phase, existing solar). Saved on `projects.bill_reading` (jsonb) with who ran it and when.
+3. **Sizing worked out in code, not by the model** (deterministic, shown on the card with the inputs so it can be checked):
+   - Solar: daily use divided by the zone's yield (about 3.9 kWh per kW per day in zone 3, 4.2 in zone 2), less any existing solar, rounded up to a common size (6.6, 8, 10, 13.2 kW), with the export limit answer noted.
+   - Battery: the kWh used outside solar hours (the off-peak plus shoulder share when the bill splits it, otherwise 60% of daily use), plus the backup needs answer, rounded up to common sizes (10, 13.5, 16, 20 kWh), kept inside the 5 to 100 kWh federal discount band.
+   - A plain one-line summary of the bill and an "estimate only" note; no money promises.
+4. **Fills the answers**: NMI, daily use, supply (phases) and existing system fill their pre-quote questions when blank; suggested solar kW prefills the STC system size on step 3 and the battery kWh prefills "Usable kWh wanted" when blank. The reading is included in the scope of works prompt.
+5. **Fixes alongside**: every checklist photo item on step 5 (bill, owner consent, strata) accepts several files (`quote_compliance_answers.photo_paths` jsonb, thumbnails for each); the bill item answers itself Yes when step 1 has pages. Step 4 supporting documents are saved on `projects.sow_documents` (jsonb) so they survive a reload, and the bill pages are passed to the scope of works too.
+
+Migration: `projects.bill_reading jsonb`, `projects.sow_documents jsonb`, `quote_compliance_answers.photo_paths jsonb`. No money or stock change.
