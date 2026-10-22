@@ -3428,9 +3428,9 @@
                     </div>
                     <p class="subtitle" id="q-stc-calc" style="margin:6px 0 0;"></p>
                   </div>
-                  <div id="bstc-credit-block" style="margin-top:14px; padding-top:12px; border-top:0.5px solid var(--border); ${quoteHasBattery(template, project.template_answers || {}) || Number(project.bstc_total) > 0 ? '' : 'display:none;'}">
+                  <div id="bstc-credit-block" style="margin-top:14px; padding-top:12px; border-top:0.5px solid var(--border);">
                     <label style="margin-top:0;">BSTC credit (battery)</label>
-                    <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">Type the number of BSTCs from Pylon or Formbay (TEops does not work out the tiered battery factor). Total is count x price.</p>
+                    <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">Type the number of BSTCs from Pylon or Formbay (TEops does not work out the tiered battery factor). Total is count x price. Leave it blank, or tick the box below, when there is no battery.</p>
                     <div class="grid cols-4">
                       <div><label style="margin-top:0; font-size:12px;">Number of BSTCs</label><input id="q-bstc-qty" type="number" inputmode="numeric" step="1" min="0" value="${project.bstc_quantity ?? ''}" placeholder="e.g. 90" /></div>
                       <div><label style="margin-top:0; font-size:12px;">$ per BSTC</label><input id="q-bstc-price" type="number" step="0.01" value="${project.bstc_price_per_certificate ?? 35}" /></div>
@@ -3562,8 +3562,6 @@
           if (el.dataset.qid === 'with_battery') {
             if (!templateAnswers.with_battery) delete templateAnswers.with_battery;
             renderTemplateQuestions(qEl, currentTemplate, templateAnswers);
-            const bb = document.getElementById('bstc-credit-block');
-            if (bb) bb.style.display = quoteHasBattery(currentTemplate, templateAnswers) || Number(project.bstc_total) > 0 ? '' : 'none';
           }
           showMissing();
           renderCustomerGets();
