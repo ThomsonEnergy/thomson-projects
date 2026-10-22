@@ -8,7 +8,7 @@ const { requirePricingRole } = require('./_shared/require-pricing-role');
 // project-documents bucket so the client never has to send large files
 // through the browser twice.
 
-const MAX_DOCS = 5;
+const MAX_DOCS = 12; // supporting documents plus the electricity bill pages from step 1
 
 function mimeFor(path) {
   const ext = (path.split('.').pop() || '').toLowerCase();

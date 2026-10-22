@@ -663,7 +663,7 @@ Built, one file (`public/schedule.html`), no migration. Chips wrap onto two line
 
 Confirmed the same day, how the schedule and timesheets relate (no change planned unless the owner asks): both views show bookings (`schedule_assignments`) only. A time entry never creates a booking. On past days, Day view locks a booking to its real clocked times when there is matching clocked time, and removes a booking nobody clocked on to. Clocked time with no booking (for example a timesheet added later because someone forgot to log in) shows nowhere on the schedule. Possible follow-up if wanted: show it on past days as a grey "worked, not booked" block.
 
-## 29. Electricity bill reader on the quote: all pages, read by AI, solar and battery sizing (planned 22 Oct 2026, waiting on owner's yes)
+## 29. Electricity bill reader on the quote: all pages, read by AI, solar and battery sizing, savings on the proposal (built 22 Oct 2026, migration 20261118000000)
 
 Owner's report: the bill upload on quotes takes one page when bills run 3 to 6 pages, and the AI does not read the page that is uploaded. Found:
 
@@ -681,7 +681,11 @@ Plan (one delivery, migration plus code):
 4. **Fills the answers**: NMI, daily use, supply (phases) and existing system fill their pre-quote questions when blank; suggested solar kW prefills the STC system size on step 3 and the battery kWh prefills "Usable kWh wanted" when blank. The reading is included in the scope of works prompt.
 5. **Fixes alongside**: every checklist photo item on step 5 (bill, owner consent, strata) accepts several files (`quote_compliance_answers.photo_paths` jsonb, thumbnails for each); the bill item answers itself Yes when step 1 has pages. Step 4 supporting documents are saved on `projects.sow_documents` (jsonb) so they survive a reload, and the bill pages are passed to the scope of works too.
 
-Migration: `projects.bill_reading jsonb`, `projects.sow_documents jsonb`, `quote_compliance_answers.photo_paths jsonb`. No money or stock change.
+Migration: `projects.bill_reading jsonb`, `projects.sow_documents jsonb`, `projects.show_roi boolean`, `quote_compliance_answers.photo_paths jsonb`; `get_quote_by_token` returns the bill reading, the system size, the zone and the few answers the savings page needs. No money or stock change.
+
+Added with the owner's yes (22 Oct 2026): **the proposal shows the return on investment.** A "Your savings" page on Solar and Battery proposals, between Your system and the Investment summary, from the bill reading and the quote: use now and bills now, solar generated, stored for the evening, used at home, sent to the grid, bought from the grid after, estimated bills after, estimated saving a year, the investment after the credits, payback years, yearly return, 10 and 25 year savings (prices up 3% a year, panels down 0.5% a year), emissions avoided, and the assumptions in a note. The maths is one shared file (`public/js/solar-roi.js`: the sizing, the scenarios with and without the system, the rows and the assumptions text) used by the quote page preview, the proposal and the reader, so staff and client see the same figures. Caps keep it honest: panels cover at most 90% of daytime use, the battery at most 80% of evening use over a year. The solar size is the quote's STC system size (or the Pylon design), the battery size the "Usable kWh wanted" answer, the price the total after the STC and BSTC credits. Step 3 has a tick "Show the savings estimate on the proposal" (on by default).
+
+Sizes stay suggestions: "Use as system size (step 3)" and "Use as usable kWh wanted" buttons fill the fields, then Save as usual. The Pylon "View interactive design & ROI" link stays as it was.
 
 ## 30. Tag people in site photos (planned 22 Oct 2026, waiting on owner's yes)
 

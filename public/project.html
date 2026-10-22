@@ -33,6 +33,7 @@
 
   <script src="/js/supabase-client.js?v=114"></script>
   <script src="/js/template-questions.js?v=2"></script>
+  <script src="/js/solar-roi.js?v=1"></script>
   <script src="/js/prebuild-form.js?v=2"></script>
   <script src="/js/feed.js?v=10"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -325,6 +326,7 @@
     let sitePicker = null; // attached when the quote edit form is on screen
     let referencePhotos = [];
     let sowDocs = [];
+    let billDocs = []; // the electricity bill pages filed on the quote (step 1), see wireBillCard
     let assignedContactIds = {};
     let currentTemplate = 'new_build';
     let templateAnswers = {};
@@ -1049,6 +1051,188 @@
     // ---------- shared wiring for the quote editor and the quote steps (item 27) ----------
     // Each wires the ids it finds; the quote steps panel and the full editor use the same ids.
 
+    // ---------- Electricity bill on step 1 (backlog item 29) ----------
+    // Pages are project_documents rows in the "Electricity bill" folder (private project-documents
+    // bucket, bills/<quote id>/), read by read-electricity-bill.js into projects.bill_reading. The
+    // sizing and the savings preview come from public/js/solar-roi.js, the same maths the proposal
+    // uses, so what the staff see here is what the client sees.
+    const BILL_FOLDER = 'Electricity bill';
+
+    async function loadBillDocs(projectId) {
+      const { data } = await supabaseClient.from('project_documents').select('id, file_path, file_name, mime_type, created_at')
+        .eq('project_id', projectId).eq('folder', BILL_FOLDER).order('created_at');
+      billDocs = data || [];
+      return billDocs;
+    }
+
+    function wireBillCard(project, qEl, showMissing, refreshBar) {
+      const card = document.getElementById('bill-card');
+      if (!card) return;
+      const listEl = document.getElementById('bill-doc-list');
+      const fileInput = document.getElementById('bill-doc-file');
+      const msg = document.getElementById('bill-doc-msg');
+      const readBtn = document.getElementById('bill-read-btn');
+      const readMsg = document.getElementById('bill-read-msg');
+      const liveAnswers = () => Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
+
+      function renderList() {
+        listEl.innerHTML = billDocs.length ? billDocs.map(d => `
+          <div style="display:inline-flex; align-items:center; gap:6px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:6px 10px; margin:0 8px 8px 0; font-size:12px;">
+            <a href="#" class="bill-doc-view" data-path="${escapeHtml(d.file_path)}">${escapeHtml(d.file_name)}</a>
+            <button type="button" class="bill-doc-remove" data-id="${d.id}" data-path="${escapeHtml(d.file_path)}" style="padding:2px 6px; font-size:11px;">x</button>
+          </div>`).join('') : `<p class="subtitle" style="font-size:12px; margin:0 0 6px;">No pages yet.</p>`;
+        listEl.querySelectorAll('.bill-doc-view').forEach(a => a.addEventListener('click', (e) => {
+          e.preventDefault();
+          openSignedDocInNewTab(a.dataset.path).catch(err => { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; });
+        }));
+        listEl.querySelectorAll('.bill-doc-remove').forEach(btn => btn.addEventListener('click', async () => {
+          if (!confirm('Remove this page?')) return;
+          try {
+            const { error } = await supabaseClient.from('project_documents').delete().eq('id', btn.dataset.id);
+            if (error) throw error;
+            await supabaseClient.storage.from('project-documents').remove([btn.dataset.path]);
+            billDocs = billDocs.filter(d => d.id !== btn.dataset.id);
+            renderList();
+          } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
+        }));
+        readBtn.disabled = !billDocs.length;
+      }
+
+      fileInput.addEventListener('change', async () => {
+        if (!fileInput.files.length) return;
+        const files = Array.from(fileInput.files);
+        fileInput.disabled = true;
+        try {
+          const { data: { user } } = await supabaseClient.auth.getUser();
+          for (let i = 0; i < files.length; i++) {
+            msg.innerHTML = `<p class="subtitle">Uploading ${i + 1} of ${files.length}...</p>`;
+            const file = files[i];
+            const path = await uploadPrivateFile(file, `bills/${project.id}`); // photos are compressed on the way
+            const ext = (path.split('.').pop() || '').toLowerCase();
+            const mime = ext === 'pdf' ? 'application/pdf' : ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : (file.type || null);
+            const { data, error } = await supabaseClient.from('project_documents')
+              .insert({ project_id: project.id, folder: BILL_FOLDER, file_path: path, file_name: file.name, mime_type: mime, uploaded_by: user?.id || null })
+              .select('id, file_path, file_name, mime_type, created_at').single();
+            if (error) throw error;
+            billDocs.push(data);
+          }
+          msg.innerHTML = '';
+          renderList();
+        } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
+        finally { fileInput.value = ''; fileInput.disabled = false; }
+      });
+
+      readBtn.addEventListener('click', async () => {
+        readBtn.disabled = true;
+        const label = readBtn.innerHTML;
+        readBtn.textContent = 'Reading the bill...';
+        readMsg.innerHTML = '';
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/read-electricity-bill', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ projectId: project.id }),
+          });
+          const json = await res.json();
+          if (!json.ok) throw new Error(json.error || 'The bill could not be read.');
+          project.bill_reading = json.reading;
+          project.template_answers = json.answers;
+          templateAnswers = json.answers;
+          renderTemplateQuestions(qEl, currentTemplate, templateAnswers);
+          showMissing();
+          renderCustomerGets();
+          const filledKeys = Object.keys(json.filled || {});
+          readMsg.innerHTML = `<div class="success-box">Bill read.${filledKeys.length ? ` Filled in and saved: ${filledKeys.join(', ')}.` : ''}</div>`;
+          renderReading();
+          refreshBar();
+        } catch (err) { readMsg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
+        finally { readBtn.innerHTML = label; readBtn.disabled = !billDocs.length; }
+      });
+
+      // What the savings preview runs on: the step 3 inputs when they are on the page, else what is saved.
+      function currentSolarKw() {
+        if (currentTemplate === 'battery') return 0;
+        const el = document.getElementById('q-stc-kw');
+        const v = el ? parseFloat(el.value) : NaN;
+        if (Number.isFinite(v) && v > 0) return v;
+        return Number(project.stc_system_kw) || pylonKw || 0;
+      }
+      function currentBatteryKwh() {
+        const answers = liveAnswers();
+        if (!quoteHasBattery(currentTemplate, answers)) return 0;
+        return parseFloat(answers.battery_kwh_wanted) || 0;
+      }
+      function currentNetCost() {
+        const exGst = (project.cost_centres || []).reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
+        return Math.max(0, exGst * 1.1 - (Number(project.stc_total) || 0) - (Number(project.bstc_total) || 0));
+      }
+      function currentZone() {
+        const el = document.getElementById('q-stc-zone');
+        return (el && parseFloat(el.value)) || Number(project.stc_zone_rating) || 1.382;
+      }
+
+      function renderReading() {
+        const out = document.getElementById('bill-reading');
+        const when = document.getElementById('bill-read-when');
+        const r = project.bill_reading;
+        if (!out || !when) return;
+        if (!r) { out.innerHTML = ''; when.textContent = ''; return; }
+        when.textContent = r.read_at ? `Read ${new Date(r.read_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}${r.pages ? `, ${r.pages} file${r.pages === 1 ? '' : 's'}` : ''}` : '';
+        const m = billMetrics(r);
+        const fmt = (v, unit) => (v == null ? '-' : `${v}${unit || ''}`);
+        const rows = [
+          ['Retailer', `${r.retailer || '-'}${r.distributor ? ` (network ${r.distributor})` : ''}`],
+          ['NMI', r.nmi || '-'],
+          ['Period', `${r.billing_period_start || '?'} to ${r.billing_period_end || '?'} (${fmt(m.days, ' days')})`],
+          ['Use', `${fmt(m.totalKwh, ' kWh')} in the period, ${fmt(m.dailyKwh, ' kWh a day')}, about ${fmt(m.annualKwh, ' kWh a year')}`],
+          ...(m.split ? [['Time of use', `peak ${m.split.peak} / shoulder ${m.split.shoulder} / off-peak ${m.split.offPeak} kWh${m.split.controlled ? `, controlled load ${m.split.controlled} kWh` : ''}`]] : []),
+          ['Rates', `${fmt(r.usage_rate_c_per_kwh, ' c/kWh')} usage, ${fmt(r.supply_charge_c_per_day, ' c/day')} supply${r.feed_in_c_per_kwh != null ? `, feed-in ${r.feed_in_c_per_kwh} c/kWh` : ''}`],
+          ['This bill', `${r.bill_total != null ? money(r.bill_total) : '-'}${m.annualBill ? `, about ${money(m.annualBill)} a year` : ''}`],
+          ...(r.solar_export_kwh ? [['Solar export', `${r.solar_export_kwh} kWh (existing solar)`]] : []),
+          ...(r.skipped_files && r.skipped_files.length ? [['Not read', r.skipped_files.join(', ')]] : []),
+          ...(r.notes ? [['Note', r.notes]] : []),
+        ];
+        const s = r.sizing || {};
+        const roi = roiFor({ reading: r, answers: liveAnswers(), newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone() });
+        const cell = (k, v) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`;
+        out.innerHTML = `
+          <table style="margin-top:10px; font-size:13px;"><tbody>${rows.map(([k, v]) => cell(k, v)).join('')}</tbody></table>
+          <div style="margin-top:12px;">
+            <label style="margin-top:0; font-weight:600;">Suggested size</label>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0;">
+              ${s.solarKw ? `<span><strong>${s.solarKw} kW</strong> solar</span>${currentTemplate !== 'battery' ? `<button type="button" class="secondary" id="bill-use-solar" style="font-size:12px; padding:4px 8px;">Use as system size (step 3)</button>` : ''}` : (s.solarKw === 0 ? `<span>Solar: the existing ${s.existingKw} kW already covers the use</span>` : '')}
+              ${s.batteryKwh ? `<span><strong>${s.batteryKwh} kWh</strong> battery</span><button type="button" class="secondary" id="bill-use-battery" style="font-size:12px; padding:4px 8px;">Use as usable kWh wanted</button>` : ''}
+            </div>
+            ${(s.notes || []).map(n => `<p class="subtitle" style="margin:2px 0; font-size:12px;">${escapeHtml(n)}</p>`).join('')}
+          </div>
+          ${roi ? `
+          <div style="margin-top:12px;">
+            <label style="margin-top:0; font-weight:600;">Savings estimate (as the proposal shows it)</label>
+            <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${roi.newSolarKw ? `${roi.newSolarKw} kW of solar` : ''}${roi.newSolarKw && roi.batteryKwh ? ' and ' : ''}${roi.batteryKwh ? `a ${roi.batteryKwh} kWh battery` : ''}${roi.existingKw ? ` on top of the existing ${roi.existingKw} kW` : ''}${roi.netCost ? ` at ${money(roi.netCost)} after the credits (step 3)` : ' (no price on step 3 yet)'}. Follows the pricing and the answers; the tick on step 3 hides it from the proposal.</p>
+            <table style="font-size:13px;"><tbody>${roiRows(roi, money).map(([k, v]) => cell(k, v)).join('')}</tbody></table>
+          </div>` : `<p class="subtitle" style="margin-top:10px; font-size:12px;">The savings estimate appears once a system size (step 3) or a battery size (Usable kWh wanted, above) is set.</p>`}`;
+        const useSolar = out.querySelector('#bill-use-solar');
+        if (useSolar) useSolar.addEventListener('click', () => {
+          const el = document.getElementById('q-stc-kw');
+          if (el) { el.value = s.solarKw; el.dispatchEvent(new Event('input', { bubbles: true })); showToast(`${s.solarKw} kW set on step 3. Save pricing to keep it.`); }
+          renderReading();
+        });
+        const useBattery = out.querySelector('#bill-use-battery');
+        if (useBattery) useBattery.addEventListener('click', () => {
+          const el = qEl.querySelector('.tq-input[data-qid="battery_kwh_wanted"]');
+          if (!el) { showToast('Answer "Batteries as well?" with Yes first.', { error: true }); return; }
+          el.value = s.batteryKwh;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          showToast(`${s.batteryKwh} kWh set. Save answers to keep it.`);
+          renderReading();
+        });
+      }
+
+      qEl.addEventListener('change', () => { if (project.bill_reading) renderReading(); });
+      ['q-stc-kw', 'q-stc-zone'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', () => { if (project.bill_reading) renderReading(); }); });
+      loadBillDocs(project.id).then(() => { renderList(); renderReading(); });
+    }
+
     // Supporting documents, Generate scope of works with AI, reference photos.
     function wireScopeTools(project) {
       document.getElementById('sow-doc-file').addEventListener('change', async () => {
@@ -1111,7 +1295,7 @@
             method: 'POST', headers: aiHeaders,
             body: JSON.stringify({
               projectName: projectName || 'This project', brief, stageNames: updatedStageNames,
-              stageDescriptions: updatedDescriptions, documentPaths: sowDocs.map(d => d.path),
+              stageDescriptions: updatedDescriptions, documentPaths: [...sowDocs.map(d => d.path), ...billDocs.map(d => d.file_path)],
               style: sowStyle, template: currentTemplate, templateAnswers: answersText, customerGets, withBattery,
             }),
           });
@@ -1359,7 +1543,7 @@
         selectedClientId = project.client_id || null;
         referencePhotos = (project.reference_photos || []).map(p => p.url || p);
         renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
-        sowDocs = [];
+        sowDocs = (project.sow_documents || []).slice();
         renderEditSowDocList();
         showSiteInspectionNote(project);
 
@@ -1705,6 +1889,7 @@
             sow_text, proposal_subtitle, terms_text, deposit_percent, show_investment_breakdown, pylon_link, pylon_project_id,
             sow_brief: document.getElementById('p-brief').value.trim(),
             reference_photos: referencePhotos.map(url => ({ url })),
+            sow_documents: sowDocs,
             cover_photos: coverPhotos,
             proposal_template: currentTemplate,
             template_answers: readTemplateAnswers(document.getElementById('template-questions')),
@@ -3358,6 +3543,19 @@
                 </div>
                 <div id="site-inspection-note"></div>
                 <div class="grid cols-2" id="template-questions"></div>
+                <div id="bill-card" style="margin-top:14px; padding:12px; background:var(--surface-2); border-radius:8px; ${['solar', 'battery'].includes(template) ? '' : 'display:none;'}">
+                  <label style="margin-top:0; font-weight:600;">Electricity bill</label>
+                  <p class="subtitle" style="margin:2px 0 8px;">Add every page (photos from the phone, or the retailer's PDF), then Read bill with AI. It fills the NMI, daily use, supply and network above when they are blank, suggests the solar and battery size, and works out the savings estimate shown on the proposal.</p>
+                  <div id="bill-doc-list" style="margin-bottom:8px;"></div>
+                  <input type="file" id="bill-doc-file" accept="image/*,.pdf" multiple />
+                  <div id="bill-doc-msg"></div>
+                  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+                    <button type="button" class="secondary" id="bill-read-btn" disabled>&#10024; Read bill with AI</button>
+                    <span class="subtitle" id="bill-read-when" style="font-size:12px;"></span>
+                  </div>
+                  <div id="bill-read-msg"></div>
+                  <div id="bill-reading"></div>
+                </div>
                 <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                   <button type="button" id="qs1-save">Save answers</button>
                   <span class="subtitle" id="qs1-missing" style="font-size:12px;"></span>
@@ -3445,6 +3643,7 @@
                   <label style="margin-top:0; font-weight:600;">Payment schedule</label>
                   <div style="max-width:160px;"><label style="margin-top:6px;">Deposit %</label><input id="p-deposit" type="number" step="1" value="${project.deposit_percent ?? 10}" /></div>
                   <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:400; cursor:pointer;"><input type="checkbox" id="p-breakdown" style="width:auto; margin:0;" ${project.show_investment_breakdown ? 'checked' : ''} /> Show investment breakdown (a page after the Investment summary listing each stage's items, prebuilds by their client description, no item prices)</label>
+                  <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-weight:400; cursor:pointer; ${['solar', 'battery'].includes(template) ? '' : 'display:none;'}"><input type="checkbox" id="p-show-roi" style="width:auto; margin:0;" ${project.show_roi === false ? '' : 'checked'} /> Show the savings estimate on the proposal (a "Your savings" page from the electricity bill read on step 1: generation, use, bills before and after, payback, 10 and 25 year savings)</label>
                   <div style="margin-top:12px;">
                     <label style="margin-top:0">Custom milestones (optional)</label>
                     <p class="subtitle" style="margin-bottom:8px;">Replaces the schedule shown to the client with your own named stages. Doesn't change what's invoiced when the quote's approved - that's still the Deposit % above.</p>
@@ -3540,7 +3739,7 @@
         templateAnswers = project.template_answers || {};
         lastPylonData = project.pylon_data || null;
         pylonKw = project.pylon_data?.summary?.dc_output_kw || null;
-        sowDocs = [];
+        sowDocs = (project.sow_documents || []).slice();
         referencePhotos = (project.reference_photos || []).map(p => p.url || p);
         const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
         const refreshBar = () => { const bar = document.getElementById('quote-steps-bar'); if (bar) bar.innerHTML = quoteStepsBarHtml(project, project.cost_centres || []); };
@@ -3571,8 +3770,11 @@
           Object.assign(templateAnswers, readTemplateAnswers(qEl));
           renderTemplateQuestions(qEl, currentTemplate, templateAnswers);
           showMissing();
+          const billCard = document.getElementById('bill-card');
+          if (billCard) billCard.style.display = ['solar', 'battery'].includes(currentTemplate) ? '' : 'none';
         });
         showSiteInspectionNote(project);
+        wireBillCard(project, qEl, showMissing, refreshBar);
         document.getElementById('qs1-save').addEventListener('click', async () => {
           const btn = document.getElementById('qs1-save');
           busy(btn, true, 'Save answers');
@@ -3708,6 +3910,7 @@
             const fields = {
               deposit_percent: parseFloat(document.getElementById('p-deposit').value) || 0,
               show_investment_breakdown: document.getElementById('p-breakdown').checked,
+              show_roi: document.getElementById('p-show-roi').checked,
               pylon_link: document.getElementById('p-pylon-link').value.trim(),
               pylon_project_id: document.getElementById('p-pylon-id').value.trim(),
               estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
@@ -3754,6 +3957,7 @@
               proposal_subtitle: document.getElementById('p-subtitle').value.trim(),
               terms_text: document.getElementById('p-terms').value,
               reference_photos: referencePhotos.map(url => ({ url })),
+              sow_documents: sowDocs,
             };
             const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
             if (error) throw error;
@@ -5380,6 +5584,12 @@
       const items = itemsData || [];
       const answers = {};
       (answersData || []).forEach(a => { answers[a.item_id] = a; });
+      // An item holds several files (a multi-page bill, a consent form): photo_paths, with
+      // photo_path kept as the first for older rows and readers.
+      const filesOf = (a) => Array.isArray(a?.photo_paths) && a.photo_paths.length ? a.photo_paths : (a?.photo_path ? [a.photo_path] : []);
+      const isPdfUrl = (u) => /\.pdf(\?|$)/i.test(u);
+      const isBillItem = (it) => it.item_type === 'photo' && /electricity bill/i.test(it.label || '');
+      if (['solar', 'battery'].includes(project.proposal_template)) await loadBillDocs(project.id);
 
       function itemsVisible() {
         return items.filter(it => {
@@ -5403,7 +5613,9 @@
         containerEl.innerHTML = visible.map(it => {
           const a = answers[it.id];
           const isChild = !!it.parent_item_id;
-          const answered = it.item_type === 'photo' ? !!a?.photo_path : (a?.answer_yes_no !== null && a?.answer_yes_no !== undefined);
+          const files = filesOf(a);
+          const billPages = isBillItem(it) ? billDocs.length : 0;
+          const answered = it.item_type === 'photo' ? (files.length > 0 || billPages > 0) : (a?.answer_yes_no !== null && a?.answer_yes_no !== undefined);
           return `
           <div class="${isChild ? 'insp-child' : ''}">
             <div class="insp-item ${answered ? 'answered' : ''}" data-item-id="${it.id}">
@@ -5413,8 +5625,10 @@
                 <button type="button" class="insp-yn-btn yn-yes ${a?.answer_yes_no === true ? 'selected' : ''}">Yes</button>
                 <button type="button" class="insp-yn-btn secondary yn-no ${a?.answer_yes_no === false ? 'selected' : ''}">No</button>
               ` : `
-                ${a?.photo_path ? `<img class="insp-photo-thumb insp-photo-view" src="${escapeHtml(a.photo_path)}" style="cursor:pointer;" />` : ''}
-                <label class="btn ${a?.photo_path ? 'secondary' : ''} insp-photo-btn">&#128247; ${a?.photo_path ? 'Replace photo or PDF' : 'Add photo or PDF'}<input type="file" class="insp-photo-file" accept="image/*,.pdf" style="display:none;" /></label>
+                ${files.map((u, i) => isPdfUrl(u) ? `<a class="link-quiet" href="${escapeHtml(u)}" target="_blank" rel="noopener" style="display:inline-block; margin:0 8px 6px 0; font-size:12px;">PDF ${i + 1} &rarr;</a>` : `<img class="insp-photo-thumb insp-photo-view" data-i="${i}" src="${escapeHtml(u)}" style="cursor:pointer;" />`).join('')}
+                ${billPages ? `<p class="subtitle" style="font-size:12px; margin:0 0 6px;">&#10003; ${billPages} page${billPages === 1 ? '' : 's'} filed on step 1 (Pre-quote information)${project.bill_reading ? ', read by AI' : ', not read by AI yet'}.</p>` : ''}
+                <label class="btn ${files.length ? 'secondary' : ''} insp-photo-btn">&#128247; ${files.length ? 'Add more pages or files' : 'Add photos or PDF (every page)'}<input type="file" class="insp-photo-file" accept="image/*,.pdf" multiple style="display:none;" /></label>
+                ${files.length ? `<button type="button" class="secondary insp-photo-clear" style="font-size:11px; padding:3px 8px; margin-left:6px;">Clear files</button>` : ''}
               `}
               <div class="insp-item-msg"></div>
             </div>
@@ -5432,8 +5646,14 @@
             });
           });
 
-          const photoViewImg = el.querySelector('.insp-photo-view');
-          if (photoViewImg) photoViewImg.addEventListener('click', () => openPhotoLightbox([photoViewImg.src], 0));
+          const imgs = [...el.querySelectorAll('.insp-photo-view')];
+          imgs.forEach((img, i) => img.addEventListener('click', () => openPhotoLightbox(imgs.map(x => x.src), i)));
+          const clearBtn = el.querySelector('.insp-photo-clear');
+          if (clearBtn) clearBtn.addEventListener('click', async () => {
+            if (!confirm('Remove every file on this item?')) return;
+            try { await saveAnswer(itemId, { photo_path: null, photo_paths: [] }); renderChecklist(); }
+            catch (err) { msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
+          });
 
           const fileInput = el.querySelector('.insp-photo-file');
           const photoBtn = el.querySelector('.insp-photo-btn');
@@ -5444,8 +5664,9 @@
               photoBtn.classList.add('is-loading');
               msgEl.innerHTML = `<p class="subtitle">Uploading...</p>`;
               try {
-                const [url] = await uploadPhotos(fileInput.files, `quote-compliance/${project.id}`, 'site-photos');
-                await saveAnswer(itemId, { photo_path: url });
+                const urls = await uploadPhotos(fileInput.files, `quote-compliance/${project.id}`, 'site-photos');
+                const all = [...filesOf(answers[itemId]), ...urls];
+                await saveAnswer(itemId, { photo_path: all[0] || null, photo_paths: all });
                 renderChecklist();
               } catch (err) {
                 msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
