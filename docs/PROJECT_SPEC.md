@@ -293,6 +293,7 @@ Manual steps only a person can do (the code is live):
 
 ### A19. Feeds, meetings, job extras
 - Company feed and per-job feed (likes, comments, tags).
+- Site photos on feed posts (item 30, 22 Oct 2026): a job post can carry site photos (`feed_post_photos`, migration 20261119000000). Add photos on the job's Feed composer (uploaded as site photos first, so they also show on Site Photos), Post to feed in the photo viewer, or Select photos to post on the Site Photos tab. Each opens a message, @ tag people (notified as any tag) and the Also show on the Home page tick. Posts are made by `create_feed_post` (post, tags and photos all or nothing; photos only from the post's own job). Feed cards on the job and Home show a photo strip that opens the viewer. Deleting a post leaves the photos; deleting a photo drops it from the post.
 - Meetings: record, transcribe, analyse; follow-up tasks with reminders.
 - Installer summary on the job card; recent jobs for the same client; search within a job.
 

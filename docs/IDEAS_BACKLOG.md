@@ -689,7 +689,7 @@ Added with the owner's yes (22 Oct 2026): **the proposal shows the return on inv
 
 Sizes stay suggestions: "Use as system size (step 3)" and "Use as usable kWh wanted" buttons fill the fields, then Save as usual. The Pylon "View interactive design & ROI" link stays as it was.
 
-## 30. Post a site photo to the feed with a message and tagged people (planned 22 Oct 2026, waiting on owner's yes)
+## 30. Post a site photo to the feed with a message and tagged people (built 22 Oct 2026, migration 20261119000000)
 
 **Today:** the job feed and the company feed (`feed.js`) already do posts, @ tags with a notification (`feed_mentions`), likes, comments and "also show on the Home page". A post cannot carry a photo, and a site photo cannot be posted anywhere. (Owner, 22 Oct 2026: a separate tag-on-the-photo table was planned first and dropped; the tag lives on the post.)
 
@@ -701,3 +701,5 @@ Sizes stay suggestions: "Use as system size (step 3)" and "Use as usable kWh wan
 4. **Feed cards (`feed.js`, job feed and Home):** a photo strip under the message (thumbnails, tap opens the lightbox with the set), tagged names as now. Deleting a post leaves the site photos alone; deleting a site photo drops it from the post.
 
 No money or stock change. One small migration, `?v=` bumps on feed.js, supabase-client.js and project.html scripts.
+
+As built: the post, tags and photo links are made in one database call, `create_feed_post` (security invoker, so the table policies check the caller). A post can be photos only with no message. Possible follow-ups: photos on Home-only posts (no job), and showing a post's photos as "on the feed" on the Site Photos tab.
