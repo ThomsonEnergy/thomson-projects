@@ -689,15 +689,15 @@ Added with the owner's yes (22 Oct 2026): **the proposal shows the return on inv
 
 Sizes stay suggestions: "Use as system size (step 3)" and "Use as usable kWh wanted" buttons fill the fields, then Save as usual. The Pylon "View interactive design & ROI" link stays as it was.
 
-## 30. Tag people in site photos (planned 22 Oct 2026, waiting on owner's yes)
+## 30. Post a site photo to the feed with a message and tagged people (planned 22 Oct 2026, waiting on owner's yes)
 
-**Today:** a site photo (`project_photos`) has a caption, who took it and when. There is no way to say who is in the picture, and no way to find every photo a person is in.
+**Today:** the job feed and the company feed (`feed.js`) already do posts, @ tags with a notification (`feed_mentions`), likes, comments and "also show on the Home page". A post cannot carry a photo, and a site photo cannot be posted anywhere. (Owner, 22 Oct 2026: a separate tag-on-the-photo table was planned first and dropped; the tag lives on the post.)
 
 **Plan:**
 
-1. **Table `project_photo_tags`** (migration): `photo_id` (FK `project_photos`, cascade), `profile_id` (FK `profiles`), `tagged_by`, `created_at`, unique on photo and person, index on each FK. Fast RLS `to authenticated`: anyone logged in reads and adds; the tagger, the photo's uploader, the tagged person, or Admin / Finance removes. A trigger on insert calls `create_notification` ("<name> tagged you in a photo", job label, link to the job's Site Photos tab, dedupe `phototag:<photo>:<person>`), skipped when you tag yourself.
-2. **Lightbox (`openPhotoLightbox`, supabase-client.js):** a "People" row under the name box: chips with each tagged name and an x, plus "+ Tag" which opens a search list of active staff (type to filter, tap to tag). Saves straight away, works on the phone, no page reload.
-3. **Site Photos tab (`project.html`):** each tile shows "with Jasper, Tom" under the caption; a "Person" dropdown at the top (Everyone, Me, then each person who is tagged on this job) filters the grid and the lightbox set.
-4. **Global search:** a tagged name matches the photo (the search already matches captions).
+1. **Table `feed_post_photos`** (migration): `post_id` (FK `feed_posts`, cascade), `photo_id` (FK `project_photos`, cascade), `sort_order`, unique on post and photo, index on each FK. Fast RLS `to authenticated`: everyone reads; only the post's author adds; the author or Admin removes. No new notification: tagged people already get one from `feed_mentions`.
+2. **Post to feed from a photo (`project.html` Site Photos tab and the lightbox):** a "Post to feed" button in the lightbox, and a Select mode on the tab to pick several photos then "Post to feed". Both open a small form: message, @ Tag people (same list as the feed composer), "Also show on the Home page" tick, Post. Makes one `feed_posts` row on the job, the mentions, and the photo links.
+3. **Photos from the feed composer (job feeds):** an "Add photos" button on the job's Feed tab composer (camera or files). The pictures go through `uploadPhotosBatch` into site photos as now (so they stay on the Site Photos tab) and are attached to the post. Home-only posts (no job) stay text, as now.
+4. **Feed cards (`feed.js`, job feed and Home):** a photo strip under the message (thumbnails, tap opens the lightbox with the set), tagged names as now. Deleting a post leaves the site photos alone; deleting a site photo drops it from the post.
 
-No money or stock change. One small migration, `?v=` bumps on supabase-client.js and project.html scripts.
+No money or stock change. One small migration, `?v=` bumps on feed.js, supabase-client.js and project.html scripts.
