@@ -250,6 +250,7 @@
 
   <script src="/js/supabase-client.js?v=114"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
+  <script src="/js/solar-roi.js?v=1"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -755,6 +756,33 @@
           </div>
         </section>` : '';
 
+      // 3b. Your savings: the return on investment from the customer's electricity bill as read
+      // on the quote (projects.bill_reading, backlog item 29). Same maths as the quote page's
+      // preview (public/js/solar-roi.js). Solar and battery proposals, switched off per quote
+      // with projects.show_roi, never on variation pages. The battery size comes from the
+      // pre-quote answer; the solar size from the quote's STC system size or the Pylon design.
+      const roiAnswers = data.roi_answers || {};
+      const roiSolarKw = template === 'battery' ? 0 : (Number(project.stc_system_kw) || Number(pd.summary && pd.summary.dc_output_kw) || 0);
+      const roiHasBattery = template === 'battery' || (template === 'solar' && roiAnswers.with_battery === 'Yes'); // as quoteHasBattery() in template-questions.js
+      const roiBatteryKwh = roiHasBattery ? (parseFloat(roiAnswers.battery_kwh_wanted) || 0) : 0;
+      const roi = ((template === 'solar' || template === 'battery') && project.show_roi !== false && !vInfo && project.bill_reading)
+        ? roiFor({ reading: project.bill_reading, answers: roiAnswers, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: stcTotal > 0 ? totalAfterStc : totalIncGst, zoneRating: Number(project.stc_zone_rating) || 1.382 })
+        : null;
+      const savingsHtml = roi ? `
+        <section class="pg">
+          ${slabsSvg('light')}
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">Your<br>savings</h1>
+            <p class="pg-lead">Worked out from your electricity bill${project.bill_reading.retailer ? ` (${esc(String(project.bill_reading.retailer))}` + (project.bill_reading.billing_days ? `, ${esc(String(project.bill_reading.billing_days))} days)` : ')') : ''}: ${esc(String(roi.dailyKwh))} kWh a day, about ${money(roi.annualBillNow)} a year at today's rates. ${roi.newSolarKw ? `${esc(String(roi.newSolarKw))} kW of solar` : ''}${roi.newSolarKw && roi.batteryKwh ? ' with ' : ''}${roi.batteryKwh ? `a ${esc(String(roi.batteryKwh))} kWh battery` : ''}${roi.existingKw ? ` on top of your existing ${esc(String(roi.existingKw))} kW` : ''} is estimated to save you <strong>${money(roi.annualSaving)} a year</strong>${roi.paybackYears ? ` and pay for itself in about <strong>${esc(String(roi.paybackYears))} years</strong>` : ''}.</p>
+            <table class="qtable">
+              <thead><tr><th>Each year</th><th class="num">Estimate</th></tr></thead>
+              <tbody>${roiRows(roi, money).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num" style="white-space:normal;">${esc(v)}</td></tr>`).join('')}</tbody>
+            </table>
+            <p class="note-line">${esc(roiAssumptionsText(roi))}</p>
+          </div>
+        </section>` : '';
+
       // 4. Investment and payment schedule
       const milestones = data.payment_milestones || [];
       const milestoneRowsHtml = milestones.length
@@ -1014,7 +1042,7 @@
       // original quote rather than repeating it.
       content.innerHTML = vInfo
         ? coverHtml + variationPageHtml
-        : coverHtml + introHtml + scopeHtml + systemHtml + investHtml + breakdownHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
+        : coverHtml + introHtml + scopeHtml + systemHtml + savingsHtml + investHtml + breakdownHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
 
       content.querySelectorAll('.stage-summary-row').forEach(row => {
         row.addEventListener('click', () => {
