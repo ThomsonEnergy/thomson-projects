@@ -1233,7 +1233,7 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
   }
 
   function render() {
-    const editable = opts && (opts.onRename || opts.onMarkup || opts.onDelete);
+    const editable = opts && (opts.onRename || opts.onMarkup || opts.onDelete || opts.onPostToFeed);
     const canDel = !!(opts && opts.onDelete && (!opts.canDelete || opts.canDelete(index)));
     overlay.innerHTML = `
       <button type="button" id="lb-close" aria-label="Close" style="position:absolute; top:calc(env(safe-area-inset-top, 0px) + 12px); right:12px; background:rgba(255,255,255,0.1); color:#fff; border:none; width:44px; height:44px; border-radius:50%; font-size:24px; cursor:pointer;">&times;</button>
@@ -1242,12 +1242,13 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
       ${urls.length > 1 ? `<button type="button" id="lb-next" style="${navBtnStyle} right:16px;">&rarr;</button>` : ''}
       ${urls.length > 1 ? `<div style="position:absolute; bottom:${editable ? '70px' : '20px'}; left:0; right:0; text-align:center; color:#fff; font-size:13px;">${index + 1} / ${urls.length}</div>` : ''}
       ${editable ? `
-        <div style="position:absolute; bottom:14px; left:50%; transform:translateX(-50%); display:flex; gap:8px; align-items:center; width:min(560px, 92vw);">
-          ${opts.onRename ? `<input id="lb-name" placeholder="Name this photo..." value="${escapeHtml((opts.captions && opts.captions[index]) || '')}" style="flex:1; margin:0;" />` : '<span style="flex:1;"></span>'}
+        <div style="position:absolute; bottom:14px; left:50%; transform:translateX(-50%); display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:flex-end; width:min(560px, 92vw);">
+          ${opts.onRename ? `<input id="lb-name" placeholder="Name this photo..." value="${escapeHtml((opts.captions && opts.captions[index]) || '')}" style="flex:1; min-width:150px; margin:0;" />` : '<span style="flex:1;"></span>'}
+          ${opts.onPostToFeed ? `<button type="button" class="secondary" id="lb-post" style="white-space:nowrap;">Post to feed</button>` : ''}
           ${opts.onMarkup ? `<button type="button" id="lb-markup" style="white-space:nowrap;">Mark up</button>` : ''}
           ${canDel ? `<span id="lb-del-wrap" style="display:flex; gap:6px; align-items:center;"><button type="button" class="secondary" id="lb-delete" style="white-space:nowrap;">Delete</button></span>` : ''}
         </div>
-        <div id="lb-msg" style="position:absolute; bottom:56px; left:0; right:0; text-align:center; color:#fca5a5; font-size:12px;"></div>` : ''}
+        <div id="lb-msg" style="position:absolute; top:calc(env(safe-area-inset-top, 0px) + 64px); left:16px; right:16px; text-align:center; color:#fca5a5; font-size:13px;"></div>` : ''}
     `;
     overlay.querySelector('#lb-close').addEventListener('click', close);
     if (urls.length > 1) {
@@ -1265,6 +1266,9 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
         } catch (err) { msgEl.textContent = `Could not save the name: ${err.message}`; }
       });
     }
+    // Post to feed (job site photos): the caller opens its own form over the viewer.
+    const postBtn = overlay.querySelector('#lb-post');
+    if (postBtn) postBtn.addEventListener('click', (e) => { e.stopPropagation(); opts.onPostToFeed(index); });
     const markupBtn = overlay.querySelector('#lb-markup');
     if (markupBtn) {
       markupBtn.addEventListener('click', () => {
@@ -1326,7 +1330,7 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
   document.addEventListener('keydown', function onKey(e) {
     if (!document.body.contains(overlay)) { document.removeEventListener('keydown', onKey); return; }
     if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-    if (document.querySelector('.photo-markup-overlay')) return; // markup editor is on top
+    if (document.querySelector('.photo-markup-overlay, .feed-photo-post-overlay')) return; // markup editor or post form is on top
     if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
     else if (e.key === 'ArrowLeft' && urls.length > 1) { index = (index - 1 + urls.length) % urls.length; render(); }
     else if (e.key === 'ArrowRight' && urls.length > 1) { index = (index + 1) % urls.length; render(); }
