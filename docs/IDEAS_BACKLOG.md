@@ -682,3 +682,16 @@ Plan (one delivery, migration plus code):
 5. **Fixes alongside**: every checklist photo item on step 5 (bill, owner consent, strata) accepts several files (`quote_compliance_answers.photo_paths` jsonb, thumbnails for each); the bill item answers itself Yes when step 1 has pages. Step 4 supporting documents are saved on `projects.sow_documents` (jsonb) so they survive a reload, and the bill pages are passed to the scope of works too.
 
 Migration: `projects.bill_reading jsonb`, `projects.sow_documents jsonb`, `quote_compliance_answers.photo_paths jsonb`. No money or stock change.
+
+## 30. Tag people in site photos (planned 22 Oct 2026, waiting on owner's yes)
+
+**Today:** a site photo (`project_photos`) has a caption, who took it and when. There is no way to say who is in the picture, and no way to find every photo a person is in.
+
+**Plan:**
+
+1. **Table `project_photo_tags`** (migration): `photo_id` (FK `project_photos`, cascade), `profile_id` (FK `profiles`), `tagged_by`, `created_at`, unique on photo and person, index on each FK. Fast RLS `to authenticated`: anyone logged in reads and adds; the tagger, the photo's uploader, the tagged person, or Admin / Finance removes. A trigger on insert calls `create_notification` ("<name> tagged you in a photo", job label, link to the job's Site Photos tab, dedupe `phototag:<photo>:<person>`), skipped when you tag yourself.
+2. **Lightbox (`openPhotoLightbox`, supabase-client.js):** a "People" row under the name box: chips with each tagged name and an x, plus "+ Tag" which opens a search list of active staff (type to filter, tap to tag). Saves straight away, works on the phone, no page reload.
+3. **Site Photos tab (`project.html`):** each tile shows "with Jasper, Tom" under the caption; a "Person" dropdown at the top (Everyone, Me, then each person who is tagged on this job) filters the grid and the lightbox set.
+4. **Global search:** a tagged name matches the photo (the search already matches captions).
+
+No money or stock change. One small migration, `?v=` bumps on supabase-client.js and project.html scripts.
