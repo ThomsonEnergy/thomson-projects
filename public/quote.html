@@ -250,7 +250,7 @@
 
   <script src="/js/supabase-client.js?v=114"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=2"></script>
+  <script src="/js/solar-roi.js?v=3"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -767,42 +767,38 @@
       const roiBatteryKwh = roiHasBattery ? (parseFloat(roiAnswers.battery_kwh_wanted) || 0) : 0;
       const roiNetCost = stcTotal > 0 ? totalAfterStc : totalIncGst;
       const roiWanted = (template === 'solar' || template === 'battery') && project.show_roi !== false && !vInfo;
-      // Anything that matters missing (no bill, no usage, no rates, no bill total, no existing solar
-      // size, no system size or price): no figures at all. The page asks the customer for what we
-      // need, when it is theirs to give; gaps only the office can fill mean no page.
-      const roiGapList = roiWanted ? roiGaps({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost }) : [];
-      const roiBlocking = roiGapList.filter(g => g.blocking);
-      const roiAsks = roiBlocking.filter(g => g.client).map(g => g.client);
-      const roiNotes = roiGapList.filter(g => !g.blocking && g.client).map(g => g.client);
-      const roi = (roiWanted && !roiBlocking.length)
-        ? roiFor({ reading: project.bill_reading, answers: roiAnswers, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382 })
-        : null;
-      const savingsAskHtml = (roiWanted && roiBlocking.length && roiAsks.length) ? `
+      // The page shows whatever we have (never a figure that rests on a guess), then "to give you Y
+      // we need X" for what the customer can supply, and that accepting the proposal before then
+      // is accepting it on what is shown. Nothing here stops the proposal being sent or accepted.
+      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, money }) : { rows: [], asks: [] };
+      const roi = pres.roi;
+      const br = project.bill_reading || {};
+      const billLine = br.retailer ? ` (${esc(String(br.retailer))}${br.billing_days ? `, ${esc(String(br.billing_days))} days` : ''})` : '';
+      const savingsLead = !pres.rows.length
+        ? 'We want your savings estimate to be accurate, not a guess, so there are no figures here yet.'
+        : roi && pres.dollars
+          ? `Worked out from your electricity bill${billLine}: ${esc(String(roi.dailyKwh))} kWh a day${pres.rows.some(r => r[0] === 'Your bills now') ? `, about ${money(roi.annualBillNow)} a year at today's rates` : ''}. ${roi.newSolarKw ? `${esc(String(roi.newSolarKw))} kW of solar` : ''}${roi.newSolarKw && roi.batteryKwh ? ' with ' : ''}${roi.batteryKwh ? `a ${esc(String(roi.batteryKwh))} kWh battery` : ''}${roi.existingKw ? ` on top of your existing ${esc(String(roi.existingKw))} kW` : ''} is estimated to save you <strong>${money(roi.annualSaving)} a year</strong>${roi.paybackYears ? ` and pay for itself in about <strong>${esc(String(roi.paybackYears))} years</strong>` : ''}.`
+          : `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day. The figures below are what we can say from the pages we have.`;
+      const asksHtml = pres.asks.length ? `
+            <div class="sec-title" style="margin-top:22px;">What we still need from you</div>
+            ${pres.asks.map(a => `<p class="pg-lead" style="margin-bottom:8px;">To give you ${esc(a.gives)}, we need ${esc(a.need)}.</p>`).join('')}
+            <p class="pg-lead">Send it to us (a photo of each page is fine) and we will update this proposal. If you accept this proposal before we have it, you are accepting it on the figures and information shown here.</p>` : '';
+      const savingsHtml = (roiWanted && (pres.rows.length || pres.asks.length)) ? `
         <section class="pg">
           ${slabsSvg('light')}
           ${headHtml}
           <div class="pg-body">
             <h1 class="pg-title">Your<br>savings</h1>
-            <p class="pg-lead">We want your savings estimate to be accurate, not a guess, so we have not put figures here yet. To work out what this system will save you each year, how soon it pays for itself and what it saves over 10 and 25 years, we need:</p>
-            <div class="rows">${roiAsks.map(t => `<p class="pg-lead" style="margin-bottom:8px;">&bull; ${esc(t.charAt(0).toUpperCase() + t.slice(1))}</p>`).join('')}</div>
-            <p class="pg-lead" style="margin-top:14px;">Send it to us (a photo of each page is fine) and we will update this proposal with your figures.</p>
-          </div>
-        </section>` : '';
-      const savingsHtml = roi ? `
-        <section class="pg">
-          ${slabsSvg('light')}
-          ${headHtml}
-          <div class="pg-body">
-            <h1 class="pg-title">Your<br>savings</h1>
-            <p class="pg-lead">Worked out from your electricity bill${project.bill_reading.retailer ? ` (${esc(String(project.bill_reading.retailer))}` + (project.bill_reading.billing_days ? `, ${esc(String(project.bill_reading.billing_days))} days)` : ')') : ''}: ${esc(String(roi.dailyKwh))} kWh a day, about ${money(roi.annualBillNow)} a year at today's rates. ${roi.newSolarKw ? `${esc(String(roi.newSolarKw))} kW of solar` : ''}${roi.newSolarKw && roi.batteryKwh ? ' with ' : ''}${roi.batteryKwh ? `a ${esc(String(roi.batteryKwh))} kWh battery` : ''}${roi.existingKw ? ` on top of your existing ${esc(String(roi.existingKw))} kW` : ''} is estimated to save you <strong>${money(roi.annualSaving)} a year</strong>${roi.paybackYears ? ` and pay for itself in about <strong>${esc(String(roi.paybackYears))} years</strong>` : ''}.</p>
+            <p class="pg-lead">${savingsLead}</p>
+            ${pres.rows.length ? `
             <table class="qtable">
               <thead><tr><th>Each year</th><th class="num">Estimate</th></tr></thead>
-              <tbody>${roiRows(roi, money).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num" style="white-space:normal;">${esc(v)}</td></tr>`).join('')}</tbody>
-            </table>
-            ${roiNotes.length ? `<p class="note-line">To make this more accurate, send us ${esc(roiNotes.join('; '))}.</p>` : ''}
-            <p class="note-line">${esc(roiAssumptionsText(roi))}</p>
+              <tbody>${pres.rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num" style="white-space:normal;">${esc(v)}</td></tr>`).join('')}</tbody>
+            </table>` : ''}
+            ${asksHtml}
+            ${roi ? `<p class="note-line">${esc(roiAssumptionsText(roi))}</p>` : ''}
           </div>
-        </section>` : savingsAskHtml;
+        </section>` : '';
 
       // 4. Investment and payment schedule
       const milestones = data.payment_milestones || [];
