@@ -214,27 +214,66 @@ function annualUseCost(m) {
 }
 
 // Rows for a savings table (proposal and the quote page preview). money() is the caller's formatter.
-function roiRows(roi, money) {
+// opts.dollars false leaves out every dollar row (the bill gave no rates or total: the kWh figures
+// stand, the money ones wait for the missing page); opts.billsNow false leaves out "Your bills now".
+function roiRows(roi, money, opts = {}) {
   if (!roi) return [];
+  const dollars = opts.dollars !== false;
   const kwh = (n) => `${Math.round(n).toLocaleString('en-AU')} kWh`;
-  const rows = [
-    ['Your use now', `${kwh(roi.annualKwh)} a year (${roi.dailyKwh} kWh a day)`],
-    ['Your bills now', `${money(roi.annualBillNow)} a year`],
-  ];
+  const rows = [['Your use now', `${kwh(roi.annualKwh)} a year (${roi.dailyKwh} kWh a day)`]];
+  if (dollars && opts.billsNow !== false) rows.push(['Your bills now', `${money(roi.annualBillNow)} a year`]);
   if (roi.newSolarKw) rows.push(['Solar generated', `${kwh(roi.generationKwh)} a year from ${roi.newSolarKw} kW of panels`]);
   if (roi.batteryKwh) rows.push(['Stored for the evening', `${kwh(roi.shiftedKwh)} a year through the ${roi.batteryKwh} kWh battery`]);
   rows.push(['Used at home', `${kwh(roi.selfUseKwh)} a year (${roi.selfUseShare}% of what the system makes)`]);
   rows.push(['Sent to the grid', `${kwh(roi.exportedKwh)} a year at ${roi.feedIn} c/kWh`]);
   rows.push(['Bought from the grid after', `${kwh(roi.gridKwhAfter)} a year (${roi.gridShareAfter}% less than now)`]);
-  rows.push(['Estimated bills after', `${money(roi.annualBillAfter)} a year`]);
-  rows.push(['Estimated saving', `${money(roi.annualSaving)} a year`]);
-  if (roi.netCost) rows.push(['Your investment', `${money(roi.netCost)} after the credits`]);
-  if (roi.paybackYears) rows.push(['Pays for itself in', `${roi.paybackYears} years`]);
-  if (roi.annualReturnPercent) rows.push(['Yearly return', `${roi.annualReturnPercent}% of the investment`]);
-  rows.push(['Saving over 10 years', money(roi.saving10)]);
-  rows.push(['Saving over 25 years', money(roi.saving25)]);
+  if (dollars) {
+    if (opts.billsNow !== false) rows.push(['Estimated bills after', `${money(roi.annualBillAfter)} a year`]);
+    rows.push(['Estimated saving', `${money(roi.annualSaving)} a year`]);
+    if (roi.netCost) rows.push(['Your investment', `${money(roi.netCost)} after the credits`]);
+    if (roi.paybackYears) rows.push(['Pays for itself in', `${roi.paybackYears} years`]);
+    if (roi.annualReturnPercent) rows.push(['Yearly return', `${roi.annualReturnPercent}% of the investment`]);
+    rows.push(['Saving over 10 years', money(roi.saving10)]);
+    rows.push(['Saving over 25 years', money(roi.saving25)]);
+  }
   rows.push(['Emissions avoided', `about ${roi.co2TonnesPerYear} tonnes of CO2 a year`]);
   return rows;
+}
+
+// What a missing piece would give the customer once we have it (the "to give you Y we need X" line).
+const ROI_GAP_GIVES = {
+  bill: 'your yearly saving, how soon the system pays for itself and the 10 and 25 year savings',
+  usage: 'any savings figures',
+  rate: 'the dollar savings, how soon the system pays for itself and the 10 and 25 year savings',
+  total: 'your bills before and after, and the dollar savings',
+  existing: 'the generation and savings figures for your home',
+  short: 'a more accurate yearly figure',
+};
+
+// Everything the proposal (and the quote page preview) shows for the savings estimate: the rows we
+// can stand behind with what we have, the asks ("to give you Y, we need X") for what the customer
+// can supply, and the staff-side gaps. Nothing is withheld that we do have; nothing is shown that
+// rests on a guess: no rates or total on the bill means kWh rows only, no existing solar size when
+// the bill shows export means use and bills only, no system size means no generation.
+function roiPresentation({ reading, answers, template, newSolarKw, batteryKwh, netCost, zoneRating, money }) {
+  const gaps = roiGaps({ reading, answers, template, newSolarKw, batteryKwh, netCost });
+  const has = (k) => !gaps.some(g => g.key === k);
+  const m = billMetrics(reading);
+  const asks = gaps.filter(g => g.client).map(g => ({ key: g.key, need: g.client, gives: ROI_GAP_GIVES[g.key] || 'a more accurate estimate', blocking: g.blocking }));
+  let roi = null;
+  let rows = [];
+  if (reading && m.dailyKwh) {
+    const dollars = has('rate') && has('total');
+    const canModel = has('existing') && ((roiNum(newSolarKw) || 0) > 0 || (roiNum(batteryKwh) || 0) > 0);
+    if (canModel) {
+      roi = roiFor({ reading, answers, newSolarKw, batteryKwh, netCost, zoneRating });
+      rows = roiRows(roi, money, { dollars, billsNow: has('total') });
+    } else {
+      rows = [['Your use now', `${Math.round(m.annualKwh).toLocaleString('en-AU')} kWh a year (${m.dailyKwh} kWh a day)`]];
+      if (has('total') && m.annualBill) rows.push(['Your bills now', `${money(m.annualBill)} a year`]);
+    }
+  }
+  return { roi, rows, asks, gaps, metrics: m, dollars: !!roi && has('rate') && has('total') };
 }
 
 function roiAssumptionsText(roi) {
@@ -243,5 +282,5 @@ function roiAssumptionsText(roi) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, billMetrics, suggestSizes, roiFor, roiRows, roiAssumptionsText, roiGaps, existingSolarKw };
+  module.exports = { ROI_ASSUMPTIONS, billMetrics, suggestSizes, roiFor, roiRows, roiAssumptionsText, roiGaps, roiPresentation, existingSolarKw };
 }

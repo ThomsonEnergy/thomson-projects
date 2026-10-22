@@ -33,7 +33,7 @@
 
   <script src="/js/supabase-client.js?v=114"></script>
   <script src="/js/template-questions.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=2"></script>
+  <script src="/js/solar-roi.js?v=3"></script>
   <script src="/js/prebuild-form.js?v=2"></script>
   <script src="/js/feed.js?v=10"></script>
   <script src="/js/email-view.js?v=3"></script>
@@ -1176,12 +1176,13 @@
         const when = document.getElementById('bill-read-when');
         const r = project.bill_reading;
         if (!out || !when) return;
-        const gaps = roiGaps({ reading: r, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost() });
+        const pres = roiPresentation({ reading: r, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money });
+        const gaps = pres.gaps;
         const blocking = gaps.filter(g => g.blocking);
         const warnings = gaps.filter(g => !g.blocking);
         const gapsHtml = (blocking.length || warnings.length) ? `
           <div style="margin-top:10px; padding:10px 12px; border-radius:8px; border:1px solid ${blocking.length ? 'var(--red, #c0392b)' : 'var(--border)'}; background:var(--surface);">
-            ${blocking.length ? `<strong style="font-size:13px;">Missing for the savings estimate</strong><p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${project.show_roi === false ? 'The savings page is switched off on step 3.' : 'The proposal shows no figures while these are missing. It asks the customer for what it needs instead; the rest is ours to fill in.'}</p><ul style="margin:0 0 6px 18px; padding:0; font-size:13px;">${blocking.map(g => `<li>${escapeHtml(g.staff)}${g.client ? ` <span class="subtitle">(the proposal asks the customer for ${escapeHtml(g.client)})</span>` : ''}</li>`).join('')}</ul>` : ''}
+            ${blocking.length ? `<strong style="font-size:13px;">Missing for the savings estimate</strong><p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${project.show_roi === false ? 'The savings page is switched off on step 3.' : 'The proposal still goes out: it shows the rows we can stand behind, tells the customer "to give you Y we need X", and says accepting before then is accepting on what is shown. Items with no customer ask are ours to fill in.'}</p><ul style="margin:0 0 6px 18px; padding:0; font-size:13px;">${blocking.map(g => `<li>${escapeHtml(g.staff)}${g.client ? ` <span class="subtitle">(the proposal asks the customer for ${escapeHtml(g.client)})</span>` : ''}</li>`).join('')}</ul>` : ''}
             ${warnings.length ? `<strong style="font-size:13px;">Assumed</strong><ul style="margin:2px 0 0 18px; padding:0; font-size:12px; color:var(--muted);">${warnings.map(g => `<li>${escapeHtml(g.staff)}</li>`).join('')}</ul>` : ''}
           </div>` : '';
         if (!r) { out.innerHTML = gapsHtml; when.textContent = ''; return; }
@@ -1201,7 +1202,7 @@
           ...(r.notes ? [['Note', r.notes]] : []),
         ];
         const s = r.sizing || {};
-        const roi = roiFor({ reading: r, answers: liveAnswers(), newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone() });
+        const roi = pres.roi;
         const cell = (k, v) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`;
         out.innerHTML = `
           <table style="margin-top:10px; font-size:13px;"><tbody>${rows.map(([k, v]) => cell(k, v)).join('')}</tbody></table>
@@ -1214,12 +1215,13 @@
             </div>
             ${(s.notes || []).map(n => `<p class="subtitle" style="margin:2px 0; font-size:12px;">${escapeHtml(n)}</p>`).join('')}
           </div>
-          ${roi ? `
+          ${pres.rows.length ? `
           <div style="margin-top:12px;">
-            <label style="margin-top:0; font-weight:600;">Savings estimate${blocking.length ? ' (preview only: not on the proposal until the gaps above are filled)' : ' (as the proposal shows it)'}</label>
-            <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${roi.newSolarKw ? `${roi.newSolarKw} kW of solar` : ''}${roi.newSolarKw && roi.batteryKwh ? ' and ' : ''}${roi.batteryKwh ? `a ${roi.batteryKwh} kWh battery` : ''}${roi.existingKw ? ` on top of the existing ${roi.existingKw} kW` : ''}${roi.netCost ? ` at ${money(roi.netCost)} after the credits (step 3)` : ' (no price on step 3 yet)'}. Follows the pricing and the answers; the tick on step 3 hides it from the proposal.</p>
-            <table style="font-size:13px;"><tbody>${roiRows(roi, money).map(([k, v]) => cell(k, v)).join('')}</tbody></table>
-          </div>` : `<p class="subtitle" style="margin-top:10px; font-size:12px;">The savings estimate appears once a system size (step 3) or a battery size (Usable kWh wanted, above) is set.</p>`}`;
+            <label style="margin-top:0; font-weight:600;">Savings estimate (as the proposal shows it)</label>
+            <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${roi ? `${roi.newSolarKw ? `${roi.newSolarKw} kW of solar` : ''}${roi.newSolarKw && roi.batteryKwh ? ' and ' : ''}${roi.batteryKwh ? `a ${roi.batteryKwh} kWh battery` : ''}${roi.existingKw ? ` on top of the existing ${roi.existingKw} kW` : ''}${roi.netCost ? ` at ${money(roi.netCost)} after the credits (step 3)` : ' (no price on step 3 yet)'}. ` : 'Only what the bill alone tells us until the gaps above are filled. '}Follows the pricing and the answers; the tick on step 3 hides it from the proposal.</p>
+            <table style="font-size:13px;"><tbody>${pres.rows.map(([k, v]) => cell(k, v)).join('')}</tbody></table>
+            ${pres.asks.length ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">The proposal adds under the table: ${pres.asks.map(a => `"To give you ${escapeHtml(a.gives)}, we need ${escapeHtml(a.need)}."`).join(' ')} and that accepting before then is accepting on what is shown.</p>` : ''}
+          </div>` : ''}`;
         const useSolar = out.querySelector('#bill-use-solar');
         if (useSolar) useSolar.addEventListener('click', () => {
           const el = document.getElementById('q-stc-kw');
