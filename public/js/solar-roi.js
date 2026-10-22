@@ -352,14 +352,21 @@ function roiChartsHtml(roi, money, { dollars = true, colors = ROI_CHART_COLORS }
         <svg viewBox="0 0 220 170" width="100%" role="img" aria-label="Savings reach ${esc(money(cum[10]))} after 10 years and ${esc(money(cum[25]))} after 25 years against an investment of ${esc(money(roi.netCost))}">
           <line x1="36" y1="130" x2="206" y2="130" stroke="${c.line}" stroke-width="1" />
           <line x1="36" y1="${Y(roi.netCost)}" x2="206" y2="${Y(roi.netCost)}" stroke="${c.grid}" stroke-width="1.5" stroke-dasharray="4 3" />
-          <text x="206" y="${Y(roi.netCost) + 13}" text-anchor="end" font-size="10.5" fill="${c.muted}" style="${font}">Your investment ${esc(money(roi.netCost))}</text>
           <path d="${path}" fill="none" stroke="${c.solar}" stroke-width="2" stroke-linejoin="round" />
-          ${pb ? `<circle cx="${X(pb)}" cy="${Y(roi.netCost)}" r="5" fill="${c.solar}" stroke="#fff" stroke-width="2" /><text x="${X(pb) + 9}" y="${Y(roi.netCost) + 4}" text-anchor="start" font-size="10.5" font-weight="600" fill="${c.ink}" style="${font}">Paid off in year ${esc(Math.ceil(pb))}</text>` : ''}
+          ${pb ? `<circle cx="${X(pb)}" cy="${Y(roi.netCost)}" r="5" fill="${c.solar}" stroke="#fff" stroke-width="2" />` : ''}
+          ${(() => {
+            // two short lines, placed where the curve is not: right of an early marker, else at the
+            // right end below the dashed line (the curve is above it there); not paid off: bottom left
+            const lx = pb ? (X(pb) <= 100 ? X(pb) + 9 : 206) : 36;
+            const anchor = pb && X(pb) <= 100 ? 'start' : (pb ? 'end' : 'start');
+            const ly = pb ? Math.min(Y(roi.netCost) + 15, 126) : 100;
+            return `<text x="${lx}" y="${ly}" text-anchor="${anchor}" font-size="10.5" fill="${c.ink}" style="${font}"><tspan x="${lx}" font-weight="600">${pb ? `Paid off in year ${esc(Math.ceil(pb))}` : 'Not paid off in 25 years'}</tspan><tspan x="${lx}" dy="13" fill="${c.muted}">Investment ${esc(money(roi.netCost))}</tspan></text>`;
+          })()}
           <circle cx="${X(25)}" cy="${Y(cum[25])}" r="4" fill="${c.solar}" stroke="#fff" stroke-width="2" />
           <text x="${X(25)}" y="${Y(cum[25]) - 8}" text-anchor="end" font-size="11" font-weight="600" fill="${c.ink}" style="${font}">${esc(money(cum[25]))}</text>
-          <text x="36" y="148" font-size="10.5" fill="${c.muted}" style="${font}">Today</text>
-          <text x="${X(10)}" y="148" text-anchor="middle" font-size="10.5" fill="${c.muted}" style="${font}">10 years</text>
-          <text x="206" y="148" text-anchor="end" font-size="10.5" fill="${c.muted}" style="${font}">25 years</text>
+          <text x="36" y="158" font-size="10.5" fill="${c.muted}" style="${font}">Today</text>
+          <text x="${X(10)}" y="158" text-anchor="middle" font-size="10.5" fill="${c.muted}" style="${font}">10 years</text>
+          <text x="206" y="158" text-anchor="end" font-size="10.5" fill="${c.muted}" style="${font}">25 years</text>
         </svg>
       </figure>`);
   }
