@@ -729,3 +729,21 @@ As built: the post, tags and photo links are made in one database call, `create_
 6. **One set of words** everywhere: Ordered, Part received, All received (ready to close), Closed.
 
 No money or stock rule changes: every receive, move, close and bill decision keeps calling the same database functions. Files: `purchase-orders.html`, new `purchase-order.html`, `supabase-client.js` (shared row, next step, tick-to-receive), `project.html`, `stock.html`, `vehicle-stock.html`, `global-search.js`, `style.css`, `?v=` bumps. Roles unchanged (staff receive, pricing roles edit lines and decide on bills, Admin / Finance reopen).
+## 32. Notifications in three places: bell, Messages, ops manager (planned 22 Oct 2026, waiting on owner's yes)
+
+**Today:** every notification kind lands in the one bell (`public/js/notifications.js`), pushes to the phone, and only disappears when tapped or "Mark all read". Opening an email in the Inbox or a chat does not mark its bell row read. The owner's bell on 22 Oct 2026: 79 unread, of which 45 emails, 13 emailed supplier bills, 7 Knowledge Base reads, 5 ops digests, and 9 real items (bookings, licences, a tag, a statement, a price list, a worker alert). Chats (16 rows) also land there. The Ops page `Needs me` card already lists emailed bills, bill checks, statements, price list changes and worker tasks from their own tables, so the bell rows for those are doubles.
+
+**Plan:**
+
+1. **Three channels, set from the kind in `create_notification`** (migration 20261120000000): new `notifications.channel` (`bell`, `messages`), a `notification_channel(kind)` lookup, backfill of existing rows, partial index on `(user_id, channel) where read_at is null`.
+   - **bell** (do or know now): tag, comment, task_assigned, task_reminder, call_reminder, followup_done, scheduled, booking_reminder, review, licence, incident, knowledge, quote accepted, variation signed, ops_digest, agent_alert.
+   - **messages**: chat_dm, chat_mention, chat_reply, chat_message, email.
+   - **ops manager** (supplier_bill, price_list, statement, stock_low, bill problems): no row at all. They live on the Ops page `Needs me` card and in the 5am digest, which is the one bell item a day that sums them up. Stock running low is added to both (today it is only on the Stock page).
+2. **Bell** counts and lists `bell` rows only. The tick-box list is grouped under Bell, Messages and Ops manager headings so people see where each thing goes.
+3. **Messages icon** (the Chat icon in the top bar, `supabase-client.js`): badge = unread chats (as now, `chat_unread_total`) + unread `messages` rows for emails. Tap opens a small panel with two sections, Chats (unread chats, from `chat_my_channels`) and Emails (unread email rows), each row opening the chat or the Inbox thread. The Chat and Inbox menu entries stay as they are.
+4. **Read when read:** opening a thread in the Inbox marks its email rows read (match on the link); `chat_mark_read` marks that chat's rows read. So the Messages badge drops as you work through them, and the bell is never touched by them.
+5. **Phone push** (`_shared/push.js`): bell rows push as now; chat DMs and @mentions push; emails, channel chatter and thread replies do not. The per-kind tick boxes still turn any of them off.
+6. **One-off tidy on production** (owner's yes with the plan): existing email, chat and ops rows are marked read for everyone (the ops kinds deleted), so the bell starts at the real items. The owner's bell goes from 79 to about 19.
+
+No money or stock change. One small migration; `?v=` bumps on notifications.js, supabase-client.js and the pages that reference it; ops-digest.js, push.js, inbox.html and ops.html change.
+
