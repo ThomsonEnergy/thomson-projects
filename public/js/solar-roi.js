@@ -167,6 +167,8 @@ function roiFor({ reading, answers, newSolarKw, batteryKwh, netCost, zoneRating 
     for (let y = 0; y < years; y++) sum += annualSaving * Math.pow(1 + ROI_ASSUMPTIONS.priceRisePerYear, y) * Math.pow(1 - ROI_ASSUMPTIONS.panelDegradationPerYear, y);
     return Math.round(sum);
   };
+  const cumulative = [];
+  for (let y = 0; y <= 25; y++) cumulative.push(over(y));
   const co2Tonnes = (after.selfUse - before.selfUse + after.exported - before.exported) * ROI_ASSUMPTIONS.gridEmissionsKgPerKwh / 1000;
   return {
     dailyKwh: m.dailyKwh, annualKwh: m.annualKwh, usageRate: m.usageRate, feedIn: m.feedIn, feedInFromBill: m.feedInFromBill,
@@ -177,7 +179,7 @@ function roiFor({ reading, answers, newSolarKw, batteryKwh, netCost, zoneRating 
     gridShareAfter: m.annualKwh ? Math.round(100 * (1 - after.gridKwh / m.annualKwh)) : 0,
     annualBillNow, annualBillAfter, annualSaving: Math.round(annualSaving),
     netCost: cost, paybackYears: payback ? Math.round(payback * 10) / 10 : null,
-    saving10: over(10), saving25: over(25), co2TonnesPerYear: Math.round(co2Tonnes * 10) / 10,
+    saving10: over(10), saving25: over(25), cumulative, co2TonnesPerYear: Math.round(co2Tonnes * 10) / 10,
     annualReturnPercent: cost > 0 ? Math.round(annualSaving / cost * 1000) / 10 : null,
   };
 }
@@ -276,11 +278,106 @@ function roiPresentation({ reading, answers, template, newSolarKw, batteryKwh, n
   return { roi, rows, asks, gaps, metrics: m, dollars: !!roi && has('rate') && has('total') };
 }
 
+// Three small pictures for the proposal and the quote page preview, as inline SVG so the PDF
+// gets them too: the yearly bill now and after, where the home's power will come from, and the
+// savings adding up against the investment. Kept plain: a few marks, direct labels, one colour
+// per thing (solar blue, battery green, grid grey as the neutral remainder). Only drawn when the
+// dollar figures stand (roi with rates and a total); the power chart alone when they do not.
+const ROI_CHART_COLORS = { solar: '#1a6be6', battery: '#15803d', grid: '#5b6472', ink: '#0a0a0a', muted: '#5b6472', line: '#d9dde5' };
+
+function roiChartsHtml(roi, money, { dollars = true, colors = ROI_CHART_COLORS } = {}) {
+  if (!roi) return '';
+  const c = colors;
+  const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const font = `font-family: Archivo, Helvetica, Arial, sans-serif;`;
+  const charts = [];
+
+  if (dollars) {
+    // 1. Your yearly bill: two bars.
+    const now = roi.annualBillNow, after = roi.annualBillAfter;
+    const max = Math.max(now, after, 1);
+    const h = (v) => Math.max(2, Math.round(110 * v / max));
+    charts.push(`
+      <figure class="roi-fig">
+        <figcaption>Your yearly bill</figcaption>
+        <svg viewBox="0 0 220 170" width="100%" role="img" aria-label="Yearly bill now ${esc(money(now))}, with the system ${esc(money(after))}">
+          <line x1="20" y1="140" x2="200" y2="140" stroke="${c.line}" stroke-width="1" />
+          <rect x="45" y="${140 - h(now)}" width="50" height="${h(now)}" rx="4" fill="${c.grid}" />
+          <rect x="125" y="${140 - h(after)}" width="50" height="${h(after)}" rx="4" fill="${c.solar}" />
+          <text x="70" y="${140 - h(now) - 6}" text-anchor="middle" font-size="12" font-weight="600" fill="${c.ink}" style="${font}">${esc(money(now))}</text>
+          <text x="150" y="${140 - h(after) - 6}" text-anchor="middle" font-size="12" font-weight="600" fill="${c.ink}" style="${font}">${esc(money(after))}</text>
+          <text x="70" y="158" text-anchor="middle" font-size="11" fill="${c.muted}" style="${font}">Now</text>
+          <text x="150" y="158" text-anchor="middle" font-size="11" fill="${c.muted}" style="${font}">With the system</text>
+        </svg>
+      </figure>`);
+  }
+
+  // 2. Where your power will come from: one stacked bar, three parts.
+  const use = Math.max(roi.annualKwh, 1);
+  const parts = [
+    { key: 'solar', label: 'Straight from the solar', kwh: Math.max(0, roi.selfUseKwh - roi.shiftedKwh), color: c.solar },
+    { key: 'battery', label: 'From the battery at night', kwh: roi.shiftedKwh, color: c.battery },
+    { key: 'grid', label: 'Still from the grid', kwh: roi.gridKwhAfter, color: c.grid },
+  ].filter(p => p.kwh > 0);
+  let x = 10;
+  const W = 200;
+  const segs = parts.map((p, i) => {
+    const w = Math.max(0, Math.round(W * p.kwh / use) - (i < parts.length - 1 ? 2 : 0));
+    const out = `<rect x="${x}" y="30" width="${w}" height="28" rx="${i === 0 || i === parts.length - 1 ? 4 : 0}" fill="${p.color}" />`;
+    x += w + 2;
+    return out;
+  }).join('');
+  const legend = parts.map((p, i) => `<g transform="translate(10, ${78 + i * 20})"><rect x="0" y="-9" width="12" height="12" rx="3" fill="${p.color}" /><text x="18" y="1" font-size="11.5" fill="${c.ink}" style="${font}">${esc(p.label)}: ${Math.round(100 * p.kwh / use)}%</text></g>`).join('');
+  charts.push(`
+      <figure class="roi-fig">
+        <figcaption>Where your power comes from</figcaption>
+        <svg viewBox="0 0 220 ${80 + parts.length * 20}" width="100%" role="img" aria-label="${esc(parts.map(p => `${p.label} ${Math.round(100 * p.kwh / use)}%`).join(', '))}">
+          <text x="10" y="18" font-size="11" fill="${c.muted}" style="${font}">Of the ${Math.round(roi.annualKwh).toLocaleString('en-AU')} kWh you use a year</text>
+          ${segs}
+          ${legend}
+        </svg>
+      </figure>`);
+
+  if (dollars && roi.netCost > 0 && roi.cumulative) {
+    // 3. Savings adding up against the investment.
+    const cum = roi.cumulative;
+    const maxV = Math.max(cum[25], roi.netCost, 1);
+    const X = (y) => 36 + Math.round(y * 170 / 25);
+    const Y = (v) => 130 - Math.round(110 * v / maxV);
+    const path = cum.map((v, y) => `${y === 0 ? 'M' : 'L'}${X(y)},${Y(v)}`).join(' ');
+    const pb = roi.paybackYears && roi.paybackYears <= 25 ? roi.paybackYears : null;
+    charts.push(`
+      <figure class="roi-fig">
+        <figcaption>Savings add up</figcaption>
+        <svg viewBox="0 0 220 170" width="100%" role="img" aria-label="Savings reach ${esc(money(cum[10]))} after 10 years and ${esc(money(cum[25]))} after 25 years against an investment of ${esc(money(roi.netCost))}">
+          <line x1="36" y1="130" x2="206" y2="130" stroke="${c.line}" stroke-width="1" />
+          <line x1="36" y1="${Y(roi.netCost)}" x2="206" y2="${Y(roi.netCost)}" stroke="${c.grid}" stroke-width="1.5" stroke-dasharray="4 3" />
+          <path d="${path}" fill="none" stroke="${c.solar}" stroke-width="2" stroke-linejoin="round" />
+          ${pb ? `<circle cx="${X(pb)}" cy="${Y(roi.netCost)}" r="5" fill="${c.solar}" stroke="#fff" stroke-width="2" />` : ''}
+          ${(() => {
+            // two short lines, placed where the curve is not: right of an early marker, else at the
+            // right end below the dashed line (the curve is above it there); not paid off: bottom left
+            const lx = pb ? (X(pb) <= 100 ? X(pb) + 9 : 206) : 36;
+            const anchor = pb && X(pb) <= 100 ? 'start' : (pb ? 'end' : 'start');
+            const ly = pb ? Math.min(Y(roi.netCost) + 15, 126) : 100;
+            return `<text x="${lx}" y="${ly}" text-anchor="${anchor}" font-size="10.5" fill="${c.ink}" style="${font}"><tspan x="${lx}" font-weight="600">${pb ? `Paid off in year ${esc(Math.ceil(pb))}` : 'Not paid off in 25 years'}</tspan><tspan x="${lx}" dy="13" fill="${c.muted}">Investment ${esc(money(roi.netCost))}</tspan></text>`;
+          })()}
+          <circle cx="${X(25)}" cy="${Y(cum[25])}" r="4" fill="${c.solar}" stroke="#fff" stroke-width="2" />
+          <text x="${X(25)}" y="${Y(cum[25]) - 8}" text-anchor="end" font-size="11" font-weight="600" fill="${c.ink}" style="${font}">${esc(money(cum[25]))}</text>
+          <text x="36" y="158" font-size="10.5" fill="${c.muted}" style="${font}">Today</text>
+          <text x="${X(10)}" y="158" text-anchor="middle" font-size="10.5" fill="${c.muted}" style="${font}">10 years</text>
+          <text x="206" y="158" text-anchor="end" font-size="10.5" fill="${c.muted}" style="${font}">25 years</text>
+        </svg>
+      </figure>`);
+  }
+  return `<div class="roi-charts">${charts.join('')}</div>`;
+}
+
 function roiAssumptionsText(roi) {
   const a = ROI_ASSUMPTIONS;
   return `Estimates only, from your electricity bill and these assumptions: ${roi.yieldPerKw} kWh generated per kW of panels per day on average over the year, electricity bought at ${roi.usageRate} c/kWh${roi.feedInFromBill ? '' : ' and'} ${roi.feedInFromBill ? `and sold at ${roi.feedIn} c/kWh as shown on your bill` : `sold at ${roi.feedIn} c/kWh`}, prices rising ${Math.round(a.priceRisePerYear * 100)}% a year, panels losing ${a.panelDegradationPerYear * 100}% of output a year${roi.batteryKwh ? `, the battery cycling ${Math.round(a.batteryUsableCycle * 100)}% of its usable capacity daily at ${Math.round(a.batteryRoundTrip * 100)}% round trip efficiency` : ''}. Actual savings depend on weather, how and when you use power, and your retailer's rates.`;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, billMetrics, suggestSizes, roiFor, roiRows, roiAssumptionsText, roiGaps, roiPresentation, existingSolarKw };
+  module.exports = { ROI_ASSUMPTIONS, billMetrics, suggestSizes, roiFor, roiRows, roiAssumptionsText, roiGaps, roiPresentation, roiChartsHtml, existingSolarKw };
 }
