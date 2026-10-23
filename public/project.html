@@ -33,7 +33,7 @@
 
   <script src="/js/supabase-client.js?v=118"></script>
   <script src="/js/template-questions.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=5"></script>
+  <script src="/js/solar-roi.js?v=6"></script>
   <style>
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; }
     .roi-preview .roi-fig { margin:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; }
@@ -1115,13 +1115,13 @@
         if (Number.isFinite(v) && v > 0) return v;
         return Number(project.stc_system_kw) || pylonKw || 0;
       }
+      // Only the battery we are quoting (step 3) counts: never the "Usable kWh wanted" answer, which
+      // is what the customer asked for and can be far from what is on the quote.
       function currentBatteryKwh() {
-        const answers = liveAnswers();
-        if (!quoteHasBattery(currentTemplate, answers)) return 0;
         const el = document.getElementById('q-battery-kwh');
         const v = el ? parseFloat(el.value) : NaN;
         if (Number.isFinite(v) && v > 0) return v;
-        return Number(project.battery_kwh) || parseFloat(answers.battery_kwh_wanted) || 0;
+        return Number(project.battery_kwh) || 0;
       }
       function currentNetCost() {
         const exGst = (project.cost_centres || []).reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
@@ -1355,7 +1355,55 @@
       if (step3Roi && showRoi) step3Roi.addEventListener('change', () => { showRoi.checked = step3Roi.checked; });
       qEl.addEventListener('change', () => { if (project.bill_reading) renderEstimate(); });
       ['q-stc-kw', 'q-stc-zone', 'q-battery-kwh', 'ri-solar-price', 'ri-battery-price'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', () => { if (project.bill_reading) renderEstimate(); }); });
-      loadBillDocs(project.id).then(() => { renderList(); renderReading(); });
+      loadBillDocs(project.id).then(() => { renderList(); renderReading(); }).then(offerBillFromSibling);
+
+      // A second quote for the same client (a "with battery" and a "without" pair, say) can take the
+      // bill pages and the reading from the quote that already has them, instead of a fresh upload.
+      async function offerBillFromSibling() {
+        if (billDocs.length || !project.client_id) return;
+        const { data: others } = await supabaseClient.from('projects').select('id, quote_number, job_number, name, bill_reading, roi_inputs')
+          .eq('client_id', project.client_id).neq('id', project.id).not('bill_reading', 'is', null).order('created_at', { ascending: false }).limit(1);
+        const o = others && others[0];
+        if (!o || billDocs.length) return;
+        const label = o.quote_number ? `Q${o.quote_number}` : (o.job_number ? `J${o.job_number}` : 'the other quote');
+        listEl.insertAdjacentHTML('beforeend', `<div style="margin:0 0 8px;"><button type="button" class="secondary" id="bill-copy-btn" style="font-size:12px; padding:4px 8px;">Use the bill from ${escapeHtml(label)} ${escapeHtml(o.name || '')}</button> <span class="subtitle" style="font-size:12px;">Same client, already read there: copies the pages, the reading and the rates here.</span></div>`);
+        document.getElementById('bill-copy-btn').addEventListener('click', async () => {
+          const btn = document.getElementById('bill-copy-btn');
+          btn.disabled = true; btn.textContent = 'Copying...';
+          try {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            const { data: srcDocs, error: srcErr } = await supabaseClient.from('project_documents').select('file_path, file_name, mime_type').eq('project_id', o.id).eq('folder', BILL_FOLDER).order('created_at');
+            if (srcErr) throw srcErr;
+            for (const d of srcDocs || []) {
+              const { data: blob, error: dlErr } = await supabaseClient.storage.from('project-documents').download(d.file_path);
+              if (dlErr) throw dlErr;
+              const path = `bills/${project.id}/${Date.now()}-${(d.file_path.split('/').pop() || 'bill').replace(/^\d+-/, '')}`;
+              const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(path, blob, { contentType: d.mime_type || undefined });
+              if (upErr) throw upErr;
+              const { data: row, error } = await supabaseClient.from('project_documents')
+                .insert({ project_id: project.id, folder: BILL_FOLDER, file_path: path, file_name: d.file_name, mime_type: d.mime_type, uploaded_by: user?.id || null })
+                .select('id, file_path, file_name, mime_type, created_at').single();
+              if (error) throw error;
+              billDocs.push(row);
+            }
+            const reading = { ...o.bill_reading, copied_from: label, copied_at: new Date().toISOString() };
+            const roiInputs = { ...(o.roi_inputs || {}), solar_price: (project.roi_inputs || {}).solar_price ?? null, battery_price: (project.roi_inputs || {}).battery_price ?? null };
+            const { error: pErr } = await supabaseClient.from('projects').update({ bill_reading: reading, roi_inputs: roiInputs }).eq('id', project.id);
+            if (pErr) throw pErr;
+            project.bill_reading = reading;
+            project.roi_inputs = roiInputs;
+            const panel = document.getElementById('roi-inputs-panel');
+            if (panel) panel.innerHTML = '';
+            renderList();
+            renderReading();
+            showToast(`Bill copied from ${label}.`);
+            if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+            btn.disabled = false; btn.textContent = `Use the bill from ${label}`;
+          }
+        });
+      }
     }
 
     // Supporting documents, Generate scope of works with AI, reference photos.
