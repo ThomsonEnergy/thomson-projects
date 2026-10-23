@@ -78,6 +78,10 @@ Build on the existing feeds:
 - Staff sign in TEops with a versioned re-sign and two tick boxes (AI features, location). AI start date per user = sign date if ticked, else none. Users with no AI start date are excluded from all agent processing; manual tagging still works.
 - Built: versioned re-sign and AI / location consent with dates per user (migration 20261018120000, `profiles.ai_consent_at`). Every agent must skip users with no `ai_consent_at`, and anything before the notice start date, except team chat: Sparky is a member of every chat (channels and DMs), so chat needs no AI consent (owner's lawyer, 18 Oct 2026). Staff who don't want Sparky involved text outside the app. Full detail: docs/IDEAS_BACKLOG.md item 6.
 
+## Retail plan suggestions (planned 23 Oct 2026, waiting on yes)
+
+Suggests electricity plans for a quote's address from the AER's Consumer Data Right plan data (synced nightly), costed with the savings estimate's own maths, not an AI web search; staff choose what goes on the proposal and nothing is sent automatically. Detail in `docs/IDEAS_BACKLOG.md` item 34.
+
 ## Safety
 
 - **Staging first:** a Supabase persistent branch with fake data. Every agent, migration and prompt change is tested there before production.

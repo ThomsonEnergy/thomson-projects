@@ -1,7 +1,7 @@
 -- The savings estimate's inputs (docs/IDEAS_BACKLOG.md item 29, rework of 23 Oct 2026): the
 -- bill's rates as edited, an optional second plan to compare, an optional battery export window,
 -- and the solar and battery prices. One jsonb column; the proposal reads it through
--- get_quote_by_token (same function as migration 20261119000000 plus roi_inputs).
+-- get_quote_by_token (same function as migration 20261122090000 (first numbered 20261119000000) plus roi_inputs).
 
 alter table public.projects add column if not exists roi_inputs jsonb;
 
