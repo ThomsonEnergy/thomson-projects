@@ -58,7 +58,7 @@
     const [{ data: rows, error }, { data: offers }, { data: emails }] = await Promise.all([
       supabaseClient.from('schedule_assignments').select('id, staff_id, assignment_date, start_time, end_time, block_type, note, client_informed_at, time_offer_id, profiles(full_name)')
         .eq('project_id', project.id).order('assignment_date').order('start_time'),
-      supabaseClient.from('schedule_time_offers').select('*, sender:profiles!schedule_time_offers_created_by_fkey(full_name)').eq('project_id', project.id).order('created_at', { ascending: false }),
+      supabaseClient.from('schedule_time_offers').select('id, project_id, staff_ids, start_time, end_time, days, weekdays_only, option_dates, message, to_email, to_name, status, picked_date, picked_at, client_message, email_id, created_by, created_at, viewed_at, sender:profiles!schedule_time_offers_created_by_fkey(full_name)').eq('project_id', project.id).order('created_at', { ascending: false }),
       supabaseClient.from('schedule_emails').select('*, sender:profiles!schedule_emails_sent_by_fkey(full_name)').eq('project_id', project.id).order('sent_at', { ascending: false }),
     ]);
     if (error) { errBox(daysEl, error.message); return; }
@@ -155,7 +155,10 @@
       const o = S.offers.find((x) => x.id === box.dataset.offer);
       const copy = box.querySelector('.js-offer-copy');
       if (copy) copy.addEventListener('click', async () => {
-        const url = `${shareOrigin()}/pick-time.html?token=${o.token}`;
+        // the token is never in the tab's data: pricing roles fetch it when they copy the link
+        const { data: tok, error: tokErr } = await supabaseClient.rpc('schedule_offer_token', { p_offer_id: o.id });
+        if (tokErr || !tok) { alert('Only Admin, Finance or Sales can copy this link.'); return; }
+        const url = `${shareOrigin()}/pick-time.html?token=${tok}`;
         try { await navigator.clipboard.writeText(url); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy link'; }, 2000); } catch (e) { prompt('Copy this link', url); }
       });
       const wd = box.querySelector('.js-offer-withdraw');

@@ -44,7 +44,7 @@
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=8"></script>
-  <script src="/js/job-schedule.js?v=2"></script>
+  <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=1"></script>
   <script src="/js/assets.js?v=2"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
@@ -6334,6 +6334,44 @@
       const filesOf = (a) => Array.isArray(a?.photo_paths) && a.photo_paths.length ? a.photo_paths : (a?.photo_path ? [a.photo_path] : []);
       const isPdfUrl = (u) => /\.pdf(\?|$)/i.test(u);
       const isBillItem = (it) => it.item_type === 'photo' && /electricity bill/i.test(it.label || '');
+      // Checklist files (bills, consent forms) live in the private project-documents bucket under
+      // quote-compliance/<quote id>/ and are shown through short signed links. Rows written before
+      // 24 Oct 2026 hold public site-photos URLs: those files are moved into the private bucket the
+      // first time the checklist is opened, then the public copy is removed (S6, 23 Oct review).
+      const LEGACY_PUBLIC = '/storage/v1/object/public/site-photos/';
+      async function migrateLegacyFiles(itemId) {
+        const a = answers[itemId];
+        const files = filesOf(a);
+        if (!files.some(u => typeof u === 'string' && u.includes(LEGACY_PUBLIC))) return;
+        const moved = [];
+        for (const u of files) {
+          if (!u.includes(LEGACY_PUBLIC)) { moved.push(u); continue; }
+          try {
+            const oldPath = decodeURIComponent(u.split(LEGACY_PUBLIC)[1].split('?')[0]);
+            const res = await fetch(u);
+            if (!res.ok) throw new Error(`Could not read ${oldPath}`);
+            const blob = await res.blob();
+            const newPath = `quote-compliance/${project.id}/${Date.now()}-${oldPath.split('/').pop().replace(/^\d+-/, '')}`;
+            const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(newPath, blob, { contentType: blob.type || undefined });
+            if (upErr) throw upErr;
+            moved.push(newPath);
+            await supabaseClient.storage.from('site-photos').remove([oldPath]);
+          } catch (err) {
+            console.warn('Checklist file not moved yet:', err.message);
+            moved.push(u);
+          }
+        }
+        await saveAnswer(itemId, { photo_path: moved[0] || null, photo_paths: moved });
+      }
+      async function signChecklistFiles(visible) {
+        const paths = [];
+        visible.forEach(it => filesOf(answers[it.id]).forEach(u => { if (u && !/^https?:/i.test(u)) paths.push(u); }));
+        const byPath = {};
+        if (!paths.length) return byPath;
+        const { data } = await supabaseClient.storage.from('project-documents').createSignedUrls([...new Set(paths)], 300);
+        (data || []).forEach(d => { if (d.signedUrl) byPath[d.path] = d.signedUrl; });
+        return byPath;
+      }
       if (['solar', 'battery'].includes(project.proposal_template)) await loadBillDocs(project.id);
 
       function itemsVisible() {
@@ -6353,12 +6391,14 @@
         answers[itemId] = data;
       }
 
-      function renderChecklist() {
+      async function renderChecklist() {
         const visible = itemsVisible();
+        for (const it of visible) { try { await migrateLegacyFiles(it.id); } catch (e) { console.warn(e); } }
+        const signedBy = await signChecklistFiles(visible);
         containerEl.innerHTML = visible.map(it => {
           const a = answers[it.id];
           const isChild = !!it.parent_item_id;
-          const files = filesOf(a);
+          const files = filesOf(a).map(u => signedBy[u] || u);
           const billPages = isBillItem(it) ? billDocs.length : 0;
           const answered = it.item_type === 'photo' ? (files.length > 0 || billPages > 0) : (a?.answer_yes_no !== null && a?.answer_yes_no !== undefined);
           return `
@@ -6409,8 +6449,9 @@
               photoBtn.classList.add('is-loading');
               msgEl.innerHTML = `<p class="subtitle">Uploading...</p>`;
               try {
-                const urls = await uploadPhotos(fileInput.files, `quote-compliance/${project.id}`, 'site-photos');
-                const all = [...filesOf(answers[itemId]), ...urls];
+                const paths = [];
+                for (const f of fileInput.files) paths.push(await uploadPrivateFile(f, `quote-compliance/${project.id}`));
+                const all = [...filesOf(answers[itemId]), ...paths];
                 await saveAnswer(itemId, { photo_path: all[0] || null, photo_paths: all });
                 renderChecklist();
               } catch (err) {
