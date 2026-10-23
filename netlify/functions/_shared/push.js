@@ -24,7 +24,11 @@ async function configure() {
 // to each of its owner's subscribed devices, then marks it pushed. A device
 // the push service says is gone (404 / 410) is forgotten.
 // Browsers get web push; the TEgo iPhone app (platform 'ios') gets Apple push.
+// Only bell rows, chat DMs and @mentions are sent to the phone: emails, channel
+// chatter and thread replies stay on the Messages icon (they are still marked
+// pushed so they are never retried). The app badge count is the bell count.
 // `send` and `sendApns` are injectable for tests.
+const goesToPhone = (n) => n.channel === 'bell' || n.kind === 'chat_dm' || n.kind === 'chat_mention';
 async function deliverPending(supabaseAdmin, { onlyIds = null, send = null, sendApns = null } = {}) {
   const sendFn = send || (async (sub, payload) => { await configure(); return webpush.sendNotification(sub, payload, { TTL: 60 * 60 * 24, urgency: 'high' }); });
   let apns = null;
@@ -33,22 +37,23 @@ async function deliverPending(supabaseAdmin, { onlyIds = null, send = null, send
     return apns.send(token, n);
   });
 
-  let q = supabaseAdmin.from('notifications').select('id, user_id, kind, title, body, link').is('pushed_at', null);
+  let q = supabaseAdmin.from('notifications').select('id, user_id, kind, channel, title, body, link').is('pushed_at', null);
   q = onlyIds ? q.in('id', onlyIds) : q.gt('created_at', new Date(Date.now() - 2 * 86400000).toISOString()).order('created_at').limit(300);
   const { data: rows, error } = await q;
   if (error) throw error;
   if (!rows || !rows.length) return { notifications: 0, sent: 0, failed: 0, removed: 0 };
 
-  const userIds = [...new Set(rows.map(r => r.user_id))];
+  const toSend = rows.filter(goesToPhone);
+  const userIds = [...new Set(toSend.map(r => r.user_id))];
   const { data: subs } = await supabaseAdmin.from('push_subscriptions').select('id, user_id, endpoint, p256dh, auth, platform').in('user_id', userIds);
   const unread = {};
   await Promise.all(userIds.filter(u => (subs || []).some(s => s.user_id === u)).map(async (u) => {
-    const { count } = await supabaseAdmin.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', u).is('read_at', null);
+    const { count } = await supabaseAdmin.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', u).eq('channel', 'bell').is('read_at', null);
     unread[u] = count || 0;
   }));
 
   let sent = 0, failed = 0; const dead = new Set();
-  for (const n of rows) {
+  for (const n of toSend) {
     for (const s of (subs || []).filter(x => x.user_id === n.user_id && !dead.has(x.id))) {
       const msg = { id: n.id, title: n.title, body: n.body || '', url: n.link || '/home.html', tag: n.id, count: unread[n.user_id] || 0 };
       try {

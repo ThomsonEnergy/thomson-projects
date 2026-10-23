@@ -6,7 +6,9 @@
 // Ops page (ops.html) shows. Also clears worker log rows older than 90 days.
 //
 // What it covers: what the workers did in the last 24 hours, what is waiting on a person (emailed
-// bills to check, open "Needs me" tasks), and any worker that has stopped working.
+// bills to check, stock running low, open "Needs me" tasks), and any worker that has stopped
+// working. Emailed bills, price lists, statements and stock low make no bell row of their own
+// (migration 20261120000000): this digest and the Ops page are where they show.
 
 const { getAdminClient } = require('./_shared/require-admin');
 const { runAgent, notifyManagers } = require('./_shared/agent-log');
@@ -21,7 +23,7 @@ const sydneyDate = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Aus
 
 async function buildDigest(admin) {
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const [runsRes, beatsRes, tasksRes, billsRes, savedRes, pricesRes, checkRes, stIssuesRes, missingSts] = await Promise.all([
+  const [runsRes, beatsRes, tasksRes, billsRes, savedRes, pricesRes, checkRes, stIssuesRes, missingSts, lowRes] = await Promise.all([
     admin.from('agent_runs').select('agent, status, summary, input_tokens, output_tokens').gte('started_at', since),
     admin.from('agent_heartbeats').select('*'),
     admin.from('agent_tasks').select('title').eq('status', 'open').order('created_at'),
@@ -31,6 +33,7 @@ async function buildDigest(admin) {
     admin.from('supplier_bills').select('check_status, approved_for_payment').eq('paid', false).in('check_status', ['matches', 'resolved', 'problems', 'queried']),
     admin.from('supplier_statements').select('id', { count: 'exact', head: true }).eq('status', 'issues'),
     missingStatements(admin),
+    admin.from('stock_low_flags').select('id', { count: 'exact', head: true }).is('cleared_at', null),
   ]);
   const runs = runsRes.data || [], beats = beatsRes.data || [], tasks = tasksRes.data || [];
   const toCheck = (billsRes.data || []).filter(b => b.status === 'to_check').length;
@@ -45,6 +48,7 @@ async function buildDigest(admin) {
   const queried = checks.filter(b => b.check_status === 'queried').length;
   const stIssues = stIssuesRes.count || 0;
   const priceAuto = prices.filter(p => p.status === 'applied' && !p.resolved_by).length;
+  const stockLow = lowRes.count || 0;
 
   // a worker is down if it has not worked for 3 of its usual gaps
   const down = beats.filter(b => b.agent !== 'ops-digest' && (!b.last_ok_at || Date.now() - new Date(b.last_ok_at).getTime() > 3 * b.expected_every_minutes * 60000));
@@ -62,6 +66,7 @@ async function buildDigest(admin) {
   if (stIssues) needs.push(`${plural(stIssues, 'statement')} that do not reconcile`);
   if (missingSts.length) needs.push(`no statement yet from ${missingSts.map(s => s.name).join(', ')}`);
   if (queried) needs.push(`${plural(queried, 'query', 'queries')} waiting on suppliers`);
+  if (stockLow) needs.push(`${plural(stockLow, 'stock item')} running low`);
   tasks.forEach(t => needs.push(t.title));
 
   const lines = [];
@@ -72,7 +77,7 @@ async function buildDigest(admin) {
   if (failedRuns.length) lines.push(`${plural(failedRuns.length, 'failed run')} in the last 24 hours.`);
   if (tokensIn || tokensOut) lines.push(`AI used: ${tokensIn.toLocaleString('en-AU')} tokens in, ${tokensOut.toLocaleString('en-AU')} out.`);
 
-  const needCount = toCheck + failedBills + tasks.length + priceWaiting + billProblems + toApprove + stIssues + missingSts.length;
+  const needCount = toCheck + failedBills + tasks.length + priceWaiting + billProblems + toApprove + stIssues + missingSts.length + stockLow;
   const title = down.length ? `Morning: ${down[0].label} is not working`
     : needCount ? `Morning: ${plural(needCount, 'thing')} need${needCount === 1 ? 's' : ''} you`
     : 'Morning: all clear';

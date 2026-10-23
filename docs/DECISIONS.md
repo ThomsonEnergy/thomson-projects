@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 23 Oct 2026
 
+- LIVE once merged: notifications in three places (backlog item 32). Bell keeps only do-now items; chats and emails are on the Messages icon (the Chat icon, with a panel, read when the chat or Inbox thread is opened); emailed bills, price lists, statements and stock low make no row and live on the Ops page and in the 5am digest (stock low added to both). Tick boxes grouped and shown only for kinds the role can get. Shared inbox mail now to Admin, Finance and Sales, Inbox menu hidden from Staff. Migration 20261120000000 applied to production with the one-off tidy (owner's bell 79 to 19); supabase-client.js v116, notifications.js v16. (`docs/PROJECT_SPEC.md` A20)
 - Added to the notifications plan (owner): the tick-box list only shows the kinds a person's role can get (Sales and Staff never see the admin and finance boxes, ops manager boxes only for ops manager people). Still waiting on the owner's yes. (`docs/IDEAS_BACKLOG.md` item 32)
 - Owner's change to backlog item 33 (still waiting on yes): when the job's Thomson site manager has not clocked in that day, the clock-out "How's the job?" question goes to the highest-ranking person who did, by a new `profiles.site_rank` set on the Staff page (role as the default, first clock-in breaks ties). (`docs/IDEAS_BACKLOG.md` item 33)
 
