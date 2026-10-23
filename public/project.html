@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=118"></script>
+  <script src="/js/supabase-client.js?v=119"></script>
   <script src="/js/template-questions.js?v=2"></script>
   <script src="/js/solar-roi.js?v=7"></script>
   <style>
@@ -39,7 +39,7 @@
     .roi-preview .roi-fig { margin:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; }
     .roi-preview .roi-fig figcaption { font-size:12px; font-weight:600; margin-bottom:4px; }
   </style>
-  <script src="/js/prebuild-form.js?v=2"></script>
+  <script src="/js/prebuild-form.js?v=3"></script>
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=8"></script>
@@ -606,6 +606,30 @@
       renderStageLineItems(div, lineItems);
 
       photoGroups.forEach(pg => addPhotoGroup(div, pg));
+      return div;
+    }
+
+    // Access equipment and Mobilisation prebuilds land in their own stage (cost centre) named after
+    // the category, found on the quote or added at the bottom. Called from addPrebuildToStage
+    // (js/supabase-client.js), so the picker, + New prebuild and the AI suggestions all do it.
+    // Single-stage quotes (quick estimate) keep everything in the one stage.
+    const OWN_STAGE_DESCRIPTIONS = {
+      'Access equipment': 'Scissor lift, EWP, scaffold and plant hire',
+      Mobilisation: 'Getting the crew, vehicles and gear to and from site',
+    };
+    function stageForPrebuild(stageRow, prebuild) {
+      const own = prebuildOwnStageName(prebuild);
+      if (!own || (TEMPLATE_INFO[currentTemplate] || {}).singleStage || !document.getElementById('cc-rows')) return stageRow;
+      const rows = [...document.querySelectorAll('#cc-rows .cc-row')];
+      const match = rows.find(r => (r.querySelector('.cc-name').value || '').trim().toLowerCase() === own.toLowerCase());
+      if (match) {
+        if (match !== stageRow) showToast(`${prebuild.name} added to the ${own} stage`);
+        return match;
+      }
+      const div = addRow({ name: own, description: OWN_STAGE_DESCRIPTIONS[own] || '' });
+      renderCustomerGets();
+      showToast(`${own} stage added for ${prebuild.name}`);
+      return div;
     }
 
     function addPhotoGroup(stageRow, { description = '', photos = [] } = {}) {

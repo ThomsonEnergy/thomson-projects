@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 23 Oct 2026
 
+- LIVE once merged: two new prebuild categories, Access equipment and Mobilisation, and adding one to a quote or job puts it in its own stage (cost centre) named after the category. 5 existing prebuilds (Sizzorlift, CUB10 Generator, 3 mobilisation) moved out of Electrical on production, "Mobalization" spelling fixed. No migration. supabase-client.js v119, prebuild-form.js v3. (`docs/PROJECT_SPEC.md` A9)
 - Planned (waiting on owner's yes): make the savings estimate user friendly and hard to get wrong: one self-saving card on step 1 with the reading correctable, plain mistake checks, a simpler rates panel, step 5 status, Duplicate carries the bill, the gate reads the battery quoted. No migration. (`docs/IDEAS_BACKLOG.md` item 29)
 - Fixed (Q1005 battery quote): blank bill fields read as 0, a made-up shoulder band on a two-band tariff that starved the solar, and the battery size now read off the quote's line items when step 3 is blank; the reader asks the bill for its time-of-use hours. (`docs/IDEAS_BACKLOG.md` item 29)
 - Fixed (Q1005 showed a 179 kWh battery): the savings estimate uses only the battery quoted on step 3, never the "Usable kWh wanted" answer; no battery typed means no battery in the estimate, with a note on the bill card. A quote with no bill pages can take the bill, reading and rates from the client's other quote ("Use the bill from Q..."). (`docs/IDEAS_BACKLOG.md` item 29)
