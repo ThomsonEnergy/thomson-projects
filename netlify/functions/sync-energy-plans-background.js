@@ -11,7 +11,7 @@
 
 const { getAdminClient } = require('./_shared/require-admin');
 const { due } = require('./sync-energy-plans');
-const { NETWORKS, networkKey, discoverBrands, listPlans, fetchPlanDetail, convertPlan } = require('./_shared/energy-plans');
+const { CONVERTER_VERSION, NETWORKS, networkKey, discoverBrands, listPlans, fetchPlanDetail, convertPlan } = require('./_shared/energy-plans');
 
 const BUDGET_MS = 13 * 60000;
 const clip = (v, n = 12000) => { try { const t = JSON.stringify(v); return t.length > n ? t.slice(0, n) + '...' : t; } catch (_) { return null; } };
@@ -37,14 +37,15 @@ exports.handler = async () => {
   const counts = { brands: 0, plans_listed: 0, plans_fetched: 0, plans_saved: 0 };
   const finish = (status) => admin.from('energy_plan_sync_runs').update({ status, finished_at: new Date().toISOString(), errors: errors.slice(0, 200), samples, ...counts }).eq('id', run.id);
   try {
-    const { brands, source } = await discoverBrands();
+    const { brands, source, why } = await discoverBrands();
+    if (why) errors.push({ step: 'brands', error: why });
     await admin.from('energy_plan_sync_runs').update({ source }).eq('id', run.id);
     counts.brands = brands.length;
 
     // what is stored now, so unchanged plans are not fetched again
     const stored = new Map();
     for (let from = 0; ; from += 1000) {
-      const { data, error } = await admin.from('energy_plans').select('plan_id, last_updated, costable').range(from, from + 999);
+      const { data, error } = await admin.from('energy_plans').select('plan_id, last_updated, costable, converter:notes->converter').range(from, from + 999);
       if (error) throw new Error(error.message);
       (data || []).forEach(p => stored.set(p.plan_id, p));
       if (!data || data.length < 1000) break;
@@ -85,7 +86,8 @@ exports.handler = async () => {
       if (!id) return;
       seen.add(id);
       const had = stored.get(id);
-      if (had && summary.lastUpdated && had.last_updated && new Date(had.last_updated).getTime() >= new Date(summary.lastUpdated).getTime()) return;
+      // unchanged since the last download, and converted by this version of the converter
+      if (had && Number(had.converter) >= CONVERTER_VERSION && summary.lastUpdated && had.last_updated && new Date(had.last_updated).getTime() >= new Date(summary.lastUpdated).getTime()) return;
       try {
         const { detail, version } = await fetchPlanDetail(brand, id);
         if (!detail) { errors.push({ brand: brand.id, plan: id, step: 'detail', error: 'no detail' }); return; }

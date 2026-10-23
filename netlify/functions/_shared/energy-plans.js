@@ -13,12 +13,19 @@
 const fetch = require('node-fetch');
 const { roiParseHours } = require('../../../public/js/solar-roi.js');
 
+// Bump when convertPlan changes, so the next download converts every stored plan again.
+const CONVERTER_VERSION = 2;
+// Retailers whose price follows the wholesale market: their published rate is only indicative, so
+// their plans are kept but never costed.
+const WHOLESALE_BRANDS = /^(amber|localvolts|flow-power|powerclub)$/i;
+
 const REGISTER_URL = 'https://api.cdr.gov.au/cdr-register/v1/energy/data-holders/brands/summary';
 const AER_BASE = 'https://cdr.energymadeeasy.gov.au';
 // If the register cannot be read, these AER brand paths are tried instead (most NSW and QLD retailers).
 const FALLBACK_BRANDS = ['agl', 'origin', 'energyaustralia', 'red-energy', 'alinta', 'momentum', 'powershop', 'simply-energy', 'lumo', 'dodo',
   'globird', 'tango', 'nectr', 'ovo-energy', 'amber', 'covau', 'sumo', '1st-energy', 'energy-locals', 'powerclub', 'kogan', 'enova', 'diamond-energy',
-  'arcline', 'radian', 'reamped', 'blue-nrg', 'qenergy', 'actewagl', 'locality-planning', 'besy', 'cooperative-power', 'future-x', 'altogether'];
+  'arcline', 'radian', 'reamped', 'blue-nrg', 'qenergy', 'actewagl', 'locality-planning', 'besy', 'cooperative-power', 'future-x', 'altogether',
+  'engie', 'lumo-energy', 'sumo-power', 'shell-energy', 'mojo-power', 'origin-energy', 'agl-energy', 'localvolts', 'flow-power', 'energyaustralia-business'];
 
 // The networks Thomson Energy quotes on; a plan is kept when it is sold on one of them.
 const NETWORKS = [
@@ -54,24 +61,31 @@ async function fetchJson(url, version, { tries = 3, timeoutMs = 20000 } = {}) {
 // Every energy brand from the CDR register, with the base of its product data (the AER hosts it).
 async function discoverBrands() {
   const out = [];
-  try {
-    let url = REGISTER_URL;
-    for (let page = 0; url && page < 20; page++) {
-      const { json } = await fetchJson(url, 1);
-      const rows = (json && json.data) || [];
-      rows.forEach(b => {
-        let base = b.productBaseUri || b.productReferenceDataBaseUri || null;
-        if (!base && b.dataHolderBrandId) base = null;
-        if (base) base = String(base).replace(/\/+$/, '').replace(/\/cds-au\/v1$/, '');
-        if (base) out.push({ id: base.split('/').pop(), name: b.brandName || base.split('/').pop(), base });
-      });
-      url = json && json.links && json.links.next;
-    }
-  } catch (err) {
+  let why = null;
+  for (const version of [2, 1]) {
     out.length = 0;
+    try {
+      let url = REGISTER_URL;
+      let rows = 0;
+      for (let page = 0; url && page < 20; page++) {
+        const { status, json } = await fetchJson(url, version);
+        if (!json) { why = `register HTTP ${status} (x-v ${version})`; break; }
+        const data = json.data || [];
+        rows += data.length;
+        data.forEach(b => {
+          let base = b.productBaseUri || b.productReferenceDataBaseUri || null;
+          if (base) base = String(base).replace(/\/+$/, '').replace(/\/cds-au\/v1$/, '');
+          if (base) out.push({ id: base.split('/').pop(), name: b.brandName || base.split('/').pop(), base });
+        });
+        url = json.links && json.links.next;
+      }
+      if (out.length) return { brands: dedupe(out), source: `register x-v ${version}`, why: null };
+      if (rows && !why) why = `register gave ${rows} brands but no product data address (x-v ${version}); fields: ${Object.keys(((await fetchJson(REGISTER_URL, version)).json || { data: [{}] }).data[0] || {}).join(', ')}`;
+    } catch (err) {
+      why = `register error (x-v ${version}): ${String(err.message || err).slice(0, 200)}`;
+    }
   }
-  if (out.length) return { brands: dedupe(out), source: 'register' };
-  return { brands: FALLBACK_BRANDS.map(id => ({ id, name: id, base: `${AER_BASE}/${id}` })), source: 'fallback' };
+  return { brands: FALLBACK_BRANDS.map(id => ({ id, name: id, base: `${AER_BASE}/${id}` })), source: 'fallback', why };
 }
 function dedupe(brands) {
   const seen = new Set();
@@ -184,6 +198,7 @@ function windowsFromTimeOfUse(timeOfUse, band, months, notes) {
 // discounts and fees applied in the costing.
 function convertPlan(detail) {
   const notes = new Set();
+  const wholesale = WHOLESALE_BRANDS.test(String(detail.brand || ''));
   const warn = [];
   const contract = detail.electricityContract || detail.electricity || {};
   const periods = contract.tariffPeriod || contract.tariffPeriods || [];
@@ -283,7 +298,7 @@ function convertPlan(detail) {
   });
   const eligibility = (contract.eligibility || detail.eligibility || []).map(e => [e.information, e.description].filter(Boolean).join(': ') || String(e.type || '').toLowerCase()).filter(Boolean);
   const text = `${detail.displayName || ''} ${detail.description || ''}`;
-  if (/wholesale|spot price|market price/i.test(text) || String(detail.pricingModel || contract.pricingModel || '').toUpperCase() === 'QUOTA') { costable = false; reasons.push('Price follows the wholesale market, which the estimate cannot cost.'); }
+  if (wholesale || /wholesale|spot price|market price/i.test(text) || String(detail.pricingModel || contract.pricingModel || '').toUpperCase() === 'QUOTA') { costable = false; reasons.push('Price follows the wholesale market, which the estimate cannot cost.'); }
 
   return {
     roi_plan: plan,
@@ -297,8 +312,9 @@ function convertPlan(detail) {
       variation: contract.variation || null,
       warnings: [...new Set(warn)],
       model: [...notes],
+      converter: CONVERTER_VERSION,
     },
   };
 }
 
-module.exports = { NETWORKS, networkKey, discoverBrands, listPlans, fetchPlanDetail, convertPlan, AER_BASE };
+module.exports = { CONVERTER_VERSION, NETWORKS, networkKey, discoverBrands, listPlans, fetchPlanDetail, convertPlan, AER_BASE };
