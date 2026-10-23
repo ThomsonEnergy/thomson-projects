@@ -28,7 +28,7 @@ Cost: Pro plan branch compute, roughly US$10/month for the persistent staging br
 
 ## Migration workflow
 
-1. New file: `supabase migration new <name>` (creates `supabase/migrations/<timestamp>_<name>.sql`). Keep the real timestamp it makes (to the second); never hand-pick the next round number like `20261119000000`. Two chats on different devices picked the same round numbers on 22 Oct 2026 (two files each at 20261119000000 and 20261120000000), which breaks `supabase db push`; the battery and rates ones were renumbered 20261122090000 and 20261122090100 and recorded by hand.
+1. New file: `supabase migration new <name>` (creates `supabase/migrations/<timestamp>_<name>.sql`). This repo's numbers run ahead of the calendar (they are in November 2026), so a fresh real timestamp would sort before migrations already applied: name the file with the day after the newest file in `supabase/migrations` plus the real time of day to the second (for example `20261123033219`), never a round number like `20261119000000`. Two chats on different devices picked the same round numbers on 22 Oct 2026 (two files each at 20261119000000 and 20261120000000), which breaks `supabase db push`; the battery and rates ones were renumbered 20261122090000 and 20261122090100 and recorded by hand.
 2. Every `create policy` has `drop policy if exists` right before it. Index every FK. Fast RLS (`(select auth.uid())`, one policy per action).
 3. `npm run check` (parses the SQL and checks the policy pairs).
 4. Show the owner the SQL. Wait for "yes".

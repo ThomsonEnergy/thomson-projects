@@ -27,6 +27,7 @@ const AGENTS = {
   'ops-digest': { label: 'Ops manager 5am digest', every: 1440 },
   'remind-client-bookings': { label: 'Client not told of booking (7am reminder)', every: 1440 },
   'read-knowledge-sweep': { label: 'Knowledge Base reader (every 2 minutes)', every: 2 },
+  'sync-energy-plans': { label: 'Retail plan list from Energy Made Easy (refreshed daily)', every: 15 },
 };
 
 async function managerIds(admin) {

@@ -96,3 +96,9 @@
 [functions.read-knowledge-background]
   memory = "2048mb"
   included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.js", "node_modules/pdfjs-dist/standard_fonts/**", "node_modules/pdfjs-dist/cmaps/**"]
+
+# Every 15 minutes: starts the retail plan download from the AER's Consumer Data Right data when the
+# last good one is over 20 hours old (about once a day) - see sync-energy-plans.js; the download is
+# sync-energy-plans-background.js (docs/IDEAS_BACKLOG.md item 34).
+[functions.sync-energy-plans]
+  schedule = "*/15 * * * *"
