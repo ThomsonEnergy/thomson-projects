@@ -32,12 +32,13 @@
   </div>
 
   <script src="/js/supabase-client.js?v=118"></script>
-  <script src="/js/template-questions.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=7"></script>
+  <script src="/js/template-questions.js?v=3"></script>
+  <script src="/js/solar-roi.js?v=8"></script>
   <style>
-    .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; }
-    .roi-preview .roi-fig { margin:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; }
-    .roi-preview .roi-fig figcaption { font-size:12px; font-weight:600; margin-bottom:4px; }
+    /* the estimate's charts on white paper, as they print on the proposal */
+    .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
+    .roi-preview .roi-fig { margin:0; }
+    .roi-preview .roi-fig figcaption { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:#1a6be6; margin-bottom:4px; }
   </style>
   <script src="/js/prebuild-form.js?v=2"></script>
   <script src="/js/feed.js?v=11"></script>
@@ -1030,12 +1031,80 @@
       const readBtn = document.getElementById('bill-read-btn');
       const readMsg = document.getElementById('bill-read-msg');
       const liveAnswers = () => Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
+      const byId = (id) => document.getElementById(id);
+      const val = (id) => { const el = byId(id); return el ? el.value.trim() : ''; };
+      const numOrNull = (v) => { if (v === '' || v == null) return null; const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+      // A typed number for saving: blank is null, below zero is refused with a plain message.
+      const nonNeg = (text, label) => { const n = numOrNull(text); if (n != null && n < 0) throw new Error(`${label} cannot be below zero`); return n; };
+      const RED = 'var(--red, #c0272d)';
+      const AMBER = 'var(--amber, #92400e)';
+      let clientIsCompany = false; // credits carry GST on the proposal for a company client
+      if (project.client_id) supabaseClient.from('clients').select('client_type').eq('id', project.client_id).maybeSingle()
+        .then(({ data }) => { clientIsCompany = data?.client_type === 'company'; scheduleRender(0); });
 
+      // ----- saving: everything on this card saves itself as it is changed -----
+      // Each kind of change has its own key, so a quick run of typing is one save. The header shows
+      // Saving..., a tick, or what failed with Try again; leaving the page with a change not saved asks first.
+      const savedEl = byId('bc-saved');
+      const timers = {};
+      const failed = {};
+      let inFlight = 0;
+      let everSaved = false;
+      let pdfTimer = null;
+      function showSaveState() {
+        if (!savedEl) return;
+        const failedKeys = Object.keys(failed);
+        if (failedKeys.length) {
+          savedEl.innerHTML = `<span style="color:${RED};">Not saved: ${escapeHtml(failed[failedKeys[0]].message)}</span> <button type="button" class="secondary" id="bc-retry" style="font-size:11px; padding:2px 8px;">Try again</button>`;
+          byId('bc-retry').addEventListener('click', () => { Object.keys(failed).forEach(k => { const b = failed[k].build; delete failed[k]; autosave(k, b, 0); }); });
+        } else if (Object.keys(timers).length || inFlight) {
+          savedEl.textContent = 'Saving...';
+        } else {
+          savedEl.innerHTML = everSaved ? '<span style="color:var(--green);">&#10003; Saved</span>' : '';
+        }
+      }
+      function autosave(key, build, delay = 700) {
+        clearTimeout(timers[key]);
+        delete failed[key];
+        timers[key] = setTimeout(async () => {
+          delete timers[key];
+          let fields;
+          try { fields = build(); } catch (err) { failed[key] = { message: err.message, build }; showSaveState(); return; }
+          if (!fields) { showSaveState(); return; }
+          inFlight++;
+          showSaveState();
+          try {
+            const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
+            if (error) throw error;
+            Object.assign(project, fields);
+            everSaved = true;
+            schedulePdf();
+          } catch (err) {
+            failed[key] = { message: friendlyError(err), build };
+          } finally {
+            inFlight--;
+            showSaveState();
+            scheduleRender(0);
+          }
+        }, delay);
+        showSaveState();
+      }
+      function schedulePdf() {
+        clearTimeout(pdfTimer);
+        pdfTimer = setTimeout(() => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); }, 4000);
+      }
+      window.addEventListener('beforeunload', (e) => {
+        if (Object.keys(timers).length || inFlight || Object.keys(failed).length) { e.preventDefault(); e.returnValue = ''; }
+      });
+      let renderTimer = null;
+      const scheduleRender = (ms = 200) => { clearTimeout(renderTimer); renderTimer = setTimeout(renderEstimate, ms); };
+
+      // ----- bill pages -----
       function renderList() {
         listEl.innerHTML = billDocs.length ? billDocs.map(d => `
           <div style="display:inline-flex; align-items:center; gap:6px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:6px 10px; margin:0 8px 8px 0; font-size:12px;">
             <a href="#" class="bill-doc-view" data-path="${escapeHtml(d.file_path)}">${escapeHtml(d.file_name)}</a>
-            <button type="button" class="bill-doc-remove" data-id="${d.id}" data-path="${escapeHtml(d.file_path)}" style="padding:2px 6px; font-size:11px;">x</button>
+            <button type="button" class="bill-doc-remove" data-id="${d.id}" data-path="${escapeHtml(d.file_path)}" style="padding:2px 6px; font-size:11px;" aria-label="Remove this page">x</button>
           </div>`).join('') : `<p class="subtitle" style="font-size:12px; margin:0 0 6px;">No pages yet.</p>`;
         listEl.querySelectorAll('.bill-doc-view').forEach(a => a.addEventListener('click', (e) => {
           e.preventDefault();
@@ -1052,6 +1121,7 @@
           } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
         }));
         readBtn.disabled = !billDocs.length;
+        readBtn.innerHTML = project.bill_reading ? '&#10024; Read bill with AI again' : '&#10024; Read bill with AI';
       }
 
       fileInput.addEventListener('change', async () => {
@@ -1072,15 +1142,20 @@
             if (error) throw error;
             billDocs.push(data);
           }
-          msg.innerHTML = '';
+          msg.innerHTML = project.bill_reading ? `<p class="subtitle" style="font-size:12px;">Pages added. Press Read bill with AI again to read them.</p>` : '';
           renderList();
         } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
         finally { fileInput.value = ''; fileInput.disabled = false; }
       });
 
       readBtn.addEventListener('click', async () => {
+        // A fresh read replaces any figure or rate changed by hand: say which, and only go on with a yes.
+        const r0 = project.bill_reading || {};
+        const editedBill = (r0.edited_fields || []).map(k => (BILL_FIELDS.find(f => f[0] === k) || [k, k])[1]);
+        const editedRates = Object.keys(((project.roi_inputs || {}).current) || {}).map(k => (RI_FIELDS.find(f => f[0] === k) || [k, k])[1]);
+        const changed = [...editedBill, ...editedRates];
+        if (changed.length && !confirm(`Reading the bill again replaces what you changed by hand: ${changed.join(', ')}. Carry on?`)) return;
         readBtn.disabled = true;
-        const label = readBtn.innerHTML;
         readBtn.textContent = 'Reading the bill...';
         readMsg.innerHTML = '';
         try {
@@ -1092,318 +1167,504 @@
           const json = await res.json();
           if (!json.ok) throw new Error(json.error || 'The bill could not be read.');
           project.bill_reading = json.reading;
-          const panel = document.getElementById('roi-inputs-panel');
-          if (panel) panel.innerHTML = '';
           project.template_answers = json.answers;
           templateAnswers = json.answers;
+          if (editedRates.length) {
+            project.roi_inputs = { ...(project.roi_inputs || {}), current: {} };
+            autosave('roi_inputs', () => ({ roi_inputs: project.roi_inputs }), 0);
+          }
+          const panel = byId('roi-inputs-panel');
+          if (panel) panel.innerHTML = '';
           renderTemplateQuestions(qEl, currentTemplate, templateAnswers);
           showMissing();
           renderCustomerGets();
           const filledKeys = Object.keys(json.filled || {});
-          readMsg.innerHTML = `<div class="success-box">Bill read.${filledKeys.length ? ` Filled in and saved: ${filledKeys.join(', ')}.` : ''}</div>`;
+          readMsg.innerHTML = `<div class="success-box">Bill read. Check the figures below.${filledKeys.length ? ` Filled in above and saved: ${filledKeys.join(', ')}.` : ''}</div>`;
           renderReading();
           refreshBar();
         } catch (err) { readMsg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
-        finally { readBtn.innerHTML = label; readBtn.disabled = !billDocs.length; }
+        finally { renderList(); }
       });
 
-      // What the savings preview runs on: the step 3 inputs when they are on the page, else what is saved.
+      // ----- what the estimate runs on -----
+      // Solar size: step 3's System size (it also sets the STC credit, so it is changed and saved there).
       function currentSolarKw() {
         if (currentTemplate === 'battery') return 0;
-        const el = document.getElementById('q-stc-kw');
-        const v = el ? parseFloat(el.value) : NaN;
-        if (Number.isFinite(v) && v > 0) return v;
+        const v = numOrNull(val('q-stc-kw'));
+        if (v != null && v > 0) return v;
         return Number(project.stc_system_kw) || pylonKw || 0;
       }
-      // Only the battery we are quoting (step 3) counts: never the "Usable kWh wanted" answer, which
-      // is what the customer asked for and can be far from what is on the quote.
-      function currentBatteryKwh() {
-        const el = document.getElementById('q-battery-kwh');
-        const v = el ? parseFloat(el.value) : NaN;
-        if (Number.isFinite(v) && v > 0) return v;
-        return Number(project.battery_kwh) || roiBatteryKwhFromLines(project.cost_centres) || 0;
+      function savedSolarKw() { return currentTemplate === 'battery' ? 0 : (Number(project.stc_system_kw) || pylonKw || 0); }
+      function linesBatteryKwh() { return roiBatteryKwhFromLines(project.cost_centres); }
+      // The battery quoted: the box when it has a number, else the quote's battery lines. Never the
+      // "Usable kWh the customer asked for" answer.
+      function typedBatteryKwh() {
+        const el = byId('bc-battery-kwh') || byId('q-battery-kwh');
+        if (el) { const v = numOrNull(el.value.trim()); return v != null && v > 0 ? v : null; }
+        return Number(project.battery_kwh) > 0 ? Number(project.battery_kwh) : null;
       }
+      function currentBatteryKwh() { return typedBatteryKwh() || linesBatteryKwh() || 0; }
+      const creditAsShown = (n) => (Number(n) || 0) * (clientIsCompany ? 1.1 : 1);
       function currentNetCost() {
         const exGst = (project.cost_centres || []).reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
-        return Math.max(0, exGst * 1.1 - (Number(project.stc_total) || 0) - (Number(project.bstc_total) || 0));
+        return Math.max(0, exGst * 1.1 - creditAsShown(project.stc_total) - creditAsShown(project.bstc_total));
       }
       function currentZone() {
-        const el = document.getElementById('q-stc-zone');
+        const el = byId('q-stc-zone');
         return (el && parseFloat(el.value)) || Number(project.stc_zone_rating) || 1.382;
       }
+      function typedPrice(which) {
+        const el = byId(`bc-${which}-price`) || byId(`ri-${which}-price`);
+        if (el) return numOrNull(el.value.trim());
+        const v = (project.roi_inputs || {})[`${which}_price`];
+        return v == null ? null : Number(v);
+      }
+      function defaultPrices() { return roiDefaultPrices({ centres: project.cost_centres, netCost: currentNetCost(), bstcCredit: creditAsShown(project.bstc_total) }); }
+      function currentPrices() { return roiPricesFor({ typedSolar: typedPrice('solar'), typedBattery: typedPrice('battery'), defaults: defaultPrices() }); }
 
-      // ----- the rates for the estimate (projects.roi_inputs): the bill's rates as read, editable, a
-      // second plan to compare, and a battery export window. Built once; the estimate below it is
-      // re-rendered as anything changes (unsaved values included) and Save rates keeps them.
-      const RI_FIELDS = [
-        ['rate', 'Usage (c/kWh)', 'flat'], ['peak', 'Peak (c/kWh)', 'tou'], ['shoulder', 'Shoulder (c/kWh)', 'tou'], ['off_peak', 'Off-peak (c/kWh)', 'tou'],
-        ['peak_hours', 'Peak hours', 'tou', 'e.g. 17:00-20:00'], ['shoulder_hours', 'Shoulder hours (blank: no shoulder band)', 'tou', 'blank: none'],
-        ['controlled', 'Controlled load (c/kWh)', 'any'], ['supply', 'Supply (c/day)', 'any'], ['feed_in', 'Feed-in (c/kWh)', 'any'],
+      // ----- the bill's figures, correctable in place -----
+      const BILL_FIELDS = [
+        ['billing_days', 'Days on the bill'], ['total_kwh', 'kWh used (total)'], ['bill_total', 'Bill total ($)'], ['solar_export_kwh', 'Solar exported (kWh)'],
+        ['peak_kwh', 'Peak kWh'], ['shoulder_kwh', 'Shoulder kWh'], ['off_peak_kwh', 'Off-peak kWh'], ['controlled_load_kwh', 'Controlled load kWh'],
       ];
-      function riPlanFieldsHtml(prefix, plan, withName) {
-        const attr = (v) => escapeHtml(v == null ? '' : String(v));
-        const field = ([key, label, when, ph]) => {
-          const isHours = key.endsWith('_hours');
-          return `<div class="ri-${when}" style="${(when === 'tou' && plan.tariff !== 'tou') || (when === 'flat' && plan.tariff === 'tou') ? 'display:none;' : ''}"><label style="margin-top:0; font-size:12px;">${label}</label><input id="${prefix}-${key}" ${isHours ? 'type="text"' : 'type="number" step="0.1" inputmode="decimal"'} value="${attr(plan[key])}" placeholder="${attr(ph || '')}" /></div>`;
-        };
-        return `
-          <div class="grid cols-4">
-            ${withName ? `<div><label style="margin-top:0; font-size:12px;">Plan or retailer name</label><input id="${prefix}-name" value="${attr(plan.name)}" placeholder="e.g. Amber, Origin Solar Boost" /></div>` : ''}
-            <div><label style="margin-top:0; font-size:12px;">Tariff</label><select id="${prefix}-tariff"><option value="flat" ${plan.tariff !== 'tou' ? 'selected' : ''}>Flat rate</option><option value="tou" ${plan.tariff === 'tou' ? 'selected' : ''}>Time of use</option></select></div>
-            ${RI_FIELDS.map(field).join('')}
-          </div>`;
+      function billPerDayText() {
+        const m = billMetrics(project.bill_reading);
+        if (!m.dailyKwh) return 'No usage worked out yet: the days and the kWh used are both needed.';
+        return `= ${m.dailyKwh} kWh a day, about ${Math.round(m.annualKwh).toLocaleString('en-AU')} kWh a year${m.annualBill ? `, about ${money(m.annualBill)} a year` : ''}.`;
       }
-      function riReadPlan(prefix) {
-        const v = (key) => { const el = document.getElementById(`${prefix}-${key}`); return el ? el.value.trim() : ''; };
-        const out = { tariff: v('tariff') || 'flat' };
-        const nameEl = document.getElementById(`${prefix}-name`);
-        if (nameEl) out.name = nameEl.value.trim();
-        RI_FIELDS.forEach(([key]) => { const val = v(key); if (key.endsWith('_hours')) out[key] = val; else if (val !== '') out[key] = parseFloat(val); });
-        return out;
-      }
-      function readRoiInputs() {
-        const saved = project.roi_inputs || {};
-        const altOn = document.getElementById('ri-alt-enabled');
-        const expOn = document.getElementById('ri-export-enabled');
-        const num = (id) => { const el = document.getElementById(id); const n = el ? parseFloat(el.value) : NaN; return Number.isFinite(n) ? n : null; };
-        const text = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
-        const stepSolar = document.getElementById('ri-solar-price');
-        const stepBattery = document.getElementById('ri-battery-price');
-        return {
-          current: riReadPlan('ri'),
-          alt: { enabled: !!(altOn && altOn.checked), ...riReadPlan('ri-alt') },
-          export: { enabled: !!(expOn && expOn.checked), rate: num('ri-export-rate'), from: text('ri-export-from') || '17:00', to: text('ri-export-to') || '21:00', max_kwh: num('ri-export-max') },
-          solar_price: stepSolar ? num('ri-solar-price') : (saved.solar_price ?? null),
-          battery_price: stepBattery ? num('ri-battery-price') : (saved.battery_price ?? null),
-        };
-      }
-      function buildRoiInputsPanel() {
-        const panel = document.getElementById('roi-inputs-panel');
-        if (!panel) return;
-        const saved = project.roi_inputs || {};
-        const r = project.bill_reading || null;
-        const current = roiPlan(saved.current, r, '');
-        const alt = roiPlan(saved.alt, null, '');
-        if (!saved.alt) { alt.rate = null; alt.peak = null; alt.shoulder = null; alt.off_peak = null; alt.controlled = null; alt.supply = null; alt.feed_in = null; alt.name = ''; }
-        const exp = saved.export || {};
-        panel.innerHTML = `
-          <div style="margin-top:12px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
-            <label style="margin-top:0; font-weight:600;">Rates for the estimate</label>
-            <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">Filled from the bill; change anything. The estimate runs solar first, then the battery, hour by hour at these rates. Time of use: the hours not in peak or shoulder are off-peak.</p>
-            ${riPlanFieldsHtml('ri', current, false)}
-            <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-alt-enabled" style="width:auto; margin:0;" ${saved.alt && saved.alt.enabled ? 'checked' : ''} /> Compare with another plan (the same figures on a different retailer or tariff, shown as a second column)</label>
-            <div id="ri-alt-fields" style="${saved.alt && saved.alt.enabled ? '' : 'display:none;'} margin-top:4px;">${riPlanFieldsHtml('ri-alt', alt, true)}</div>
-            <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-export-enabled" style="width:auto; margin:0;" ${exp.enabled ? 'checked' : ''} /> The battery sells to the grid in a window (a VPP or a plan with a high evening feed-in)</label>
-            <div id="ri-export-fields" style="${exp.enabled ? '' : 'display:none;'} margin-top:4px;">
-              <div class="grid cols-4">
-                <div><label style="margin-top:0; font-size:12px;">Sold at (c/kWh)</label><input id="ri-export-rate" type="number" step="0.1" inputmode="decimal" value="${exp.rate ?? ''}" placeholder="e.g. 60" /></div>
-                <div><label style="margin-top:0; font-size:12px;">From</label><input id="ri-export-from" type="time" value="${escapeHtml(exp.from || '17:00')}" /></div>
-                <div><label style="margin-top:0; font-size:12px;">To</label><input id="ri-export-to" type="time" value="${escapeHtml(exp.to || '21:00')}" /></div>
-                <div><label style="margin-top:0; font-size:12px;">Up to (kWh a day)</label><input id="ri-export-max" type="number" step="0.1" inputmode="decimal" value="${exp.max_kwh ?? ''}" placeholder="blank: whatever is in it" /></div>
-              </div>
-              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">In the window the battery sells first when the sold rate beats that hour's buy rate, then covers the home with what is left.</p>
-            </div>
-            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px;">
-              <button type="button" id="ri-save">Save rates</button>
-              <span class="subtitle" id="ri-msg" style="font-size:12px;"></span>
-            </div>
-          </div>`;
-        const toggleTariff = (prefix) => {
-          const sel = document.getElementById(`${prefix}-tariff`);
-          if (!sel) return;
-          const tou = sel.value === 'tou';
-          panel.querySelectorAll(`[id^="${prefix}-"]`).forEach(el => {
-            const wrap = el.closest('.ri-tou, .ri-flat');
-            if (!wrap) return;
-            if (!el.id.startsWith(prefix + '-') || (prefix === 'ri' && el.id.startsWith('ri-alt-'))) return;
-            wrap.style.display = wrap.classList.contains('ri-tou') ? (tou ? '' : 'none') : (tou ? 'none' : '');
-          });
-        };
-        document.getElementById('ri-tariff').addEventListener('change', () => toggleTariff('ri'));
-        document.getElementById('ri-alt-tariff').addEventListener('change', () => toggleTariff('ri-alt'));
-        document.getElementById('ri-alt-enabled').addEventListener('change', (e) => { document.getElementById('ri-alt-fields').style.display = e.target.checked ? '' : 'none'; });
-        document.getElementById('ri-export-enabled').addEventListener('change', (e) => { document.getElementById('ri-export-fields').style.display = e.target.checked ? '' : 'none'; });
-        let timer = null;
-        panel.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(renderEstimate, 250); });
-        panel.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(renderEstimate, 50); });
-        document.getElementById('ri-save').addEventListener('click', async () => {
-          const btn = document.getElementById('ri-save');
-          const msg = document.getElementById('ri-msg');
-          btn.disabled = true;
-          try {
-            const inputs = readRoiInputs();
-            const { error } = await supabaseClient.from('projects').update({ roi_inputs: inputs }).eq('id', project.id);
-            if (error) throw error;
-            project.roi_inputs = inputs;
-            msg.textContent = 'Saved.';
-            showToast('Rates saved.');
-            renderEstimate();
-            if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
-          } catch (err) { msg.innerHTML = `<span style="color:var(--red, #c0392b);">${escapeHtml(friendlyError(err))}</span>`; }
-          finally { btn.disabled = false; }
-        });
-      }
-
-      function estimateArgs() {
-        const inputs = readRoiInputs();
-        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money, inputs, solarPrice: inputs.solar_price, batteryPrice: inputs.battery_price };
-      }
-
       function renderReading() {
-        const out = document.getElementById('bill-reading');
-        const when = document.getElementById('bill-read-when');
+        const out = byId('bill-reading');
+        const when = byId('bill-read-when');
         const r = project.bill_reading;
         if (!out || !when) return;
-        if (!r) { out.innerHTML = ''; when.textContent = ''; renderEstimate(); return; }
-        when.textContent = r.read_at ? `Read ${new Date(r.read_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}${r.pages ? `, ${r.pages} file${r.pages === 1 ? '' : 's'}` : ''}` : '';
-        const m = billMetrics(r);
-        const fmt = (v, unit) => (v == null ? '-' : `${v}${unit || ''}`);
-        const rates = r.usage_rates || {};
-        const rateText = rates.peak != null ? `peak ${rates.peak}${rates.shoulder != null ? `, shoulder ${rates.shoulder}` : ''}${rates.off_peak != null ? `, off-peak ${rates.off_peak}` : ''} c/kWh` : `${fmt(r.usage_rate_c_per_kwh, ' c/kWh')} usage`;
-        const rows = [
-          ['Retailer', `${r.retailer || '-'}${r.distributor ? ` (network ${r.distributor})` : ''}`],
-          ['NMI', r.nmi || '-'],
-          ['Period', `${r.billing_period_start || '?'} to ${r.billing_period_end || '?'} (${fmt(m.days, ' days')})`],
-          ['Use', `${fmt(m.totalKwh, ' kWh')} in the period, ${fmt(m.dailyKwh, ' kWh a day')}, about ${fmt(m.annualKwh, ' kWh a year')}`],
-          ...(m.split ? [['Time of use', `peak ${m.split.peak} / shoulder ${m.split.shoulder} / off-peak ${m.split.offPeak} kWh${m.split.controlled ? `, controlled load ${m.split.controlled} kWh` : ''}`]] : []),
-          ['Rates', `${rateText}${rates.controlled_load != null ? `, controlled load ${rates.controlled_load} c/kWh` : ''}, ${fmt(r.supply_charge_c_per_day, ' c/day')} supply${r.feed_in_c_per_kwh != null ? `, feed-in ${r.feed_in_c_per_kwh} c/kWh` : ''}`],
-          ['This bill', `${r.bill_total != null ? money(r.bill_total) : '-'}${m.annualBill ? `, about ${money(m.annualBill)} a year` : ''}`],
-          ...(r.solar_export_kwh ? [['Solar export', `${r.solar_export_kwh} kWh (existing solar)`]] : []),
-          ...(r.skipped_files && r.skipped_files.length ? [['Not read', r.skipped_files.join(', ')]] : []),
-          ...(r.notes ? [['Note', r.notes]] : []),
-        ];
-        const s = r.sizing || {};
-        const cell = (k, v) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`;
+        if (!r) { out.innerHTML = ''; when.textContent = ''; byId('roi-inputs-panel').innerHTML = ''; renderRecommend(); scheduleRender(0); return; }
+        when.textContent = r.read_at ? `Read ${new Date(r.read_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}${r.pages ? `, ${r.pages} file${r.pages === 1 ? '' : 's'}` : ''}${r.copied_from ? `, copied from ${r.copied_from}` : ''}` : '';
+        const edited = r.edited_fields || [];
+        const ai = r.ai_values || {};
+        const head = [r.retailer ? `${r.retailer}${r.distributor ? ` (network ${r.distributor})` : ''}` : null, r.nmi ? `NMI ${r.nmi}` : null, r.billing_period_start || r.billing_period_end ? `${r.billing_period_start || '?'} to ${r.billing_period_end || '?'}` : null].filter(Boolean).join(' · ');
         out.innerHTML = `
-          <table style="margin-top:10px; font-size:13px;"><tbody>${rows.map(([k, v]) => cell(k, v)).join('')}</tbody></table>
+          <div style="margin-top:12px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
+            <label style="margin-top:0; font-weight:600;">What the bill says</label>
+            <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">${escapeHtml(head || 'Read by AI')}. Check these against the bill and fix anything wrong; a blank means it is not on the bill.</p>
+            <div class="grid cols-4" id="bc-bill-grid">
+              ${BILL_FIELDS.map(([key, label]) => `<div><label style="margin-top:0; font-size:12px;">${label}${edited.includes(key) ? ' <span style="color:' + AMBER + ';">(changed)</span>' : ''}</label><input type="number" step="any" inputmode="decimal" ${key === 'bill_total' ? '' : 'min="0"'} data-bill="${key}" value="${r[key] ?? ''}" placeholder="not on the bill" />${edited.includes(key) ? `<p class="subtitle" style="margin:2px 0 0; font-size:11px;">AI read ${ai[key] == null ? 'nothing' : escapeHtml(String(ai[key]))}</p>` : ''}</div>`).join('')}
+            </div>
+            <p class="subtitle" id="bc-bill-perday" style="margin:6px 0 0; font-size:12px;">${escapeHtml(billPerDayText())}</p>
+            ${r.notes ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">Note from the reading: ${escapeHtml(r.notes)}</p>` : ''}
+            ${r.skipped_files && r.skipped_files.length ? `<p style="margin:6px 0 0; font-size:12px; color:${RED};">Not read: ${escapeHtml(r.skipped_files.join(', '))}. Use photos (JPG, PNG) or a PDF.</p>` : ''}
+          </div>`;
+        byId('bc-bill-grid').addEventListener('input', (e) => {
+          const key = e.target.dataset.bill;
+          if (!key) return;
+          const reading = project.bill_reading;
+          const raw = e.target.value.trim();
+          const n = raw === '' ? null : parseFloat(raw);
+          reading.ai_values = reading.ai_values || {};
+          if (!(key in reading.ai_values)) reading.ai_values[key] = reading[key] ?? null;
+          reading[key] = Number.isFinite(n) ? n : null;
+          reading.edited_fields = [...new Set([...(reading.edited_fields || []), key])].filter(k => reading[k] !== reading.ai_values[k]);
+          // the daily figure follows the corrected total and days (the bill's printed average would win otherwise)
+          if (key === 'total_kwh' || key === 'billing_days') {
+            const t = numOrNull(reading.total_kwh), d = numOrNull(reading.billing_days);
+            reading.daily_average_kwh = t && d ? Math.round(t / d * 10) / 10 : null;
+          }
+          if ((key === 'peak_kwh' || key === 'shoulder_kwh' || key === 'off_peak_kwh') && reading.tariff_type !== 'time_of_use' && numOrNull(reading.peak_kwh)) reading.tariff_type = 'time_of_use';
+          byId('bc-bill-perday').textContent = billPerDayText();
+          autosave('bill_reading', () => {
+            // a bill total below zero is real (a bill in credit); nothing else can be
+            BILL_FIELDS.forEach(([k, label]) => { if (k !== 'bill_total' && numOrNull(project.bill_reading[k]) != null && project.bill_reading[k] < 0) throw new Error(`${label} cannot be below zero`); });
+            return { bill_reading: project.bill_reading };
+          }, 900);
+          renderRecommend();
+          scheduleRender();
+        });
+        if (!byId('ri-tariff')) buildRoiInputsPanel();
+        renderRecommend();
+        scheduleRender(0);
+      }
+
+      // ----- the recommendation: sizes from the bill, worked out again as anything changes -----
+      function renderRecommend() {
+        const out = byId('bc-recommend');
+        if (!out) return;
+        const r = project.bill_reading;
+        if (!r) { out.innerHTML = ''; return; }
+        const s = suggestSizes({ reading: r, answers: liveAnswers(), zoneRating: currentZone() });
+        if (!s.dailyKwh) { out.innerHTML = ''; return; }
+        const wantsBattery = quoteHasBattery(currentTemplate, liveAnswers());
+        out.innerHTML = `
           <div style="margin-top:12px;">
             <label style="margin-top:0; font-weight:600;">Recommended from the bill</label>
             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0;">
-              ${s.solarKw ? `<span><strong>${s.solarKw} kW</strong> solar</span>${currentTemplate !== 'battery' ? `<button type="button" class="secondary" id="bill-use-solar" style="font-size:12px; padding:4px 8px;">Quote this size (step 3)</button>` : ''}` : (s.solarKw === 0 ? `<span>Solar: the existing ${s.existingKw} kW already covers the use</span>` : '')}
-              ${s.batteryKwh ? `<span><strong>${s.batteryKwh} kWh</strong> battery</span><button type="button" class="secondary" id="bill-use-battery" style="font-size:12px; padding:4px 8px;">Quote this size (step 3)</button>` : ''}
+              ${currentTemplate !== 'battery' ? (s.solarKw ? `<span><strong>${s.solarKw} kW</strong> solar</span><button type="button" class="secondary" id="bill-use-solar" style="font-size:12px; padding:4px 8px;">Quote this size</button>` : (s.solarKw === 0 ? `<span>Solar: the existing ${s.existingKw} kW already covers the use</span>` : '')) : ''}
+              ${wantsBattery && s.batteryKwh ? `<span><strong>${s.batteryKwh} kWh</strong> battery</span><button type="button" class="secondary" id="bill-use-battery" style="font-size:12px; padding:4px 8px;">Quote this size</button>` : ''}
             </div>
-            ${(s.notes || []).map(n => `<p class="subtitle" style="margin:2px 0; font-size:12px;">${escapeHtml(n)}</p>`).join('')}
+            ${s.notes.map(n => `<p class="subtitle" style="margin:2px 0; font-size:12px;">${escapeHtml(n)}</p>`).join('')}
           </div>`;
-        const useSolar = out.querySelector('#bill-use-solar');
+        const useSolar = byId('bill-use-solar');
         if (useSolar) useSolar.addEventListener('click', () => {
-          const el = document.getElementById('q-stc-kw');
-          if (el) { el.value = s.solarKw; el.dispatchEvent(new Event('input', { bubbles: true })); showToast(`${s.solarKw} kW set on step 3. Save pricing to keep it.`); }
-          renderEstimate();
+          const el = byId('q-stc-kw');
+          if (!el) return;
+          el.value = s.solarKw;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          el.focus();
+          showToast(`${s.solarKw} kW put in step 3. Press Save pricing there to keep it: the size also sets the STC credit.`);
         });
-        const useBattery = out.querySelector('#bill-use-battery');
+        const useBattery = byId('bill-use-battery');
         if (useBattery) useBattery.addEventListener('click', () => {
-          const wanted = qEl.querySelector('.tq-input[data-qid="battery_kwh_wanted"]');
-          if (!wanted && currentTemplate !== 'battery') { showToast('Answer "Batteries as well?" with Yes first.', { error: true }); return; }
-          if (wanted && !wanted.value) { wanted.value = s.batteryKwh; wanted.dispatchEvent(new Event('change', { bubbles: true })); }
-          const el = document.getElementById('q-battery-kwh');
-          if (el) { el.value = s.batteryKwh; el.dispatchEvent(new Event('input', { bubbles: true })); }
-          showToast(`${s.batteryKwh} kWh set as the battery quoted on step 3. Save pricing to keep it.`);
-          renderEstimate();
+          ['bc-battery-kwh', 'q-battery-kwh'].forEach(id => { const el = byId(id); if (el) el.value = s.batteryKwh; });
+          autosave('battery_kwh', () => ({ battery_kwh: s.batteryKwh }), 0);
+          showToast(`Quoting a ${s.batteryKwh} kWh battery. Saved.`);
+          scheduleRender(0);
         });
-        if (!document.getElementById('ri-save')) buildRoiInputsPanel();
-        renderEstimate();
       }
 
-      // The estimate as the proposal shows it (same maths, same rows), plus the gaps and the working.
+      // ----- what we are quoting (the estimate runs on these) -----
+      function buildQuoting() {
+        const out = byId('bc-quoting');
+        if (!out) return;
+        out.innerHTML = `
+          <div style="margin-top:12px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
+            <label style="margin-top:0; font-weight:600;">What we are quoting</label>
+            <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">The estimate runs on these, not on the recommendation. The battery and the two prices are the same boxes as on step 3.</p>
+            <div class="grid cols-4">
+              <div id="bc-solar-wrap"><label style="margin-top:0; font-size:12px;">Solar</label><div style="padding:6px 0;"><strong id="bc-solar-kw">-</strong> <a href="#q-stc-kw" id="bc-goto-solar" class="link-quiet" style="font-size:12px;">change on step 3</a></div></div>
+              <div id="bc-battery-wrap"><label style="margin-top:0; font-size:12px;">Battery (usable kWh)</label><input id="bc-battery-kwh" type="number" step="0.1" inputmode="decimal" min="0" value="${project.battery_kwh ?? ''}" /></div>
+              <div id="bc-solar-price-wrap"><label style="margin-top:0; font-size:12px;">Solar price (inc GST, after STC)</label><input id="bc-solar-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs || {}).solar_price ?? ''}" /></div>
+              <div id="bc-battery-price-wrap"><label style="margin-top:0; font-size:12px;">Battery price (inc GST, after BSTC)</label><input id="bc-battery-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs || {}).battery_price ?? ''}" /></div>
+            </div>
+            <p class="subtitle" id="bc-quoting-note" style="margin:6px 0 0; font-size:12px;"></p>
+            <div id="bc-solar-unsaved"></div>
+          </div>`;
+        byId('bc-goto-solar').addEventListener('click', (e) => {
+          const el = byId('q-stc-kw');
+          if (!el) return;
+          e.preventDefault();
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          el.focus();
+        });
+        // the battery and the two prices are mirrored with step 3's boxes and save themselves
+        const mirror = (aId, bId, onChange) => {
+          const a = byId(aId), b = byId(bId);
+          [[a, b], [b, a]].forEach(([el, other]) => { if (el) el.addEventListener('input', () => { if (other) other.value = el.value; onChange(); }); });
+        };
+        mirror('bc-battery-kwh', 'q-battery-kwh', () => {
+          autosave('battery_kwh', () => ({ battery_kwh: nonNeg(val('bc-battery-kwh'), 'The battery kWh') }));
+          scheduleRender();
+        });
+        const savePrices = () => { autosave('roi_inputs', () => ({ roi_inputs: readRoiInputs(true) }), 900); scheduleRender(); };
+        mirror('bc-solar-price', 'ri-solar-price', savePrices);
+        mirror('bc-battery-price', 'ri-battery-price', savePrices);
+      }
+      // Labels, hints and the "not saved on step 3" warning, refreshed with the estimate.
+      function refreshQuoting() {
+        if (!byId('bc-quoting') || !byId('bc-solar-kw')) return;
+        const solar = currentSolarKw();
+        const battery = currentBatteryKwh();
+        const lines = linesBatteryKwh();
+        const hasBattery = quoteHasBattery(currentTemplate, liveAnswers()) || battery > 0;
+        const total = currentNetCost();
+        const d = defaultPrices();
+        const both = solar > 0 && battery > 0;
+        byId('bc-solar-wrap').style.display = currentTemplate === 'battery' ? 'none' : '';
+        byId('bc-solar-kw').textContent = solar ? `${solar} kW` : 'not set';
+        byId('bc-battery-wrap').style.display = hasBattery ? '' : 'none';
+        byId('bc-solar-price-wrap').style.display = both ? '' : 'none';
+        byId('bc-battery-price-wrap').style.display = both ? '' : 'none';
+        byId('bc-battery-kwh').placeholder = lines ? `${lines} (from the line items)` : 'e.g. 13.5';
+        byId('bc-solar-price').placeholder = d.solar != null ? `${d.solar} (the rest)` : 'blank: one price';
+        byId('bc-battery-price').placeholder = d.battery != null ? `${d.battery} (battery stage)` : 'blank: one price';
+        [['q-battery-kwh', 'bc-battery-kwh'], ['ri-solar-price', 'bc-solar-price'], ['ri-battery-price', 'bc-battery-price']].forEach(([a, b]) => { const el = byId(a); if (el) el.placeholder = byId(b).placeholder; });
+        const notes = [];
+        if (hasBattery && !typedBatteryKwh()) notes.push(lines ? `Battery blank: ${lines} kWh from the battery lines on the quote.` : 'Battery blank and no battery kWh in the line items: type the battery\'s usable kWh.');
+        if (both) notes.push(typedPrice('solar') == null && typedPrice('battery') == null
+          ? (d.battery != null ? `Prices blank: battery ${money(d.battery)} (its stage less the BSTC), solar ${money(d.solar)} (everything else), adding up to the quote's ${money(total)} after credits.` : `Prices blank: one payback on the quote's ${money(total)} after credits.`)
+          : `The two prices should add up to the quote's ${money(total)} after credits.`);
+        else notes.push(total ? `Price: the quote's ${money(total)} after credits.` : 'No price yet: price the stages on step 3.');
+        byId('bc-quoting-note').textContent = notes.join(' ');
+        const unsaved = byId('bc-solar-unsaved');
+        const live = currentSolarKw(), saved = savedSolarKw();
+        unsaved.innerHTML = currentTemplate !== 'battery' && Math.abs(live - saved) > 0.001
+          ? `<p style="margin:6px 0 0; font-size:12px; color:${AMBER};">The solar size on step 3 (${live} kW) is not saved yet; the proposal still says ${saved || 'nothing'}${saved ? ' kW' : ''}. Press Save pricing on step 3.</p>`
+          : '';
+      }
+
+      // ----- the rates for the estimate (projects.roi_inputs) -----
+      // The current plan holds only what was changed from the bill, so a blank or untouched box
+      // always follows the bill; the second plan and the battery export window hold what is typed.
+      const RI_FIELDS = [
+        ['rate', 'Usage (c/kWh)', 'flat'], ['peak', 'Peak (c/kWh)', 'tou'], ['shoulder', 'Shoulder (c/kWh)', 'tou'], ['off_peak', 'Off-peak (c/kWh)', 'tou'],
+        ['supply', 'Supply (c/day)', 'any'], ['feed_in', 'Feed-in (c/kWh)', 'any'],
+        ['peak_hours', 'Peak hours', 'tou'], ['shoulder_hours', 'Shoulder hours (blank: none)', 'tou'], ['controlled', 'Controlled load (c/kWh)', 'any'],
+      ];
+      const MORE_KEYS = ['peak_hours', 'shoulder_hours', 'controlled'];
+      // What the bill itself says for each rate box (null when it is not on the bill).
+      function billRates() {
+        const r = project.bill_reading || {};
+        const rates = r.usage_rates || {};
+        const hours = r.tou_hours || {};
+        const base = roiPlan(undefined, r, '');
+        return {
+          tariff: base.tariff, rate: numOrNull(r.usage_rate_c_per_kwh), peak: numOrNull(rates.peak), shoulder: numOrNull(rates.shoulder), off_peak: numOrNull(rates.off_peak),
+          controlled: numOrNull(rates.controlled_load), supply: numOrNull(r.supply_charge_c_per_day), feed_in: numOrNull(r.feed_in_c_per_kwh),
+          peak_hours: hours.peak || '', shoulder_hours: hours.shoulder || '', base,
+        };
+      }
+      function readCurrentOverrides() {
+        const bill = billRates();
+        const out = {};
+        const tariff = val('ri-tariff');
+        if (tariff && tariff !== bill.tariff) out.tariff = tariff;
+        RI_FIELDS.forEach(([key, label]) => {
+          const el = byId(`ri-${key}`);
+          if (!el) return;
+          const raw = el.value.trim();
+          if (key.endsWith('_hours')) { if (raw !== (bill[key] || '')) out[key] = raw; return; }
+          const n = numOrNull(raw);
+          if (n != null && n < 0) throw new Error(`${label} cannot be below zero`);
+          if (n != null && (bill[key] == null || Math.abs(n - bill[key]) > 1e-9)) out[key] = n;
+        });
+        return out;
+      }
+      function readAltPlan() {
+        const out = { tariff: val('ri-alt-tariff') || 'flat', name: val('ri-alt-name') };
+        RI_FIELDS.forEach(([key, label]) => {
+          const raw = val(`ri-alt-${key}`);
+          if (key.endsWith('_hours')) { out[key] = raw; return; }
+          const n = numOrNull(raw);
+          if (n != null && n < 0) throw new Error(`${label} cannot be below zero`);
+          if (n != null) out[key] = n;
+        });
+        return out;
+      }
+      // strict: refuse below-zero numbers (when saving); otherwise read what is there (when previewing)
+      function readRoiInputs(strict) {
+        const saved = project.roi_inputs || {};
+        const safe = (fn, fallback) => { try { return fn(); } catch (err) { if (strict) throw err; return fallback; } };
+        const panelBuilt = !!byId('ri-tariff');
+        const exp = byId('ri-export-enabled')
+          ? { enabled: byId('ri-export-enabled').checked, rate: numOrNull(val('ri-export-rate')), from: val('ri-export-from') || '17:00', to: val('ri-export-to') || '21:00', max_kwh: numOrNull(val('ri-export-max')) }
+          : (saved.export || { enabled: false });
+        if (strict && exp.enabled && (exp.rate == null || exp.rate < 0)) throw new Error('Type the rate the battery sells at, or untick the battery selling to the grid');
+        const price = (which) => { const n = typedPrice(which); if (strict && n != null && n < 0) throw new Error(`The ${which} price cannot be below zero`); return n; };
+        return {
+          current: panelBuilt ? safe(readCurrentOverrides, saved.current || {}) : (saved.current || {}),
+          alt: byId('ri-alt-enabled') ? { enabled: byId('ri-alt-enabled').checked, ...safe(readAltPlan, saved.alt || {}) } : (saved.alt || { enabled: false }),
+          export: exp,
+          solar_price: price('solar'),
+          battery_price: price('battery'),
+        };
+      }
+      function buildRoiInputsPanel() {
+        const panel = byId('roi-inputs-panel');
+        if (!panel || !project.bill_reading) return;
+        const saved = project.roi_inputs || {};
+        const bill = billRates();
+        const cur = saved.current || {};
+        const shown = (key) => (cur[key] != null ? cur[key] : (bill[key] != null ? bill[key] : ''));
+        const tariff = cur.tariff || bill.tariff;
+        const billHasShoulder = bill.shoulder != null || numOrNull(project.bill_reading.shoulder_kwh) > 0 || cur.shoulder != null;
+        const alt = saved.alt || {};
+        const exp = saved.export || {};
+        const attr = (v) => escapeHtml(v == null ? '' : String(v));
+        // grey hints: the figure the estimate uses when the box is blank
+        const hint = (key) => {
+          if (key === 'feed_in') return `${bill.base.feed_in} assumed`;
+          if (key === 'supply') return `${bill.base.supply} assumed`;
+          if (key === 'peak_hours') return `${bill.base.peak_hours} (usual)`;
+          if (key === 'shoulder_hours') return 'none';
+          if (key === 'controlled') return 'same as off-peak';
+          if (key === 'shoulder') return 'not on the bill';
+          return 'not on the bill';
+        };
+        const field = (prefix, plan, value, placeholder) => ([key, label, when]) => `<div class="ri-field ri-${when}" data-prefix="${prefix}" style="${(when === 'tou' && plan !== 'tou') || (when === 'flat' && plan === 'tou') ? 'display:none;' : ''}"><label style="margin-top:0; font-size:12px;">${label}</label><input id="${prefix}-${key}" ${key.endsWith('_hours') ? 'type="text"' : 'type="number" step="0.01" inputmode="decimal" min="0"'} value="${attr(value(key))}" placeholder="${attr(placeholder(key))}" /></div>`;
+        const curField = field('ri', tariff, shown, hint);
+        const mainKeys = RI_FIELDS.filter(([k]) => !MORE_KEYS.includes(k) && (k !== 'shoulder' || billHasShoulder));
+        const moreKeys = RI_FIELDS.filter(([k]) => MORE_KEYS.includes(k) || (k === 'shoulder' && !billHasShoulder));
+        const altField = field('ri-alt', alt.tariff || 'flat', (k) => alt[k] ?? '', (k) => (k.endsWith('_hours') ? (k === 'peak_hours' ? 'e.g. 17:00-20:00' : 'blank: none') : ''));
+        const moreOpen = !!(alt.enabled || exp.enabled || MORE_KEYS.some(k => cur[k] != null) || (cur.shoulder != null && !billHasShoulder));
+        panel.innerHTML = `
+          <div style="margin-top:12px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
+            <label style="margin-top:0; font-weight:600;">Rates</label>
+            <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">From the bill. Change anything that is wrong; a blank box uses the figure shown in grey.</p>
+            <div class="grid cols-4">
+              <div><label style="margin-top:0; font-size:12px;">Tariff</label><select id="ri-tariff"><option value="flat" ${tariff !== 'tou' ? 'selected' : ''}>Flat rate</option><option value="tou" ${tariff === 'tou' ? 'selected' : ''}>Time of use</option></select></div>
+              ${mainKeys.map(curField).join('')}
+            </div>
+            <details id="ri-more" style="margin-top:10px;" ${moreOpen ? 'open' : ''}>
+              <summary style="cursor:pointer; font-size:13px;">More: time of use hours, controlled load, another plan to compare, the battery selling to the grid</summary>
+              <div class="grid cols-4" style="margin-top:8px;">${moreKeys.map(curField).join('')}</div>
+              <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-alt-enabled" style="width:auto; margin:0;" ${alt.enabled ? 'checked' : ''} /> Compare with another plan (shown as a second column on the proposal)</label>
+              <div id="ri-alt-fields" style="${alt.enabled ? '' : 'display:none;'} margin-top:4px;">
+                <div class="grid cols-4">
+                  <div><label style="margin-top:0; font-size:12px;">Plan or retailer name</label><input id="ri-alt-name" value="${attr(alt.name)}" placeholder="e.g. Amber" /></div>
+                  <div><label style="margin-top:0; font-size:12px;">Tariff</label><select id="ri-alt-tariff"><option value="flat" ${alt.tariff !== 'tou' ? 'selected' : ''}>Flat rate</option><option value="tou" ${alt.tariff === 'tou' ? 'selected' : ''}>Time of use</option></select></div>
+                  ${RI_FIELDS.map(altField).join('')}
+                </div>
+              </div>
+              <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-export-enabled" style="width:auto; margin:0;" ${exp.enabled ? 'checked' : ''} /> The battery sells to the grid in a window (a VPP or a plan with a high evening feed-in)</label>
+              <div id="ri-export-fields" style="${exp.enabled ? '' : 'display:none;'} margin-top:4px;">
+                <div class="grid cols-4">
+                  <div><label style="margin-top:0; font-size:12px;">Sold at (c/kWh)</label><input id="ri-export-rate" type="number" step="0.1" inputmode="decimal" min="0" value="${exp.rate ?? ''}" placeholder="e.g. 60" /></div>
+                  <div><label style="margin-top:0; font-size:12px;">From</label><input id="ri-export-from" type="time" value="${attr(exp.from || '17:00')}" /></div>
+                  <div><label style="margin-top:0; font-size:12px;">To</label><input id="ri-export-to" type="time" value="${attr(exp.to || '21:00')}" /></div>
+                  <div><label style="margin-top:0; font-size:12px;">Up to (kWh a day)</label><input id="ri-export-max" type="number" step="0.1" inputmode="decimal" min="0" value="${exp.max_kwh ?? ''}" placeholder="blank: whatever is in it" /></div>
+                </div>
+                <p class="subtitle" style="margin:4px 0 0; font-size:12px;">In the window the battery sells first when that rate beats the rate you buy at, then covers the home with what is left.</p>
+              </div>
+            </details>
+          </div>`;
+        const toggleTariff = (prefix) => {
+          const tou = val(`${prefix}-tariff`) === 'tou';
+          panel.querySelectorAll(`.ri-field[data-prefix="${prefix}"]`).forEach(w => {
+            if (w.classList.contains('ri-tou')) w.style.display = tou ? '' : 'none';
+            if (w.classList.contains('ri-flat')) w.style.display = tou ? 'none' : '';
+          });
+        };
+        byId('ri-tariff').addEventListener('change', () => toggleTariff('ri'));
+        byId('ri-alt-tariff').addEventListener('change', () => toggleTariff('ri-alt'));
+        byId('ri-alt-enabled').addEventListener('change', (e) => { byId('ri-alt-fields').style.display = e.target.checked ? '' : 'none'; });
+        byId('ri-export-enabled').addEventListener('change', (e) => { byId('ri-export-fields').style.display = e.target.checked ? '' : 'none'; });
+        const save = () => { autosave('roi_inputs', () => ({ roi_inputs: readRoiInputs(true) }), 900); scheduleRender(); };
+        panel.addEventListener('input', save);
+        panel.addEventListener('change', save);
+      }
+
+      function estimateArgs() {
+        const inputs = readRoiInputs(false);
+        const prices = currentPrices();
+        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money, inputs, solarPrice: prices.solar, batteryPrice: prices.battery, linesBatteryKwh: linesBatteryKwh() };
+      }
+
+      // ----- the estimate as the proposal shows it, what is missing, what to check, and step 5's line -----
       function renderEstimate() {
-        const out = document.getElementById('roi-estimate');
+        refreshQuoting();
+        const out = byId('roi-estimate');
         if (!out) return;
         const pres = roiPresentation(estimateArgs());
-        const gaps = pres.gaps;
-        const blocking = gaps.filter(g => g.blocking);
-        const warnings = gaps.filter(g => !g.blocking);
-        const gapsHtml = (blocking.length || warnings.length) ? `
-          <div style="margin-top:10px; padding:10px 12px; border-radius:8px; border:1px solid ${blocking.length ? 'var(--red, #c0392b)' : 'var(--border)'}; background:var(--surface);">
-            ${blocking.length ? `<strong style="font-size:13px;">Missing for the savings estimate</strong><p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${project.show_roi === false ? 'The savings page is switched off.' : 'The proposal still goes out: it shows the rows we can stand behind, tells the customer "to give you Y we need X", and says accepting before then is accepting on what is shown. Items with no customer ask are ours to fill in.'}</p><ul style="margin:0 0 6px 18px; padding:0; font-size:13px;">${blocking.map(g => `<li>${escapeHtml(g.staff)}${g.client ? ` <span class="subtitle">(the proposal asks the customer for ${escapeHtml(g.client)})</span>` : ''}</li>`).join('')}</ul>` : ''}
-            ${warnings.length ? `<strong style="font-size:13px;">Assumed</strong><ul style="margin:2px 0 0 18px; padding:0; font-size:12px; color:var(--muted);">${warnings.map(g => `<li>${escapeHtml(g.staff)}</li>`).join('')}</ul>` : ''}
+        const missing = pres.gaps.filter(g => g.blocking);
+        const assumed = pres.gaps.filter(g => !g.blocking);
+        const checks = pres.checks || [];
+        renderStep5Status(missing, checks);
+        const list = (items, color, size) => `<ul style="margin:2px 0 6px 18px; padding:0; font-size:${size}px;${color ? ` color:${color};` : ''}">${items.join('')}</ul>`;
+        const boxHtml = (missing.length || checks.length || assumed.length) ? `
+          <div style="margin-top:10px; padding:10px 12px; border-radius:8px; border:1px solid ${missing.length ? RED : checks.length ? AMBER : 'var(--border)'}; background:var(--surface);">
+            ${missing.length ? `<strong style="font-size:13px; color:${RED};">Missing</strong>${list(missing.map(g => `<li>${escapeHtml(g.staff)}${g.client && project.show_roi !== false ? ` <span class="subtitle">The proposal asks the customer for ${escapeHtml(g.client)}.</span>` : ''}</li>`), '', 13)}` : ''}
+            ${checks.length ? `<strong style="font-size:13px; color:${AMBER};">Check these</strong>${list(checks.map(c => `<li>${escapeHtml(c.staff)}</li>`), '', 13)}` : ''}
+            ${assumed.length ? `<strong style="font-size:13px;">Assumed</strong>${list(assumed.map(g => `<li>${escapeHtml(g.staff)}</li>`), 'var(--muted)', 12)}` : ''}
+            ${missing.length && project.show_roi !== false ? `<p class="subtitle" style="margin:0; font-size:12px;">The proposal still goes out: it shows only the figures we can stand behind and says that accepting before we have the rest is accepting on what is shown.</p>` : ''}
           </div>` : '';
-        if (!pres.sections.length) { out.innerHTML = gapsHtml; return; }
+        if (!pres.sections.length) { out.innerHTML = boxHtml; return; }
         const est = pres.est;
         const cols = pres.columns;
         const head = cols.length > 1 ? `<thead><tr><th></th>${cols.map(c => `<th style="text-align:left; font-size:12px;">${escapeHtml(c)}</th>`).join('')}</tr></thead>` : '';
         const body = pres.sections.map(sec => `<tr><td colspan="${cols.length + 1}" style="padding-top:10px; font-weight:600;">${escapeHtml(sec.title)}</td></tr>${sec.rows.map(([k, vals]) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px;">${escapeHtml(k)}</td>${vals.map(v => `<td>${escapeHtml(String(v))}</td>`).join('')}</tr>`).join('')}`).join('');
         const working = est ? roiWorkingRows(est, money) : [];
         out.innerHTML = `
-          ${gapsHtml}
-          <div style="margin-top:12px;">
-            <label style="margin-top:0; font-weight:600;">Savings estimate on what we are quoting (as the proposal shows it)</label>
-            <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${est ? `Quoting ${est.newSolarKw ? `${est.newSolarKw} kW of solar${est.prices.solar != null ? ` (${money(est.prices.solar)})` : ''}` : ''}${est.newSolarKw && est.batteryKwh ? ' and ' : ''}${est.batteryKwh ? `a ${est.batteryKwh} kWh battery${est.prices.battery != null ? ` (${money(est.prices.battery)})` : ''}` : ''}${est.existingKw ? ` on top of the existing ${est.existingKw} kW` : ''}${est.prices.total ? `, ${money(est.prices.total)} in all after the credits` : ' (no price on step 3 yet)'}. ` : 'Only what the bill alone tells us until the gaps above are filled. '}Change the sizes and prices on step 3 or the rates above and this follows; the tick above hides it from the proposal.</p>
+          ${boxHtml}
+          <div style="margin-top:12px; ${project.show_roi === false ? 'opacity:0.55;' : ''}">
+            <label style="margin-top:0; font-weight:600;">${project.show_roi === false ? 'Savings estimate (switched off: not on the proposal)' : 'Savings estimate, exactly as the customer sees it'}</label>
             <div class="roi-preview">${est ? roiChartsHtml(est, money, { dollars: pres.dollars, bills: pres.bills }) : ''}</div>
             <table style="font-size:13px;">${head}<tbody>${body}</tbody></table>
-            ${pres.asks.length ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">The proposal adds under the table: ${pres.asks.map(a => `"To give you ${escapeHtml(a.gives)}, we need ${escapeHtml(a.need)}."`).join(' ')} and that accepting before then is accepting on what is shown.</p>` : ''}
+            ${pres.asks.length && project.show_roi !== false ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">Under the table the proposal says: ${pres.asks.map(a => `"To give you ${escapeHtml(a.gives)}, we need ${escapeHtml(a.need)}."`).join(' ')}</p>` : ''}
             ${working.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:13px;">Show the working</summary>${working.map(w => `<p style="margin:8px 0 2px; font-size:12px; font-weight:600;">${escapeHtml(w.title)}</p><table style="font-size:12px;"><tbody>${w.rows.map(([k, v]) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px; vertical-align:top;">${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('')}</tbody></table>`).join('')}<p class="subtitle" style="margin:8px 0 0; font-size:12px;">A typical day in each season, hour by hour, 70% clear days and 30% overcast; ${ROI_ASSUMPTIONS.yieldPerKwPerDay[currentZone()] || 3.9} kWh per kW per day over the year; the battery at ${Math.round(ROI_ASSUMPTIONS.batteryRoundTrip * 100)}% round trip. Full detail: public/js/solar-roi.js.</p></details>` : ''}
           </div>`;
       }
 
-      // The same switch as step 3's tick (projects.show_roi): this one saves on its own so the page
-      // can be taken off a proposal without going through Save pricing.
-      const showRoi = document.getElementById('bill-show-roi');
-      if (showRoi) showRoi.addEventListener('change', async () => {
-        const on = showRoi.checked;
-        try {
-          const { error } = await supabaseClient.from('projects').update({ show_roi: on }).eq('id', project.id);
-          if (error) throw error;
-          project.show_roi = on;
-          const step3 = document.getElementById('p-show-roi');
-          if (step3) step3.checked = on;
-          showToast(on ? 'Savings estimate will show on the proposal.' : 'Savings estimate taken off the proposal.');
-          renderEstimate();
-          if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
-        } catch (err) { showRoi.checked = !on; showToast(friendlyError(err), { error: true }); }
-      });
-      const step3Roi = document.getElementById('p-show-roi');
-      if (step3Roi && showRoi) step3Roi.addEventListener('change', () => { showRoi.checked = step3Roi.checked; });
-      qEl.addEventListener('change', () => { if (project.bill_reading) renderEstimate(); });
-      ['q-stc-kw', 'q-stc-zone', 'q-battery-kwh', 'ri-solar-price', 'ri-battery-price'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', () => { if (project.bill_reading) renderEstimate(); }); });
+      // Step 5 (Send): one line on where the savings page stands, so nothing goes out wrong by accident.
+      function renderStep5Status(missing, checks) {
+        const el = byId('roi-status');
+        if (!el) return;
+        if (!['solar', 'battery'].includes(currentTemplate)) { el.innerHTML = ''; return; }
+        if (project.show_roi === false) { el.innerHTML = `<p class="subtitle" style="margin:10px 0 0; font-size:13px;">Savings page on the proposal: <strong>off</strong>. Switch it on in the bill card on step 1.</p>`; return; }
+        if (!project.bill_reading) { el.innerHTML = `<p style="margin:10px 0 0; font-size:13px; color:${AMBER};">Savings page on the proposal: no bill read yet, so it only asks the customer for their bill. <a href="#bill-card" class="link-quiet">Add the bill on step 1 &rarr;</a></p>`; return; }
+        if (!missing.length && !checks.length) { el.innerHTML = `<p style="margin:10px 0 0; font-size:13px;"><span style="color:var(--green);">&#10003;</span> Savings page on the proposal: on, nothing to fix.</p>`; return; }
+        const parts = [missing.length ? `${missing.length} missing` : null, checks.length ? `${checks.length} to check` : null].filter(Boolean).join(', ');
+        el.innerHTML = `
+          <div style="margin-top:10px; padding:10px 12px; border:1px solid ${missing.length ? RED : AMBER}; border-radius:8px;">
+            <strong style="font-size:13px;">Savings page on the proposal: on, ${parts}</strong>
+            <ul style="margin:4px 0 6px 18px; padding:0; font-size:13px;">${[...missing.map(g => g.staff), ...checks.map(c => c.staff)].map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
+            <a href="#bill-card" class="link-quiet" style="font-size:12px;">Fix on step 1 &rarr;</a> <span class="subtitle" style="font-size:12px;">The quote still sends; this is here so nothing goes out wrong by accident.</span>
+          </div>`;
+      }
+
+      // ----- the proposal switch (same as step 3's tick), saves itself -----
+      const showRoi = byId('bill-show-roi');
+      const step3Roi = byId('p-show-roi');
+      const setShowRoi = (on, from) => {
+        if (showRoi && from !== showRoi) showRoi.checked = on;
+        if (step3Roi && from !== step3Roi) step3Roi.checked = on;
+        autosave('show_roi', () => ({ show_roi: on }), 0);
+        project.show_roi = on;
+        showToast(on ? 'The savings page will show on the proposal.' : 'The savings page is taken off the proposal.');
+        scheduleRender(0);
+      };
+      if (showRoi) showRoi.addEventListener('change', () => setShowRoi(showRoi.checked, showRoi));
+      if (step3Roi) step3Roi.addEventListener('change', () => setShowRoi(step3Roi.checked, step3Roi));
+
+      // ----- anything else that changes the estimate -----
+      qEl.addEventListener('change', () => { renderRecommend(); scheduleRender(); });
+      ['q-stc-kw', 'q-stc-zone'].forEach(id => { const el = byId(id); if (el) el.addEventListener('input', () => { renderRecommend(); scheduleRender(); }); });
+      const tplSel = byId('qs1-template');
+      if (tplSel) tplSel.addEventListener('change', () => scheduleRender(0));
+
+      buildQuoting();
       loadBillDocs(project.id).then(() => { renderList(); renderReading(); }).then(offerBillFromSibling);
 
       // A second quote for the same client (a "with battery" and a "without" pair, say) can take the
       // bill pages and the reading from the quote that already has them, instead of a fresh upload.
       async function offerBillFromSibling() {
-        if (billDocs.length || !project.client_id) return;
+        if (billDocs.length || project.bill_reading || !project.client_id) return;
         const { data: others } = await supabaseClient.from('projects').select('id, quote_number, job_number, name, bill_reading, roi_inputs')
           .eq('client_id', project.client_id).neq('id', project.id).not('bill_reading', 'is', null).order('created_at', { ascending: false }).limit(1);
         const o = others && others[0];
         if (!o || billDocs.length) return;
         const label = o.quote_number ? `Q${o.quote_number}` : (o.job_number ? `J${o.job_number}` : 'the other quote');
-        listEl.insertAdjacentHTML('beforeend', `<div style="margin:0 0 8px;"><button type="button" class="secondary" id="bill-copy-btn" style="font-size:12px; padding:4px 8px;">Use the bill from ${escapeHtml(label)} ${escapeHtml(o.name || '')}</button> <span class="subtitle" style="font-size:12px;">Same client, already read there: copies the pages, the reading and the rates here.</span></div>`);
-        document.getElementById('bill-copy-btn').addEventListener('click', async () => {
-          const btn = document.getElementById('bill-copy-btn');
+        listEl.insertAdjacentHTML('beforeend', `<div style="margin:0 0 8px;"><button type="button" id="bill-copy-btn" style="font-size:12px; padding:4px 8px;">Use the bill from ${escapeHtml(label)} ${escapeHtml(o.name || '')}</button> <span class="subtitle" style="font-size:12px;">Same client, already read there: copies the pages, what it read and the rates.</span></div>`);
+        byId('bill-copy-btn').addEventListener('click', async () => {
+          const btn = byId('bill-copy-btn');
           btn.disabled = true; btn.textContent = 'Copying...';
           try {
-            const { data: { user } } = await supabaseClient.auth.getUser();
-            const { data: srcDocs, error: srcErr } = await supabaseClient.from('project_documents').select('file_path, file_name, mime_type').eq('project_id', o.id).eq('folder', BILL_FOLDER).order('created_at');
-            if (srcErr) throw srcErr;
-            for (const d of srcDocs || []) {
-              const { data: blob, error: dlErr } = await supabaseClient.storage.from('project-documents').download(d.file_path);
-              if (dlErr) throw dlErr;
-              const path = `bills/${project.id}/${Date.now()}-${(d.file_path.split('/').pop() || 'bill').replace(/^\d+-/, '')}`;
-              const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(path, blob, { contentType: d.mime_type || undefined });
-              if (upErr) throw upErr;
-              const { data: row, error } = await supabaseClient.from('project_documents')
-                .insert({ project_id: project.id, folder: BILL_FOLDER, file_path: path, file_name: d.file_name, mime_type: d.mime_type, uploaded_by: user?.id || null })
-                .select('id, file_path, file_name, mime_type, created_at').single();
-              if (error) throw error;
-              billDocs.push(row);
-            }
+            await copyBillDocs(o.id, project.id);
             const reading = { ...o.bill_reading, copied_from: label, copied_at: new Date().toISOString() };
             const roiInputs = { ...(o.roi_inputs || {}), solar_price: (project.roi_inputs || {}).solar_price ?? null, battery_price: (project.roi_inputs || {}).battery_price ?? null };
             const { error: pErr } = await supabaseClient.from('projects').update({ bill_reading: reading, roi_inputs: roiInputs }).eq('id', project.id);
             if (pErr) throw pErr;
             project.bill_reading = reading;
             project.roi_inputs = roiInputs;
-            const panel = document.getElementById('roi-inputs-panel');
+            await loadBillDocs(project.id);
+            const panel = byId('roi-inputs-panel');
             if (panel) panel.innerHTML = '';
             renderList();
             renderReading();
             showToast(`Bill copied from ${label}.`);
-            if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
+            schedulePdf();
           } catch (err) {
             msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
             btn.disabled = false; btn.textContent = `Use the bill from ${label}`;
           }
         });
       }
+    }
+
+    // Copies a quote's electricity bill pages (files and rows) to another quote. Used by "Use the bill
+    // from Q..." on the bill card and by Duplicate as new quote.
+    async function copyBillDocs(fromProjectId, toProjectId) {
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const { data: srcDocs, error: srcErr } = await supabaseClient.from('project_documents').select('file_path, file_name, mime_type').eq('project_id', fromProjectId).eq('folder', BILL_FOLDER).order('created_at');
+      if (srcErr) throw srcErr;
+      for (const d of srcDocs || []) {
+        const { data: blob, error: dlErr } = await supabaseClient.storage.from('project-documents').download(d.file_path);
+        if (dlErr) throw dlErr;
+        const path = `bills/${toProjectId}/${Date.now()}-${(d.file_path.split('/').pop() || 'bill').replace(/^\d+-/, '')}`;
+        const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(path, blob, { contentType: d.mime_type || undefined });
+        if (upErr) throw upErr;
+        const { error } = await supabaseClient.from('project_documents')
+          .insert({ project_id: toProjectId, folder: BILL_FOLDER, file_path: path, file_name: d.file_name, mime_type: d.mime_type, uploaded_by: user?.id || null });
+        if (error) throw error;
+      }
+      return (srcDocs || []).length;
     }
 
     // Supporting documents, Generate scope of works with AI, reference photos.
@@ -3705,8 +3966,15 @@
                 <div id="site-inspection-note"></div>
                 <div class="grid cols-2" id="template-questions"></div>
                 <div id="bill-card" style="margin-top:14px; padding:12px; background:var(--surface-2); border-radius:8px; ${['solar', 'battery'].includes(template) ? '' : 'display:none;'}">
-                  <label style="margin-top:0; font-weight:600;">Electricity bill</label>
-                  <p class="subtitle" style="margin:2px 0 8px;">Add every page (photos from the phone, or the retailer's PDF), then Read bill with AI. It fills the NMI, daily use, supply and network above when they are blank, suggests the solar and battery size, and works out the savings estimate shown on the proposal.</p>
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <label style="margin-top:0; font-weight:600;">Electricity bill and savings estimate</label>
+                    <span id="bc-saved" class="subtitle" style="font-size:12px;"></span>
+                  </div>
+                  <ol style="margin:4px 0 10px 18px; padding:0; font-size:12.5px; color:var(--muted); line-height:1.55;">
+                    <li>Add every page of the bill (phone photos or the retailer's PDF), then press Read bill with AI.</li>
+                    <li>Check what it read and the rates against the bill. Fix anything wrong right here.</li>
+                    <li>Fill in What we are quoting. The estimate at the bottom is exactly what the customer sees. This card saves itself as you type.</li>
+                  </ol>
                   <div id="bill-doc-list" style="margin-bottom:8px;"></div>
                   <input type="file" id="bill-doc-file" accept="image/*,.pdf" multiple />
                   <div id="bill-doc-msg"></div>
@@ -3714,10 +3982,12 @@
                     <button type="button" class="secondary" id="bill-read-btn" disabled>&#10024; Read bill with AI</button>
                     <span class="subtitle" id="bill-read-when" style="font-size:12px;"></span>
                   </div>
-                  <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-weight:400; cursor:pointer;"><input type="checkbox" id="bill-show-roi" style="width:auto; margin:0;" ${project.show_roi === false ? '' : 'checked'} /> Show the savings estimate on the proposal (saves straight away; same switch as on step 3)</label>
                   <div id="bill-read-msg"></div>
                   <div id="bill-reading"></div>
                   <div id="roi-inputs-panel"></div>
+                  <div id="bc-recommend"></div>
+                  <div id="bc-quoting"></div>
+                  <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="bill-show-roi" style="width:auto; margin:0;" ${project.show_roi === false ? '' : 'checked'} /> Show the savings estimate on the proposal</label>
                   <div id="roi-estimate"></div>
                 </div>
                 <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -3803,13 +4073,13 @@
                   </div>
                   <div id="quoted-sizes-block" style="margin-top:14px; padding-top:12px; border-top:0.5px solid var(--border);">
                     <label style="margin-top:0;">What we are quoting (drives the savings estimate)</label>
-                    <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">The solar size is the System size (kW) above. Type the battery's usable kWh here; the price is this quote's total after the credits. The bill card on step 1 shows the recommendation and the estimate the customer sees.</p>
+                    <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">The solar size is the System size (kW) above. The battery and the two prices are the same boxes as on the bill card on step 1 and save themselves as you type; the estimate the customer sees is there.</p>
                     <div class="grid cols-4">
                       <div><label style="margin-top:0; font-size:12px;">Battery quoted (usable kWh)</label><input id="q-battery-kwh" type="number" step="0.1" inputmode="decimal" min="0" value="${project.battery_kwh ?? ''}" placeholder="${roiBatteryKwhFromLines(centres) ? `${roiBatteryKwhFromLines(centres)} from the line items` : 'e.g. 13.5'}" /></div>
-                      <div><label style="margin-top:0; font-size:12px;">Solar price (inc GST, after STC)</label><input id="ri-solar-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.solar_price != null) ? project.roi_inputs.solar_price : ''}" placeholder="${(() => { const c = (centres || []).find(x => x.id === project.stc_cost_centre_id); return c ? Math.max(0, Math.round(Number(c.quoted_amount || 0) * 1.1 - Number(project.stc_total || 0))) : 'blank: combined only'; })()}" /></div>
-                      <div><label style="margin-top:0; font-size:12px;">Battery price (inc GST, after BSTC)</label><input id="ri-battery-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.battery_price != null) ? project.roi_inputs.battery_price : ''}" placeholder="${(() => { const c = (centres || []).find(x => x.id === project.bstc_cost_centre_id); return c ? Math.max(0, Math.round(Number(c.quoted_amount || 0) * 1.1 - Number(project.bstc_total || 0))) : 'blank: combined only'; })()}" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">Solar price (inc GST, after STC)</label><input id="ri-solar-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.solar_price != null) ? project.roi_inputs.solar_price : ''}" placeholder="blank: the rest of the total" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">Battery price (inc GST, after BSTC)</label><input id="ri-battery-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.battery_price != null) ? project.roi_inputs.battery_price : ''}" placeholder="blank: the battery stage" /></div>
                     </div>
-                    <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Battery blank: the kWh is read off the quote's line items (the grey hint). The two prices give the solar and the battery their own payback on the proposal (the grey hint is that credit's stage, inc GST, less the credit). Leave both blank for one combined payback.</p>
+                    <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Battery blank: the kWh is read off the battery lines on the quote. Prices blank: the battery is its stage less the BSTC and the solar is everything else, so the two add up to the total and each gets its own payback.</p>
                   </div>
                 </div>
 
@@ -3876,6 +4146,7 @@
                 ${stepHead(5, 'Send', 'The ready-to-send check runs here and again when you email the quote or move it to Quote Sent. Admin and Finance can send anyway with a reason.')}
                 <button type="button" class="secondary" id="compliance-check-btn">Check now</button>
                 <div id="compliance-check-result" style="margin-top:12px;"></div>
+                <div id="roi-status"></div>
                 <div style="margin-top:16px; ${['solar', 'battery'].includes(template) ? '' : 'display:none;'}">
                   <label style="margin-top:0; font-weight:600;">Documents to gather from the customer</label>
                   <p class="subtitle" style="margin:2px 0 8px;">Work through these with the customer - answers and photos save as you go.</p>
@@ -5378,6 +5649,23 @@
               cover_photos: fullProject.cover_photos,
               proposal_template: fullProject.proposal_template,
               template_answers: fullProject.template_answers,
+              // The quote-level STC and BSTC credits (item 27) and the savings estimate's inputs
+              // (item 29) go with the copy, so a "with battery" and "without" pair start from the
+              // same facts. The credit stages are pointed at the copied stages below.
+              stc_quantity: fullProject.stc_quantity,
+              stc_system_kw: fullProject.stc_system_kw,
+              stc_zone_rating: fullProject.stc_zone_rating,
+              stc_install_year: fullProject.stc_install_year,
+              stc_price_per_certificate: fullProject.stc_price_per_certificate,
+              stc_total: fullProject.stc_total,
+              bstc_quantity: fullProject.bstc_quantity,
+              bstc_price_per_certificate: fullProject.bstc_price_per_certificate,
+              bstc_total: fullProject.bstc_total,
+              bstc_not_claimed: fullProject.bstc_not_claimed,
+              battery_kwh: fullProject.battery_kwh,
+              show_roi: fullProject.show_roi,
+              roi_inputs: fullProject.roi_inputs,
+              bill_reading: fullProject.bill_reading ? { ...fullProject.bill_reading, copied_from: fullProject.quote_number ? `Q${fullProject.quote_number}` : 'the original quote', copied_at: new Date().toISOString() } : null,
             })
             .select()
             .single();
@@ -5411,6 +5699,15 @@
             })))
             .select();
           if (stagesErr) throw stagesErr;
+          const stageMap = Object.fromEntries(stages.map((st, i) => [st.id, newStages[i].id]));
+          if (fullProject.stc_cost_centre_id || fullProject.bstc_cost_centre_id) {
+            const { error: ccErr } = await supabaseClient.from('projects').update({
+              stc_cost_centre_id: stageMap[fullProject.stc_cost_centre_id] || null,
+              bstc_cost_centre_id: stageMap[fullProject.bstc_cost_centre_id] || null,
+            }).eq('id', newProject.id);
+            if (ccErr) throw ccErr;
+          }
+          if (fullProject.bill_reading) await copyBillDocs(project.id, newProject.id);
 
           const allLineItems = [];
           const allPhotoGroups = [];

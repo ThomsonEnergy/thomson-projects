@@ -17,6 +17,11 @@
 //   hasBatteryAccreditedStaff, hasComplianceCertDoc, hasOwnerDeclarationDoc.
 
 const { missingRequiredAnswers, quoteHasBattery } = require('../../../public/js/template-questions.js');
+const { roiBatteryKwhFromLines } = require('../../../public/js/solar-roi.js');
+
+// The battery on the quote: the size typed under What we are quoting (projects.battery_kwh), else the
+// battery lines on the quote. Needs the line items' description and quantity in ctx.project.
+const quotedBatteryKwh = (ctx) => Number(ctx.project.battery_kwh) || roiBatteryKwhFromLines(ctx.project.cost_centres) || 0;
 
 const yes = (ctx, id) => (ctx.answers || {})[id] === 'Yes';
 const num = (ctx, id) => parseFloat((ctx.answers || {})[id]);
@@ -34,6 +39,12 @@ const GENERAL_QUOTE_RULES = [
     id: 'priced_stage',
     label: 'Add at least one priced stage (the quoted total is $0)',
     check: (ctx) => ctx.quotedTotal > 0,
+  },
+  {
+    // A copied quote keeps the original's credits: a BSTC on a quote with no battery is a wrong price.
+    id: 'bstc_without_battery',
+    label: 'Remove the BSTC credit (step 3) or add the battery: this quote has a BSTC credit but no battery (a duplicated quote keeps the original\'s credits)',
+    check: (ctx) => !(Number(ctx.project.bstc_total) > 0) || !!ctx.withBattery || quotedBatteryKwh(ctx) > 0,
   },
   {
     id: 'terms_present',
@@ -84,8 +95,8 @@ const BATTERY_QUOTE_RULES = [
   },
   {
     id: 'battery_size_in_range',
-    label: 'Usable battery size must be 5 to 100 kWh for the federal battery discount, which covers the first 50 kWh (answer "Usable kWh wanted")',
-    check: (ctx) => { const k = num(ctx, 'battery_kwh_wanted'); return k >= 5 && k <= 100; },
+    label: 'The battery quoted must be 5 to 100 kWh usable for the federal battery discount, which covers the first 50 kWh (type it under What we are quoting on step 3, or it is read off the battery lines)',
+    check: (ctx) => { const k = quotedBatteryKwh(ctx); return k >= 5 && k <= 100; },
   },
   {
     id: 'battery_cec_listed',
