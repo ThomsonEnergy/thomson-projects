@@ -258,7 +258,7 @@
 
   <script src="/js/supabase-client.js?v=119"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=7"></script>
+  <script src="/js/solar-roi.js?v=8"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -778,7 +778,9 @@
       // we need X" for what the customer can supply, and that accepting the proposal before then
       // is accepting it on what is shown. Nothing here stops the proposal being sent or accepted.
       const roiInputs = project.roi_inputs || {};
-      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, money, inputs: roiInputs, solarPrice: roiInputs.solar_price, batteryPrice: roiInputs.battery_price }) : { sections: [], asks: [], columns: [] };
+      // the two prices as typed, else the default split (battery stage less the BSTC, solar the rest), as on the quote page
+      const roiPrices = roiPricesFor({ typedSolar: roiInputs.solar_price, typedBattery: roiInputs.battery_price, defaults: roiDefaultPrices({ centres: data.cost_centres, netCost: roiNetCost, bstcCredit: bstcOnly }) });
+      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, money, inputs: roiInputs, solarPrice: roiPrices.solar, batteryPrice: roiPrices.battery }) : { sections: [], asks: [], columns: [] };
       const est = pres.est;
       const cur = est ? est.current : null;
       const br = project.bill_reading || {};

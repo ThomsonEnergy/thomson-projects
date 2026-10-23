@@ -43,7 +43,9 @@ const SOLAR_QUESTIONS = [
 
 // Battery proposal, and a Solar proposal with "Batteries as well".
 const BATTERY_QUESTIONS = [
-  { id: 'battery_kwh_wanted', type: 'number', label: 'Usable kWh wanted', placeholder: '5 to 100 for the federal discount (first 50 kWh discounted)', required: true },
+  // What the customer asked for, for the record. The quote, the savings estimate and the ready-to-send
+  // check use the battery quoted (step 3 / the bill card, or the battery lines), never this answer.
+  { id: 'battery_kwh_wanted', type: 'number', label: 'Usable kWh the customer asked for (optional; the quote uses the battery quoted on step 3)', placeholder: 'e.g. 13.5' },
   { id: 'backup_needs', type: 'text', label: 'What must stay on in a blackout', placeholder: 'e.g. fridge, lights, pump, nothing', required: true },
   { id: 'existing_pv', type: 'text', label: 'Existing PV size and inverter', placeholder: 'e.g. 6.6 kW, SMA Sunny Boy 5.0, 2018', requiredFor: ['battery'] },
   { id: 'coupling', type: 'select', label: 'Coupling', options: ['Hybrid inverter (DC coupled)', 'AC coupled', 'Not sure'], required: true },
