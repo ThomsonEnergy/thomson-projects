@@ -411,6 +411,8 @@ Live: see `docs/PROJECT_SPEC.md` A3 Variations (migration 20261030000000).
 
 ## 15. Security sweep and hardening (planned 19 Oct 2026, last step)
 
+**23 Oct 2026:** the sweep of the app itself was run (read only) after the week of updates: `docs/BUG_REVIEW_2026-10-23.md`, 195 confirmed findings. The fixes are planned as three consolidated deliveries (waiting on the owner's yes). The account-side items below (2FA, idle lock, re-enter password, leaked password protection, backup restore test) are still to do.
+
 **When:** at the end of the build sequence, once major additions stop (after Tier 4 in PROJECT_SPEC Part 0). One consolidated sweep, then fixes, so nothing new lands half-reviewed. Plan first, owner's yes, as usual.
 
 **Goal:** make sure TEops cannot be broken into, and limit the damage if an admin leaves a computer logged in or a password leaks.
