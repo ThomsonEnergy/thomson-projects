@@ -33,7 +33,7 @@
 
   <script src="/js/supabase-client.js?v=119"></script>
   <script src="/js/template-questions.js?v=3"></script>
-  <script src="/js/solar-roi.js?v=11"></script>
+  <script src="/js/solar-roi.js?v=12"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
@@ -1732,6 +1732,7 @@
           <div style="margin-top:14px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
             <label style="margin-top:0; font-weight:600;">Other plans in this area (a suggestion only)</label>
             <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">Plans published on Energy Made Easy for this postcode and network, costed on this home's use with and without the system we are quoting. Tick up to 3 to show on the proposal; the customer then sees this note with them: <em>${escapeHtml(ROI_PLAN_DISCLAIMER)}</em></p>
+            <p style="margin:0 0 8px; font-size:12px; color:${AMBER};"><strong>${escapeHtml(ROI_WHOLESALE_NOTE)}</strong></p>
             <div id="bc-plan-chosen"></div>
             <div class="grid cols-4" style="align-items:end;">
               <div><label style="margin-top:0; font-size:12px;">Postcode</label><input id="bc-plan-pc" inputmode="numeric" maxlength="4" value="${escapeHtml(sitePostcode())}" placeholder="e.g. 2483" /></div>
@@ -1812,7 +1813,12 @@
         const diff = (n) => (n === 0 ? 'same' : n < 0 ? `${money(-n)} less` : `${money(n)} more`);
         const things = (p) => [...((p.notes || {}).eligibility || []), ...((p.notes || {}).conditions || [])].slice(0, 3).join('; ');
         el.innerHTML = `
-          <p class="subtitle" style="margin:8px 0 4px; font-size:12px;">${escapeHtml(planResults.fetchedNote)} ${res.rows.length} plans costed${planResults.uncostable.length ? `, ${planResults.uncostable.length} left out (demand charges, wholesale prices or rates that could not be read)` : ''}. Cheapest with the system first; current plan on the same basis: ${money(res.current.billNow)} now, ${money(res.current.billAfter)} with the system.</p>
+          <p class="subtitle" style="margin:8px 0 4px; font-size:12px;">${escapeHtml(planResults.fetchedNote)} ${res.rows.length} plans costed${(() => {
+            const isWholesale = (p) => ((p.notes || {}).cannot_cost || []).includes(ROI_WHOLESALE_REASON);
+            const wholesale = planResults.uncostable.filter(isWholesale).length;
+            const other = planResults.uncostable.length - wholesale;
+            return `${other ? `, ${other} left out (demand charges, or rates that could not be read)` : ''}${wholesale ? `, ${wholesale} wholesale-price plans sold here not listed (we don't do estimates for wholesale rates)` : ''}`;
+          })()}. Cheapest with the system first; current plan on the same basis: ${money(res.current.billNow)} now, ${money(res.current.billAfter)} with the system.</p>
           <div style="overflow-x:auto;"><table style="font-size:12.5px; min-width:640px;">
             <thead><tr><th>Show</th><th style="text-align:left;">Retailer and plan</th><th>Yearly bill now</th><th>With the system</th><th>Vs current plan</th><th>Feed-in</th><th style="text-align:left;">Things to check</th></tr></thead>
             <tbody>${top.map(r => { const p = byId2[r.key]; return `<tr>

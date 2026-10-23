@@ -712,6 +712,11 @@ function roiComparePlans({ reading, answers, inputs, newSolarKw, batteryKwh, zon
 // not a recommendation (owner's words, 23 Oct 2026).
 const ROI_PLAN_DISCLAIMER = 'These are other electricity plans published for your area, shown only as a suggestion to help you research your options. Thomson Energy does not endorse any retailer, cannot connect you with a retailer or switch your plan for you, and receives no payment or commission from any retailer. The rates are an online estimate taken from each retailer\'s published plan on Energy Made Easy (the government\'s comparison site) on the date shown, and we cannot promise them. Check the current rates, eligibility and conditions with the retailer before you decide.';
 
+// Plans whose price follows the wholesale market change price every 5 minutes: we do not estimate
+// them (owner, 23 Oct 2026). A proper estimate is backlogged (docs/IDEAS_BACKLOG.md item 35).
+const ROI_WHOLESALE_NOTE = 'We don\'t do estimates for wholesale rates: plans whose price follows the wholesale electricity market (such as Amber, Localvolts, Flow Power and Powerclub) change price every 5 minutes, so they are not estimated or shown here.';
+const ROI_WHOLESALE_REASON = 'Price follows the wholesale market, which the estimate cannot cost.';
+
 // ---------- what is missing ----------
 
 // What is missing for an honest savings estimate. A `blocking` gap keeps the figures that rest on
@@ -1018,5 +1023,5 @@ function roiAssumptionsText(est) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, ROI_PLAN_DISCLAIMER, roiComparePlans, billMetrics, suggestSizes, existingSolarKw, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiScheduleStripHtml, roiBatteryKwhFromLines, roiDefaultPrices, roiPricesFor, roiEstimate, roiGaps, roiChecks, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
+  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, ROI_PLAN_DISCLAIMER, ROI_WHOLESALE_NOTE, ROI_WHOLESALE_REASON, roiComparePlans, billMetrics, suggestSizes, existingSolarKw, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiScheduleStripHtml, roiBatteryKwhFromLines, roiDefaultPrices, roiPricesFor, roiEstimate, roiGaps, roiChecks, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
 }

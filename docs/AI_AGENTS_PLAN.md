@@ -80,7 +80,7 @@ Build on the existing feeds:
 
 ## Retail plan suggestions (built 23 Oct 2026)
 
-Suggests electricity plans for a quote's address from the AER's Consumer Data Right plan data (downloaded daily by `sync-energy-plans`, listed on the ops manager's workers), costed with the savings estimate's own maths, not an AI web search; staff choose what goes on the proposal and nothing is sent automatically. Writes only its own `energy_plans` table. Detail in `docs/IDEAS_BACKLOG.md` item 34.
+Suggests electricity plans for a quote's address from the AER's Consumer Data Right plan data (downloaded daily by `sync-energy-plans`, listed on the ops manager's workers), costed with the savings estimate's own maths, not an AI web search; staff choose what goes on the proposal and nothing is sent automatically. Writes only its own `energy_plans` table. Wholesale-price plans are not estimated (the app says so); a proper wholesale estimate is backlogged as item 35. Detail in `docs/IDEAS_BACKLOG.md` item 34.
 
 ## Safety
 
