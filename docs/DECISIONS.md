@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 23 Oct 2026
+
+- LIVE once merged: savings estimate rework (owner's yes). Hour-by-hour typical day per season, solar first then the battery from export and import at that hour's rate, rates editable with a second plan to compare and an optional battery export window, solar and battery prices on step 3 with their own payback, the working shown on the bill card. Migration 20261120000000 (`projects.roi_inputs`) applied to production. (`docs/IDEAS_BACKLOG.md` item 29, `docs/PROJECT_SPEC.md` A3)
+
 ## 22 Oct 2026
 
 - Planned (waiting on owner's yes): contacts on every job. New `job_contacts` table with three sides (On site: owner, renter, builder, other trade; Client: project manager, site manager, job contact; Thomson Energy: site manager, project manager, sales manager), a Contacts tab on the job page every role can read and edit, Key people on Summary, booking emails to the client-side contact, and the clock-out "How's the job?" step only for the job's Thomson site manager with a day picker for Not complete. (`docs/IDEAS_BACKLOG.md` item 33)
