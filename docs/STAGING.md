@@ -19,6 +19,14 @@ Staging was paused from 18 to 23 Oct 2026 for a run of bulk updates and is back 
 - **The `staging` git branch follows `main`.** The Supabase staging branch (`jpmaudhhsahjhnrufzez`) runs whatever migrations are on the `staging` git branch, so after every merge: `git push origin main:staging`. Its old history has no shared base with `main`, so the first sync needs a force push, which cloud sessions are not allowed to make: owner, once, from the laptop in the repo folder: `git fetch origin && git push --force origin origin/main:staging`. Then Dashboard > Branches > staging should show the migrations running; after that plain `git push origin main:staging` works.
 - **Preview branches:** automatic branching makes a throwaway Supabase branch per PR and should delete it when the PR closes. Check Dashboard > Branches now and then; on 23 Oct one from PR 34 (`feat/email-workers`, 18 Oct) was still running. Delete leftovers: Dashboard > Branches > the branch > the three dots > Delete branch.
 
+### Testing a feature on its preview (owner)
+
+- Every PR gets a preview address from Netlify (on the PR page, "Deploy Preview" link, or Netlify > Deploys). It runs against the staging database, never live data: type in whatever dummy jobs, quotes and POs you like.
+- Staging logins (test only, not real accounts): admin@staging.test, finance@staging.test, sales@staging.test, staff@staging.test, password `StagingOnly-TEops-2026`. Staging starts with a handful of fake rows from `supabase/seed.sql` and keeps whatever you add until the branch is reset.
+- A feature that adds a migration: the chat building it pushes the migration to staging (`supabase db push` linked to staging) so the preview works before the release.
+- What does not work on a preview: anything that needs a real integration key (AI buttons, Xero, Gmail, Airwallex, Formbay, Pylon) unless that key is also put in staging's `api_keys` table from Settings on the preview; scheduled functions (they only run on the production deploy); emails and push notifications to real people.
+- Until the one-off `staging` sync above is done, previews will error on the columns added since 18 Oct.
+
 ### Make `check` a required check on `main` (owner, GitHub, once)
 
 The Action `.github/workflows/check.yml` runs `npm run check` on every PR by itself; nobody taps anything. To make a red result block the merge:
