@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 23 Oct 2026
 
+- Added to the notifications plan (owner): the tick-box list only shows the kinds a person's role can get (Sales and Staff never see the admin and finance boxes, ops manager boxes only for ops manager people). Still waiting on the owner's yes. (`docs/IDEAS_BACKLOG.md` item 32)
 - Owner's change to backlog item 33 (still waiting on yes): when the job's Thomson site manager has not clocked in that day, the clock-out "How's the job?" question goes to the highest-ranking person who did, by a new `profiles.site_rank` set on the Staff page (role as the default, first clock-in breaks ties). (`docs/IDEAS_BACKLOG.md` item 33)
 
 ## 22 Oct 2026
