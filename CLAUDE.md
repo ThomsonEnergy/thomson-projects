@@ -16,7 +16,7 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
   - Sonnet 5.5: small well-specified changes (one-file fixes, copy, `?v=` bumps), docs edits, reading logs and deploy status.
   - Haiku 5.5: lookups and yes/no checks only, never code that ships.
   - Effort: `high` for feature builds and most plans; `xhigh` or `max` only for migrations, money, stock, RLS or an unknown bug; `medium` (the Opus 5.5 default) for chat, docs and small fixes; `low` for lookups. A level saved on the laptop does not reach cloud sessions; set `CLAUDE_CODE_EFFORT_LEVEL` on the cloud environment for a standing default.
-- After that "yes", carry the whole plan through without asking again: build, run production migrations, push, open the PR and merge to `main`. Only stop and ask the owner if there is a real question or a change of direction (new scope, a different migration, deleting data not in the plan, or a failure that changes the plan).
+- After that "yes", carry the whole plan through without asking again: build, push, open the PR. A bug fix then goes all the way (production migration, merge to `main`); a feature stops at the PR and its preview link and waits for release time (see "Releases" below). Only stop and ask the owner if there is a real question or a change of direction (new scope, a different migration, deleting data not in the plan, or a failure that changes the plan).
 - One consolidated delivery, not lots of small ones.
 - Talk plainly, one step at a time: say exactly what to click and what they should see, especially in dashboards (Netlify, Supabase, Twilio, Apple, Google). No "see line 6 of seed.sql": test-only staging logins can be stated in chat directly. Real keys and passwords never go in chat.
 - Owner is also the bookkeeper (does Xero payroll). Give Xero steps directly, never "ask your bookkeeper". Xero entity is Thomson Energy Australia only, never Thomson Energy Solutions, and use the real account codes (see `docs/BUSINESS_FACTS.md`).
@@ -37,12 +37,21 @@ Other chats only know what is on `main`. So in every session, before the final r
 1. **Write it back.** Anything finished, decided, added as an idea, or changed in scope (including talk-only planning chats with no code) goes in the repo:
    - one dated line at the top of `docs/DECISIONS.md` saying what changed and where the detail lives;
    - the detail in the right doc: `docs/PROJECT_SPEC.md` (built or in scope), `docs/IDEAS_BACKLOG.md` (ideas and plans), `docs/AI_AGENTS_PLAN.md` (agents), `docs/EXTERNAL_ACCOUNTS.md` (outside accounts), `docs/BUSINESS_FACTS.md` (business facts).
-2. **Get it onto `main`.** Commit, push, open a PR. Docs-only PRs (`docs/`, `CLAUDE.md`, `README.md`) are merged straight away so the next chat sees them. Code and migrations wait for the owner's "yes" on the plan, then go all the way to `main` without asking again.
+2. **Get it onto `main`.** Commit, push, open a PR. Docs-only PRs (`docs/`, `CLAUDE.md`, `README.md`) are merged straight away so the next chat sees them. Code and migrations wait for the owner's "yes" on the plan; bug fixes then go all the way to `main` without asking again, features wait on their branch for release time (see "Releases").
 3. **Say so.** End the reply with one line naming the docs updated, or "no repo notes needed".
 
 At the start of every session: pull `main` and read `docs/DECISIONS.md` before answering questions about plans or status. If the owner says something that contradicts the docs, ask, then fix the doc.
 
 Chats that cannot write to GitHub (for example Claude Projects): end with a short "Notes for the repo" list for the owner to paste into a Claude Code session.
+
+## Releases (owner's rule from 23 Oct 2026)
+
+- **Bug fixes** (something live is wrong): fix on a branch, `npm run check`, PR, merge to `main` straight away, any time of day. A migration in a fix still gets the owner's yes first.
+- **Features and updates**: one feature branch per feature, one PR, one merge. Push the branch, open the PR and give the owner the PR's Netlify deploy preview link (it runs against the staging database) so they can test it on the phone. Do NOT merge during the work day: staff are on jobs. The owner releases overnight or at the end of the week by saying "release PR 123" (or "release everything that is ready") in any chat; that chat applies the migrations to production, merges, checks the deploy commit, then fast-forwards `staging`. The one exception: the owner says at the start of the chat "upload this straight to the site".
+- A feature stays on its branch until it is whole and tested. No half features on `main`, no two features in one PR. Several features can wait on their own branches at once; merge `main` into a waiting branch if it has fallen behind.
+- The GitHub Action `check` runs `npm run check` on every PR and is a required check: wait for it to go green before merging. Nobody has to approve anything by hand.
+- After every merge to `main`: `git push origin main:staging` so the staging database runs the same migrations.
+- Docs-only PRs still merge straight away.
 
 ## Delivery standards
 
@@ -68,8 +77,6 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 
 ## Staging and production
 
-**CURRENT MODE (from 18 Oct 2026, owner's instruction): STAGING PAUSED.** Skip staging for everything: apply migrations and push updates straight to production and merge to `main` so Netlify deploys. Still state the plan and get the owner's "yes" before building, run `npm run check`, and take a backup before risky changes. This stays until the owner says to go back to staging; then delete this paragraph and log it in `docs/DECISIONS.md`. The staging rules below are on hold until then.
-
 - Test migrations, features and agents on the `staging` Supabase branch first, never on production data. Cloud sessions use staging credentials by default.
 - Production changes (migrations, data fixes, settings) only after the owner approves.
 - Supabase SQL runs without a permission popup (`.claude/settings.json` allows `execute_sql`, `list_migrations`, `list_tables`) on staging and production alike, so asking in chat is the only check: get the owner's yes before any production write. In cloud sessions (phone) that file is not enough on its own: the owner picks **Auto** in the mode dropdown next to the prompt box when starting the task (it can be switched mid-run too). In any other mode the worker stops at every Supabase call until the owner taps Allow once. If a cloud session is not in Auto, say so in the plan reply before the owner says yes. Edits to `CLAUDE.md` itself still stop for one Allow tap even in Auto; the owner is happy with that one.
@@ -81,8 +88,8 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 1. `supabase migration new <name>` (files go in `supabase/migrations/`, never the old `Migrations/` archive).
 2. Write the SQL, run `npm run check`.
 3. Show the owner the SQL and wait for "yes".
-4. Apply to staging (`supabase db push` with the CLI linked to staging), test. (Skipped while staging is paused, see above.)
-5. After the owner says yes: `supabase db push` linked to production, then merge to `main` so Netlify deploys. Confirm both succeeded. (Supabase "Deploy to production" is off on purpose.)
+4. Apply to staging (`supabase db push` with the CLI linked to staging, or push the branch and let the PR preview branch run it), test.
+5. At release time (a bug fix: straight after the owner's yes): `supabase db push` linked to production, then merge to `main` so Netlify deploys. Confirm both succeeded. (Supabase "Deploy to production" is off on purpose.)
 6. Risky changes (dropping columns or tables, bulk updates): take a backup first.
 
 Full detail in `docs/STAGING.md`.
