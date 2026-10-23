@@ -11,6 +11,10 @@
 const PREBUILD_SUBCATEGORIES = {
   Electrical: ['Lighting', 'Power', 'Trenching', 'Cable Runs'],
   Solar: ['Panels', 'Batteries', 'Inverters'],
+  // These two go into their own stage (cost centre) when added to a quote or job: see
+  // PREBUILD_OWN_STAGE_CATEGORIES in supabase-client.js.
+  'Access equipment': ['Scissor lift', 'Boom lift / EWP', 'Scaffold', 'Generator / plant'],
+  Mobilisation: ['Travel', 'Accommodation', 'Site setup'],
 };
 
 function prebuildFormHtml({ heading = 'Add a prebuild', inPopup = false } = {}) {
@@ -66,7 +70,7 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
 
   function refreshSubcategoryOptions() {
     const cat = $('.pb-category').value;
-    $('.pb-subcategory').innerHTML = (PREBUILD_SUBCATEGORIES[cat] || []).map(s => `<option value="${s}">${s}</option>`).join('');
+    $('.pb-subcategory').innerHTML = `<option value="">None</option>` + (PREBUILD_SUBCATEGORIES[cat] || []).map(s => `<option value="${s}">${s}</option>`).join('');
   }
   $('.pb-category').addEventListener('change', refreshSubcategoryOptions);
 
@@ -200,6 +204,10 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
     $('.pb-client-desc').value = pb.client_description || '';
     $('.pb-category').value = pb.category;
     refreshSubcategoryOptions();
+    // A saved subcategory not on the list (older data) stays selectable rather than silently dropped.
+    if (pb.subcategory && ![...$('.pb-subcategory').options].some(o => o.value === pb.subcategory)) {
+      $('.pb-subcategory').insertAdjacentHTML('beforeend', `<option value="${escapeHtml(pb.subcategory)}">${escapeHtml(pb.subcategory)}</option>`);
+    }
     $('.pb-subcategory').value = pb.subcategory || '';
     $('.pb-components').innerHTML = '';
     (pb.prebuild_components || []).slice().sort((a, b) => a.sort_order - b.sort_order).forEach(addComponentRow);
@@ -280,7 +288,7 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
         internal_part_number: $('.pb-part-number').value.trim(),
         client_description: $('.pb-client-desc').value.trim(),
         category: $('.pb-category').value,
-        subcategory: $('.pb-subcategory').value,
+        subcategory: $('.pb-subcategory').value || null,
       };
 
       const wasEditing = !!editingPrebuildId;

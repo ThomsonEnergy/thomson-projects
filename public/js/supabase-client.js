@@ -5462,12 +5462,22 @@ async function openStockPicker(stageRow) {
   renderResults();
 }
 
+// Prebuild categories that get their own stage (cost centre) on a quote or job, named after the
+// category, so lifts, scaffold, travel and site setup price, cost and invoice on their own.
+const PREBUILD_OWN_STAGE_CATEGORIES = ['Access equipment', 'Mobilisation'];
+function prebuildOwnStageName(prebuild) {
+  const cat = String((prebuild && prebuild.category) || '').trim().toLowerCase();
+  return PREBUILD_OWN_STAGE_CATEGORIES.find(c => c.toLowerCase() === cat) || null;
+}
+
 // Adds one prebuild (with its prebuild_components) to a stage as a collapsed group. One group id
 // is shared by every component this call adds - lets the client-facing quote collapse them back
 // into a single line (the prebuild's own client_description) while staff still see and can edit
 // each component individually. A second add of the same prebuild gets its own group, so it
 // collapses on its own rather than merging with the first.
 function addPrebuildToStage(stageRow, prebuild, qty = 1) {
+  // Access equipment and Mobilisation go into their own stage (project.html's stageForPrebuild).
+  if (typeof stageForPrebuild === 'function') stageRow = stageForPrebuild(stageRow, prebuild) || stageRow;
   const groupId = crypto.randomUUID();
   const clientDescription = prebuild.client_description || prebuild.name;
   const components = (prebuild.prebuild_components || []).map(comp => ({
