@@ -33,7 +33,7 @@
 
   <script src="/js/supabase-client.js?v=119"></script>
   <script src="/js/template-questions.js?v=3"></script>
-  <script src="/js/solar-roi.js?v=9"></script>
+  <script src="/js/solar-roi.js?v=10"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
@@ -1492,11 +1492,16 @@
           ? { enabled: byId('ri-export-enabled').checked, rate: numOrNull(val('ri-export-rate')), from: val('ri-export-from') || '17:00', to: val('ri-export-to') || '21:00', max_kwh: numOrNull(val('ri-export-max')) }
           : (saved.export || { enabled: false });
         if (strict && exp.enabled && (exp.rate == null || exp.rate < 0)) throw new Error('Type the rate the battery sells at, or untick the battery selling to the grid');
+        const grid = byId('ri-grid-enabled')
+          ? { enabled: byId('ri-grid-enabled').checked, rate: numOrNull(val('ri-grid-rate')), from: val('ri-grid-from') || '00:00', to: val('ri-grid-to') || '06:00', max_kwh: numOrNull(val('ri-grid-max')) }
+          : (saved.grid_charge || { enabled: false });
+        if (strict && grid.enabled && ((grid.rate != null && grid.rate < 0) || (grid.max_kwh != null && grid.max_kwh < 0))) throw new Error('The night charging rate and kWh cannot be below zero');
         const price = (which) => { const n = typedPrice(which); if (strict && n != null && n < 0) throw new Error(`The ${which} price cannot be below zero`); return n; };
         return {
           current: panelBuilt ? safe(readCurrentOverrides, saved.current || {}) : (saved.current || {}),
           alt: byId('ri-alt-enabled') ? { enabled: byId('ri-alt-enabled').checked, ...safe(readAltPlan, saved.alt || {}) } : (saved.alt || { enabled: false }),
           export: exp,
+          grid_charge: grid,
           solar_price: price('solar'),
           battery_price: price('battery'),
         };
@@ -1561,7 +1566,8 @@
         const mainKeys = RI_FIELDS.filter(([k]) => k !== 'controlled' && (inMain[k] !== false));
         const moreKeys = RI_FIELDS.filter(([k]) => k === 'controlled' || inMain[k] === false);
         const altField = field('ri-alt', alt.tariff || 'flat', (k) => alt[k] ?? '', () => 'as the bill');
-        const moreOpen = !!(alt.enabled || exp.enabled || cur.controlled != null);
+        const grid = saved.grid_charge || {};
+        const moreOpen = !!(alt.enabled || exp.enabled || grid.enabled || cur.controlled != null);
         panel.innerHTML = `
           <div style="margin-top:12px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
             <label style="margin-top:0; font-weight:600;">Rates</label>
@@ -1572,7 +1578,7 @@
             </div>
             ${timesEditorHtml('ri', curPlan, tariff === 'tou')}
             <details id="ri-more" style="margin-top:12px;" ${moreOpen ? 'open' : ''}>
-              <summary style="cursor:pointer; font-size:13px;">More: ${moreKeys.map(([, l]) => l.replace(/ \(.*\)$/, '').toLowerCase()).join(', ')}, another plan to compare, the battery selling to the grid</summary>
+              <summary style="cursor:pointer; font-size:13px;">More: ${moreKeys.map(([, l]) => l.replace(/ \(.*\)$/, '').toLowerCase()).join(', ')}, another plan to compare, charging the battery at night, the battery selling to the grid</summary>
               <div class="grid cols-4" style="margin-top:8px;">${moreKeys.map(curField).join('')}</div>
               <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-alt-enabled" style="width:auto; margin:0;" ${alt.enabled ? 'checked' : ''} /> Compare with another plan (shown as a second column on the proposal)</label>
               <div id="ri-alt-fields" style="${alt.enabled ? '' : 'display:none;'} margin-top:4px;">
@@ -1582,6 +1588,16 @@
                   ${RI_FIELDS.map(altField).join('')}
                 </div>
                 ${timesEditorHtml('ri-alt', altPlan, alt.tariff === 'tou')}
+              </div>
+              <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-grid-enabled" style="width:auto; margin:0;" ${grid.enabled ? 'checked' : ''} /> Charge the battery from the grid at night on a cheap rate (when spare solar does not fill it)</label>
+              <div id="ri-grid-fields" style="${grid.enabled ? '' : 'display:none;'} margin-top:4px;">
+                <div class="grid cols-4">
+                  <div><label style="margin-top:0; font-size:12px;">Charge rate (c/kWh)</label><input id="ri-grid-rate" type="number" step="0.1" inputmode="decimal" min="0" value="${grid.rate ?? ''}" placeholder="blank: the plan's rate then" /></div>
+                  <div><label style="margin-top:0; font-size:12px;">From</label><input id="ri-grid-from" type="time" value="${attr(grid.from || '00:00')}" /></div>
+                  <div><label style="margin-top:0; font-size:12px;">To</label><input id="ri-grid-to" type="time" value="${attr(grid.to || '06:00')}" /></div>
+                  <div><label style="margin-top:0; font-size:12px;">Up to (kWh a day)</label><input id="ri-grid-max" type="number" step="0.1" inputmode="decimal" min="0" value="${grid.max_kwh ?? ''}" placeholder="blank: as much as it needs" /></div>
+                </div>
+                <p class="subtitle" style="margin:4px 0 0; font-size:12px;">In the window the battery tops up from the grid only as much as it needs for the dearer hours before the panels refill it, and only when that is cheaper after battery losses (about 10%). The home runs on solar in the day; the battery covers the morning and evening. The estimate shows what night charging adds on top of spare solar alone.</p>
               </div>
               <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-export-enabled" style="width:auto; margin:0;" ${exp.enabled ? 'checked' : ''} /> The battery sells to the grid in a window (a VPP or a plan with a high evening feed-in)</label>
               <div id="ri-export-fields" style="${exp.enabled ? '' : 'display:none;'} margin-top:4px;">
@@ -1608,6 +1624,7 @@
         byId('ri-alt-tariff').addEventListener('change', () => toggleTariff('ri-alt'));
         byId('ri-alt-enabled').addEventListener('change', (e) => { byId('ri-alt-fields').style.display = e.target.checked ? '' : 'none'; });
         byId('ri-export-enabled').addEventListener('change', (e) => { byId('ri-export-fields').style.display = e.target.checked ? '' : 'none'; });
+        byId('ri-grid-enabled').addEventListener('change', (e) => { byId('ri-grid-fields').style.display = e.target.checked ? '' : 'none'; });
         const save = () => { autosave('roi_inputs', () => ({ roi_inputs: readRoiInputs(true) }), 900); scheduleRender(); renderTimes('ri'); renderTimes('ri-alt'); };
         // any change to a time marks that plan's times as typed by hand
         const markTyped = (target) => {
