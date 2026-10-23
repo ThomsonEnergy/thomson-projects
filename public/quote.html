@@ -539,7 +539,7 @@
         variationToken
           ? supabaseClient.rpc('get_variation_by_token', { p_token: variationToken })
           : supabaseClient.rpc('get_quote_by_token', { p_token: token }),
-        supabaseClient.from('company_settings').select('*').eq('id', 1).single(),
+        supabaseClient.rpc('get_public_company_settings'),
       ]);
       const content = document.getElementById('content');
       const vInfo = variationToken && rpcData ? rpcData : null; // { variation, quote, other_variations }

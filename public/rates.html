@@ -118,7 +118,7 @@
       const content = document.getElementById('content');
       const [{ data, error }, { data: settings }] = await Promise.all([
         supabaseClient.rpc('get_schedule_of_rates'),
-        supabaseClient.from('company_settings').select('*').eq('id', 1).single(),
+        supabaseClient.rpc('get_public_company_settings'),
       ]);
       if (error || !data) { content.innerHTML = `<div class="error-box" style="margin:24px;">The Schedule of Rates could not be loaded. Please try again or contact us.</div>`; return; }
 
