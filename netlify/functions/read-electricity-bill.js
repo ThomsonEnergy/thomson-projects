@@ -37,13 +37,14 @@ const PROMPT = `These are the pages of a customer's electricity bill from an Aus
 - billing_days: the number of days in the billing period
 - total_kwh: the total electricity used in the period in kWh (all usage tariffs added, including controlled load, excluding any solar export)
 - daily_average_kwh: the average daily use the bill prints, if it prints one
-- peak_kwh, shoulder_kwh, off_peak_kwh: the kWh per time-of-use band when the bill splits them (null on a flat tariff)
+- peak_kwh, shoulder_kwh, off_peak_kwh, solar_soak_kwh: the kWh per time-of-use band when the bill splits them (null on a flat tariff, and solar_soak_kwh null unless the bill has that band)
 - controlled_load_kwh: kWh on a controlled load / hot water tariff, if shown
 - solar_export_kwh: kWh exported to the grid (solar feed-in) in the period, if shown
 - feed_in_c_per_kwh: the feed-in tariff in cents per kWh, if shown
 - usage_rate_c_per_kwh: the main usage rate in cents per kWh (inc GST if the bill shows inc GST figures; on a time-of-use tariff the peak rate), and
-- usage_rates: an object of every usage rate shown, e.g. {"peak": 48.2, "shoulder": 30.1, "off_peak": 22.5, "controlled_load": 20.0}
-- tou_hours: when the bill prints the time-of-use windows, an object of the hours each band applies, as 24 hour ranges, e.g. {"peak": "17:00-20:00", "shoulder": "07:00-17:00, 20:00-22:00", "off_peak": "22:00-07:00"}; leave a band out when the bill has no such band (a peak and off-peak only tariff has no shoulder); null when no hours are printed
+- usage_rates: an object of every usage rate shown, e.g. {"peak": 48.2, "shoulder": 30.1, "off_peak": 22.5, "solar_soak": 12.0, "controlled_load": 20.0} (solar_soak only for a separately priced solar soak or super off-peak rate)
+- tou_schedule: when the bill or the plan details on it print WHEN each time-of-use rate applies, a list with one entry per window exactly as printed, for example [{"band": "peak", "hours": "15:00-21:00", "days": "weekdays", "months": "Nov-Mar, Jun-Aug"}, {"band": "off_peak", "hours": "10:00-14:00", "days": "all", "months": ""}, {"band": "off_peak", "hours": "22:00-07:00", "days": "all", "months": ""}, {"band": "off_peak", "hours": "00:00-24:00", "days": "weekends", "months": ""}]. band is one of peak, shoulder, off_peak, solar_soak (a "solar soak" or "super off-peak" window that has its own cheaper rate; a midday window charged at the normal off-peak rate is off_peak). hours as 24 hour ranges, several ranges comma separated. days is "all", "weekdays" or "weekends". months is blank when the window applies all year. Off-peak is NOT always overnight: many plans make the middle of the day and/or weekends off-peak, so list every off-peak window that is printed, and never assume one that is not printed. null when no times are printed anywhere on the bill.
+- tou_other: when the bill says a band applies at "all other times" (for example "Shoulder: all other times"), that band (peak, shoulder, off_peak or solar_soak); otherwise null.
 - supply_charge_c_per_day: the daily supply charge in cents per day
 - bill_total: the total amount of this bill in dollars (the amount due for this period, not the account balance carried forward)
 - usage_charges_total: the dollars charged for usage in the period, if shown separately

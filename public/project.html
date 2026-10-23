@@ -33,7 +33,7 @@
 
   <script src="/js/supabase-client.js?v=119"></script>
   <script src="/js/template-questions.js?v=3"></script>
-  <script src="/js/solar-roi.js?v=8"></script>
+  <script src="/js/solar-roi.js?v=9"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
@@ -1176,7 +1176,7 @@
         // A fresh read replaces any figure or rate changed by hand: say which, and only go on with a yes.
         const r0 = project.bill_reading || {};
         const editedBill = (r0.edited_fields || []).map(k => (BILL_FIELDS.find(f => f[0] === k) || [k, k])[1]);
-        const editedRates = Object.keys(((project.roi_inputs || {}).current) || {}).map(k => (RI_FIELDS.find(f => f[0] === k) || [k, k])[1]);
+        const editedRates = [...new Set(Object.keys(((project.roi_inputs || {}).current) || {}).map(RI_LABEL))];
         const changed = [...editedBill, ...editedRates];
         if (changed.length && !confirm(`Reading the bill again replaces what you changed by hand: ${changed.join(', ')}. Carry on?`)) return;
         readBtn.disabled = true;
@@ -1417,23 +1417,44 @@
       // ----- the rates for the estimate (projects.roi_inputs) -----
       // The current plan holds only what was changed from the bill, so a blank or untouched box
       // always follows the bill; the second plan and the battery export window hold what is typed.
+      // When each rate applies is a list of windows (band, hours, days, months) plus "any other
+      // time", shown as a coloured strip per day pattern so a wrong time is easy to spot.
       const RI_FIELDS = [
-        ['rate', 'Usage (c/kWh)', 'flat'], ['peak', 'Peak (c/kWh)', 'tou'], ['shoulder', 'Shoulder (c/kWh)', 'tou'], ['off_peak', 'Off-peak (c/kWh)', 'tou'],
-        ['supply', 'Supply (c/day)', 'any'], ['feed_in', 'Feed-in (c/kWh)', 'any'],
-        ['peak_hours', 'Peak hours', 'tou'], ['shoulder_hours', 'Shoulder hours (blank: none)', 'tou'], ['controlled', 'Controlled load (c/kWh)', 'any'],
+        ['rate', 'Usage (c/kWh)', 'flat'], ['peak', 'Peak (c/kWh)', 'tou'], ['shoulder', 'Shoulder (c/kWh)', 'tou'], ['off_peak', 'Off-peak (c/kWh)', 'tou'], ['solar_soak', 'Solar soak (c/kWh)', 'tou'],
+        ['supply', 'Supply (c/day)', 'any'], ['feed_in', 'Feed-in (c/kWh)', 'any'], ['controlled', 'Controlled load (c/kWh)', 'any'],
       ];
-      const MORE_KEYS = ['peak_hours', 'shoulder_hours', 'controlled'];
-      // What the bill itself says for each rate box (null when it is not on the bill).
+      const RI_LABEL = (k) => (k === 'windows' || k === 'other' || k.endsWith('_hours') ? 'the times' : (RI_FIELDS.find(f => f[0] === k) || [k, k])[1]);
+      // What the bill itself says for each rate box (null when it is not on the bill), and its plan.
       function billRates() {
         const r = project.bill_reading || {};
         const rates = r.usage_rates || {};
-        const hours = r.tou_hours || {};
         const base = roiPlan(undefined, r, '');
         return {
           tariff: base.tariff, rate: numOrNull(r.usage_rate_c_per_kwh), peak: numOrNull(rates.peak), shoulder: numOrNull(rates.shoulder), off_peak: numOrNull(rates.off_peak),
-          controlled: numOrNull(rates.controlled_load), supply: numOrNull(r.supply_charge_c_per_day), feed_in: numOrNull(r.feed_in_c_per_kwh),
-          peak_hours: hours.peak || '', shoulder_hours: hours.shoulder || '', base,
+          solar_soak: numOrNull(rates.solar_soak ?? rates.super_off_peak), controlled: numOrNull(rates.controlled_load), supply: numOrNull(r.supply_charge_c_per_day), feed_in: numOrNull(r.feed_in_c_per_kwh), base,
         };
+      }
+      // the times editor: rows of band / hours / days / months
+      const bandOptions = (sel) => ROI_BANDS.map(b => `<option value="${b.key}" ${b.key === sel ? 'selected' : ''}>${b.label}</option>`).join('');
+      const dayOptions = (sel) => [['all', 'Every day'], ['weekdays', 'Weekdays'], ['weekends', 'Weekends']].map(([k, l]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${l}</option>`).join('');
+      function winRowsHtml(windows) {
+        const a = (v) => escapeHtml(v == null ? '' : String(v));
+        return windows.map(w => `
+          <div class="ri-win-row grid cols-4" style="align-items:end; margin-bottom:6px;">
+            <div><label style="margin-top:0; font-size:12px;">Rate</label><select class="win-band">${bandOptions(w.band)}</select></div>
+            <div><label style="margin-top:0; font-size:12px;">Hours</label><input class="win-hours" value="${a(w.hours)}" placeholder="e.g. 15:00-21:00" /></div>
+            <div><label style="margin-top:0; font-size:12px;">Days</label><select class="win-days">${dayOptions(w.days)}</select></div>
+            <div style="display:flex; gap:6px; align-items:end;"><div style="flex:1; min-width:0;"><label style="margin-top:0; font-size:12px;">Months</label><input class="win-months" value="${a(w.months)}" placeholder="all year" /></div><button type="button" class="secondary win-del" style="padding:6px 10px;" aria-label="Remove this time">x</button></div>
+          </div>`).join('');
+      }
+      function readWindows(prefix) {
+        const box = byId(`${prefix}-win-rows`);
+        if (!box) return null;
+        const windows = [...box.querySelectorAll('.ri-win-row')].map(row => ({
+          band: row.querySelector('.win-band').value, hours: row.querySelector('.win-hours').value.trim(),
+          days: row.querySelector('.win-days').value, months: row.querySelector('.win-months').value.trim(),
+        }));
+        return { windows, other: val(`${prefix}-other`) || 'off_peak', typed: box.dataset.typed === '1' };
       }
       function readCurrentOverrides() {
         const bill = billRates();
@@ -1443,23 +1464,23 @@
         RI_FIELDS.forEach(([key, label]) => {
           const el = byId(`ri-${key}`);
           if (!el) return;
-          const raw = el.value.trim();
-          if (key.endsWith('_hours')) { if (raw !== (bill[key] || '')) out[key] = raw; return; }
-          const n = numOrNull(raw);
+          const n = numOrNull(el.value.trim());
           if (n != null && n < 0) throw new Error(`${label} cannot be below zero`);
           if (n != null && (bill[key] == null || Math.abs(n - bill[key]) > 1e-9)) out[key] = n;
         });
+        const t = readWindows('ri');
+        if (t && t.typed) { out.windows = roiCleanWindows(t.windows); out.other = t.other; }
         return out;
       }
       function readAltPlan() {
         const out = { tariff: val('ri-alt-tariff') || 'flat', name: val('ri-alt-name') };
         RI_FIELDS.forEach(([key, label]) => {
-          const raw = val(`ri-alt-${key}`);
-          if (key.endsWith('_hours')) { out[key] = raw; return; }
-          const n = numOrNull(raw);
+          const n = numOrNull(val(`ri-alt-${key}`));
           if (n != null && n < 0) throw new Error(`${label} cannot be below zero`);
           if (n != null) out[key] = n;
         });
+        const t = readWindows('ri-alt');
+        if (t && t.typed) { out.windows = roiCleanWindows(t.windows); out.other = t.other; }
         return out;
       }
       // strict: refuse below-zero numbers (when saving); otherwise read what is there (when previewing)
@@ -1480,34 +1501,67 @@
           battery_price: price('battery'),
         };
       }
+      // The strip, the plain-words summary and where the times came from, for one plan.
+      function renderTimes(prefix) {
+        const out = byId(`${prefix}-times-view`);
+        if (!out) return;
+        const inputs = readRoiInputs(false);
+        const plan = prefix === 'ri' ? roiPlan(inputs.current, project.bill_reading, '') : roiPlan(inputs.alt, project.bill_reading, '');
+        if (plan.tariff !== 'tou') { out.innerHTML = ''; return; }
+        const from = plan.timesFrom === 'assumed'
+          ? `<p style="margin:0 0 6px; font-size:12px; color:${AMBER};"><strong>Not on the bill, so these times are assumed.</strong> Type them from the bill or the retailer's plan (Energy Made Easy lists every plan's times), then press These times are right. Off-peak is often the middle of the day or the weekend too, not only overnight.</p>`
+          : `<p class="subtitle" style="margin:0 0 6px; font-size:12px;">${plan.timesFrom === 'bill' ? 'From the bill.' : 'Typed by hand.'} Check them against the bill: off-peak is often the middle of the day or the weekend too, not only overnight.</p>`;
+        out.innerHTML = `${from}${roiScheduleStripHtml(plan)}<p class="subtitle" style="margin:6px 0 0; font-size:12px;">${escapeHtml(roiScheduleText(plan))}.</p>`;
+        const confirmBtn = byId(`${prefix}-times-confirm`);
+        if (confirmBtn) confirmBtn.style.display = plan.timesFrom === 'assumed' ? '' : 'none';
+        const resetBtn = byId(`${prefix}-times-reset`);
+        if (resetBtn) resetBtn.style.display = prefix === 'ri' && plan.timesFrom === 'typed' && roiBillWindows(project.bill_reading).length ? '' : 'none';
+      }
+      function timesEditorHtml(prefix, plan, show) {
+        return `
+          <div class="ri-times-wrap" data-prefix="${prefix}" style="${show ? '' : 'display:none;'} margin-top:12px;">
+            <label style="margin-top:0; font-weight:600;">When each rate applies</label>
+            <div id="${prefix}-times-view" style="margin-top:4px;"></div>
+            <details style="margin-top:6px;" ${plan.timesFrom === 'assumed' ? 'open' : ''}>
+              <summary style="cursor:pointer; font-size:13px;">Change the times</summary>
+              <div id="${prefix}-win-rows" data-typed="${plan.timesFrom === 'typed' ? '1' : ''}" style="margin-top:8px;">${winRowsHtml(plan.windows)}</div>
+              <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-top:4px;">
+                <button type="button" class="secondary ri-win-add" data-prefix="${prefix}" style="font-size:12px; padding:6px 10px;">+ Add a time</button>
+                <div><label style="margin-top:0; font-size:12px;">Any time not listed is</label><select id="${prefix}-other" class="ri-other">${bandOptions(plan.other)}</select></div>
+                <button type="button" id="${prefix}-times-confirm" style="font-size:12px; padding:6px 10px; display:none;">These times are right</button>
+                <button type="button" class="secondary" id="${prefix}-times-reset" style="font-size:12px; padding:6px 10px; display:none;">Use the bill's times</button>
+              </div>
+            </details>
+          </div>`;
+      }
       function buildRoiInputsPanel() {
         const panel = byId('roi-inputs-panel');
         if (!panel || !project.bill_reading) return;
         const saved = project.roi_inputs || {};
         const bill = billRates();
         const cur = saved.current || {};
+        const curPlan = roiPlan(cur, project.bill_reading, '');
         const shown = (key) => (cur[key] != null ? cur[key] : (bill[key] != null ? bill[key] : ''));
         const tariff = cur.tariff || bill.tariff;
-        const billHasShoulder = bill.shoulder != null || numOrNull(project.bill_reading.shoulder_kwh) > 0 || cur.shoulder != null;
+        const inMain = { shoulder: curPlan.hasShoulder || cur.shoulder != null, solar_soak: bill.solar_soak != null || cur.solar_soak != null || (curPlan.bandShare.solar_soak || 0) > 0 };
         const alt = saved.alt || {};
+        const altPlan = roiPlan(alt, project.bill_reading, '');
         const exp = saved.export || {};
         const attr = (v) => escapeHtml(v == null ? '' : String(v));
         // grey hints: the figure the estimate uses when the box is blank
         const hint = (key) => {
           if (key === 'feed_in') return `${bill.base.feed_in} assumed`;
           if (key === 'supply') return `${bill.base.supply} assumed`;
-          if (key === 'peak_hours') return `${bill.base.peak_hours} (usual)`;
-          if (key === 'shoulder_hours') return 'none';
           if (key === 'controlled') return 'same as off-peak';
-          if (key === 'shoulder') return 'not on the bill';
+          if (key === 'solar_soak') return 'same as off-peak';
           return 'not on the bill';
         };
-        const field = (prefix, plan, value, placeholder) => ([key, label, when]) => `<div class="ri-field ri-${when}" data-prefix="${prefix}" style="${(when === 'tou' && plan !== 'tou') || (when === 'flat' && plan === 'tou') ? 'display:none;' : ''}"><label style="margin-top:0; font-size:12px;">${label}</label><input id="${prefix}-${key}" ${key.endsWith('_hours') ? 'type="text"' : 'type="number" step="0.01" inputmode="decimal" min="0"'} value="${attr(value(key))}" placeholder="${attr(placeholder(key))}" /></div>`;
+        const field = (prefix, plan, value, placeholder) => ([key, label, when]) => `<div class="ri-field ri-${when}" data-prefix="${prefix}" style="${(when === 'tou' && plan !== 'tou') || (when === 'flat' && plan === 'tou') ? 'display:none;' : ''}"><label style="margin-top:0; font-size:12px;">${label}</label><input id="${prefix}-${key}" type="number" step="0.01" inputmode="decimal" min="0" value="${attr(value(key))}" placeholder="${attr(placeholder(key))}" /></div>`;
         const curField = field('ri', tariff, shown, hint);
-        const mainKeys = RI_FIELDS.filter(([k]) => !MORE_KEYS.includes(k) && (k !== 'shoulder' || billHasShoulder));
-        const moreKeys = RI_FIELDS.filter(([k]) => MORE_KEYS.includes(k) || (k === 'shoulder' && !billHasShoulder));
-        const altField = field('ri-alt', alt.tariff || 'flat', (k) => alt[k] ?? '', (k) => (k.endsWith('_hours') ? (k === 'peak_hours' ? 'e.g. 17:00-20:00' : 'blank: none') : ''));
-        const moreOpen = !!(alt.enabled || exp.enabled || MORE_KEYS.some(k => cur[k] != null) || (cur.shoulder != null && !billHasShoulder));
+        const mainKeys = RI_FIELDS.filter(([k]) => k !== 'controlled' && (inMain[k] !== false));
+        const moreKeys = RI_FIELDS.filter(([k]) => k === 'controlled' || inMain[k] === false);
+        const altField = field('ri-alt', alt.tariff || 'flat', (k) => alt[k] ?? '', () => 'as the bill');
+        const moreOpen = !!(alt.enabled || exp.enabled || cur.controlled != null);
         panel.innerHTML = `
           <div style="margin-top:12px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
             <label style="margin-top:0; font-weight:600;">Rates</label>
@@ -1516,8 +1570,9 @@
               <div><label style="margin-top:0; font-size:12px;">Tariff</label><select id="ri-tariff"><option value="flat" ${tariff !== 'tou' ? 'selected' : ''}>Flat rate</option><option value="tou" ${tariff === 'tou' ? 'selected' : ''}>Time of use</option></select></div>
               ${mainKeys.map(curField).join('')}
             </div>
-            <details id="ri-more" style="margin-top:10px;" ${moreOpen ? 'open' : ''}>
-              <summary style="cursor:pointer; font-size:13px;">More: time of use hours, controlled load, another plan to compare, the battery selling to the grid</summary>
+            ${timesEditorHtml('ri', curPlan, tariff === 'tou')}
+            <details id="ri-more" style="margin-top:12px;" ${moreOpen ? 'open' : ''}>
+              <summary style="cursor:pointer; font-size:13px;">More: ${moreKeys.map(([, l]) => l.replace(/ \(.*\)$/, '').toLowerCase()).join(', ')}, another plan to compare, the battery selling to the grid</summary>
               <div class="grid cols-4" style="margin-top:8px;">${moreKeys.map(curField).join('')}</div>
               <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-alt-enabled" style="width:auto; margin:0;" ${alt.enabled ? 'checked' : ''} /> Compare with another plan (shown as a second column on the proposal)</label>
               <div id="ri-alt-fields" style="${alt.enabled ? '' : 'display:none;'} margin-top:4px;">
@@ -1526,6 +1581,7 @@
                   <div><label style="margin-top:0; font-size:12px;">Tariff</label><select id="ri-alt-tariff"><option value="flat" ${alt.tariff !== 'tou' ? 'selected' : ''}>Flat rate</option><option value="tou" ${alt.tariff === 'tou' ? 'selected' : ''}>Time of use</option></select></div>
                   ${RI_FIELDS.map(altField).join('')}
                 </div>
+                ${timesEditorHtml('ri-alt', altPlan, alt.tariff === 'tou')}
               </div>
               <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-export-enabled" style="width:auto; margin:0;" ${exp.enabled ? 'checked' : ''} /> The battery sells to the grid in a window (a VPP or a plan with a high evening feed-in)</label>
               <div id="ri-export-fields" style="${exp.enabled ? '' : 'display:none;'} margin-top:4px;">
@@ -1545,14 +1601,49 @@
             if (w.classList.contains('ri-tou')) w.style.display = tou ? '' : 'none';
             if (w.classList.contains('ri-flat')) w.style.display = tou ? 'none' : '';
           });
+          const times = panel.querySelector(`.ri-times-wrap[data-prefix="${prefix}"]`);
+          if (times) times.style.display = tou ? '' : 'none';
         };
         byId('ri-tariff').addEventListener('change', () => toggleTariff('ri'));
         byId('ri-alt-tariff').addEventListener('change', () => toggleTariff('ri-alt'));
         byId('ri-alt-enabled').addEventListener('change', (e) => { byId('ri-alt-fields').style.display = e.target.checked ? '' : 'none'; });
         byId('ri-export-enabled').addEventListener('change', (e) => { byId('ri-export-fields').style.display = e.target.checked ? '' : 'none'; });
-        const save = () => { autosave('roi_inputs', () => ({ roi_inputs: readRoiInputs(true) }), 900); scheduleRender(); };
-        panel.addEventListener('input', save);
-        panel.addEventListener('change', save);
+        const save = () => { autosave('roi_inputs', () => ({ roi_inputs: readRoiInputs(true) }), 900); scheduleRender(); renderTimes('ri'); renderTimes('ri-alt'); };
+        // any change to a time marks that plan's times as typed by hand
+        const markTyped = (target) => {
+          const wrap = target.closest('.ri-times-wrap');
+          if (wrap) { const box = byId(`${wrap.dataset.prefix}-win-rows`); if (box) box.dataset.typed = '1'; }
+        };
+        panel.addEventListener('input', (e) => { markTyped(e.target); save(); });
+        panel.addEventListener('change', (e) => { markTyped(e.target); save(); });
+        panel.addEventListener('click', (e) => {
+          const add = e.target.closest('.ri-win-add');
+          const del = e.target.closest('.win-del');
+          const confirmBtn = e.target.closest('[id$="-times-confirm"]');
+          const resetBtn = e.target.closest('[id$="-times-reset"]');
+          if (!add && !del && !confirmBtn && !resetBtn) return;
+          const wrap = e.target.closest('.ri-times-wrap');
+          const prefix = wrap.dataset.prefix;
+          const box = byId(`${prefix}-win-rows`);
+          if (add) {
+            const t = readWindows(prefix);
+            box.innerHTML = winRowsHtml([...t.windows, { band: 'off_peak', hours: '', days: 'all', months: '' }]);
+            const rows = box.querySelectorAll('.win-hours');
+            rows[rows.length - 1].focus();
+            return; // saved once the new row has hours
+          }
+          if (del) { del.closest('.ri-win-row').remove(); box.dataset.typed = '1'; }
+          if (confirmBtn) { box.dataset.typed = '1'; showToast('Times saved as right.'); }
+          if (resetBtn) {
+            const billPlan = roiPlan(undefined, project.bill_reading, '');
+            box.dataset.typed = '';
+            box.innerHTML = winRowsHtml(billPlan.windows);
+            byId(`${prefix}-other`).value = billPlan.other;
+          }
+          save();
+        });
+        renderTimes('ri');
+        renderTimes('ri-alt');
       }
 
       function estimateArgs() {
