@@ -1,4 +1,4 @@
-// Downloads every retailer's current electricity market plans on the NSW, ACT and QLD networks from
+// Downloads every retailer's current electricity market plans on the NSW and QLD networks from
 // the AER's Consumer Data Right product data into energy_plans, for the plan suggestions on a quote
 // (docs/IDEAS_BACKLOG.md item 34). Started by sync-energy-plans.js about once a day.
 //
