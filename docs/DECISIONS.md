@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 23 Oct 2026
+
+- LIVE once merged: simpler purchase orders (backlog item 31) plus a Show me how guided tour for new staff. One short row per PO on every list (Purchase Orders, job, Stock, vehicle, supplier pages), new `purchase-order.html` with one next-step button, tick the lines that arrived and one Receive button, a "..." per line and a More sheet for the rest, bills and log folded; Create panels ask only what it is for, the supplier and the lines, the rest under More options, then "PO1234 created" with Email it now and Open the PO; tour offered once to anyone new and on the Show me how button any time. No migration. supabase-client.js v116, style.css v24. (`docs/PROJECT_SPEC.md` A10)
+
 ## 22 Oct 2026
 
 - Planned (waiting on owner's yes): simpler purchase orders. Found the PO list loads every PO ever with every line, bill line and up to fifty buttons per card, no one-PO page, receiving asks where every line goes, the Create panel asks for everything up front. Plan: short list with tabs, new `purchase-order.html` with one next-step button and a More menu, tick the lines that arrived and receive them in one go, short Create panel with More options and Email it now after. No migration. (`docs/IDEAS_BACKLOG.md` item 31)

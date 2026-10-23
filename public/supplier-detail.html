@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=23" />
+<link rel="stylesheet" href="/css/style.css?v=24" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=115"></script>
+  <script src="/js/supabase-client.js?v=116"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const supplierId = new URLSearchParams(window.location.search).get('id');
@@ -61,18 +61,20 @@
         .eq('supplier_bills.supplier_id', supplierId)
         .not('flag_reason', 'is', null);
 
+      // Short rows (backlog item 31): open POs first, then the last closed ones. Each opens its own page.
       const { data: pos } = await supabaseClient
         .from('purchase_orders')
-        .select('*, purchase_order_line_items(*)')
+        .select('id, po_number, supplier_id, supplier_name, project_id, vehicle_id, po_kind, po_type, stock_source, status, closed_at, amount, created_at, description, purchase_order_line_items(id, quantity, unit_cost, received, is_backordered), projects(name, job_number), fleet_vehicles!vehicle_id(vehicle_name, rego), supplier_bills(id, paid, check_status)')
         .eq('supplier_id', supplierId)
-        .order('created_at', { ascending: false });
+        .order('closed_at', { ascending: false, nullsFirst: true })
+        .order('created_at', { ascending: false })
+        .limit(60);
 
       const myRole = await getMyRole();
-      const billsByPo = await loadBillsForPos((pos || []).map(p => p.id));
-      render(supplier, summary, bills || [], flaggedItems || [], pos || [], myRole, billsByPo);
+      render(supplier, summary, bills || [], flaggedItems || [], pos || [], myRole);
     }
 
-    function render(supplier, summary, bills, flaggedItems, pos, myRole, billsByPo) {
+    function render(supplier, summary, bills, flaggedItems, pos, myRole) {
       const canPay = isFinanceRole(myRole);
       const dayText = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
       const terms = supplier.credit_terms_type === 'cod' ? 'COD' : `${supplier.credit_terms_days} ${CREDIT_TERMS_LABELS[supplier.credit_terms_type]}`;
@@ -148,17 +150,7 @@
         <div class="card">
           <h2>Purchase orders</h2>
           <div id="pos-list">
-            ${!pos.length ? '<p class="subtitle">No purchase orders for this supplier yet.</p>' : pos.map(po => `
-              <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
-                <div style="display:flex; justify-content:space-between;">
-                  <strong>${escapeHtml(po.po_number || 'PO')}</strong>${renderPoBadges(po)}
-                </div>
-                <p class="subtitle" style="margin:4px 0 8px;">${escapeHtml(po.description)}</p>
-                ${renderPoLineItemsReceivable(po, true)}
-                ${renderPoBills(billsByPo[po.id], po, myRole)}
-                ${po.budget_cap ? `<p class="subtitle" style="margin-top:8px;">Budget cap: ${money(po.budget_cap)}</p>` : ''}
-                ${!po.closed_at ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice for this PO</button>` : ''}
-              </div>`).join('')}
+            ${!pos.length ? '<p class="subtitle">No purchase orders for this supplier yet.</p>' : pos.map(po => renderPoRow(po)).join('') + (pos.length >= 60 ? '<p class="subtitle">Showing the last 60. Older ones are on the <a href="/purchase-orders.html" class="link-quiet">Purchase Orders</a> page.</p>' : '')}
           </div>
         </div>
 
@@ -198,18 +190,6 @@
         if (note === null) return;
         busy(btn, 'Saving...', () => callServer('run-supplier-payments', { action: 'undo_paid', bill_id: btn.dataset.id, note }));
       }));
-
-      document.querySelectorAll('.upload-invoice-btn').forEach(btn => {
-        btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
-      });
-      wirePoBillButtons(document.getElementById('pos-list'), loadSupplier);
-
-      wireReceiveLineItemButtons(
-        document.getElementById('pos-list'),
-        pos,
-        (po) => po.project_id ? 'job' : po.vehicle_id ? 'vehicle' : 'warehouse',
-        loadSupplier
-      );
 
       document.getElementById('edit-supplier-btn').addEventListener('click', () => openEditPanel(supplier));
       document.getElementById('upload-bill-btn').addEventListener('click', () => {

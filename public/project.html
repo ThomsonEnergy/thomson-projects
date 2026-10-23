@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=23" />
+<link rel="stylesheet" href="/css/style.css?v=24" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=115"></script>
+  <script src="/js/supabase-client.js?v=116"></script>
   <script src="/js/template-questions.js?v=2"></script>
   <script src="/js/solar-roi.js?v=4"></script>
   <style>
@@ -4566,7 +4566,7 @@
             <div class="settings-panel" id="panel-pos">
               <div class="card">
                 <h2>Purchase orders &amp; supplier invoices</h2>
-                <p class="subtitle" style="margin-bottom:14px;">Tracked separately so costs aren't double-counted.</p>
+                <p class="subtitle" style="margin-bottom:14px;">One line per order. Tap it to open the PO: receive gear, email it, close it.</p>
                 <div id="po-list"></div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:${centres.length ? '16px' : '0'};">
                   <button type="button" id="create-po-btn" class="secondary">+ Create purchase order</button>
@@ -8619,11 +8619,10 @@
       const otherPoIds = [...new Set((movedIn || []).map(r => r.po_id))];
       let poQuery = supabaseClient
         .from('purchase_orders')
-        .select('*, purchase_order_line_items(*), suppliers(name)')
+        .select('*, purchase_order_line_items(*), suppliers(name), projects(name, job_number), supplier_bills(id, paid, check_status)')
         .order('created_at', { ascending: false });
       poQuery = otherPoIds.length ? poQuery.or(`project_id.eq.${projectId},id.in.(${otherPoIds.join(',')})`) : poQuery.eq('project_id', projectId);
       const { data: pos, error } = await poQuery;
-      const billsByPo = await loadBillsForPos((pos || []).map(p => p.id));
 
       // Wired up unconditionally, before any early return below - this
       // button previously only got its click handler when the project
@@ -8652,85 +8651,23 @@
         summaryEl.innerHTML = `<p class="subtitle">${receivedCount} of ${pos.length} purchase order${pos.length === 1 ? '' : 's'} fully received.</p>`;
       }
 
-      const stageName = (id) => (centres.find(c => c.id === id) || {}).name || 'Whole project';
-      const myRole = await getMyRole();
+      const stageName = (id) => (centres.find(c => c.id === id) || {}).name || '';
 
+      // One short row per PO (backlog item 31); everything about a PO happens on its own page.
       listEl.innerHTML = pos.map(po => {
-        const items = po.purchase_order_line_items || [];
-        const itemsTotal = items.reduce((s, li) => s + (Number(li.quantity) * Number(li.unit_cost)), 0);
-        const total = items.length ? itemsTotal : Number(po.amount) || 0;
-        const supplierLabel = po.suppliers?.name || po.supplier_name || 'Unknown supplier';
-        const budgetPercent = po.budget_cap ? Math.round((total / Number(po.budget_cap)) * 100) : null;
         const otherJob = po.project_id !== projectId;
-
-        return `
-          <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
-              <div>
-                <strong>${escapeHtml(supplierLabel)}</strong>${po.po_number ? ` (${escapeHtml(po.po_number)})` : ''}
-                ${renderPoBadges(po)}
-                ${otherJob ? '<span class="badge draft" style="margin-left:6px;">Another job\'s PO, line moved here</span>' : ''}
-              </div>
-              <div>
-                <span style="font-weight:600;">${money(total)}</span>
-              </div>
-            </div>
-            <p class="subtitle" style="margin:6px 0;">${escapeHtml(stageName(po.cost_centre_id))}${po.description ? ' - ' + escapeHtml(po.description) : ''}</p>
-
-            <div style="margin-top:8px;">${renderPoLineItemsReceivable(po, true)}</div>
-            ${renderPoNotes(po)}
-            ${renderPoBills(billsByPo[po.id], po, myRole)}
-
-            ${po.budget_cap ? `
-              <div style="margin-top:10px;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                  <span class="subtitle">Budget used</span>
-                  <span style="font-weight:600; color:${budgetPercent > 100 ? 'var(--red)' : 'var(--green)'};">${budgetPercent}%</span>
-                </div>
-                <div style="background:var(--surface-2); border-radius:999px; height:8px; overflow:hidden;">
-                  <div style="background:${budgetPercent > 100 ? 'var(--red)' : 'var(--green)'}; width:${Math.min(100, budgetPercent)}%; height:100%;"></div>
-                </div>
-              </div>` : ''}
-
-            ${po.file_path ? `<a href="#" class="link-quiet view-doc" data-path="${po.file_path}" style="display:block; margin-top:8px; font-size:13px;">${escapeHtml(po.file_name || 'View attached document')}</a>` : ''}
-
-            <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-              ${renderPoControls(po, myRole)}
-              ${po.supplier_id && !po.closed_at ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px;">Upload invoice</button>` : ''}
-            </div>
-          </div>`;
+        const stage = stageName(po.cost_centre_id);
+        const note = (otherJob ? '<span class="badge draft">Another job\'s PO, line moved here</span>' : '')
+          + (stage ? `<span class="subtitle">${escapeHtml(stage)}</span>` : '');
+        return renderPoRow(po, { showWhere: otherJob, note });
       }).join('') + `<p class="subtitle" style="margin-top:6px;">Total: ${money(pos.reduce((s, p) => {
         const items = p.purchase_order_line_items || [];
         // another job's PO: only the lines moved onto this job count here
         if (p.project_id !== projectId) {
           return s + items.filter(li => li.destination_job_id === projectId).reduce((s2, li) => s2 + Number(li.quantity) * Number(li.unit_cost), 0);
         }
-        return s + (items.length ? items.reduce((s2, li) => s2 + Number(li.quantity) * Number(li.unit_cost), 0) : Number(p.amount) || 0);
+        return s + poTotalAmount(p);
       }, 0))}</p>`;
-
-      listEl.querySelectorAll('.view-doc').forEach(a => {
-        a.addEventListener('click', async (e) => {
-          e.preventDefault();
-          document.getElementById('po-msg').innerHTML = '';
-          try {
-            // Tab is opened on the tap itself (no await before it) so iPhone Safari does not block it.
-            await openSignedDocInNewTab(a.dataset.path);
-          } catch (err) {
-            document.getElementById('po-msg').innerHTML = `<div class="error-box">Could not open: ${escapeHtml(friendlyError(err))}</div>`;
-          }
-        });
-      });
-      wirePoControls(listEl, pos, () => loadPurchaseOrders(projectId, centres));
-      wirePoBillButtons(listEl, () => loadPurchaseOrders(projectId, centres));
-      listEl.querySelectorAll('.upload-invoice-btn').forEach(btn => {
-        btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
-      });
-      wireReceiveLineItemButtons(
-        listEl,
-        pos,
-        (po) => po.vehicle_id ? 'vehicle' : 'job', // POs on this page belong to this job by default
-        () => loadPurchaseOrders(projectId, centres)
-      );
     }
 
     function fuzzyMatchScore(a, b) {
@@ -8983,23 +8920,27 @@
           <p class="subtitle" style="font-size:12px; margin:4px 0 0;">Warehouse or vehicle stock makes a stock PO: the gear comes off that count and onto this job straight away.</p>
           <label>Supplier</label>
           ${supplierPickerHtml({ search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' })}
-          <button type="button" class="secondary" id="cp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
-          <label style="margin-top:14px;">Stage (optional)</label>
-          <select id="cp-stage"><option value="">Whole project</option>${centres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
-          <label>Description</label>
-          <input id="cp-description" placeholder="e.g. Switchboard gear for stage 2" />
 
-          ${poTypeChoiceHtml('cp')}
+          <label style="margin-top:14px;">Lines</label>
           <p class="subtitle" style="font-size:12px; margin:0 0 6px;">Anyone can add more lines as the job goes. Close the PO once it's all in: that approves its bills.</p>
           <div id="cp-fixed-items-container"></div>
-          <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add line</button>
-          <label>Budget cap (optional)</label>
-          <input id="cp-budget-cap" type="number" step="0.01" inputmode="decimal" placeholder="Flag when spending gets close to this" />
-          ${poNotesFieldsHtml('cp')}
-          ${poShowPricesHtml('cp')}
+          <button type="button" class="secondary btn-sm" id="cp-add-line-btn">+ Add line</button>
 
-          <label style="margin-top:14px;">Attach document (optional)</label>
-          <input type="file" id="cp-file" />
+          <details class="po-fold" id="cp-more" style="margin-top:14px;">
+            <summary>More options <span class="subtitle" style="font-weight:400; font-size:12px; margin-left:auto;">stage, open PO, notes, budget, document</span></summary>
+            <label>Stage (optional)</label>
+            <select id="cp-stage"><option value="">Whole project</option>${centres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
+            <label>Description</label>
+            <input id="cp-description" placeholder="e.g. Switchboard gear for stage 2" />
+            ${poTypeChoiceHtml('cp')}
+            <label>Budget cap (optional)</label>
+            <input id="cp-budget-cap" type="number" step="0.01" inputmode="decimal" placeholder="Flag when spending gets close to this" />
+            ${poNotesFieldsHtml('cp')}
+            ${poShowPricesHtml('cp')}
+            <label style="margin-top:14px;">Attach document (optional)</label>
+            <input type="file" id="cp-file" />
+            <button type="button" class="secondary btn-sm" id="cp-upload-invoice-btn" style="margin-top:10px;">Or upload the supplier's invoice instead</button>
+          </details>
 
           <div style="margin-top:14px;">
             <button id="cp-save-btn">Create PO</button>
@@ -9068,7 +9009,7 @@
             status: 'ordered',
             amount: 0,
             file_path, file_name,
-          }).select('id, po_number').single();
+          }).select('id, po_number, supplier_id, project_id').single();
           if (poErr) throw poErr;
           await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${supplierName}`);
           await logActivity('project', projectId, 'po_created', `PO ${newPo.po_number || ''} created for ${supplierName}`);
@@ -9084,7 +9025,8 @@
           }
 
           overlay.remove();
-          await loadPurchaseOrders(projectId, centres);
+          loadPurchaseOrders(projectId, centres);
+          showPoCreatedPanel(newPo, supplierName, { onDone: () => loadPurchaseOrders(projectId, centres) });
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {

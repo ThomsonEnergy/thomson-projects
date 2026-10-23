@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=23" />
+<link rel="stylesheet" href="/css/style.css?v=24" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=115"></script>
+  <script src="/js/supabase-client.js?v=116"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const vehicleId = new URLSearchParams(window.location.search).get('id');
@@ -52,15 +52,16 @@
         .eq('location_type', 'vehicle')
         .gt('quantity', 0);
 
+      // Open POs for this vehicle as short rows (backlog item 31); closed ones are on the Purchase Orders page.
       const { data: pos } = await supabaseClient
         .from('purchase_orders')
-        .select('*, purchase_order_line_items(*), suppliers(name)')
+        .select('id, po_number, supplier_id, supplier_name, project_id, vehicle_id, po_kind, po_type, stock_source, status, closed_at, amount, created_at, description, purchase_order_line_items(id, quantity, unit_cost, received, is_backordered), suppliers(name), fleet_vehicles!vehicle_id(vehicle_name, rego), supplier_bills(id, paid, check_status)')
         .eq('vehicle_id', vehicleId)
+        .is('closed_at', null)
         .order('created_at', { ascending: false });
 
-      const billsByPo = await loadBillsForPos((pos || []).map(p => p.id));
       const myRole = await getMyRole();
-      render(vehicle, stockRows || [], pos || [], billsByPo, myRole);
+      render(vehicle, stockRows || [], pos || [], {}, myRole);
     }
 
     function render(vehicle, stockRows, pos, billsByPo, myRole) {
@@ -97,19 +98,7 @@
         <div class="card">
           <h2>Purchase orders for this vehicle</h2>
           <div id="veh-po-list">
-            ${!pos.length ? '<p class="subtitle">None yet.</p>' : pos.map(po => {
-              const isStockPull = !po.supplier_id;
-              return `
-                <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
-                  <div style="display:flex; justify-content:space-between;">
-                    <strong>${isStockPull ? 'From Warehouse stock' : escapeHtml(po.suppliers?.name || po.supplier_name || 'Unknown supplier')}</strong>
-                    ${renderPoBadges(po)}
-                  </div>
-                  ${renderPoLineItemsReceivable(po, true)}
-                  ${renderPoBills(billsByPo[po.id], po, myRole)}
-                  ${po.supplier_id && !po.closed_at ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice</button>` : ''}
-                </div>`;
-            }).join('')}
+            ${!pos.length ? '<p class="subtitle">None open. Closed ones are on the <a href="/purchase-orders.html" class="link-quiet">Purchase Orders</a> page.</p>' : pos.map(po => renderPoRow(po, { showWhere: false })).join('') + '<p class="subtitle" style="font-size:13px;">Tap a PO to receive gear into this vehicle.</p>'}
           </div>
         </div>
       `;
@@ -143,17 +132,6 @@
         } catch (err) { alert(friendlyError(err)); btn.disabled = false; }
       }));
 
-      document.querySelectorAll('.upload-invoice-btn').forEach(btn => {
-        btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
-      });
-
-      wirePoBillButtons(document.getElementById('veh-po-list'), loadVehicleStock);
-      wireReceiveLineItemButtons(
-        document.getElementById('veh-po-list'),
-        pos,
-        () => 'vehicle', // POs on this page default to this vehicle
-        loadVehicleStock
-      );
     }
 
     async function openCreatePoPanel() {
@@ -170,12 +148,16 @@
           <div id="cp-supplier-section">
             <label>Supplier</label>
             ${supplierPickerHtml({ search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' })}
-            <button type="button" class="secondary" id="cp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
           </div>
 
-          ${poTypeChoiceHtml('cp')}
+          <label style="margin-top:14px;">Lines</label>
           <div id="cp-items-container"></div>
-          <button type="button" class="secondary" id="cp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
+          <button type="button" class="secondary btn-sm" id="cp-add-line-btn">+ Add item</button>
+          <details class="po-fold" style="margin-top:14px;">
+            <summary>More options <span class="subtitle" style="font-weight:400; font-size:12px; margin-left:auto;">open PO, invoice</span></summary>
+            ${poTypeChoiceHtml('cp')}
+            <button type="button" class="secondary btn-sm" id="cp-upload-invoice-btn" style="margin-top:10px;">Or upload the supplier's invoice instead</button>
+          </details>
 
           <div style="margin-top:14px;">
             <button id="cp-save-btn">Create PO</button>
@@ -215,7 +197,7 @@
             project_id: null, vehicle_id: vehicleId, supplier_id: supplierId, supplier_name: supplierName || 'Warehouse', // supplier_name is required
             po_type: supplierId ? readPoTypeChoice(overlay, 'cp') : 'fixed', locked: false, status: 'ordered', amount: 0,
             description: source === 'stock' ? 'Pulled from Warehouse stock' : 'Purchased for vehicle',
-          }).select('id, po_number').single();
+          }).select('id, po_number, supplier_id, project_id').single();
           if (poErr) throw poErr;
           await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${currentVehicle.vehicle_name || currentVehicle.rego} - ${source === 'stock' ? 'pulled from Warehouse' : supplierName}`);
 
@@ -229,7 +211,8 @@
           }
 
           overlay.remove();
-          await loadVehicleStock();
+          loadVehicleStock();
+          showPoCreatedPanel(newPo, supplierName || 'Warehouse', { onDone: loadVehicleStock });
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         } finally {

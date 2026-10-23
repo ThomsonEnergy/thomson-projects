@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 22 Oct 2026 (simpler purchase orders plan, item 31)
+Last updated 23 Oct 2026 (simpler purchase orders built, item 31)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -26,7 +26,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 25 | AI guesses prebuild components and prebuilds per cost centre (highlighted to check) | Built 21 Oct 2026, LIVE (spec A3), migration 20261116000000 | N | None |
 | 26 | STCs and BSTCs separate | Folded into item 27 (credits at quote level, not per stage) | N | See 27 |
 | 27 | Quote in steps: create, pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level | Built 21 Oct 2026, LIVE (spec A3), migration 20261117000000 | N | None |
-| 31 | Simpler purchase orders (short list, one PO page, tick-to-receive, short Create panel) | Planned 22 Oct 2026, waiting on owner's yes | N | None, no migration |
+| 31 | Simpler purchase orders (short list, one PO page, tick-to-receive, short Create panel, Show me how tour) | Built 23 Oct 2026, LIVE once merged (spec A10) | N | None |
 
 ## High lead time, start now
 
@@ -707,7 +707,7 @@ No money or stock change. One small migration, `?v=` bumps on feed.js, supabase-
 
 As built: the post, tags and photo links are made in one database call, `create_feed_post` (security invoker, so the table policies check the caller). A post can be photos only with no message. Possible follow-ups: photos on Home-only posts (no job), and showing a post's photos as "on the feed" on the Site Photos tab.
 
-## 31. Simpler purchase orders (planned 22 Oct 2026, waiting on owner's yes)
+## 31. Simpler purchase orders (built 23 Oct 2026, no migration)
 
 **Why:** the owner finds purchase orders overwhelming. Read-only look at `purchase-orders.html`, the job page Purchase orders tab (`project.html` `loadPurchaseOrders`, `openCreatePoPanel`) and the shared card code in `supabase-client.js` (`renderPoLineItemsReceivable`, `renderPoControls`, `renderPoBills`) found:
 
@@ -727,3 +727,5 @@ As built: the post, tags and photo links are made in one database call, `create_
 6. **One set of words** everywhere: Ordered, Part received, All received (ready to close), Closed.
 
 No money or stock rule changes: every receive, move, close and bill decision keeps calling the same database functions. Files: `purchase-orders.html`, new `purchase-order.html`, `supabase-client.js` (shared row, next step, tick-to-receive), `project.html`, `stock.html`, `vehicle-stock.html`, `global-search.js`, `style.css`, `?v=` bumps. Roles unchanged (staff receive, pricing roles edit lines and decide on bills, Admin / Finance reopen).
+
+**As built (23 Oct 2026):** everything above, plus the owner's add-on the same day: a **Show me how** guided tour for new staff on the Purchase Orders page and the PO page (spotlights the real buttons step by step, offered once to anyone new, on the button any time). Tabs became Open / Waiting on delivery / Ready to close / Bills needing a decision / Closed. The supplier page and the Stock and vehicle pages show the same short rows. Detail in `docs/PROJECT_SPEC.md` A10. Possible follow-ups: a tour on the job page's Purchase orders tab; the Closed tab stops at the last 300 (search by PO number for older).
