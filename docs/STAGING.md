@@ -11,6 +11,38 @@ TEops is live. Everything is tested on staging first.
 - **Preview branches (optional):** with the GitHub integration on, each pull request gets a throwaway Supabase branch that runs the PR's migrations. It is deleted when the PR closes.
 - **Production migrations:** NOT automatic ("Deploy to production" is off, so the repo can never change live auth settings or the live schema by itself). After the owner approves, Claude runs `supabase db push` linked to production, then the PR is merged and Netlify deploys the code.
 
+## Releases, the required check and Point in Time Recovery (23 Oct 2026)
+
+Staging was paused from 18 to 23 Oct 2026 for a run of bulk updates and is back on. The rules now:
+
+- **Bug fixes** go to `main` straight away. **Features** wait on their own branch; the owner tests them on the PR's Netlify deploy preview (it runs against the staging database) and releases overnight or at the end of the week by telling a chat "release PR 123". That chat applies the migrations to production, merges, checks the deploy commit on Netlify matches `main`, then runs `git push origin main:staging`. Full rule in `CLAUDE.md`, "Releases".
+- **The `staging` git branch follows `main`.** The Supabase staging branch (`jpmaudhhsahjhnrufzez`) runs whatever migrations are on the `staging` git branch, so after every merge: `git push origin main:staging`. Its old history has no shared base with `main`, so the first sync needs a force push, which cloud sessions are not allowed to make: owner, once, from the laptop in the repo folder: `git fetch origin && git push --force origin origin/main:staging`. Then Dashboard > Branches > staging should show the migrations running; after that plain `git push origin main:staging` works.
+- **Preview branches:** automatic branching makes a throwaway Supabase branch per PR and should delete it when the PR closes. Check Dashboard > Branches now and then; on 23 Oct one from PR 34 (`feat/email-workers`, 18 Oct) was still running. Delete leftovers: Dashboard > Branches > the branch > the three dots > Delete branch.
+
+### Make `check` a required check on `main` (owner, GitHub, once)
+
+The Action `.github/workflows/check.yml` runs `npm run check` on every PR by itself; nobody taps anything. To make a red result block the merge:
+
+1. GitHub > the repo > Settings > Rules > Rulesets > New ruleset > New branch ruleset.
+2. Ruleset name `main`. Enforcement status: Active. Target branches: Add target > Include default branch.
+3. Tick **Require a pull request before merging** (leave Required approvals at 0: you are the only reviewer).
+4. Tick **Require status checks to pass**, then Add checks and pick `check` (it only appears in the list after the Action has run once, so do this after the first PR with the Action has merged).
+5. Tick **Block force pushes**. Create.
+
+From then on a chat waits for the green tick before merging. Nothing else changes.
+
+### Turn on Point in Time Recovery (owner, Supabase, once)
+
+Daily backups can lose up to a day. PITR keeps a running copy so the database can be put back to any minute, which is the real safety net for a bad migration.
+
+1. Supabase Dashboard > the production project > Project Settings (the gear) > Add-ons.
+2. Point in Time Recovery > Enable, keep 7 days. It needs the Pro plan (already on it for branching) and the Small compute add-on or bigger; the page shows the monthly price before you confirm.
+3. Afterwards, Database > Backups has a "Point in time" tab: pick a date and minute to restore to a new project, never straight over production.
+
+### Migration history note
+
+`supabase/migrations/20261017120000_explicit_api_grants.sql` is in the repo but not in production's `supabase_migrations.schema_migrations`. Its grants already match production (that was its point), so the next `supabase db push` to production will apply it again harmlessly; record it by hand if the push complains.
+
 ## One-time setup (owner, in the dashboards)
 
 Do these in order. Steps 1 to 3 must be finished before step 4, or the integration will try to run the baseline against production.

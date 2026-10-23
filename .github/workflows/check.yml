@@ -1,0 +1,21 @@
+# Runs npm run check (syntax of every JS file, inline script block and SQL migration, plus the
+# policy pairs) on every pull request and on main. The owner makes it a required check in GitHub
+# (Settings > Rules > Rulesets, see docs/STAGING.md) so a red result blocks the merge. No approvals
+# are needed: the owner is the only reviewer. Nobody has to tap anything: it runs on its own.
+name: check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --no-audit --no-fund
+      # SQL parser for the migration checks (same as scripts/cloud-setup.sh)
+      - run: npm install --no-save --no-audit --no-fund libpg-query
+      - run: npm run check
