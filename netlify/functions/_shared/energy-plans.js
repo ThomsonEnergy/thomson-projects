@@ -27,14 +27,14 @@ const FALLBACK_BRANDS = ['agl', 'origin', 'energyaustralia', 'red-energy', 'alin
   'arcline', 'radian', 'reamped', 'blue-nrg', 'qenergy', 'actewagl', 'locality-planning', 'besy', 'cooperative-power', 'future-x', 'altogether',
   'engie', 'lumo-energy', 'sumo-power', 'shell-energy', 'mojo-power', 'origin-energy', 'agl-energy', 'localvolts', 'flow-power', 'energyaustralia-business'];
 
-// The networks Thomson Energy quotes on; a plan is kept when it is sold on one of them.
+// The networks Thomson Energy quotes on: NSW and QLD only, where it is licensed (not the ACT, see
+// docs/BUSINESS_FACTS.md). A plan is kept when it is sold on one of them.
 const NETWORKS = [
   { key: 'Essential Energy', match: /essential/i },
   { key: 'Ausgrid', match: /ausgrid/i },
   { key: 'Endeavour Energy', match: /endeavour/i },
   { key: 'Energex', match: /energex/i },
   { key: 'Ergon Energy', match: /ergon/i },
-  { key: 'Evoenergy', match: /evoenergy|actewagl distribution/i },
 ];
 function networkKey(name) {
   const n = NETWORKS.find(x => x.match.test(String(name || '')));

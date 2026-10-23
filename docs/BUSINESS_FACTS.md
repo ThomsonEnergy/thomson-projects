@@ -1,8 +1,12 @@
 # Business Facts
 
-Last updated 19 Oct 2026
+Last updated 23 Oct 2026
 
 Facts the owner has confirmed, which the code and spec depend on. Update here when they change.
+
+## Where we work
+
+- Licensed in **NSW and QLD only**, not the ACT (owner, 23 Oct 2026). Anything that covers areas (retail plan suggestions, networks) is limited to the NSW and QLD networks: Essential Energy, Ausgrid, Endeavour Energy, Energex and Ergon Energy.
 
 ## Xero
 

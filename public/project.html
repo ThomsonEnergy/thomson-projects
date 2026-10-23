@@ -1713,10 +1713,11 @@
       // when a retailer later edits the plan. Always a suggestion: the disclaimer goes wherever they show.
       let planOptions = Array.isArray((project.roi_inputs || {}).plan_options) ? project.roi_inputs.plan_options.slice() : [];
       let planResults = null; // { candidates, uncostable, fetchedNote }
-      const NETWORK_KEYS = ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex', 'Ergon Energy', 'Evoenergy'];
+      // NSW and QLD networks only: Thomson Energy is licensed there, not in the ACT (docs/BUSINESS_FACTS.md)
+      const NETWORK_KEYS = ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex', 'Ergon Energy'];
       const networkOf = (name) => {
         const t = String(name || '').toLowerCase();
-        return NETWORK_KEYS.find(k => t.includes(k.split(' ')[0].toLowerCase())) || (/actewagl/.test(t) ? 'Evoenergy' : '');
+        return NETWORK_KEYS.find(k => t.includes(k.split(' ')[0].toLowerCase())) || '';
       };
       function sitePostcode() {
         const texts = [(project.bill_reading || {}).supply_address, project.client_address];
