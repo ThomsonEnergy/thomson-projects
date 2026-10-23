@@ -267,6 +267,13 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
     if (pgErr) throw pgErr;
   }
 
+  // The quote's contacts (Contacts tab) go with the job.
+  const { data: contacts } = await supabaseAdmin.from('job_contacts').select('side, role, name, company, phone, email, notes, profile_id, client_contact_id, sort_order, created_by').eq('project_id', quote.id);
+  if (contacts && contacts.length) {
+    const { error: jcErr } = await supabaseAdmin.from('job_contacts').insert(contacts.map((c) => ({ ...c, project_id: job.id })));
+    if (jcErr) throw jcErr;
+  }
+
   // The agreed payment milestones go with the job too.
   const { data: milestones } = await supabaseAdmin.from('payment_milestones').select('label, percent, sort_order').eq('project_id', quote.id);
   if (milestones && milestones.length) {

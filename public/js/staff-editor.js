@@ -75,7 +75,7 @@ async function openStaffEditor(userId, opts = {}) {
     policyStatusHtml,
   ] = await Promise.all([
     supabaseClient.from('profiles')
-      .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id,
+      .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id, site_rank,
         employment_type, employment_start_date, pay_type, salary_includes_super, has_company_vehicle, has_probationary_period,
         emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_employee_id`)
       .eq('id', userId).single(),
@@ -133,6 +133,10 @@ async function openStaffEditor(userId, opts = {}) {
 
     <label>Mobile number</label>
     <input id="profile-mobile-input" type="tel" autocomplete="tel" value="${staffEditorEscAttr(profile.mobile_number)}" />
+
+    <label>Site rank</label>
+    <input id="profile-site-rank-input" type="number" min="1" max="99" inputmode="numeric" value="${profile.site_rank || ''}" placeholder="1 is the most senior" />
+    <p class="subtitle" style="font-size:12px; margin:4px 0 0;">Decides who is asked "How's the job?" at clock-out when the job's Thomson site manager has not clocked in that day: the lowest number on the job that day. Blank uses the role (Admin 1, Finance 2, Sales 3, Staff 9).</p>
 
     <label>Notes</label>
     <textarea id="profile-notes-input" style="min-height:70px;">${escapeHtml(profile.notes)}</textarea>
@@ -355,6 +359,7 @@ async function openStaffEditor(userId, opts = {}) {
       const updates = {
         full_name: overlay.querySelector('#profile-name-input').value.trim() || null,
         mobile_number: overlay.querySelector('#profile-mobile-input').value.trim() || null,
+        site_rank: Math.min(99, Math.max(1, parseInt(overlay.querySelector('#profile-site-rank-input').value, 10))) || null,
         notes: overlay.querySelector('#profile-notes-input').value.trim() || null,
         rate_tier_id: overlay.querySelector('#profile-tier-select').value || null,
         ordinary_rate: parseFloat(overlay.querySelector('#profile-rate-ordinary').value) || null,

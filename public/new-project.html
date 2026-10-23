@@ -95,11 +95,6 @@
       <p class="subtitle" style="margin-top:6px;"><a class="link-quiet" href="/clients.html" target="_blank">Manage clients &amp; contacts &rarr;</a></p>
     </div>
 
-    <div class="card" id="job-contacts-card" style="display:none;">
-      <h2>Who's running this job</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Picked from this client's contact list. Used so correspondence like variations goes to the right person, not just whoever's first on file.</p>
-      <div class="grid cols-3" id="job-contacts-selects"></div>
-    </div>
 
     <div class="card">
       <h2>Notes</h2>
@@ -112,7 +107,7 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=115"></script>
+  <script src="/js/supabase-client.js?v=116"></script>
   <script src="/js/template-questions.js?v=2"></script>
   <script src="/js/email-compose.js?v=8"></script>
   <script src="/js/theme.js?v=2"></script>
@@ -127,7 +122,6 @@
     let currentTemplate = 'new_build';
     let companySettings = {};
     let selectedClientId = null;
-    let assignedContactIds = {};
     const sitePicker = attachSitePicker(document.getElementById('p-site-pick'), document.getElementById('p-address'));
 
     const TEMPLATE_INFO = {
@@ -167,7 +161,6 @@
     document.getElementById('clear-client-btn').addEventListener('click', () => {
       document.getElementById('client-search-input').value = '';
       setSelectedClient(null);
-      loadJobContactPickers(null);
     });
 
     let clientSearchTimeout = null;
@@ -198,7 +191,6 @@
             const client = data.find(c => c.id === row.dataset.id);
             document.getElementById('client-search-input').value = client.name;
             setSelectedClient(client);
-            loadJobContactPickers(client.id);
           });
         });
         resultsEl.style.display = 'block';
@@ -211,42 +203,6 @@
       }
     });
 
-    // ---------- job contact assignment ----------
-
-    const JOB_CONTACT_TYPES = [
-      { key: 'project_manager_contact_id', type: 'project_manager', label: 'Project manager' },
-      { key: 'site_contact_id', type: 'site', label: 'Site supervisor' },
-      { key: 'job_contact_id', type: 'job', label: 'Job contact' },
-      { key: 'sales_contact_id', type: 'sales', label: 'Sales contact' },
-      { key: 'accounts_contact_id', type: 'accounts', label: 'Accounts contact' },
-    ];
-
-    async function loadJobContactPickers(clientId) {
-      const card = document.getElementById('job-contacts-card');
-      const container = document.getElementById('job-contacts-selects');
-      assignedContactIds = {};
-      if (!clientId) { card.style.display = 'none'; return; }
-      const { data: contacts, error } = await supabaseClient.from('client_contacts').select('*').eq('client_id', clientId);
-      if (error || !contacts || !contacts.length) { card.style.display = 'none'; return; }
-      card.style.display = 'block';
-      container.innerHTML = JOB_CONTACT_TYPES.map(t => {
-        const options = contacts.filter(c => c.contact_type === t.type);
-        if (!options.length) return '';
-        return `
-          <div>
-            <label style="margin-top:0">${t.label}</label>
-            <select class="job-contact-select" data-key="${t.key}">
-              <option value="">-- Not assigned --</option>
-              ${options.map(c => `<option value="${c.id}">${escapeHtml(c.name || c.phone || c.email)}</option>`).join('')}
-            </select>
-          </div>`;
-      }).join('');
-      if (!container.innerHTML.trim()) { card.style.display = 'none'; return; }
-      container.querySelectorAll('.job-contact-select').forEach(sel => {
-        sel.addEventListener('change', () => { assignedContactIds[sel.dataset.key] = sel.value || null; });
-        assignedContactIds[sel.dataset.key] = sel.value || null;
-      });
-    }
 
     // ---------- address autocomplete ----------
 
@@ -340,11 +296,6 @@
           estimate_disclaimer_text: currentTemplate === 'quick_estimate'
             ? (companySettings.default_estimate_disclaimer || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.')
             : '',
-          project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
-          site_contact_id: assignedContactIds.site_contact_id || null,
-          job_contact_id: assignedContactIds.job_contact_id || null,
-          sales_contact_id: assignedContactIds.sales_contact_id || null,
-          accounts_contact_id: assignedContactIds.accounts_contact_id || null,
           pipeline_stage: 'draft_quote',
         };
         if (prefillLeadId) projectFields.lead_id = prefillLeadId;
@@ -444,7 +395,6 @@
           if (client) {
             document.getElementById('client-search-input').value = client.name;
             setSelectedClient(client);
-            loadJobContactPickers(client.id);
           }
         }
         setV('p-name', emailPf.name); setV('p-client', emailPf.client_name); setV('p-email', emailPf.client_email);

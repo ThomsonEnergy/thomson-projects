@@ -758,7 +758,7 @@ No money or stock rule changes: every receive, move, close and bill decision kee
 No money or stock change. One small migration; `?v=` bumps on notifications.js, supabase-client.js and the pages that reference it; ops-digest.js, push.js, inbox.html and ops.html change.
 
 
-## 33. Contacts on every job: on site, client, Thomson Energy (planned 22 Oct 2026, waiting on owner's yes)
+## 33. Contacts on every job: on site, client, Thomson Energy (built 23 Oct 2026, migration 20261121000000)
 
 **Today:** a job can only link five of the client's saved contacts (`projects.project_manager_contact_id`, `site_contact_id`, `job_contact_id`, `sales_contact_id`, `accounts_contact_id`), picked in the quote edit form from `client_contacts`. That table is readable by pricing roles only, so Staff on site never see the "Who's running this job" card on the Details tab, and there is nowhere to put the owner, the renter, the builder or another trade, nor who at Thomson Energy is running the job. At clock-out, everyone on the job is asked "How's the job?" (Complete / Not complete, back next working day), whoever they are.
 
