@@ -61,6 +61,7 @@ const ROI_ASSUMPTIONS = {
 };
 
 function roiNum(v) {
+  if (v == null || v === '') return null;
   const n = typeof v === 'string' ? parseFloat(v.replace(/[^0-9.\-]/g, '')) : Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -152,6 +153,27 @@ function suggestSizes({ reading, answers, zoneRating }) {
   };
 }
 
+// The battery on the quote, from its line items: every line that names a battery with a kWh figure
+// ("Sigen Battery 8kWh", "Powerwall 3 13.5 kWh"), times its quantity. Used when nothing is typed on
+// step 3, so the estimate follows what is quoted. Works on the quote page's centres and on the
+// proposal's (description plus quantity on both).
+function roiBatteryKwhFromLines(centres) {
+  let total = 0;
+  (centres || []).forEach(c => {
+    const stageIsBattery = /batter/i.test(c.name || '');
+    (c.cost_centre_line_items || c.line_items || []).forEach(li => {
+      const text = `${li.description || ''} ${li.prebuild_client_description || ''}`;
+      if (!/batter|powerwall|sigenstor|storage/i.test(text) && !stageIsBattery) return;
+      if (/gateway|inverter|cable|labour|bracket|mount/i.test(text) && !/batter/i.test(text)) return;
+      const m = text.match(/(\d+(?:\.\d+)?)\s*kwh/i);
+      if (!m) return;
+      const qty = roiNum(li.quantity) || 1;
+      total += parseFloat(m[1]) * qty;
+    });
+  });
+  return Math.round(total * 10) / 10;
+}
+
 // ---------- rates (a plan) ----------
 
 // "14:00-20:00, 07:00-09:00" to a set of hours. A window that crosses midnight wraps.
@@ -180,6 +202,11 @@ function roiPlan(saved, reading, fallbackName) {
   const billTou = !!(roiNum(rates.peak) && (roiNum(rates.off_peak) != null)) || r.tariff_type === 'time_of_use';
   const tariff = s.tariff || (billTou && roiNum(rates.peak) ? 'tou' : 'flat');
   const pick = (k, billValue) => (roiNum(s[k]) != null ? roiNum(s[k]) : roiNum(billValue));
+  const billHours = r.tou_hours || {};
+  // A shoulder band exists only when the bill prices one (or shows shoulder kWh), or the staff typed
+  // one. A two-band tariff (peak and off-peak, like CovaU on Essential Energy) has none: every hour
+  // outside peak is off-peak.
+  const hasShoulder = roiNum(s.shoulder) != null || roiNum(rates.shoulder) != null || roiNum(r.shoulder_kwh) > 0 || (s.shoulder_hours != null && s.shoulder_hours !== '');
   const plan = {
     name: s.name || fallbackName,
     tariff,
@@ -190,13 +217,15 @@ function roiPlan(saved, reading, fallbackName) {
     controlled: pick('controlled', rates.controlled_load),
     supply: pick('supply', r.supply_charge_c_per_day),
     feed_in: pick('feed_in', r.feed_in_c_per_kwh),
-    peak_hours: s.peak_hours || ROI_ASSUMPTIONS.defaultPeakHours,
-    shoulder_hours: s.shoulder_hours || ROI_ASSUMPTIONS.defaultShoulderHours,
+    peak_hours: (s.peak_hours != null && s.peak_hours !== '') ? s.peak_hours : (billHours.peak || ROI_ASSUMPTIONS.defaultPeakHours),
+    shoulder_hours: s.shoulder_hours != null ? s.shoulder_hours : (billHours.shoulder || (hasShoulder ? ROI_ASSUMPTIONS.defaultShoulderHours : '')),
+    hasShoulder,
   };
   if (plan.tariff === 'tou') {
     if (plan.peak == null) plan.peak = plan.rate;
     if (plan.off_peak == null) plan.off_peak = plan.rate != null ? Math.round(plan.rate * 0.7 * 10) / 10 : null;
-    if (plan.shoulder == null && plan.peak != null && plan.off_peak != null) plan.shoulder = Math.round((plan.peak + plan.off_peak) / 2 * 10) / 10;
+    if (plan.shoulder == null) plan.shoulder = hasShoulder && plan.peak != null && plan.off_peak != null ? Math.round((plan.peak + plan.off_peak) / 2 * 10) / 10 : plan.off_peak;
+    if (!hasShoulder) plan.shoulder_hours = '';
   } else if (plan.rate == null && plan.peak != null) {
     plan.rate = plan.peak;
   }
@@ -221,10 +250,14 @@ function roiLoadShape(metrics, plan) {
   let shape = base.map(v => v / total);
   if (metrics.split && plan.tariff === 'tou') {
     const splitTotal = metrics.split.peak + metrics.split.shoulder + metrics.split.offPeak;
-    if (splitTotal > 0) {
-      const want = { peak: metrics.split.peak / splitTotal, shoulder: metrics.split.shoulder / splitTotal, off_peak: metrics.split.offPeak / splitTotal };
-      const have = { peak: 0, shoulder: 0, off_peak: 0 };
-      shape.forEach((v, h) => { have[plan.bandOf(h)] += v; });
+    const want = { peak: metrics.split.peak / splitTotal, shoulder: metrics.split.shoulder / splitTotal, off_peak: metrics.split.offPeak / splitTotal };
+    const have = { peak: 0, shoulder: 0, off_peak: 0 };
+    shape.forEach((v, h) => { have[plan.bandOf(h)] += v; });
+    // Only stretch when every band the plan has hours for also has kWh on the bill; otherwise the
+    // bill's bands and the plan's windows do not line up (a shoulder window typed against a two-band
+    // bill, say) and the normal day shape is the safer guess.
+    const lineUp = splitTotal > 0 && ['peak', 'shoulder', 'off_peak'].every(b => have[b] === 0 || want[b] > 0);
+    if (lineUp) {
       shape = shape.map((v, h) => { const b = plan.bandOf(h); return have[b] > 0 ? v * want[b] / have[b] : v; });
       const sum = shape.reduce((s, v) => s + v, 0);
       shape = shape.map(v => v / sum);
@@ -596,5 +629,5 @@ function roiAssumptionsText(est) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, billMetrics, suggestSizes, existingSolarKw, roiPlan, roiParseHours, roiEstimate, roiGaps, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
+  module.exports = { ROI_ASSUMPTIONS, billMetrics, suggestSizes, existingSolarKw, roiPlan, roiParseHours, roiBatteryKwhFromLines, roiEstimate, roiGaps, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
 }

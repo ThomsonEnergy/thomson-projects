@@ -43,6 +43,7 @@ const PROMPT = `These are the pages of a customer's electricity bill from an Aus
 - feed_in_c_per_kwh: the feed-in tariff in cents per kWh, if shown
 - usage_rate_c_per_kwh: the main usage rate in cents per kWh (inc GST if the bill shows inc GST figures; on a time-of-use tariff the peak rate), and
 - usage_rates: an object of every usage rate shown, e.g. {"peak": 48.2, "shoulder": 30.1, "off_peak": 22.5, "controlled_load": 20.0}
+- tou_hours: when the bill prints the time-of-use windows, an object of the hours each band applies, as 24 hour ranges, e.g. {"peak": "17:00-20:00", "shoulder": "07:00-17:00, 20:00-22:00", "off_peak": "22:00-07:00"}; leave a band out when the bill has no such band (a peak and off-peak only tariff has no shoulder); null when no hours are printed
 - supply_charge_c_per_day: the daily supply charge in cents per day
 - bill_total: the total amount of this bill in dollars (the amount due for this period, not the account balance carried forward)
 - usage_charges_total: the dollars charged for usage in the period, if shown separately
