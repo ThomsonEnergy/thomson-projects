@@ -16,7 +16,7 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
   - Sonnet 5.5: small well-specified changes (one-file fixes, copy, `?v=` bumps), docs edits, reading logs and deploy status.
   - Haiku 5.5: lookups and yes/no checks only, never code that ships.
   - Effort: `high` for feature builds and most plans; `xhigh` or `max` only for migrations, money, stock, RLS or an unknown bug; `medium` (the Opus 5.5 default) for chat, docs and small fixes; `low` for lookups. A level saved on the laptop does not reach cloud sessions; set `CLAUDE_CODE_EFFORT_LEVEL` on the cloud environment for a standing default.
-- After that "yes", carry the whole plan through without asking again: build, push, open the PR. A bug fix then goes all the way (production migration, merge to `main`); a feature stops at the PR and its preview link and waits for release time (see "Releases" below). Only stop and ask the owner if there is a real question or a change of direction (new scope, a different migration, deleting data not in the plan, or a failure that changes the plan).
+- After that "yes", carry the whole plan through without asking again: build, push, open the PR. A bug fix then goes all the way (production migration, merge to `main`); a feature merges into `staging` once it is whole and waits there for release night (see "Releases" below). Only stop and ask the owner if there is a real question or a change of direction (new scope, a different migration, deleting data not in the plan, or a failure that changes the plan).
 - One consolidated delivery, not lots of small ones.
 - Talk plainly, one step at a time: say exactly what to click and what they should see, especially in dashboards (Netlify, Supabase, Twilio, Apple, Google). No "see line 6 of seed.sql": test-only staging logins can be stated in chat directly. Real keys and passwords never go in chat.
 - Owner is also the bookkeeper (does Xero payroll). Give Xero steps directly, never "ask your bookkeeper". Xero entity is Thomson Energy Australia only, never Thomson Energy Solutions, and use the real account codes (see `docs/BUSINESS_FACTS.md`).
@@ -26,7 +26,7 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
 The owner switches between Claude Code on the laptop and cloud sessions on the phone. Cloud sessions only see GitHub, and the laptop's local Claude memory does not travel. So:
 
 - **GitHub is the only shared memory.** Anything worth remembering (rules, decisions, account progress, business facts) goes in this file or `docs/`, never only in local memory or chat.
-- **Never leave work only on one device.** Before ending a turn that changed files: commit, push, and open (or update) a PR. Merge to `main` once the owner approves, so the next session on any device starts from it.
+- **Never leave work only on one device.** Before ending a turn that changed files: commit, push, and open (or update) a PR. Merge it (features into `staging`, bug fixes and docs into `main`) once the owner approves, so the next session on any device starts from it.
 - **Start of every session:** pull the latest `main` (or sync the worktree with the base branch) before working, and check open PRs/branches from the other device.
 - Decisions and progress from planning chats go in `docs/` the same day (for example `docs/EXTERNAL_ACCOUNTS.md`).
 
@@ -37,7 +37,7 @@ Other chats only know what is on `main`. So in every session, before the final r
 1. **Write it back.** Anything finished, decided, added as an idea, or changed in scope (including talk-only planning chats with no code) goes in the repo:
    - one dated line at the top of `docs/DECISIONS.md` saying what changed and where the detail lives;
    - the detail in the right doc: `docs/PROJECT_SPEC.md` (built or in scope), `docs/IDEAS_BACKLOG.md` (ideas and plans), `docs/AI_AGENTS_PLAN.md` (agents), `docs/EXTERNAL_ACCOUNTS.md` (outside accounts), `docs/BUSINESS_FACTS.md` (business facts).
-2. **Get it onto `main`.** Commit, push, open a PR. Docs-only PRs (`docs/`, `CLAUDE.md`, `README.md`) are merged straight away so the next chat sees them. Code and migrations wait for the owner's "yes" on the plan; bug fixes then go all the way to `main` without asking again, features wait on their branch for release time (see "Releases").
+2. **Get it onto `main`.** Commit, push, open a PR. Docs-only PRs (`docs/`, `CLAUDE.md`, `README.md`) are merged straight away so the next chat sees them. Code and migrations wait for the owner's "yes" on the plan; bug fixes then go all the way to `main` without asking again, features merge into `staging` and wait there for release night (see "Releases").
 3. **Say so.** End the reply with one line naming the docs updated, or "no repo notes needed".
 
 At the start of every session: pull `main` and read `docs/DECISIONS.md` before answering questions about plans or status. If the owner says something that contradicts the docs, ask, then fix the doc.
@@ -46,12 +46,13 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 
 ## Releases (owner's rule from 23 Oct 2026)
 
-- **Bug fixes** (something live is wrong): fix on a branch, `npm run check`, PR, merge to `main` straight away, any time of day. A migration in a fix still gets the owner's yes first.
-- **Features and updates**: one feature branch per feature, one PR, one merge. Push the branch, open the PR and give the owner the PR's Netlify deploy preview link (it runs against the staging database) so they can test it on the phone. Do NOT merge during the work day: staff are on jobs. The owner releases overnight or at the end of the week by saying "release PR 123" (or "release everything that is ready") in any chat; that chat applies the migrations to production, merges, checks the deploy commit, then fast-forwards `staging`. The one exception: the owner says at the start of the chat "upload this straight to the site".
-- A feature stays on its branch until it is whole and tested. No half features on `main`, no two features in one PR. Several features can wait on their own branches at once (different chats, different devices). Release them one at a time: merge `main` into the branch, `npm run check`, that branch's migrations to production, merge, confirm the Netlify deploy commit matches `main`, then the next one. Two features that touch the same big file (`project.html`, `supabase-client.js`) or bump the same `?v=` will conflict; the release chat resolves that and sets the final `?v=` numbers. Better: features that touch the same page or depend on each other are built in one chat on one branch, one after the other; parallel chats are for separate areas (quotes, stock, inbox).
-- The GitHub Action `check` runs `npm run check` on every PR and is a required check: wait for it to go green before merging. Nobody has to approve anything by hand.
-- After every merge to `main`: `git push origin main:staging` so the staging database runs the same migrations.
-- Docs-only PRs still merge straight away.
+- **Two branches matter.** `main` is the live site. `staging` is the next release: the staging database follows it and Netlify builds it at https://staging--thomsonprojects.netlify.app (staging database, test logins in `docs/STAGING.md`). Everything is tested there, together, before it goes live.
+- **Bug fixes** (something live is wrong): branch off `main`, `npm run check`, PR into `main`, merge straight away, any time of day. A migration in a fix still gets the owner's yes first and goes to production before the merge. Then merge `main` into `staging` (a merge commit) so the fix is on the test site too.
+- **Features and updates**: branch off `staging`, one branch and one PR per feature, PR into `staging`. Merge into `staging` as soon as the feature is whole and `check` is green, any time of day (nothing on `staging` is live). The staging database runs the feature's migrations by itself when the PR merges. Half-built work stays on its own branch and its own preview link; a feature that is on `staging` but not ready on release night holds up the whole release until a chat reverts it out, so merge only what is finished.
+- **Release** (overnight or end of week, when the owner says "release"): one PR `staging` into `main`. The release chat applies every new migration to production (`supabase db push` linked to production), merges with a merge commit (never squash, so `main` and `staging` stay identical), confirms the Netlify deploy commit matches `main`, and tells the owner what went live. The one exception: the owner says at the start of the chat "upload this straight to the site" (then it is handled like a bug fix).
+- Features that touch the same page or depend on each other: one chat, one branch, one after the other. Parallel chats are for separate areas (quotes, stock, inbox).
+- The GitHub Action `check` runs `npm run check` on every PR and is a required check on `main`: wait for the green tick before merging. Nobody approves anything by hand.
+- Docs-only PRs still go straight into `main`, then `main` into `staging`.
 
 ## Delivery standards
 
@@ -88,8 +89,8 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 1. `supabase migration new <name>` (files go in `supabase/migrations/`, never the old `Migrations/` archive).
 2. Write the SQL, run `npm run check`.
 3. Show the owner the SQL and wait for "yes".
-4. Apply to staging (`supabase db push` with the CLI linked to staging, or push the branch and let the PR preview branch run it), test.
-5. At release time (a bug fix: straight after the owner's yes): `supabase db push` linked to production, then merge to `main` so Netlify deploys. Confirm both succeeded. (Supabase "Deploy to production" is off on purpose.)
+4. Apply to staging: merging the feature PR into `staging` runs it on the staging database by itself (or `supabase db push` linked to staging to test earlier on the PR preview). Test there.
+5. At release time (a bug fix: straight after the owner's yes): `supabase db push` linked to production, then merge `staging` into `main` (a bug fix: its PR into `main`) so Netlify deploys. Confirm both succeeded. (Supabase "Deploy to production" is off on purpose.)
 6. Risky changes (dropping columns or tables, bulk updates): take a backup first.
 
 Full detail in `docs/STAGING.md`.

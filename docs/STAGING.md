@@ -13,19 +13,21 @@ TEops is live. Everything is tested on staging first.
 
 ## Releases, the required check and Point in Time Recovery (23 Oct 2026)
 
-Staging was paused from 18 to 23 Oct 2026 for a run of bulk updates and is back on. The rules now:
+Staging was paused from 18 to 23 Oct 2026 for a run of bulk updates and is back on, as the one branch everything is tested on together. The flow (full rule in `CLAUDE.md`, "Releases"):
 
-- **Bug fixes** go to `main` straight away. **Features** wait on their own branch; the owner tests them on the PR's Netlify deploy preview (it runs against the staging database) and releases overnight or at the end of the week by telling a chat "release PR 123". That chat applies the migrations to production, merges, checks the deploy commit on Netlify matches `main`, then runs `git push origin main:staging`. Full rule in `CLAUDE.md`, "Releases".
-- **The `staging` git branch follows `main`.** The Supabase staging branch (`jpmaudhhsahjhnrufzez`) runs whatever migrations are on the `staging` git branch, so after every merge: `git push origin main:staging`. Its old history has no shared base with `main`, so the first sync needs a force push, which cloud sessions are not allowed to make: owner, once, from the laptop in the repo folder: `git fetch origin && git push --force origin origin/main:staging`. Then Dashboard > Branches > staging should show the migrations running; after that plain `git push origin main:staging` works.
+- **`staging` is the next release.** Feature branches come off `staging` and their PRs merge into `staging` as soon as the feature is whole. The Supabase staging branch (`jpmaudhhsahjhnrufzez`) follows the `staging` git branch, so each merge runs that feature's migrations on the staging database by itself. Netlify builds the branch at https://staging--thomsonprojects.netlify.app against the staging database: the owner logs in there with the test logins below and tests the week's features together.
+- **Bug fixes** go into `main` straight away, then `main` is merged into `staging`.
+- **Release night:** the owner says "release" in any chat. That chat opens one PR `staging` into `main`, applies the new migrations to production, merges with a merge commit (not squash, so the two branches stay identical), checks the deploy commit on Netlify matches `main`, and reports what went live.
+- **One-off sync (owner, laptop):** the old `staging` history has no shared base with `main`, so the first sync needs a force push, which cloud sessions are not allowed to make. In the repo folder: `git fetch origin && git push --force origin origin/main:staging`. Then Dashboard > Branches > staging shows the migrations running. From then on the branch moves only by PR merges and `git merge main`.
+- **Netlify branch deploy (owner, once):** Netlify > the site > Site configuration > Build & deploy > Continuous deployment > Branches and deploy contexts > Configure > Branch deploys: "Let me add individual branches", add `staging`, Save. The branch-deploy environment variables already point at the staging database (18 Oct). Then check Supabase staging > Authentication > URL configuration has `https://*--thomsonprojects.netlify.app/**` in the redirect URLs so logins on the branch address work.
 - **Preview branches:** automatic branching makes a throwaway Supabase branch per PR and should delete it when the PR closes. Check Dashboard > Branches now and then; on 23 Oct one from PR 34 (`feat/email-workers`, 18 Oct) was still running. Delete leftovers: Dashboard > Branches > the branch > the three dots > Delete branch.
 
-### Testing a feature on its preview (owner)
+### Testing on staging (owner)
 
-- Every PR gets a preview address from Netlify (on the PR page, "Deploy Preview" link, or Netlify > Deploys). It runs against the staging database, never live data: type in whatever dummy jobs, quotes and POs you like.
+- The fixed address https://staging--thomsonprojects.netlify.app has everything merged into `staging` so far. A feature still on its own branch has its own preview link on the PR page ("Deploy Preview"); both run against the staging database, never live data: type in whatever dummy jobs, quotes and POs you like.
 - Staging logins (test only, not real accounts): admin@staging.test, finance@staging.test, sales@staging.test, staff@staging.test, password `StagingOnly-TEops-2026`. Staging starts with a handful of fake rows from `supabase/seed.sql` and keeps whatever you add until the branch is reset.
-- A feature that adds a migration: the chat building it pushes the migration to staging (`supabase db push` linked to staging) so the preview works before the release.
-- What does not work on a preview: anything that needs a real integration key (AI buttons, Xero, Gmail, Airwallex, Formbay, Pylon) unless that key is also put in staging's `api_keys` table from Settings on the preview; scheduled functions (they only run on the production deploy); emails and push notifications to real people.
-- Until the one-off `staging` sync above is done, previews will error on the columns added since 18 Oct.
+- What does not work on staging: anything that needs a real integration key (AI buttons, Xero, Gmail, Airwallex, Formbay, Pylon) unless that key is also entered in Settings on the staging site (it goes into staging's own `api_keys` table); scheduled functions (they only run on the production deploy); emails and push notifications to real people.
+- Until the one-off `staging` sync above is done, the staging site will error on the columns added since 18 Oct.
 
 ### Make `check` a required check on `main` (owner, GitHub, once)
 
