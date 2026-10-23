@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Purchase Order - TEops</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <p style="margin:0 0 10px;"><a href="/purchase-orders.html" class="link-quiet">&larr; All purchase orders</a></p>
+    <div id="po-page"><p class="subtitle">Loading...</p></div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=118"></script>
+  <script src="/js/email-compose.js?v=8"></script>
+  <script src="/js/theme.js?v=2"></script>
+  <script>
+    // One purchase order, one page: the next step at the top, the lines with a tick box each
+    // (tick what arrived, one Receive button), everything else under More. Backlog item 31.
+    const poId = new URLSearchParams(window.location.search).get('id');
+    let current = null; // { po, bills, emailed }
+    let myRole = 'staff';
+
+    async function load() {
+      const pageEl = document.getElementById('po-page');
+      if (!poId) { pageEl.innerHTML = '<div class="error-box">No purchase order given. Open one from the Purchase Orders page.</div>'; return; }
+      try {
+        const [full, role] = await Promise.all([loadPurchaseOrderFull(poId), getMyRole()]);
+        myRole = role;
+        if (!full) { pageEl.innerHTML = '<div class="error-box">That purchase order could not be found.</div>'; return; }
+        current = full;
+        render();
+      } catch (err) {
+        pageEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+      }
+    }
+
+    function createdLabel(po) {
+      return po.created_at ? new Date(po.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    }
+
+    function render() {
+      const { po, bills, emailed } = current;
+      const pageEl = document.getElementById('po-page');
+      const ref = po.po_number || 'Purchase order';
+      if (typeof setPageTitle === 'function') setPageTitle(ref); else document.title = `${ref} - TEops`;
+      const c = poLineCounts(po);
+      const open = !po.closed_at;
+      const next = poNextStep(po, bills, { emailed, role: myRole });
+      const pricing = isPricingRole(myRole);
+      const supplierName = po.suppliers?.name || po.supplier_name || 'Unknown supplier';
+      const genericDesc = /^(PO for |Stock purchase order$|PO for vehicle$|Pulled from Warehouse stock$|Purchased for vehicle$|Tools and equipment$|Perishables \(tools register\)$)/.test(po.description || '');
+      const decideCount = bills.filter(b => !b.paid && (b.supplier_bill_line_items || []).some(l => l.resolution !== 'denied' && billLineState(l).red)).length;
+      const billsSummary = !bills.length ? 'No bills on this PO yet'
+        : decideCount ? `${decideCount} bill${decideCount === 1 ? '' : 's'} need${decideCount === 1 ? 's' : ''} a decision`
+        : `${bills.length} bill${bills.length === 1 ? '' : 's'}, ${bills.every(b => b.paid) ? 'paid' : bills.some(b => b.approved_for_payment) ? 'approved for payment' : 'matched'}`;
+      const budgetPercent = po.budget_cap ? Math.round((poTotalAmount(po) / Number(po.budget_cap)) * 100) : null;
+
+      pageEl.innerHTML = `
+        <div class="card" id="po-head">
+          <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+            <div style="min-width:0;">
+              <h1 style="margin:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">${escapeHtml(ref)} <span id="po-status">${renderPoBadges(po)}</span></h1>
+              <p class="subtitle" style="margin:6px 0 0; font-size:14px;">
+                <strong style="color:var(--text);">${escapeHtml(supplierName)}</strong>
+                &middot; for <a href="${poWhereHref(po)}" class="link-quiet" id="po-where">${escapeHtml(poWhereLabel(po))}</a>
+                ${createdLabel(po) ? ` &middot; created ${escapeHtml(createdLabel(po))}` : ''}
+                ${emailed ? ' &middot; emailed to the supplier' : ''}
+              </p>
+              ${po.description && !genericDesc ? `<p class="subtitle" style="margin:4px 0 0;">${escapeHtml(po.description)}</p>` : ''}
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+              <div style="font-size:22px; font-weight:700;">${money(poTotalAmount(po))}</div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+                <button type="button" class="secondary btn-sm" id="po-more-btn">More &#8943;</button>
+                <button type="button" class="secondary btn-sm" id="po-tour-btn" title="A short tour of this page">Show me how</button>
+              </div>
+            </div>
+          </div>
+          <div class="po-next" id="po-next">
+            ${next.done ? `<div class="po-next-done">&#10003; ${escapeHtml(next.label)}</div>` : `<button type="button" id="po-next-btn" class="${next.secondary ? 'secondary' : ''}" data-key="${next.key}">${escapeHtml(next.label)}</button>`}
+            ${next.hint ? `<p class="subtitle" style="margin:0; font-size:13px;">${escapeHtml(next.hint)}</p>` : ''}
+          </div>
+        </div>
+
+        <div class="card" id="po-lines-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+            <h2 style="margin:0;">Lines${c.total ? ` <span class="subtitle" style="font-size:14px; font-weight:400;">${c.received} of ${c.total} received</span>` : ''}</h2>
+            ${open && c.toReceive + c.backordered > 0 ? '<a href="#" class="link-quiet" id="po-select-all" style="font-size:14px;">Tick all</a>' : ''}
+          </div>
+          ${open && c.toReceive + c.backordered > 0 ? '<p class="subtitle" style="margin:4px 0 8px; font-size:13px;">Tick what arrived, then press Receive. Anything else for a line is under its &#8943; button.</p>' : '<div style="height:8px;"></div>'}
+          <div id="po-lines">${renderPoTickLines(po, true)}</div>
+          <div class="po-receive-bar" id="po-receive-bar" style="display:none;">
+            <button type="button" class="po-receive-btn">Receive</button>
+            <span class="subtitle" style="font-size:13px;">or <a href="#" class="po-receive-elsewhere link-quiet">somewhere else</a></span>
+          </div>
+          ${open && !po.stock_source ? '<div style="margin-top:12px;"><button type="button" class="secondary btn-sm" id="po-add-item-btn">+ Add an item</button></div>' : ''}
+          ${budgetPercent !== null ? `
+            <div style="margin-top:14px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span class="subtitle">Budget used</span><span style="font-weight:600; color:${budgetPercent > 100 ? 'var(--red)' : 'var(--green)'};">${budgetPercent}% of ${money(po.budget_cap)}</span></div>
+              <div style="background:var(--surface-2); border-radius:999px; height:8px; overflow:hidden;"><div style="background:${budgetPercent > 100 ? 'var(--red)' : 'var(--green)'}; width:${Math.min(100, budgetPercent)}%; height:100%;"></div></div>
+            </div>` : ''}
+        </div>
+
+        ${po.supplier_notes || po.internal_notes || po.file_path ? `
+        <div class="card" id="po-notes-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;"><h2 style="margin:0;">Notes</h2><button type="button" class="secondary btn-sm" id="po-notes-btn">Edit</button></div>
+          ${renderPoNotes(po)}
+          ${po.file_path ? `<p style="margin:8px 0 0; font-size:13px;"><a href="#" class="link-quiet" id="po-doc-link">${escapeHtml(po.file_name || 'View attached document')}</a></p>` : ''}
+        </div>` : ''}
+
+        ${pricing ? `
+        <details class="po-fold card" id="po-bills" ${decideCount ? 'open' : ''}>
+          <summary>Bills <span class="subtitle" style="font-weight:400; font-size:13px; margin-left:auto; ${decideCount ? 'color:var(--red);' : ''}">${escapeHtml(billsSummary)}</span></summary>
+          <div style="margin-top:8px;">
+            ${bills.length ? renderPoBills(bills, po, myRole) : '<p class="subtitle" style="font-size:13px;">A supplier\'s invoice emailed to invoice@ lands here by its PO number, or upload it under More.</p>'}
+          </div>
+        </details>` : ''}
+
+        <details class="po-fold card" id="po-log">
+          <summary>Log <span class="subtitle" style="font-weight:400; font-size:13px; margin-left:auto;">who did what, when</span></summary>
+          <div id="po-log-body" style="margin-top:8px;"></div>
+        </details>
+        <div id="po-msg"></div>`;
+
+      // the next step
+      const nextBtn = document.getElementById('po-next-btn');
+      if (nextBtn) nextBtn.addEventListener('click', () => {
+        const key = nextBtn.dataset.key;
+        if (key === 'bills') { const d = document.getElementById('po-bills'); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
+        else if (key === 'close') closePurchaseOrder(po, load);
+        else if (key === 'invoice') uploadInvoiceForPo(po);
+        else if (key === 'add') openAddPoItemPanel(po, load);
+        else if (key === 'email') emailPurchaseOrder(po, nextBtn);
+        else if (key === 'receive') {
+          const first = document.querySelector('.po-line-cb');
+          document.getElementById('po-lines-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          if (first) setTimeout(() => first.focus(), 350);
+        }
+      });
+
+      document.getElementById('po-more-btn').addEventListener('click', () => openPoMoreMenu(po, myRole, load, {
+        onShowLog: () => { const d = document.getElementById('po-log'); d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+      }));
+      document.getElementById('po-tour-btn').addEventListener('click', startPoTour);
+      const addBtn = document.getElementById('po-add-item-btn');
+      if (addBtn) addBtn.addEventListener('click', () => openAddPoItemPanel(po, load));
+      const notesBtn = document.getElementById('po-notes-btn');
+      if (notesBtn) notesBtn.addEventListener('click', () => openPoNotesPanel(po, load));
+      const docLink = document.getElementById('po-doc-link');
+      if (docLink) docLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { await openSignedDocInNewTab(po.file_path); }
+        catch (err) { document.getElementById('po-msg').innerHTML = `<div class="error-box">Could not open: ${escapeHtml(friendlyError(err))}</div>`; }
+      });
+
+      wirePoTickLines(document.getElementById('po-lines'), po, {
+        role: myRole, onComplete: load,
+        bar: document.getElementById('po-receive-bar'), selectAll: document.getElementById('po-select-all'),
+      });
+      wirePoBillButtons(pageEl, load);
+      const logEl = document.getElementById('po-log');
+      logEl.addEventListener('toggle', () => { if (logEl.open && !logEl.dataset.loaded) { logEl.dataset.loaded = '1'; renderActivityLog('purchase_order', po.id, 'po-log-body'); } });
+    }
+
+    // The tour: where to click on this page, step by step, on the real buttons.
+    function startPoTour() {
+      const setTick = (on) => {
+        const cb = document.querySelector('.po-line-cb');
+        if (cb && cb.checked !== on) { cb.checked = on; cb.dispatchEvent(new Event('change')); }
+      };
+      const po = current ? current.po : null;
+      const where = po ? poWhereShort(po) : 'the job';
+      startGuidedTour([
+        { target: '#po-status', title: 'What state the PO is in', text: 'Ordered: nothing in yet. Part received: some lines in. All received: everything is in, close it to approve its bills. Closed: approved and done.' },
+        { target: '#po-next', title: 'The next step is always here', text: 'This button is the one thing to do next on this PO: email it, receive what arrived, decide on a bill, or close it. Press it and it takes you there.' },
+        { target: () => document.querySelector('.po-line-cb') || document.querySelector('.po-line') || document.getElementById('po-lines'), title: 'Tick what arrived', text: 'Each line has a tick box. When the gear turns up, tick the lines that came in. Tick all does every line at once.' },
+        { before: () => setTick(true), target: '#po-receive-bar', title: 'Then press Receive', text: `One button receives every ticked line to ${where}: it goes on the job's costs or into that stock count. "Somewhere else" is for the odd line that went to the Warehouse or a van instead.` },
+        { before: () => setTick(false), target: () => document.querySelector('.po-line-more'), title: 'Anything else for a line', text: 'Back ordered, move it to another job or stock, undo a tick, add it to Stock, or mark it as a tool: all under this button.' },
+        { target: '#po-more-btn', title: 'Everything else is under More', text: 'Add an item, edit the lines, email the PO, view the PDF, notes, prices on the PO, upload the invoice, close or reopen, and the log.' },
+        { target: '#po-bills', title: 'Bills', text: "The supplier's invoices for this PO. Green lines match the PO; a red line is not on the PO or costs more, and needs Accept or Deny. Closing the PO approves its bills for payment." },
+        { target: '#po-where', title: 'Where it is going', text: 'Tap the job, vehicle or Stock name to go there. Back to the list with the arrow at the top.' },
+      ], { key: 'po-page', onEnd: () => setTick(false) });
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('purchase-orders');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      await load();
+      if (current) offerGuidedTour('po-page', 'New to purchase orders? A one minute tour shows where to click.', startPoTour);
+    })();
+  </script>
+</body>
+</html>

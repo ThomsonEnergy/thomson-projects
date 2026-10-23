@@ -75,7 +75,7 @@
           .select('id, po_number, supplier_name, description')
           .or(ilikeOr(['po_number', 'supplier_name', 'description'], q))
           .order('created_at', { ascending: false }).limit(PER_GROUP));
-        return data.map(po => ({ title: `${po.po_number || 'PO'} - ${po.supplier_name || ''}`, sub: po.description || '', href: `/purchase-orders.html?id=${enc(po.id)}` }));
+        return data.map(po => ({ title: `${po.po_number || 'PO'} - ${po.supplier_name || ''}`, sub: po.description || '', href: `/purchase-order.html?id=${enc(po.id)}` }));
       },
     },
     {

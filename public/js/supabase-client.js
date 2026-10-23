@@ -5937,87 +5937,6 @@ function poPlaceLabel(type) {
 }
 function poLineIsTool(li, po) { return !!(li.is_tool || (po && po.po_kind === 'tools')); }
 
-function renderPoLineItemsReceivable(po, canEdit) {
-  const items = po.purchase_order_line_items || [];
-  const btn = (cls, li, text) => `<button type="button" class="secondary btn-sm ${cls}" data-line-id="${li.id}">${text}</button>`;
-  // only the roles that can add Stock items (role not loaded yet: shown, and the server checks)
-  const canAddStock = canEdit && (!_cachedRole || isPricingRole(_cachedRole));
-  const addStock = (li) => (canAddStock && !li.material_id && Number(li.quantity) > 0 && !poLineIsTool(li, po)) ? btn('add-line-to-stock-btn', li, '+ Add to Stock') : '';
-  // a line marked as a tool lands in the Tools register when received (pricing roles mark or unmark it)
-  const toolChip = (li) => poLineIsTool(li, po) ? `<span class="badge draft" style="margin-left:6px;" title="Goes to the Tools register, not the job or stock">${li.tool_kind === 'perishable' ? 'Perishable' : 'Tool'}</span>` : '';
-  const toolBtn = (li) => (canAddStock && !po.stock_source && !po.closed_at && po.po_kind !== 'tools') ? btn('tool-line-btn', li, li.is_tool ? 'Not a tool' : 'Tool?') : '';
-  const rows = items.map(li => {
-    if (li.received) {
-      return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
-        <span>${escapeHtml(li.description)} - ${poLineMoney(li)}${toolChip(li)}</span>
-        <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-          <span class="badge accepted">Received - ${poPlaceLabel(li.destination_type)}</span>
-          ${po.stock_source && !(Number(li.unit_cost) > 0) ? '<span class="badge draft" style="color:var(--red);" title="Added from site without a price. Price it on the Stock page and this line takes the price.">Needs a price</span>' : ''}
-          ${canEdit ? (li.destination_type === 'tools' ? '' : btn('move-line-item-btn', li, 'Move')) + btn('undo-receive-line-item-btn', li, 'Undo received') : ''}
-          ${addStock(li)}${toolBtn(li)}
-        </span>
-      </div>`;
-    }
-    const etaLabel = li.backorder_eta ? new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : null;
-    return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
-      <span>${escapeHtml(li.description)} - ${poLineMoney(li)}${toolChip(li)}
-        ${li.is_backordered ? `<span class="badge draft" style="margin-left:6px;">Backordered${etaLabel ? ' - ETA ' + etaLabel : ''}</span>` : ''}
-      </span>
-      ${canEdit ? `
-        <span style="display:flex; gap:6px; flex-wrap:wrap;">
-          ${btn('receive-line-item-btn', li, 'Receive')}
-          ${btn('backorder-line-item-btn', li, li.is_backordered ? 'Update backorder' : 'Mark backordered')}
-          ${poLineIsTool(li, po) ? '' : btn('move-line-item-btn', li, 'Move')}
-          ${addStock(li)}${toolBtn(li)}
-        </span>` : '<span class="subtitle small">Not yet received</span>'}
-    </div>`;
-  }).join('');
-  // One button to receive every open line to the job (job POs only, two or more lines left)
-  const toReceive = items.filter(li => !li.received && !li.is_backordered && !poLineIsTool(li, po));
-  const jobRef = po.projects && po.projects.job_number ? 'J' + po.projects.job_number : 'the job';
-  const receiveAllHtml = canEdit && po.project_id && !po.vehicle_id && !po.closed_at && toReceive.length > 1
-    ? `<div style="margin-top:8px;"><button type="button" class="receive-all-po-btn" data-po-id="${escapeHtml(po.id)}">Receive all ${toReceive.length} to ${escapeHtml(jobRef)}</button></div>`
-    : '';
-  return rows + receiveAllHtml;
-}
-
-// Wires up every line button found in the container - call this after rendering a PO list that used
-// renderPoLineItemsReceivable.
-function wireReceiveLineItemButtons(containerEl, allPos, defaultDestinationFor, onComplete) {
-  function findLineItem(lineId) {
-    for (const po of allPos) {
-      const found = (po.purchase_order_line_items || []).find(li => li.id === lineId);
-      if (found) return { lineItem: found, parentPo: po };
-    }
-    return {};
-  }
-  const wire = (cls, fn) => containerEl.querySelectorAll(cls).forEach(btn => {
-    btn.addEventListener('click', () => {
-      const { lineItem, parentPo } = findLineItem(btn.dataset.lineId);
-      if (lineItem) fn(lineItem, parentPo);
-    });
-  });
-  wire('.receive-line-item-btn', (li, po) => openReceiveLineItemPanel(li, po, defaultDestinationFor(po), onComplete));
-  wire('.backorder-line-item-btn', (li) => openBackorderPanel(li, onComplete));
-  wire('.move-line-item-btn', (li, po) => openMoveLineItemPanel(li, po, onComplete));
-  wire('.undo-receive-line-item-btn', (li, po) => openUndoReceivePanel(li, po, onComplete));
-  wire('.add-line-to-stock-btn', (li, po) => openAddLineToStockPanel(li, po, onComplete));
-  wire('.tool-line-btn', async (li, po) => {
-    let kind = 'tool';
-    if (!li.is_tool) {
-      const answer = prompt(`"${li.description}": is it a tool, or a perishable (drill bits, blades)? Type tool or perishable.`, 'tool');
-      if (answer === null) return;
-      kind = /^p/i.test(answer.trim()) ? 'perishable' : 'tool';
-    } else if (!confirm(`"${li.description}" is no longer a tool? It goes back to ${po.project_id ? "the job's costs" : 'stock'} when received.`)) return;
-    const { error } = await supabaseClient.rpc('po_line_set_tool', { p_line_id: li.id, p_is_tool: !li.is_tool, p_kind: kind });
-    if (error) { alert(friendlyError(error)); return; }
-    if (onComplete) await onComplete();
-  });
-  containerEl.querySelectorAll('.receive-all-po-btn').forEach(btn => btn.addEventListener('click', () => {
-    const po = allPos.find(p => p.id === btn.dataset.poId);
-    if (po) receiveAllPoLines(po, btn, onComplete);
-  }));
-}
 
 // Shared modal: dark backdrop and a card that scrolls inside itself (at most 88% of the screen
 // tall), so a tall form is never cut off on a phone. innerHtml is the card's content (escape
@@ -6144,27 +6063,6 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
   });
 }
 
-// Receive every open line on a job PO to the job, one server call per line (each call locks the
-// PO row), then refresh once. Stops at the first failure; earlier lines stay received.
-async function receiveAllPoLines(po, btn, onComplete) {
-  const lines = (po.purchase_order_line_items || []).filter(li => !li.received && !li.is_backordered && !poLineIsTool(li, po));
-  if (!lines.length) return;
-  if (!confirm(`Receive all ${lines.length} lines on PO ${po.po_number || ''} to the job? You can still Undo received on any line.`)) return;
-  const label = btn.textContent;
-  btn.disabled = true;
-  let done = 0, failure = null, failedLine = null;
-  try {
-    for (const li of lines) {
-      btn.textContent = `Receiving ${done + 1} of ${lines.length}...`;
-      const { error } = await supabaseClient.rpc('po_receive_line', { p_line_id: li.id, p_dest: 'job', p_vehicle_id: null });
-      if (error && !/already received/i.test(error.message || '')) { failure = error; failedLine = li; break; }
-      done++;
-    }
-  } finally { btn.disabled = false; btn.textContent = label; }
-  if (onComplete) { try { await onComplete(); } catch (e) { console.error('refresh after Receive all failed:', e); } }
-  if (failure) alert(`Received ${done} of ${lines.length}. ${failedLine.description}: ${friendlyError(failure)}`);
-  else showToast(`Received ${done} line${done === 1 ? '' : 's'} to the job`);
-}
 
 // Undo received (e.g. ticked by mistake, or it was really back ordered). Needs a note once the PO is
 // closed or a bill on it is approved - the server checks the bills too.
@@ -6408,22 +6306,6 @@ function openPoNotesPanel(po, onComplete) {
   });
 }
 
-function renderPoControls(po, role) {
-  const b = (cls, text) => `<button type="button" class="secondary btn-sm ${cls}" data-po-id="${po.id}">${text}</button>`;
-  const open = !po.closed_at;
-  return [
-    open && !po.stock_source ? b('po-add-item-btn', '+ Add item') : '',
-    open && isPricingRole(role) && (po.purchase_order_line_items || []).length ? b('po-edit-lines-btn', 'Edit lines') : '',
-    po.supplier_id ? b('po-email-btn', 'Email PO') : '',
-    !po.stock_source ? b('po-view-pdf-btn', 'View PO') : '',
-    b('po-notes-btn', po.supplier_notes || po.internal_notes ? 'Edit notes' : '+ Notes'),
-    !po.stock_source ? b('po-prices-btn', `Prices on PO: ${po.show_prices ? 'On' : 'Off'}`) : '',
-    open ? (po.status === 'received'
-      ? `<button type="button" class="btn-sm po-close-btn" data-po-id="${po.id}" style="background:var(--green); border-color:var(--green); color:#fff;">All received: close and approve</button>`
-      : b('po-close-btn', 'Close PO')) : '',
-    !open && isFinanceRole(role) ? b('po-reopen-btn', 'Reopen') : '',
-  ].join('');
-}
 
 // Close a PO (the approval step). Every line must be received, back ordered or moved off; back ordered
 // lines are the closer's call: wait, or close now and cancel them off the PO. The server checks the same.
@@ -6457,31 +6339,6 @@ async function closePurchaseOrder(po, onComplete) {
   if (error) { alert(friendlyError(error)); return; }
   showToast(`PO ${po.po_number || ''} closed and approved for payment`);
   if (onComplete) await onComplete();
-}
-
-function wirePoControls(containerEl, allPos, onComplete) {
-  const find = (id) => allPos.find(p => p.id === id);
-  const wire = (cls, fn) => containerEl.querySelectorAll(cls).forEach(btn => btn.addEventListener('click', () => { const po = find(btn.dataset.poId); if (po) fn(po, btn); }));
-  wire('.po-add-item-btn', (po) => openAddPoItemPanel(po, onComplete));
-  wire('.po-edit-lines-btn', (po) => openEditPoLinesPanel(po, onComplete));
-  wire('.po-notes-btn', (po) => openPoNotesPanel(po, onComplete));
-  wire('.po-prices-btn', async (po) => {
-    const { error } = await supabaseClient.from('purchase_orders').update({ show_prices: !po.show_prices }).eq('id', po.id);
-    if (error) { alert(error.message); return; }
-    await logActivity('purchase_order', po.id, 'prices_toggled', `PO ${po.po_number || ''}: prices ${po.show_prices ? 'hidden on' : 'shown on'} the PO sent to the supplier`);
-    if (onComplete) await onComplete();
-  });
-  wire('.po-email-btn', (po, btn) => emailPurchaseOrder(po, btn));
-  wire('.po-view-pdf-btn', (po) => window.open(`/po.html?token=${po.po_token}`, '_blank'));
-  wire('.po-close-btn', (po) => closePurchaseOrder(po, onComplete));
-  wire('.po-reopen-btn', async (po) => {
-    const note = prompt(`Why is PO ${po.po_number || ''} being reopened?`);
-    if (note === null) return;
-    if (!note.trim()) { alert('Add a note saying why.'); return; }
-    const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: false, p_note: note.trim(), p_cancel_backorders: false });
-    if (error) { alert(friendlyError(error)); return; }
-    if (onComplete) await onComplete();
-  });
 }
 
 
@@ -6635,6 +6492,420 @@ function readPoTypeChoice(root, prefix) {
   return root.querySelector(`input[name="${prefix}-po-type"]:checked`)?.value === 'open' ? 'open' : 'fixed';
 }
 
+
+// ---------- Simpler purchase orders (backlog item 31, 23 Oct 2026) ----------
+// One PO is one page (purchase-order.html). Lists show one short row per PO; the page shows the
+// next step, the lines with a tick box each (tick what arrived, one Receive button) and everything
+// else under More. Every receive, move, close and bill decision still goes through the same
+// database functions as before.
+
+function poLineCounts(po) {
+  const items = po.purchase_order_line_items || [];
+  const received = items.filter(li => li.received).length;
+  const backordered = items.filter(li => !li.received && li.is_backordered).length;
+  return { total: items.length, received, backordered, toReceive: items.length - received - backordered };
+}
+
+function poTotalAmount(po) {
+  const items = po.purchase_order_line_items || [];
+  return items.length ? items.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0) : Number(po.amount) || 0;
+}
+
+// Where the PO is going: "J7040 Smith", "Stock", "Van 2" or "Tools in Van 2".
+function poWhereLabel(po) {
+  const veh = po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : null;
+  if (po.po_kind === 'tools') return 'Tools' + (veh ? ' in ' + veh : '');
+  if (po.project_id) return po.projects ? `${po.projects.job_number ? 'J' + po.projects.job_number + ' ' : ''}${po.projects.name || ''}`.trim() : 'Job';
+  if (po.vehicle_id) return veh || 'Vehicle';
+  return 'Stock';
+}
+
+// The short form used on buttons: "J7040", "Stock", "Van 2", "the Tools register".
+function poWhereShort(po) {
+  const veh = po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : null;
+  if (po.po_kind === 'tools') return 'the Tools register';
+  if (po.project_id) return po.projects && po.projects.job_number ? 'J' + po.projects.job_number : 'the job';
+  if (po.vehicle_id) return veh || 'the vehicle';
+  return 'Stock';
+}
+
+function poWhereHref(po) {
+  if (po.po_kind === 'tools') return '/tools.html';
+  if (po.project_id) return `/project.html?id=${encodeURIComponent(po.project_id)}&tab=pos`;
+  if (po.vehicle_id) return `/vehicle-stock.html?id=${encodeURIComponent(po.vehicle_id)}`;
+  return '/stock.html';
+}
+
+// A bill on the PO still waiting on us (a line not on the PO or charged more). Staff never see bills (RLS).
+function poBillNeedsDecision(b) { return !!b && !b.paid && b.check_status === 'problems'; }
+
+// One short row per PO for the lists (Purchase Orders page, the job page). Tap it to open the PO.
+function renderPoRow(po, { showWhere = true, note = '' } = {}) {
+  const c = poLineCounts(po);
+  const decide = (po.supplier_bills || []).filter(poBillNeedsDecision).length;
+  const chipCls = po.closed_at ? 'accepted' : po.status === 'received' ? 'sent' : po.status === 'part_received' ? 'info' : 'draft';
+  const progress = c.total
+    ? `${c.received} of ${c.total} received${c.backordered ? `, ${c.backordered} back ordered` : ''}`
+    : (po.po_type === 'open' && !po.closed_at ? 'Lines come from the invoice' : 'No lines yet');
+  return `<a class="po-row" href="/purchase-order.html?id=${encodeURIComponent(po.id)}" data-po-id="${escapeHtml(po.id)}">
+    <div class="po-row-main">
+      <div class="po-row-title"><strong>${escapeHtml(po.po_number || 'PO')}</strong> <span class="po-row-supplier">${escapeHtml(po.suppliers?.name || po.supplier_name || 'Unknown supplier')}</span></div>
+      <div class="po-row-sub">${showWhere ? `<span class="badge draft">${escapeHtml(poWhereLabel(po))}</span>` : ''}<span class="subtitle">${escapeHtml(progress)}</span>${note}</div>
+    </div>
+    <div class="po-row-side">
+      <span class="po-row-total">${money(poTotalAmount(po))}</span>
+      <span class="badge ${chipCls}">${poStatusLabel(po)}</span>
+      ${decide ? '<span class="badge red">Bill needs a decision</span>' : ''}
+    </div>
+  </a>`;
+}
+
+// The one thing to do next on a PO, in this order: decide on a bill line in red, close an
+// all-received PO, add lines (or the invoice on an open PO), email it, receive what arrived.
+function poNextStep(po, bills, { emailed, role } = {}) {
+  const c = poLineCounts(po);
+  if (po.closed_at) return { key: 'closed', label: 'Closed and approved for payment', hint: 'Nothing more to do. Admin or Finance can reopen it under More.', done: true };
+  const redLine = isPricingRole(role) && (bills || []).some(b => !b.paid && (b.supplier_bill_line_items || []).some(l => l.resolution !== 'denied' && billLineState(l).red));
+  if (redLine) return { key: 'bills', label: 'Decide on the bill lines in red', hint: 'A bill does not match this PO. Accept each red line, or deny the charge and the supplier is asked about it.' };
+  if (po.status === 'received' && c.total) return { key: 'close', label: 'All received: close and approve', hint: 'Closing approves its bills for payment.' };
+  if (!c.total) {
+    if (po.po_type === 'open' && po.supplier_id) return { key: 'invoice', label: "Upload the supplier's invoice", hint: 'An open PO takes its lines from the invoice.' };
+    return { key: 'add', label: 'Add the lines', hint: 'What is being ordered, how many, and the unit cost.' };
+  }
+  if (po.supplier_id && !po.stock_source && !emailed && !c.received) return { key: 'email', label: 'Email the PO to the supplier', hint: 'Then tick each line below as it arrives.' };
+  if (c.toReceive) return { key: 'receive', label: 'Receive what arrived', hint: 'Tick the lines that came in, then press Receive.' };
+  if (c.backordered) return { key: 'close', label: `Waiting on ${c.backordered} back ordered line${c.backordered === 1 ? '' : 's'}`, hint: 'Wait for it, or close now and it is cancelled off the PO.', secondary: true };
+  return { key: 'close', label: 'Close PO' };
+}
+
+// Lines with a tick box each. Tick what arrived, then one Receive button (wirePoTickLines).
+// Received lines show where they went. Everything else for a line sits under its "..." button.
+function renderPoTickLines(po, canEdit) {
+  const items = po.purchase_order_line_items || [];
+  if (!items.length) return '<p class="subtitle" id="po-lines-empty">No lines yet.</p>';
+  const open = !po.closed_at;
+  return items.map(li => {
+    const tool = poLineIsTool(li, po);
+    const tickable = canEdit && open && !li.received;
+    const eta = li.backorder_eta ? ', ETA ' + new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
+    let state = '';
+    if (li.received) state = ` &middot; <span style="color:var(--green);">Received to ${poPlaceLabel(li.destination_type)}</span>`;
+    else if (li.is_backordered) state = ` &middot; <span style="color:var(--amber);">Back ordered${escapeHtml(eta)}</span>`;
+    const needsPrice = po.stock_source && !(Number(li.unit_cost) > 0) ? ' <span class="badge draft" style="color:var(--red);" title="Added from site without a price. Price it on the Stock page and this line takes the price.">Needs a price</span>' : '';
+    const toolChip = tool ? ` <span class="badge draft" title="Goes to the Tools register, not the job or stock">${li.tool_kind === 'perishable' ? 'Perishable' : 'Tool'}</span>` : '';
+    return `<div class="po-line${li.received ? ' is-received' : ''}" data-line-id="${escapeHtml(li.id)}">
+      <label class="po-line-tick">${tickable ? `<input type="checkbox" class="po-line-cb" data-line-id="${escapeHtml(li.id)}" aria-label="Arrived: ${escapeHtml(li.description)}" />` : `<span class="po-line-mark">${li.received ? '&#10003;' : ''}</span>`}</label>
+      <div class="po-line-body">
+        <div class="po-line-desc">${escapeHtml(li.description)}${toolChip}${needsPrice}</div>
+        <div class="po-line-meta">${poLineMoney(li)}${state}</div>
+      </div>
+      ${canEdit ? `<button type="button" class="secondary btn-sm po-line-more" data-line-id="${escapeHtml(li.id)}" aria-label="More for this line" title="More for this line">&#8943;</button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// Where a ticked line goes when received from the PO page: the PO's own destination.
+function poReceiveDestination(po, li) {
+  if (poLineIsTool(li, po)) return { dest: 'tools', vehicleId: po.po_kind === 'tools' ? (po.vehicle_id || null) : null };
+  if (po.project_id) return { dest: 'job', vehicleId: null };
+  if (po.vehicle_id) return { dest: 'vehicle', vehicleId: po.vehicle_id };
+  return { dest: 'warehouse', vehicleId: null };
+}
+
+// A short list of actions in a small sheet, the same on a phone and a laptop.
+// items: [{ label, hint, danger, onPick }]. Resolves when it closes.
+function openActionSheet(title, items) {
+  return new Promise(resolve => {
+    const overlay = openModal(`
+      <h2 style="margin-bottom:10px;">${escapeHtml(title)}</h2>
+      <div class="te-sheet">
+        ${items.map((it, i) => `<button type="button" class="te-sheet-item${it.danger ? ' is-danger' : ''}" data-i="${i}">${escapeHtml(it.label)}${it.hint ? `<span class="te-sheet-hint">${escapeHtml(it.hint)}</span>` : ''}</button>`).join('')}
+        <button type="button" class="secondary te-sheet-cancel">Cancel</button>
+      </div>`, { maxWidth: 400, closeOnBackdrop: true });
+    const done = () => { overlay.remove(); resolve(); };
+    overlay.querySelector('.te-sheet-cancel').addEventListener('click', done);
+    overlay.querySelectorAll('.te-sheet-item').forEach(b => b.addEventListener('click', () => {
+      overlay.remove();
+      resolve();
+      const it = items[Number(b.dataset.i)];
+      if (it && it.onPick) it.onPick();
+    }));
+  });
+}
+
+// Mark a line as a tool (lands in the Tools register when received) or not.
+async function togglePoLineTool(li, po, onComplete) {
+  let kind = 'tool';
+  if (!li.is_tool) {
+    const answer = prompt(`"${li.description}": is it a tool, or a perishable (drill bits, blades)? Type tool or perishable.`, 'tool');
+    if (answer === null) return;
+    kind = /^p/i.test(answer.trim()) ? 'perishable' : 'tool';
+  } else if (!confirm(`"${li.description}" is no longer a tool? It goes back to ${po.project_id ? "the job's costs" : 'stock'} when received.`)) return;
+  const { error } = await supabaseClient.rpc('po_line_set_tool', { p_line_id: li.id, p_is_tool: !li.is_tool, p_kind: kind });
+  if (error) { alert(friendlyError(error)); return; }
+  if (onComplete) await onComplete();
+}
+
+// The "..." on a line: everything other than the plain tick-to-receive.
+function openPoLineMenu(li, po, role, onComplete) {
+  const open = !po.closed_at;
+  const tool = poLineIsTool(li, po);
+  const pricing = isPricingRole(role);
+  const items = [];
+  if (!li.received && open) {
+    items.push({ label: 'Receive somewhere else', hint: 'The Warehouse, a vehicle, or another job', onPick: () => openReceiveLineItemPanel(li, po, po.project_id ? 'job' : po.vehicle_id ? 'vehicle' : 'warehouse', onComplete) });
+    items.push({ label: li.is_backordered ? 'Update the back order' : 'Mark back ordered', hint: 'The supplier says it is delayed', onPick: () => openBackorderPanel(li, onComplete) });
+    if (!tool) items.push({ label: 'Move to another job, the Warehouse or a vehicle', hint: 'Not needed here', onPick: () => openMoveLineItemPanel(li, po, onComplete) });
+  }
+  if (li.received) {
+    if (li.destination_type !== 'tools' && open) items.push({ label: 'Move some or all of it', hint: 'To another job, the Warehouse or a vehicle', onPick: () => openMoveLineItemPanel(li, po, onComplete) });
+    items.push({ label: 'Undo received', hint: po.closed_at ? 'Reopens the PO (Admin or Finance)' : 'Ticked by mistake, or really back ordered', onPick: () => openUndoReceivePanel(li, po, onComplete) });
+  }
+  if (pricing && !li.material_id && Number(li.quantity) > 0 && !tool) items.push({ label: 'Add to Stock', hint: 'Make it a Stock item', onPick: () => openAddLineToStockPanel(li, po, onComplete) });
+  if (pricing && !po.stock_source && open && po.po_kind !== 'tools') items.push({ label: li.is_tool ? 'Not a tool' : 'This is a tool', hint: li.is_tool ? 'Back to the job or stock when received' : 'Goes to the Tools register when received', onPick: () => togglePoLineTool(li, po, onComplete) });
+  if (!items.length) items.push({ label: 'Nothing to do on this line', onPick: () => {} });
+  openActionSheet(li.description.length > 48 ? li.description.slice(0, 46) + '...' : li.description, items);
+}
+
+// Wires the tick boxes, Select all, the Receive bar and every "..." in a container rendered with
+// renderPoTickLines. onComplete reloads the page's data.
+function wirePoTickLines(container, po, { role, onComplete, bar, selectAll } = {}) {
+  const items = po.purchase_order_line_items || [];
+  const cbs = [...container.querySelectorAll('.po-line-cb')];
+  const btn = bar ? bar.querySelector('.po-receive-btn') : null;
+  const elsewhere = bar ? bar.querySelector('.po-receive-elsewhere') : null;
+  const ticked = () => cbs.filter(cb => cb.checked).map(cb => items.find(li => li.id === cb.dataset.lineId)).filter(Boolean);
+  const update = () => {
+    const n = ticked().length;
+    if (bar) bar.style.display = n ? 'flex' : 'none';
+    if (btn) btn.textContent = `Receive ${n} to ${poWhereShort(po)}`;
+    if (selectAll) selectAll.textContent = cbs.length && cbs.every(cb => cb.checked) ? 'Untick all' : 'Tick all';
+  };
+  cbs.forEach(cb => cb.addEventListener('change', update));
+  if (selectAll) selectAll.addEventListener('click', (e) => {
+    e.preventDefault();
+    const all = cbs.length && cbs.every(cb => cb.checked);
+    cbs.forEach(cb => { cb.checked = !all; });
+    update();
+  });
+  if (btn) btn.addEventListener('click', async () => {
+    const lines = ticked();
+    if (!lines.length) return;
+    const label = btn.textContent;
+    btn.disabled = true;
+    let done = 0, failure = null, failedLine = null;
+    try {
+      for (const li of lines) {
+        btn.textContent = `Receiving ${done + 1} of ${lines.length}...`;
+        const { dest, vehicleId } = poReceiveDestination(po, li);
+        const { error } = await supabaseClient.rpc('po_receive_line', { p_line_id: li.id, p_dest: dest, p_vehicle_id: vehicleId });
+        if (error && !/already received/i.test(error.message || '')) { failure = error; failedLine = li; break; }
+        done++;
+      }
+    } finally { btn.disabled = false; btn.textContent = label; }
+    if (onComplete) { try { await onComplete(); } catch (e) { console.error('refresh after receive failed:', e); } }
+    if (failure) alert(`Received ${done} of ${lines.length}. ${failedLine.description}: ${friendlyError(failure)}`);
+    else showToast(`Received ${done} line${done === 1 ? '' : 's'} to ${poWhereShort(po)}`);
+  });
+  if (elsewhere) elsewhere.addEventListener('click', (e) => {
+    e.preventDefault();
+    const lines = ticked();
+    if (lines.length !== 1) { alert('Tick one line at a time to receive it somewhere else.'); return; }
+    openReceiveLineItemPanel(lines[0], po, po.project_id ? 'job' : po.vehicle_id ? 'vehicle' : 'warehouse', onComplete);
+  });
+  container.querySelectorAll('.po-line-more').forEach(b => b.addEventListener('click', () => {
+    const li = items.find(x => x.id === b.dataset.lineId);
+    if (li) openPoLineMenu(li, po, role, onComplete);
+  }));
+  update();
+}
+
+// The More menu on a PO page: everything that is not the next step.
+function openPoMoreMenu(po, role, onComplete, { onShowLog } = {}) {
+  const open = !po.closed_at;
+  const items = [];
+  if (open && !po.stock_source) items.push({ label: 'Add an item', onPick: () => openAddPoItemPanel(po, onComplete) });
+  if (open && isPricingRole(role) && (po.purchase_order_line_items || []).length) items.push({ label: 'Edit the lines', hint: 'Names, quantities, unit costs', onPick: () => openEditPoLinesPanel(po, onComplete) });
+  if (po.supplier_id && typeof openEmailComposer === 'function') items.push({ label: 'Email the PO to the supplier', onPick: () => emailPurchaseOrder(po, null) });
+  if (!po.stock_source) items.push({ label: 'View the PO (PDF)', onPick: () => window.open(`/po.html?token=${po.po_token}`, '_blank') });
+  items.push({ label: po.supplier_notes || po.internal_notes ? 'Edit the notes' : 'Add notes', hint: 'For the supplier, or internal', onPick: () => openPoNotesPanel(po, onComplete) });
+  if (!po.stock_source) items.push({ label: `Prices on the PO sent to the supplier: ${po.show_prices ? 'on' : 'off'}`, hint: 'Tap to switch', onPick: async () => {
+    const { error } = await supabaseClient.from('purchase_orders').update({ show_prices: !po.show_prices }).eq('id', po.id);
+    if (error) { alert(error.message); return; }
+    await logActivity('purchase_order', po.id, 'prices_toggled', `PO ${po.po_number || ''}: prices ${po.show_prices ? 'hidden on' : 'shown on'} the PO sent to the supplier`);
+    if (onComplete) await onComplete();
+  } });
+  if (po.supplier_id && open) items.push({ label: "Upload the supplier's invoice", onPick: () => uploadInvoiceForPo(po) });
+  if (open) items.push({ label: po.status === 'received' ? 'Close and approve for payment' : 'Close the PO', hint: po.status === 'received' ? '' : 'Every line must be in, back ordered or moved off', onPick: () => closePurchaseOrder(po, onComplete) });
+  if (!open && isFinanceRole(role)) items.push({ label: 'Reopen the PO', hint: 'Admin and Finance, with a note', onPick: async () => {
+    const note = prompt(`Why is PO ${po.po_number || ''} being reopened?`);
+    if (note === null) return;
+    if (!note.trim()) { alert('Add a note saying why.'); return; }
+    const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: false, p_note: note.trim(), p_cancel_backorders: false });
+    if (error) { alert(friendlyError(error)); return; }
+    if (onComplete) await onComplete();
+  } });
+  if (onShowLog) items.push({ label: 'View the log', hint: 'Who did what, when', onPick: onShowLog });
+  openActionSheet(`PO ${po.po_number || ''}`, items);
+}
+
+// After Create: which PO number was made, with Email it now and Open it.
+// newPo needs id and po_number; supplier_id and project_id when it can be emailed.
+function showPoCreatedPanel(newPo, supplierName, { onDone } = {}) {
+  const canEmail = !!newPo.supplier_id && typeof openEmailComposer === 'function';
+  const overlay = openModal(`
+    <h2>${escapeHtml(newPo.po_number || 'PO')} created</h2>
+    <p class="subtitle" style="margin-bottom:14px;">For ${escapeHtml(supplierName || 'Warehouse')}. Quote ${escapeHtml(newPo.po_number || 'the PO number')} to the supplier; the gear is ticked off on the PO as it arrives.</p>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      ${canEmail ? '<button type="button" id="pc-email">Email it to the supplier now</button>' : ''}
+      <a class="btn secondary" id="pc-open" href="/purchase-order.html?id=${encodeURIComponent(newPo.id)}" style="text-align:center;">Open the PO</a>
+      <button type="button" class="secondary" id="pc-done">Done</button>
+    </div>`, { maxWidth: 400 });
+  const finish = async () => { overlay.remove(); if (onDone) await onDone(); };
+  overlay.querySelector('#pc-done').addEventListener('click', finish);
+  const emailBtn = overlay.querySelector('#pc-email');
+  if (emailBtn) emailBtn.addEventListener('click', async () => {
+    await emailPurchaseOrder(newPo, emailBtn);
+    finish();
+  });
+  return overlay;
+}
+
+// A PO the page can show: the PO with its lines, supplier, job, vehicle and bills. Returns null when not found.
+async function loadPurchaseOrderFull(poId) {
+  const { data, error } = await supabaseClient
+    .from('purchase_orders')
+    .select('*, purchase_order_line_items(*), suppliers(name, contact_email), projects(name, job_number), fleet_vehicles!vehicle_id(vehicle_name, rego)')
+    .eq('id', poId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  data.purchase_order_line_items = (data.purchase_order_line_items || []).sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  const [bills, { data: emailedRows }] = await Promise.all([
+    loadBillsForPos([poId]),
+    supabaseClient.from('activity_log').select('id').eq('entity_type', 'purchase_order').eq('entity_id', poId).eq('action', 'emailed').limit(1),
+  ]);
+  return { po: data, bills: bills[poId] || [], emailed: !!(emailedRows && emailedRows.length) };
+}
+
+
+// ---------- Guided tour: "Show me how" ----------
+// Spotlights the real buttons one at a time with a short card: Back, Next, Done. A step is
+// { target: css selector or () => element, title, text, before: async () => {} }. A step whose
+// target is not on the page shows the card in the middle. Remembered per key in localStorage so
+// the offer shows once; the Show me how button runs it any time.
+function startGuidedTour(steps, { key, onEnd } = {}) {
+  if (document.querySelector('.te-tour')) return;
+  const root = document.createElement('div');
+  root.className = 'te-tour';
+  root.innerHTML = `<div class="te-tour-spot"></div>
+    <div class="te-tour-card" role="dialog" aria-live="polite">
+      <div class="te-tour-step"></div>
+      <h3 class="te-tour-title"></h3>
+      <p class="te-tour-text"></p>
+      <div class="te-tour-btns">
+        <button type="button" class="secondary te-tour-back">Back</button>
+        <button type="button" class="te-tour-next">Next</button>
+        <button type="button" class="secondary te-tour-close" aria-label="Close the tour">&times;</button>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  const spot = root.querySelector('.te-tour-spot');
+  const card = root.querySelector('.te-tour-card');
+  let i = 0, target = null, raf = 0;
+
+  const place = () => {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (!target || !target.isConnected) {
+      spot.style.display = 'none';
+      card.style.left = '50%'; card.style.top = '50%'; card.style.transform = 'translate(-50%, -50%)'; card.style.bottom = 'auto';
+      return;
+    }
+    const r = target.getBoundingClientRect();
+    const pad = 6;
+    spot.style.display = 'block';
+    spot.style.left = `${r.left - pad}px`; spot.style.top = `${r.top - pad}px`;
+    spot.style.width = `${r.width + pad * 2}px`; spot.style.height = `${r.height + pad * 2}px`;
+    card.style.transform = 'none';
+    if (vw < 700) {
+      // phone: the card sits at the bottom, or the top when the target is low on the screen
+      card.style.left = '12px'; card.style.right = '12px';
+      if (r.bottom > vh * 0.55) { card.style.top = '12px'; card.style.bottom = 'auto'; }
+      else { card.style.top = 'auto'; card.style.bottom = 'calc(12px + env(safe-area-inset-bottom, 0px))'; }
+      return;
+    }
+    card.style.right = 'auto'; card.style.bottom = 'auto';
+    const cw = Math.min(360, vw - 24), ch = card.offsetHeight || 160;
+    let left = Math.max(12, Math.min(r.left, vw - cw - 12));
+    let top = r.bottom + 14;
+    if (top + ch > vh - 12) top = Math.max(12, r.top - ch - 14);
+    card.style.width = `${cw}px`; card.style.left = `${left}px`; card.style.top = `${top}px`;
+  };
+  const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(place); };
+
+  const end = (finished) => {
+    window.removeEventListener('resize', schedule);
+    window.removeEventListener('scroll', schedule, true);
+    document.removeEventListener('keydown', onKey);
+    root.remove();
+    if (key) { try { localStorage.setItem(`te-tour-${key}`, finished ? 'done' : 'closed'); } catch (e) { /* private mode */ } }
+    if (onEnd) onEnd(finished);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') end(false); if (e.key === 'ArrowRight' || e.key === 'Enter') go(i + 1); if (e.key === 'ArrowLeft') go(i - 1); };
+
+  const resolveTarget = (step) => {
+    try {
+      const t = typeof step.target === 'function' ? step.target() : (step.target ? document.querySelector(step.target) : null);
+      return t && t.isConnected ? t : null;
+    } catch (e) { return null; }
+  };
+
+  let busy = false;
+  const go = async (n) => {
+    if (busy) return;
+    if (n >= steps.length) { end(true); return; }
+    if (n < 0) n = 0;
+    busy = true;
+    try {
+      const step = steps[n];
+      if (step.before) { try { await step.before(); } catch (e) { console.error('tour step:', e); } }
+      i = n;
+      target = resolveTarget(step);
+      root.querySelector('.te-tour-step').textContent = `${i + 1} of ${steps.length}`;
+      root.querySelector('.te-tour-title').textContent = step.title || '';
+      root.querySelector('.te-tour-text').textContent = step.text || '';
+      root.querySelector('.te-tour-back').style.visibility = i === 0 ? 'hidden' : 'visible';
+      root.querySelector('.te-tour-next').textContent = i === steps.length - 1 ? 'Done' : 'Next';
+      if (target) {
+        target.scrollIntoView({ block: 'center', behavior: 'smooth', inline: 'nearest' });
+        await new Promise(r => setTimeout(r, 320));
+      }
+      place();
+    } finally { busy = false; }
+  };
+  root.querySelector('.te-tour-next').addEventListener('click', () => go(i + 1));
+  root.querySelector('.te-tour-back').addEventListener('click', () => go(i - 1));
+  root.querySelector('.te-tour-close').addEventListener('click', () => end(false));
+  window.addEventListener('resize', schedule);
+  window.addEventListener('scroll', schedule, true);
+  document.addEventListener('keydown', onKey);
+  go(0);
+}
+
+function guidedTourSeen(key) {
+  try { return !!localStorage.getItem(`te-tour-${key}`); } catch (e) { return true; }
+}
+
+// The one-time offer for someone new: a bar at the bottom with Show me and Not now.
+function offerGuidedTour(key, text, start) {
+  if (guidedTourSeen(key) || document.querySelector('.te-tour-offer')) return;
+  const bar = document.createElement('div');
+  bar.className = 'te-tour-offer';
+  bar.innerHTML = `<span>${escapeHtml(text)}</span><span class="te-tour-offer-btns"><button type="button" class="btn-sm te-offer-yes">Show me</button><button type="button" class="secondary btn-sm te-offer-no">Not now</button></span>`;
+  document.body.appendChild(bar);
+  const dismiss = () => { bar.remove(); try { localStorage.setItem(`te-tour-${key}`, 'offered'); } catch (e) { /* private mode */ } };
+  bar.querySelector('.te-offer-no').addEventListener('click', dismiss);
+  bar.querySelector('.te-offer-yes').addEventListener('click', () => { bar.remove(); start(); });
+}
 
 // ---------- Stock from My Day (migration 20261110000000) ----------
 // Used stock on a job: where it came from (the van assigned to you first), what, how many, and how

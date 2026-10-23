@@ -1069,3 +1069,56 @@ html[data-theme="navy"] .success-box {
    file so they win over earlier single-class rules such as .subtitle. */
 .small { font-size: 13px; }
 .tiny { font-size: 12px; }
+
+/* Purchase orders (backlog item 31): one short row per PO in lists, the PO page's lines with a
+   tick box each and a sticky Receive bar, the action sheet, and the guided tour. */
+.po-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; text-decoration: none; color: var(--text); background: var(--surface); }
+.po-row:hover { background: var(--surface-2); text-decoration: none; }
+.po-row-main { min-width: 0; flex: 1; }
+.po-row-title { font-size: 15px; }
+.po-row-supplier { color: var(--muted); margin-left: 4px; }
+.po-row-sub { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; font-size: 13px; }
+.po-row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.po-row-total { font-weight: 600; }
+@media (max-width: 600px) {
+  .po-row { flex-direction: column; align-items: stretch; }
+  .po-row-side { flex-direction: row; align-items: center; flex-wrap: wrap; }
+}
+.po-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.po-tabs .settings-tab { white-space: nowrap; }
+.po-next { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.po-next button { font-size: 16px; padding: 14px 18px; width: 100%; }
+.po-next .po-next-done { font-size: 16px; font-weight: 600; color: var(--green); padding: 10px 0; }
+.po-line { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.po-line:last-child { border-bottom: 0; }
+.po-line.is-received .po-line-desc { color: var(--muted); }
+.po-line-tick { margin: 0; display: flex; align-items: flex-start; font-weight: 400; }
+.po-line-tick input { width: 24px; height: 24px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.po-line-mark { display: inline-block; width: 24px; text-align: center; color: var(--green); font-weight: 700; font-size: 18px; line-height: 24px; }
+.po-line-body { flex: 1; min-width: 0; }
+.po-line-desc { font-size: 15px; }
+.po-line-meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
+button.po-line-more { padding: 2px 10px; min-height: 32px; font-size: 20px; line-height: 1; flex-shrink: 0; }
+.po-receive-bar { position: sticky; bottom: 0; background: var(--surface); padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; z-index: 5; }
+.po-receive-bar .po-receive-btn { font-size: 16px; padding: 12px 18px; }
+.po-fold summary { cursor: pointer; font-weight: 600; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.po-fold summary::-webkit-details-marker { display: none; }
+.po-fold summary::after { content: '\25BE'; color: var(--muted); }
+.po-fold[open] summary::after { content: '\25B4'; }
+.te-sheet { display: flex; flex-direction: column; gap: 6px; }
+.te-sheet-item { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: 10px 14px; }
+.te-sheet-item:hover { border-color: var(--accent); }
+.te-sheet-item.is-danger { color: var(--red); }
+.te-sheet-hint { font-size: 12px; color: var(--muted); font-weight: 400; }
+.te-tour { position: fixed; inset: 0; z-index: 3000; }
+.te-tour-spot { position: fixed; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.62), 0 0 0 3px var(--accent); transition: left .25s, top .25s, width .25s, height .25s; pointer-events: none; }
+.te-tour-card { position: fixed; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); max-width: 360px; }
+.te-tour-step { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.te-tour-title { margin: 4px 0 6px; font-size: 17px; }
+.te-tour-text { margin: 0; font-size: 14px; line-height: 1.45; }
+.te-tour-btns { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+.te-tour-btns .te-tour-next { flex: 1; }
+.te-tour-btns .te-tour-close { padding: 6px 12px; font-size: 18px; line-height: 1; }
+.te-tour-offer { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 2050; background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4); font-size: 14px; }
+.te-tour-offer-btns { display: flex; gap: 8px; }
+@media (min-width: 700px) { .te-tour-offer { left: auto; max-width: 480px; } }
