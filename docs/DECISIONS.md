@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 23 Oct 2026
+
+- Owner's change to backlog item 33 (still waiting on yes): when the job's Thomson site manager has not clocked in that day, the clock-out "How's the job?" question goes to the highest-ranking person who did, by a new `profiles.site_rank` set on the Staff page (role as the default, first clock-in breaks ties). (`docs/IDEAS_BACKLOG.md` item 33)
+
 ## 22 Oct 2026
 
 - Planned (waiting on owner's yes): contacts on every job. New `job_contacts` table with three sides (On site: owner, renter, builder, other trade; Client: project manager, site manager, job contact; Thomson Energy: site manager, project manager, sales manager), a Contacts tab on the job page every role can read and edit, Key people on Summary, booking emails to the client-side contact, and the clock-out "How's the job?" step only for the job's Thomson site manager with a day picker for Not complete. (`docs/IDEAS_BACKLOG.md` item 33)
