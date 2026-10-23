@@ -147,6 +147,8 @@
   .roi-fig { margin: 0; }
   .roi-fig figcaption { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--q-blue); margin-bottom: 4px; }
   .roi-fig svg { display: block; }
+  .roi-table td, .roi-table th { padding-top: 7px; padding-bottom: 7px; font-size: 12.5px; }
+  .roi-table .roi-sec td { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--q-blue); border-bottom: none; padding-top: 14px; padding-bottom: 2px; }
   .sec-title { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 19px; text-transform: uppercase; margin: 36px 0 6px; }
   .sor .pg-title { margin-bottom: 22px; }
   .sor .sor-h { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 14px; text-transform: uppercase; margin: 16px 0 5px; }
@@ -256,7 +258,7 @@
 
   <script src="/js/supabase-client.js?v=116"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=4"></script>
+  <script src="/js/solar-roi.js?v=5"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -776,34 +778,39 @@
       // The page shows whatever we have (never a figure that rests on a guess), then "to give you Y
       // we need X" for what the customer can supply, and that accepting the proposal before then
       // is accepting it on what is shown. Nothing here stops the proposal being sent or accepted.
-      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, money }) : { rows: [], asks: [] };
-      const roi = pres.roi;
+      const roiInputs = project.roi_inputs || {};
+      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, money, inputs: roiInputs, solarPrice: roiInputs.solar_price, batteryPrice: roiInputs.battery_price }) : { sections: [], asks: [], columns: [] };
+      const est = pres.est;
+      const cur = est ? est.current : null;
       const br = project.bill_reading || {};
       const billLine = br.retailer ? ` (${esc(String(br.retailer))}${br.billing_days ? `, ${esc(String(br.billing_days))} days` : ''})` : '';
-      const savingsLead = !pres.rows.length
+      const systemText = est ? `${est.newSolarKw ? `${esc(String(est.newSolarKw))} kW of solar` : ''}${est.newSolarKw && est.batteryKwh ? ' with ' : ''}${est.batteryKwh ? `a ${esc(String(est.batteryKwh))} kWh battery` : ''}${est.existingKw ? ` on top of your existing ${esc(String(est.existingKw))} kW` : ''}` : '';
+      const savingsLead = !pres.sections.length
         ? 'We want your savings estimate to be accurate, not a guess, so there are no figures here yet.'
-        : roi && pres.dollars
-          ? `Worked out from your electricity bill${billLine}: ${esc(String(roi.dailyKwh))} kWh a day${pres.rows.some(r => r[0] === 'Your bills now') ? `, about ${money(roi.annualBillNow)} a year at today's rates` : ''}. ${roi.newSolarKw ? `${esc(String(roi.newSolarKw))} kW of solar` : ''}${roi.newSolarKw && roi.batteryKwh ? ' with ' : ''}${roi.batteryKwh ? `a ${esc(String(roi.batteryKwh))} kWh battery` : ''}${roi.existingKw ? ` on top of your existing ${esc(String(roi.existingKw))} kW` : ''} is estimated to save you <strong>${money(roi.annualSaving)} a year</strong>${roi.paybackYears ? ` and pay for itself in about <strong>${esc(String(roi.paybackYears))} years</strong>` : ''}.`
+        : cur && pres.dollars
+          ? `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day${pres.bills ? `, about ${money(cur.billNow)} a year at today's rates` : ''}. ${systemText} is estimated to save you <strong>${money(cur.totalSaving)} a year</strong>${cur.payback ? ` and pay for itself in about <strong>${esc(String(cur.payback))} years</strong>` : ''}${est.newSolarKw && est.batteryKwh && cur.solarPayback && cur.batteryPayback ? ` (the solar in ${esc(String(cur.solarPayback))} years, the battery in ${esc(String(cur.batteryPayback))})` : ''}.${est.alt ? ` On ${esc(est.alt.name)} the same system would save about ${money(est.alt.totalSaving)} a year.` : ''}`
           : `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day. The figures below are what we can say from the pages we have.`;
       const asksHtml = pres.asks.length ? `
             <div class="sec-title" style="margin-top:22px;">What we still need from you</div>
             ${pres.asks.map(a => `<p class="pg-lead" style="margin-bottom:8px;">To give you ${esc(a.gives)}, we need ${esc(a.need)}.</p>`).join('')}
             <p class="pg-lead">Send it to us (a photo of each page is fine) and we will update this proposal. If you accept this proposal before we have it, you are accepting it on the figures and information shown here.</p>` : '';
-      const savingsHtml = (roiWanted && (pres.rows.length || pres.asks.length)) ? `
+      const roiCols = pres.columns || [];
+      const roiTableHtml = pres.sections.length ? `
+            <table class="qtable roi-table">
+              <thead><tr><th>Each year</th>${roiCols.length > 1 ? roiCols.map(c => `<th class="num">${esc(c)}</th>`).join('') : '<th class="num">Estimate</th>'}</tr></thead>
+              <tbody>${pres.sections.map(sec => `<tr class="roi-sec"><td colspan="${roiCols.length + 1}">${esc(sec.title)}</td></tr>${sec.rows.map(([k, vals]) => `<tr><td>${esc(k)}</td>${vals.map(v => `<td class="num" style="white-space:normal;">${esc(v)}</td>`).join('')}</tr>`).join('')}`).join('')}</tbody>
+            </table>` : '';
+      const savingsHtml = (roiWanted && (pres.sections.length || pres.asks.length)) ? `
         <section class="pg">
           ${slabsSvg('light')}
           ${headHtml}
           <div class="pg-body">
             <h1 class="pg-title">Your<br>savings</h1>
             <p class="pg-lead">${savingsLead}</p>
-            ${roi ? roiChartsHtml(roi, money, { dollars: pres.dollars }) : ''}
-            ${pres.rows.length ? `
-            <table class="qtable">
-              <thead><tr><th>Each year</th><th class="num">Estimate</th></tr></thead>
-              <tbody>${pres.rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num" style="white-space:normal;">${esc(v)}</td></tr>`).join('')}</tbody>
-            </table>` : ''}
+            ${est ? roiChartsHtml(est, money, { dollars: pres.dollars, bills: pres.bills }) : ''}
+            ${roiTableHtml}
             ${asksHtml}
-            ${roi ? `<p class="note-line">${esc(roiAssumptionsText(roi))}</p>` : ''}
+            ${est ? `<p class="note-line">${esc(roiAssumptionsText(est))}</p>` : ''}
           </div>
         </section>` : '';
 
