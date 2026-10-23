@@ -33,7 +33,7 @@
 
   <script src="/js/supabase-client.js?v=119"></script>
   <script src="/js/template-questions.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=6"></script>
+  <script src="/js/solar-roi.js?v=7"></script>
   <style>
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; }
     .roi-preview .roi-fig { margin:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; }
@@ -1145,7 +1145,7 @@
         const el = document.getElementById('q-battery-kwh');
         const v = el ? parseFloat(el.value) : NaN;
         if (Number.isFinite(v) && v > 0) return v;
-        return Number(project.battery_kwh) || 0;
+        return Number(project.battery_kwh) || roiBatteryKwhFromLines(project.cost_centres) || 0;
       }
       function currentNetCost() {
         const exGst = (project.cost_centres || []).reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
@@ -1161,7 +1161,7 @@
       // re-rendered as anything changes (unsaved values included) and Save rates keeps them.
       const RI_FIELDS = [
         ['rate', 'Usage (c/kWh)', 'flat'], ['peak', 'Peak (c/kWh)', 'tou'], ['shoulder', 'Shoulder (c/kWh)', 'tou'], ['off_peak', 'Off-peak (c/kWh)', 'tou'],
-        ['peak_hours', 'Peak hours', 'tou', '14:00-20:00'], ['shoulder_hours', 'Shoulder hours', 'tou', '07:00-14:00, 20:00-22:00'],
+        ['peak_hours', 'Peak hours', 'tou', 'e.g. 17:00-20:00'], ['shoulder_hours', 'Shoulder hours (blank: no shoulder band)', 'tou', 'blank: none'],
         ['controlled', 'Controlled load (c/kWh)', 'any'], ['supply', 'Supply (c/day)', 'any'], ['feed_in', 'Feed-in (c/kWh)', 'any'],
       ];
       function riPlanFieldsHtml(prefix, plan, withName) {
@@ -1182,7 +1182,7 @@
         const out = { tariff: v('tariff') || 'flat' };
         const nameEl = document.getElementById(`${prefix}-name`);
         if (nameEl) out.name = nameEl.value.trim();
-        RI_FIELDS.forEach(([key]) => { const val = v(key); if (val !== '') out[key] = key.endsWith('_hours') ? val : parseFloat(val); });
+        RI_FIELDS.forEach(([key]) => { const val = v(key); if (key.endsWith('_hours')) out[key] = val; else if (val !== '') out[key] = parseFloat(val); });
         return out;
       }
       function readRoiInputs() {
@@ -3829,11 +3829,11 @@
                     <label style="margin-top:0;">What we are quoting (drives the savings estimate)</label>
                     <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">The solar size is the System size (kW) above. Type the battery's usable kWh here; the price is this quote's total after the credits. The bill card on step 1 shows the recommendation and the estimate the customer sees.</p>
                     <div class="grid cols-4">
-                      <div><label style="margin-top:0; font-size:12px;">Battery quoted (usable kWh)</label><input id="q-battery-kwh" type="number" step="0.1" inputmode="decimal" min="0" value="${project.battery_kwh ?? ''}" placeholder="e.g. 13.5" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">Battery quoted (usable kWh)</label><input id="q-battery-kwh" type="number" step="0.1" inputmode="decimal" min="0" value="${project.battery_kwh ?? ''}" placeholder="${roiBatteryKwhFromLines(centres) ? `${roiBatteryKwhFromLines(centres)} from the line items` : 'e.g. 13.5'}" /></div>
                       <div><label style="margin-top:0; font-size:12px;">Solar price (inc GST, after STC)</label><input id="ri-solar-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.solar_price != null) ? project.roi_inputs.solar_price : ''}" placeholder="${(() => { const c = (centres || []).find(x => x.id === project.stc_cost_centre_id); return c ? Math.max(0, Math.round(Number(c.quoted_amount || 0) * 1.1 - Number(project.stc_total || 0))) : 'blank: combined only'; })()}" /></div>
                       <div><label style="margin-top:0; font-size:12px;">Battery price (inc GST, after BSTC)</label><input id="ri-battery-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.battery_price != null) ? project.roi_inputs.battery_price : ''}" placeholder="${(() => { const c = (centres || []).find(x => x.id === project.bstc_cost_centre_id); return c ? Math.max(0, Math.round(Number(c.quoted_amount || 0) * 1.1 - Number(project.bstc_total || 0))) : 'blank: combined only'; })()}" /></div>
                     </div>
-                    <p class="subtitle" style="margin:4px 0 0; font-size:12px;">The two prices give the solar and the battery their own payback on the proposal (the grey hint is that credit's stage, inc GST, less the credit). Leave both blank for one combined payback.</p>
+                    <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Battery blank: the kWh is read off the quote's line items (the grey hint). The two prices give the solar and the battery their own payback on the proposal (the grey hint is that credit's stage, inc GST, less the credit). Leave both blank for one combined payback.</p>
                   </div>
                 </div>
 
