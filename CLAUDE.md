@@ -16,6 +16,14 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
   - Sonnet 5.5: small well-specified changes (one-file fixes, copy, `?v=` bumps), docs edits, reading logs and deploy status.
   - Haiku 5.5: lookups and yes/no checks only, never code that ships.
   - Effort: `high` for feature builds and most plans; `xhigh` or `max` only for migrations, money, stock, RLS or an unknown bug; `medium` (the Opus 5.5 default) for chat, docs and small fixes; `low` for lookups. A level saved on the laptop does not reach cloud sessions; set `CLAUDE_CODE_EFFORT_LEVEL` on the cloud environment for a standing default.
+- **Every plan ends with the same footer** (plan mode, or any "here is the plan, yes?" reply), so the owner can tell which chat to build in and what the release will need:
+  - `Touches:` every page, script, function and migration the build will change, by file name, the big shared ones first (`project.html`, `supabase-client.js`, `settings.html`, `style.css`).
+  - `Overlaps:` other work on the same files, or "none". Check three places first: `git fetch origin` then branches not yet merged into `staging` (`git branch -r --no-merged origin/staging`), the open PRs on GitHub, and items in `docs/IDEAS_BACKLOG.md` marked "waiting on yes". If there is an overlap, say "build this in that chat" with the PR number or branch name.
+  - `Kind:` bug fix (straight into `main`) or feature (into `staging`); migration yes or no; money, stock, RLS or payroll yes or no (then a backup before the production migration).
+  - `Size:` small (under an hour), medium (a morning) or large (a day or more).
+  - `Test on staging:` which login to use and the three or four clicks that show it working; anything that needs a key on the staging site (AI, Xero, Gmail).
+  - `Best model: <name>, effort <level>, because <one reason>` (the line described above).
+  The same `Touches:` line goes in the `docs/IDEAS_BACKLOG.md` item when the plan is written up, so other chats can see the overlap before a branch exists.
 - After that "yes", carry the whole plan through without asking again: build, push, open the PR. A bug fix then goes all the way (production migration, merge to `main`); a feature merges into `staging` once it is whole and waits there for release night (see "Releases" below). Only stop and ask the owner if there is a real question or a change of direction (new scope, a different migration, deleting data not in the plan, or a failure that changes the plan).
 - One consolidated delivery, not lots of small ones.
 - Talk plainly, one step at a time: say exactly what to click and what they should see, especially in dashboards (Netlify, Supabase, Twilio, Apple, Google). No "see line 6 of seed.sql": test-only staging logins can be stated in chat directly. Real keys and passwords never go in chat.
