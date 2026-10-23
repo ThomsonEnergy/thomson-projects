@@ -692,6 +692,15 @@ Added with the owner's yes (22 Oct 2026): **the proposal shows the return on inv
 
 **Taking it off a proposal (owner, 22 Oct 2026):** the tick "Show the savings estimate on the proposal" is on step 3 (saved with Save pricing) and on the step 1 bill card (saves straight away, regenerates the PDF). Off: the whole Your savings page goes, charts, table and the "what we need" note alike.
 
+**Rework planned (owner, 22 Oct 2026, waiting on yes): solar first, then the battery, on the bill's rates, with other rates and battery export to compare.** Today's maths is one blended usage rate, one 40/60 day and night split, and solar plus battery treated as one system against one price (working shown in chat 22 Oct). The rework:
+
+1. **Rates we can change.** The bill card gets a rates panel prefilled from the bill: usage rate (flat, or peak / shoulder / off-peak with their hours when the bill is time-of-use), daily supply charge, feed-in rate. A second column "If they switch to [retailer]" with the same fields, typed by us, optional. Saved on `projects.roi_inputs` (jsonb, one new column). The proposal shows both columns when the second is filled ("on your current plan" and "on [retailer]").
+2. **Solar first.** Generation from the quoted kW and the zone yield, netting any existing solar. Daytime self-use against the daytime load (from the time-of-use split or the default), the rest exported at the feed-in rate, the import priced at the rate for its time of day. Solar saving = bill before less bill after; solar payback on the solar price.
+3. **Then the battery, from export and import.** The battery charges from what solar would otherwise export (so the lost feed-in is counted), and discharges into the evening and overnight import at that time's rate (peak when the bill is time-of-use). Battery saving = the extra over solar alone; battery payback on the battery price. Together: total saving, payback, 10 and 25 years, with the battery's own line.
+4. **Battery export to the grid.** Optional: "export from the battery at X c/kWh between HH:MM and HH:MM, up to N kWh a day" (a retailer or VPP that pays a high evening feed-in). The battery sends that energy to the grid at X instead of covering the home's evening use when X is higher than the evening rate; the rest covers the home as in 3. Shown as its own line.
+5. **Two prices on step 3.** "What we are quoting" gets Solar price (inc GST, after the STC credit) and Battery price (inc GST, after the BSTC credit), prefilled from the stage each credit is claimed with, so each step has its own payback; the total stays the quote's total after credits.
+6. **Proposal and preview:** the Your savings page becomes Solar, Adding the battery, Together (and the retailer comparison column when set); charts become yearly bill now / with solar / with solar and battery, where the power comes from, savings adding up (one line for the total, the solar-only payback marked too). The working (each step's kWh and dollars) is shown on the bill card so it can be checked.
+
 Sizes stay suggestions: "Use as system size (step 3)" and "Use as usable kWh wanted" buttons fill the fields, then Save as usual. The Pylon "View interactive design & ROI" link stays as it was.
 
 ## 30. Post a site photo to the feed with a message and tagged people (built 22 Oct 2026, migration 20261119000000)
@@ -747,3 +756,20 @@ No money or stock rule changes: every receive, move, close and bill decision kee
 
 No money or stock change. One small migration; `?v=` bumps on notifications.js, supabase-client.js and the pages that reference it; ops-digest.js, push.js, inbox.html and ops.html change.
 
+
+## 33. Contacts on every job: on site, client, Thomson Energy (planned 22 Oct 2026, waiting on owner's yes)
+
+**Today:** a job can only link five of the client's saved contacts (`projects.project_manager_contact_id`, `site_contact_id`, `job_contact_id`, `sales_contact_id`, `accounts_contact_id`), picked in the quote edit form from `client_contacts`. That table is readable by pricing roles only, so Staff on site never see the "Who's running this job" card on the Details tab, and there is nowhere to put the owner, the renter, the builder or another trade, nor who at Thomson Energy is running the job. At clock-out, everyone on the job is asked "How's the job?" (Complete / Not complete, back next working day), whoever they are.
+
+**Plan:**
+
+1. **New table `job_contacts`** (migration 20261121000000): one row per person on a job (quotes too, same project id), `side` (`site`, `client`, `thomson`), `role`, `name`, `company`, `phone`, `email`, `notes`, `profile_id` (Thomson side, one of our people), `client_contact_id` (set when picked from the client's saved contacts), `sort_order`, `created_by`, `created_at`. One Thomson site manager per job (partial unique index). Fast RLS: every active user reads, adds, edits and removes (a tradie adds the builder's number on site). Indexes on every FK. Backfill: the five existing links on every job and quote become client-side rows.
+   - **On site** roles: Owner, Renter, Builder, Other trade, Real estate agent, Strata, Other.
+   - **Client** roles: Project manager, Site manager, Job contact, Accounts, Sales, Other.
+   - **Thomson Energy** roles: Site manager, Project manager, Sales manager, Other.
+2. **Contacts tab on the job page** (`project.html`, every role, after Summary): three sections with an Add button each. On site and Client rows take role, name, company, phone, email and notes; the Client section also offers "Pick from the client's saved contacts" for pricing roles (fills the row and links it). The Thomson Energy section picks an active staff member and a role. Edit and Remove on each row, tap to call and email, an activity line on add and remove. The old "Who's running this job" card and the edit-form pickers go (their rows are carried into the tab). Quote contacts copy onto the job when the quote becomes a job (`create-job-from-quote.js`).
+3. **Summary tab** gets a short "Key people" line: site contact, client site manager and Thomson site manager with tap-to-call, so a tradie never hunts for the number.
+4. **Booking emails** (`_shared/schedule-emails.js`): the recipient is the job's first client-side contact with an email (Job contact, then Site manager, then Project manager), else the client's email as now.
+5. **Clock-out** (`supabase-client.js`): the "How's the job?" step goes to one person a day per job. If the job's Thomson Energy site manager clocked in on it that day (Sydney date), only they are asked. If not, the highest-ranking person who clocked in on the job that day is asked (owner's change, 23 Oct 2026). Rank: new `profiles.site_rank` (1 is most senior, set on the Staff page, shown as "Site rank"), defaulting from the role (Admin 1, Finance 2, Sales 3, Staff 9), ties broken by who clocked in first. "Not complete" gets a day picker (next working day preselected, any day in the next 7, the window `book_back_after_clockout` already allows). Only that person's own booking is made; the crew stays with the PM to schedule.
+
+No money or stock change. One migration (`job_contacts`, `profiles.site_rank`); `?v=` bump on supabase-client.js and staff-editor.js; project.html, staff.html, schedule-emails.js and create-job-from-quote.js change.
