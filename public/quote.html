@@ -258,7 +258,7 @@
 
   <script src="/js/supabase-client.js?v=118"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=6"></script>
+  <script src="/js/solar-roi.js?v=7"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -771,7 +771,7 @@
       // pre-quote answer; the solar size from the quote's STC system size or the Pylon design.
       const roiAnswers = data.roi_answers || {};
       const roiSolarKw = template === 'battery' ? 0 : (Number(project.stc_system_kw) || Number(pd.summary && pd.summary.dc_output_kw) || 0);
-      const roiBatteryKwh = Number(project.battery_kwh) || 0; // only the battery we are quoting (step 3), never the "wanted" answer
+      const roiBatteryKwh = Number(project.battery_kwh) || roiBatteryKwhFromLines(data.cost_centres) || 0; // the battery we are quoting: step 3, else the quote's own line items; never the "wanted" answer
       const roiNetCost = stcTotal > 0 ? totalAfterStc : totalIncGst;
       const roiWanted = (template === 'solar' || template === 'battery') && project.show_roi !== false && !vInfo;
       // The page shows whatever we have (never a figure that rests on a guess), then "to give you Y
