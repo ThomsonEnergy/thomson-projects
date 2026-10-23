@@ -139,7 +139,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=116"></script>
+  <script src="/js/supabase-client.js?v=117"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=8"></script>
@@ -639,6 +639,10 @@
       loadThreadLabels(thread);
       (emails || []).forEach(m => mountEmailBody(detailEl.querySelector(`.email-body[data-email-id="${m.id}"]`), m, { fetchAttachment: fetchEmailAttachment, fetchStored: fetchStoredAttachment }));
 
+      // the Messages icon rows for this thread are read now (bell is never involved)
+      supabaseClient.from('notifications').update({ read_at: new Date().toISOString() })
+        .eq('user_id', S.me.id).is('read_at', null).eq('link', '/inbox.html?thread=' + threadId)
+        .then(() => { if (window.refreshChatBadge) refreshChatBadge(); }, () => {});
       if (!thread.is_read) {
         await supabaseClient.from('email_threads').update({ is_read: true }).eq('id', threadId);
         if (S.box === 'mine') act('mark_read', { thread_id: threadId }).catch(() => {});

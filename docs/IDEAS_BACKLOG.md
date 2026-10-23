@@ -738,7 +738,7 @@ As built: the post, tags and photo links are made in one database call, `create_
 6. **One set of words** everywhere: Ordered, Part received, All received (ready to close), Closed.
 
 No money or stock rule changes: every receive, move, close and bill decision keeps calling the same database functions. Files: `purchase-orders.html`, new `purchase-order.html`, `supabase-client.js` (shared row, next step, tick-to-receive), `project.html`, `stock.html`, `vehicle-stock.html`, `global-search.js`, `style.css`, `?v=` bumps. Roles unchanged (staff receive, pricing roles edit lines and decide on bills, Admin / Finance reopen).
-## 32. Notifications in three places: bell, Messages, ops manager (planned 22 Oct 2026, waiting on owner's yes)
+## 32. Notifications in three places: bell, Messages, ops manager (built 23 Oct 2026, migration 20261120000000)
 
 **Today:** every notification kind lands in the one bell (`public/js/notifications.js`), pushes to the phone, and only disappears when tapped or "Mark all read". Opening an email in the Inbox or a chat does not mark its bell row read. The owner's bell on 22 Oct 2026: 79 unread, of which 45 emails, 13 emailed supplier bills, 7 Knowledge Base reads, 5 ops digests, and 9 real items (bookings, licences, a tag, a statement, a price list, a worker alert). Chats (16 rows) also land there. The Ops page `Needs me` card already lists emailed bills, bill checks, statements, price list changes and worker tasks from their own tables, so the bell rows for those are doubles.
 
@@ -754,6 +754,9 @@ No money or stock rule changes: every receive, move, close and bill decision kee
 5. **Tick boxes only for what you can get** (owner, 23 Oct 2026). The "Choose what I get notified about" list shows a person only the kinds their role can receive, grouped under Bell, Messages and Ops manager. Admin and Finance: everything their role gets. Sales: no supplier bill, price list, statement, stock low or incident boxes. Staff: those plus no shared inbox email box. The ops digest and worker alert boxes show only for people set as ops manager in Settings. Kinds that come from something the person did themselves (claimed call, a meeting they ran, a Knowledge Base read, a review on a job they made) show for everyone.
 6. **Phone push** (`_shared/push.js`): bell rows push as now; chat DMs and @mentions push; emails, channel chatter and thread replies do not. The per-kind tick boxes still turn any of them off.
 7. **One-off tidy on production** (owner's yes with the plan): existing email, chat and ops rows are marked read for everyone (the ops kinds deleted), so the bell starts at the real items. The owner's bell goes from 79 to about 19.
+7. **One-off tidy on production** (done 23 Oct 2026): existing email and chat rows (575) marked read for everyone, the 72 ops rows deleted (copy kept in `notifications_tidy_20261023` for a few weeks), so the bell starts at the real items. The owner's bell went from 79 to 19.
+
+**Decided while building (owner, 23 Oct 2026):** shared inbox mail notifies Sales and above (Admin, Finance, Sales), never Staff, and the Inbox menu entry is hidden from Staff to match. Staff still see emails linked to their jobs on the job page.
 
 No money or stock change. One small migration; `?v=` bumps on notifications.js, supabase-client.js and the pages that reference it; ops-digest.js, push.js, inbox.html and ops.html change.
 
