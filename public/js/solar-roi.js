@@ -83,8 +83,8 @@ function billMetrics(reading) {
   if (!dailyKwh && totalKwh && days) dailyKwh = totalKwh / days;
   const billTotal = roiNum(r.bill_total);
   const annualBill = billTotal && days ? billTotal * 365 / days : null;
-  const peak = roiNum(r.peak_kwh), shoulder = roiNum(r.shoulder_kwh), offPeak = roiNum(r.off_peak_kwh), controlled = roiNum(r.controlled_load_kwh);
-  const split = (peak || shoulder || offPeak) ? { peak: peak || 0, shoulder: shoulder || 0, offPeak: offPeak || 0, controlled: controlled || 0 } : null;
+  const peak = roiNum(r.peak_kwh), shoulder = roiNum(r.shoulder_kwh), offPeak = roiNum(r.off_peak_kwh), solarSoak = roiNum(r.solar_soak_kwh), controlled = roiNum(r.controlled_load_kwh);
+  const split = (peak || shoulder || offPeak || solarSoak) ? { peak: peak || 0, shoulder: shoulder || 0, offPeak: offPeak || 0, solarSoak: solarSoak || 0, controlled: controlled || 0 } : null;
   const usageRate = roiNum(r.usage_rate_c_per_kwh) || ROI_ASSUMPTIONS.defaultUsageRateCents;
   const feedIn = roiNum(r.feed_in_c_per_kwh);
   const supplyCharge = roiNum(r.supply_charge_c_per_day) || ROI_ASSUMPTIONS.defaultSupplyChargeCents;
@@ -201,14 +201,29 @@ function roiPricesFor({ typedSolar, typedBattery, defaults }) {
 
 // ---------- rates (a plan) ----------
 
-// "14:00-20:00, 07:00-09:00" to a set of hours. A window that crosses midnight wraps.
+// The time-of-use bands a plan can have. Solar soak (some plans call it super off-peak) is a cheap
+// window in the middle of the day with its own rate; most plans do not have one. Off-peak is not
+// only overnight: many plans make the middle of the day or the weekend off-peak too.
+const ROI_BANDS = [
+  { key: 'peak', label: 'Peak', color: '#dc2626' },
+  { key: 'shoulder', label: 'Shoulder', color: '#f59e0b' },
+  { key: 'off_peak', label: 'Off-peak', color: '#16a34a' },
+  { key: 'solar_soak', label: 'Solar soak', color: '#0ea5e9' },
+];
+const ROI_BAND_LABEL = { flat: 'Usage', peak: 'Peak', shoulder: 'Shoulder', off_peak: 'Off-peak', solar_soak: 'Solar soak' };
+const ROI_SEASON_MONTHS = [[12, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]]; // same order as ROI_ASSUMPTIONS.seasons
+const ROI_DAY_KINDS = [{ key: 'weekday', label: 'Weekdays', share: 5 / 7 }, { key: 'weekend', label: 'Weekends', share: 2 / 7 }];
+const ROI_MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+// "14:00-20:00, 07:00-09:00" (or "3pm to 9pm") to a set of hours. A window that crosses midnight wraps.
 function roiParseHours(text) {
   const hours = new Set();
-  String(text || '').split(/[,;]/).forEach(part => {
-    const m = part.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?$/i);
+  const toHour = (num, mer) => { let h = parseInt(num, 10); if (mer === 'pm' && h < 12) h += 12; if (mer === 'am' && h === 12) h = 0; return h; };
+  String(text || '').toLowerCase().split(/[,;&]|\band\b/).forEach(part => {
+    const m = part.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|to|–)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
     if (!m) return;
-    const from = parseInt(m[1], 10) % 24;
-    let to = parseInt(m[3], 10);
+    const from = toHour(m[1], m[3] || (m[6] && parseInt(m[1], 10) <= parseInt(m[4], 10) ? m[6] : m[3])) % 24;
+    let to = toHour(m[4], m[6]);
     if (to === 24) to = 0;
     to = to % 24;
     if (from === to) { for (let h = 0; h < 24; h++) hours.add(h); return; }
@@ -217,76 +232,250 @@ function roiParseHours(text) {
   return hours;
 }
 
-// The rates a plan charges, with the bill's figures as the fallback for anything not typed.
-// Fields: tariff ('flat' | 'tou'), rate, peak, shoulder, off_peak, controlled, peak_hours,
-// shoulder_hours, supply, feed_in, name.
+// "Nov-Mar, Jun-Aug" (or "November to March", "Jun, Jul, Aug") to a set of month numbers; blank is all year.
+function roiParseMonths(text) {
+  const all = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  const t = String(text || '').trim().toLowerCase();
+  if (!t || /all year|every month|all months|year round/.test(t)) return all;
+  const idx = (w) => { const i = ROI_MONTH_NAMES.indexOf(String(w).trim().slice(0, 3)); return i < 0 ? null : i + 1; };
+  const out = new Set();
+  t.split(/[,;&]|\band\b/).forEach(part => {
+    const m = part.trim().match(/^([a-z]+)\s*(?:-|to|–)\s*([a-z]+)$/);
+    if (m) {
+      const a = idx(m[1]), b = idx(m[2]);
+      if (a && b) for (let k = a, n = 0; n < 12; k = k % 12 + 1, n++) { out.add(k); if (k === b) break; }
+      return;
+    }
+    const one = idx(part.trim());
+    if (one) out.add(one);
+  });
+  return out.size ? out : all;
+}
+
+function roiDays(v) {
+  const t = String(v || '').toLowerCase();
+  if (/weekend|sat|sun/.test(t) && !/week ?day|working|mon|business/.test(t)) return 'weekends';
+  if (/week ?day|working|mon|business/.test(t)) return 'weekdays';
+  return 'all';
+}
+
+function roiBandKey(v) {
+  const t = String(v || '').toLowerCase();
+  if (/soak|super/.test(t)) return 'solar_soak';
+  if (/shoulder/.test(t)) return 'shoulder';
+  if (/off/.test(t)) return 'off_peak';
+  if (/peak/.test(t)) return 'peak';
+  return null;
+}
+
+function roiCleanWindows(list) {
+  return (Array.isArray(list) ? list : [])
+    .map(w => ({ band: roiBandKey(w && w.band), hours: String((w && w.hours) || '').trim(), days: roiDays(w && w.days), months: String((w && w.months) || '').trim() }))
+    .filter(w => w.band && w.hours && roiParseHours(w.hours).size);
+}
+
+// The times the bill prints for each band: tou_schedule from the reader (one entry per band and
+// pattern), or the older tou_hours object.
+function roiBillWindows(reading) {
+  const r = reading || {};
+  if (Array.isArray(r.tou_schedule) && r.tou_schedule.length) return roiCleanWindows(r.tou_schedule);
+  const h = r.tou_hours || {};
+  return roiCleanWindows(ROI_BANDS.filter(b => h[b.key]).map(b => ({ band: b.key, hours: h[b.key], days: 'all' })));
+}
+
+// The rates a plan charges and when, with the bill's figures as the fallback for anything not typed.
+// Rate fields: tariff ('flat' | 'tou'), rate, peak, shoulder, off_peak, solar_soak, controlled,
+// supply, feed_in, name. Times: windows [{ band, hours, days, months }] and other (the band at any
+// time not listed). Older saved plans with peak_hours / shoulder_hours still work.
 function roiPlan(saved, reading, fallbackName) {
   const r = reading || {};
   const s = saved || {};
   const rates = r.usage_rates || {};
   const billTou = !!(roiNum(rates.peak) && (roiNum(rates.off_peak) != null)) || r.tariff_type === 'time_of_use';
   const tariff = s.tariff || (billTou && roiNum(rates.peak) ? 'tou' : 'flat');
-  const pick = (k, billValue) => (roiNum(s[k]) != null ? roiNum(s[k]) : roiNum(billValue));
-  const billHours = r.tou_hours || {};
-  // A shoulder band exists only when the bill prices one (or shows shoulder kWh), or the staff typed
-  // one. A two-band tariff (peak and off-peak, like CovaU on Essential Energy) has none: every hour
-  // outside peak is off-peak.
-  const hasShoulder = roiNum(s.shoulder) != null || roiNum(rates.shoulder) != null || roiNum(r.shoulder_kwh) > 0 || (s.shoulder_hours != null && s.shoulder_hours !== '');
-  const plan = {
-    name: s.name || fallbackName,
-    tariff,
-    rate: pick('rate', r.usage_rate_c_per_kwh),
-    peak: pick('peak', rates.peak),
-    shoulder: pick('shoulder', rates.shoulder),
-    off_peak: pick('off_peak', rates.off_peak),
-    controlled: pick('controlled', rates.controlled_load),
-    supply: pick('supply', r.supply_charge_c_per_day),
-    feed_in: pick('feed_in', r.feed_in_c_per_kwh),
-    peak_hours: (s.peak_hours != null && s.peak_hours !== '') ? s.peak_hours : (billHours.peak || ROI_ASSUMPTIONS.defaultPeakHours),
-    shoulder_hours: s.shoulder_hours != null ? s.shoulder_hours : (billHours.shoulder || (hasShoulder ? ROI_ASSUMPTIONS.defaultShoulderHours : '')),
-    hasShoulder,
+  const fromBill = { rate: r.usage_rate_c_per_kwh, peak: rates.peak, shoulder: rates.shoulder, off_peak: rates.off_peak, solar_soak: rates.solar_soak ?? rates.super_off_peak, controlled: rates.controlled_load, supply: r.supply_charge_c_per_day, feed_in: r.feed_in_c_per_kwh };
+  const plan = { name: s.name || fallbackName, tariff, rateKnown: {} };
+  Object.keys(fromBill).forEach(k => {
+    plan[k] = roiNum(s[k]) != null ? roiNum(s[k]) : roiNum(fromBill[k]);
+    plan.rateKnown[k] = plan[k] != null;
+  });
+
+  // when each band applies: typed, else the bill, else assumed
+  let windows;
+  if (Array.isArray(s.windows)) { windows = roiCleanWindows(s.windows); plan.timesFrom = 'typed'; }
+  else if ((s.peak_hours && String(s.peak_hours).trim()) || (s.shoulder_hours && String(s.shoulder_hours).trim())) {
+    windows = roiCleanWindows([{ band: 'peak', hours: s.peak_hours }, { band: 'shoulder', hours: s.shoulder_hours }]);
+    plan.timesFrom = 'typed';
+  } else {
+    windows = roiBillWindows(r);
+    plan.timesFrom = windows.length ? 'bill' : 'assumed';
+  }
+  // the bands this plan has: a rate, a window, or kWh on the bill for it
+  const has = {
+    peak: true,
+    off_peak: true,
+    shoulder: plan.rateKnown.shoulder || windows.some(w => w.band === 'shoulder') || roiNum(r.shoulder_kwh) > 0,
+    solar_soak: plan.rateKnown.solar_soak || windows.some(w => w.band === 'solar_soak') || roiNum(r.solar_soak_kwh) > 0,
   };
-  if (plan.tariff === 'tou') {
+  if (tariff === 'tou' && plan.timesFrom === 'assumed') {
+    windows = [{ band: 'peak', hours: ROI_ASSUMPTIONS.defaultPeakHours, days: 'all', months: '' }];
+    if (has.shoulder) windows.push({ band: 'shoulder', hours: ROI_ASSUMPTIONS.defaultShoulderHours, days: 'all', months: '' });
+  }
+  const bandsWithout = Object.keys(has).filter(b => has[b] && !windows.some(w => w.band === b));
+  const otherFrom = s.other || (plan.timesFrom === 'bill' ? roiBandKey(r.tou_other) : null);
+  plan.other = otherFrom || (bandsWithout.includes('off_peak') ? 'off_peak' : bandsWithout[0] || 'off_peak');
+  plan.windows = windows;
+  plan.bands = ROI_BANDS.map(b => b.key).filter(b => has[b] || plan.other === b);
+
+  if (tariff === 'tou') {
     if (plan.peak == null) plan.peak = plan.rate;
     if (plan.off_peak == null) plan.off_peak = plan.rate != null ? Math.round(plan.rate * 0.7 * 10) / 10 : null;
-    if (plan.shoulder == null) plan.shoulder = hasShoulder && plan.peak != null && plan.off_peak != null ? Math.round((plan.peak + plan.off_peak) / 2 * 10) / 10 : plan.off_peak;
-    if (!hasShoulder) plan.shoulder_hours = '';
+    if (plan.shoulder == null && plan.peak != null && plan.off_peak != null) plan.shoulder = Math.round((plan.peak + plan.off_peak) / 2 * 10) / 10;
+    if (plan.solar_soak == null) plan.solar_soak = plan.off_peak;
   } else if (plan.rate == null && plan.peak != null) {
     plan.rate = plan.peak;
   }
-  if (plan.controlled == null) plan.controlled = plan.tariff === 'tou' ? plan.off_peak : plan.rate;
-  plan.hasRate = plan.tariff === 'tou' ? (plan.peak != null && plan.off_peak != null) : plan.rate != null;
+  if (plan.controlled == null) plan.controlled = tariff === 'tou' ? plan.off_peak : plan.rate;
+  plan.hasShoulder = has.shoulder;
+  plan.hasRate = tariff === 'tou' ? (plan.peak != null && plan.off_peak != null) : plan.rate != null;
   plan.feedInKnown = plan.feed_in != null;
   if (plan.feed_in == null) plan.feed_in = ROI_ASSUMPTIONS.defaultFeedInCents;
   plan.supplyKnown = plan.supply != null;
   if (plan.supply == null) plan.supply = ROI_ASSUMPTIONS.defaultSupplyChargeCents;
-  const peakHours = roiParseHours(plan.peak_hours);
-  const shoulderHours = roiParseHours(plan.shoulder_hours);
-  plan.bandOf = (h) => (plan.tariff !== 'tou' ? 'flat' : peakHours.has(h) ? 'peak' : shoulderHours.has(h) ? 'shoulder' : 'off_peak');
-  plan.rateOf = (h) => { const b = plan.bandOf(h); return b === 'flat' ? plan.rate : plan[b]; };
-  plan.bandLabel = { flat: 'Usage', peak: 'Peak', shoulder: 'Shoulder', off_peak: 'Off-peak' };
+
+  // the band for every hour of a weekday and a weekend day in each season; where two windows
+  // cover the same hour the narrower one wins (a solar soak window inside a long shoulder, say)
+  const parsed = windows.map(w => {
+    const hourSet = roiParseHours(w.hours), monthSet = roiParseMonths(w.months);
+    return { ...w, hourSet, monthSet, size: hourSet.size * (w.days === 'all' ? 7 : w.days === 'weekdays' ? 5 : 2) * monthSet.size };
+  }).sort((a, b) => a.size - b.size);
+  const inSeason = (monthSet, si) => ROI_SEASON_MONTHS[si].filter(m => monthSet.has(m)).length >= 2;
+  const dayOk = (w, dk) => w.days === 'all' || (w.days === 'weekdays') === (dk === 0);
+  plan.overlaps = [];
+  plan.grid = ROI_ASSUMPTIONS.seasons.map((_, si) => ROI_DAY_KINDS.map((__, dk) => {
+    const row = [];
+    for (let h = 0; h < 24; h++) {
+      if (tariff !== 'tou') { row.push('flat'); continue; }
+      const hits = parsed.filter(w => w.hourSet.has(h) && dayOk(w, dk) && inSeason(w.monthSet, si));
+      if (hits.length > 1 && new Set(hits.map(w => w.band)).size > 1) plan.overlaps.push({ si, dk, h, bands: hits.map(w => w.band) });
+      row.push(hits.length ? hits[0].band : plan.other);
+    }
+    return row;
+  }));
+  plan.bandOf = (h, si = 0, dk = 0) => plan.grid[si][dk][h];
+  plan.rateOf = (h, si = 0, dk = 0) => { const b = plan.grid[si][dk][h]; return b === 'flat' ? plan.rate : plan[b]; };
+  plan.bandLabel = ROI_BAND_LABEL;
+  // bands that apply at some time, and how much of the year each covers
+  plan.bandShare = {};
+  plan.grid.forEach(seasonRows => seasonRows.forEach((row, dk) => row.forEach(b => { plan.bandShare[b] = (plan.bandShare[b] || 0) + ROI_DAY_KINDS[dk].share / 4 / 24; })));
   return plan;
 }
 
-// The hourly load shape, stretched so the hours in each band add up to the bill's split.
+// "15:00-21:00" style ranges for the hours of a day in a band, joined with "and".
+function roiHoursText(hours) {
+  const set = new Set(hours);
+  if (set.size === 24) return 'all day';
+  if (!set.size) return '';
+  const runs = [];
+  let start = [...Array(24).keys()].find(h => set.has(h) && !set.has((h + 23) % 24));
+  if (start == null) return 'all day';
+  const seen = new Set();
+  for (let k = 0; k < 24; k++) {
+    const h = (start + k) % 24;
+    if (!set.has(h) || seen.has(h)) continue;
+    let end = h;
+    while (set.has((end + 1) % 24) && !seen.has((end + 1) % 24) && (end + 1) % 24 !== h) { seen.add(end); end = (end + 1) % 24; }
+    seen.add(end);
+    runs.push(`${String(h).padStart(2, '0')}:00-${String((end + 1) % 24).padStart(2, '0')}:00`);
+  }
+  return runs.join(' and ');
+}
+
+// The day patterns a plan has (identical days grouped), each with a plain label.
+function roiDayPatterns(plan) {
+  const groups = [];
+  plan.grid.forEach((seasonRows, si) => seasonRows.forEach((row, dk) => {
+    const key = row.join(',');
+    let g = groups.find(x => x.key === key);
+    if (!g) { g = { key, row, members: [] }; groups.push(g); }
+    g.members.push({ si, dk });
+  }));
+  const seasonNames = ROI_ASSUMPTIONS.seasons.map(s => s.name.toLowerCase());
+  const list = (arr) => arr.length <= 1 ? arr.join('') : `${arr.slice(0, -1).join(', ')} and ${arr[arr.length - 1]}`;
+  groups.forEach(g => {
+    const parts = ROI_DAY_KINDS.map((d, dk) => {
+      const seasons = g.members.filter(m => m.dk === dk).map(m => m.si);
+      if (!seasons.length) return null;
+      return seasons.length === 4 ? d.label.toLowerCase() : `${d.label.toLowerCase()} in ${list(seasons.map(si => seasonNames[si]))}`;
+    }).filter(Boolean);
+    const label = g.members.length === 8 ? 'every day' : list(parts);
+    g.label = label.charAt(0).toUpperCase() + label.slice(1);
+  });
+  return groups;
+}
+
+// "Weekdays: peak 15:00-21:00, off-peak 21:00-15:00. Weekends: off-peak all day."
+function roiScheduleText(plan) {
+  if (plan.tariff !== 'tou') return 'one rate at all times';
+  return roiDayPatterns(plan).map(g => {
+    const bands = ROI_BANDS.map(b => b.key).filter(b => g.row.includes(b));
+    return `${g.label}: ${bands.map(b => `${ROI_BAND_LABEL[b].toLowerCase()} ${roiHoursText(g.row.map((x, h) => (x === b ? h : -1)).filter(h => h >= 0))}`).join(', ')}`;
+  }).join('. ');
+}
+
+// A coloured strip per day pattern (24 cells, one per hour) so the times can be seen at a glance.
+function roiScheduleStripHtml(plan) {
+  if (plan.tariff !== 'tou') return '';
+  const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const color = Object.fromEntries(ROI_BANDS.map(b => [b.key, b.color]));
+  const groups = roiDayPatterns(plan);
+  const ticks = `<div style="display:flex; justify-content:space-between; font-size:10.5px; opacity:0.7; margin-top:2px;"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div>`;
+  // the label sits beside the strip on a wide screen and above it on a phone
+  const rows = groups.map((g, gi) => `
+    <div style="display:flex; flex-wrap:wrap; align-items:center; column-gap:8px; margin:4px 0;">
+      <div style="flex:1 1 110px; font-size:12px;">${esc(g.label)}</div>
+      <div style="flex:4 1 220px; min-width:0;">
+        <div style="display:flex; gap:1px;">${g.row.map((b, h) => `<div title="${String(h).padStart(2, '0')}:00 ${esc(ROI_BAND_LABEL[b])}" style="flex:1; height:16px; background:${color[b] || '#9ca3af'}; ${h === 0 ? 'border-radius:3px 0 0 3px;' : h === 23 ? 'border-radius:0 3px 3px 0;' : ''}"></div>`).join('')}</div>
+        ${gi === groups.length - 1 ? ticks : ''}
+      </div>
+    </div>`).join('');
+  const used = ROI_BANDS.filter(b => plan.grid.some(rs => rs.some(row => row.includes(b.key))));
+  const legend = `<div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:6px; font-size:12px;">${used.map(b => `<span style="display:inline-flex; align-items:center; gap:5px;"><span style="width:12px; height:12px; border-radius:3px; background:${b.color};"></span>${esc(b.label)}${plan[b.key] != null ? ` ${esc(plan[b.key])} c/kWh` : ''}</span>`).join('')}</div>`;
+  return `<div class="roi-strip">${rows}${legend}</div>`;
+}
+
+// The hourly load shape, stretched so the hours in each band add up to the bill's split. Hours can
+// be in different bands on weekdays and weekends or by season, so the stretch is fitted over the
+// whole year (a few rounds of proportional fitting).
 function roiLoadShape(metrics, plan) {
   const base = ROI_ASSUMPTIONS.loadShape.slice();
   const total = base.reduce((s, v) => s + v, 0);
   let shape = base.map(v => v / total);
-  if (metrics.split && plan.tariff === 'tou') {
-    const splitTotal = metrics.split.peak + metrics.split.shoulder + metrics.split.offPeak;
-    const want = { peak: metrics.split.peak / splitTotal, shoulder: metrics.split.shoulder / splitTotal, off_peak: metrics.split.offPeak / splitTotal };
-    const have = { peak: 0, shoulder: 0, off_peak: 0 };
-    shape.forEach((v, h) => { have[plan.bandOf(h)] += v; });
-    // Only stretch when every band the plan has hours for also has kWh on the bill; otherwise the
-    // bill's bands and the plan's windows do not line up (a shoulder window typed against a two-band
-    // bill, say) and the normal day shape is the safer guess.
-    const lineUp = splitTotal > 0 && ['peak', 'shoulder', 'off_peak'].every(b => have[b] === 0 || want[b] > 0);
-    if (lineUp) {
-      shape = shape.map((v, h) => { const b = plan.bandOf(h); return have[b] > 0 ? v * want[b] / have[b] : v; });
-      const sum = shape.reduce((s, v) => s + v, 0);
-      shape = shape.map(v => v / sum);
-    }
+  if (!metrics.split || plan.tariff !== 'tou') return shape;
+  const sp = metrics.split;
+  const want = { peak: sp.peak, shoulder: sp.shoulder, off_peak: sp.offPeak, solar_soak: sp.solarSoak || 0 };
+  const splitTotal = Object.values(want).reduce((a, b) => a + b, 0);
+  if (!(splitTotal > 0)) return shape;
+  Object.keys(want).forEach(b => { want[b] /= splitTotal; });
+  // share of the year each hour spends in each band
+  const mem = [];
+  for (let h = 0; h < 24; h++) {
+    const m = { peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 };
+    plan.grid.forEach(seasonRows => seasonRows.forEach((row, dk) => { m[row[h]] += ROI_DAY_KINDS[dk].share / 4; }));
+    mem.push(m);
+  }
+  const bandsUsed = Object.keys(want).filter(b => mem.some(m => m[b] > 0));
+  // only stretch when every band the plan has hours for also has kWh on the bill; otherwise the
+  // bill's bands and the plan's times do not line up and the normal day shape is the safer guess
+  if (!bandsUsed.every(b => want[b] > 0)) return shape;
+  for (let round = 0; round < 40; round++) {
+    const have = { peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 };
+    shape.forEach((v, h) => bandsUsed.forEach(b => { have[b] += v * mem[h][b]; }));
+    const f = {};
+    bandsUsed.forEach(b => { f[b] = have[b] > 0 ? want[b] / have[b] : 1; });
+    shape = shape.map((v, h) => v * bandsUsed.reduce((s, b) => s + mem[h][b] * f[b], 0));
+    const sum = shape.reduce((s, v) => s + v, 0);
+    shape = shape.map(v => v / sum);
   }
   return shape;
 }
@@ -299,6 +488,10 @@ function roiSolarShape() {
 }
 
 // One stage (a solar size and a battery size) for one plan over a year: the kWh and the bill.
+// Every combination of season, clear or overcast day, and weekday or weekend is run hour by hour,
+// each priced at its own band. The battery keeps its charge for dearer hours still to come before
+// the panels can refill it (it does not spend it in a cheap midday or overnight off-peak hour when
+// peak is still ahead), and carries what is left into the next morning.
 function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh, yieldPerKw, exportWindow }) {
   const dailyGeneral = Math.max(0, (metrics.dailyKwh || 0) - (metrics.controlledDailyKwh || 0));
   const eff = Math.sqrt(ROI_ASSUMPTIONS.batteryRoundTrip);
@@ -308,48 +501,69 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
     rate: roiNum(exportWindow.rate),
     maxKwh: roiNum(exportWindow.max_kwh) || batteryKwh,
   } : null;
-  const totals = { generation: 0, selfUse: 0, charged: 0, discharged: 0, batteryExport: 0, exported: 0, imported: 0, importBy: { flat: 0, peak: 0, shoulder: 0, off_peak: 0 }, load: 0 };
-  ROI_ASSUMPTIONS.seasons.forEach(season => ROI_ASSUMPTIONS.dayTypes.forEach(dayType => {
-    const daysPerSeason = 365 / ROI_ASSUMPTIONS.seasons.length * dayType.share;
-    let soc = 0;
-    let exportLeft = exp ? exp.maxKwh : 0;
-    // start at 6am so the battery begins the solar day empty, run a full day
+  const totals = { generation: 0, selfUse: 0, charged: 0, discharged: 0, batteryExport: 0, exported: 0, imported: 0, importBy: { flat: 0, peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 }, costBy: { flat: 0, peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 }, dischargedBy: { flat: 0, peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 }, load: 0 };
+  ROI_ASSUMPTIONS.seasons.forEach((season, si) => ROI_ASSUMPTIONS.dayTypes.forEach(dayType => ROI_DAY_KINDS.forEach((dayKind, dk) => {
+    const days = 365 / ROI_ASSUMPTIONS.seasons.length * dayType.share * dayKind.share;
+    // the day from 6am, before the battery
+    const day = [];
     for (let i = 0; i < 24; i++) {
       const h = (6 + i) % 24;
-      if (h === 0) exportLeft = exp ? exp.maxKwh : 0;
       const load = dailyGeneral * loadShape[h] * season.load;
       const gen = solarKw * yieldPerKw * season.gen * dayType.gen * solarShape[h];
-      const self = Math.min(gen, load);
-      let surplus = gen - self;
-      let deficit = load - self;
-      totals.generation += gen * daysPerSeason;
-      totals.selfUse += self * daysPerSeason;
-      totals.load += load * daysPerSeason;
-      if (batteryKwh > 0) {
-        const charge = Math.min(surplus, Math.max(0, batteryKwh - soc) / eff, cRate);
-        soc += charge * eff;
-        surplus -= charge;
-        totals.charged += charge * daysPerSeason;
-        let out = 0;
-        if (exp && exp.hours.has(h) && exportLeft > 0 && exp.rate > plan.rateOf(h)) {
-          const e = Math.min(soc * eff, exportLeft, cRate);
-          soc -= e / eff;
-          exportLeft -= e;
-          out += e;
-          totals.batteryExport += e * daysPerSeason;
-        }
-        const discharge = Math.min(deficit, soc * eff, Math.max(0, cRate - out));
-        soc -= discharge / eff;
-        deficit -= discharge;
-        totals.discharged += discharge * daysPerSeason;
-      }
-      totals.exported += surplus * daysPerSeason;
-      totals.imported += deficit * daysPerSeason;
-      totals.importBy[plan.bandOf(h)] += deficit * daysPerSeason;
+      day.push({ h, load, gen, band: plan.bandOf(h, si, dk), rate: plan.rateOf(h, si, dk) || 0 });
     }
-  }));
+    // what the home will still buy at a rate above `above` before the panels next have spare power
+    const dearerAhead = (i, above) => {
+      let sum = 0;
+      for (let k = 1; k < 24; k++) {
+        const d = day[(i + k) % 24];
+        if (d.gen > d.load + 1e-9) break;
+        if (d.rate > above + 1e-6) sum += d.load - d.gen;
+      }
+      return sum;
+    };
+    let soc = 0;
+    // run the day twice so the battery starts the counted day with what the last one left
+    for (let pass = 0; pass < 2; pass++) {
+      const count = pass === 1 ? days : 0;
+      let exportLeft = exp ? exp.maxKwh : 0;
+      for (let i = 0; i < 24; i++) {
+        const d = day[i];
+        if (d.h === 0) exportLeft = exp ? exp.maxKwh : 0;
+        const self = Math.min(d.gen, d.load);
+        let surplus = d.gen - self;
+        let deficit = d.load - self;
+        totals.generation += d.gen * count;
+        totals.selfUse += self * count;
+        totals.load += d.load * count;
+        if (batteryKwh > 0) {
+          const charge = Math.min(surplus, Math.max(0, batteryKwh - soc) / eff, cRate);
+          soc += charge * eff;
+          surplus -= charge;
+          totals.charged += charge * count;
+          let out = 0;
+          if (exp && exp.hours.has(d.h) && exportLeft > 0 && exp.rate > d.rate) {
+            const e = Math.max(0, Math.min(soc * eff - dearerAhead(i, exp.rate), exportLeft, cRate));
+            soc -= e / eff;
+            exportLeft -= e;
+            out += e;
+            totals.batteryExport += e * count;
+          }
+          const discharge = Math.max(0, Math.min(deficit, soc * eff - dearerAhead(i, d.rate), cRate - out));
+          soc -= discharge / eff;
+          deficit -= discharge;
+          totals.discharged += discharge * count;
+          totals.dischargedBy[d.band] += discharge * count;
+        }
+        totals.exported += surplus * count;
+        totals.imported += deficit * count;
+        totals.importBy[d.band] += deficit * count;
+        totals.costBy[d.band] += deficit * count * d.rate / 100;
+      }
+    }
+  })));
   const controlledKwh = (metrics.controlledDailyKwh || 0) * 365;
-  const usageCost = Object.keys(totals.importBy).reduce((s, b) => s + totals.importBy[b] * (b === 'flat' ? plan.rate : plan[b]) / 100, 0);
+  const usageCost = Object.values(totals.costBy).reduce((s, v) => s + v, 0);
   const controlledCost = controlledKwh * (plan.controlled || 0) / 100;
   const supplyCost = plan.supply * 365 / 100;
   const feedInCredit = totals.exported * plan.feed_in / 100;
@@ -361,6 +575,8 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
     generation: round(totals.generation), selfUse: round(totals.selfUse), charged: round(totals.charged), discharged: round(totals.discharged),
     batteryExport: round(totals.batteryExport), exported: round(totals.exported), imported: round(totals.imported), controlledKwh: round(controlledKwh),
     importBy: Object.fromEntries(Object.entries(totals.importBy).map(([k, v]) => [k, round(v)])),
+    costBy: Object.fromEntries(Object.entries(totals.costBy).map(([k, v]) => [k, round(v)])),
+    dischargedBy: Object.fromEntries(Object.entries(totals.dischargedBy).map(([k, v]) => [k, round(v)])),
     usageCost: round(usageCost), controlledCost: round(controlledCost), supplyCost: round(supplyCost), feedInCredit: round(feedInCredit), batteryExportCredit: round(batteryExportCredit),
     bill: round(bill), exportRate: exp ? exp.rate : null,
   };
@@ -487,12 +703,23 @@ function roiChecks({ reading, answers, template, newSolarKw, batteryKwh, netCost
     if (m.days != null && (m.days < 20 || m.days > 100)) add('days', `The bill covers ${m.days} days: check the days were read right (a quarterly bill is about 90, a monthly one about 30).`);
     if (m.dailyKwh != null && m.dailyKwh < 3) add('tiny_use', `The bill works out at ${m.dailyKwh} kWh a day, which is very low: check the kWh and the days.`);
     const plan = roiPlan((inputs || {}).current, reading, 'Current plan');
-    const rates = plan.tariff === 'tou' ? [['peak', plan.peak], ['off-peak', plan.off_peak], ...(plan.hasShoulder ? [['shoulder', plan.shoulder]] : [])] : [['usage', plan.rate]];
-    rates.forEach(([name, v]) => { if (v != null && (v < 10 || v > 100)) add(`rate_${name}`, `The ${name} rate is ${v} c/kWh, outside the usual 10 to 100: check it against the bill (cents, not dollars).`); });
+    const rates = plan.tariff === 'tou' ? ROI_BANDS.filter(b => plan.rateKnown[b.key]).map(b => [b.label.toLowerCase(), plan[b.key]]) : [['usage', plan.rate]];
+    rates.forEach(([name, v]) => { if (v != null && (v < (name === 'solar soak' ? 0 : 10) || v > 100)) add(`rate_${name}`, `The ${name} rate is ${v} c/kWh, outside the usual ${name === 'solar soak' ? 0 : 10} to 100: check it against the bill (cents, not dollars).`); });
     if (plan.supplyKnown && (plan.supply < 30 || plan.supply > 500)) add('supply', `The supply charge is ${plan.supply} c/day, outside the usual 30 to 500: check it against the bill (cents a day).`);
-    const lowest = Math.min(...rates.map(r => r[1]).filter(v => v != null));
+    const lowest = Math.min(...rates.filter(r => r[0] !== 'solar soak').map(r => r[1]).filter(v => v != null));
     if (plan.feedInKnown && Number.isFinite(lowest) && plan.feed_in >= lowest) add('feed_in', `The feed-in rate (${plan.feed_in} c/kWh) is as high as the rate you buy at: check it.`);
-    if (plan.tariff === 'tou' && !roiParseHours(plan.peak_hours).size) add('peak_hours', 'Time of use with no peak hours: type them under More (for example 17:00-20:00).');
+    if (plan.tariff === 'tou') {
+      if (plan.timesFrom === 'assumed') add('tou_times', `The bill does not say when each rate applies, so this is assumed: ${roiScheduleText(plan)}. Type the times from the bill or the retailer's plan under When each rate applies (off-peak is often the middle of the day or the weekend too, not only overnight).`);
+      if (plan.overlaps.length) {
+        const o = plan.overlaps[0];
+        add('tou_overlap', `Some hours are in two windows (for example ${String(o.h).padStart(2, '0')}:00 on ${ROI_DAY_KINDS[o.dk].label.toLowerCase()} is ${o.bands.map(b => ROI_BAND_LABEL[b].toLowerCase()).join(' and ')}): the narrower window is used. Check the times.`);
+      }
+      ROI_BANDS.forEach(b => {
+        const used = (plan.bandShare[b.key] || 0) > 0;
+        if (used && !plan.rateKnown[b.key] && b.key !== 'peak') add(`rate_missing_${b.key}`, `${b.label} applies at some times but has no rate on the bill: type its rate (${plan[b.key]} c/kWh is assumed).`);
+        if (!used && plan.rateKnown[b.key]) add(`rate_unused_${b.key}`, `The ${b.label.toLowerCase()} rate is ${plan[b.key]} c/kWh but no time uses it: add its times, or make it "any other time".`);
+      });
+    }
   }
   if (sp != null && bp != null && total > 0 && Math.abs(sp + bp - total) > Math.max(50, total * 0.01)) add('prices', `Solar ${fmt(sp)} plus battery ${fmt(bp)} is ${fmt(sp + bp)}, but the quote's total after credits is ${fmt(total)}: check the two prices.`);
   else if (total > 0 && ((sp != null && sp > total + 1) || (bp != null && bp > total + 1))) add('prices', `A price under What we are quoting is more than the whole quote (${fmt(total)} after credits): check it.`);
@@ -590,16 +817,18 @@ function roiWorkingRows(est, money) {
   const out = [];
   est.scenarios.forEach(s => {
     const plan = s.plan;
-    const rateText = plan.tariff === 'tou' ? `peak ${plan.peak}, shoulder ${plan.shoulder}, off-peak ${plan.off_peak} c/kWh` : `${plan.rate} c/kWh`;
-    out.push({ title: `${s.name}: ${rateText}, supply ${plan.supply} c/day, feed-in ${plan.feed_in} c/kWh${plan.tariff === 'tou' ? ` (peak ${plan.peak_hours}; shoulder ${plan.shoulder_hours})` : ''}`, rows: [] });
+    const rateText = plan.tariff === 'tou' ? ROI_BANDS.filter(b => (plan.bandShare[b.key] || 0) > 0).map(b => `${b.label.toLowerCase()} ${plan[b.key]}`).join(', ') + ' c/kWh' : `${plan.rate} c/kWh`;
+    out.push({ title: `${s.name}: ${rateText}, supply ${plan.supply} c/day, feed-in ${plan.feed_in} c/kWh`, rows: [] });
+    const rows = out[out.length - 1].rows;
+    if (plan.tariff === 'tou') rows.push(['When', `${roiScheduleText(plan)}${plan.timesFrom === 'assumed' ? ' (assumed: not on the bill)' : plan.timesFrom === 'typed' ? ' (typed)' : ' (from the bill)'}`]);
     const stages = [['As the home is now', s.stages.base], ...(est.newSolarKw > 0 ? [['With the solar', s.stages.solar]] : []), ...(est.batteryKwh > 0 ? [['With the solar and the battery', s.stages.full]] : [])];
     stages.forEach(([label, st]) => {
-      const imp = Object.entries(st.importBy).filter(([, v]) => v > 0).map(([b, v]) => `${plan.bandLabel[b].toLowerCase()} ${roiKwh(v)}`).join(', ');
-      out[out.length - 1].rows.push([label, `${st.solarKw ? `${st.solarKw} kW makes ${roiKwh(st.generation)}; ` : ''}used straight ${roiKwh(st.selfUse)}${st.batteryKwh ? `; battery charged ${roiKwh(st.charged)}, gave back ${roiKwh(st.discharged)}${st.batteryExport ? `, sold ${roiKwh(st.batteryExport)} at ${st.exportRate} c` : ''}` : ''}; exported ${roiKwh(st.exported)}; bought ${imp || '0 kWh'}${st.controlledKwh ? `; controlled load ${roiKwh(st.controlledKwh)}` : ''}. Bill: usage ${money(st.usageCost)}${st.controlledCost ? ` + controlled ${money(st.controlledCost)}` : ''} + supply ${money(st.supplyCost)} - feed-in ${money(st.feedInCredit)}${st.batteryExportCredit ? ` - battery sales ${money(st.batteryExportCredit)}` : ''} = ${money(st.bill)} a year`]);
+      const imp = Object.entries(st.importBy).filter(([, v]) => v > 0).map(([b, v]) => `${plan.bandLabel[b].toLowerCase()} ${roiKwh(v)} (${money(st.costBy[b])})`).join(', ');
+      rows.push([label, `${st.solarKw ? `${st.solarKw} kW makes ${roiKwh(st.generation)}; ` : ''}used straight ${roiKwh(st.selfUse)}${st.batteryKwh ? `; battery charged ${roiKwh(st.charged)}, gave back ${roiKwh(st.discharged)}${plan.tariff === 'tou' ? ` (${Object.entries(st.dischargedBy).filter(([, v]) => v > 0).map(([b, v]) => `${plan.bandLabel[b].toLowerCase()} ${roiKwh(v)}`).join(', ')})` : ''}${st.batteryExport ? `, sold ${roiKwh(st.batteryExport)} at ${st.exportRate} c` : ''}` : ''}; exported ${roiKwh(st.exported)}; bought ${imp || '0 kWh'}${st.controlledKwh ? `; controlled load ${roiKwh(st.controlledKwh)}` : ''}. Bill: usage ${money(st.usageCost)}${st.controlledCost ? ` + controlled ${money(st.controlledCost)}` : ''} + supply ${money(st.supplyCost)} - feed-in ${money(st.feedInCredit)}${st.batteryExportCredit ? ` - battery sales ${money(st.batteryExportCredit)}` : ''} = ${money(st.bill)} a year`]);
     });
     if (s.billNowIsActual && s.modelledNow) {
       const diff = Math.round(100 * (s.modelledNow - s.billNow) / s.billNow);
-      out[out.length - 1].rows.push(['Check', `The bill says ${money(s.billNow)} a year; these rates on this usage give ${money(s.modelledNow)} (${diff > 0 ? '+' : ''}${diff}%).${Math.abs(diff) > 20 ? ' More than 20% apart: check the rates, the split and the controlled load.' : ''}`]);
+      rows.push(['Check', `The bill says ${money(s.billNow)} a year; these rates on this usage give ${money(s.modelledNow)} (${diff > 0 ? '+' : ''}${diff}%).${Math.abs(diff) > 20 ? ' More than 20% apart: check the rates, the times, the split and the controlled load.' : ''}`]);
     }
   });
   return out;
@@ -697,10 +926,10 @@ function roiChartsHtml(est, money, { dollars = true, bills = true, colors = ROI_
 function roiAssumptionsText(est) {
   const a = ROI_ASSUMPTIONS;
   const p = est.current.plan;
-  const rateText = p.tariff === 'tou' ? `peak ${p.peak} c/kWh (${p.peak_hours}), shoulder ${p.shoulder} c/kWh and off-peak ${p.off_peak} c/kWh` : `${p.rate} c/kWh`;
+  const rateText = p.tariff === 'tou' ? `${ROI_BANDS.filter(b => (p.bandShare[b.key] || 0) > 0).map(b => `${b.label.toLowerCase()} ${p[b.key]} c/kWh`).join(', ')} (${roiScheduleText(p).toLowerCase()})` : `${p.rate} c/kWh`;
   return `Estimates only, worked out hour by hour on a typical day in each season from your electricity bill: ${est.yieldPerKw} kWh generated per kW of panels per day on average over the year, electricity bought at ${rateText}${p.feedInKnown ? ` and sold at ${p.feed_in} c/kWh as shown on your bill` : ` and sold at ${p.feed_in} c/kWh`}${est.exportWindow ? `, the battery selling to the grid at ${est.exportWindow.rate} c/kWh between ${est.exportWindow.from || '17:00'} and ${est.exportWindow.to || '21:00'}` : ''}, prices rising ${Math.round(a.priceRisePerYear * 100)}% a year, panels losing ${a.panelDegradationPerYear * 100}% of output a year${est.batteryKwh ? `, the battery at ${Math.round(a.batteryRoundTrip * 100)}% round trip efficiency` : ''}. Actual savings depend on weather, how and when you use power, and your retailer's rates.`;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, billMetrics, suggestSizes, existingSolarKw, roiPlan, roiParseHours, roiBatteryKwhFromLines, roiDefaultPrices, roiPricesFor, roiEstimate, roiGaps, roiChecks, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
+  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, billMetrics, suggestSizes, existingSolarKw, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiScheduleStripHtml, roiBatteryKwhFromLines, roiDefaultPrices, roiPricesFor, roiEstimate, roiGaps, roiChecks, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
 }
