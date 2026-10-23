@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 23 Oct 2026
 
+- Wholesale plans (owner): a proper wholesale estimate (option C) is backlogged as `docs/IDEAS_BACKLOG.md` item 35. For now the app says "We don't do estimates for wholesale rates" on the bill card's plans section (with the count of wholesale plans left out) and in the proposal's plan options note (item 34).
 - Options written up (waiting on owner's choice): showing wholesale retailers (Amber and the like) with no estimate, with their own published estimate, or with a proper estimate from AEMO's past prices and network tariffs; business plans are already covered, small customers only. (`docs/IDEAS_BACKLOG.md` item 34)
 - Business fact (owner): Thomson Energy is licensed in NSW and QLD only, not the ACT. Retail plan suggestions now cover the NSW and QLD networks only; ACT (Evoenergy) plans already downloaded were hidden. (`docs/BUSINESS_FACTS.md`, `docs/IDEAS_BACKLOG.md` item 34)
 - Checked: the first retail plan download worked (6,235 plans, 20 retailers, no errors; midday off-peak windows read correctly). Fixed: wholesale-price retailers such as Amber are no longer costed; a parser change now re-converts stored plans; the run log says why the retailer register was not used. (`docs/IDEAS_BACKLOG.md` item 34)

@@ -258,7 +258,7 @@
 
   <script src="/js/supabase-client.js?v=119"></script>
   <script src="/js/schedule-of-rates.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=11"></script>
+  <script src="/js/solar-roi.js?v=12"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -820,7 +820,7 @@
                 ${planCmp.rows.map(r => { const o = byKey[r.key] || {}; const check = [...((o.notes || {}).eligibility || []), ...((o.notes || {}).conditions || [])].slice(0, 2).join('; '); return `<tr><td>${esc(o.brand_name || '')}: ${esc(o.display_name || '')}<br><span style="font-size:11px; color:var(--q-grey);">Plan ID ${esc(r.key)}${check ? `. Check: ${esc(check)}` : ''}</span></td><td class="num">${money(r.billAfter)}</td><td class="num" style="white-space:normal;">${diff(r.vsCurrentAfter)}</td><td class="num">${esc(String(r.feedIn))} c/kWh</td></tr>`; }).join('')}
               </tbody>
             </table>
-            <p class="note-line">${esc(ROI_PLAN_DISCLAIMER)}${asAt ? ` Plans as published on ${new Date(asAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}; look a plan up on energymadeeasy.gov.au by its plan ID.` : ''}</p>`;
+            <p class="note-line">${esc(ROI_PLAN_DISCLAIMER)} ${esc(ROI_WHOLESALE_NOTE)}${asAt ? ` Plans as published on ${new Date(asAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}; look a plan up on energymadeeasy.gov.au by its plan ID.` : ''}</p>`;
       })() : '';
       const savingsHtml = (roiWanted && (pres.sections.length || pres.asks.length)) ? `
         <section class="pg">
