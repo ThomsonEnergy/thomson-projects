@@ -142,6 +142,7 @@ Manual steps only a person can do (the code is live):
 ### A9. Prebuilds
 - Name, internal part number, client description, category, bundle of labour (hours x rate tier) and material lines; scales with quantity; client sees description and total only.
 - Xero coding per line type via `xero_account_mapping` (C4).
+- **Categories (23 Oct 2026):** Electrical (Lighting, Power, Trenching, Cable Runs), Solar (Panels, Batteries, Inverters), Access equipment (Scissor lift, Boom lift / EWP, Scaffold, Generator / plant) and Mobilisation (Travel, Accommodation, Site setup); subcategory can be None. The list lives in `public/js/prebuild-form.js`, no database constraint. **Own cost centre:** an Access equipment or Mobilisation prebuild added to a quote or job stage (picker, + New prebuild, Suggest prebuilds with AI) goes into a stage named after its category instead, found on the quote or added at the bottom with the default markup (`PREBUILD_OWN_STAGE_CATEGORIES` in `supabase-client.js`, `stageForPrebuild` in `project.html`); quick estimates keep their one stage. Variations and invoice add-ons are unchanged (they go where staff put them). The 5 existing lift, generator and mobilisation prebuilds were moved out of Electrical on production.
 - 55 prebuilds imported from the SM8 bundle catalog (7 Sep 2026). Material lines are **not yet linked** to the Materials Database (A9a).
 
 ### A9a. Materials Database

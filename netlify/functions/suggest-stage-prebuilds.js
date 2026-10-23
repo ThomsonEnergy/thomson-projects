@@ -50,7 +50,7 @@ ${String(answersText).trim() ? `\nPre-quote information from the client:\n${answ
 Prebuild library (number. name [category] (parts): client description):
 ${library}
 
-For each stage, pick the prebuilds from the library that the scope says will be installed in that stage, with a quantity (how many of the package: 1 for a switchboard upgrade, 8 for eight downlights if the package is per light, metres if the package is per metre). Only pick a prebuild when the scope or the stage description clearly calls for it; leave a stage empty rather than guess. Never invent a prebuild that is not in the library. Give one short reason per pick (under 15 words) naming what in the scope called for it.
+For each stage, pick the prebuilds from the library that the scope says will be installed in that stage, with a quantity (how many of the package: 1 for a switchboard upgrade, 8 for eight downlights if the package is per light, metres if the package is per metre). Access equipment (lifts, scaffold, plant) and Mobilisation (travel, site setup) prebuilds are moved to their own stage automatically, so pick them against any stage when the scope calls for them. Only pick a prebuild when the scope or the stage description clearly calls for it; leave a stage empty rather than guess. Never invent a prebuild that is not in the library. Give one short reason per pick (under 15 words) naming what in the scope called for it.
 
 Respond with ONLY a JSON array, no other text, no markdown fences:
 [{"stage": 1, "prebuild": 12, "quantity": 1, "reason": "..."}]`;
