@@ -3853,9 +3853,24 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     // Only asked for an actual job (not a quote/site-visit), and only
     // while it's genuinely mid-install - once it's moved on to handover
     // or beyond there's nothing left to ask about here.
-    if (project && project.job_number && ['job_booked', 'job_not_complete'].includes(project.pipeline_stage)) renderStepJobStatus();
+    if (project && project.job_number && ['job_booked', 'job_not_complete'].includes(project.pipeline_stage) && await clockOutAsksMe(project.id)) renderStepJobStatus();
     else if (project) renderStep3();
     else await finishAndMaybeSwitch();
+  }
+
+  // Who gets "How's the job?" (backlog item 33): the job's Thomson Energy site manager when
+  // they clocked in on it today, else the highest site rank on the job today (ties: first
+  // clock-in). Worked out on the server (clockout_asks_me, migration 20261121000000) because
+  // Staff cannot read each other's time entries. If that call fails, ask as before.
+  async function clockOutAsksMe(projectId) {
+    try {
+      const { data, error } = await supabaseClient.rpc('clockout_asks_me', { p_project_id: projectId });
+      if (error) throw error;
+      return data !== false;
+    } catch (err) {
+      console.error('clockout_asks_me failed, asking anyway:', err);
+      return true;
+    }
   }
 
   // "Complete" moves the job on to Client Handover. "Not complete, back
@@ -3868,23 +3883,39 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   // separate from the Job Not Complete a PM can still set by hand from
   // the pipeline board for something genuinely stuck.
   function renderStepJobStatus() {
-    const backKey = nextWorkingDayKey(sydneyDateKey(new Date(state.outIso)));
-    const backLabel = dayKeyLabel(backKey);
+    // Back-in day: the next working day, or any day in the next 7 (the window
+    // book_back_after_clockout allows), counted from today in Sydney so an
+    // edited earlier clock-out time never offers a day that has already gone.
+    const baseKey = [sydneyDateKey(new Date(state.outIso)), sydneyDateKey(new Date())].sort().pop();
+    const backOptions = [];
+    for (let i = 1; i <= 7; i++) { const d = new Date(`${baseKey}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + i); backOptions.push(sydneyDateKey(d)); }
+    let backKey = nextWorkingDayKey(baseKey);
+    if (!backOptions.includes(backKey)) backKey = backOptions[0];
+    let backLabel = dayKeyLabel(backKey);
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>How's the job?</h2>
         <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))}</p>
         <div id="cko-job-status-buttons" style="display:flex; flex-direction:column; gap:10px;">
           <button type="button" id="cko-job-complete">Complete</button>
+          <label for="cko-back-day" style="margin:4px 0 0; font-size:12px; font-weight:400;" class="subtitle">Not complete? Pick the day to come back</label>
+          <select id="cko-back-day" style="margin:0;">${backOptions.map(k => `<option value="${k}" ${k === backKey ? 'selected' : ''}>${escapeHtml(dayKeyLabel(k))}</option>`).join('')}</select>
           <button type="button" class="secondary" id="cko-job-not-complete">Not complete, back ${backLabel}</button>
         </div>
         <a href="#" id="cko-job-no-book" class="link-quiet" style="display:block; text-align:center; font-size:13px; padding:10px; margin-top:6px;">Not finished, do not book me</a>
         <div id="cko-job-status-msg" style="margin-top:10px;"></div>
       </div>`;
 
+    overlay.querySelector('#cko-back-day').addEventListener('change', (e) => {
+      backKey = e.target.value;
+      backLabel = dayKeyLabel(backKey);
+      const b = overlay.querySelector('#cko-job-not-complete');
+      if (b) b.textContent = `Not complete, back ${backLabel}`;
+    });
+
     // Only one of Complete / Not complete / do not book me may run at a time
     const lockJobStatus = (on) => {
-      ['#cko-job-complete', '#cko-job-not-complete'].forEach(s => { const b = overlay.querySelector(s); if (b) b.disabled = on; });
+      ['#cko-job-complete', '#cko-job-not-complete', '#cko-back-day'].forEach(s => { const b = overlay.querySelector(s); if (b) b.disabled = on; });
       const l = overlay.querySelector('#cko-job-no-book');
       if (l) { l.style.pointerEvents = on ? 'none' : ''; l.style.opacity = on ? '0.6' : ''; }
     };
