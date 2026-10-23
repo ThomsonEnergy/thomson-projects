@@ -636,8 +636,10 @@ function roiEstimate({ reading, answers, inputs, newSolarKw, batteryKwh, zoneRat
     if (battery > 0 && solar <= 0) prices.battery = prices.total;
   } else if (prices.solar == null && prices.battery != null && solar > 0) prices.solar = Math.max(0, prices.total - prices.battery);
   else if (prices.battery == null && prices.solar != null && battery > 0) prices.battery = Math.max(0, prices.total - prices.solar);
+  // when the home uses power is worked out once, from the bill's kWh split and the current plan's
+  // times; a second plan is priced on that same pattern (its own times must not reshape the home)
+  const loadShape = roiLoadShape(metrics, plans[0]);
   const scenarios = plans.map((plan, idx) => {
-    const loadShape = roiLoadShape(metrics, plan);
     const run = (kw, kwh, grid) => roiRunStage({ metrics, plan, loadShape, solarShape, solarKw: kw, batteryKwh: kwh, yieldPerKw, exportWindow: kwh > 0 ? inp.export : null, gridCharge: kwh > 0 && grid ? inp.grid_charge : null });
     const base = run(existingKw, 0);
     const withSolar = solar > 0 ? run(existingKw + solar, 0) : base;
@@ -668,6 +670,47 @@ function roiEstimate({ reading, answers, inputs, newSolarKw, batteryKwh, zoneRat
   });
   return { metrics, existingKw, newSolarKw: solar, batteryKwh: battery, yieldPerKw, prices, scenarios, current: scenarios[0], alt: scenarios[1] || null, exportWindow: inp.export && inp.export.enabled ? inp.export : null, gridCharge: battery > 0 && inp.grid_charge && inp.grid_charge.enabled ? inp.grid_charge : null };
 }
+
+// ---------- other retail plans (docs/IDEAS_BACKLOG.md item 34) ----------
+
+// Prices a list of published plans on this home's use: the yearly bill as the home is now and with
+// the quoted system, each on the same usage pattern (from the bill and the current plan's times).
+// candidates: [{ key, roi_plan, adjust: { percent_of_use, percent_of_bill, annual_fees } }].
+// Night charging, when ticked, uses each plan's own rate at that time; a VPP export window is the
+// current plan's own deal and is not carried over. Returns null without a usable bill.
+function roiComparePlans({ reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, candidates }) {
+  const metrics = billMetrics(reading);
+  if (!metrics.dailyKwh) return null;
+  const inp = inputs || {};
+  const yieldPerKw = ROI_ASSUMPTIONS.yieldPerKwPerDay[zoneRating] || ROI_ASSUMPTIONS.yieldPerKwPerDay[ROI_ASSUMPTIONS.defaultZoneRating];
+  const existingKw = existingSolarKw(answers);
+  const solar = roiNum(newSolarKw) || 0;
+  const battery = roiNum(batteryKwh) || 0;
+  const current = roiPlan(inp.current, reading, 'Current plan');
+  const loadShape = roiLoadShape(metrics, current);
+  const solarShape = roiSolarShape();
+  const grid = inp.grid_charge && inp.grid_charge.enabled ? { ...inp.grid_charge, rate: null } : null;
+  const cost = (plan, adjust) => {
+    const a = adjust || {};
+    const run = (kw, kwh) => roiRunStage({ metrics, plan, loadShape, solarShape, solarKw: kw, batteryKwh: kwh, yieldPerKw, exportWindow: null, gridCharge: kwh > 0 ? grid : null });
+    const bill = (st) => Math.round(((st.usageCost + st.controlledCost + st.gridChargeCost) * (1 - (a.percent_of_use || 0)) + st.supplyCost) * (1 - (a.percent_of_bill || 0)) - st.feedInCredit + (a.annual_fees || 0));
+    const now = run(existingKw, 0);
+    const after = (solar > 0 || battery > 0) ? run(existingKw + solar, battery) : now;
+    return { billNow: bill(now), billAfter: bill(after), exported: after.exported, feedIn: plan.feed_in };
+  };
+  const currentCost = cost(current, null);
+  const rows = (candidates || []).map(c => {
+    const plan = roiPlan(c.roi_plan, null, c.key);
+    const r = cost(plan, c.adjust);
+    return { key: c.key, plan, ...r, vsCurrentAfter: r.billAfter - currentCost.billAfter, vsCurrentNow: r.billNow - currentCost.billNow };
+  });
+  rows.sort((x, y) => x.billAfter - y.billAfter);
+  return { current: { plan: current, ...currentCost }, rows, withSystem: solar > 0 || battery > 0 };
+}
+
+// What the customer is told wherever plan options are shown: a suggestion to help their own research,
+// not a recommendation (owner's words, 23 Oct 2026).
+const ROI_PLAN_DISCLAIMER = 'These are other electricity plans published for your area, shown only as a suggestion to help you research your options. Thomson Energy does not endorse any retailer, cannot connect you with a retailer or switch your plan for you, and receives no payment or commission from any retailer. The rates are an online estimate taken from each retailer\'s published plan on Energy Made Easy (the government\'s comparison site) on the date shown, and we cannot promise them. Check the current rates, eligibility and conditions with the retailer before you decide.';
 
 // ---------- what is missing ----------
 
@@ -755,6 +798,8 @@ function roiChecks({ reading, answers, template, newSolarKw, batteryKwh, netCost
       });
     }
   }
+  const stalePlans = ((inputs || {}).plan_options || []).filter(o => o.fetched_at && Date.now() - new Date(o.fetched_at).getTime() > 30 * 86400000);
+  if (stalePlans.length) add('plans_stale', `${stalePlans.length === 1 ? 'A plan option on the proposal is' : `${stalePlans.length} plan options on the proposal are`} more than 30 days old: find plans again and tick them again, or remove them.`);
   if (sp != null && bp != null && total > 0 && Math.abs(sp + bp - total) > Math.max(50, total * 0.01)) add('prices', `Solar ${fmt(sp)} plus battery ${fmt(bp)} is ${fmt(sp + bp)}, but the quote's total after credits is ${fmt(total)}: check the two prices.`);
   else if (total > 0 && ((sp != null && sp > total + 1) || (bp != null && bp > total + 1))) add('prices', `A price under What we are quoting is more than the whole quote (${fmt(total)} after credits): check it.`);
   if (est && est.current && est.batteryKwh > 0) {
@@ -973,5 +1018,5 @@ function roiAssumptionsText(est) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, billMetrics, suggestSizes, existingSolarKw, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiScheduleStripHtml, roiBatteryKwhFromLines, roiDefaultPrices, roiPricesFor, roiEstimate, roiGaps, roiChecks, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
+  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, ROI_PLAN_DISCLAIMER, roiComparePlans, billMetrics, suggestSizes, existingSolarKw, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiScheduleStripHtml, roiBatteryKwhFromLines, roiDefaultPrices, roiPricesFor, roiEstimate, roiGaps, roiChecks, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
 }

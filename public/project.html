@@ -33,7 +33,7 @@
 
   <script src="/js/supabase-client.js?v=119"></script>
   <script src="/js/template-questions.js?v=3"></script>
-  <script src="/js/solar-roi.js?v=10"></script>
+  <script src="/js/solar-roi.js?v=11"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
@@ -1501,6 +1501,7 @@
           current: panelBuilt ? safe(readCurrentOverrides, saved.current || {}) : (saved.current || {}),
           alt: byId('ri-alt-enabled') ? { enabled: byId('ri-alt-enabled').checked, ...safe(readAltPlan, saved.alt || {}) } : (saved.alt || { enabled: false }),
           export: exp,
+          plan_options: planOptions,
           grid_charge: grid,
           solar_price: price('solar'),
           battery_price: price('battery'),
@@ -1679,6 +1680,7 @@
         const assumed = pres.gaps.filter(g => !g.blocking);
         const checks = pres.checks || [];
         renderStep5Status(missing, checks);
+        if (planResults) renderPlanResults();
         const list = (items, color, size) => `<ul style="margin:2px 0 6px 18px; padding:0; font-size:${size}px;${color ? ` color:${color};` : ''}">${items.join('')}</ul>`;
         const boxHtml = (missing.length || checks.length || assumed.length) ? `
           <div style="margin-top:10px; padding:10px 12px; border-radius:8px; border:1px solid ${missing.length ? RED : checks.length ? AMBER : 'var(--border)'}; background:var(--surface);">
@@ -1702,6 +1704,133 @@
             ${pres.asks.length && project.show_roi !== false ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">Under the table the proposal says: ${pres.asks.map(a => `"To give you ${escapeHtml(a.gives)}, we need ${escapeHtml(a.need)}."`).join(' ')}</p>` : ''}
             ${working.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:13px;">Show the working</summary>${working.map(w => `<p style="margin:8px 0 2px; font-size:12px; font-weight:600;">${escapeHtml(w.title)}</p><table style="font-size:12px;"><tbody>${w.rows.map(([k, v]) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px; vertical-align:top;">${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('')}</tbody></table>`).join('')}<p class="subtitle" style="margin:8px 0 0; font-size:12px;">A typical day in each season, hour by hour, 70% clear days and 30% overcast; ${ROI_ASSUMPTIONS.yieldPerKwPerDay[currentZone()] || 3.9} kWh per kW per day over the year; the battery at ${Math.round(ROI_ASSUMPTIONS.batteryRoundTrip * 100)}% round trip. Full detail: public/js/solar-roi.js.</p></details>` : ''}
           </div>`;
+      }
+
+      // ----- other plans in this area (docs/IDEAS_BACKLOG.md item 34) -----
+      // Published plans from energy_plans (downloaded daily from Energy Made Easy's data), costed on this
+      // home's use with and without the quoted system. Up to 3 can be ticked to show on the proposal; the
+      // ticked plans are saved as a snapshot in roi_inputs.plan_options so the proposal does not change
+      // when a retailer later edits the plan. Always a suggestion: the disclaimer goes wherever they show.
+      let planOptions = Array.isArray((project.roi_inputs || {}).plan_options) ? project.roi_inputs.plan_options.slice() : [];
+      let planResults = null; // { candidates, uncostable, fetchedNote }
+      const NETWORK_KEYS = ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex', 'Ergon Energy', 'Evoenergy'];
+      const networkOf = (name) => {
+        const t = String(name || '').toLowerCase();
+        return NETWORK_KEYS.find(k => t.includes(k.split(' ')[0].toLowerCase())) || (/actewagl/.test(t) ? 'Evoenergy' : '');
+      };
+      function sitePostcode() {
+        const texts = [(project.bill_reading || {}).supply_address, project.client_address];
+        for (const t of texts) { const m = String(t || '').match(/\b(\d{4})\b(?!.*\b\d{4}\b)/); if (m) return m[1]; }
+        return '';
+      }
+      function buildPlans() {
+        const out = byId('bc-plans');
+        if (!out) return;
+        const net = networkOf((project.bill_reading || {}).distributor) || networkOf(liveAnswers().dnsp) || '';
+        out.innerHTML = `
+          <div style="margin-top:14px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
+            <label style="margin-top:0; font-weight:600;">Other plans in this area (a suggestion only)</label>
+            <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">Plans published on Energy Made Easy for this postcode and network, costed on this home's use with and without the system we are quoting. Tick up to 3 to show on the proposal; the customer then sees this note with them: <em>${escapeHtml(ROI_PLAN_DISCLAIMER)}</em></p>
+            <div id="bc-plan-chosen"></div>
+            <div class="grid cols-4" style="align-items:end;">
+              <div><label style="margin-top:0; font-size:12px;">Postcode</label><input id="bc-plan-pc" inputmode="numeric" maxlength="4" value="${escapeHtml(sitePostcode())}" placeholder="e.g. 2483" /></div>
+              <div><label style="margin-top:0; font-size:12px;">Network</label><select id="bc-plan-net"><option value="">Any network</option>${NETWORK_KEYS.map(k => `<option ${k === net ? 'selected' : ''}>${k}</option>`).join('')}</select></div>
+              <div><label style="margin-top:0; font-size:12px;">Plans for</label><select id="bc-plan-type"><option value="RESIDENTIAL" ${clientIsCompany ? '' : 'selected'}>Homes</option><option value="BUSINESS" ${clientIsCompany ? 'selected' : ''}>Businesses</option></select></div>
+              <div><button type="button" class="secondary" id="bc-plan-find" style="width:100%;">Find plans</button></div>
+            </div>
+            <div id="bc-plan-msg"></div>
+            <div id="bc-plan-results"></div>
+          </div>`;
+        byId('bc-plan-find').addEventListener('click', findPlans);
+        renderChosenPlans();
+      }
+      function savePlanOptions() {
+        autosave('roi_inputs', () => ({ roi_inputs: readRoiInputs(true) }), 300);
+        renderChosenPlans();
+        renderPlanResults();
+      }
+      function renderChosenPlans() {
+        const el = byId('bc-plan-chosen');
+        if (!el) return;
+        if (!planOptions.length) { el.innerHTML = ''; return; }
+        const days = (d) => Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+        el.innerHTML = `<p style="margin:0 0 4px; font-size:13px;"><strong>On the proposal:</strong></p>
+          <ul style="margin:0 0 10px 18px; padding:0; font-size:13px;">${planOptions.map((o, i) => `<li>${escapeHtml(o.brand_name || '')}: ${escapeHtml(o.display_name || '')} <span class="subtitle">(plan ${escapeHtml(o.plan_id)}, data from ${new Date(o.fetched_at).toLocaleDateString('en-AU')}${days(o.fetched_at) > 30 ? `, <span style="color:${AMBER};">${days(o.fetched_at)} days old: find plans again to refresh</span>` : ''})</span> <button type="button" class="secondary bc-plan-remove" data-i="${i}" style="font-size:11px; padding:2px 8px;">Remove</button></li>`).join('')}</ul>`;
+        el.querySelectorAll('.bc-plan-remove').forEach(b => b.addEventListener('click', () => { planOptions.splice(Number(b.dataset.i), 1); savePlanOptions(); }));
+      }
+      async function findPlans() {
+        const msgEl = byId('bc-plan-msg');
+        const pc = val('bc-plan-pc');
+        const net = val('bc-plan-net');
+        const type = val('bc-plan-type');
+        if (!project.bill_reading || !billMetrics(project.bill_reading).dailyKwh) { msgEl.innerHTML = `<p style="font-size:12px; color:${AMBER};">Read the bill first: the plans are costed on this home's use.</p>`; return; }
+        if (!/^\d{4}$/.test(pc) && !net) { msgEl.innerHTML = `<p style="font-size:12px; color:${AMBER};">Type the site's postcode or pick the network.</p>`; return; }
+        const btn = byId('bc-plan-find');
+        btn.disabled = true; btn.textContent = 'Finding...';
+        msgEl.innerHTML = '';
+        try {
+          const cols = 'plan_id, brand_name, display_name, customer_type, distributors, roi_plan, adjust, notes, costable, last_updated, fetched_at';
+          const queries = [];
+          if (net) {
+            let q = supabaseClient.from('energy_plans').select(cols).eq('active', true).eq('customer_type', type).overlaps('distributors', [net]);
+            if (/^\d{4}$/.test(pc)) q = q.or(`included_postcodes.eq.{},included_postcodes.cs.{${pc}}`).not('excluded_postcodes', 'cs', `{${pc}}`);
+            queries.push(q.limit(3000));
+          }
+          if (/^\d{4}$/.test(pc)) queries.push(supabaseClient.from('energy_plans').select(cols).eq('active', true).eq('customer_type', type).contains('included_postcodes', [pc]).limit(3000));
+          const results = await Promise.all(queries);
+          const byPlan = new Map();
+          results.forEach(({ data, error }) => { if (error) throw error; (data || []).forEach(p => byPlan.set(p.plan_id, p)); });
+          const plans = [...byPlan.values()];
+          const { data: lastRun } = await supabaseClient.from('energy_plan_sync_runs').select('finished_at, status').in('status', ['ok', 'partial']).order('started_at', { ascending: false }).limit(1).maybeSingle();
+          if (!plans.length) {
+            msgEl.innerHTML = `<p style="font-size:12px; color:${AMBER};">${lastRun ? `No plans found for ${escapeHtml(pc || net)}.` : 'The plan list has not been downloaded yet; it downloads by itself within a day.'}</p>`;
+            planResults = null; byId('bc-plan-results').innerHTML = '';
+            return;
+          }
+          planResults = {
+            candidates: plans.filter(p => p.costable && p.roi_plan),
+            uncostable: plans.filter(p => !p.costable || !p.roi_plan),
+            fetchedNote: lastRun && lastRun.finished_at ? `Plan data downloaded ${new Date(lastRun.finished_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}.` : '',
+            pc, net,
+          };
+          renderPlanResults();
+        } catch (err) {
+          msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+        } finally { btn.disabled = false; btn.textContent = 'Find plans'; }
+      }
+      function renderPlanResults() {
+        const el = byId('bc-plan-results');
+        if (!el || !planResults) return;
+        const args = estimateArgs();
+        const res = roiComparePlans({ reading: project.bill_reading, answers: args.answers, inputs: args.inputs, newSolarKw: args.newSolarKw, batteryKwh: args.batteryKwh, zoneRating: args.zoneRating,
+          candidates: planResults.candidates.map(p => ({ key: p.plan_id, roi_plan: p.roi_plan, adjust: p.adjust })) });
+        if (!res) { el.innerHTML = ''; return; }
+        const byId2 = Object.fromEntries(planResults.candidates.map(p => [p.plan_id, p]));
+        const top = res.rows.slice(0, 10);
+        const chosenIds = new Set(planOptions.map(o => o.plan_id));
+        const diff = (n) => (n === 0 ? 'same' : n < 0 ? `${money(-n)} less` : `${money(n)} more`);
+        const things = (p) => [...((p.notes || {}).eligibility || []), ...((p.notes || {}).conditions || [])].slice(0, 3).join('; ');
+        el.innerHTML = `
+          <p class="subtitle" style="margin:8px 0 4px; font-size:12px;">${escapeHtml(planResults.fetchedNote)} ${res.rows.length} plans costed${planResults.uncostable.length ? `, ${planResults.uncostable.length} left out (demand charges, wholesale prices or rates that could not be read)` : ''}. Cheapest with the system first; current plan on the same basis: ${money(res.current.billNow)} now, ${money(res.current.billAfter)} with the system.</p>
+          <div style="overflow-x:auto;"><table style="font-size:12.5px; min-width:640px;">
+            <thead><tr><th>Show</th><th style="text-align:left;">Retailer and plan</th><th>Yearly bill now</th><th>With the system</th><th>Vs current plan</th><th>Feed-in</th><th style="text-align:left;">Things to check</th></tr></thead>
+            <tbody>${top.map(r => { const p = byId2[r.key]; return `<tr>
+              <td><input type="checkbox" class="bc-plan-pick" data-id="${escapeHtml(r.key)}" style="width:auto;" ${chosenIds.has(r.key) ? 'checked' : ''} /></td>
+              <td>${escapeHtml(p.brand_name || '')}: ${escapeHtml(p.display_name || '')}<br><span class="subtitle" style="font-size:11px;">${escapeHtml(r.key)}</span></td>
+              <td>${money(r.billNow)}</td><td><strong>${money(r.billAfter)}</strong></td><td>${diff(r.vsCurrentAfter)}</td><td>${r.feedIn} c</td>
+              <td style="font-size:11.5px;">${escapeHtml(things(p) || '-')}</td></tr>`; }).join('')}</tbody>
+          </table></div>`;
+        el.querySelectorAll('.bc-plan-pick').forEach(cb => cb.addEventListener('change', () => {
+          const p = byId2[cb.dataset.id];
+          if (cb.checked) {
+            if (planOptions.length >= 3) { cb.checked = false; showToast('Up to 3 plans on the proposal: remove one first.', { error: true }); return; }
+            planOptions.push({ plan_id: p.plan_id, brand_name: p.brand_name, display_name: p.display_name, roi_plan: p.roi_plan, adjust: p.adjust,
+              notes: { eligibility: (p.notes || {}).eligibility || [], conditions: (p.notes || {}).conditions || [] }, last_updated: p.last_updated, fetched_at: p.fetched_at });
+          } else {
+            planOptions = planOptions.filter(o => o.plan_id !== p.plan_id);
+          }
+          savePlanOptions();
+        }));
       }
 
       // Step 5 (Send): one line on where the savings page stands, so nothing goes out wrong by accident.
@@ -1742,6 +1871,7 @@
       if (tplSel) tplSel.addEventListener('change', () => scheduleRender(0));
 
       buildQuoting();
+      buildPlans();
       loadBillDocs(project.id).then(() => { renderList(); renderReading(); }).then(offerBillFromSibling);
 
       // A second quote for the same client (a "with battery" and a "without" pair, say) can take the
@@ -4121,6 +4251,7 @@
                   <div id="bc-quoting"></div>
                   <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="bill-show-roi" style="width:auto; margin:0;" ${project.show_roi === false ? '' : 'checked'} /> Show the savings estimate on the proposal</label>
                   <div id="roi-estimate"></div>
+                  <div id="bc-plans"></div>
                 </div>
                 <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                   <button type="button" id="qs1-save">Save answers</button>
