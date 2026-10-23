@@ -39,7 +39,7 @@ const ROI_ASSUMPTIONS = {
   defaultFeedInCents: 5,
   defaultSupplyChargeCents: 110,
   solarSizesKw: [6.6, 8, 10, 13.2, 15, 20, 26.6, 30],
-  batterySizesKwh: [5, 10, 13.5, 16, 20, 25, 30, 40, 50],
+  batterySizesKwh: [5, 10, 13.5, 16, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100],
   minBatteryKwh: 5,
   maxBatteryKwh: 100,
   // Four seasons, each a quarter of the year: how much the panels make and the home uses against
@@ -143,6 +143,7 @@ function suggestSizes({ reading, answers, zoneRating }) {
     }
     batteryKwh = Math.min(ROI_ASSUMPTIONS.maxBatteryKwh, Math.max(ROI_ASSUMPTIONS.minBatteryKwh, roiRoundUpTo(wanted, ROI_ASSUMPTIONS.batterySizesKwh)));
     notes.push(`${Math.round(share * 100)}% of use is outside daylight (${eveningKwh.toFixed(1)} kWh a day${m.split ? ', from the bill\'s peak and off-peak split' : ', assumed'}), rounded up to a common battery size within the 5 to 100 kWh federal discount band.`);
+    if (wanted > ROI_ASSUMPTIONS.maxBatteryKwh) notes.push(`The evening use alone would take about ${Math.round(wanted)} kWh of battery; 100 kWh is the top of the discount band (the discount covers the first 50 kWh), so a bigger system is a commercial job sized by hand.`);
   }
   return {
     solarKw, solarRawKw: solarRaw ? Math.round(solarRaw * 10) / 10 : null, existingKw, yieldPerKw,
@@ -386,7 +387,7 @@ function roiGaps({ reading, answers, template, newSolarKw, batteryKwh, netCost, 
     if (!m.split) gaps.push({ key: 'tou', blocking: false, staff: 'No peak / shoulder / off-peak split on the bill: a normal household day shape is used for when the power is used.', client: null });
   }
   if (template !== 'battery' && !(roiNum(newSolarKw) > 0)) gaps.push({ key: 'size', blocking: true, staff: 'No system size: set it on step 3 (STC system size) or pull the Pylon design.', client: null });
-  if (hasBattery && !(roiNum(batteryKwh) > 0)) gaps.push({ key: 'battery', blocking: true, staff: 'No battery size: type the battery quoted (usable kWh) on step 3.', client: null });
+  if (hasBattery && !(roiNum(batteryKwh) > 0)) gaps.push({ key: 'battery', blocking: false, staff: 'No battery quoted on step 3, so the estimate runs without one. Type the battery quoted (usable kWh) there, or answer "Batteries as well?" No if this quote has no battery.', client: null });
   if (!(roiNum(netCost) > 0)) gaps.push({ key: 'price', blocking: true, staff: 'No price yet: the payback needs a priced stage on step 3.', client: null });
   else if (roiNum(newSolarKw) > 0 && roiNum(batteryKwh) > 0 && roiNum(solarPrice) == null && roiNum(batteryPrice) == null) gaps.push({ key: 'split_prices', blocking: false, staff: 'Solar and battery prices are not split on step 3, so only the combined payback shows (not one for each).', client: null });
   return gaps;
