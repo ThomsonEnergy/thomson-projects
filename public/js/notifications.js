@@ -1,37 +1,45 @@
 // Notification bell in the top bar + phone push setup. Loaded on every page
 // by renderMainNav() in supabase-client.js. Rows in `notifications` are made by
-// database triggers (see migration_132); this only shows and manages them.
+// database triggers and the create_notification function; this only shows and manages
+// the `bell` channel. Chats and emails (`messages` channel) are on the Messages icon in
+// supabase-client.js (loadChatBadge).
 
 const NOTIF_VAPID_PUBLIC = 'BPWaE-Nk0X9vEeR7Lq3MEtE8U7e7yDNu2DwyKFAdJAJFiWnPfmvODPcV1u2AJMB2C9sl23mRsG0_TEaBzUMPS5s';
-const NOTIF_KINDS = [
-  ['chat_dm', 'Chat: direct messages to me'],
-  ['chat_mention', 'Chat: @mentions of me (and Sparky answering me)'],
-  ['chat_reply', 'Chat: replies in threads I am in'],
-  ['chat_message', 'Chat: every new message in my channels (mute a channel in Chat to stop just that one)'],
-  ['tag', 'Tagged in a post or comment'],
-  ['comment', 'Comments on my posts'],
-  ['task_assigned', 'Tasks given to me'],
-  ['task_reminder', 'Task reminders'],
-  ['call_reminder', 'Call requests I have claimed (5 minutes before)'],
-  ['followup_done', 'Meeting follow-ups finished (for meetings I ran)'],
-  ['scheduled', 'Booked onto the schedule, or a booking of mine moved or cancelled'],
-  ['booking_reminder', 'A booking I made starts soon and the client has not been told; the client picked or declined time options'],
-  ['email', 'New emails in the shared inbox (admin and sales)'],
-  ['supplier_bill', 'Emailed supplier bills that need checking (admin and finance)'],
-  ['price_list', 'Emailed price lists with changes to check (admin and finance)'],
-  ['statement', 'Supplier statements that do not reconcile, and supplier replies (admin and finance)'],
-  ['stock_low', 'Stock flagged running low from a van or the Warehouse (admin and finance)'],
-  ['ops_digest', 'Ops manager 5am digest (ops manager people)'],
-  ['agent_alert', 'A background worker has stopped working (ops manager people)'],
-  ['review', 'Client reviews received'],
-  ['licence', 'Licence and insurance expiry reminders, and requests to update my licences'],
-  ['incident', 'Incidents reported from site (admin and finance)'],
-  ['knowledge', 'Knowledge Base reads I started (finished or stopped)'],
+// Where each kind shows and who can get it (migration 20261120000000). The third value says
+// who sees the tick box: nothing = everyone, 'pricing' = Admin, Finance and Sales,
+// 'finance' = Admin and Finance, 'ops' = the ops manager people set in Settings.
+const NOTIF_GROUPS = [
+  { name: 'Bell', note: 'Counted on the bell and sent to your phone.', kinds: [
+    ['tag', 'Tagged in a post or comment'],
+    ['comment', 'Comments on my posts'],
+    ['task_assigned', 'Tasks given to me'],
+    ['task_reminder', 'Task reminders'],
+    ['call_reminder', 'Call requests I have claimed (5 minutes before)'],
+    ['followup_done', 'Meeting follow-ups finished (for meetings I ran)'],
+    ['scheduled', 'Booked onto the schedule, or a booking of mine moved or cancelled'],
+    ['booking_reminder', 'A booking I made starts soon and the client has not been told; the client picked or declined time options'],
+    ['quote', 'A quote I made was declined by the client', 'pricing'],
+    ['variation', 'A variation I made was approved or declined by the client', 'pricing'],
+    ['review', 'Client reviews received'],
+    ['licence', 'Licence and insurance expiry reminders, and requests to update my licences'],
+    ['incident', 'Incidents reported from site', 'finance'],
+    ['knowledge', 'Knowledge Base reads I started (finished or stopped)'],
+    ['ops_digest', 'Ops manager 5am digest', 'ops'],
+    ['agent_alert', 'A background worker has stopped working', 'ops'],
+  ] },
+  { name: 'Messages', note: 'Counted on the Messages icon, never on the bell. Direct messages and @mentions still go to your phone; the rest wait for you here.', kinds: [
+    ['chat_dm', 'Chat: direct messages to me'],
+    ['chat_mention', 'Chat: @mentions of me (and Sparky answering me)'],
+    ['chat_reply', 'Chat: replies in threads I am in'],
+    ['chat_message', 'Chat: every new message in my channels (mute a channel in Chat to stop just that one)'],
+    ['email', 'New emails in the shared inbox, and replies on conversations I am handling', 'pricing'],
+  ] },
+  { name: 'Ops manager', who: 'finance', note: 'Emailed supplier bills, price list changes, supplier statements and stock running low never notify. They sit on the Ops page under Needs me and in the 5am digest.', kinds: [] },
 ];
 
 (function () {
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  let me = null, items = [], unread = 0, open = false, prefs = {}, prefsOpen = false, baseTitle = document.title, pushMsg = '';
+  let me = null, items = [], unread = 0, open = false, prefs = {}, prefsOpen = false, baseTitle = document.title, pushMsg = '', myRole = null, opsIds = [];
 
   function ago(iso) {
     const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -134,7 +142,7 @@ const NOTIF_KINDS = [
 
   // ---------- data ----------
   async function loadCount() {
-    const { count } = await supabaseClient.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', me).is('read_at', null);
+    const { count } = await supabaseClient.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', me).eq('channel', 'bell').is('read_at', null);
     unread = count || 0;
     const badge = document.getElementById('notif-badge');
     if (badge) { badge.textContent = unread > 99 ? '99+' : String(unread); badge.style.display = unread ? 'flex' : 'none'; }
@@ -144,7 +152,7 @@ const NOTIF_KINDS = [
   // setPageTitle (supabase-client.js) keeps the record name in __teBaseTitle; the unread count goes in front
   window.__teApplyTitle = () => { document.title = (unread ? `(${unread}) ` : '') + (window.__teBaseTitle || baseTitle); };
   async function loadItems() {
-    const { data } = await supabaseClient.from('notifications').select('*').eq('user_id', me).order('created_at', { ascending: false }).limit(40);
+    const { data } = await supabaseClient.from('notifications').select('*').eq('user_id', me).eq('channel', 'bell').order('created_at', { ascending: false }).limit(40);
     items = data || [];
   }
 
@@ -166,19 +174,41 @@ const NOTIF_KINDS = [
         <div class="nf-item ${n.read_at ? '' : 'unread'}" data-id="${n.id}" data-link="${esc(n.link || '')}">
           <span class="nf-dot"></span>
           <div style="min-width:0;"><div class="nf-title">${esc(n.title)}</div>${n.body ? `<div class="nf-body">${esc(n.body)}</div>` : ''}<div class="nf-time">${ago(n.created_at)}</div></div>
-        </div>`).join('') : '<p class="subtitle" style="padding:16px 14px; margin:0;">Nothing yet. You will see tags, tasks, bookings and new emails here.</p>'}
+        </div>`).join('') : '<p class="subtitle" style="padding:16px 14px; margin:0;">Nothing to do. Tags, tasks, bookings and reminders show here. Chats and emails are under the Messages icon.</p>'}
       <div class="nf-foot">
         ${pushHtml}
         <div id="nf-push-msg" style="font-size:12px; margin-top:6px;">${pushMsg}</div>
         <p style="margin:12px 0 6px;"><button type="button" class="nf-link" id="nf-prefs-toggle">${prefsOpen ? 'Hide' : 'Choose'} what I get notified about</button></p>
-        ${prefsOpen ? `<div class="nf-prefs">${NOTIF_KINDS.map(([k, label]) => `<label><input type="checkbox" data-kind="${k}" ${prefs[k] === false ? '' : 'checked'} /> ${esc(label)}</label>`).join('')}</div>` : ''}
+        ${prefsOpen ? `<div class="nf-prefs">${prefsHtml()}</div>` : ''}
       </div>`;
+  }
+
+  // Only the kinds this person can get are offered (see NOTIF_GROUPS).
+  function canGet(who) {
+    if (!who) return true;
+    if (who === 'pricing') return ['admin', 'finance', 'sales'].includes(myRole);
+    if (who === 'finance') return ['admin', 'finance'].includes(myRole);
+    if (who === 'ops') return opsIds.includes(me);
+    return false;
+  }
+  function prefsHtml() {
+    return NOTIF_GROUPS.filter(g => canGet(g.who)).map(g => {
+      const kinds = g.kinds.filter(([, , who]) => canGet(who));
+      if (!kinds.length && !g.note) return '';
+      return `<div style="margin:10px 0 4px; font-weight:700; font-size:13px;">${esc(g.name)}</div>` +
+        (g.note ? `<p style="margin:0 0 6px; font-size:12px; color:var(--muted);">${esc(g.note)}</p>` : '') +
+        kinds.map(([k, label]) => `<label><input type="checkbox" data-kind="${k}" ${prefs[k] === false ? '' : 'checked'} /> ${esc(label)}</label>`).join('');
+    }).join('');
   }
 
   async function openPanel() {
     open = true;
     document.getElementById('notif-panel').classList.add('open');
-    await Promise.all([loadItems(), supabaseClient.from('profiles').select('notification_prefs').eq('id', me).maybeSingle().then(r => { prefs = (r.data && r.data.notification_prefs) || {}; })]);
+    await Promise.all([
+      loadItems(),
+      supabaseClient.from('profiles').select('notification_prefs, role').eq('id', me).maybeSingle().then(r => { prefs = (r.data && r.data.notification_prefs) || {}; myRole = r.data ? r.data.role : null; }),
+      supabaseClient.from('company_settings').select('ops_manager_user_ids').eq('id', 1).maybeSingle().then(r => { opsIds = (r.data && r.data.ops_manager_user_ids) || []; }, () => { opsIds = []; }),
+    ]);
     await renderPanel();
   }
   function closePanel() { open = false; const p = document.getElementById('notif-panel'); if (p) p.classList.remove('open'); }

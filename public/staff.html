@@ -38,11 +38,11 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=116"></script>
+  <script src="/js/supabase-client.js?v=118"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/hr-templates.js?v=2"></script>
   <script src="/js/hr-shared.js?v=3"></script>
-  <script src="/js/staff-editor.js?v=7"></script>
+  <script src="/js/staff-editor.js?v=8"></script>
   <script>
     // Staff profile: everything about one team member in one place, laid out
     // like a job (tabs for overview, documents, photos, letters, incidents
@@ -69,7 +69,7 @@
     // ---------- Loading ----------
     async function loadPerson() {
       const [{ data: profile, error }, { data: sensitive }, { data: licences }, { data: contract }] = await Promise.all([
-        supabaseClient.from('profiles').select(`id, full_name, role, active, job_title, mobile_number, notes, photo_url, created_at,
+        supabaseClient.from('profiles').select(`id, full_name, role, active, job_title, mobile_number, notes, photo_url, created_at, site_rank,
           employment_type, employment_start_date, pay_type, has_company_vehicle, has_probationary_period,
           emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_payroll_status`)
           .eq('id', staffId).single(),
@@ -284,6 +284,7 @@
               <dt>Mobile</dt><dd>${p.mobile_number ? `<a class="link-quiet" href="tel:${escapeHtml(p.mobile_number)}">${escapeHtml(p.mobile_number)}</a>` : '-'}</dd>
               <dt>Email</dt><dd>${staffEmail ? `<a class="link-quiet" href="mailto:${escapeHtml(staffEmail)}">${escapeHtml(staffEmail)}</a>` : '-'}</dd>
               <dt>Position</dt><dd>${escapeHtml(p.job_title || '-')}</dd>
+              <dt>Site rank</dt><dd>${p.site_rank ? escapeHtml(String(p.site_rank)) : `<span class="subtitle">from role (${{ admin: 1, finance: 2, sales: 3 }[p.role] || 9})</span>`}</dd>
               <dt>Employment type</dt><dd>${EMPLOYMENT_LABELS[p.employment_type] || '-'}</dd>
               <dt>Start date</dt><dd>${fmtDate(p.employment_start_date)}${p.employment_start_date ? ` <span class="subtitle">(${serviceLength(p.employment_start_date)})</span>` : ''}</dd>
               <dt>Pay type</dt><dd>${p.pay_type === 'salary' ? 'Salary' : 'Hourly'}</dd>

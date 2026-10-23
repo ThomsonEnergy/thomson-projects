@@ -31,9 +31,9 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=116"></script>
+  <script src="/js/supabase-client.js?v=118"></script>
   <script src="/js/template-questions.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=4"></script>
+  <script src="/js/solar-roi.js?v=5"></script>
   <style>
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; }
     .roi-preview .roi-fig { margin:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; }
@@ -44,6 +44,7 @@
   <script src="/js/email-view.js?v=3"></script>
   <script src="/js/email-compose.js?v=8"></script>
   <script src="/js/job-schedule.js?v=2"></script>
+  <script src="/js/job-contacts.js?v=1"></script>
   <script src="/js/assets.js?v=2"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js?v=2"></script>
@@ -85,11 +86,6 @@
       const { data: project, error } = await supabaseClient
         .from('projects')
         .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), credit_note_claims(*), cost_centre_line_items(${liCols}, rate_tier_id, prebuild_group_id, prebuild_client_description, prebuild_base_quantity), cost_centre_photo_groups(*)),
-          project_manager:client_contacts!project_manager_contact_id(name, phone, email),
-          site_contact:client_contacts!site_contact_id(name, phone, email),
-          job_contact:client_contacts!job_contact_id(name, phone, email),
-          sales_contact:client_contacts!sales_contact_id(name, phone, email),
-          accounts_contact:client_contacts!accounts_contact_id(name, phone, email),
           source_quote:projects!source_quote_id(id, quote_token, quote_number),
           payment_milestones(*)`)
         .eq('id', projectId)
@@ -332,7 +328,6 @@
     let referencePhotos = [];
     let sowDocs = [];
     let billDocs = []; // the electricity bill pages filed on the quote (step 1), see wireBillCard
-    let assignedContactIds = {};
     let currentTemplate = 'new_build';
     let templateAnswers = {};
 
@@ -758,44 +753,6 @@
       document.getElementById('client-search-results').style.display = 'none';
     }
 
-    const JOB_CONTACT_TYPES = [
-      { key: 'project_manager_contact_id', type: 'project_manager', label: 'Project manager' },
-      { key: 'site_contact_id', type: 'site', label: 'Site supervisor' },
-      { key: 'job_contact_id', type: 'job', label: 'Job contact' },
-      { key: 'sales_contact_id', type: 'sales', label: 'Sales contact' },
-      { key: 'accounts_contact_id', type: 'accounts', label: 'Accounts contact' },
-    ];
-
-    async function loadEditJobContactPickers(clientId, preselected = {}) {
-      const card = document.getElementById('job-contacts-card');
-      const container = document.getElementById('job-contacts-selects');
-      assignedContactIds = { ...preselected };
-      if (!clientId) { card.style.display = 'none'; return; }
-
-      const { data: contacts, error } = await supabaseClient.from('client_contacts').select('*').eq('client_id', clientId);
-      if (error || !contacts || !contacts.length) { card.style.display = 'none'; return; }
-
-      card.style.display = 'block';
-      container.innerHTML = JOB_CONTACT_TYPES.map(t => {
-        const options = contacts.filter(c => c.contact_type === t.type);
-        if (!options.length) return '';
-        return `
-          <div>
-            <label style="margin-top:0">${t.label}</label>
-            <select class="job-contact-select" data-key="${t.key}">
-              <option value="">-- Not assigned --</option>
-              ${options.map(c => `<option value="${c.id}" ${preselected[t.key] === c.id ? 'selected' : ''}>${escapeHtml(c.name || c.phone || c.email)}</option>`).join('')}
-            </select>
-          </div>`;
-      }).join('');
-
-      if (!container.innerHTML.trim()) { card.style.display = 'none'; return; }
-      container.querySelectorAll('.job-contact-select').forEach(sel => {
-        sel.addEventListener('change', () => { assignedContactIds[sel.dataset.key] = sel.value || null; });
-        assignedContactIds[sel.dataset.key] = sel.value || null;
-      });
-    }
-
     function renderEditSowDocList() {
       const el = document.getElementById('sow-doc-list');
       if (!sowDocs.length) { el.innerHTML = ''; return; }
@@ -908,12 +865,6 @@
           <h2>Notes</h2>
           <p class="subtitle" style="margin-bottom:8px;">Background/context that should stick around regardless of how the scope of works changes - e.g. what a lead originally asked for. Not shown to the client.</p>
           <textarea id="p-notes" placeholder="Internal notes..."></textarea>
-        </div>
-
-        <div class="card" id="job-contacts-card" style="display:none;">
-          <h2>Who's running this job</h2>
-          <p class="subtitle" style="margin-bottom:10px;">Picked from this client's contact list.</p>
-          <div class="grid cols-3" id="job-contacts-selects"></div>
         </div>
 
         <div class="card" id="pylon-card">
@@ -1141,6 +1092,8 @@
           const json = await res.json();
           if (!json.ok) throw new Error(json.error || 'The bill could not be read.');
           project.bill_reading = json.reading;
+          const panel = document.getElementById('roi-inputs-panel');
+          if (panel) panel.innerHTML = '';
           project.template_answers = json.answers;
           templateAnswers = json.answers;
           renderTemplateQuestions(qEl, currentTemplate, templateAnswers);
@@ -1179,42 +1132,150 @@
         return (el && parseFloat(el.value)) || Number(project.stc_zone_rating) || 1.382;
       }
 
+      // ----- the rates for the estimate (projects.roi_inputs): the bill's rates as read, editable, a
+      // second plan to compare, and a battery export window. Built once; the estimate below it is
+      // re-rendered as anything changes (unsaved values included) and Save rates keeps them.
+      const RI_FIELDS = [
+        ['rate', 'Usage (c/kWh)', 'flat'], ['peak', 'Peak (c/kWh)', 'tou'], ['shoulder', 'Shoulder (c/kWh)', 'tou'], ['off_peak', 'Off-peak (c/kWh)', 'tou'],
+        ['peak_hours', 'Peak hours', 'tou', '14:00-20:00'], ['shoulder_hours', 'Shoulder hours', 'tou', '07:00-14:00, 20:00-22:00'],
+        ['controlled', 'Controlled load (c/kWh)', 'any'], ['supply', 'Supply (c/day)', 'any'], ['feed_in', 'Feed-in (c/kWh)', 'any'],
+      ];
+      function riPlanFieldsHtml(prefix, plan, withName) {
+        const attr = (v) => escapeHtml(v == null ? '' : String(v));
+        const field = ([key, label, when, ph]) => {
+          const isHours = key.endsWith('_hours');
+          return `<div class="ri-${when}" style="${(when === 'tou' && plan.tariff !== 'tou') || (when === 'flat' && plan.tariff === 'tou') ? 'display:none;' : ''}"><label style="margin-top:0; font-size:12px;">${label}</label><input id="${prefix}-${key}" ${isHours ? 'type="text"' : 'type="number" step="0.1" inputmode="decimal"'} value="${attr(plan[key])}" placeholder="${attr(ph || '')}" /></div>`;
+        };
+        return `
+          <div class="grid cols-4">
+            ${withName ? `<div><label style="margin-top:0; font-size:12px;">Plan or retailer name</label><input id="${prefix}-name" value="${attr(plan.name)}" placeholder="e.g. Amber, Origin Solar Boost" /></div>` : ''}
+            <div><label style="margin-top:0; font-size:12px;">Tariff</label><select id="${prefix}-tariff"><option value="flat" ${plan.tariff !== 'tou' ? 'selected' : ''}>Flat rate</option><option value="tou" ${plan.tariff === 'tou' ? 'selected' : ''}>Time of use</option></select></div>
+            ${RI_FIELDS.map(field).join('')}
+          </div>`;
+      }
+      function riReadPlan(prefix) {
+        const v = (key) => { const el = document.getElementById(`${prefix}-${key}`); return el ? el.value.trim() : ''; };
+        const out = { tariff: v('tariff') || 'flat' };
+        const nameEl = document.getElementById(`${prefix}-name`);
+        if (nameEl) out.name = nameEl.value.trim();
+        RI_FIELDS.forEach(([key]) => { const val = v(key); if (val !== '') out[key] = key.endsWith('_hours') ? val : parseFloat(val); });
+        return out;
+      }
+      function readRoiInputs() {
+        const saved = project.roi_inputs || {};
+        const altOn = document.getElementById('ri-alt-enabled');
+        const expOn = document.getElementById('ri-export-enabled');
+        const num = (id) => { const el = document.getElementById(id); const n = el ? parseFloat(el.value) : NaN; return Number.isFinite(n) ? n : null; };
+        const text = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+        const stepSolar = document.getElementById('ri-solar-price');
+        const stepBattery = document.getElementById('ri-battery-price');
+        return {
+          current: riReadPlan('ri'),
+          alt: { enabled: !!(altOn && altOn.checked), ...riReadPlan('ri-alt') },
+          export: { enabled: !!(expOn && expOn.checked), rate: num('ri-export-rate'), from: text('ri-export-from') || '17:00', to: text('ri-export-to') || '21:00', max_kwh: num('ri-export-max') },
+          solar_price: stepSolar ? num('ri-solar-price') : (saved.solar_price ?? null),
+          battery_price: stepBattery ? num('ri-battery-price') : (saved.battery_price ?? null),
+        };
+      }
+      function buildRoiInputsPanel() {
+        const panel = document.getElementById('roi-inputs-panel');
+        if (!panel) return;
+        const saved = project.roi_inputs || {};
+        const r = project.bill_reading || null;
+        const current = roiPlan(saved.current, r, '');
+        const alt = roiPlan(saved.alt, null, '');
+        if (!saved.alt) { alt.rate = null; alt.peak = null; alt.shoulder = null; alt.off_peak = null; alt.controlled = null; alt.supply = null; alt.feed_in = null; alt.name = ''; }
+        const exp = saved.export || {};
+        panel.innerHTML = `
+          <div style="margin-top:12px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
+            <label style="margin-top:0; font-weight:600;">Rates for the estimate</label>
+            <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">Filled from the bill; change anything. The estimate runs solar first, then the battery, hour by hour at these rates. Time of use: the hours not in peak or shoulder are off-peak.</p>
+            ${riPlanFieldsHtml('ri', current, false)}
+            <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-alt-enabled" style="width:auto; margin:0;" ${saved.alt && saved.alt.enabled ? 'checked' : ''} /> Compare with another plan (the same figures on a different retailer or tariff, shown as a second column)</label>
+            <div id="ri-alt-fields" style="${saved.alt && saved.alt.enabled ? '' : 'display:none;'} margin-top:4px;">${riPlanFieldsHtml('ri-alt', alt, true)}</div>
+            <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="ri-export-enabled" style="width:auto; margin:0;" ${exp.enabled ? 'checked' : ''} /> The battery sells to the grid in a window (a VPP or a plan with a high evening feed-in)</label>
+            <div id="ri-export-fields" style="${exp.enabled ? '' : 'display:none;'} margin-top:4px;">
+              <div class="grid cols-4">
+                <div><label style="margin-top:0; font-size:12px;">Sold at (c/kWh)</label><input id="ri-export-rate" type="number" step="0.1" inputmode="decimal" value="${exp.rate ?? ''}" placeholder="e.g. 60" /></div>
+                <div><label style="margin-top:0; font-size:12px;">From</label><input id="ri-export-from" type="time" value="${escapeHtml(exp.from || '17:00')}" /></div>
+                <div><label style="margin-top:0; font-size:12px;">To</label><input id="ri-export-to" type="time" value="${escapeHtml(exp.to || '21:00')}" /></div>
+                <div><label style="margin-top:0; font-size:12px;">Up to (kWh a day)</label><input id="ri-export-max" type="number" step="0.1" inputmode="decimal" value="${exp.max_kwh ?? ''}" placeholder="blank: whatever is in it" /></div>
+              </div>
+              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">In the window the battery sells first when the sold rate beats that hour's buy rate, then covers the home with what is left.</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+              <button type="button" id="ri-save">Save rates</button>
+              <span class="subtitle" id="ri-msg" style="font-size:12px;"></span>
+            </div>
+          </div>`;
+        const toggleTariff = (prefix) => {
+          const sel = document.getElementById(`${prefix}-tariff`);
+          if (!sel) return;
+          const tou = sel.value === 'tou';
+          panel.querySelectorAll(`[id^="${prefix}-"]`).forEach(el => {
+            const wrap = el.closest('.ri-tou, .ri-flat');
+            if (!wrap) return;
+            if (!el.id.startsWith(prefix + '-') || (prefix === 'ri' && el.id.startsWith('ri-alt-'))) return;
+            wrap.style.display = wrap.classList.contains('ri-tou') ? (tou ? '' : 'none') : (tou ? 'none' : '');
+          });
+        };
+        document.getElementById('ri-tariff').addEventListener('change', () => toggleTariff('ri'));
+        document.getElementById('ri-alt-tariff').addEventListener('change', () => toggleTariff('ri-alt'));
+        document.getElementById('ri-alt-enabled').addEventListener('change', (e) => { document.getElementById('ri-alt-fields').style.display = e.target.checked ? '' : 'none'; });
+        document.getElementById('ri-export-enabled').addEventListener('change', (e) => { document.getElementById('ri-export-fields').style.display = e.target.checked ? '' : 'none'; });
+        let timer = null;
+        panel.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(renderEstimate, 250); });
+        panel.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(renderEstimate, 50); });
+        document.getElementById('ri-save').addEventListener('click', async () => {
+          const btn = document.getElementById('ri-save');
+          const msg = document.getElementById('ri-msg');
+          btn.disabled = true;
+          try {
+            const inputs = readRoiInputs();
+            const { error } = await supabaseClient.from('projects').update({ roi_inputs: inputs }).eq('id', project.id);
+            if (error) throw error;
+            project.roi_inputs = inputs;
+            msg.textContent = 'Saved.';
+            showToast('Rates saved.');
+            renderEstimate();
+            if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
+          } catch (err) { msg.innerHTML = `<span style="color:var(--red, #c0392b);">${escapeHtml(friendlyError(err))}</span>`; }
+          finally { btn.disabled = false; }
+        });
+      }
+
+      function estimateArgs() {
+        const inputs = readRoiInputs();
+        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money, inputs, solarPrice: inputs.solar_price, batteryPrice: inputs.battery_price };
+      }
+
       function renderReading() {
         const out = document.getElementById('bill-reading');
         const when = document.getElementById('bill-read-when');
         const r = project.bill_reading;
         if (!out || !when) return;
-        const pres = roiPresentation({ reading: r, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money });
-        const gaps = pres.gaps;
-        const blocking = gaps.filter(g => g.blocking);
-        const warnings = gaps.filter(g => !g.blocking);
-        const gapsHtml = (blocking.length || warnings.length) ? `
-          <div style="margin-top:10px; padding:10px 12px; border-radius:8px; border:1px solid ${blocking.length ? 'var(--red, #c0392b)' : 'var(--border)'}; background:var(--surface);">
-            ${blocking.length ? `<strong style="font-size:13px;">Missing for the savings estimate</strong><p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${project.show_roi === false ? 'The savings page is switched off on step 3.' : 'The proposal still goes out: it shows the rows we can stand behind, tells the customer "to give you Y we need X", and says accepting before then is accepting on what is shown. Items with no customer ask are ours to fill in.'}</p><ul style="margin:0 0 6px 18px; padding:0; font-size:13px;">${blocking.map(g => `<li>${escapeHtml(g.staff)}${g.client ? ` <span class="subtitle">(the proposal asks the customer for ${escapeHtml(g.client)})</span>` : ''}</li>`).join('')}</ul>` : ''}
-            ${warnings.length ? `<strong style="font-size:13px;">Assumed</strong><ul style="margin:2px 0 0 18px; padding:0; font-size:12px; color:var(--muted);">${warnings.map(g => `<li>${escapeHtml(g.staff)}</li>`).join('')}</ul>` : ''}
-          </div>` : '';
-        if (!r) { out.innerHTML = gapsHtml; when.textContent = ''; return; }
+        if (!r) { out.innerHTML = ''; when.textContent = ''; renderEstimate(); return; }
         when.textContent = r.read_at ? `Read ${new Date(r.read_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}${r.pages ? `, ${r.pages} file${r.pages === 1 ? '' : 's'}` : ''}` : '';
         const m = billMetrics(r);
         const fmt = (v, unit) => (v == null ? '-' : `${v}${unit || ''}`);
+        const rates = r.usage_rates || {};
+        const rateText = rates.peak != null ? `peak ${rates.peak}${rates.shoulder != null ? `, shoulder ${rates.shoulder}` : ''}${rates.off_peak != null ? `, off-peak ${rates.off_peak}` : ''} c/kWh` : `${fmt(r.usage_rate_c_per_kwh, ' c/kWh')} usage`;
         const rows = [
           ['Retailer', `${r.retailer || '-'}${r.distributor ? ` (network ${r.distributor})` : ''}`],
           ['NMI', r.nmi || '-'],
           ['Period', `${r.billing_period_start || '?'} to ${r.billing_period_end || '?'} (${fmt(m.days, ' days')})`],
           ['Use', `${fmt(m.totalKwh, ' kWh')} in the period, ${fmt(m.dailyKwh, ' kWh a day')}, about ${fmt(m.annualKwh, ' kWh a year')}`],
           ...(m.split ? [['Time of use', `peak ${m.split.peak} / shoulder ${m.split.shoulder} / off-peak ${m.split.offPeak} kWh${m.split.controlled ? `, controlled load ${m.split.controlled} kWh` : ''}`]] : []),
-          ['Rates', `${fmt(r.usage_rate_c_per_kwh, ' c/kWh')} usage, ${fmt(r.supply_charge_c_per_day, ' c/day')} supply${r.feed_in_c_per_kwh != null ? `, feed-in ${r.feed_in_c_per_kwh} c/kWh` : ''}`],
+          ['Rates', `${rateText}${rates.controlled_load != null ? `, controlled load ${rates.controlled_load} c/kWh` : ''}, ${fmt(r.supply_charge_c_per_day, ' c/day')} supply${r.feed_in_c_per_kwh != null ? `, feed-in ${r.feed_in_c_per_kwh} c/kWh` : ''}`],
           ['This bill', `${r.bill_total != null ? money(r.bill_total) : '-'}${m.annualBill ? `, about ${money(m.annualBill)} a year` : ''}`],
           ...(r.solar_export_kwh ? [['Solar export', `${r.solar_export_kwh} kWh (existing solar)`]] : []),
           ...(r.skipped_files && r.skipped_files.length ? [['Not read', r.skipped_files.join(', ')]] : []),
           ...(r.notes ? [['Note', r.notes]] : []),
         ];
         const s = r.sizing || {};
-        const roi = pres.roi;
         const cell = (k, v) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px;">${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`;
         out.innerHTML = `
           <table style="margin-top:10px; font-size:13px;"><tbody>${rows.map(([k, v]) => cell(k, v)).join('')}</tbody></table>
-          ${gapsHtml}
           <div style="margin-top:12px;">
             <label style="margin-top:0; font-weight:600;">Recommended from the bill</label>
             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0;">
@@ -1222,20 +1283,12 @@
               ${s.batteryKwh ? `<span><strong>${s.batteryKwh} kWh</strong> battery</span><button type="button" class="secondary" id="bill-use-battery" style="font-size:12px; padding:4px 8px;">Quote this size (step 3)</button>` : ''}
             </div>
             ${(s.notes || []).map(n => `<p class="subtitle" style="margin:2px 0; font-size:12px;">${escapeHtml(n)}</p>`).join('')}
-          </div>
-          ${pres.rows.length ? `
-          <div style="margin-top:12px;">
-            <label style="margin-top:0; font-weight:600;">Savings estimate on what we are quoting (as the proposal shows it)</label>
-            <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${roi ? `Quoting ${roi.newSolarKw ? `${roi.newSolarKw} kW of solar` : ''}${roi.newSolarKw && roi.batteryKwh ? ' and ' : ''}${roi.batteryKwh ? `a ${roi.batteryKwh} kWh battery` : ''}${roi.existingKw ? ` on top of the existing ${roi.existingKw} kW` : ''}${roi.netCost ? ` at ${money(roi.netCost)} after the credits` : ' (no price on step 3 yet)'}. ` : 'Only what the bill alone tells us until the gaps above are filled. '}Change the sizes and price on step 3 and this follows; the tick on step 3 hides it from the proposal.</p>
-            <div class="roi-preview">${roiChartsHtml(roi, money, { dollars: pres.dollars })}</div>
-            <table style="font-size:13px;"><tbody>${pres.rows.map(([k, v]) => cell(k, v)).join('')}</tbody></table>
-            ${pres.asks.length ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">The proposal adds under the table: ${pres.asks.map(a => `"To give you ${escapeHtml(a.gives)}, we need ${escapeHtml(a.need)}."`).join(' ')} and that accepting before then is accepting on what is shown.</p>` : ''}
-          </div>` : ''}`;
+          </div>`;
         const useSolar = out.querySelector('#bill-use-solar');
         if (useSolar) useSolar.addEventListener('click', () => {
           const el = document.getElementById('q-stc-kw');
           if (el) { el.value = s.solarKw; el.dispatchEvent(new Event('input', { bubbles: true })); showToast(`${s.solarKw} kW set on step 3. Save pricing to keep it.`); }
-          renderReading();
+          renderEstimate();
         });
         const useBattery = out.querySelector('#bill-use-battery');
         if (useBattery) useBattery.addEventListener('click', () => {
@@ -1245,12 +1298,63 @@
           const el = document.getElementById('q-battery-kwh');
           if (el) { el.value = s.batteryKwh; el.dispatchEvent(new Event('input', { bubbles: true })); }
           showToast(`${s.batteryKwh} kWh set as the battery quoted on step 3. Save pricing to keep it.`);
-          renderReading();
+          renderEstimate();
         });
+        if (!document.getElementById('ri-save')) buildRoiInputsPanel();
+        renderEstimate();
       }
 
-      qEl.addEventListener('change', () => { if (project.bill_reading) renderReading(); });
-      ['q-stc-kw', 'q-stc-zone', 'q-battery-kwh'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', () => { if (project.bill_reading) renderReading(); }); });
+      // The estimate as the proposal shows it (same maths, same rows), plus the gaps and the working.
+      function renderEstimate() {
+        const out = document.getElementById('roi-estimate');
+        if (!out) return;
+        const pres = roiPresentation(estimateArgs());
+        const gaps = pres.gaps;
+        const blocking = gaps.filter(g => g.blocking);
+        const warnings = gaps.filter(g => !g.blocking);
+        const gapsHtml = (blocking.length || warnings.length) ? `
+          <div style="margin-top:10px; padding:10px 12px; border-radius:8px; border:1px solid ${blocking.length ? 'var(--red, #c0392b)' : 'var(--border)'}; background:var(--surface);">
+            ${blocking.length ? `<strong style="font-size:13px;">Missing for the savings estimate</strong><p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${project.show_roi === false ? 'The savings page is switched off.' : 'The proposal still goes out: it shows the rows we can stand behind, tells the customer "to give you Y we need X", and says accepting before then is accepting on what is shown. Items with no customer ask are ours to fill in.'}</p><ul style="margin:0 0 6px 18px; padding:0; font-size:13px;">${blocking.map(g => `<li>${escapeHtml(g.staff)}${g.client ? ` <span class="subtitle">(the proposal asks the customer for ${escapeHtml(g.client)})</span>` : ''}</li>`).join('')}</ul>` : ''}
+            ${warnings.length ? `<strong style="font-size:13px;">Assumed</strong><ul style="margin:2px 0 0 18px; padding:0; font-size:12px; color:var(--muted);">${warnings.map(g => `<li>${escapeHtml(g.staff)}</li>`).join('')}</ul>` : ''}
+          </div>` : '';
+        if (!pres.sections.length) { out.innerHTML = gapsHtml; return; }
+        const est = pres.est;
+        const cols = pres.columns;
+        const head = cols.length > 1 ? `<thead><tr><th></th>${cols.map(c => `<th style="text-align:left; font-size:12px;">${escapeHtml(c)}</th>`).join('')}</tr></thead>` : '';
+        const body = pres.sections.map(sec => `<tr><td colspan="${cols.length + 1}" style="padding-top:10px; font-weight:600;">${escapeHtml(sec.title)}</td></tr>${sec.rows.map(([k, vals]) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px;">${escapeHtml(k)}</td>${vals.map(v => `<td>${escapeHtml(String(v))}</td>`).join('')}</tr>`).join('')}`).join('');
+        const working = est ? roiWorkingRows(est, money) : [];
+        out.innerHTML = `
+          ${gapsHtml}
+          <div style="margin-top:12px;">
+            <label style="margin-top:0; font-weight:600;">Savings estimate on what we are quoting (as the proposal shows it)</label>
+            <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">${est ? `Quoting ${est.newSolarKw ? `${est.newSolarKw} kW of solar${est.prices.solar != null ? ` (${money(est.prices.solar)})` : ''}` : ''}${est.newSolarKw && est.batteryKwh ? ' and ' : ''}${est.batteryKwh ? `a ${est.batteryKwh} kWh battery${est.prices.battery != null ? ` (${money(est.prices.battery)})` : ''}` : ''}${est.existingKw ? ` on top of the existing ${est.existingKw} kW` : ''}${est.prices.total ? `, ${money(est.prices.total)} in all after the credits` : ' (no price on step 3 yet)'}. ` : 'Only what the bill alone tells us until the gaps above are filled. '}Change the sizes and prices on step 3 or the rates above and this follows; the tick above hides it from the proposal.</p>
+            <div class="roi-preview">${est ? roiChartsHtml(est, money, { dollars: pres.dollars, bills: pres.bills }) : ''}</div>
+            <table style="font-size:13px;">${head}<tbody>${body}</tbody></table>
+            ${pres.asks.length ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">The proposal adds under the table: ${pres.asks.map(a => `"To give you ${escapeHtml(a.gives)}, we need ${escapeHtml(a.need)}."`).join(' ')} and that accepting before then is accepting on what is shown.</p>` : ''}
+            ${working.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:13px;">Show the working</summary>${working.map(w => `<p style="margin:8px 0 2px; font-size:12px; font-weight:600;">${escapeHtml(w.title)}</p><table style="font-size:12px;"><tbody>${w.rows.map(([k, v]) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px; vertical-align:top;">${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('')}</tbody></table>`).join('')}<p class="subtitle" style="margin:8px 0 0; font-size:12px;">A typical day in each season, hour by hour, 70% clear days and 30% overcast; ${ROI_ASSUMPTIONS.yieldPerKwPerDay[currentZone()] || 3.9} kWh per kW per day over the year; the battery at ${Math.round(ROI_ASSUMPTIONS.batteryRoundTrip * 100)}% round trip. Full detail: public/js/solar-roi.js.</p></details>` : ''}
+          </div>`;
+      }
+
+      // The same switch as step 3's tick (projects.show_roi): this one saves on its own so the page
+      // can be taken off a proposal without going through Save pricing.
+      const showRoi = document.getElementById('bill-show-roi');
+      if (showRoi) showRoi.addEventListener('change', async () => {
+        const on = showRoi.checked;
+        try {
+          const { error } = await supabaseClient.from('projects').update({ show_roi: on }).eq('id', project.id);
+          if (error) throw error;
+          project.show_roi = on;
+          const step3 = document.getElementById('p-show-roi');
+          if (step3) step3.checked = on;
+          showToast(on ? 'Savings estimate will show on the proposal.' : 'Savings estimate taken off the proposal.');
+          renderEstimate();
+          if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
+        } catch (err) { showRoi.checked = !on; showToast(friendlyError(err), { error: true }); }
+      });
+      const step3Roi = document.getElementById('p-show-roi');
+      if (step3Roi && showRoi) step3Roi.addEventListener('change', () => { showRoi.checked = step3Roi.checked; });
+      qEl.addEventListener('change', () => { if (project.bill_reading) renderEstimate(); });
+      ['q-stc-kw', 'q-stc-zone', 'q-battery-kwh', 'ri-solar-price', 'ri-battery-price'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', () => { if (project.bill_reading) renderEstimate(); }); });
       loadBillDocs(project.id).then(() => { renderList(); renderReading(); });
     }
 
@@ -1576,13 +1680,6 @@
             document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${escapeHtml(client.name)}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
             await sitePicker.setClient(client);
           }
-          await loadEditJobContactPickers(project.client_id, {
-            project_manager_contact_id: project.project_manager_contact_id,
-            site_contact_id: project.site_contact_id,
-            job_contact_id: project.job_contact_id,
-            sales_contact_id: project.sales_contact_id,
-            accounts_contact_id: project.accounts_contact_id,
-          });
         }
       } else {
         // addRow()'s singleStage check still needs a real template - jobs
@@ -1915,11 +2012,6 @@
             proposal_template: currentTemplate,
             template_answers: readTemplateAnswers(document.getElementById('template-questions')),
             estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
-            project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
-            site_contact_id: assignedContactIds.site_contact_id || null,
-            job_contact_id: assignedContactIds.job_contact_id || null,
-            sales_contact_id: assignedContactIds.sales_contact_id || null,
-            accounts_contact_id: assignedContactIds.accounts_contact_id || null,
           };
 
           const { error: updateErr } = await supabaseClient.from('projects').update(projectFields).eq('id', project.id);
@@ -3574,8 +3666,11 @@
                     <button type="button" class="secondary" id="bill-read-btn" disabled>&#10024; Read bill with AI</button>
                     <span class="subtitle" id="bill-read-when" style="font-size:12px;"></span>
                   </div>
+                  <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-weight:400; cursor:pointer;"><input type="checkbox" id="bill-show-roi" style="width:auto; margin:0;" ${project.show_roi === false ? '' : 'checked'} /> Show the savings estimate on the proposal (saves straight away; same switch as on step 3)</label>
                   <div id="bill-read-msg"></div>
                   <div id="bill-reading"></div>
+                  <div id="roi-inputs-panel"></div>
+                  <div id="roi-estimate"></div>
                 </div>
                 <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                   <button type="button" id="qs1-save">Save answers</button>
@@ -3663,7 +3758,10 @@
                     <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">The solar size is the System size (kW) above. Type the battery's usable kWh here; the price is this quote's total after the credits. The bill card on step 1 shows the recommendation and the estimate the customer sees.</p>
                     <div class="grid cols-4">
                       <div><label style="margin-top:0; font-size:12px;">Battery quoted (usable kWh)</label><input id="q-battery-kwh" type="number" step="0.1" inputmode="decimal" min="0" value="${project.battery_kwh ?? ''}" placeholder="e.g. 13.5" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">Solar price (inc GST, after STC)</label><input id="ri-solar-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.solar_price != null) ? project.roi_inputs.solar_price : ''}" placeholder="${(() => { const c = (centres || []).find(x => x.id === project.stc_cost_centre_id); return c ? Math.max(0, Math.round(Number(c.quoted_amount || 0) * 1.1 - Number(project.stc_total || 0))) : 'blank: combined only'; })()}" /></div>
+                      <div><label style="margin-top:0; font-size:12px;">Battery price (inc GST, after BSTC)</label><input id="ri-battery-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.battery_price != null) ? project.roi_inputs.battery_price : ''}" placeholder="${(() => { const c = (centres || []).find(x => x.id === project.bstc_cost_centre_id); return c ? Math.max(0, Math.round(Number(c.quoted_amount || 0) * 1.1 - Number(project.bstc_total || 0))) : 'blank: combined only'; })()}" /></div>
                     </div>
+                    <p class="subtitle" style="margin:4px 0 0; font-size:12px;">The two prices give the solar and the battery their own payback on the proposal (the grey hint is that credit's stage, inc GST, less the credit). Leave both blank for one combined payback.</p>
                   </div>
                 </div>
 
@@ -3950,9 +4048,12 @@
               bstc_cost_centre_id: document.getElementById('q-bstc-stage').value || null,
               bstc_not_claimed: document.getElementById('q-bstc-none').checked,
               battery_kwh: num('q-battery-kwh'),
+              roi_inputs: { ...(project.roi_inputs || {}), solar_price: num('ri-solar-price'), battery_price: num('ri-battery-price') },
             };
             const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
             if (error) throw error;
+            project.roi_inputs = fields.roi_inputs;
+            project.battery_kwh = fields.battery_kwh;
 
             await supabaseClient.from('payment_milestones').delete().eq('project_id', project.id);
             const milestonesPayload = readMilestones();
@@ -4129,6 +4230,7 @@
       const tabDefs = [
         { panel: 'quote', label: 'Quote', show: isStepQuote },
         { panel: 'summary', label: 'Summary', show: true },
+        { panel: 'contacts', label: 'Contacts', show: !editMode },
         { panel: 'costcentres', label: 'Cost Centres', show: true },
         { panel: 'pos', label: 'Purchase Orders', show: !!project.job_number && !editMode },
         { panel: 'variations', label: 'Variations', show: !!project.job_number && !editMode },
@@ -4141,7 +4243,7 @@
         { panel: 'documents', label: 'Documents', show: !editMode },
         { panel: 'photos', label: 'Site Photos', show: !editMode },
       ];
-      const FIELD_TABS_FIRST = ['summary', 'photos', 'documents', 'feed'];
+      const FIELD_TABS_FIRST = ['summary', 'contacts', 'photos', 'documents', 'feed'];
       const tabsInOrder = pricingVisible ? tabDefs : [...FIELD_TABS_FIRST.map(p => tabDefs.find(d => d.panel === p)), ...tabDefs.filter(d => !FIELD_TABS_FIRST.includes(d.panel))];
 
       content.innerHTML = `
@@ -4184,6 +4286,7 @@
 
             <div class="settings-panel${isStepQuote ? '' : ' active'}${!editMode ? ' job-card-grid' : ''}" id="panel-summary">
               ${!editMode ? '<div id="clock-here-card"></div>' : ''}
+              ${!editMode ? '<div class="card" id="job-key-people" style="display:none;"></div>' : ''}
               ${!editMode ? `
               <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
@@ -4668,6 +4771,13 @@
             </div>` : ''}
 
             ${!editMode ? `
+            <div class="settings-panel" id="panel-contacts">
+              <div class="card">
+                <h2 style="margin:0 0 4px;">Contacts</h2>
+                <p class="subtitle" style="margin:0 0 14px;">Who to call on this job: the people at the site, the client's people and ours. Anyone can add or fix a contact; tap a number to call.</p>
+                <div id="job-contacts-sections"><p class="subtitle">Loading...</p></div>
+              </div>
+            </div>
             <div class="settings-panel" id="panel-schedule">
               <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
@@ -4728,27 +4838,6 @@
                 <div id="proj-needs-visit-msg"></div>
                 <div id="proj-inspection-area" style="margin-top:10px;"></div>
               </div>
-
-              ${(() => {
-                const contactRows = [
-                  { label: 'Project manager', c: project.project_manager },
-                  { label: 'Site supervisor', c: project.site_contact },
-                  { label: 'Job contact', c: project.job_contact },
-                  { label: 'Sales contact', c: project.sales_contact },
-                  { label: 'Accounts contact', c: project.accounts_contact },
-                ].filter(r => r.c && r.c.name);
-                if (!contactRows.length) return '';
-                return `
-              <div class="card">
-                <h2>Who's running this job</h2>
-                <table>
-                  <thead><tr><th>Role</th><th>Name</th><th>Phone</th><th>Email</th></tr></thead>
-                  <tbody>
-                    ${contactRows.map(r => `<tr><td>${r.label}</td><td>${escapeHtml(r.c.name || '')}</td><td>${r.c.phone ? `<a class="link-quiet" href="tel:${escapeHtml(r.c.phone)}">${escapeHtml(r.c.phone)}</a>` : ''}</td><td>${r.c.email ? `<a class="link-quiet" href="mailto:${escapeHtml(r.c.email)}">${escapeHtml(r.c.email)}</a>` : ''}</td></tr>`).join('')}
-                  </tbody>
-                </table>
-              </div>`;
-              })()}
 
               ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) && !isStepQuote ? `
               <div class="card">
@@ -4897,6 +4986,7 @@
       initJobSearch(project, pricingVisible);
       initJobEmails(project);
       initJobSchedule(project, pricingVisible);
+      initJobContacts(project, pricingVisible);
       initJobStcs(project, centres);
 
       const hdSaveBtn = document.getElementById('hd-save-btn');
@@ -5229,11 +5319,6 @@
               client_email: fullProject.client_email,
               client_phone: fullProject.client_phone,
               client_address: fullProject.client_address,
-              project_manager_contact_id: fullProject.project_manager_contact_id,
-              site_contact_id: fullProject.site_contact_id,
-              job_contact_id: fullProject.job_contact_id,
-              sales_contact_id: fullProject.sales_contact_id,
-              accounts_contact_id: fullProject.accounts_contact_id,
               sow_text: fullProject.sow_text,
               proposal_subtitle: fullProject.proposal_subtitle,
               terms_text: fullProject.terms_text,
@@ -5249,6 +5334,14 @@
             .select()
             .single();
           if (insErr) throw insErr;
+
+          // The quote's contacts (Contacts tab) go with the copy.
+          const { data: quoteContacts } = await supabaseClient.from('job_contacts')
+            .select('side, role, name, company, phone, email, notes, profile_id, client_contact_id, sort_order').eq('project_id', project.id);
+          if (quoteContacts && quoteContacts.length) {
+            const { error: jcErr } = await supabaseClient.from('job_contacts').insert(quoteContacts.map(c => ({ ...c, project_id: newProject.id })));
+            if (jcErr) throw jcErr;
+          }
 
           const stages = fullProject.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
           const { data: newStages, error: stagesErr } = await supabaseClient

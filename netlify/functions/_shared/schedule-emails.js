@@ -47,8 +47,15 @@ function whenLines(rows) {
   return lines;
 }
 
-// The job contact's email when there is one, else the client email on the job.
+// The job's own client-side contact with an email (Contacts tab: job contact, then site manager,
+// then project manager), else the old job contact link, else the client email on the job.
+const CLIENT_ROLE_ORDER = ['job_contact', 'site_manager', 'project_manager'];
+const CLIENT_ROLE_SOURCE = { job_contact: 'job contact', site_manager: 'client site manager', project_manager: 'client project manager' };
 async function recipientFor(admin, project) {
+  const { data: contacts } = await admin.from('job_contacts').select('role, name, email').eq('project_id', project.id).eq('side', 'client');
+  const pick = (contacts || []).filter((c) => c.email && c.email.trim() && CLIENT_ROLE_ORDER.includes(c.role))
+    .sort((a, b) => CLIENT_ROLE_ORDER.indexOf(a.role) - CLIENT_ROLE_ORDER.indexOf(b.role))[0];
+  if (pick) return { to: pick.email.trim(), name: pick.name || project.client_name || '', first: firstName(pick.name || project.client_name), source: CLIENT_ROLE_SOURCE[pick.role] };
   if (project.job_contact_id) {
     const { data: c } = await admin.from('client_contacts').select('name, email').eq('id', project.job_contact_id).maybeSingle();
     if (c && c.email) return { to: c.email, name: c.name || project.client_name || '', first: firstName(c.name || project.client_name), source: 'job contact' };

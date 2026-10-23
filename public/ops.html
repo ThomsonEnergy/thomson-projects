@@ -79,7 +79,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=116"></script>
+  <script src="/js/supabase-client.js?v=118"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const esc = (s) => escapeHtml(s == null ? '' : String(s));
@@ -93,7 +93,7 @@
     }
 
     async function load() {
-      const [bills, tasks, beats, runs, digest, sups, prices, checks, stIssues] = await Promise.all([
+      const [bills, tasks, beats, runs, digest, sups, prices, checks, stIssues, lows] = await Promise.all([
         supabaseClient.from('supplier_bill_inbox').select('id, status, extracted, supplier_id, match_reason, error, email_from, created_at').in('status', ['to_check', 'failed']).order('created_at').limit(50),
         supabaseClient.from('agent_tasks').select('*').eq('status', 'open').order('created_at'),
         supabaseClient.from('agent_heartbeats').select('*').order('label'),
@@ -103,6 +103,7 @@
         supabaseClient.from('price_changes').select('id', { count: 'exact', head: true }).eq('status', 'waiting'),
         supabaseClient.from('supplier_bills').select('check_status, approved_for_payment').eq('paid', false).in('check_status', ['matches', 'resolved', 'problems']),
         supabaseClient.from('supplier_statements').select('id', { count: 'exact', head: true }).eq('status', 'issues'),
+        supabaseClient.from('stock_low_flags').select('id, location_type, materials(name)').is('cleared_at', null).order('created_at').limit(50),
       ]);
       const err = [bills, tasks, beats, runs, digest].find(r => r.error);
       if (err) { document.getElementById('op-needs').innerHTML = `<div class="error-box">${esc(err.error.message)}</div>`; return; }
@@ -132,6 +133,10 @@
       if (prices.count) items.push(`<div class="op-item"><div class="op-head"><strong>${prices.count} price list change${prices.count === 1 ? '' : 's'} to check</strong></div>
           <div class="op-meta">Big price moves, first-time matches and items that look replaced.</div>
           <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/price-lists.html">Open Price lists</a></div></div>`);
+      const lowRows = lows.data || [];
+      if (lowRows.length) items.push(`<div class="op-item"><div class="op-head"><strong>${lowRows.length} stock item${lowRows.length === 1 ? '' : 's'} running low</strong></div>
+          <div class="op-meta">${esc(lowRows.map(l => `${(l.materials && l.materials.name) || 'Item'} (${l.location_type === 'vehicle' ? 'van' : 'Warehouse'})`).join(', '))}</div>
+          <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/stock.html">Open Stock</a></div></div>`);
       const needsEl = document.getElementById('op-needs');
       needsEl.innerHTML = items.length ? items.join('') : '<p class="subtitle">Nothing needs you.</p>';
       needsEl.querySelectorAll('[data-task]').forEach(el => {
