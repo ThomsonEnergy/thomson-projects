@@ -77,7 +77,7 @@ exports.handler = async (event) => {
     }
     // Stock / prebuild items added on the invoice are extra on top, so only the typed claim is limited.
     // Estimates and time-and-materials jobs bill actuals, which can run past the estimate: not limited.
-    const { data: jobForCap } = await supabaseAdmin.from('projects').select('proposal_template, stc_total, bstc_total').eq('id', projectId).maybeSingle();
+    const { data: jobForCap } = await supabaseAdmin.from('projects').select('proposal_template, stc_total, bstc_total, client_id').eq('id', projectId).maybeSingle();
     const capped = !['quick_estimate', 'time_and_materials', 'direct_job'].includes(jobForCap?.proposal_template);
     for (const { c } of (capped ? pricedClaims : [])) {
       const centre = (allCentres || []).find(cc => cc.id === c.costCentreId);
@@ -101,7 +101,14 @@ exports.handler = async (event) => {
     if (r2(totalAmount) <= 0) {
       return { statusCode: 400, body: JSON.stringify({ error: 'An invoice needs labour or materials on it. A credit on its own is not an invoice.' }) };
     }
-    if (r2(totalStc + totalBstc) > r2(totalAmount) + 0.01) {
+    // Compared with GST on both sides, the way the invoice totals it (invoice_client_type in the database):
+    // the work carries GST for everyone, a certificate credit carries it for a company client only.
+    const creditClientId = billToClientId || jobForCap?.client_id || null;
+    const { data: creditClient } = creditClientId
+      ? await supabaseAdmin.from('clients').select('client_type').eq('id', creditClientId).maybeSingle()
+      : { data: null };
+    const creditIncGst = (n) => (creditClient?.client_type === 'company' ? r2(n * 1.1) : r2(n));
+    if (r2(creditIncGst(totalStc) + creditIncGst(totalBstc)) > r2(totalAmount * 1.1) + 0.01) {
       return { statusCode: 400, body: JSON.stringify({ error: 'The STC and BSTC credits on this claim are more than the work claimed, so the invoice would be negative. Claim more of the stage with the credits, or less credit.' }) };
     }
     // The credits are the quote's (projects.stc_total and bstc_total): a claim can carry at most what is left of

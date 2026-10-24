@@ -288,14 +288,15 @@
         <p class="subtitle" style="margin:8px 0 0; font-size:12px;">As at ${escapeHtml(asAt)}</p>`;
     }
 
-    // Finance roles only: POSTs to sync-leave-balances (Xero Payroll AU), then reloads the block.
+    // Finance roles only: POSTs to sync-leave-balances-now (the on-demand twin of the nightly
+    // sync-leave-balances, which Netlify runs on its schedule only and never over HTTP), then reloads the block.
     async function refreshLeaveFromXero(btn, msgEl) {
       const label = btn.textContent;
       btn.disabled = true; btn.textContent = 'Refreshing...';
       msgEl.innerHTML = '';
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/sync-leave-balances', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } });
+        const res = await fetch('/.netlify/functions/sync-leave-balances-now', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } });
         const json = await res.json().catch(() => ({}));
         if (!res.ok || !json.ok) throw new Error(json.error || 'Could not refresh from Xero');
         const { data: leave } = await supabaseClient.from('leave_balances').select('*').eq('profile_id', staffId).maybeSingle();

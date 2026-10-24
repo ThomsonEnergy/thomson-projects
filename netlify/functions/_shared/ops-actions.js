@@ -121,6 +121,7 @@ const OPS_TOOLS = [
       bill_inbox_id: { type: 'string', description: 'supplier_bill_inbox.id' },
       po_number: { type: 'string', description: 'e.g. PO2014, only if the person wants a different PO from the matched one.' },
       no_po: { type: 'boolean' },
+      amount: { type: 'number', description: 'The bill total inc GST the person confirmed or corrected. Leave out to keep the total the reader found.' },
     }, required: ['bill_inbox_id'] },
   },
   {
