@@ -841,3 +841,76 @@ end;
 $$;
 revoke execute on function public.supplier_bills_mark_paid(uuid[], date, text, uuid) from public, anon, authenticated;
 grant execute on function public.supplier_bills_mark_paid(uuid[], date, text, uuid) to service_role;
+
+-- ---------------------------------------------------------------------------------------------------
+-- 13. F7 follow-up: a field role's clock-in or booking on a Ready to Book job moves it to Job Booked
+-- ---------------------------------------------------------------------------------------------------
+-- time_entries_sync_booked runs sync_project_booked as the person clocking in, and its update of
+-- pipeline_stage reaches guard_projects_writes (20261124131544) with that person's login. 'job_booked' was
+-- not in the field-role stage list, so a Staff clock-in on a Ready to Book job was refused. Same function
+-- as delivery 1 with 'job_booked' added; projects_job_booked_gate still refuses Job Booked unless someone
+-- is scheduled or clocked in.
+create or replace function public.guard_projects_writes()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_allowed text[] := array['pipeline_stage', 'ccew_file_path', 'ccew_not_required_reason', 'nmi', 'panel_serial_numbers',
+                            'inverter_serial_numbers', 'notes', 'needs_site_visit'];
+  v_key text;
+begin
+  -- the server (service role) and migrations have no user: nothing to guard
+  if v_uid is null then
+    if tg_op = 'DELETE' then return old; end if;
+    return new;
+  end if;
+
+  if tg_op = 'DELETE' then
+    if not is_pricing_role() then
+      raise exception 'Only Admin, Finance or Sales can delete a job or quote.';
+    end if;
+    return old;
+  end if;
+
+  if tg_op = 'INSERT' then
+    if not is_pricing_role() then
+      -- a job with no quote (My Day "+ New job") is the only kind a field role can add
+      if new.proposal_template is distinct from 'direct_job' or new.pipeline_stage is distinct from 'ready_to_book'
+         or new.quote_number is not null or coalesce(new.stc_total, 0) <> 0 or coalesce(new.bstc_total, 0) <> 0
+         or new.deposit_percent is not null or new.roi_inputs is not null or new.bill_reading is not null
+         or new.approved_at is not null or new.send_gate_override_at is not null then
+        raise exception 'Only Admin, Finance or Sales can create a quote. You can add a job with no quote.';
+      end if;
+    end if;
+    return new;
+  end if;
+
+  -- UPDATE
+  if is_pricing_role() then
+    if not is_finance_role()
+       and (new.send_gate_override_reason is distinct from old.send_gate_override_reason
+            or new.send_gate_override_at is distinct from old.send_gate_override_at) then
+      raise exception 'Only Admin or Finance can override the ready-to-send check.';
+    end if;
+    return new;
+  end if;
+
+  -- a field role: only the site columns may change
+  for v_key in select key from jsonb_each(to_jsonb(new)) loop
+    if not (v_key = any (v_allowed)) and (to_jsonb(new) -> v_key) is distinct from (to_jsonb(old) -> v_key) then
+      raise exception 'Only Admin, Finance or Sales can change % on a job or quote.', v_key;
+    end if;
+  end loop;
+  -- job_booked: only ever set by sync_project_booked (a clock-in or booking), and projects_job_booked_gate
+  -- refuses it without one
+  if new.pipeline_stage is distinct from old.pipeline_stage
+     and new.pipeline_stage not in ('client_handover', 'job_not_complete', 'ready_to_invoice', 'awaiting_action', 'ready_to_book', 'quote_sent', 'job_booked') then
+    raise exception 'That stage move needs Admin, Finance or Sales.';
+  end if;
+  return new;
+end;
+$$;
+revoke execute on function public.guard_projects_writes() from public, anon, authenticated;

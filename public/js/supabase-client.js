@@ -3742,7 +3742,9 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       overlay.querySelector('#cko-break-yes').style.borderColor = '';
       detailEl.innerHTML = `<label style="margin-top:0">Why not?</label><input id="cko-break-reason" placeholder="e.g. too busy on site" />`;
     });
-    overlay.querySelector('#cko-back-btn').addEventListener('click', renderStep1);
+    // Back forgets the default answer below: a shift shortened to 6 hours or less on step 1 is never
+    // asked again, and must not carry a break it was never asked about.
+    overlay.querySelector('#cko-back-btn').addEventListener('click', () => { state.breakTaken = null; state.breakStart = ''; renderStep1(); });
     // The default answer is yes, 30 minutes, so Continue works straight away; No is one tap.
     if (state.breakTaken !== false) overlay.querySelector('#cko-break-yes').click();
     overlay.querySelector('#cko-break-continue-btn').addEventListener('click', () => {
@@ -3794,7 +3796,10 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     if (savingMsg) savingMsg.innerHTML = `<p class="subtitle">Saving...</p>`;
 
     const onceFields = {};
-    if (state.breakTaken !== null) {
+    // The break question is only asked past 6 hours (step 1); a shorter shift never gets break fields,
+    // whatever an earlier pass through the break step left in state.
+    const shiftHoursNow = (new Date(state.outIso) - new Date(entry.clock_in)) / 3600000;
+    if (state.breakTaken !== null && shiftHoursNow > 6) {
       onceFields.break_taken = state.breakTaken;
       if (state.breakTaken) {
         const [hh, mm] = state.breakStart.split(':').map(Number);
@@ -3844,15 +3849,22 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       // The open entry becomes the first stage's segment (updated, never
       // deleted: deleting an open entry fires sync_project_booked and can
       // unbook the job, migration 20261023000000). The rest are inserted.
+      // The break sits on the longest segment so it always comes off in full (a short first segment
+      // could not hold 30 minutes); the overnight flag stays on the first.
+      const breakKeys = ['break_taken', 'break_start', 'break_minutes', 'break_skip_reason'];
+      const breakFields = Object.fromEntries(Object.entries(onceFields).filter(([k]) => breakKeys.includes(k)));
+      const otherOnce = Object.fromEntries(Object.entries(onceFields).filter(([k]) => !breakKeys.includes(k)));
+      const breakRow = rows.reduce((best, r, i) => (r.minutes > rows[best].minutes ? i : best), 0);
       const { error: upErr } = await supabaseClient.from('time_entries').update({
         cost_centre_id: rows[0].cost_centre_id, selected_cost_centre_ids: null,
-        clock_in: rows[0].clock_in, clock_out: rows[0].clock_out, ...onceFields,
+        clock_in: rows[0].clock_in, clock_out: rows[0].clock_out, ...otherOnce, ...(breakRow === 0 ? breakFields : {}),
       }).eq('id', entry.id);
       if (upErr) saveError = upErr;
 
-      const inserts = rows.slice(1).map(r => ({
+      const inserts = rows.slice(1).map((r, j) => ({
         staff_id: entry.staff_id, project_id: entry.project_id, cost_centre_id: r.cost_centre_id,
         time_category: entry.time_category, clock_in: r.clock_in, clock_out: r.clock_out,
+        ...(breakRow === j + 1 ? breakFields : {}),
       }));
       if (!saveError && inserts.length) {
         const { error: insErr } = await insertTimeEntriesOnce(entry.staff_id, inserts);
@@ -8038,16 +8050,39 @@ async function deleteProject(projectId) {
 
   const centres = step('cost centres (lookup)', await supabaseClient.from('cost_centres').select('id').eq('project_id', projectId));
   const centreIds = (centres || []).map(c => c.id);
-
   const invoices = step('invoices (lookup)', await supabaseClient.from('invoices').select('id').eq('project_id', projectId));
   const invoiceIds = (invoices || []).map(i => i.id);
+  const pos = step('purchase orders (lookup)', await supabaseClient.from('purchase_orders').select('id').eq('project_id', projectId));
+  const poIds = (pos || []).map(po => po.id);
+
+  // Everything that would make the database refuse the last steps is checked before the first delete:
+  // before this, the invoices and claims were already gone by the time the project delete failed, and
+  // the job was left standing with empty stages (bug M5). Pricing roles (the only ones who can delete)
+  // see every row of these tables, so the counts are complete. One message lists the lot.
+  const blockers = [];
+  const count = async (name, q) => {
+    const { count: n, error } = await q;
+    if (error) throw new Error(`Delete stopped at ${name} (check): ${error.message}`);
+    if (n) blockers.push(`${n} ${name}`);
+  };
+  const head = (table) => supabaseClient.from(table).select('id', { count: 'exact', head: true });
+  await count('timesheet entries', head('time_entries').eq('project_id', projectId));
+  await count('schedule bookings', head('schedule_assignments').eq('project_id', projectId));
+  await count('supplier bills', head('supplier_bills').eq('project_id', projectId));
+  await count('DNSP records', head('dnsp_records').eq('project_id', projectId));
+  await count('stock usage rows', head('job_material_usage').eq('project_id', projectId));
+  if (centreIds.length) await count('stock usage rows on its stages', head('job_material_usage').is('project_id', null).in('cost_centre_id', centreIds));
+  await count('PO lines moved onto it from other POs', head('purchase_order_line_items').eq('destination_job_id', projectId));
+  if (poIds.length) await count('received PO lines', head('purchase_order_line_items').in('po_id', poIds).eq('received', true));
+  if (blockers.length) {
+    throw new Error(`This job cannot be deleted while it has ${blockers.join(', ')}. Remove or move those first (received PO lines: Undo received), then try again.`);
+  }
+
   if (invoiceIds.length) {
     step('invoice claims', await supabaseClient.from('invoice_claims').delete().in('invoice_id', invoiceIds));
     step('invoices', await supabaseClient.from('invoices').delete().in('id', invoiceIds));
   }
 
-  const pos = step('purchase orders (lookup)', await supabaseClient.from('purchase_orders').select('id').eq('project_id', projectId));
-  const poIds = (pos || []).map(po => po.id);
   if (poIds.length) {
     step('purchase order lines', await supabaseClient.from('purchase_order_line_items').delete().in('po_id', poIds));
     step('purchase orders', await supabaseClient.from('purchase_orders').delete().in('id', poIds));

@@ -791,7 +791,7 @@
       selectedClientId = client ? client.id : null;
       const note = document.getElementById('selected-client-note');
       if (client) {
-        note.innerHTML = `Using existing client: <strong>${escapeHtml(client.name)}</strong>. Edits below only apply to this quote unless you also update it on the <a class="link-quiet" href="/clients.html" target="_blank">Clients page</a>.`;
+        note.innerHTML = `Using existing client: <strong>${escapeHtml(client.name)}</strong>. Edits below only apply to this quote unless you also update it on the <a class="link-quiet" href="/clients.html" target="_blank">Clients page</a>; payment terms save to the client.`;
         document.getElementById('p-client').value = client.name || '';
         document.getElementById('p-email').value = client.email || '';
         document.getElementById('p-phone').value = client.phone || '';
@@ -2630,10 +2630,18 @@
         try {
           // The job's site address never overwrites the client's office address; a new client's
           // first site is the best guess for their office address until it is set on the Clients page.
-          // An existing client's own record is never changed from here: the name, email, phone and
-          // terms typed on a quote apply to that quote only, as the note above the fields says.
+          // An existing client's name, email and phone are never changed from here (the ones typed on a
+          // quote apply to that quote only, as the note above the fields says). Payment terms are the
+          // client's, there is nowhere else they live and the deposit invoice's due date reads them off
+          // the client, so a change here saves to the client.
           let clientId = selectedClientId;
-          if (!clientId) {
+          if (clientId) {
+            const currentTerms = (sitePicker.client() || {}).payment_terms || 'cod';
+            if (payment_terms && payment_terms !== currentTerms) {
+              const { error: termsErr } = await supabaseClient.from('clients').update({ payment_terms }).eq('id', clientId);
+              if (termsErr) throw termsErr;
+            }
+          } else {
             const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
             const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({ ...clientFields, address: client_address || null }).select().single();
             if (clientErr) throw clientErr;
@@ -3956,14 +3964,18 @@
             const totalBstc = newRows.reduce((s, r) => s + r.bstc, 0);
             const newDate = overlay.querySelector('#ei-date').value;
             const newDueDate = overlay.querySelector('#ei-due-date').value || null;
-            const newSentAt = newDate ? new Date(newDate).toISOString() : invoice.sent_at;
+            // Compared as Sydney dates: a deposit invoice's sent_at carries a time of day, so a save that
+            // keeps the date keeps the timestamp too (or every save would drop the PDF as stale).
+            const sydneyDay = (iso) => iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }) : null;
+            const dateChanged = !!newDate && newDate !== sydneyDay(invoice.sent_at);
+            const newSentAt = dateChanged ? new Date(newDate).toISOString() : invoice.sent_at;
             // The PDF made at creation shows the old figures and dates. Once any of them changes it is
             // dropped, so Email and View make a fresh one (both regenerate when pdf_path is empty).
             const changed = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) > 0.001;
             const pdfStale = changed(totalLabour, invoice.labour_amount) || changed(totalMaterial, invoice.material_amount)
               || changed(totalStc, invoice.stc_amount) || changed(totalBstc, invoice.bstc_amount)
               || newRows.some((r, i) => changed(r.labour, rows[i].labour) || changed(r.material, rows[i].material) || changed(r.stc, rows[i].stc) || changed(r.bstc, rows[i].bstc))
-              || new Date(newSentAt).getTime() !== new Date(invoice.sent_at).getTime() || (newDueDate || null) !== (invoice.due_date || null);
+              || dateChanged || (newDueDate || null) !== (invoice.due_date || null);
             await mustUpdate('invoices', {
               labour_amount: totalLabour, material_amount: totalMaterial, stc_amount: totalStc, bstc_amount: totalBstc,
               sent_at: newSentAt,

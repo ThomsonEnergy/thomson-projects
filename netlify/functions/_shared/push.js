@@ -30,10 +30,21 @@ async function configure() {
 // `send` and `sendApns` are injectable for tests.
 const goesToPhone = (n) => n.channel === 'bell' || n.kind === 'chat_dm' || n.kind === 'chat_mention';
 async function deliverPending(supabaseAdmin, { onlyIds = null, send = null, sendApns = null } = {}) {
-  const sendFn = send || (async (sub, payload) => { await configure(); return webpush.sendNotification(sub, payload, { TTL: 60 * 60 * 24, urgency: 'high' }); });
+  // A setup failure (VAPID keys or the APNs key unreadable) is a config problem, not a reason to drop
+  // notifications: that channel is skipped for the rest of this run, its notifications stay unmarked for
+  // the next minute, and the other channel still goes. Each setup is tried once per run and logged once.
+  let webDown = null, apnsDown = null;
+  const sendFn = send || (async (sub, payload) => {
+    if (webDown) throw webDown;
+    try { await configure(); } catch (err) { webDown = Object.assign(new Error('web push not configured: ' + err.message), { setup: true }); throw webDown; }
+    return webpush.sendNotification(sub, payload, { TTL: 60 * 60 * 24, urgency: 'high' });
+  });
   let apns = null;
   const apnsSend = sendApns || (async (token, n) => {
-    if (!apns) apns = await createApnsSender();
+    if (apnsDown) throw apnsDown;
+    if (!apns) {
+      try { apns = await createApnsSender(); } catch (err) { apnsDown = Object.assign(new Error('APNs not configured: ' + err.message), { setup: true }); throw apnsDown; }
+    }
     return apns.send(token, n);
   });
 
@@ -45,11 +56,11 @@ async function deliverPending(supabaseAdmin, { onlyIds = null, send = null, send
 
   const toSend = rows.filter(goesToPhone);
   const userIds = [...new Set(toSend.map(r => r.user_id))];
-  // A failed lookup, or VAPID keys that cannot be read, stops here before anything is marked pushed, so
-  // the rows are tried again next minute instead of being dropped (F33 in docs/BUG_REVIEW_2026-10-23.md).
+  // A failed lookup stops here before anything is marked pushed, so the rows are tried again next minute
+  // instead of being dropped (F33 in docs/BUG_REVIEW_2026-10-23.md); unreadable push keys are handled per
+  // send above, so one bad channel never stops the other.
   const { data: subs, error: subErr } = await supabaseAdmin.from('push_subscriptions').select('id, user_id, endpoint, p256dh, auth, platform').in('user_id', userIds);
   if (subErr) throw subErr;
-  if (!send && (subs || []).some(s => s.platform !== 'ios')) await configure();
   const unread = {};
   await Promise.all(userIds.filter(u => (subs || []).some(s => s.user_id === u)).map(async (u) => {
     const { count } = await supabaseAdmin.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', u).eq('channel', 'bell').is('read_at', null);
@@ -75,7 +86,8 @@ async function deliverPending(supabaseAdmin, { onlyIds = null, send = null, send
         if (code === 404 || code === 410) dead.add(s.id);
         else {
           if (!code || code === 429 || code >= 500) transient = true;
-          console.error('push failed:', code || (err && err.message));
+          if (!(err && err.setup && err.logged)) console.error('push failed:', code || (err && err.message));
+          if (err && err.setup) err.logged = true;
         }
       }
     }
