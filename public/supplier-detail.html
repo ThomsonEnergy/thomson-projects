@@ -46,8 +46,10 @@
       }
       currentSupplier = supplier;
 
-      const { data: summaryRows } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: supplierId });
-      const summary = summaryRows?.[0] || { invoiced_not_paid: 0, approved_for_payment: 0, not_approved: 0, overdue: 0 };
+      // pricing roles only (the function refuses Staff): then the tiles say so instead of showing $0
+      const { data: summaryRows, error: sumErr } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: supplierId });
+      const summary = sumErr ? null : (summaryRows?.[0] || { invoiced_not_paid: 0, approved_for_payment: 0, not_approved: 0, overdue: 0 });
+      const sm = (v) => (summary ? money(v) : 'n/a');
 
       const { data: bills } = await supabaseClient
         .from('supplier_bills')
@@ -98,10 +100,10 @@
 
         ${supplier.needs_review ? `<div class="error-box" style="margin:10px 0;">Created automatically from ${supplier.created_from === 'price_list' ? 'a price list' : 'an emailed bill'}. Check the details, especially the bank account (call them on a number you already have), then press Edit details and Save. Bills from them cannot be approved for payment until then.</div>` : ''}
         <div class="grid cols-4">
-          <div class="stat"><div class="label">Invoiced, not paid</div><div class="value">${money(summary.invoiced_not_paid)}</div></div>
-          <div class="stat"><div class="label">Approved for payment</div><div class="value">${money(summary.approved_for_payment)}</div></div>
-          <div class="stat"><div class="label">Not approved</div><div class="value">${money(summary.not_approved)}</div></div>
-          <div class="stat"><div class="label">Overdue</div><div class="value" style="color:${Number(summary.overdue) > 0 ? 'var(--red)' : 'inherit'};">${money(summary.overdue)}</div></div>
+          <div class="stat"><div class="label">Invoiced, not paid</div><div class="value">${sm(summary?.invoiced_not_paid)}</div></div>
+          <div class="stat"><div class="label">Approved for payment</div><div class="value">${sm(summary?.approved_for_payment)}</div></div>
+          <div class="stat"><div class="label">Not approved</div><div class="value">${sm(summary?.not_approved)}</div></div>
+          <div class="stat"><div class="label">Overdue</div><div class="value" style="color:${Number(summary?.overdue) > 0 ? 'var(--red)' : 'inherit'};">${sm(summary?.overdue)}</div></div>
         </div>
 
         ${flaggedItems.length ? `

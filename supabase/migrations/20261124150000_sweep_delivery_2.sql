@@ -46,10 +46,12 @@ revoke insert, update, delete, truncate, references, trigger on public.leave_bal
 grant select on public.leave_balances to authenticated;
 
 -- ---------------------------------------------------------------------------------------------------
--- 2. M17: a salaried person's hours cost salary / 52 / 38 an hour when they have no ordinary rate
+-- 2. M17: a salaried person's hours cost salary / paid hours a year, the Overheads rule, not $0
 -- ---------------------------------------------------------------------------------------------------
--- Same hours rule as before (clock_out - clock_in less the break). The Overheads people table costs a salary
--- as salary / paid hours with no super on the hourly figure (super sits in on-costs), so none is added here.
+-- Same hours rule as before (clock_out - clock_in less the break). The hourly figure is the one the Overheads
+-- people table uses (overhead_people_calc): a salary over 52 weeks x days per week x hours per day (the
+-- person's Overheads row or the defaults), else the ordinary rate; no super on the hourly figure (super sits
+-- in on-costs), so none is added here.
 create or replace function public.get_monthly_net_summary(p_months integer default 12)
 returns table(month date, revenue numeric, materials numeric, job_labour numeric, gross_profit numeric, direct_overheads numeric, indirect_wages numeric, company_costs numeric, net_profit numeric, job_hours numeric)
 language plpgsql
@@ -80,9 +82,12 @@ begin
     from time_entries t
     join profiles p on p.id = t.staff_id
     left join overhead_people op on op.profile_id = p.id
+    left join overhead_settings s on s.id = 1
     cross join lateral (select extract(epoch from (t.clock_out - t.clock_in)) / 3600.0 - coalesce(t.break_minutes, 0) / 60.0 as hrs,
-                               -- hourly cost: the ordinary rate, or for a salaried person salary / 52 weeks / 38 hours (M17)
-                               coalesce(p.ordinary_rate, case when coalesce(p.annual_salary, 0) > 0 then p.annual_salary / 52.0 / 38.0 end, 0) as rate) h
+                               -- hourly cost, the Overheads rule: a salary over the paid hours in a year, else the ordinary rate (M17)
+                               case when coalesce(p.annual_salary, 0) > 0
+                                    then p.annual_salary / (52.0 * coalesce(op.days_per_week, s.default_days_per_week, 5) * coalesce(op.hours_per_day, s.default_hours_per_day, 8))
+                                    else coalesce(p.ordinary_rate, 0) end as rate) h
     where t.clock_out is not null group by 1)
   select mo.m,
     round(coalesce(rev.v, 0), 2), round(coalesce(mat.v, 0), 2), round(coalesce(tm.job_wages, 0), 2),
@@ -313,8 +318,13 @@ begin
         raise exception 'Back ordered: %. Wait for it, or close now and cancel it off the PO.', v_bo;
       end if;
       -- bill lines that pointed at a cancelled line come off it first (F12); they show red until a person decides
-      update supplier_bill_line_items set po_line_item_id = null, flag_reason = coalesce(flag_reason, 'Back order cancelled off ' || po.po_number)
-        where po_line_item_id in (select id from purchase_order_line_items where po_id = po.id and not received and is_backordered);
+      -- their bills are not approved by this close (the line is red): they wait for a person to decide
+      with unlinked as (
+        update supplier_bill_line_items set po_line_item_id = null, flag_reason = coalesce(flag_reason, 'Back order cancelled off ' || po.po_number)
+          where po_line_item_id in (select id from purchase_order_line_items where po_id = po.id and not received and is_backordered)
+          returning bill_id)
+      update supplier_bills set check_status = 'problems'
+        where id in (select bill_id from unlinked) and not paid;
       delete from purchase_order_line_items where po_id = po.id and not received and is_backordered;
       perform _po_log('purchase_order', po.id, 'backorders_cancelled', format('Back ordered lines cancelled off PO %s at close: %s', po.po_number, v_bo));
       if po.project_id is not null then perform _po_log('project', po.project_id, 'po_backorders_cancelled', format('PO %s: back ordered lines cancelled at close: %s', po.po_number, v_bo)); end if;
@@ -752,8 +762,11 @@ revoke all on function public.get_supplier_financial_summary(uuid) from public, 
 grant execute on function public.get_supplier_financial_summary(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------------------------------
--- 10. The last blanket "staff full access" policies (all were ALL to authenticated using true)
+-- 10. The last blanket "staff full access" policies on private or money tables (ALL to authenticated using true)
 -- ---------------------------------------------------------------------------------------------------
+-- Still open to every logged-in role, by design (every role works in them on site or in the office): customer_assets,
+-- job_tasks, cost_centre_photo_groups, meetings, knowledge_entries, knowledge_ocr_parts, site_inspection_answers,
+-- tech_support_contacts, bug_reports, bug_report_comments. That closes S2 with the list.
 -- company_credentials: the Team page's insurance section is admin only; Home (admin) and the incident form
 -- (finance roles) read them.
 alter policy "staff full access on company_credentials" on public.company_credentials to authenticated using ((select is_admin())) with check ((select is_admin()));
@@ -774,6 +787,11 @@ revoke update, delete, truncate, references, trigger on public.asset_reminder_lo
 -- review_requests: pricing roles. The client's review page reads and answers through the server with the token.
 alter policy "staff full access on review_requests" on public.review_requests to authenticated using ((select is_pricing_role())) with check ((select is_pricing_role()));
 alter policy "staff full access on review_requests" on public.review_requests rename to "Pricing roles manage review requests";
+-- "Ask for a review" in a job's email panel is offered to every role and makes the row in the browser first
+-- (email-compose.js), so a logged-in user keeps an insert of their own; reading and managing stays pricing.
+drop policy if exists "Logged-in users add their own review requests" on public.review_requests;
+create policy "Logged-in users add their own review requests" on public.review_requests for insert to authenticated
+  with check (created_by = (select auth.uid()));
 
 -- ---------------------------------------------------------------------------------------------------
 -- 11. The two unused secure views (locked in delivery 1; gone on staging and any rebuild)
