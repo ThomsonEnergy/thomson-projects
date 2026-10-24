@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { selfBaseUrl } = require('./_shared/site-url');
+const { internalHeaders } = require('./_shared/require-internal');
 
 // Every 2 minutes (netlify.toml): makes sure no chat message is missed by
 // Sparky's job tagging and voice transcripts, for example when a phone sent
@@ -9,7 +10,7 @@ exports.handler = async () => {
   try {
     const res = await fetch(`${selfBaseUrl()}/.netlify/functions/chat-ai-background`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...internalHeaders() },
       body: JSON.stringify({ sweep: true }),
     });
     return { statusCode: 200, body: JSON.stringify({ ok: true, started: res.status }) };

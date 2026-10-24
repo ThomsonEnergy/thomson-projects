@@ -1,6 +1,6 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
-const { getAdminClient } = require('./_shared/require-admin');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 // Pulls a hardware summary (panel/inverter/battery counts) from Pylon's
 // documented solar_designs API (https://app.getpylon.com/docs/api) so it
@@ -22,14 +22,24 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
+  // Pricing roles only (the same gate as push-to-pylon): the Pylon key is spent and the quote's
+  // hardware summary, shown to the client, is overwritten through the service role.
+  const auth = await requirePricingRole(event);
+  if (!auth) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
+  const supabaseAdmin = auth.supabaseAdmin;
+
   try {
-    const { projectId, pylonProjectId } = JSON.parse(event.body);
+    const { projectId, pylonProjectId } = JSON.parse(event.body || '{}');
     if (!projectId || !pylonProjectId) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'projectId and pylonProjectId are required' }) };
     }
 
+    // the quote has to exist before the Pylon key is spent on it
+    const { data: project, error: projectErr } = await supabaseAdmin.from('projects').select('id').eq('id', projectId).maybeSingle();
+    if (projectErr) throw projectErr;
+    if (!project) return { statusCode: 404, body: JSON.stringify({ ok: false, error: 'Quote not found' }) };
+
     const apiKey = await getIntegrationKey('pylon');
-    const supabaseAdmin = getAdminClient();
 
     const query = new URLSearchParams({ 'fields[solar_designs]': 'summary,module_types,inverter_types,storage_types' });
     const res = await fetch(`https://api.getpylon.com/v1/solar_designs/${encodeURIComponent(pylonProjectId)}?${query}`, {

@@ -34,8 +34,22 @@ function dayOfWeekFromKey(dateKey) {
   // ambiguity can shift it to the adjacent calendar date.
   return new Date(`${dateKey}T12:00:00Z`).getUTCDay();
 }
+// Paid hours: clock-out less clock-in, less the unpaid break. A shift is one row
+// across the break with break_minutes on it (the clock-out wizard, the AI
+// assistant and a TAFE day all write it that way), so the break comes off here,
+// once, for pay, cost and billing alike. Callers must select break_minutes.
 function entryHours(te) {
-  return (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000;
+  return Math.max(0, (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000 - (Number(te.break_minutes) || 0) / 60);
+}
+
+// The stage(s) an entry counts against. A split entry (the Admin drilldown
+// edit, the Timesheets day editor and an overnight segment) has cost_centre_id
+// null and the stages in selected_cost_centre_ids; every reader of hours per
+// stage goes through this so none of them misses those entries.
+function entryCentreIds(te) {
+  return (te.selected_cost_centre_ids && te.selected_cost_centre_ids.length)
+    ? te.selected_cost_centre_ids
+    : (te.cost_centre_id ? [te.cost_centre_id] : []);
 }
 
 // Every row a query matches, 1000 at a time (PostgREST caps a single
@@ -104,7 +118,7 @@ async function computeEntryLabourCosts(supabaseAdmin, timeEntries) {
     const windowEnd = new Date(`${dateKeys[dateKeys.length - 1]}T00:00:00Z`); windowEnd.setUTCDate(windowEnd.getUTCDate() + 2);
     const windowEntries = await fetchAllRows(() => supabaseAdmin
       .from('time_entries')
-      .select('id, clock_in, clock_out')
+      .select('id, clock_in, clock_out, break_minutes')
       .eq('staff_id', staffId)
       .gte('clock_in', windowStart.toISOString())
       .lt('clock_in', windowEnd.toISOString())
@@ -200,7 +214,7 @@ async function computeAccruedLabourCost(supabaseAdmin, projectIds, { rates: prel
   const [allTimeEntries, { data: centres }, rates] = await Promise.all([
     fetchAllRows(() => supabaseAdmin
       .from('time_entries')
-      .select('id, project_id, cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out')
+      .select('id, project_id, cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out, break_minutes')
       .in('project_id', projectIds)
       .not('clock_out', 'is', null)
       .order('id', { ascending: true })),
@@ -232,9 +246,7 @@ async function computeAccruedLabourCost(supabaseAdmin, projectIds, { rates: prel
     proj.totalIndirectOverhead += oh.indirect;
     proj.totalActualHours += hours;
 
-    const centreIds = (te.selected_cost_centre_ids && te.selected_cost_centre_ids.length)
-      ? te.selected_cost_centre_ids
-      : (te.cost_centre_id ? [te.cost_centre_id] : []);
+    const centreIds = entryCentreIds(te);
     // An entry ticked against multiple stages (no explicit split) shares its
     // hours/cost evenly across them - crediting each stage the FULL duration
     // was inflating every stage total (and the project's "hours logged" sum,
@@ -267,4 +279,4 @@ async function computeAccruedLabourCost(supabaseAdmin, projectIds, { rates: prel
   return byProject;
 }
 
-module.exports = { computeAccruedLabourCost, computeEntryLabourCosts, computeEntryOverheads, loadOverheadRates, dayBands, localDateKey, entryHours };
+module.exports = { computeAccruedLabourCost, computeEntryLabourCosts, computeEntryOverheads, loadOverheadRates, dayBands, localDateKey, entryHours, entryCentreIds };

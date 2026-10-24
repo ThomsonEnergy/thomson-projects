@@ -25,6 +25,7 @@
 // centre's id), which is all the warranty close-out panel needs.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
+const { entryHours, entryCentreIds } = require('./_shared/compute-labour-cost');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -57,7 +58,7 @@ exports.handler = async (event) => {
     const centreOf = (id) => (id && centres.some(c => c.id === id) ? id : firstId);
 
     const [{ data: entries }, { data: pos }, { data: usage }, { data: invItems }, { data: settings }] = await Promise.all([
-      supabaseAdmin.from('time_entries').select('staff_id, clock_in, clock_out, cost_centre_id').eq('project_id', projectId).not('clock_out', 'is', null),
+      supabaseAdmin.from('time_entries').select('staff_id, clock_in, clock_out, break_minutes, cost_centre_id, selected_cost_centre_ids').eq('project_id', projectId).not('clock_out', 'is', null),
       supabaseAdmin.from('purchase_orders').select('id, cost_centre_id').eq('project_id', projectId),
       // every material costed to this job: PO lines received to it (whichever PO they are on, less any moved
       // off) and Stock draws. Lines received to the Warehouse or moved to another job are not here.
@@ -79,10 +80,16 @@ exports.handler = async (event) => {
 
     const byCentre = Object.fromEntries(centres.map(c => [c.id, { hours: 0, labourSell: 0, materialCost: 0, itemInvoiced: 0 }]));
     (entries || []).forEach(e => {
-      const hours = (new Date(e.clock_out) - new Date(e.clock_in)) / 3600000;
-      const b = byCentre[centreOf(e.cost_centre_id)];
-      b.hours += hours;
-      b.labourSell += hours * (sellRateByProfile[e.staff_id] || 0);
+      // Paid hours (the unpaid break comes off), shared evenly across the stages of a split
+      // entry, the same way the job costing reads them.
+      const hours = entryHours(e);
+      const centreIds = entryCentreIds(e);
+      const share = centreIds.length > 1 ? 1 / centreIds.length : 1;
+      (centreIds.length ? centreIds : [null]).forEach(cid => {
+        const b = byCentre[centreOf(cid)];
+        b.hours += hours * share;
+        b.labourSell += hours * share * (sellRateByProfile[e.staff_id] || 0);
+      });
     });
 
     const usageOnInvoices = new Set((invItems || []).map(i => i.job_material_usage_id).filter(Boolean));

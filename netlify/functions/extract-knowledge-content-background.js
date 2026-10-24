@@ -1,4 +1,7 @@
 const fetch = require('node-fetch');
+const dns = require('dns').promises;
+const net = require('net');
+const https = require('https');
 const XLSX = require('xlsx');
 const { PDFDocument } = require('pdf-lib');
 const pdfParse = require('pdf-parse');
@@ -18,6 +21,11 @@ const { requireActiveUser } = require('./_shared/require-active-user');
 // export.
 
 const MAX_WEBSITE_CHARS = 20000;
+// A pasted link is fetched from the server, so it is kept on a short leash: https only, public
+// addresses only (checked again on every redirect, at most 5), 20 seconds and 5 MB.
+const MAX_WEBSITE_BYTES = 5 * 1024 * 1024;
+const WEBSITE_TIMEOUT_MS = 20000;
+const MAX_REDIRECTS = 5;
 
 // Anthropic caps a single request at 600 PDF pages, and even well under
 // that, asking for a full verbatim transcription of a big multi-hundred-
@@ -158,20 +166,89 @@ async function handlePdf(buffer, apiKey, onProgress, meta = {}) {
   return transcribeScannedPdf(buffer, apiKey, onProgress);
 }
 
+// Addresses a staff-typed link must never reach from the server: this machine, the private
+// ranges, link-local (cloud metadata lives at 169.254.169.254), carrier NAT, multicast and
+// reserved space. Anything that is not an address at all is refused too.
+function isPrivateAddress(ip) {
+  let a = String(ip || '').toLowerCase();
+  if (a.startsWith('::ffff:')) a = a.slice(7); // an IPv4 address written as IPv6
+  if (net.isIPv4(a)) {
+    const [p, q] = a.split('.').map(Number);
+    return p === 0 || p === 10 || p === 127 || (p === 169 && q === 254) || (p === 172 && q >= 16 && q <= 31)
+      || (p === 192 && q === 168) || (p === 100 && q >= 64 && q <= 127) || p >= 224;
+  }
+  if (net.isIPv6(a)) return a === '::' || a === '::1' || /^f[cd]/.test(a) || /^fe[89ab]/.test(a) || a.startsWith('ff');
+  return true;
+}
+
+// The link is checked before it is opened: https only, and the host must resolve to public
+// addresses. Returns the parsed URL and the addresses it resolved to.
+async function checkWebsiteUrl(raw) {
+  let url;
+  try { url = new URL(raw); } catch (e) { throw new Error('That is not a valid web address.'); }
+  if (url.protocol !== 'https:') throw new Error('Only https:// links can be read.');
+  if (url.username || url.password) throw new Error('Links with a login in them cannot be read.');
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  if (!host || host === 'localhost' || /\.(localhost|local|internal)$/.test(host)) throw new Error('That address is not a public website.');
+  let addresses;
+  try { addresses = await dns.lookup(host, { all: true }); } catch (e) { throw new Error(`Couldn't find that website (${host}).`); }
+  if (!addresses.length || addresses.some((x) => isPrivateAddress(x.address))) throw new Error('That address is not a public website.');
+  return { url, addresses };
+}
+
+// The connection goes to the addresses that were checked, not to a second lookup of the name.
+function pinnedAgent(addresses) {
+  return new https.Agent({
+    lookup: (hostname, options, cb) => {
+      if (options && options.all) return cb(null, addresses.map((x) => ({ address: x.address, family: x.family })));
+      return cb(null, addresses[0].address, addresses[0].family);
+    },
+  });
+}
+
+function websiteFetchError(err) {
+  if (err && err.type === 'max-size') return new Error('That page is over 5 MB, so it was not read.');
+  if (err && (err.type === 'request-timeout' || err.type === 'body-timeout')) return new Error('That page took over 20 seconds to load, so it was not read.');
+  return err;
+}
+
 async function extractWebsite(sourceUrl, apiKeyGetter, onProgress) {
-  const res = await fetch(sourceUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ThomsonProjectsBot/1.0)' } });
+  let { url, addresses } = await checkWebsiteUrl(sourceUrl);
+  let res;
+  for (let hop = 0; ; hop += 1) {
+    try {
+      res = await fetch(url.href, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ThomsonProjectsBot/1.0)' },
+        redirect: 'manual', timeout: WEBSITE_TIMEOUT_MS, size: MAX_WEBSITE_BYTES, agent: pinnedAgent(addresses),
+      });
+    } catch (err) {
+      throw websiteFetchError(err);
+    }
+    if (![301, 302, 303, 307, 308].includes(res.status)) break;
+    const location = res.headers.get('location');
+    if (!location) throw new Error(`Couldn't fetch that page (${res.status})`);
+    if (hop >= MAX_REDIRECTS) throw new Error('That link redirects too many times.');
+    let next;
+    try { next = new URL(location, url).href; } catch (e) { throw new Error('That link redirects to an invalid address.'); }
+    ({ url, addresses } = await checkWebsiteUrl(next));
+  }
   if (!res.ok) throw new Error(`Couldn't fetch that page (${res.status})`);
+  if (Number(res.headers.get('content-length')) > MAX_WEBSITE_BYTES) throw new Error('That page is over 5 MB, so it was not read.');
 
   const contentType = res.headers.get('content-type') || '';
-  const looksLikePdf = contentType.includes('application/pdf') || /\.pdf(\?|$)/i.test(sourceUrl);
+  const looksLikePdf = contentType.includes('application/pdf') || /\.pdf$/i.test(url.pathname);
+  let body;
+  try {
+    body = looksLikePdf ? Buffer.from(await res.arrayBuffer()) : await res.text();
+  } catch (err) {
+    throw websiteFetchError(err);
+  }
   if (looksLikePdf) {
-    const buffer = Buffer.from(await res.arrayBuffer());
     const apiKey = await apiKeyGetter();
-    return handlePdf(buffer, apiKey, onProgress);
+    return handlePdf(body, apiKey, onProgress);
   }
 
-  const html = await res.text();
-  const text = stripHtml(html).slice(0, MAX_WEBSITE_CHARS);
+  const text = stripHtml(body).slice(0, MAX_WEBSITE_CHARS);
   if (!text) throw new Error("Couldn't find any readable text on that page.");
   return text;
 }

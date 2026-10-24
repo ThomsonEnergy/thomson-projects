@@ -20,6 +20,7 @@ const { scanInbox, suggestForSenders, runQueuedActions } = require('./_shared/ma
 const { runEmailAgent } = require('./_shared/email-agent');
 const { learnWritingStyle, wantsLearning } = require('./_shared/writing-style');
 const { runAgent } = require('./_shared/agent-log');
+const { requireInternal } = require('./_shared/require-internal');
 
 const BUDGET_MS = 12 * 60 * 1000;
 const BACKFILL_QUERY = 'newer_than:60d -in:spam -in:trash -in:drafts -in:chats';
@@ -65,7 +66,16 @@ async function backfill(admin, mailbox, startedAt) {
   return { loaded, done: !!mb.backfill_done_at };
 }
 
-exports.handler = () => runAgent('mailbox-work', async () => {
+exports.handler = (event) => {
+  // only the Gmail sync, the Inbox and Settings functions and this worker itself start it (x-internal-secret)
+  if (!requireInternal(event)) {
+    console.error('mailbox-work-background: refused, no internal secret');
+    return { statusCode: 202, body: '' };
+  }
+  return runAgent('mailbox-work', () => mailboxWork());
+};
+
+async function mailboxWork() {
   const admin = getAdminClient();
   const startedAt = Date.now();
   const usage = { input_tokens: 0, output_tokens: 0 };
@@ -145,4 +155,4 @@ exports.handler = () => runAgent('mailbox-work', async () => {
     details: { more },
     usage,
   };
-});
+}

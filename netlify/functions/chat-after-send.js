@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { deliverPending } = require('./_shared/push');
 const { selfBaseUrl } = require('./_shared/site-url');
+const { internalHeaders } = require('./_shared/require-internal');
 
 // POST { message_ids: [...] }, called by chat.html right after it sends
 // (including messages that sat in the offline queue).
@@ -49,7 +50,7 @@ exports.handler = async (event) => {
       const timer = setTimeout(() => controller.abort(), 8000);
       await fetch(`${selfBaseUrl()}/.netlify/functions/chat-ai-background`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...internalHeaders() },
         body: JSON.stringify({ token, message_ids: mineIds }),
         signal: controller.signal,
       });

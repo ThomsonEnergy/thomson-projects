@@ -1,11 +1,13 @@
 require('./_shared/polyfill-websocket');
 const { createClient } = require('@supabase/supabase-js');
 const { getAdminClient, getAuthCheckClient } = require('./_shared/require-admin');
+const { requireInternal } = require('./_shared/require-internal');
 const { processPending, answer } = require('./_shared/chat-ai');
 
 // Background (up to 15 minutes). Started by chat-after-send.js with the
 // sender's login and their new message ids, or by chat-ai-sweep.js with
-// { sweep: true } and no login.
+// { sweep: true } and no login. Both send the internal secret; a call with
+// neither the secret nor a valid login does nothing.
 //  - Always: works through messages Sparky has not looked at yet (job tags,
 //    voice transcripts). See _shared/chat-ai.js.
 //  - With a login: answers any of those messages that @mention Sparky, using
@@ -24,6 +26,10 @@ exports.handler = async (event) => {
       const { data } = await getAuthCheckClient().auth.getUser(token);
       user = data && data.user;
       if (user) userClient = createClient(process.env.SUPABASE_URL, SUPABASE_ANON_KEY, { ...SERVER_CLIENT_OPTS, global: { headers: { Authorization: `Bearer ${token}` } } });
+    }
+    if (!requireInternal(event) && !user) {
+      console.error('chat-ai-background: refused, no internal secret and no valid login');
+      return { statusCode: 202, body: '' };
     }
 
     // Questions first so a person is not kept waiting behind other people's

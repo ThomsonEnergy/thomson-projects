@@ -5,11 +5,12 @@
 
 const fetch = require('node-fetch');
 const { selfBaseUrl } = require('./_shared/site-url');
+const { internalHeaders } = require('./_shared/require-internal');
 
 exports.handler = async () => {
   try {
     const res = await fetch(`${selfBaseUrl()}/.netlify/functions/generate-client-document-pdf`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc_type: 'warm' }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() }, body: JSON.stringify({ doc_type: 'warm' }),
     });
     return { statusCode: res.ok ? 200 : 502, body: res.ok ? 'warm' : `PDF function answered ${res.status}` };
   } catch (err) {
