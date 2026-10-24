@@ -308,6 +308,12 @@
           </div>
 
           <div class="card">
+            <h2>Your leave</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Balances from Xero Payroll, refreshed each day. Request leave on the Timesheets page.</p>
+            <div id="my-leave-block"><p class="subtitle">Loading...</p></div>
+          </div>
+
+          <div class="card">
             <h2>My licences</h2>
             <div id="my-licence-rows"></div>
             <button type="button" class="secondary" id="my-add-licence-btn" style="font-size:12px; padding:6px 10px;">+ Add licence</button>
@@ -797,7 +803,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let portfolioPhotos = [];
@@ -1239,7 +1245,7 @@
 
       const inviteTierSelect = document.getElementById('invite-rate-tier');
       if (inviteTierSelect) {
-        inviteTierSelect.innerHTML = `<option value="">-- None --</option>${(data || []).map(t => `<option value="${t.id}">${t.name}</option>`).join('')}`;
+        inviteTierSelect.innerHTML = `<option value="">-- None --</option>${(data || []).map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}`;
       }
 
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
@@ -1338,7 +1344,7 @@
         <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
             <div>
-              <strong>${t.name}</strong> ${!t.active ? '<span class="badge draft">Inactive</span>' : ''}
+              <strong>${escapeHtml(t.name)}</strong> ${!t.active ? '<span class="badge draft">Inactive</span>' : ''}
               <span class="subtitle" style="margin-left:6px;">${items.length} item${items.length === 1 ? '' : 's'}</span>
             </div>
             <div>
@@ -1355,9 +1361,9 @@
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:8px 0; ${i > 0 ? 'border-top:1px solid var(--border);' : ''}">
                   <div>
                     <span class="badge ${it.item_type === 'photo' ? 'info' : 'draft'}">${it.item_type === 'photo' ? 'Photo' : 'Yes/No'}</span>
-                    <strong style="margin-left:6px;">${it.label}</strong> ${!it.required ? '<span class="subtitle">(optional)</span>' : ''}
-                    ${it.description ? `<p class="subtitle" style="margin:4px 0 0;">${it.description}</p>` : ''}
-                    ${parent ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Shown when "${parent.label}" = ${it.show_when_parent_answer ? 'Yes' : 'No'}</p>` : ''}
+                    <strong style="margin-left:6px;">${escapeHtml(it.label)}</strong> ${!it.required ? '<span class="subtitle">(optional)</span>' : ''}
+                    ${it.description ? `<p class="subtitle" style="margin:4px 0 0;">${escapeHtml(it.description)}</p>` : ''}
+                    ${parent ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Shown when "${escapeHtml(parent.label)}" = ${it.show_when_parent_answer ? 'Yes' : 'No'}</p>` : ''}
                   </div>
                   <div style="display:flex; gap:4px; flex-shrink:0;">
                     <button type="button" class="secondary move-item-btn" data-id="${it.id}" data-dir="up" style="font-size:11px; padding:4px 8px;" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
@@ -1382,8 +1388,8 @@
                     <select class="new-item-parent" data-template="${t.id}">
                       <option value="">Always shown</option>
                       ${items.filter(it => it.item_type === 'yes_no').map(it => `
-                        <option value="${it.id}|true">"${it.label}" = Yes</option>
-                        <option value="${it.id}|false">"${it.label}" = No</option>
+                        <option value="${it.id}|true">"${escapeHtml(it.label)}" = Yes</option>
+                        <option value="${it.id}|false">"${escapeHtml(it.label)}" = No</option>
                       `).join('')}
                     </select>
                   </div>
@@ -1679,13 +1685,30 @@
       });
     }
 
+    // Leave balances (public.leave_balances, filled from Xero Payroll by sync-leave-balances):
+    // annual, sick and long service hours "as at" the Sydney date of the last sync.
+    function leaveBlockHtml(leave) {
+      if (!leave || !leave.as_at) return '<p class="subtitle" style="margin:0;">Not synced yet.</p>';
+      const hrs = (n) => n == null ? '-' : `${Number(n).toFixed(1)} hrs`;
+      const asAt = new Date(leave.as_at).toLocaleDateString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', year: 'numeric' });
+      return `
+        <div class="grid cols-3">
+          <div class="stat"><div class="label">Annual leave</div><div class="value">${hrs(leave.annual_leave_hours)}</div></div>
+          <div class="stat"><div class="label">Sick leave</div><div class="value">${hrs(leave.sick_leave_hours)}</div></div>
+          ${leave.long_service_hours != null ? `<div class="stat"><div class="label">Long service</div><div class="value">${hrs(leave.long_service_hours)}</div></div>` : ''}
+        </div>
+        <p class="subtitle" style="margin:8px 0 0; font-size:12px;">As at ${escapeHtml(asAt)}</p>`;
+    }
+
     async function loadMyProfile(userId) {
       myProfileUserId = userId;
-      const [{ data: profile }, { data: rates }, { data: licences }] = await Promise.all([
+      const [{ data: profile }, { data: rates }, { data: licences }, { data: leave }] = await Promise.all([
         supabaseClient.from('profiles').select('mobile_number, photo_url, email_signature, email_signature_include_photo').eq('id', userId).single(),
         supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle(),
         supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date'),
+        supabaseClient.from('leave_balances').select('*').eq('profile_id', userId).maybeSingle(),
       ]);
+      document.getElementById('my-leave-block').innerHTML = leaveBlockHtml(leave);
 
       document.getElementById('my-profile-mobile').value = profile?.mobile_number || '';
       document.getElementById('my-profile-signature').value = profile?.email_signature || '';
@@ -2022,8 +2045,8 @@
             <tbody>
               ${activeUsers.map(u => `
                 <tr data-id="${u.id}">
-                  <td data-label="Name"><input class="user-name-input" data-id="${u.id}" value="${u.full_name || ''}" placeholder="Full name" style="font-size:13px;" /></td>
-                  <td data-label="Email">${u.email}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
+                  <td data-label="Name"><input class="user-name-input" data-id="${u.id}" value="${escapeHtml(u.full_name || '')}" placeholder="Full name" style="font-size:13px;" /></td>
+                  <td data-label="Email">${escapeHtml(u.email || '')}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
                   <td data-label="Role"><select class="role-select" data-id="${u.id}">${roleOptionsHtml(u.role)}</select></td>
                   <td data-label="Xero Employee">${xeroCellHtml(u)}</td>
                   <td data-label="Onboarding">${onboardingCellHtml(u)}</td>
@@ -2032,7 +2055,7 @@
                     <button class="secondary toggle-active-btn" data-id="${u.id}" data-active="${u.active}">
                       ${u.active ? 'Deactivate' : 'Reactivate'}
                     </button>
-                    <button class="secondary set-password-btn" data-id="${u.id}" data-name="${u.full_name || u.email}" style="margin-top:4px;">Set password</button>
+                    <button class="secondary set-password-btn" data-id="${u.id}" data-name="${escapeHtml(u.full_name || u.email || '')}" style="margin-top:4px;">Set password</button>
                     <a class="btn secondary" href="/staff.html?id=${u.id}&edit=1" style="margin-top:4px;">Edit employee</a>
                   </td>
                 </tr>
@@ -2634,15 +2657,15 @@
     // it's visible and gently flagged rather than silently vanishing.
     function accountOptionsHtml(accounts, currentCode) {
       const known = accounts.some(a => a.code === currentCode);
-      const currentOption = currentCode && !known ? `<option value="${currentCode}" selected>${currentCode} (current - not found in Xero)</option>` : '';
+      const currentOption = currentCode && !known ? `<option value="${escapeHtml(currentCode)}" selected>${escapeHtml(currentCode)} (current - not found in Xero)</option>` : '';
       return `<option value="">-- Select account --</option>${currentOption}` +
-        accounts.map(a => `<option value="${a.code}" ${a.code === currentCode ? 'selected' : ''}>${a.code} - ${a.name} (${a.type})</option>`).join('');
+        accounts.map(a => `<option value="${escapeHtml(a.code)}" ${a.code === currentCode ? 'selected' : ''}>${escapeHtml(a.code)} - ${escapeHtml(a.name)} (${escapeHtml(a.type)})</option>`).join('');
     }
     function taxTypeOptionsHtml(taxRates, currentTaxType) {
       const known = taxRates.some(t => t.taxType === currentTaxType);
-      const currentOption = currentTaxType && !known ? `<option value="${currentTaxType}" selected>${currentTaxType} (current - not a valid Xero tax type)</option>` : '';
+      const currentOption = currentTaxType && !known ? `<option value="${escapeHtml(currentTaxType)}" selected>${escapeHtml(currentTaxType)} (current - not a valid Xero tax type)</option>` : '';
       return `<option value="">-- Select tax type --</option>${currentOption}` +
-        taxRates.map(t => `<option value="${t.taxType}" ${t.taxType === currentTaxType ? 'selected' : ''}>${t.name}</option>`).join('');
+        taxRates.map(t => `<option value="${escapeHtml(t.taxType)}" ${t.taxType === currentTaxType ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
     }
 
     async function loadXeroMapping() {
@@ -2656,7 +2679,7 @@
       const errorEl = document.getElementById('xm-chart-error');
       if (chart.error) {
         errorEl.style.display = 'block';
-        errorEl.innerHTML = `<span style="color:var(--red);">Couldn't load your chart of accounts from Xero (${chart.error}) - falling back to plain text entry below.</span>`;
+        errorEl.innerHTML = `<span style="color:var(--red);">Couldn't load your chart of accounts from Xero (${escapeHtml(chart.error)}) - falling back to plain text entry below.</span>`;
       } else {
         errorEl.style.display = 'none';
       }
@@ -2676,14 +2699,14 @@
           <tbody>
             ${data.map(m => `
               <tr data-id="${m.id}">
-                <td>${m.label}</td>
-                <td style="color:var(--muted); font-size:12px;">${m.category}</td>
+                <td>${escapeHtml(m.label)}</td>
+                <td style="color:var(--muted); font-size:12px;">${escapeHtml(m.category)}</td>
                 <td>${chart.accounts.length
                   ? `<select class="xm-edit-code">${accountOptionsHtml(chart.accounts, m.xero_account_code)}</select>`
-                  : `<input class="xm-edit-code" value="${m.xero_account_code}" style="width:90px;" />`}</td>
+                  : `<input class="xm-edit-code" value="${escapeHtml(m.xero_account_code || '')}" style="width:90px;" />`}</td>
                 <td>${chart.taxRates.length
                   ? `<select class="xm-edit-tax">${taxTypeOptionsHtml(chart.taxRates, m.xero_tax_type)}</select>`
-                  : `<input class="xm-edit-tax" value="${m.xero_tax_type}" style="width:110px;" />`}</td>
+                  : `<input class="xm-edit-tax" value="${escapeHtml(m.xero_tax_type || '')}" style="width:110px;" />`}</td>
                 <td style="text-align:right;">
                   <button class="secondary xm-save-btn" style="font-size:12px; padding:6px 10px;">Save</button>
                   <button class="secondary danger xm-delete-btn" style="font-size:12px; padding:6px 10px;">Delete</button>
@@ -2807,9 +2830,9 @@
         if (data.trackingCategories.length) {
           html += `<p class="subtitle" style="margin-bottom:6px;"><strong style="color:var(--text);">Tracking Categories</strong> - click a category ID to fill it in above:</p>`;
           data.trackingCategories.forEach(tc => {
-            html += `<div class="project-list-item" style="cursor:pointer;" onclick="document.getElementById('xero-tracking-category-id').value='${tc.id}'">
-              <div><div class="name">${tc.name}</div><div class="meta">${tc.options.map(o => o.name).join(', ') || 'no options yet'}</div></div>
-              <span class="subtitle" style="font-size:11px;">${tc.id}</span>
+            html += `<div class="project-list-item xero-fill" style="cursor:pointer;" data-target="xero-tracking-category-id" data-value="${escapeHtml(tc.id)}">
+              <div><div class="name">${escapeHtml(tc.name)}</div><div class="meta">${escapeHtml((tc.options || []).map(o => o.name).join(', ') || 'no options yet')}</div></div>
+              <span class="subtitle" style="font-size:11px;">${escapeHtml(tc.id)}</span>
             </div>`;
           });
         } else {
@@ -2818,20 +2841,24 @@
 
         if (data.earningsRates.length) {
           html += `<p class="subtitle" style="margin:14px 0 6px;"><strong style="color:var(--text);">Earnings Rates</strong> - click which band each one represents:</p>`;
+          // Which band each button fills (S27: data attributes and one listener, no inline onclick with Xero text in it)
+          const bandButtons = [
+            ['xero-earnings-rate-id', 'Ord. Jobs'],
+            ['xero-ordinary-office-earnings-rate-id', 'Ord. Office'],
+            ['xero-ot1-earnings-rate-id', 'OT1 Jobs'],
+            ['xero-ot1-office-earnings-rate-id', 'OT1 Office'],
+            ['xero-ot2-earnings-rate-id', 'OT2 Jobs'],
+            ['xero-ot2-office-earnings-rate-id', 'OT2 Office'],
+            ['xero-public-holiday-earnings-rate-id', 'Pub hol. penalty Jobs'],
+            ['xero-public-holiday-office-earnings-rate-id', 'Pub hol. penalty Office'],
+            ['xero-public-holiday-base-earnings-rate-id', 'Pub hol. Base'],
+            ['xero-laha-earnings-rate-id', 'LAHA'],
+          ];
           data.earningsRates.forEach(er => {
             html += `<div class="project-list-item" style="align-items:center;">
-              <div><div class="name">${er.name}</div><div class="meta">${er.type || ''} - ${er.id}</div></div>
+              <div><div class="name">${escapeHtml(er.name)}</div><div class="meta">${escapeHtml(er.type || '')} - ${escapeHtml(er.id)}</div></div>
               <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;">
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-earnings-rate-id').value='${er.id}'">Ord. Jobs</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ordinary-office-earnings-rate-id').value='${er.id}'">Ord. Office</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot1-earnings-rate-id').value='${er.id}'">OT1 Jobs</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot1-office-earnings-rate-id').value='${er.id}'">OT1 Office</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot2-earnings-rate-id').value='${er.id}'">OT2 Jobs</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot2-office-earnings-rate-id').value='${er.id}'">OT2 Office</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-earnings-rate-id').value='${er.id}'">Pub hol. penalty Jobs</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-office-earnings-rate-id').value='${er.id}'">Pub hol. penalty Office</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-base-earnings-rate-id').value='${er.id}'">Pub hol. Base</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-laha-earnings-rate-id').value='${er.id}'">LAHA</button>
+                ${bandButtons.map(([target, label]) => `<button type="button" class="secondary xero-fill" style="padding:4px 8px; font-size:11px;" data-target="${target}" data-value="${escapeHtml(er.id)}">${label}</button>`).join('')}
               </div>
             </div>`;
           });
@@ -2840,9 +2867,9 @@
         if (data.payrollCalendars.length) {
           html += `<p class="subtitle" style="margin:14px 0 6px;"><strong style="color:var(--text);">Payroll Calendars</strong> - click the one your staff are paid on:</p>`;
           data.payrollCalendars.forEach(pc => {
-            html += `<div class="project-list-item" style="cursor:pointer;" onclick="document.getElementById('xero-payroll-calendar-id').value='${pc.id}'">
-              <div><div class="name">${pc.name}</div><div class="meta">${pc.type || ''}</div></div>
-              <span class="subtitle" style="font-size:11px;">${pc.id}</span>
+            html += `<div class="project-list-item xero-fill" style="cursor:pointer;" data-target="xero-payroll-calendar-id" data-value="${escapeHtml(pc.id)}">
+              <div><div class="name">${escapeHtml(pc.name)}</div><div class="meta">${escapeHtml(pc.type || '')}</div></div>
+              <span class="subtitle" style="font-size:11px;">${escapeHtml(pc.id)}</span>
             </div>`;
           });
         } else {
@@ -2850,12 +2877,18 @@
         }
 
         if (data.errors.length) {
-          html += `<div class="error-box" style="margin-top:10px;">${data.errors.join('<br>')}</div>`;
+          html += `<div class="error-box" style="margin-top:10px;">${data.errors.map(e => escapeHtml(String(e))).join('<br>')}</div>`;
         }
 
         resultEl.innerHTML = html;
+        resultEl.querySelectorAll('.xero-fill').forEach(el => {
+          el.addEventListener('click', () => {
+            const target = document.getElementById(el.dataset.target);
+            if (target) target.value = el.dataset.value || '';
+          });
+        });
       } catch (err) {
-        resultEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        resultEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       }
       btn.disabled = false;
       btn.textContent = 'Look up IDs from Xero';

@@ -58,7 +58,16 @@ exports.handler = async (event) => {
     }
     if (action === 'set_supplier') {
       if (!supplierId) return json(400, { ok: false, error: 'supplier_id is required' });
-      if (!(imp.items || []).length) return json(400, { ok: false, error: 'Nothing has been read from this file yet.' });
+      if (!(imp.items || []).length) {
+        // a spreadsheet from an unknown sender was never opened (price-list-intake.js
+        // 'unknown_sender'): now the supplier is picked, queue it to be read
+        if (imp.status === 'to_check') {
+          await admin.from('price_list_imports').update({ supplier_id: supplierId, status: 'pending', attempts: 0, error: null }).eq('id', id);
+          await startPriceListProcessing();
+          return json(200, { ok: true, summary: 'Supplier picked. The file is being read now.' });
+        }
+        return json(400, { ok: false, error: 'Nothing has been read from this file yet.' });
+      }
       await admin.from('price_list_imports').update({ supplier_id: supplierId }).eq('id', id);
       const r = await applyPriceList(admin, id);
       return json(200, { ok: true, summary: r.summary });

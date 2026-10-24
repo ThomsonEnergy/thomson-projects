@@ -32,8 +32,8 @@
     <p class="subtitle">Every claim raised from the app, across every job. Push to Xero and payment status still happen from the job page - this is the overview.</p>
 
     <div class="grid cols-4">
-      <div class="stat"><div class="label">Total</div><div class="value" id="stat-total">-</div></div>
-      <div class="stat"><div class="label">This month</div><div class="value" id="stat-month">-</div></div>
+      <div class="stat"><div class="label">Total (inc GST)</div><div class="value" id="stat-total">-</div></div>
+      <div class="stat"><div class="label">This month (inc GST)</div><div class="value" id="stat-month">-</div></div>
       <div class="stat"><div class="label">Outstanding (inc GST)</div><div class="value" id="stat-outstanding">-</div></div>
       <div class="stat"><div class="label">Overdue (inc GST)</div><div class="value" id="stat-overdue">-</div></div>
     </div>
@@ -53,12 +53,41 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allInvoices = null, allMappings = [];
     // ?id= (from the top bar search) shows just that invoice until the user asks for all
     let focusInvoiceId = new URLSearchParams(window.location.search).get('id');
+
+    // Overdue starts the day after the due date, on the Sydney date, the same as the client's invoice page (M23).
+    const sydneyToday = () => sydneyDateKey(new Date());
+    const isOverdue = (inv) => !inv.paid_at && !!inv.due_date && inv.due_date < sydneyToday();
+
+    // Every money figure on this page is the same number: the invoice total inc GST, less the STC credit
+    // (with GST for a company) and less credit notes, from get_invoice_balance_due, so Total, This month,
+    // the Amount column, Outstanding and Overdue all agree with each other and with the client's invoice (M37).
+    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    let invoiceTotals = {}; // invoice id -> that total, once the server has answered
+    function invoiceTotalFallback(inv) {
+      // the same sum calculate_balance_due does, before credit notes (used until the server answers, or if it cannot)
+      const sub = r2(Number(inv.labour_amount || 0) + Number(inv.material_amount || 0));
+      const project = inv.cost_centres?.projects || inv.projects;
+      const stc = Number(inv.stc_amount || 0) + Number(inv.bstc_amount || 0);
+      const stcIncGst = project?.clients?.client_type === 'company' ? r2(stc * 1.10) : r2(stc);
+      return r2(sub + r2(sub * 0.10) - stcIncGst);
+    }
+    const invoiceTotal = (inv) => invoiceTotals[inv.id] ?? invoiceTotalFallback(inv);
+    async function loadInvoiceTotals(invoices) {
+      const out = {};
+      for (let i = 0; i < invoices.length; i += 20) {
+        await Promise.all(invoices.slice(i, i + 20).map(async (inv) => {
+          const { data: bal, error } = await supabaseClient.rpc('get_invoice_balance_due', { p_invoice_id: inv.id });
+          if (!error && bal != null) out[inv.id] = Number(bal);
+        }));
+      }
+      return out;
+    }
 
     function clearInvoiceFocus() {
       if (!focusInvoiceId) return;
@@ -88,50 +117,30 @@
         return;
       }
 
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-      let total = 0, thisMonth = 0;
-
-      data.forEach(inv => {
-        const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0) - Number(inv.bstc_amount || 0);
-        const sentAt = new Date(inv.sent_at);
-        total += amount;
-        if (sentAt >= startOfMonth) thisMonth += amount;
-      });
-
-      document.getElementById('stat-total').textContent = money(total);
-      document.getElementById('stat-month').textContent = money(thisMonth);
-
-      // Outstanding / Overdue: the balance due each unpaid invoice shows (inc GST, less the
-      // STC credit with GST for a company, less credit notes), from get_invoice_balance_due.
-      // Only unpaid invoices are asked for, all at once.
-      const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-      const unpaid = data.filter(inv => !inv.paid_at);
-      document.getElementById('stat-outstanding').textContent = unpaid.length ? '...' : money(0);
-      document.getElementById('stat-overdue').textContent = unpaid.length ? '...' : money(0);
-      Promise.all(unpaid.map(async (inv) => {
-        const { data: bal, error: balErr } = await supabaseClient.rpc('get_invoice_balance_due', { p_invoice_id: inv.id });
-        if (!balErr && bal != null) return { inv, due: Number(bal) };
-        // Fallback (no credit notes): the same sum calculate_balance_due does.
-        const sub = r2(Number(inv.labour_amount || 0) + Number(inv.material_amount || 0));
-        const project = inv.cost_centres?.projects || inv.projects;
-        const stc = Number(inv.stc_amount || 0) + Number(inv.bstc_amount || 0);
-        const stcIncGst = project?.clients?.client_type === 'company' ? r2(stc * 1.10) : r2(stc);
-        return { inv, due: r2(sub + r2(sub * 0.10) - stcIncGst) };
-      })).then((rows) => {
-        let outstanding = 0, overdue = 0;
-        rows.forEach(({ inv, due }) => {
-          outstanding += due;
-          if (inv.due_date && new Date(inv.due_date + 'T00:00:00') < now) overdue += due;
-        });
-        document.getElementById('stat-outstanding').textContent = money(outstanding);
-        document.getElementById('stat-overdue').textContent = money(overdue);
-      });
-
       allInvoices = data;
       allMappings = mappings || [];
+      invoiceTotals = {};
+      ['stat-total', 'stat-month', 'stat-outstanding', 'stat-overdue'].forEach(id => { document.getElementById(id).textContent = '...'; });
       renderInvoiceList();
+
+      // the list shows straight away; the figures (and the Amount column) settle once the server has answered
+      invoiceTotals = await loadInvoiceTotals(data);
+      const thisMonthKey = sydneyToday().slice(0, 7);
+      let total = 0, thisMonth = 0, outstanding = 0, overdue = 0;
+      data.forEach(inv => {
+        const amount = invoiceTotal(inv);
+        total += amount;
+        if (inv.sent_at && sydneyDateKey(new Date(inv.sent_at)).slice(0, 7) === thisMonthKey) thisMonth += amount;
+        if (!inv.paid_at) {
+          outstanding += amount;
+          if (isOverdue(inv)) overdue += amount;
+        }
+      });
+      document.getElementById('stat-total').textContent = money(total);
+      document.getElementById('stat-month').textContent = money(thisMonth);
+      document.getElementById('stat-outstanding').textContent = money(outstanding);
+      document.getElementById('stat-overdue').textContent = money(overdue);
+      if (allInvoices === data) renderInvoiceList();
     }
 
     function renderInvoiceList() {
@@ -139,8 +148,6 @@
       const listEl = document.getElementById('invoices-list');
       const q = document.getElementById('invoice-search').value.trim().toLowerCase();
       const filter = document.getElementById('invoice-filter').value;
-      const now = new Date();
-      const isOverdue = (inv) => !inv.paid_at && inv.due_date && new Date(inv.due_date + 'T00:00:00') < now;
 
       const focusInv = focusInvoiceId && allInvoices.find(inv => inv.id === focusInvoiceId);
       if (focusInvoiceId && !focusInv) { showToast('That invoice could not be found', { error: true }); clearInvoiceFocus(); }
@@ -170,7 +177,7 @@
 
       listEl.innerHTML = (focusInv ? `<p class="subtitle" style="margin:0 0 10px;">Showing ${escapeHtml(focusInv.invoice_number || 'one invoice')} only. <a href="/invoices.html" class="link-quiet" id="inv-show-all">Show all invoices</a></p>` : '') + `
         <table class="responsive-stack">
-          <thead><tr><th>Invoice</th><th>Job</th><th>Stage</th><th class="num">Amount</th><th>Sent</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Job</th><th>Stage</th><th class="num">Amount (inc GST)</th><th>Sent</th><th>Status</th><th></th></tr></thead>
           <tbody>
             ${rows.map(inv => {
               const cc = inv.cost_centres;
@@ -179,7 +186,7 @@
               const projectId = cc?.project_id || inv.project_id;
               const clientType = project?.clients?.client_type || 'individual';
               const stageLabel = cc ? (cc.name || '-') : (claimStages.length ? (claimStages.length > 1 ? `${claimStages.length} stages` : claimStages[0]) : '-');
-              const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0) - Number(inv.bstc_amount || 0);
+              const amount = invoiceTotal(inv);
               const overdue = isOverdue(inv);
               return `
                 <tr>
@@ -234,6 +241,20 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+
+      // Field staff do not see Invoices in the nav; a typed URL gets the same answer
+      if (!isPricingRole(await getMyRole())) {
+        document.querySelector('.wrap').innerHTML = `
+          <div class="card">
+            <div class="empty-state">
+              <div class="empty-icon">&#128274;</div>
+              <h2>Not available for your role</h2>
+              <p>Invoices are limited to Sales, Finance, and Admin accounts.</p>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Pipeline</a>
+            </div>
+          </div>`;
+        return;
+      }
       await loadInvoices();
     })();
   </script>

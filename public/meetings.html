@@ -91,9 +91,9 @@
     <div id="mt-detail-view" style="display:none;"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
-  <script src="/js/meeting-recorder.js?v=1"></script>
+  <script src="/js/meeting-recorder.js?v=2"></script>
   <script>
     let me = null, myRole = 'staff', staff = [], staffById = {};
     let meetings = [];
@@ -103,7 +103,7 @@
 
     // ---------- small helpers ----------
     const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const todayStr = () => isoDate(new Date());
+    const todayStr = () => sydneyDateKey(new Date()); // today in Sydney, not the device date
     const fmtDate = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '-';
     const fmtShortDate = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '-';
     const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';

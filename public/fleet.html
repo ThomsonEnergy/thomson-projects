@@ -40,10 +40,13 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let staffOptions = [];
+    // Vehicle writes are admin only at the database (policy "Admin manages fleet"), so the
+    // buttons only show for admin (F16).
+    let isAdmin = false;
 
     function daysUntil(dateStr) {
       if (!dateStr) return null;
@@ -78,7 +81,7 @@
                   <td data-label="Next service">${v.next_service_date ? new Date(v.next_service_date).toLocaleDateString('en-AU') : '-'}${serviceWarn ? ` <span class="badge red">${serviceDays}d</span>` : ''}</td>
                   <td data-label="">
                     ${v.holds_stock ? `<a href="/vehicle-stock.html?id=${v.id}" class="link-quiet" style="font-size:12px; margin-right:10px;">Stock</a>` : ''}
-                    <button class="secondary edit-vehicle-btn" data-id="${v.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
+                    ${isAdmin ? `<button class="secondary edit-vehicle-btn" data-id="${v.id}" style="font-size:12px; padding:6px 10px;">Edit</button>` : ''}
                   </td>
                 </tr>`;
             }).join('')}
@@ -123,7 +126,7 @@
               <button id="veh-save-btn">Save</button>
               <button type="button" class="secondary" id="veh-cancel-btn">Cancel</button>
             </div>
-            ${vehicle ? `<button type="button" class="secondary" id="veh-delete-btn" style="color:var(--red);">Delete</button>` : ''}
+            ${vehicle && isAdmin ? `<button type="button" class="secondary" id="veh-delete-btn" style="color:var(--red);">Delete</button>` : ''}
           </div>
           <div id="veh-msg"></div>
         </div>`;
@@ -153,10 +156,12 @@
           odometer: parseFloat(overlay.querySelector('#veh-odo').value) || null,
           notes: overlay.querySelector('#veh-notes').value.trim() || null,
         };
-        const { error } = vehicle
-          ? await supabaseClient.from('fleet_vehicles').update(fields).eq('id', vehicle.id)
-          : await supabaseClient.from('fleet_vehicles').insert(fields);
+        const { data: saved, error } = vehicle
+          ? await supabaseClient.from('fleet_vehicles').update(fields).eq('id', vehicle.id).select('id')
+          : await supabaseClient.from('fleet_vehicles').insert(fields).select('id');
         if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        // RLS filters a refused update to 0 rows with no error: say so instead of closing
+        if (!saved || !saved.length) { msg.innerHTML = `<div class="error-box">Not saved: only an admin can change vehicles.</div>`; return; }
         overlay.remove();
         await loadFleet();
         } finally {
@@ -165,11 +170,12 @@
         }
       });
 
-      if (vehicle) {
+      if (vehicle && isAdmin) {
         overlay.querySelector('#veh-delete-btn').addEventListener('click', async () => {
           if (!confirm(`Delete ${vehicle.rego}?`)) return;
-          const { error } = await supabaseClient.from('fleet_vehicles').delete().eq('id', vehicle.id);
+          const { data: gone, error } = await supabaseClient.from('fleet_vehicles').delete().eq('id', vehicle.id).select('id');
           if (error) { alert(error.message); return; }
+          if (!gone || !gone.length) { alert('Not deleted: only an admin can delete vehicles.'); return; }
           overlay.remove();
           await loadFleet();
         });
@@ -190,6 +196,8 @@
       });
       const { data: profiles } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true);
       staffOptions = profiles || [];
+      isAdmin = (await getMyRole()) === 'admin';
+      if (!isAdmin) document.getElementById('add-vehicle-btn').style.display = 'none';
       await loadFleet();
     })();
   </script>

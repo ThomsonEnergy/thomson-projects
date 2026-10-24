@@ -347,6 +347,10 @@ function maiOpenPaste() {
 
 // ---------- review ----------
 function maiDraft() { return mai.meeting.ai_draft; }
+// The draft is written back from the browser, so a confidence value is only trusted
+// when it is one of the three the server hands out (S40).
+const MAI_CONFIDENCE = ['high', 'medium', 'low'];
+const maiConf = (v, fallback) => (MAI_CONFIDENCE.includes(v) ? v : fallback);
 function maiSaveDraftSoon() {
   const ind = document.getElementById('mai-saved');
   if (ind) ind.textContent = 'Saving...';
@@ -376,7 +380,7 @@ function maiReviewHtml() {
   const speakersHtml = labels.map(l => {
     const s = d.speakers[l] || {};
     return `<div class="mai-spk">
-      <div><strong>${escapeHtml(l.length > 3 ? l : 'Speaker ' + l)}</strong><span class="mai-chip ${s.confidence || 'low'}">${s.confidence || 'low'}</span></div>
+      <div><strong>${escapeHtml(l.length > 3 ? l : 'Speaker ' + l)}</strong><span class="mai-chip ${maiConf(s.confidence, 'low')}">${maiConf(s.confidence, 'low')}</span></div>
       <div>${sample(l).map(u => `<p class="mai-line">${playBtn(u.start)} "${escapeHtml(u.text.length > 120 ? u.text.slice(0, 120) + '...' : u.text)}"</p>`).join('') || '<p class="mai-line">(no lines)</p>'}${s.reason ? `<p class="mai-line">AI: ${escapeHtml(s.reason)}</p>` : ''}</div>
       <div><select data-spk="${escapeHtml(l)}">${staffOpts(s.staff_id)}</select>
         ${!s.staff_id ? `<input data-spkname="${escapeHtml(l)}" placeholder="Not staff? type their name" value="${escapeHtml(s.name || '')}" style="margin-top:6px;" />` : ''}</div>
@@ -390,7 +394,7 @@ function maiReviewHtml() {
       <div class="mai-act-top">
         <input type="checkbox" data-f="include" ${a.include ? 'checked' : ''} title="Include this task" />
         <input data-f="description" value="${escapeHtml(a.description)}" placeholder="What needs doing" />
-        <span class="mai-chip ${a.confidence || 'high'}" title="How sure the AI was">${a.confidence || 'high'}</span>
+        <span class="mai-chip ${maiConf(a.confidence, 'high')}" title="How sure the AI was">${maiConf(a.confidence, 'high')}</span>
         <button type="button" class="secondary" data-del="${a.id}" style="padding:4px 10px; font-size:12px;" title="Remove">&times;</button>
       </div>
       <div class="mai-act-grid">

@@ -31,29 +31,31 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/template-questions.js?v=3"></script>
-  <script src="/js/solar-roi.js?v=12"></script>
+  <script src="/js/solar-roi.js?v=13"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
     .roi-preview .roi-fig { margin:0; }
     .roi-preview .roi-fig figcaption { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:#1a6be6; margin-bottom:4px; }
   </style>
-  <script src="/js/prebuild-form.js?v=3"></script>
+  <script src="/js/prebuild-form.js?v=4"></script>
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=8"></script>
+  <script src="/js/email-compose.js?v=9"></script>
   <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=1"></script>
-  <script src="/js/assets.js?v=2"></script>
+  <script src="/js/assets.js?v=3"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
     const projectId = params.get('id');
 
-    function entryHours(te) { return (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000; }
+    // Paid hours of one time entry: clock out minus clock in, less the break on the row (a shift is one
+    // row with break_minutes on it), never below zero. Any select whose rows land here needs break_minutes.
+    function entryHours(te) { return Math.max(0, (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000 - (Number(te.break_minutes) || 0) / 60); }
 
     // Real accrued labour cost, per stage, from each employee's actual pay
     // rates - computed entirely server-side now (get-accrued-labour-cost.js)
@@ -499,6 +501,29 @@
     // A markup of 0% is real (signed fixed-price variation stages): only fall back to 45 when it is not set.
     function markupOr45(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 45; }
 
+    // The Pylon hardware summary as HTML. Product names come back from the Pylon API, so every part is
+    // escaped here, one part at a time (pylonSystemSummary in supabase-client.js returns plain text joined
+    // with a middle dot character; this one joins with the &middot; entity for HTML).
+    function pylonSummaryHtml(pylonData) {
+      if (!pylonData || typeof pylonData !== 'object') return '';
+      const parts = [];
+      if (pylonData.summary?.dc_output_kw) parts.push(`${pylonData.summary.dc_output_kw}kW system`);
+      [...(pylonData.module_types || []), ...(pylonData.inverter_types || []), ...(pylonData.storage_types || [])]
+        .forEach(item => { if (item?.description) parts.push(`${item.quantity || 1}x ${item.description}`); });
+      return parts.map(p => escapeHtml(p)).join(' &middot; ');
+    }
+
+    // A Pylon link only goes into an href when it is a plain https address (a javascript: link would run on click).
+    function safePylonLink(link) {
+      const s = String(link || '').trim();
+      return /^https:\/\/[^\s"'<>]+$/i.test(s) ? s : '';
+    }
+
+    // Typed search text for a PostgREST .or() / .ilike() filter: a comma, bracket, quote, % or backslash
+    // would change the filter itself and break the search. Each becomes _ (one-character wildcard), so
+    // "O'Brien" still matches O'Brien.
+    function filterSafe(q) { return String(q || '').replace(/[%,()"'\\]/g, '_').trim(); }
+
     function addRow({
       id = '', name = '', description = '', markup_percent = null, stc_total = 0, stc_quantity = null,
       stc_system_kw = null, stc_zone_rating = null, stc_install_year = null, stc_price_per_certificate = null,
@@ -735,7 +760,7 @@
       const qEl = document.getElementById('template-questions');
       const a = Object.assign({}, templateAnswers, qEl ? readTemplateAnswers(qEl) : {});
       const lines = [];
-      const pylon = pylonSystemSummary(lastPylonData).replace(/&middot;/g, ',');
+      const pylon = pylonSystemSummary(lastPylonData).replace(/·/g, ',');
       if (pylon) lines.push(`System (Pylon): ${pylon}`);
       const pick = (id, label) => { if (a[id]) lines.push(`${label}: ${a[id]}`); };
       pick('grid_type', 'Grid'); pick('existing_system', 'Existing system'); pick('existing_system_detail', 'Existing system details');
@@ -1064,7 +1089,13 @@
       const AMBER = 'var(--amber, #92400e)';
       let clientIsCompany = false; // credits carry GST on the proposal for a company client
       if (project.client_id) supabaseClient.from('clients').select('client_type').eq('id', project.client_id).maybeSingle()
-        .then(({ data }) => { clientIsCompany = data?.client_type === 'company'; scheduleRender(0); });
+        .then(({ data }) => {
+          clientIsCompany = data?.client_type === 'company';
+          // the rates panel may be built before the client row arrives: its blank GST option names the default
+          const opt = byId('ri-bill-gst')?.querySelector('option[value=""]');
+          if (opt) opt.textContent = `${clientIsCompany ? 'ex GST' : 'inc GST'} (default for this client)`;
+          scheduleRender(0);
+        });
 
       // ----- saving: everything on this card saves itself as it is changed -----
       // Each kind of change has its own key, so a quick run of typing is one save. The header shows
@@ -1190,9 +1221,12 @@
           });
           const json = await res.json();
           if (!json.ok) throw new Error(json.error || 'The bill could not be read.');
+          // What is typed on step 1 since the last Save answers stays on the page; only the answers the
+          // bill itself filled (json.filled) land on top of it. json.answers is what the database holds.
+          const typedNow = Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
           project.bill_reading = json.reading;
           project.template_answers = json.answers;
-          templateAnswers = json.answers;
+          templateAnswers = Object.assign({}, json.answers || {}, typedNow, json.filled || {});
           if (editedRates.length) {
             project.roi_inputs = { ...(project.roi_inputs || {}), current: {} };
             autosave('roi_inputs', () => ({ roi_inputs: project.roi_inputs }), 0);
@@ -1203,7 +1237,8 @@
           showMissing();
           renderCustomerGets();
           const filledKeys = Object.keys(json.filled || {});
-          readMsg.innerHTML = `<div class="success-box">Bill read. Check the figures below.${filledKeys.length ? ` Filled in above and saved: ${filledKeys.join(', ')}.` : ''}</div>`;
+          // json.warning names the files left out (too many for one reading) or skipped
+          readMsg.innerHTML = `<div class="success-box">Bill read. Check the figures below.${filledKeys.length ? ` Filled in above and saved: ${filledKeys.join(', ')}.` : ''}</div>${json.warning ? `<p style="margin:6px 0 0; font-size:12px; color:${AMBER};">${escapeHtml(json.warning)}</p>` : ''}`;
           renderReading();
           refreshBar();
         } catch (err) { readMsg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
@@ -1251,6 +1286,12 @@
         ['billing_days', 'Days on the bill'], ['total_kwh', 'kWh used (total)'], ['bill_total', 'Bill total ($)'], ['solar_export_kwh', 'Solar exported (kWh)'],
         ['peak_kwh', 'Peak kWh'], ['shoulder_kwh', 'Shoulder kWh'], ['off_peak_kwh', 'Off-peak kWh'], ['controlled_load_kwh', 'Controlled load kWh'],
       ];
+      // A bill figure lands in value="...": a finite number or nothing. The reading comes from the AI's
+      // reply to a document a client supplied, so it is never trusted to be a number.
+      function billNumber(v) {
+        const n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+        return Number.isFinite(n) ? n : '';
+      }
       function billPerDayText() {
         const m = billMetrics(project.bill_reading);
         if (!m.dailyKwh) return 'No usage worked out yet: the days and the kWh used are both needed.';
@@ -1271,11 +1312,12 @@
             <label style="margin-top:0; font-weight:600;">What the bill says</label>
             <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">${escapeHtml(head || 'Read by AI')}. Check these against the bill and fix anything wrong; a blank means it is not on the bill.</p>
             <div class="grid cols-4" id="bc-bill-grid">
-              ${BILL_FIELDS.map(([key, label]) => `<div><label style="margin-top:0; font-size:12px;">${label}${edited.includes(key) ? ' <span style="color:' + AMBER + ';">(changed)</span>' : ''}</label><input type="number" step="any" inputmode="decimal" ${key === 'bill_total' ? '' : 'min="0"'} data-bill="${key}" value="${r[key] ?? ''}" placeholder="not on the bill" />${edited.includes(key) ? `<p class="subtitle" style="margin:2px 0 0; font-size:11px;">AI read ${ai[key] == null ? 'nothing' : escapeHtml(String(ai[key]))}</p>` : ''}</div>`).join('')}
+              ${BILL_FIELDS.map(([key, label]) => `<div><label style="margin-top:0; font-size:12px;">${label}${edited.includes(key) ? ' <span style="color:' + AMBER + ';">(changed)</span>' : ''}</label><input type="number" step="any" inputmode="decimal" ${key === 'bill_total' ? '' : 'min="0"'} data-bill="${key}" value="${escapeHtml(billNumber(r[key]))}" placeholder="not on the bill" />${edited.includes(key) ? `<p class="subtitle" style="margin:2px 0 0; font-size:11px;">AI read ${ai[key] == null ? 'nothing' : escapeHtml(String(ai[key]))}</p>` : ''}</div>`).join('')}
             </div>
             <p class="subtitle" id="bc-bill-perday" style="margin:6px 0 0; font-size:12px;">${escapeHtml(billPerDayText())}</p>
             ${r.notes ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">Note from the reading: ${escapeHtml(r.notes)}</p>` : ''}
             ${r.skipped_files && r.skipped_files.length ? `<p style="margin:6px 0 0; font-size:12px; color:${RED};">Not read: ${escapeHtml(r.skipped_files.join(', '))}. Use photos (JPG, PNG) or a PDF.</p>` : ''}
+            ${r.left_out_files && r.left_out_files.length ? `<p style="margin:6px 0 0; font-size:12px; color:${AMBER};">Left out (too many files for one reading): ${escapeHtml(r.left_out_files.join(', '))}. Remove the files that are not the bill and read it again.</p>` : ''}
           </div>`;
         byId('bc-bill-grid').addEventListener('input', (e) => {
           const key = e.target.dataset.bill;
@@ -1497,8 +1539,12 @@
           : (saved.grid_charge || { enabled: false });
         if (strict && grid.enabled && ((grid.rate != null && grid.rate < 0) || (grid.max_kwh != null && grid.max_kwh < 0))) throw new Error('The night charging rate and kWh cannot be below zero');
         const price = (which) => { const n = typedPrice(which); if (strict && n != null && n < 0) throw new Error(`The ${which} price cannot be below zero`); return n; };
+        // bill_gst: 'inc', 'ex' or '' (blank: by the client type, see roiBillGst); carried from the saved
+        // inputs when the panel is not built so a save never drops it
+        const billGst = byId('ri-bill-gst') ? val('ri-bill-gst') : (saved.bill_gst || '');
         return {
           current: panelBuilt ? safe(readCurrentOverrides, saved.current || {}) : (saved.current || {}),
+          bill_gst: billGst === 'inc' || billGst === 'ex' ? billGst : '',
           alt: byId('ri-alt-enabled') ? { enabled: byId('ri-alt-enabled').checked, ...safe(readAltPlan, saved.alt || {}) } : (saved.alt || { enabled: false }),
           export: exp,
           plan_options: planOptions,
@@ -1569,12 +1615,16 @@
         const altField = field('ri-alt', alt.tariff || 'flat', (k) => alt[k] ?? '', () => 'as the bill');
         const grid = saved.grid_charge || {};
         const moreOpen = !!(alt.enabled || exp.enabled || grid.enabled || cur.controlled != null);
+        // GST basis of the bill (M10): blank follows the client type (company: ex GST, household: inc GST)
+        const billGst = saved.bill_gst === 'inc' || saved.bill_gst === 'ex' ? saved.bill_gst : '';
+        const billGstDefault = clientIsCompany ? 'ex GST' : 'inc GST';
         panel.innerHTML = `
           <div style="margin-top:12px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
             <label style="margin-top:0; font-weight:600;">Rates</label>
             <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">From the bill. Change anything that is wrong; a blank box uses the figure shown in grey.</p>
             <div class="grid cols-4">
               <div><label style="margin-top:0; font-size:12px;">Tariff</label><select id="ri-tariff"><option value="flat" ${tariff !== 'tou' ? 'selected' : ''}>Flat rate</option><option value="tou" ${tariff === 'tou' ? 'selected' : ''}>Time of use</option></select></div>
+              <div><label style="margin-top:0; font-size:12px;">Bill shows prices</label><select id="ri-bill-gst"><option value="" ${billGst === '' ? 'selected' : ''}>${billGstDefault} (default for this client)</option><option value="inc" ${billGst === 'inc' ? 'selected' : ''}>inc GST</option><option value="ex" ${billGst === 'ex' ? 'selected' : ''}>ex GST</option></select></div>
               ${mainKeys.map(curField).join('')}
             </div>
             ${timesEditorHtml('ri', curPlan, tariff === 'tou')}
@@ -1667,7 +1717,8 @@
       function estimateArgs() {
         const inputs = readRoiInputs(false);
         const prices = currentPrices();
-        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money, inputs, solarPrice: prices.solar, batteryPrice: prices.battery, linesBatteryKwh: linesBatteryKwh() };
+        // clientType sets the GST basis of the bill when roi_inputs.bill_gst is blank (M10): a company's bill is ex GST
+        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money, inputs, solarPrice: prices.solar, batteryPrice: prices.battery, linesBatteryKwh: linesBatteryKwh(), clientType: clientIsCompany ? 'company' : 'individual' };
       }
 
       // ----- the estimate as the proposal shows it, what is missing, what to check, and step 5's line -----
@@ -1804,7 +1855,7 @@
         const el = byId('bc-plan-results');
         if (!el || !planResults) return;
         const args = estimateArgs();
-        const res = roiComparePlans({ reading: project.bill_reading, answers: args.answers, inputs: args.inputs, newSolarKw: args.newSolarKw, batteryKwh: args.batteryKwh, zoneRating: args.zoneRating,
+        const res = roiComparePlans({ reading: project.bill_reading, answers: args.answers, inputs: args.inputs, newSolarKw: args.newSolarKw, batteryKwh: args.batteryKwh, zoneRating: args.zoneRating, clientType: args.clientType,
           candidates: planResults.candidates.map(p => ({ key: p.plan_id, roi_plan: p.roi_plan, adjust: p.adjust })) });
         if (!res) { el.innerHTML = ''; return; }
         const byId2 = Object.fromEntries(planResults.candidates.map(p => [p.plan_id, p]));
@@ -2006,7 +2057,8 @@
           if (!sowJson.ok) throw new Error(sowJson.error);
           document.getElementById('p-sow').value = sowJson.sow;
           renderCustomerGets();
-          msg.innerHTML = `<div class="success-box">Stage names, descriptions, and scope of works drafted. Review and edit as needed.</div>`;
+          // sowJson.warning names the documents the AI did not get (left out or skipped)
+          msg.innerHTML = `<div class="success-box">Stage names, descriptions, and scope of works drafted. Review and edit as needed.</div>${sowJson.warning ? `<div class="error-box" style="margin-top:6px;">${escapeHtml(sowJson.warning)}</div>` : ''}`;
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {
@@ -2096,15 +2148,16 @@
         if (!pylonProjectId) { msg.innerHTML = `<div class="error-box">Enter a Pylon project ID first.</div>`; return; }
         msg.innerHTML = '';
         try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
           const res = await fetch('/.netlify/functions/pylon-sync', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
             body: JSON.stringify({ projectId: project.id, pylonProjectId }),
           });
           const json = await res.json();
           if (!json.ok) throw new Error(json.error);
           lastPylonData = json.pylonData || null;
           renderCustomerGets();
-          const summary = pylonSystemSummary(json.pylonData);
+          const summary = pylonSummaryHtml(json.pylonData);
           msg.innerHTML = `<div class="success-box">Pulled from Pylon.${summary ? ' ' + summary : ' No hardware summary came back - check the function logs against the field names in the Pylon API docs.'}</div>`;
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))} (check Settings &gt; API Keys &gt; Pylon, and that this Pylon project ID is correct)</div>`;
@@ -2162,7 +2215,6 @@
       document.getElementById('clear-client-btn').addEventListener('click', () => {
         document.getElementById('client-search-input').value = '';
         setSelectedEditClient(null);
-        loadEditJobContactPickers(null);
       });
 
       let clientSearchTimeout = null;
@@ -2172,8 +2224,9 @@
         const resultsEl = document.getElementById('client-search-results');
         if (q.length < 2) { resultsEl.style.display = 'none'; return; }
         clientSearchTimeout = setTimeout(async () => {
+          const safe = filterSafe(q);
           const { data, error } = await supabaseClient.from('clients').select('*')
-            .or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`).limit(8);
+            .or(`name.ilike.%${safe}%,email.ilike.%${safe}%,phone.ilike.%${safe}%`).limit(8);
           if (error || !data || !data.length) {
             resultsEl.innerHTML = `<div style="padding:10px 12px; font-size:13px; color:var(--muted);">No matches</div>`;
             resultsEl.style.display = 'block';
@@ -2189,7 +2242,6 @@
               const client = data.find(c => c.id === row.dataset.id);
               document.getElementById('client-search-input').value = client.name;
               setSelectedEditClient(client);
-              loadEditJobContactPickers(client.id);
             });
           });
           resultsEl.style.display = 'block';
@@ -2278,7 +2330,8 @@
           lineItems: (stage.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order)
             .map(li => ({
               id: li.id, description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id,
-              prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description, prebuild_base_quantity: li.prebuild_base_quantity,
+              // a cleared description is stored as null (also by the SM8 import): the group editor needs a string
+              prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description ?? '', prebuild_base_quantity: li.prebuild_base_quantity,
               ai_suggested: li.ai_suggested,
             })),
           photoGroups: (stage.cost_centre_photo_groups || []).slice().sort((a, b) => a.sort_order - b.sort_order)
@@ -2437,6 +2490,7 @@
       const stageRows = [...document.querySelectorAll('#cc-rows .cc-row')];
       const stagesPayload = stageRows.map((row, i) => ({
         id: row.dataset.id || null,
+        rowEl: row, // the editor row, so a new stage's id can be written back to it (never sent to the database)
         name: row.querySelector('.cc-name').value.trim(),
         description: row.querySelector('.cc-desc').value.trim(),
         markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
@@ -2486,7 +2540,7 @@
     // stages deleted. The caller has already checked removed stages carry nothing.
     async function applyStagesPayload(project, stagesPayload, removedCentres) {
       for (const s of stagesPayload) {
-        const { id, lineItems, photoGroups, ...fields } = s;
+        const { id, lineItems, photoGroups, rowEl, ...fields } = s;
         let centreId = id;
         if (centreId) {
           const { error } = await supabaseClient.from('cost_centres').update(fields).eq('id', centreId);
@@ -2495,21 +2549,13 @@
           const { data: newCentre, error } = await supabaseClient.from('cost_centres').insert({ ...fields, project_id: project.id }).select().single();
           if (error) throw error;
           centreId = newCentre.id;
+          // The editor row now owns this stage: a retry after a failure further down updates it
+          // instead of inserting it a second time.
+          if (rowEl) rowEl.dataset.id = centreId;
         }
 
-        const { error: delLiErr } = await supabaseClient.from('cost_centre_line_items').delete().eq('cost_centre_id', centreId);
-        if (delLiErr) throw delLiErr;
-        if (lineItems.length) {
-          const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(lineItems.map(li => ({ ...li, cost_centre_id: centreId })));
-          if (liErr) throw liErr;
-        }
-
-        const { error: delPgErr } = await supabaseClient.from('cost_centre_photo_groups').delete().eq('cost_centre_id', centreId);
-        if (delPgErr) throw delPgErr;
-        if (photoGroups.length) {
-          const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(photoGroups.map(pg => ({ ...pg, cost_centre_id: centreId })));
-          if (pgErr) throw pgErr;
-        }
+        await replaceStageRows('cost_centre_line_items', centreId, lineItems);
+        await replaceStageRows('cost_centre_photo_groups', centreId, photoGroups);
       }
 
       if (removedCentres.length) {
@@ -2517,6 +2563,22 @@
         if (delCentreErr) throw delCentreErr;
       }
 
+    }
+
+    // A stage's line items (or photo groups) replaced: the new rows go in first, then every row of the
+    // stage that is not one of them comes out. A connection dropped between the two calls leaves the
+    // stage with its old rows, never with none.
+    async function replaceStageRows(table, centreId, rows) {
+      let newIds = [];
+      if (rows.length) {
+        const { data, error } = await supabaseClient.from(table).insert(rows.map(r => ({ ...r, cost_centre_id: centreId }))).select('id');
+        if (error) throw error;
+        newIds = (data || []).map(r => r.id);
+      }
+      let del = supabaseClient.from(table).delete().eq('cost_centre_id', centreId);
+      if (newIds.length) del = del.not('id', 'in', `(${newIds.join(',')})`);
+      const { error: delErr } = await del;
+      if (delErr) throw delErr;
     }
 
     async function saveEdits(project) {
@@ -2558,17 +2620,21 @@
           msg.innerHTML = `<div class="error-box">Please fill in the project name and client name.</div>`;
           return;
         }
+        if (pylon_link && !safePylonLink(pylon_link)) {
+          msg.innerHTML = `<div class="error-box">The Pylon link must start with https://</div>`;
+          return;
+        }
 
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving...';
         try {
           // The job's site address never overwrites the client's office address; a new client's
           // first site is the best guess for their office address until it is set on the Clients page.
+          // An existing client's own record is never changed from here: the name, email, phone and
+          // terms typed on a quote apply to that quote only, as the note above the fields says.
           let clientId = selectedClientId;
-          const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
-          if (clientId) {
-            await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
-          } else {
+          if (!clientId) {
+            const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
             const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({ ...clientFields, address: client_address || null }).select().single();
             if (clientErr) throw clientErr;
             clientId = newClient.id;
@@ -3126,7 +3192,8 @@
         selectedMfrId = null;
         if (q.length < 2) { overlay.querySelector('#cw-mfr-results').innerHTML = ''; return; }
         mfrSearchTimeout = setTimeout(async () => {
-          const { data } = await supabaseClient.from('clients').select('id, name, email').or(`name.ilike.%${q}%,email.ilike.%${q}%`).limit(8);
+          const safe = filterSafe(q);
+          const { data } = await supabaseClient.from('clients').select('id, name, email').or(`name.ilike.%${safe}%,email.ilike.%${safe}%`).limit(8);
           const resultsEl = overlay.querySelector('#cw-mfr-results');
           if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - fill in the fields below to add them as a new client.</p>`; return; }
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
@@ -3265,7 +3332,7 @@
         // the quote's credits are offered on the stage each is claimed with, once that stage is fully claimed
         stcRemaining: c.id === credit.stcStageId ? credit.stcRemaining : 0,
         bstcRemaining: c.id === credit.bstcStageId ? credit.bstcRemaining : 0,
-      })).filter(x => x.remaining > 0.004 || x.stcRemaining > 0 || x.bstcRemaining > 0);
+      })).filter(x => x.remaining > 0.004); // a fully claimed stage is never listed for a credit on its own
       // opts.variationsOnly (from the Variations tab) opens the panel even when no stage
       // has anything left to claim, and starts it claiming 0% of the quote so only
       // the logged variations go on the invoice unless you change that.
@@ -3375,7 +3442,7 @@
             const stcAmount = amt >= x.remaining - 0.01 ? x.stcRemaining : 0; // full stage claimed -> pick up its STC credit too
             const bstcAmount = amt >= x.remaining - 0.01 ? x.bstcRemaining : 0;
             return { costCentreId: x.centre.id, labourAmount, materialAmount, stcAmount, bstcAmount, claimPercent: x.quotedAmt > 0 ? Math.round(((x.claimedTotal + amt) / x.quotedAmt) * 10000) / 100 : null };
-          }).filter(c => c.labourAmount + c.materialAmount + c.stcAmount + c.bstcAmount > 0);
+          }).filter(c => c.labourAmount + c.materialAmount > 0); // never a claim that is only a credit (a negative invoice)
         }
 
         return centres
@@ -3388,7 +3455,7 @@
             const bstcAmount = amt >= x.remaining - 0.01 ? x.bstcRemaining : 0;
             return { costCentreId: x.centre.id, labourAmount, materialAmount, stcAmount, bstcAmount, claimPercent: x.quotedAmt > 0 ? Math.round(((x.claimedTotal + amt) / x.quotedAmt) * 10000) / 100 : null };
           })
-          .filter(c => c.labourAmount + c.materialAmount + c.stcAmount + c.bstcAmount > 0);
+          .filter(c => c.labourAmount + c.materialAmount > 0); // never a claim that is only a credit (a negative invoice)
       }
 
       function refreshStagePctFromDollar(centreId) {
@@ -3502,7 +3569,7 @@
         const panelMsg = overlay.querySelector('#inv-panel-msg');
         const claims = computeClaims();
         const chosenVars = varItems.filter(i => i.checked);
-        if (!claims.length && !chosenVars.length) { panelMsg.innerHTML = `<div class="error-box">Select at least one stage with a non-zero claim, or tick a logged variation.</div>`; return; }
+        if (!claims.length && !chosenVars.length) { panelMsg.innerHTML = `<div class="error-box">Select at least one stage with a non-zero labour or materials claim (a credit cannot be invoiced on its own), or tick a logged variation.</div>`; return; }
         const unpriced = chosenVars.find(i => varTotals(i).missing);
         if (unpriced) { panelMsg.innerHTML = `<div class="error-box">Set a price for every line of "${escapeHtml(unpriced.description)}", or untick it.</div>`; return; }
 
@@ -3812,7 +3879,7 @@
             <tbody>
               ${rows.map((r, i) => `
                 <tr>
-                  <td>${r.stageName}</td>
+                  <td>${escapeHtml(r.stageName)}</td>
                   <td class="num"><input type="number" step="0.01" class="ei-labour" data-i="${i}" value="${r.labour}" style="width:100px;" /></td>
                   <td class="num"><input type="number" step="0.01" class="ei-material" data-i="${i}" value="${r.material}" style="width:100px;" /></td>
                   <td class="num"><input type="number" step="0.01" class="ei-stc" data-i="${i}" value="${r.stc}" style="width:100px;" /></td>
@@ -3854,6 +3921,17 @@
         saveBtn.textContent = 'Saving...';
         try {
           const newRows = readValues();
+          // The quote's STC and BSTC credits are the cap (the server caps labour and materials on a new
+          // invoice): this invoice can hold at most what is left of each after every other invoice on
+          // the job, and it can never be a credit on its own (that is a negative invoice).
+          const credit = quoteCreditSummary(project);
+          const sumOf = (list, k) => list.reduce((s, r) => s + r[k], 0);
+          const stcCap = Math.max(0, credit.stcRemaining + sumOf(rows, 'stc'));
+          const bstcCap = Math.max(0, credit.bstcRemaining + sumOf(rows, 'bstc'));
+          if (newRows.some(r => r.labour < 0 || r.material < 0 || r.stc < 0 || r.bstc < 0)) throw new Error('Amounts cannot be negative.');
+          if (sumOf(newRows, 'stc') > stcCap + 0.01) throw new Error(`The STC credit on this invoice can be at most ${money(stcCap)}: the quote's credit less what other invoices already hold.`);
+          if (sumOf(newRows, 'bstc') > bstcCap + 0.01) throw new Error(`The BSTC credit on this invoice can be at most ${money(bstcCap)}: the quote's credit less what other invoices already hold.`);
+          if (sumOf(newRows, 'labour') + sumOf(newRows, 'material') <= 0 && sumOf(newRows, 'stc') + sumOf(newRows, 'bstc') > 0) throw new Error('An invoice cannot be only a credit. Give it a labour or materials amount, or issue a credit note instead.');
           // Every write is checked. Order: claims, then the invoice, then each stage's
           // invoiced_amount. If one fails, what was already written is put back (best
           // effort) so the stage and the invoice never disagree.
@@ -3878,14 +3956,23 @@
             const totalBstc = newRows.reduce((s, r) => s + r.bstc, 0);
             const newDate = overlay.querySelector('#ei-date').value;
             const newDueDate = overlay.querySelector('#ei-due-date').value || null;
+            const newSentAt = newDate ? new Date(newDate).toISOString() : invoice.sent_at;
+            // The PDF made at creation shows the old figures and dates. Once any of them changes it is
+            // dropped, so Email and View make a fresh one (both regenerate when pdf_path is empty).
+            const changed = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) > 0.001;
+            const pdfStale = changed(totalLabour, invoice.labour_amount) || changed(totalMaterial, invoice.material_amount)
+              || changed(totalStc, invoice.stc_amount) || changed(totalBstc, invoice.bstc_amount)
+              || newRows.some((r, i) => changed(r.labour, rows[i].labour) || changed(r.material, rows[i].material) || changed(r.stc, rows[i].stc) || changed(r.bstc, rows[i].bstc))
+              || new Date(newSentAt).getTime() !== new Date(invoice.sent_at).getTime() || (newDueDate || null) !== (invoice.due_date || null);
             await mustUpdate('invoices', {
               labour_amount: totalLabour, material_amount: totalMaterial, stc_amount: totalStc, bstc_amount: totalBstc,
-              sent_at: newDate ? new Date(newDate).toISOString() : invoice.sent_at,
+              sent_at: newSentAt,
               due_date: newDueDate,
+              ...(pdfStale ? { pdf_path: null, pdf_generated_at: null } : {}),
             }, invoice.id, `invoice ${invoice.invoice_number}`);
             undo.push(() => supabaseClient.from('invoices').update({
               labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount, bstc_amount: invoice.bstc_amount,
-              sent_at: invoice.sent_at, due_date: invoice.due_date,
+              sent_at: invoice.sent_at, due_date: invoice.due_date, pdf_path: invoice.pdf_path, pdf_generated_at: invoice.pdf_generated_at,
             }).eq('id', invoice.id));
 
             for (let i = 0; i < rows.length; i++) {
@@ -4561,7 +4648,8 @@
             lineItems: (stage.cost_centre_line_items || []).slice().sort((a, b) => a.sort_order - b.sort_order)
               .map(li => ({
                 id: li.id, description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id,
-                prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description, prebuild_base_quantity: li.prebuild_base_quantity,
+                // a cleared description is stored as null (also by the SM8 import): the group editor needs a string
+                prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description ?? '', prebuild_base_quantity: li.prebuild_base_quantity,
                 ai_suggested: li.ai_suggested,
               })),
             photoGroups: (stage.cost_centre_photo_groups || []).slice().sort((a, b) => a.sort_order - b.sort_order)
@@ -4610,6 +4698,8 @@
           msg.innerHTML = '';
           busy(btn, true, 'Save pricing');
           try {
+            const pylonLinkTyped = document.getElementById('p-pylon-link').value.trim();
+            if (pylonLinkTyped && !safePylonLink(pylonLinkTyped)) throw new Error('The Pylon link must start with https://');
             const stagesPayload = readStagesPayload();
             const existingCentres = project.cost_centres || [];
             const keptIds = stagesPayload.map(st => st.id).filter(Boolean);
@@ -4966,7 +5056,7 @@
               ${project.warranty_of_project_id && !editMode ? `
               <div class="card" style="border-color:#eab308;">
                 <h2 style="margin:0 0 8px;">Warranty job</h2>
-                <p class="subtitle" style="margin:0 0 8px;">This is a warranty job for ${project.warranty_original ? `<a class="link-quiet" href="/project.html?id=${project.warranty_original.id}">${projectRef(project.warranty_original)}</a>` : 'a closed-out job'}.</p>
+                <p class="subtitle" style="margin:0 0 8px;">This is a warranty job for ${project.warranty_original ? `<a class="link-quiet" href="/project.html?id=${escapeHtml(project.warranty_original.id)}">${escapeHtml(projectRef(project.warranty_original))}</a>` : 'a closed-out job'}.</p>
                 ${project.warranty_original?.sow_text ? `
                   <p class="subtitle" style="margin:0 0 4px; font-weight:600;">Original scope of works</p>
                   <div style="white-space:pre-wrap; font-size:13px; max-height:160px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px;">${escapeHtml(project.warranty_original.sow_text)}</div>
@@ -4989,7 +5079,7 @@
                     <tbody>
                       ${project.warranty_jobs.map(w => `
                         <tr>
-                          <td><a class="link-quiet" href="/project.html?id=${w.id}">${projectRef(w)}</a></td>
+                          <td><a class="link-quiet" href="/project.html?id=${escapeHtml(w.id)}">${escapeHtml(projectRef(w))}</a></td>
                           <td class="num">${money(w.accrued)}</td>
                           <td class="num">${money(w.invoicedBack)}</td>
                           <td class="num">${money(w.net)}</td>
@@ -5128,7 +5218,7 @@
                           <td data-label="#"></td>
                           <td data-label="Stage" style="padding-left:24px; font-size:13px; color:var(--muted);">&#8627; ${escapeHtml(li.description)}${li.item_type === 'labour' ? ` (${li.quantity} hrs)` : ` (x${li.quantity})`}</td>
                           ${pricingVisible ? `
-                            <td class="num" data-label="Quoted">${money(Number(li.quantity) * (Number(li.unit_cost) || 0))}</td>
+                            <td class="num" data-label="Quoted">${money(Number(li.quantity) * (Number(li.unit_cost) || 0) * (li.item_type === 'labour' ? 1 : 1 + markupOr45(c.markup_percent) / 100))}</td>
                             <td class="num" data-label="Labour"></td>
                             <td class="num" data-label="Materials"></td>
                             <td class="num" data-label="Invoiced"></td>
@@ -5440,11 +5530,11 @@
                   ${project.quote_pdf_generated_at ? `<span class="subtitle" style="font-size:11px;">Generated ${new Date(project.quote_pdf_generated_at).toLocaleString('en-AU')}</span>` : ''}
                 </div>
                 <div id="quote-pdf-msg">${project.quote_pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${escapeHtml(project.quote_pdf_error)}</div>` : ''}</div>
-                ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * (project.deposit_percent / 100))}) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
-                ${project.proposal_template === 'solar' && project.pylon_link ? `
+                ${pricingVisible ? `<p class="subtitle" style="margin-top:14px;">Deposit: ${project.deposit_percent}% (${money(quoted * 1.1 * (project.deposit_percent / 100))} inc GST, as on the deposit invoice) due on acceptance, remainder invoiced per stage on completion.</p>` : ''}
+                ${project.proposal_template === 'solar' && safePylonLink(project.pylon_link) ? `
                   <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
-                    ${pylonSystemSummary(project.pylon_data) ? `<p class="subtitle" style="margin:0 0 8px;">${pylonSystemSummary(project.pylon_data)}</p>` : ''}
-                    <a class="link-quiet" href="${project.pylon_link}" target="_blank" rel="noopener">Pylon design &amp; ROI &rarr;</a>
+                    ${pylonSummaryHtml(project.pylon_data) ? `<p class="subtitle" style="margin:0 0 8px;">${pylonSummaryHtml(project.pylon_data)}</p>` : ''}
+                    <a class="link-quiet" href="${escapeHtml(safePylonLink(project.pylon_link))}" target="_blank" rel="noopener">Pylon design &amp; ROI &rarr;</a>
                   </div>` : ''}
               </div>
               ` : ''}
@@ -5904,6 +5994,7 @@
               // Keep the client link, so the next save in new-project.html
               // updates the same client record instead of creating another.
               client_id: fullProject.client_id,
+              client_site_id: fullProject.client_site_id, // the site too, so the job made from the copy has one
               client_name: fullProject.client_name,
               client_email: fullProject.client_email,
               client_phone: fullProject.client_phone,
@@ -6293,7 +6384,7 @@
             <div style="margin-top:8px; font-size:13px;">
               ${(v.changes || []).map(c => `<div class="subtitle">${escapeHtml(c.cost_centre_name)}: ${money(c.old_amount)} &rarr; ${money(c.new_amount)}</div>`).join('')}
             </div>
-            ${isSigned ? `<p class="subtitle" style="margin-top:8px;">Signed by ${v.signed_by_name} on ${new Date(v.signed_at).toLocaleDateString('en-AU')}</p>` : ''}
+            ${isSigned ? `<p class="subtitle" style="margin-top:8px;">Signed by ${escapeHtml(v.signed_by_name || '')} on ${new Date(v.signed_at).toLocaleDateString('en-AU')}</p>` : ''}
           </div>`;
       }).join('');
     }
@@ -6725,8 +6816,8 @@
       const quoteCount = Number(project.stc_quantity) > 0 ? Math.round(Number(project.stc_quantity)) : centres.reduce((n, c) => n + stcCountForStage(c), 0);
       const quotePrice = Number(project.stc_price_per_certificate) > 0 ? Number(project.stc_price_per_certificate) : ((centres.find(c => Number(c.stc_price_per_certificate) > 0) || {}).stc_price_per_certificate || 35);
       const paid = !!(row && (row.formbay_payment_advice_lines || []).length);
-      const bstcOffered = Number(project.bstc_quantity) > 0 && jobStcRows.some(r => r.stc_type === 'pv') && !jobStcRows.some(r => r.stc_type === 'battery');
-      const v = row || { stc_type: bstcOffered ? 'battery' : 'pv', stc_count: bstcOffered ? Math.round(Number(project.bstc_quantity)) : (jobStcRows.length ? '' : (quoteCount || '')), booked_price: bstcOffered ? (Number(project.bstc_price_per_certificate) || quotePrice) : quotePrice, status: project.formbay_lodgement_status || 'not_lodged', formbay_job_id: project.formbay_lodgement_id || '', ...(prefill || {}) };
+      const bstcOffered = Number(project.bstc_quantity) > 0 && jobStcRows.some(r => r.stc_type === 'pv') && !jobStcRows.some(r => r.stc_type === 'bstc');
+      const v = row || { stc_type: bstcOffered ? 'bstc' : 'pv', stc_count: bstcOffered ? Math.round(Number(project.bstc_quantity)) : (jobStcRows.length ? '' : (quoteCount || '')), booked_price: bstcOffered ? (Number(project.bstc_price_per_certificate) || quotePrice) : quotePrice, status: project.formbay_lodgement_status || 'not_lodged', formbay_job_id: project.formbay_lodgement_id || '', ...(prefill || {}) };
       holder.innerHTML = `
         <div style="margin-top:14px; padding:14px; background:var(--surface-2); border-radius:8px;">
           <h3 style="margin:0 0 8px;">${row ? 'Edit STCs' : 'Add STCs'}</h3>
@@ -7492,10 +7583,13 @@
     }
 
     async function openAddTaskPanel(projectId) {
-      const [{ data: staff }, { data: project }] = await Promise.all([
+      const [{ data: staff }, { data: project }, myRole] = await Promise.all([
         supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
         supabaseClient.from('projects').select('job_number').eq('id', projectId).single(),
+        getMyRole(),
       ]);
+      // A Schedule booking is a pricing-role write (schedule_assignments policy), so only they get the tick.
+      const canBook = isPricingRole(myRole);
       const overlay = openModal(`
           <h2>Add task</h2>
           <label style="margin-top:0">Description</label>
@@ -7556,8 +7650,9 @@
       function refreshCalendarRowVisibility() {
         const assignType = overlay.querySelector('#at-assign-type').value;
         const hasDate = !!overlay.querySelector('#at-due-date').value;
-        overlay.querySelector('#at-calendar-row').style.display = (assignType === 'person' && hasDate) ? 'flex' : 'none';
-        if (!(assignType === 'person' && hasDate)) overlay.querySelector('#at-add-to-calendar').checked = false;
+        const show = canBook && assignType === 'person' && hasDate;
+        overlay.querySelector('#at-calendar-row').style.display = show ? 'flex' : 'none';
+        if (!show) overlay.querySelector('#at-add-to-calendar').checked = false;
       }
 
       overlay.querySelector('#at-assign-type').addEventListener('change', (e) => {
@@ -7594,15 +7689,38 @@
         try {
           const { data: { user } } = await supabaseClient.auth.getUser();
 
-          let scheduleAssignmentId = null;
-          if (addToCalendar && personId && dueDate) {
+          const bookIt = canBook && addToCalendar && personId && dueDate;
+          if (bookIt) {
             const blocking = await requiredTasksBlockingSchedule(projectId);
             if (blocking.length) {
-              msg.innerHTML = `<div class="error-box">This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done: ${blocking.join('; ')}</div>`;
+              msg.innerHTML = `<div class="error-box">This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done: ${escapeHtml(blocking.join('; '))}</div>`;
               saveBtn.disabled = false;
               saveBtn.textContent = 'Add task';
               return;
             }
+          }
+
+          // The task is saved first and the booking after it: a failed booking never loses the task,
+          // and a retry cannot book the person twice for a task that was never added.
+          const { data: task, error } = await supabaseClient.from('job_tasks').insert({
+            project_id: projectId,
+            description,
+            task_type: overlay.querySelector('#at-task-type').value,
+            assigned_to_user_id: personId,
+            assigned_to_role: assignType === 'role' ? overlay.querySelector('#at-role').value : null,
+            required_before_scheduling: overlay.querySelector('#at-required').checked,
+            due_date: dueDate,
+            recurrence: isRecurring ? overlay.querySelector('#at-recurrence').value : null,
+            schedule_assignment_id: null,
+            created_by: user.id,
+          }).select('id').single();
+          if (error) throw error;
+          const who = personId ? staff.find(s => s.id === personId)?.full_name : (assignType === 'role' ? overlay.querySelector('#at-role').value : null);
+          await logActivity('project', projectId, 'task_added', `Task added: ${description}${who ? ` (assigned to ${who})` : ''}`);
+          if (overlay.querySelector('#at-required').checked) await refreshPipelineTaskGate(projectId);
+
+          let bookErr = null;
+          if (bookIt) {
             const { data: assignment, error: schedErr } = await supabaseClient
               .from('schedule_assignments')
               .insert({
@@ -7612,28 +7730,16 @@
               })
               .select('id')
               .single();
-            if (schedErr) throw schedErr;
-            scheduleAssignmentId = assignment.id;
+            bookErr = schedErr;
+            if (!bookErr) {
+              const { error: linkErr } = await supabaseClient.from('job_tasks').update({ schedule_assignment_id: assignment.id }).eq('id', task.id);
+              bookErr = linkErr;
+            }
           }
-
-          const { error } = await supabaseClient.from('job_tasks').insert({
-            project_id: projectId,
-            description,
-            task_type: overlay.querySelector('#at-task-type').value,
-            assigned_to_user_id: personId,
-            assigned_to_role: assignType === 'role' ? overlay.querySelector('#at-role').value : null,
-            required_before_scheduling: overlay.querySelector('#at-required').checked,
-            due_date: dueDate,
-            recurrence: isRecurring ? overlay.querySelector('#at-recurrence').value : null,
-            schedule_assignment_id: scheduleAssignmentId,
-            created_by: user.id,
-          });
-          if (error) throw error;
-          const who = personId ? staff.find(s => s.id === personId)?.full_name : (assignType === 'role' ? overlay.querySelector('#at-role').value : null);
-          await logActivity('project', projectId, 'task_added', `Task added: ${description}${who ? ` (assigned to ${who})` : ''}`);
-          if (overlay.querySelector('#at-required').checked) await refreshPipelineTaskGate(projectId);
           overlay.remove();
           await loadJobTasks(projectId);
+          // The task is in; only the booking failed, so say so instead of offering a retry that would add the task twice.
+          if (bookErr) showToast(`Task added, but it could not be put on the Schedule: ${friendlyError(bookErr)} Book it from the Schedule page.`, { error: true });
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           saveBtn.disabled = false;
@@ -7686,15 +7792,14 @@
           : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
         return ids.length ? ids.map(centreName).join(', ') : 'Unassigned';
       };
-      const hoursFor = (entry) => entry.clock_out
-        ? Math.round(((new Date(entry.clock_out) - new Date(entry.clock_in)) / 3600000) * 100) / 100
-        : null;
+      // paid hours (less the break), the same basis as the cost column from the server
+      const hoursFor = (entry) => entry.clock_out ? Math.round(entryHours(entry) * 100) / 100 : null;
 
       async function refreshList() {
         const listEl = overlay.querySelector('#td-list');
         const { data: entries, error } = await supabaseClient
           .from('time_entries')
-          .select('id, staff_id, clock_in, clock_out, cost_centre_id, selected_cost_centre_ids, time_category, sm8_activity_uuid, profiles(full_name)')
+          .select('id, staff_id, clock_in, clock_out, break_minutes, cost_centre_id, selected_cost_centre_ids, time_category, sm8_activity_uuid, profiles(full_name)')
           .eq('project_id', project.id)
           .order('clock_in', { ascending: false });
         if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
@@ -7739,7 +7844,7 @@
                   <td data-label="Staff">${escapeHtml(e.profiles?.full_name || 'Unknown')}</td>
                   <td data-label="Date">${new Date(e.clock_in).toLocaleDateString()}</td>
                   <td class="num" data-label="Hours">${hrs === null ? 'In progress' : hrs.toFixed(2)}</td>
-                  <td data-label="Stage / category">${stageLabel(e)}${e.sm8_activity_uuid ? ' <span class="subtitle">(ServiceM8, already paid)</span>' : ''}</td>
+                  <td data-label="Stage / category">${escapeHtml(stageLabel(e))}${e.sm8_activity_uuid ? ' <span class="subtitle">(ServiceM8, already paid)</span>' : ''}</td>
                   ${isFinanceOrAdmin ? `<td class="num" data-label="Cost">${cost === undefined ? '-' : money(cost)}</td>` : ''}
                   ${isAdmin ? `<td><button type="button" class="secondary td-edit-btn" data-id="${e.id}" style="font-size:12px; padding:4px 8px;">Edit</button></td>` : ''}
                 </tr>
@@ -8262,7 +8367,10 @@
         ids.length ? supabaseClient.from('job_variation_hours').select('*, profiles:staff_id(full_name)').in('variation_id', ids).order('work_date').order('created_at') : Promise.resolve({ data: [] }),
         ids.length ? supabaseClient.from('job_variation_materials').select('*').in('variation_id', ids).order('created_at') : Promise.resolve({ data: [] }),
         pricingVisible ? supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name') : Promise.resolve({ data: [] }),
-        centreIds.length ? supabaseClient.from('time_entries').select('cost_centre_id, staff_id, clock_in, clock_out, profiles(full_name)').in('cost_centre_id', centreIds).not('clock_out', 'is', null) : Promise.resolve({ data: [] }),
+        // Clocked to the variation's stage itself, or to it as one stage of a split entry (cost_centre_id
+        // null, the stages in selected_cost_centre_ids): the same two shapes variation-lines.js prices.
+        centreIds.length ? supabaseClient.from('time_entries').select('cost_centre_id, selected_cost_centre_ids, staff_id, clock_in, clock_out, break_minutes, profiles(full_name)')
+          .or(`cost_centre_id.in.(${centreIds.join(',')}),selected_cost_centre_ids.ov.{${centreIds.join(',')}}`).not('clock_out', 'is', null) : Promise.resolve({ data: [] }),
       ]);
 
       const isOpenToBill = (r) => r.status === 'to_bill' && !(r.variation_type === 'fixed' && r.approval_status !== 'approved');
@@ -8286,6 +8394,7 @@
       const btnStyle = 'font-size:12px; padding:5px 10px;';
       const linkFor = (r) => `${shareOrigin()}/quote.html?variation=${r.variation_token}`;
       const linesTotal = (r) => (r.fixed_lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+      const entryStages = (t) => (t.selected_cost_centre_ids && t.selected_cost_centre_ids.length) ? t.selected_cost_centre_ids : (t.cost_centre_id ? [t.cost_centre_id] : []);
 
       listEl.innerHTML = (rows || []).length ? rows.map(r => {
         const isFixed = r.variation_type === 'fixed';
@@ -8293,11 +8402,13 @@
         const kindText = `Variation ${r.variation_number || ''} &middot; ${isFixed ? 'Fixed price' : 'Do and charge'}`;
         const hrs = (hourRows || []).filter(h => h.variation_id === r.id);
         const mats = (matRows || []).filter(m => m.variation_id === r.id);
-        const clocks = (clockRows || []).filter(t => t.cost_centre_id === r.cost_centre_id);
+        const clocks = (clockRows || []).filter(t => r.cost_centre_id && entryStages(t).includes(r.cost_centre_id));
         const clockedByStaff = {};
         clocks.forEach(t => {
           const name = (t.profiles && t.profiles.full_name) || 'Someone';
-          clockedByStaff[name] = (clockedByStaff[name] || 0) + (new Date(t.clock_out) - new Date(t.clock_in)) / 3600000;
+          // paid hours (the unpaid break taken off), and a split entry gives this stage its even share, as billing does
+          const paid = Math.max(0, (new Date(t.clock_out) - new Date(t.clock_in)) / 3600000 - (Number(t.break_minutes) || 0) / 60);
+          clockedByStaff[name] = (clockedByStaff[name] || 0) + paid / entryStages(t).length;
         });
         const clockedTotal = Object.values(clockedByStaff).reduce((s, n) => s + n, 0);
         const hoursTotal = hrs.reduce((s, h) => s + Number(h.hours), 0) + clockedTotal;
@@ -8645,8 +8756,12 @@
         saveBtn.disabled = true;
         try {
           if (entry) {
-            const { error: uErr } = await supabaseClient.from('job_variation_entries').update({ description, reason, fixed_lines: clean }).eq('id', entry.id);
+            // Only a draft can be rewritten. Once it is sent, approved or declined the lines are what the
+            // client saw (and signed), so the status is checked in the same write: no row back, no save.
+            const { data: saved, error: uErr } = await supabaseClient.from('job_variation_entries').update({ description, reason, fixed_lines: clean })
+              .eq('id', entry.id).or('approval_status.is.null,approval_status.eq.draft').select('id');
             if (uErr) throw uErr;
+            if (!saved || !saved.length) throw new Error('This variation is no longer a draft (it has been sent, approved or declined since this editor was opened), so it cannot be changed. Close this and reload the page.');
           } else {
             const { data: { session } } = await supabaseClient.auth.getSession();
             const res = await fetch('/.netlify/functions/create-variation', {

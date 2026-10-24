@@ -23,6 +23,9 @@ async function hrInit(session) {
 }
 const hrIsFinance = () => HR.myRole === 'admin' || HR.myRole === 'finance';
 const hrToday = () => hrLocalDate();
+// A stored signature is only used as an image when it is a PNG or JPEG data URL (staff write
+// their own rows), the same guard as quote.html's safeSig (S15).
+const hrSafeSig = (u) => (typeof u === 'string' && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(u)) ? u : '';
 const hrStaffName = (id) => (HR.staff.find(s => s.id === id) || {}).full_name || '';
 
 function hrModal(html, maxWidth = 640) {

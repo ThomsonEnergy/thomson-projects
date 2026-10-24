@@ -45,7 +45,11 @@ async function deliverPending(supabaseAdmin, { onlyIds = null, send = null, send
 
   const toSend = rows.filter(goesToPhone);
   const userIds = [...new Set(toSend.map(r => r.user_id))];
-  const { data: subs } = await supabaseAdmin.from('push_subscriptions').select('id, user_id, endpoint, p256dh, auth, platform').in('user_id', userIds);
+  // A failed lookup, or VAPID keys that cannot be read, stops here before anything is marked pushed, so
+  // the rows are tried again next minute instead of being dropped (F33 in docs/BUG_REVIEW_2026-10-23.md).
+  const { data: subs, error: subErr } = await supabaseAdmin.from('push_subscriptions').select('id, user_id, endpoint, p256dh, auth, platform').in('user_id', userIds);
+  if (subErr) throw subErr;
+  if (!send && (subs || []).some(s => s.platform !== 'ios')) await configure();
   const unread = {};
   await Promise.all(userIds.filter(u => (subs || []).some(s => s.user_id === u)).map(async (u) => {
     const { count } = await supabaseAdmin.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', u).eq('channel', 'bell').is('read_at', null);
@@ -53,19 +57,29 @@ async function deliverPending(supabaseAdmin, { onlyIds = null, send = null, send
   }));
 
   let sent = 0, failed = 0; const dead = new Set();
+  // notifications that reached no device because the push service or network failed (a 5xx, a 429, no
+  // answer): left unmarked so the next run tries them again (the two day window above bounds the retries)
+  const retry = new Set();
   for (const n of toSend) {
+    let reached = false, transient = false;
     for (const s of (subs || []).filter(x => x.user_id === n.user_id && !dead.has(x.id))) {
       const msg = { id: n.id, title: n.title, body: n.body || '', url: n.link || '/home.html', tag: n.id, count: unread[n.user_id] || 0 };
       try {
         if (s.platform === 'ios') await apnsSend(s.endpoint, msg);
         else await sendFn({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(msg));
         sent++;
+        reached = true;
       } catch (err) {
         failed++;
-        if (err && (err.statusCode === 404 || err.statusCode === 410)) dead.add(s.id);
-        else console.error('push failed:', err && (err.statusCode || err.message));
+        const code = err && err.statusCode;
+        if (code === 404 || code === 410) dead.add(s.id);
+        else {
+          if (!code || code === 429 || code >= 500) transient = true;
+          console.error('push failed:', code || (err && err.message));
+        }
       }
     }
+    if (transient && !reached) retry.add(n.id);
   }
   if (apns) apns.close();
   if (dead.size) await supabaseAdmin.from('push_subscriptions').delete().in('id', [...dead]);
@@ -75,10 +89,14 @@ async function deliverPending(supabaseAdmin, { onlyIds = null, send = null, send
     const sentUsers = [...okUsers];
     await supabaseAdmin.from('push_subscriptions').update({ last_success_at: nowIso }).in('user_id', sentUsers);
   }
-  // Everything looked at is marked, so a person who subscribes later is not
-  // flooded with old items, and nothing is retried forever.
-  await supabaseAdmin.from('notifications').update({ pushed_at: new Date().toISOString() }).in('id', rows.map(r => r.id));
-  return { notifications: rows.length, sent, failed, removed: dead.size };
+  // Everything looked at is marked (except the transient failures above), so a person who subscribes
+  // later is not flooded with old items, and nothing is retried forever.
+  const markIds = rows.map(r => r.id).filter(id => !retry.has(id));
+  if (markIds.length) {
+    const { error: markErr } = await supabaseAdmin.from('notifications').update({ pushed_at: new Date().toISOString() }).in('id', markIds);
+    if (markErr) throw markErr;
+  }
+  return { notifications: rows.length, sent, failed, removed: dead.size, retry: retry.size };
 }
 
 module.exports = { deliverPending };

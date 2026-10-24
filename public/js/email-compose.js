@@ -292,6 +292,8 @@ function openCreateFromEmailModal(threadId) {
   (async () => {
     let result;
     try {
+      // Pricing roles only: the clients insert and the quote page are closed to other roles (F46).
+      if (!isPricingRole(await getMyRole())) throw new Error('Only sales, finance and admin can create a quote or job from an email. Tag it to a job instead, or ask one of them.');
       const { data: { session } } = await supabaseClient.auth.getSession();
       const res = await fetch('/.netlify/functions/extract-email-job', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },

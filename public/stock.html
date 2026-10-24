@@ -59,7 +59,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allMaterials = [];
@@ -312,10 +312,16 @@
         };
         let materialId = material ? material.id : null;
         if (material) {
-          const { data: upd, error } = await supabaseClient.from('materials').update(fields).eq('id', material.id).select('id');
-          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-          if (!upd || !upd.length) { msg.innerHTML = `<div class="error-box">Only Admin, Finance or Sales can change an item's details. Counts can still be corrected below.</div>`; }
-          else await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
+          // Only write the details when something changed, so a count-only edit by any role goes through;
+          // when the database refuses the details (not a pricing role) stop here, nothing is dropped silently (F17).
+          const same = (a, b) => typeof a === 'number' ? Number(b) === a : typeof a === 'boolean' ? !!b === a : (a ?? null) === (b ?? null);
+          const detailsChanged = Object.keys(fields).some(k => !same(fields[k], material[k]));
+          if (detailsChanged) {
+            const { data: upd, error } = await supabaseClient.from('materials').update(fields).eq('id', material.id).select('id');
+            if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+            if (!upd || !upd.length) { msg.innerHTML = `<div class="error-box">Only Admin, Finance or Sales can change an item's details. Put the details back as they were to save a count change.</div>`; return; }
+            await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
+          }
         } else {
           const { data: newMat, error } = await supabaseClient.from('materials').insert(fields).select('id').single();
           if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
@@ -366,7 +372,7 @@
           <details class="po-fold" style="margin-top:14px;">
             <summary>More options <span class="subtitle" style="font-weight:400; font-size:12px; margin-left:auto;">open PO, invoice</span></summary>
             ${poTypeChoiceHtml('csp')}
-            <button type="button" class="secondary btn-sm" id="csp-upload-invoice-btn" style="margin-top:10px;">Or upload the supplier's invoice instead</button>
+            ${isPricingRole(myRole) ? `<button type="button" class="secondary btn-sm" id="csp-upload-invoice-btn" style="margin-top:10px;">Or upload the supplier's invoice instead</button>` : ''}
           </details>
           <div style="margin-top:14px;">
             <button id="csp-save-btn">Create PO</button>
@@ -377,7 +383,9 @@
       document.body.appendChild(overlay);
 
       const resolveSupplier = wireSupplierPicker(overlay, suppliers, { search: 'csp-supplier-search', results: 'csp-supplier-results', selected: 'csp-supplier-selected', newSection: 'csp-supplier-new-section', newEmail: 'csp-supplier-new-email', newPhone: 'csp-supplier-new-phone' });
-      wireUploadInvoiceButton(overlay.querySelector('#csp-upload-invoice-btn'), overlay.querySelector('#csp-msg'));
+      // reading the invoice is for Admin, Finance and Sales only, so nobody else is offered it (F9)
+      const cspUploadBtn = overlay.querySelector('#csp-upload-invoice-btn');
+      if (cspUploadBtn) wireUploadInvoiceButton(cspUploadBtn, overlay.querySelector('#csp-msg'));
 
       buildMaterialSearchRow(allMaterials, 'csp-items-container');
       overlay.querySelector('#csp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(allMaterials, 'csp-items-container'));
@@ -503,9 +511,14 @@
             }).select('id, po_number').single();
             if (poErr) throw poErr;
             await logActivity('purchase_order', newPo.id, 'created', `Restock PO ${newPo.po_number || ''} created for ${group.supplierName}`);
-            await supabaseClient.from('purchase_order_line_items').insert(
+            const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(
               group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
+            if (liErr) {
+              // no lines, no PO: take the empty one back out rather than leave it behind a success toast (F41)
+              const { error: rmErr } = await supabaseClient.from('purchase_orders').delete().eq('id', newPo.id);
+              throw new Error(`${newPo.po_number || 'The PO'} for ${group.supplierName}: the lines could not be added (${liErr.message}).${rmErr ? ' The empty PO is still there, delete it from its page.' : ' It was not created.'}${created ? ` ${created} earlier PO${created === 1 ? ' was' : 's were'} created.` : ''}`);
+            }
             created++;
           }
           overlay.remove();

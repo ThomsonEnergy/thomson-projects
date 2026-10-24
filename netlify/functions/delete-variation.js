@@ -42,26 +42,34 @@ exports.handler = async (event) => {
       }
     }
 
-    // Put Stock materials back on the shelf.
-    const { data: mats } = await supabaseAdmin.from('job_variation_materials').select('material_id, quantity, stock_deducted').eq('variation_id', id);
-    for (const m of (mats || []).filter(x => x.stock_deducted && x.material_id)) {
-      const { data: wh } = await supabaseAdmin.from('material_stock_by_location').select('id, quantity').eq('material_id', m.material_id).eq('location_type', 'warehouse').maybeSingle();
-      if (wh) {
-        await supabaseAdmin.from('material_stock_by_location').update({ quantity: Number(wh.quantity) + Number(m.quantity), updated_at: new Date().toISOString() }).eq('id', wh.id);
-      } else {
-        await supabaseAdmin.from('material_stock_by_location').insert({ material_id: m.material_id, location_type: 'warehouse', quantity: Number(m.quantity) });
-      }
-    }
+    // The Stock materials taken off the shelf for it, read before the delete below (it cascades to these rows).
+    const { data: mats } = await supabaseAdmin.from('job_variation_materials').select('material_id, quantity, stock_deducted, materials(name)').eq('variation_id', id);
+    const toPutBack = (mats || []).filter(x => x.stock_deducted && x.material_id);
 
     // Costs already recorded against the stage go with it.
     if (entry.cost_centre_id) {
       await supabaseAdmin.from('job_material_usage').delete().eq('cost_centre_id', entry.cost_centre_id);
     }
-    const { error: delErr } = await supabaseAdmin.from('job_variation_entries').delete().eq('id', id);
+    // The delete comes first, and only the call that deleted the row puts stock back, so two Delete presses
+    // can not return the same stock twice (bug review M29).
+    const { data: deleted, error: delErr } = await supabaseAdmin.from('job_variation_entries').delete().eq('id', id).select('id');
     if (delErr) throw delErr;
+    if (!deleted || !deleted.length) return { statusCode: 404, body: JSON.stringify({ error: 'Variation not found' }) };
     if (entry.cost_centre_id) {
       await supabaseAdmin.from('cost_centre_line_items').delete().eq('cost_centre_id', entry.cost_centre_id);
       await supabaseAdmin.from('cost_centres').delete().eq('id', entry.cost_centre_id);
+    }
+
+    // Put Stock materials back on the shelf through _stock_adjust (migration 20261025000000), which locks the
+    // stock row: the same call variation_material_delete uses, instead of a read-then-write that a receive or
+    // count on the same material at the same moment could overwrite.
+    for (const m of toPutBack) {
+      const { error: stockErr } = await supabaseAdmin.rpc('_stock_adjust', {
+        p_material: m.material_id, p_loc: 'warehouse', p_vehicle: null, p_delta: Number(m.quantity), p_allow_short: false,
+      });
+      if (stockErr) {
+        throw new Error(`The variation was deleted, but ${Number(m.quantity)} x ${m.materials?.name || 'a Stock material'} could not be put back in the Warehouse (${stockErr.message}). Correct the count on the Stock page.`);
+      }
     }
 
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };

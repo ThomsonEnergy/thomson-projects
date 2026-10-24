@@ -13,8 +13,8 @@
 const fetch = require('node-fetch');
 const { roiParseHours } = require('../../../public/js/solar-roi.js');
 
-// Bump when convertPlan changes, so the next download converts every stored plan again.
-const CONVERTER_VERSION = 2;
+// Bump when convertPlan or expandPostcodes changes, so the next download converts every stored plan again.
+const CONVERTER_VERSION = 3;
 // Retailers whose price follows the wholesale market: their published rate is only indicative, so
 // their plans are kept but never costed.
 const WHOLESALE_BRANDS = /^(amber|localvolts|flow-power|powerclub)$/i;
@@ -48,6 +48,9 @@ async function fetchJson(url, version, { tries = 3, timeoutMs = 20000 } = {}) {
       const res = await fetch(url, { headers: { Accept: 'application/json', 'x-v': String(version), 'x-min-v': '1' }, timeout: timeoutMs });
       if (res.status === 406 || res.status === 404) return { status: res.status, json: null };
       if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
+      // any other 4xx (a WAF 403, a rejected page size) is a failed request, never an empty answer: the body
+      // is a JSON error, and reading it as a plan list would empty the brand (F2 in docs/BUG_REVIEW_2026-10-23.md)
+      if (res.status >= 400) return { status: res.status, json: null };
       const text = await res.text();
       return { status: res.status, json: text ? JSON.parse(text) : null };
     } catch (err) {
@@ -99,7 +102,9 @@ async function listPlans(brand) {
   for (let page = 0; url && page < 50; page++) {
     const { status, json } = await fetchJson(url, 1);
     if (!json) { if (page === 0) throw new Error(`plan list HTTP ${status}`); break; }
-    ((json.data && json.data.plans) || []).forEach(p => plans.push(p));
+    // a 200 without the data block is an error body too, not a brand with no plans
+    if (!json.data || !Array.isArray(json.data.plans)) { if (page === 0) throw new Error(`plan list HTTP ${status}: no plan data in the answer`); break; }
+    json.data.plans.forEach(p => plans.push(p));
     url = json.links && json.links.next;
   }
   return plans;
@@ -113,6 +118,23 @@ async function fetchPlanDetail(brand, planId) {
     if (status !== 406) break;
   }
   return { detail: null, version: null };
+}
+
+// The feed's postcode lists may hold ranges ("2000-2999"). Stored as one string a range never matches a typed
+// postcode and a ranged exclusion never excludes, so every range is expanded to its postcodes (4 digits, zero
+// padded) and the list is deduplicated. Anything that is not a postcode or a range is kept as typed.
+function expandPostcodes(list) {
+  const out = new Set();
+  (Array.isArray(list) ? list : []).forEach(raw => {
+    const s = String(raw == null ? '' : raw).trim();
+    if (!s) return;
+    const range = s.match(/^(\d{3,4})\s*(?:-|to)\s*(\d{3,4})$/i);
+    if (!range) { out.add(s); return; }
+    let a = parseInt(range[1], 10), b = parseInt(range[2], 10);
+    if (a > b) [a, b] = [b, a];
+    for (let n = a; n <= b; n++) out.add(String(n).padStart(4, '0'));
+  });
+  return [...out];
 }
 
 // ---------- turning a published plan into the savings estimate's terms ----------
@@ -317,4 +339,4 @@ function convertPlan(detail) {
   };
 }
 
-module.exports = { CONVERTER_VERSION, NETWORKS, networkKey, discoverBrands, listPlans, fetchPlanDetail, convertPlan, AER_BASE };
+module.exports = { CONVERTER_VERSION, NETWORKS, networkKey, discoverBrands, listPlans, fetchPlanDetail, convertPlan, expandPostcodes, AER_BASE };

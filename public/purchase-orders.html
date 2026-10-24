@@ -58,8 +58,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
-  <script src="/js/email-compose.js?v=8"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/email-compose.js?v=9"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // The list: open POs load first (lines and bill states, no bill lines); Closed loads when asked
@@ -218,7 +218,7 @@
             ${poTypeChoiceHtml('np')}
             ${poNotesFieldsHtml('np')}
             ${poShowPricesHtml('np')}
-            <button type="button" class="secondary btn-sm" id="np-upload-invoice-btn" style="margin-top:10px;">Or upload the supplier's invoice instead</button>
+            ${isPricingRole(myRole) ? `<button type="button" class="secondary btn-sm" id="np-upload-invoice-btn" style="margin-top:10px;">Or upload the supplier's invoice instead</button>` : ''}
           </details>
 
           <div style="margin-top:14px;">
@@ -281,8 +281,10 @@
       // Detects/creates the supplier from the invoice itself, then hands
       // off to their page to finish - including an option there to
       // create this PO's line items straight from the bill, so the
-      // destination picked above isn't needed either.
-      wireUploadInvoiceButton(overlay.querySelector('#np-upload-invoice-btn'), overlay.querySelector('#np-msg'));
+      // destination picked above isn't needed either. Reading the invoice is for Admin, Finance
+      // and Sales only, so nobody else is offered the button (F9).
+      const npUploadBtn = overlay.querySelector('#np-upload-invoice-btn');
+      if (npUploadBtn) wireUploadInvoiceButton(npUploadBtn, overlay.querySelector('#np-msg'));
 
       buildMaterialSearchRow(materials || [], 'np-items-container');
       overlay.querySelector('#np-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'np-items-container'));

@@ -13,7 +13,9 @@ const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { suggestSizes, billMetrics } = require('../../public/js/solar-roi.js');
 
 const BILL_FOLDER = 'Electricity bill';
-const MAX_PAGES = 12;
+// Files past this many are not sent (one request, one reading); their names come back as left_out_files
+// so the page can say which pages were not read (F30 in docs/BUG_REVIEW_2026-10-23.md).
+const MAX_PAGES = 20;
 
 function mimeFor(path, stored) {
   if (stored && /^(application\/pdf|image\/(png|jpeg|webp|gif))$/.test(stored)) return stored;
@@ -78,6 +80,8 @@ exports.handler = async (event) => {
 
     const blocks = [];
     const skipped = [];
+    const leftOut = docs.slice(MAX_PAGES).map((d) => d.file_name);
+    const leftOutNote = leftOut.length ? ` Only the first ${MAX_PAGES} files were read; not read: ${leftOut.join(', ')}. Delete retakes or spare pages and read again.` : '';
     for (const doc of docs.slice(0, MAX_PAGES)) {
       const mediaType = mimeFor(doc.file_path, doc.mime_type);
       if (!mediaType) { skipped.push(doc.file_name); continue; }
@@ -116,13 +120,14 @@ exports.handler = async (event) => {
     const sizing = suggestSizes({ reading: extracted, answers, zoneRating });
     const metrics = billMetrics(extracted);
     if (!metrics.dailyKwh) {
-      return { statusCode: 422, body: JSON.stringify({ ok: false, error: 'The pages were read but no usage in kWh was found on them. Add the page with the usage table (kWh and days) and try again.', reading: extracted }) };
+      return { statusCode: 422, body: JSON.stringify({ ok: false, error: `The pages were read but no usage in kWh was found on them. Add the page with the usage table (kWh and days) and try again.${leftOutNote}`, reading: extracted, left_out: leftOut }) };
     }
 
     const reading = {
       ...extracted,
       pages: blocks.length,
       skipped_files: skipped,
+      left_out_files: leftOut,
       read_at: new Date().toISOString(),
       read_by: user.id,
       sizing,
@@ -148,10 +153,10 @@ exports.handler = async (event) => {
 
     await supabaseAdmin.from('activity_log').insert({
       entity_type: 'project', entity_id: projectId, action: 'bill_read', changed_by: user.id,
-      description: `AI read the electricity bill (${blocks.length} file${blocks.length === 1 ? '' : 's'}): ${metrics.dailyKwh} kWh a day${metrics.annualBill ? `, about $${metrics.annualBill} a year` : ''}${sizing.solarKw ? `, suggests ${sizing.solarKw} kW solar` : ''}${sizing.batteryKwh ? ` and ${sizing.batteryKwh} kWh battery` : ''}`,
+      description: `AI read the electricity bill (${blocks.length} file${blocks.length === 1 ? '' : 's'}${leftOut.length ? `, ${leftOut.length} not read` : ''}): ${metrics.dailyKwh} kWh a day${metrics.annualBill ? `, about $${metrics.annualBill} a year` : ''}${sizing.solarKw ? `, suggests ${sizing.solarKw} kW solar` : ''}${sizing.batteryKwh ? ` and ${sizing.batteryKwh} kWh battery` : ''}`,
     });
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, reading, filled, answers: newAnswers, usage: data.usage || {} }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, reading, filled, answers: newAnswers, left_out: leftOut, warning: leftOutNote.trim() || null, usage: data.usage || {} }) };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };

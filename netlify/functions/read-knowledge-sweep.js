@@ -2,6 +2,7 @@ const fetch = require('node-fetch');
 const { getAdminClient } = require('./_shared/require-admin');
 const { selfBaseUrl } = require('./_shared/site-url');
 const { runAgent } = require('./_shared/agent-log');
+const { internalHeaders } = require('./_shared/require-internal');
 
 // Every 2 minutes (netlify.toml): starts the Knowledge Base reader if a read is queued, or a run died and
 // left a job locked past its time. The reading itself is in read-knowledge-background.js (a scheduled
@@ -14,7 +15,7 @@ exports.handler = () => runAgent('read-knowledge-sweep', async () => {
   if (error) throw new Error(error.message);
   if (!waiting || !waiting.length) return { quiet: true };
   const res = await fetch(`${selfBaseUrl()}/.netlify/functions/read-knowledge-background`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sweep: true }),
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() }, body: JSON.stringify({ sweep: true }),
   });
   return { summary: `Started the reader (${res.status})` };
 });

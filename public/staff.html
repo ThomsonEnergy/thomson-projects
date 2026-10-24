@@ -38,10 +38,10 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
-  <script src="/js/hr-templates.js?v=2"></script>
-  <script src="/js/hr-shared.js?v=3"></script>
+  <script src="/js/hr-templates.js?v=3"></script>
+  <script src="/js/hr-shared.js?v=4"></script>
   <script src="/js/staff-editor.js?v=8"></script>
   <script>
     // Staff profile: everything about one team member in one place, laid out
@@ -58,7 +58,7 @@
     const KPI_STATUS_LABELS = { active: 'In progress', met: 'Met', not_met: 'Not met', cancelled: 'Cancelled' };
     const KPI_STATUS_BADGE = { active: 'sent', met: 'accepted', not_met: 'red', cancelled: 'draft' };
 
-    let person = null, staffEmail = '';
+    let person = null, staffEmail = '', leaveBalance = null;
     let letters = [], incidentLinks = [], kpis = [], files = [];
 
     const fmtDate = (d) => d ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? d + 'T00:00:00' : d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
@@ -68,7 +68,7 @@
 
     // ---------- Loading ----------
     async function loadPerson() {
-      const [{ data: profile, error }, { data: sensitive }, { data: licences }, { data: contract }] = await Promise.all([
+      const [{ data: profile, error }, { data: sensitive }, { data: licences }, { data: contract }, { data: leave }] = await Promise.all([
         supabaseClient.from('profiles').select(`id, full_name, role, active, job_title, mobile_number, notes, photo_url, created_at, site_rank,
           employment_type, employment_start_date, pay_type, has_company_vehicle, has_probationary_period,
           emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_payroll_status`)
@@ -76,8 +76,11 @@
         supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', staffId).maybeSingle(),
         supabaseClient.from('profile_licences').select('*').eq('profile_id', staffId).order('expiry_date'),
         supabaseClient.from('employee_contracts').select('status, updated_at').eq('profile_id', staffId).maybeSingle(),
+        // Leave balances from Xero Payroll (public.leave_balances): own row, or every row for finance roles
+        supabaseClient.from('leave_balances').select('*').eq('profile_id', staffId).maybeSingle(),
       ]);
       if (error) throw error;
+      leaveBalance = leave || null;
       const { data: people } = await supabaseClient.from('profiles').select('id, full_name');
       // The signed contract itself: the latest signature on the contract template.
       const { data: tmpl } = await supabaseClient.from('onboarding_documents').select('id').eq('is_contract', true).maybeSingle();
@@ -271,6 +274,41 @@
       root.querySelectorAll('.contract-pdf').forEach(b => b.addEventListener('click', () => openPdfViewer(person.contractSig.file_path, person.contractSig.document_title_snapshot || 'Employment contract')));
     }
 
+    // Annual, sick and long service hours "as at" the Sydney date of the last Xero sync.
+    function leaveBlockHtml(leave) {
+      if (!leave || !leave.as_at) return '<p class="subtitle" style="margin:0;">Not synced yet.</p>';
+      const hrs = (n) => n == null ? '-' : `${Number(n).toFixed(1)} hrs`;
+      const asAt = new Date(leave.as_at).toLocaleDateString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', year: 'numeric' });
+      return `
+        <dl class="kv">
+          <dt>Annual leave</dt><dd>${hrs(leave.annual_leave_hours)}</dd>
+          <dt>Sick leave</dt><dd>${hrs(leave.sick_leave_hours)}</dd>
+          ${leave.long_service_hours != null ? `<dt>Long service</dt><dd>${hrs(leave.long_service_hours)}</dd>` : ''}
+        </dl>
+        <p class="subtitle" style="margin:8px 0 0; font-size:12px;">As at ${escapeHtml(asAt)}</p>`;
+    }
+
+    // Finance roles only: POSTs to sync-leave-balances (Xero Payroll AU), then reloads the block.
+    async function refreshLeaveFromXero(btn, msgEl) {
+      const label = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Refreshing...';
+      msgEl.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/sync-leave-balances', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.ok) throw new Error(json.error || 'Could not refresh from Xero');
+        const { data: leave } = await supabaseClient.from('leave_balances').select('*').eq('profile_id', staffId).maybeSingle();
+        leaveBalance = leave || null;
+        document.getElementById('leave-block').innerHTML = leaveBlockHtml(leaveBalance);
+        if (json.problems && json.problems.length) msgEl.innerHTML = `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">${escapeHtml(json.problems.length)} of ${escapeHtml(json.total)} people could not be read from Xero.</p>`;
+      } catch (err) {
+        msgEl.innerHTML = `<div class="error-box" style="margin-top:8px;">${escapeHtml(err.message)}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = label;
+      }
+    }
+
     function renderOverview() {
       const p = person;
       const contractBadge = contractHtml(p);
@@ -310,6 +348,14 @@
               <dt>Xero Payroll</dt><dd>${escapeHtml(p.xero_payroll_status || '-')}</dd>
             </dl>
           </div>
+          <div class="card" style="margin:0;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+              <h2 style="margin:0;">Leave</h2>
+              ${hrIsFinance() ? '<button type="button" class="secondary" id="leave-refresh-btn" style="font-size:12px; padding:4px 10px;">Refresh from Xero</button>' : ''}
+            </div>
+            <div id="leave-block" style="margin-top:8px;">${leaveBlockHtml(leaveBalance)}</div>
+            <div id="leave-msg"></div>
+          </div>
           <div class="card" style="margin:0; ${selfView ? 'display:none;' : ''}">
             <h2>HR summary</h2>
             <dl class="kv">
@@ -331,6 +377,8 @@
             </tr>`).join('')}</tbody></table>` : '<p class="subtitle">No licences recorded. Add them on the Team page.</p>'}
         </div>`;
       wireContractPdf(document.getElementById('panel-overview'));
+      const leaveBtn = document.getElementById('leave-refresh-btn');
+      if (leaveBtn) leaveBtn.addEventListener('click', () => refreshLeaveFromXero(leaveBtn, document.getElementById('leave-msg')));
       document.querySelectorAll('#panel-overview .lic-view').forEach(b => b.addEventListener('click', async () => {
         try { await viewStoredFile(b.dataset.path, b.dataset.title); } catch (err) { alert(err.message); }
       }));
@@ -397,7 +445,7 @@
           <h2>${escapeHtml(s.document_title_snapshot)}</h2>
           <p class="subtitle" style="margin-bottom:10px;">Signed ${new Date(s.signed_at).toLocaleString('en-AU')} as ${escapeHtml(s.signed_by_name)}, shown exactly as it was at the time.</p>
           <div style="white-space:pre-wrap; line-height:1.6; max-height:50vh; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px;">${escapeHtml(s.document_body_snapshot)}</div>
-          ${s.signature_data_url ? `<img src="${s.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
+          ${hrSafeSig(s.signature_data_url) ? `<img src="${hrSafeSig(s.signature_data_url)}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
           <div style="margin-top:14px;"><button type="button" class="secondary close-btn">Close</button></div>`);
         o.querySelector('.close-btn').addEventListener('click', () => o.remove());
       }));

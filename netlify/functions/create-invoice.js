@@ -77,7 +77,7 @@ exports.handler = async (event) => {
     }
     // Stock / prebuild items added on the invoice are extra on top, so only the typed claim is limited.
     // Estimates and time-and-materials jobs bill actuals, which can run past the estimate: not limited.
-    const { data: jobForCap } = await supabaseAdmin.from('projects').select('proposal_template').eq('id', projectId).maybeSingle();
+    const { data: jobForCap } = await supabaseAdmin.from('projects').select('proposal_template, stc_total, bstc_total').eq('id', projectId).maybeSingle();
     const capped = !['quick_estimate', 'time_and_materials', 'direct_job'].includes(jobForCap?.proposal_template);
     for (const { c } of (capped ? pricedClaims : [])) {
       const centre = (allCentres || []).find(cc => cc.id === c.costCentreId);
@@ -95,6 +95,44 @@ exports.handler = async (event) => {
     const totalStc = claimRows.reduce((s, c) => s + c.stc_amount, 0);
     const totalBstc = claimRows.reduce((s, c) => s + c.bstc_amount, 0);
     const totalAmount = totalLabour + totalMaterial;
+
+    // An invoice is work with a credit on it, never a credit on its own, and never less than nothing (Xero
+    // refuses a negative invoice and the pay link would charge a negative balance). Bug review M7.
+    if (r2(totalAmount) <= 0) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'An invoice needs labour or materials on it. A credit on its own is not an invoice.' }) };
+    }
+    if (r2(totalStc + totalBstc) > r2(totalAmount) + 0.01) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'The STC and BSTC credits on this claim are more than the work claimed, so the invoice would be negative. Claim more of the stage with the credits, or less credit.' }) };
+    }
+    // The credits are the quote's (projects.stc_total and bstc_total): a claim can carry at most what is left of
+    // each after every earlier claim and credit note on the job, the same figure the claim panel shows
+    // (quoteCreditSummary in project.html, where a credit note gives the credit back). A failed read here
+    // refuses the claim, it never loosens the cap.
+    if (totalStc > 0 || totalBstc > 0) {
+      const centreIds = (allCentres || []).map(cc => cc.id);
+      const [{ data: byProject, error: byProjectErr }, { data: byCentre, error: byCentreErr }] = await Promise.all([
+        supabaseAdmin.from('invoices').select('id, stc_amount, bstc_amount').eq('project_id', projectId),
+        centreIds.length ? supabaseAdmin.from('invoices').select('id, stc_amount, bstc_amount').in('cost_centre_id', centreIds) : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (byProjectErr) throw byProjectErr;
+      if (byCentreErr) throw byCentreErr;
+      const seen = new Set();
+      const jobInvoices = [...(byProject || []), ...(byCentre || [])].filter(inv => !seen.has(inv.id) && seen.add(inv.id));
+      const invoiceIds = jobInvoices.map(inv => inv.id);
+      const { data: credited, error: creditedErr } = invoiceIds.length
+        ? await supabaseAdmin.from('credit_note_claims').select('stc_amount, bstc_amount, credit_notes!inner(invoice_id)').in('credit_notes.invoice_id', invoiceIds)
+        : { data: [], error: null };
+      if (creditedErr) throw creditedErr;
+      const sum = (rows, key) => (rows || []).reduce((s, row) => s + (Number(row[key]) || 0), 0);
+      const stcLeft = Math.max(0, r2((Number(jobForCap?.stc_total) || 0) - sum(jobInvoices, 'stc_amount') + sum(credited, 'stc_amount')));
+      const bstcLeft = Math.max(0, r2((Number(jobForCap?.bstc_total) || 0) - sum(jobInvoices, 'bstc_amount') + sum(credited, 'bstc_amount')));
+      if (r2(totalStc) > stcLeft + 0.01) {
+        return { statusCode: 400, body: JSON.stringify({ error: `Only $${stcLeft.toFixed(2)} of the STC credit is left to claim on this job.` }) };
+      }
+      if (r2(totalBstc) > bstcLeft + 0.01) {
+        return { statusCode: 400, body: JSON.stringify({ error: `Only $${bstcLeft.toFixed(2)} of the BSTC credit is left to claim on this job.` }) };
+      }
+    }
 
     // Always auto-assigned, never user-typed - a manually-entered number
     // could collide with or skip the real sequence.

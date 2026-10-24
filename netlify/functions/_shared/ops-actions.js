@@ -63,7 +63,8 @@ async function prepareOps(client, type, input) {
       const job = po?.projects ? (po.projects.job_number ? `J${po.projects.job_number} - ${po.projects.name}` : po.projects.name) : (po ? 'Stock' : '');
       return {
         ok: true, type, link: '/supplier-bills.html',
-        params: { bill_inbox_id: item.id, po_id: po?.id || null },
+        // a total confirmed in chat rides along to the save; without one the total as read is used
+        params: { bill_inbox_id: item.id, po_id: po?.id || null, ...(Number(input.amount) > 0 ? { amount: Number(input.amount) } : {}) },
         summary: `Save ${billLabel(item, supplierName)}${po ? ` against ${po.po_number} (${job})` : ' with no PO'}`,
         warnings,
       };
@@ -94,7 +95,7 @@ async function executeOps(client, userId, type, params) {
     const { data: allowed } = await client.rpc('is_pricing_role');
     if (!allowed) return { ok: false, error: NOT_ALLOWED };
     try {
-      await saveInboxItemAsBill(getAdminClient(), p.bill_inbox_id, { poId: p.po_id, userId });
+      await saveInboxItemAsBill(getAdminClient(), p.bill_inbox_id, { poId: p.po_id, userId, ...(p.amount > 0 ? { amount: p.amount } : {}) });
     } catch (err) { return { ok: false, error: err.message }; }
     return { ok: true, message: 'Done. Bill saved.' };
   }

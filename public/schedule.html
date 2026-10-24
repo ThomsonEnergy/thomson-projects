@@ -218,7 +218,7 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
@@ -688,7 +688,7 @@
           const resultsEl = overlay.querySelector('#mobile-add-job-results');
           if (!results.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches.</p>`; return; }
           resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-            ${results.map(p => `<div class="mob-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" data-quote-number="${p.quote_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
+            ${results.map(p => `<div class="mob-job-pick" data-id="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" data-job-number="${escapeHtml(p.job_number || '')}" data-quote-number="${escapeHtml(p.quote_number || '')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))}</div>`).join('')}
           </div>`;
           resultsEl.querySelectorAll('.mob-job-pick').forEach(row => {
             row.addEventListener('click', () => {
@@ -705,31 +705,39 @@
       overlay.querySelector('#mobile-add-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#mobile-add-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#mobile-add-msg');
+        const saveBtn = overlay.querySelector('#mobile-add-save-btn');
         const startTime = overlay.querySelector('#mobile-add-start').value;
         const endTime = overlay.querySelector('#mobile-add-end').value;
         if (!startTime || !endTime) { msg.innerHTML = `<div class="error-box">Pick both times.</div>`; return; }
 
-        if (selectedProject) {
-          const blocking = await requiredTasksBlockingSchedule(selectedProject.id);
-          if (blocking.length) {
-            msg.innerHTML = `<div class="error-box">This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done: ${blocking.join('; ')}</div>`;
-            return;
+        // Double tap guard: one booking per tap while the request is in flight.
+        if (saveBtn.disabled) return;
+        saveBtn.disabled = true;
+        try {
+          if (selectedProject) {
+            const blocking = await requiredTasksBlockingSchedule(selectedProject.id);
+            if (blocking.length) {
+              msg.innerHTML = `<div class="error-box">This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done: ${escapeHtml(blocking.join('; '))}</div>`;
+              return;
+            }
           }
-        }
 
-        const insert = {
-          staff_id: staffId, assignment_date: dateStr, start_time: startTime, end_time: endTime,
-        };
-        if (selectedProject) {
-          insert.project_id = selectedProject.id;
-          insert.block_type = selectedProject.job_number ? 'job' : 'site_visit';
-        } else {
-          insert.project_id = null;
-          insert.block_type = overlay.querySelector('#mobile-add-category').value;
-        }
+          const insert = {
+            staff_id: staffId, assignment_date: dateStr, start_time: startTime, end_time: endTime,
+          };
+          if (selectedProject) {
+            insert.project_id = selectedProject.id;
+            insert.block_type = selectedProject.job_number ? 'job' : 'site_visit';
+          } else {
+            insert.project_id = null;
+            insert.block_type = overlay.querySelector('#mobile-add-category').value;
+          }
 
-        const { error } = await supabaseClient.from('schedule_assignments').insert(insert);
-        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
+          const { error } = await supabaseClient.from('schedule_assignments').insert(insert);
+          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
+        } finally {
+          saveBtn.disabled = false;
+        }
         // The database moves Ready to Book to Job Booked on this booking (migration 20261023000000).
         overlay.remove();
         await loadDay();
@@ -1143,8 +1151,8 @@
       const results = await searchProjects(query);
       if (!results.length) { resultsEl.innerHTML = query.trim().length >= 2 ? `<p class="subtitle">No matches.</p>` : ''; return; }
       resultsEl.innerHTML = results.map(p => `
-        <div class="job-card" draggable="true" data-project='${JSON.stringify({ id: p.id, name: p.name, job_number: p.job_number }).replace(/'/g, '&apos;')}'>
-          <div class="jc-title">${p.name}</div>
+        <div class="job-card" draggable="true" data-project="${escapeHtml(JSON.stringify({ id: p.id, name: p.name, job_number: p.job_number }))}">
+          <div class="jc-title">${escapeHtml(p.name)}</div>
           <div class="jc-meta">${p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '')} ${p.client_address ? '- ' + mapsLink(p.client_address) : ''}</div>
         </div>`).join('');
       resultsEl.querySelectorAll('.job-card').forEach(card => {

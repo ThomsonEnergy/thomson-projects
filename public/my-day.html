@@ -112,7 +112,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/template-questions.js?v=3"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -133,7 +133,8 @@
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
     function todayStr() {
-      return dateToStr(new Date());
+      // Today in Sydney, whatever the phone's clock or timezone says.
+      return sydneyDateKey(new Date());
     }
 
     async function checkActiveClock() {
@@ -226,7 +227,7 @@
       cardEl.style.display = 'block';
       cardEl.innerHTML = `
         <a href="/project.html?id=${project.id}" class="link-quiet" style="display:block; border:1px solid var(--border); border-radius:12px; padding:14px; margin-top:14px;">
-          <p style="font-weight:600; margin:0 0 8px;">${projectRef(project)}</p>
+          <p style="font-weight:600; margin:0 0 8px;">${escapeHtml(projectRef(project))}</p>
           ${project.notes ? `
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">Notes</p>
             <p class="subtitle" style="margin:0 0 12px; white-space:pre-wrap;">${escapeHtml(project.notes)}</p>` : ''}
@@ -239,11 +240,11 @@
             : (sowPreview ? `<p class="subtitle" style="margin:0 0 12px; white-space:pre-wrap;">${escapeHtml(sowPreview)}</p>` : '')}
           ${onsiteTasks.length ? `
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">Onsite tasks</p>
-            ${onsiteTasks.map(t => `<p class="subtitle" style="margin:0 0 4px; font-size:13px;">- ${t.description}</p>`).join('')}
+            ${onsiteTasks.map(t => `<p class="subtitle" style="margin:0 0 4px; font-size:13px;">- ${escapeHtml(t.description)}</p>`).join('')}
           ` : ''}
           ${prejobTasks.length ? `
             <p style="margin:${onsiteTasks.length ? '10px' : '0'} 0 4px; font-weight:600; font-size:13px;">Prejob / office / handover tasks</p>
-            ${prejobTasks.map(t => `<p class="subtitle" style="margin:0 0 4px; font-size:13px;">- ${t.description}</p>`).join('')}
+            ${prejobTasks.map(t => `<p class="subtitle" style="margin:0 0 4px; font-size:13px;">- ${escapeHtml(t.description)}</p>`).join('')}
           ` : ''}
           ${!onsiteTasks.length && !prejobTasks.length ? `<p class="subtitle" style="margin:0;">No outstanding tasks on this job.</p>` : ''}
         </a>`;
@@ -410,8 +411,8 @@
         <p class="subtitle" style="margin-bottom:8px;">You're scheduled for today:</p>
         <div style="margin-bottom:16px;">
           ${data.map(a => `
-            <button type="button" class="quick-clock-btn" data-project-id="${a.project_id || ''}" style="margin:0 8px 8px 0;">
-              ${a.projects ? projectRef(a.projects) : 'General / Office'}
+            <button type="button" class="quick-clock-btn" data-project-id="${escapeHtml(a.project_id || '')}" style="margin:0 8px 8px 0;">
+              ${escapeHtml(a.projects ? projectRef(a.projects) : 'General / Office')}
             </button>`).join('')}
         </div>`;
 
@@ -460,11 +461,12 @@
       document.getElementById('my-sched-day-btn').style.borderColor = myScheduleView === 'day' ? 'var(--accent)' : '';
       document.getElementById('my-sched-week-btn').style.borderColor = myScheduleView === 'week' ? 'var(--accent)' : '';
 
-      const today = new Date();
+      // Days run from the Sydney date, not the device date.
+      const todayStrVal = todayStr();
+      const today = new Date(todayStrVal + 'T00:00:00');
       const rangeEnd = new Date(today);
       if (myScheduleView === 'week') rangeEnd.setDate(rangeEnd.getDate() + 6);
       const rangeEndStr = dateToStr(rangeEnd);
-      const todayStrVal = todayStr();
 
       const [{ data: assignments }, { data: leave }] = await Promise.all([
         supabaseClient.from('schedule_assignments').select('*, projects(name, job_number, quote_number)').eq('staff_id', myUserId).gte('assignment_date', todayStrVal).lte('assignment_date', rangeEndStr).order('assignment_date').order('start_time'),
@@ -483,7 +485,7 @@
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">${dateStr === todayStrVal ? 'Today - ' : ''}${dayLabel}</p>
             ${onLeave ? `<p class="subtitle" style="margin:0; color:var(--red);">On leave (${onLeave.leave_type || 'approved'})</p>` : dayAssignments.length ? dayAssignments.map(a => {
               const link = linkForAssignment(a);
-              const inner = `${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${labelForAssignment(a)}`;
+              const inner = `${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${escapeHtml(labelForAssignment(a))}`;
               return link ? `<a class="link-quiet" href="${link}" style="display:block; font-size:13px; margin:2px 0;">${inner}</a>` : `<p class="subtitle" style="margin:2px 0; font-size:13px;">${inner}</p>`;
             }).join('') : `<p class="subtitle" style="margin:0; font-size:13px;">Nothing scheduled.</p>`}
           </div>`;
@@ -625,7 +627,7 @@
     // fixed 8 hour day on a chosen date.
     const clockCategoryEl = document.getElementById('clock-category');
     clockCategoryEl.innerHTML = timeCategoryOptionsHtml('admin');
-    document.getElementById('clock-tafe-date').value = new Date().toLocaleDateString('en-CA');
+    document.getElementById('clock-tafe-date').value = todayStr();
     function refreshClockCategoryUi() {
       const isTafe = clockCategoryEl.value === 'tafe' && !selectedClockJobId;
       document.getElementById('clock-tafe-row').style.display = isTafe ? 'block' : 'none';
@@ -829,6 +831,8 @@
             if (doneErr) throw doneErr;
             // Same gate as the job page: the last required task moves the job out of Awaiting Our Action.
             if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
+            // Same as the job page: the last handover task moves the job on to Ready to Invoice.
+            if (task?.project_id && task.task_type === 'handover') await checkAndAdvanceHandover(task.project_id);
             await loadTasks();
           } catch (err) {
             btn.disabled = false; btn.textContent = label;

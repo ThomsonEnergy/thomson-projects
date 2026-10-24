@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let filter = 'check', imports = [], changes = [], applied = [], suppliers = [], materials = {};
@@ -66,6 +66,8 @@
     const dateText = (iso) => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
     const pctText = (p) => p == null ? '' : `${p > 0 ? '+' : ''}${p}%`;
     const supplierName = (id) => (suppliers.find(s => s.id === id) || {}).name || '';
+    const SHEET_MIME = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'text/csv', 'application/csv'];
+    const isSheet = (i) => SHEET_MIME.includes(String(i.mime_type || '').toLowerCase()) || /\.(xlsx|xls|csv)$/i.test(i.file_name || '');
     const STATUS_TEXT = { pending: 'Being read', processing: 'Being read', to_check: 'To check', applied: 'Done', too_large: 'Very large', not_a_price_list: 'Not a price list', failed: 'Could not be read' };
     const KIND_TEXT = { price: 'Price change', match: 'Match to confirm', superseded: 'Looks replaced' };
 
@@ -107,7 +109,9 @@
     function importActions(i) {
       const b = [];
       if (i.file_path) b.push(`<button type="button" class="secondary" data-open="${i.id}">Open file</button>`);
-      if (i.status === 'to_check' && !i.supplier_id && (i.item_count || (i.items || []).length)) {
+      // The supplier picker shows when items were read but the supplier was not recognised, and for a
+      // spreadsheet from an unknown sender, which is not read until a person picks the supplier
+      if (i.status === 'to_check' && !i.supplier_id && (i.item_count || (i.items || []).length || isSheet(i))) {
         b.push(`<select data-supplier-for="${i.id}"><option value="">Pick the supplier...</option>${suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><button type="button" data-set-supplier="${i.id}">Use this supplier</button>${i.supplier_name_read ? `<button type="button" class="secondary" data-new-supplier="${i.id}">Create supplier "${esc(i.supplier_name_read)}"</button>` : ''}`);
       }
       if (i.status === 'too_large') b.push(`<button type="button" data-read-all="${i.id}">Read all pages</button>`);
@@ -172,7 +176,7 @@
     async function load() {
       const since = new Date(Date.now() - 30 * 86400000).toISOString();
       const [imp, ch, ap, sup, mat] = await Promise.all([
-        supabaseClient.from('price_list_imports').select('id, status, supplier_id, supplier_name_read, file_name, file_path, email_from, received_at, created_at, pages_total, pages_done, item_count, waiting, summary, error').order('created_at', { ascending: false }).limit(100),
+        supabaseClient.from('price_list_imports').select('id, status, supplier_id, supplier_name_read, file_name, mime_type, file_path, email_from, received_at, created_at, pages_total, pages_done, item_count, waiting, summary, error').order('created_at', { ascending: false }).limit(100),
         supabaseClient.from('price_changes').select('*').eq('status', 'waiting').order('created_at').limit(1000),
         supabaseClient.from('price_changes').select('*').in('status', ['applied', 'undone']).gte('resolved_at', since).order('resolved_at', { ascending: false }).limit(300),
         supabaseClient.from('suppliers').select('id, name').order('name'),

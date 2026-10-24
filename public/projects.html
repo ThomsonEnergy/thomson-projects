@@ -55,7 +55,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allRows = [];
@@ -255,9 +255,11 @@
               const outcome = await openReassignHoursModal(project, timeCount, rows.filter(p => p.id !== project.id));
               if (outcome.action === 'cancel') { skipped.push(project); continue; }
               if (outcome.action === 'reassign') {
-                await supabaseClient.from('time_entries').update({ project_id: outcome.targetProjectId, cost_centre_id: null, selected_cost_centre_ids: null }).eq('project_id', project.id);
+                const { error: moveErr } = await supabaseClient.from('time_entries').update({ project_id: outcome.targetProjectId, cost_centre_id: null, selected_cost_centre_ids: null }).eq('project_id', project.id);
+                if (moveErr) throw new Error(`Delete stopped at moving the logged time: ${moveErr.message}`);
               } else {
-                await supabaseClient.from('time_entries').delete().eq('project_id', project.id);
+                const { error: timeErr } = await supabaseClient.from('time_entries').delete().eq('project_id', project.id);
+                if (timeErr) throw new Error(`Delete stopped at the logged time: ${timeErr.message}`);
               }
             }
             await deleteProject(project.id);
@@ -266,7 +268,9 @@
           msg.innerHTML = `<div class="success-box">Deleted ${deletedCount} job${deletedCount === 1 ? '' : 's'}.${skipped.length ? ` Skipped: ${escapeHtml(skipped.map(p => projectRef(p)).join(', '))}.` : ''}</div>`;
           await loadProjects();
         } catch (err) {
+          // deleteProject stops at the first failed step; reload so the list shows what is really left
           msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          await loadProjects();
           deleteBtn.disabled = false;
           refreshDeleteBtn();
         }

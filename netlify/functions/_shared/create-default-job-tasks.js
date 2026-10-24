@@ -90,16 +90,25 @@ async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
     hasComplianceCertDoc: false, // legacy folder check; a fresh job has no CCEW yet, so the Upload the CCEW task is always created
     hasOwnerDeclarationDoc: false,
   };
-  const handoverMissing = evaluate('handover', ctx).filter((r) => !r.met);
+  // One task each (bug review F5): the battery tasks from the answers (tasksFor('battery') above) already
+  // ask for the battery serials and the location photo, whose rules can never be met on a fresh job (the
+  // flags above are false), and on a battery-only job for the inverter serial and the Formbay job as well.
+  const coveredByBatteryTasks = (id) =>
+    (withBattery && (id === 'battery_serials_recorded' || id === 'battery_location_photo'))
+    || (template === 'battery' && (id === 'inverter_serials_recorded' || id === 'formbay_lodged'));
+  const handoverMissing = evaluate('handover', ctx).filter((r) => !r.met && !coveredByBatteryTasks(r.id));
 
   // Everything we install gets recorded against the customer so servicing and
   // warranty reminders can go out later (Installed equipment card on the job Summary tab).
-  rows.push({
-    project_id: job.id,
-    description: 'Record the installed equipment under Installed equipment on the Summary tab',
-    task_type: 'handover',
-    required_before_scheduling: false,
-  });
+  // A battery job's own "Record the battery and inverter serial numbers under Installed equipment" task says so already.
+  if (!withBattery) {
+    rows.push({
+      project_id: job.id,
+      description: 'Record the installed equipment under Installed equipment on the Summary tab',
+      task_type: 'handover',
+      required_before_scheduling: false,
+    });
+  }
 
   if (handoverMissing.length) {
     let worded;

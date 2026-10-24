@@ -97,15 +97,27 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
     // will not save while a tag is left, so nothing guessed lands in the library unchecked.
     if (ai) {
       row.dataset.aiSuggested = '1';
+      // A part that is not in Stock arrived with no cost: the row stays marked until a person types one
+      // (or picks it from Stock), and the form will not save it at $0 (M31).
+      if (!matched && item_type === 'material') row.dataset.needsCost = '1';
       row.style.borderLeft = '4px solid #d97706';
       row.style.paddingLeft = '6px';
       const tag = document.createElement('div');
       tag.className = 'pbc-ai-tag';
       tag.style.cssText = 'grid-column:1 / -1; display:flex; gap:8px; align-items:center; font-size:11px; margin:-2px 0 4px;';
-      tag.innerHTML = `<span class="badge amber">AI suggested, check</span>${matched ? '' : '<span class="subtitle" style="font-size:11px;">Not in Stock: type the cost or add it to Stock</span>'}<button type="button" class="secondary pbc-ai-confirm" style="padding:2px 8px; font-size:11px;">Confirm</button>`;
+      tag.innerHTML = `<span class="badge amber">AI suggested, check</span>${matched ? '' : '<span class="subtitle pbc-ai-hint" style="font-size:11px;">Not in Stock: type the cost or add it to Stock</span>'}<button type="button" class="secondary pbc-ai-confirm" style="padding:2px 8px; font-size:11px;">Confirm</button>`;
       row.appendChild(tag);
       const clearTag = () => { delete row.dataset.aiSuggested; row.style.borderLeft = ''; row.style.paddingLeft = ''; tag.remove(); };
-      tag.querySelector('.pbc-ai-confirm').addEventListener('click', clearTag);
+      tag.querySelector('.pbc-ai-confirm').addEventListener('click', () => {
+        const costEl = row.querySelector('.pbc-cost');
+        if (row.dataset.needsCost && !(parseFloat(costEl.value) > 0)) {
+          const hint = tag.querySelector('.pbc-ai-hint');
+          if (hint) { hint.textContent = 'Type the cost first, or pick it from Stock'; hint.style.color = 'var(--red)'; }
+          costEl.focus();
+          return;
+        }
+        clearTag();
+      });
       row.querySelectorAll('.pbc-desc, .pbc-qty, .pbc-cost, .pbc-type').forEach(el => el.addEventListener('change', clearTag));
     }
 
@@ -115,6 +127,8 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
     const descInput = row.querySelector('.pbc-desc');
     const costInput = row.querySelector('.pbc-cost');
     const resultsEl = row.querySelector('.pbc-results');
+    const costGiven = () => { if (parseFloat(costInput.value) > 0) { delete row.dataset.needsCost; costInput.style.borderColor = ''; } };
+    costInput.addEventListener('input', costGiven);
     descInput.addEventListener('input', async () => {
       const q = descInput.value.trim().toLowerCase();
       if (row.querySelector('.pbc-type').value !== 'material' || q.length < 2) { resultsEl.style.display = 'none'; return; }
@@ -127,6 +141,7 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
         pick.addEventListener('click', () => {
           descInput.value = pick.dataset.name;
           costInput.value = pick.dataset.cost;
+          costGiven();
           resultsEl.style.display = 'none';
         });
       });
@@ -277,6 +292,14 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
       msg.innerHTML = `<div class="error-box">Check the AI suggested components first: press Confirm, edit, or remove each tagged row.</div>`;
       return;
     }
+    // a suggested part that is not in Stock never lands at $0: it needs a cost before the save (M31)
+    const noCost = [...root.querySelectorAll('.pb-component-row[data-needs-cost="1"]')]
+      .find(r => r.querySelector('.pbc-desc').value.trim() && !(parseFloat(r.querySelector('.pbc-cost').value) > 0));
+    if (noCost) {
+      msg.innerHTML = `<div class="error-box">${escapeHtml(noCost.querySelector('.pbc-desc').value.trim())} is not in Stock and has no cost. Type its unit cost (or pick it from Stock) before saving, or remove the row.</div>`;
+      noCost.querySelector('.pbc-cost').focus();
+      return;
+    }
     const btn = $('.pb-save-btn');
     const label = btn.textContent;
     btn.disabled = true;
@@ -298,8 +321,6 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
         const { data, error } = await supabaseClient.from('prebuilds').update(prebuildFields).eq('id', editingPrebuildId).select().single();
         if (error) throw error;
         saved = data;
-        const { error: delErr } = await supabaseClient.from('prebuild_components').delete().eq('prebuild_id', editingPrebuildId);
-        if (delErr) throw delErr;
       } else {
         const { data, error } = await supabaseClient.from('prebuilds').insert(prebuildFields).select().single();
         if (error) throw error;
@@ -315,6 +336,15 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
           .select();
         if (compErr) throw compErr;
         savedComponents = data || [];
+      }
+      // Editing: the old components go only after the new ones are in, so a dropped connection
+      // never leaves the library prebuild empty (F44).
+      if (wasEditing) {
+        if (components.length && !savedComponents.length) throw new Error('The new components were saved but could not be read back, so the old ones were left in place. Reload and check this prebuild.');
+        let removeOld = supabaseClient.from('prebuild_components').delete().eq('prebuild_id', editingPrebuildId);
+        if (savedComponents.length) removeOld = removeOld.not('id', 'in', `(${savedComponents.map(c => c.id).join(',')})`);
+        const { error: delErr } = await removeOld;
+        if (delErr) throw delErr;
       }
 
       clear();

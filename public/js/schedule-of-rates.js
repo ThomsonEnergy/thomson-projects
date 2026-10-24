@@ -18,7 +18,7 @@ function scheduleOfRatesParts(rates, reviewedOn) {
     <div class="sor-h">2. Labour rates</div>
     <table class="qtable">
       <thead><tr><th>Description</th><th class="num">Unit price ex GST</th><th class="num">Unit price inc GST</th></tr></thead>
-      <tbody>${(rates || []).map(r => `<tr><td>${esc(r.name)}</td><td class="num">${money(r.sell_rate)}</td><td class="num">${money(Math.round(Number(r.sell_rate) * 1.1))}</td></tr>`).join('')}</tbody>
+      <tbody>${(rates || []).map(r => `<tr><td>${esc(r.name)}</td><td class="num">${money(r.sell_rate)}</td><td class="num">${money(Math.round(Number(r.sell_rate) * 1.1 * 100) / 100)}</td></tr>`).join('')}</tbody>
     </table>
     <div class="sor-h">3. Standard hours</div>
     <p><b>Standard hours:</b> Monday to Friday, 6:30am to 4:00pm.<br><b>Minimum charge:</b> 2 hours per attendance per technician.</p>

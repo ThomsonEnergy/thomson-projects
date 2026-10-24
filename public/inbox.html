@@ -139,10 +139,10 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=8"></script>
+  <script src="/js/email-compose.js?v=9"></script>
   <script>
     // Sales inbox (sales@, shared) and My inbox (the logged-in person's own Gmail, private).
     // The email agent sorts conversations into Priority (needs a reply), Other and
@@ -154,7 +154,7 @@
     const NOTICE_VERSION = 1;
     const SECTION_NAMES = { priority: 'Priority', other: 'Other', updates: 'Subscriptions and updates' };
     const S = {
-      me: null, assistant: 'Sparky', box: 'sales', view: 'priority', unreadOnly: false, mineOnly: false, staff: [],
+      me: null, role: 'staff', assistant: 'Sparky', box: 'sales', view: 'priority', unreadOnly: false, mineOnly: false, staff: [],
       shared: null, mine: null, labels: [], drafts: [], activeThreadId: null, cleanupFilter: 'archive', cleanupTimer: null,
       listSeq: 0, listKey: '',
     };
@@ -524,14 +524,16 @@
           <a href="/project.html?id=${l.projects.id}&tab=emails" class="link-quiet" title="${escapeHtml(l.note || '')}">${escapeHtml(projectRef(l.projects))} &middot; ${EMAIL_KINDS[l.kind] || 'Other'}${l.by_ai ? ' &middot; tagged by ' + escapeHtml(S.assistant) : ''}</a>
           <a href="#" data-untag="${l.id}" title="Remove this tag">&times;</a></span>`).join('')
         + '<button type="button" class="secondary" id="tag-email-btn" style="font-size:12px; padding:4px 10px;">+ Tag to a job</button>'
-        + '<button type="button" id="create-from-email-btn" style="font-size:12px; padding:4px 10px;">Create quote / job from this email</button>';
+        // pricing roles only: other roles cannot create clients or open the quote page (F46)
+        + (isPricingRole(S.role) ? '<button type="button" id="create-from-email-btn" style="font-size:12px; padding:4px 10px;">Create quote / job from this email</button>' : '');
       el.querySelectorAll('[data-untag]').forEach(a => a.addEventListener('click', async (e) => {
         e.preventDefault();
         if (!confirm('Remove this tag? The email itself is not deleted.')) return;
         await supabaseClient.from('email_job_links').delete().eq('id', a.dataset.untag);
         loadThreadTags(threadId);
       }));
-      document.getElementById('create-from-email-btn').addEventListener('click', () => openCreateFromEmailModal(threadId));
+      const createBtn = document.getElementById('create-from-email-btn');
+      if (createBtn) createBtn.addEventListener('click', () => openCreateFromEmailModal(threadId));
       document.getElementById('tag-email-btn').addEventListener('click', () => openTagEmailModal({ threadId, onSaved: () => loadThreadTags(threadId) }));
     }
 
@@ -928,12 +930,27 @@ Please also read the Notice of Workplace Surveillance and Computer Surveillance 
           <button type="button" class="secondary cu-bulk" data-q="read" style="font-size:12px;">Mark selected read</button>
           <button type="button" class="secondary cu-bulk" data-q="keep" style="font-size:12px;">Keep selected</button></div>`;
       }
+      // How Unsubscribe would work for a sender, from their List-Unsubscribe header: an email from this
+      // mailbox to their address (shown, and confirmed before it is sent), or their link (S19).
+      const unsubTarget = (r) => {
+        const links = [...String(r.list_unsubscribe || '').matchAll(/<([^>]+)>/g)].map(x => x[1]);
+        const mailto = links.find(l => /^mailto:/i.test(l));
+        const https = links.find(l => /^https:\/\//i.test(l));
+        if (https && r.one_click_unsubscribe) return { kind: 'one_click' };
+        if (mailto) {
+          try { const to = decodeURIComponent(new URL(mailto).pathname).split(/[\r\n,;\s]/)[0]; if (to) return { kind: 'email', to }; } catch (e) { /* not a usable mailto */ }
+        }
+        return https ? { kind: 'link' } : null;
+      };
+      const unsubText = (t) => !t ? '' : t.kind === 'email' ? `Unsubscribe sends an email from ${m.address} to ${t.to}` : t.kind === 'one_click' ? 'Unsubscribe uses the sender\'s one-click link' : 'Unsubscribe gives you the sender\'s link to open';
       html += `<table class="cleanup-table"><tbody>${list.slice(0, 400).map(r => {
         const link = String(r.done_action || '').startsWith('link:') ? r.done_action.slice(5) : null;
+        const unsub = actionable && r.list_unsubscribe ? unsubTarget(r) : null;
         return `<tr>
           ${actionable ? `<td style="width:24px;"><input type="checkbox" class="cu-pick" data-s="${escapeHtml(r.sender)}" style="width:auto;" /></td>` : ''}
           <td><strong>${escapeHtml(r.sender_name || r.sender)}</strong><div class="subtitle" style="font-size:12px;">${escapeHtml(r.sender)}</div>
-            <div class="subtitle" style="font-size:12px;">${escapeHtml((r.sample_subjects || []).join(' / ')).slice(0, 160)}</div></td>
+            <div class="subtitle" style="font-size:12px;">${escapeHtml((r.sample_subjects || []).join(' / ')).slice(0, 160)}</div>
+            ${unsub ? `<div class="subtitle" style="font-size:12px;">${escapeHtml(unsubText(unsub))}</div>` : ''}</td>
           <td style="white-space:nowrap;">${r.inbox_count.toLocaleString()} emails<div class="subtitle" style="font-size:12px;">${r.unread_count.toLocaleString()} unread${r.latest_at ? ', last ' + new Date(r.latest_at).toLocaleDateString('en-AU') : ''}</div></td>
           <td style="font-size:12px;">${escapeHtml(r.suggestion_reason || '')}${r.queued_action ? '<div><em>Working...</em></div>' : ''}${r.done_action ? `<div>${link ? `Open the <a href="${escapeHtml(link)}" target="_blank" rel="noopener">unsubscribe page</a>, archived` : escapeHtml(r.done_action)}</div>` : ''}</td>
           ${actionable ? `<td style="white-space:nowrap;"><button type="button" class="cu-one" data-s="${escapeHtml(r.sender)}" data-q="archive">Archive all</button>${r.list_unsubscribe ? `<button type="button" class="secondary cu-one" data-s="${escapeHtml(r.sender)}" data-q="unsubscribe">Unsubscribe</button>` : ''}<button type="button" class="secondary cu-one" data-s="${escapeHtml(r.sender)}" data-q="read">Mark read</button>${S.cleanupFilter !== 'keep' ? `<button type="button" class="secondary cu-one" data-s="${escapeHtml(r.sender)}" data-q="keep">Keep</button>` : ''}</td>` : ''}
@@ -943,7 +960,15 @@ Please also read the Notice of Workplace Surveillance and Computer Surveillance 
 
       const queue = async (senders, q) => {
         if (!senders.length) return;
-        if (q !== 'keep' && senders.length > 1 && !confirm(`${q === 'read' ? 'Mark as read' : q === 'unsubscribe' ? 'Unsubscribe from and archive' : 'Archive'} everything in the inbox from ${senders.length} senders?`)) return;
+        if (q === 'unsubscribe') {
+          // every unsubscribe is confirmed, with the addresses the emails would go to (S19)
+          const emails = senders.map(s => { const t = unsubTarget(all.find(r => r.sender === s) || {}); return t && t.kind === 'email' ? `${t.to} (for ${s})` : null; }).filter(Boolean);
+          const who = senders.length === 1 ? senders[0] : `${senders.length} senders`;
+          const text = emails.length
+            ? `This sends an unsubscribe email from ${m.address} to:\n${emails.slice(0, 12).join('\n')}${emails.length > 12 ? `\nand ${emails.length - 12} more` : ''}\n\nThen it archives everything in the inbox from ${who}. Go ahead?`
+            : `Unsubscribe (the sender's own link) and archive everything in the inbox from ${who}?`;
+          if (!confirm(text)) return;
+        } else if (q !== 'keep' && senders.length > 1 && !confirm(`${q === 'read' ? 'Mark as read' : 'Archive'} everything in the inbox from ${senders.length} senders?`)) return;
         try { await act('cleanup_queue', { mailbox_id: m.id, senders, queue: q }); } catch (err) { alert(err.message); return; }
         renderCleanup();
       };
@@ -1015,12 +1040,14 @@ Please also read the Notice of Workplace Surveillance and Computer Surveillance 
       const deepThread = params.get('thread');
       const deepLabel = params.get('label');
       // Settings, staff, mailboxes and (for a link to a conversation) which inbox it is in, all at once.
-      const [{ data: cs }, { data: staff }, , deep] = await Promise.all([
+      const [{ data: cs }, { data: staff }, , deep, role] = await Promise.all([
         supabaseClient.from('company_settings').select('ai_assistant_name').eq('id', 1).maybeSingle(),
         supabaseClient.from('profiles').select('id, full_name, active').order('full_name'),
         loadMailboxes(),
         deepThread && !params.get('box') ? supabaseClient.from('email_threads').select('mailbox_id').eq('id', deepThread).maybeSingle() : null,
+        getMyRole(),
       ]);
+      S.role = role || 'staff';
       S.assistant = (cs && cs.ai_assistant_name && cs.ai_assistant_name.trim()) || 'Sparky';
       S.staff = staff || [];
       // a link to a conversation: open it in whichever inbox it is in

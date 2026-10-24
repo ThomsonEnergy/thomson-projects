@@ -52,7 +52,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     function taskRow(task, showPickUp) {
@@ -121,6 +121,8 @@
             if (doneErr) throw doneErr;
             // Same gate as the job page: the last required task moves the job out of Awaiting Our Action.
             if (task?.project_id && task.required_before_scheduling) await refreshPipelineTaskGate(task.project_id);
+            // Same as the job page: the last handover task moves the job on to Ready to Invoice.
+            if (task?.project_id && task.task_type === 'handover') await checkAndAdvanceHandover(task.project_id);
             if (task?.project_id) await logActivity('project', task.project_id, 'task_completed', `Task completed: ${task.description || ''}`);
             await loadTasks();
           } catch (err) {

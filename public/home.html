@@ -129,7 +129,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/circuit-background.js?v=17"></script>
@@ -435,7 +435,8 @@
     async function loadMySchedule() {
       const el = document.getElementById('my-schedule-list');
       const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      const today = new Date();
+      // Today is the Sydney date, whatever the device clock says.
+      const today = new Date(sydneyDateKey(new Date()) + 'T00:00:00');
       const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
       const until = new Date(today); until.setDate(today.getDate() + 6);
       const { data, error } = await supabaseClient
@@ -471,9 +472,10 @@
       const el = document.getElementById('action-items');
       const items = [];
       const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      // Date checks use the Sydney date, whatever the device clock says.
+      const todayStr = sydneyDateKey(today);
       const in30 = new Date(today.getTime() + 30 * 86400000);
-      const in30Str = `${in30.getFullYear()}-${String(in30.getMonth() + 1).padStart(2, '0')}-${String(in30.getDate()).padStart(2, '0')}`;
+      const in30Str = sydneyDateKey(in30);
       const isPricing = ['admin', 'finance', 'sales'].includes(myRole);
       const isFinance = myRole === 'admin' || myRole === 'finance';
       const isAdmin = myRole === 'admin';

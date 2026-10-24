@@ -2,8 +2,9 @@
 // Body: { projectId, items: [{ id, markupPercent?, overrides?: { [line key]: unit cost / rate } }] }
 // Pricing roles only. Prices each chosen do-and-charge variation onto its own
 // stage (cost centre, created when the variation was logged - it is what the team
-// clocks time to): the clocked and logged hours, Stock materials and prebuild
-// items become that stage's line items and its quoted amount. Returns the claim to
+// clocks time to): the clocked hours (a split entry's share included, the unpaid
+// break taken off, see _shared/variation-lines.js), the logged hours, Stock
+// materials and prebuild items become that stage's line items and its quoted amount. Returns the claim to
 // put on an invoice for it. Because it is a stage, the invoice, the client's
 // invoice page, balance due and the Xero push all work for a variation exactly as
 // they do for any quoted stage. The stage never appears on the client's quote

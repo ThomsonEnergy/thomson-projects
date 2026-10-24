@@ -24,9 +24,14 @@ globalThis.ImageData = globalThis.ImageData || ImageData;
 const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
 const { getIntegrationKey } = require('./get-integration-key');
 const { selfBaseUrl } = require('./site-url');
+const { internalHeaders } = require('./require-internal');
 
 const MODEL = 'claude-sonnet-5-5';
 const RUN_BUDGET_MS = 11 * 60 * 1000; // a background function gets 15 minutes
+// Pages one run reads before handing the rest to the next run (as it does when its time is up), so one
+// invocation never works through a whole 600 page standard in one go and the cancel check keeps coming
+// round (M21 in docs/BUG_REVIEW_2026-10-23.md).
+const MAX_PAGES_PER_RUN = 150;
 const LOCK_MINUTES = 14;
 const LONG_EDGE_PX = 1800;
 const THIN_TEXT_CHARS = 400;
@@ -188,7 +193,7 @@ async function claimJob(admin, jobId) {
 async function callSelf(payload) {
   try {
     await fetch(`${selfBaseUrl()}/.netlify/functions/read-knowledge-background`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() }, body: JSON.stringify(payload),
     });
   } catch (err) {
     console.error('read-knowledge: could not call itself, the sweep will pick it up:', err.message);
@@ -208,12 +213,32 @@ async function failJob(admin, job, entry, message) {
   if (entry) await notify(admin, job, entry, `read stopped: ${String(message).slice(0, 80)}`);
 }
 
+// Another read of the same entry that should go first: one that is running with a live lock, or one queued
+// or running that was asked for before this one. The same pages would be read and paid for twice otherwise.
+async function otherJobForEntry(admin, job) {
+  const { data } = await admin.from('knowledge_read_jobs').select('id, status, locked_until, created_at')
+    .eq('entry_id', job.entry_id).neq('id', job.id).in('status', ['queued', 'running']);
+  const now = Date.now();
+  return (data || []).find((o) =>
+    (o.status === 'running' && o.locked_until && new Date(o.locked_until).getTime() > now)
+    || new Date(o.created_at).getTime() < new Date(job.created_at).getTime());
+}
+
 // Works on one job until it is done or the run's time is up. Returns 'done', 'more' (called itself for the
-// rest), 'cancelled', 'failed' or 'busy' (someone else holds it).
+// rest), 'cancelled', 'failed', 'duplicate' (another read of the same entry goes first) or 'busy' (someone
+// else holds it).
 async function runJob(admin, jobId) {
   const startedAt = Date.now();
   const job = await claimJob(admin, jobId);
   if (!job) return 'busy';
+
+  if (!job.started_at) {
+    const other = await otherJobForEntry(admin, job);
+    if (other) {
+      await admin.from('knowledge_read_jobs').update({ status: 'failed', error: 'A read of this entry is already queued or running. Wait for it to finish, then Read again if pages are still missing.', finished_at: new Date().toISOString(), locked_until: null }).eq('id', job.id);
+      return 'duplicate';
+    }
+  }
 
   const { data: entry } = await admin.from('knowledge_entries').select('id, title, file_path, file_name, entry_type').eq('id', job.entry_id).maybeSingle();
   if (!entry) { await failJob(admin, job, null, 'The entry no longer exists'); return 'failed'; }
@@ -242,9 +267,10 @@ async function runJob(admin, jobId) {
   let done = job.pages_done || 0;
   let failed = job.pages_failed || 0;
   let sinceCheck = 0;
+  let thisRun = 0;
   for (const n of scope) {
     if (n < job.next_page) continue;
-    if (Date.now() - startedAt > RUN_BUDGET_MS) {
+    if (Date.now() - startedAt > RUN_BUDGET_MS || thisRun >= MAX_PAGES_PER_RUN) {
       await admin.from('knowledge_read_jobs').update({ locked_until: new Date().toISOString() }).eq('id', job.id);
       await callSelf({ job_id: job.id });
       return 'more';
@@ -290,6 +316,7 @@ async function runJob(admin, jobId) {
 
     if (readAs === 'failed') failed++;
     done++;
+    thisRun++;
     // Postgres text cannot hold a NUL byte (a stray glyph in some PDFs' text layers): found for real on page 51
     // of AS/NZS 3012, which failed the save with "unsupported Unicode escape sequence".
     if (text) text = text.replace(/\u0000/g, '');

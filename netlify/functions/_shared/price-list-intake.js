@@ -22,6 +22,7 @@ const { getAdminClient } = require('./require-admin');
 const { gmailRequest } = require('./google-client');
 const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
+const { internalHeaders } = require('./require-internal');
 const fetch = require('node-fetch');
 const { fuzzyMatchScore, matchSupplier, downloadAttachment } = require('./supplier-bill-intake');
 const ai = require('./price-list-ai');
@@ -31,6 +32,10 @@ const USED_RECENTLY_DAYS = 180;
 const MAX_PAGES = 60;
 const PAGE_BATCH = 4;
 const MAX_ATTEMPTS = 3;
+// A spreadsheet is opened with the xlsx package, which has known problems on a crafted file, so one
+// is only opened when it is small and came from a supplier we know (or a person picked the supplier).
+const MAX_SHEET_BYTES = 5 * 1024 * 1024;
+const PUBLIC_MAIL_DOMAINS = ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'yahoo.com.au', 'icloud.com', 'me.com', 'bigpond.com', 'bigpond.net.au', 'optusnet.com.au', 'iinet.net.au', 'tpg.com.au', 'protonmail.com'];
 const NAME_HINT = /price|pricing|catalog/i;
 const GMAIL_QUERY = 'has:attachment newer_than:30d -in:sent (subject:(price OR prices OR pricing OR pricelist OR catalogue OR catalog) OR filename:(price OR prices OR pricing OR pricelist OR catalogue OR catalog))';
 const SHEET_MIME = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'text/csv', 'application/csv'];
@@ -60,7 +65,7 @@ function looksLikePriceListEmail(subject, attachments) {
 async function startPriceListProcessing() {
   try {
     const res = await fetch(`${selfBaseUrl()}/.netlify/functions/process-price-lists-background`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', timeout: 8000,
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() }, body: '{}', timeout: 8000,
     });
     if (!res.ok && res.status !== 202) console.error('price list processing did not start:', res.status);
   } catch (err) {
@@ -70,6 +75,21 @@ async function startPriceListProcessing() {
 
 function headerValue(headers, name) {
   return (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || null;
+}
+
+// Is the email's sender a supplier we know: their contact address, or the same business domain
+// as one (a rep at the supplier). A public mail domain never counts.
+function knownSupplierSender(suppliers, from) {
+  const m = String(from || '').match(/<([^>]+)>/);
+  const address = (m ? m[1] : String(from || '')).trim().toLowerCase();
+  const domain = address.split('@')[1] || '';
+  if (!address || !domain) return false;
+  return (suppliers || []).some(s => {
+    const theirs = String(s.contact_email || '').trim().toLowerCase();
+    const theirDomain = theirs.split('@')[1] || '';
+    if (!theirs || !theirDomain) return false;
+    return theirs === address || (theirDomain === domain && !PUBLIC_MAIL_DOMAINS.includes(domain));
+  });
 }
 
 // ---------- finding them ----------
@@ -121,9 +141,15 @@ async function enqueue(admin, { extractAttachments }) {
 
 // Reads (or carries on reading) one import. Returns 'done' when every page is read,
 // 'more' when time ran out part way, or a final status.
-async function readImport(admin, row, { deadline, usage }) {
+async function readImport(admin, row, { deadline, usage, suppliers }) {
   const kind = fileKind(row.file_name, row.mime_type);
   const buffer = await downloadAttachment(row.gmail_message_id, row.attachment_part_id);
+
+  // a spreadsheet is only opened when it is small and from a known supplier (see MAX_SHEET_BYTES)
+  if (kind === 'sheet') {
+    if (buffer.length > MAX_SHEET_BYTES) throw new Error('Spreadsheet is over 5 MB, so it is not read automatically. Ask the supplier for a smaller file or a PDF.');
+    if (!row.supplier_id && !knownSupplierSender(suppliers, row.email_from)) return 'unknown_sender';
+  }
 
   if (!row.file_path) {
     const safeName = String(row.file_name || 'price-list').replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -394,17 +420,26 @@ async function processPriceLists({ budgetMs = 12 * 60 * 1000, extractAttachments
       .eq('id', row.id).eq('status', 'pending').select('*').maybeSingle();
     if (!claimed) continue;
     try {
-      const outcome = await readImport(admin, claimed, { deadline, usage });
+      const outcome = await readImport(admin, claimed, { deadline, usage, suppliers });
       if (outcome === 'more') { await admin.from('price_list_imports').update({ status: 'pending', attempts: 0 }).eq('id', row.id); results.push('more'); continue; }
       if (outcome === 'too_large') {
         await admin.from('price_list_imports').update({ status: 'too_large', summary: `${claimed.pages_total || 'Over ' + MAX_PAGES} pages. Tap "Read all pages" if it is worth reading.` }).eq('id', row.id);
         results.push('too_large'); continue;
       }
       if (outcome === 'not_a_price_list') { await admin.from('price_list_imports').update({ status: 'not_a_price_list', summary: 'Not a price list' }).eq('id', row.id); results.push('not'); continue; }
+      if (outcome === 'unknown_sender') {
+        // a spreadsheet from an address we do not know: a person picks the supplier, then it is read
+        await admin.from('price_list_imports').update({ status: 'to_check', item_count: 0, summary: `Spreadsheet from ${claimed.email_from || 'an unknown sender'}, not a supplier we know: pick the supplier and it will be read.` }).eq('id', row.id);
+        await notifyCheckers(admin, 'An emailed spreadsheet needs its supplier picked', `"${claimed.file_name}" came from ${claimed.email_from || 'an unknown sender'}.`);
+        results.push('to_check'); continue;
+      }
 
       const { data: fresh } = await admin.from('price_list_imports').select('*').eq('id', row.id).single();
       const meta = fresh.read_meta || {};
-      const match = matchSupplier(suppliers, { supplier: meta.supplier, abn: meta.abn, our_account_number: meta.our_account_number });
+      // a supplier a person already picked stands; otherwise match on what was read
+      const match = fresh.supplier_id
+        ? { supplier: suppliers.find(s => s.id === fresh.supplier_id) || null, how: 'picked' }
+        : matchSupplier(suppliers, { supplier: meta.supplier, abn: meta.abn, our_account_number: meta.our_account_number });
       if (!match?.supplier) {
         await admin.from('price_list_imports').update({ status: 'to_check', item_count: (fresh.items || []).length, summary: `${(fresh.items || []).length} items read. ${match?.shared ? `${match.shared.map(x => x.name).join(' and ')} share this ${match.how}: pick the supplier by our account number.` : `Supplier "${meta.supplier || 'unknown'}" not recognised: pick the supplier.`}` }).eq('id', row.id);
         await notifyCheckers(admin, 'An emailed price list needs its supplier picked', `"${meta.supplier || fresh.file_name}" was not recognised.`);

@@ -102,7 +102,12 @@ async function readPdfRange(buffer, start, count, usage, first) {
 
 // ---------- spreadsheets ----------
 
+// The xlsx package has known problems on a crafted file (prototype pollution, a regex that can
+// hang), so a spreadsheet over 5 MB is never opened, whoever sent it.
+const MAX_SHEET_BYTES = 5 * 1024 * 1024;
+
 function sheetsOf(buffer) {
+  if (!buffer || buffer.length > MAX_SHEET_BYTES) throw new Error('Spreadsheet is over 5 MB, so it is not read automatically. Ask the supplier for a smaller file or a PDF.');
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: false });
   return wb.SheetNames.map(name => ({ name, rows: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null, blankrows: false }) }))
     .filter(s => s.rows.length);

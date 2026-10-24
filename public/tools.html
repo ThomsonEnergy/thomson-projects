@@ -62,7 +62,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let tools = [], vehicles = [], suppliers = [], myRole = 'staff', tab = 'all';
@@ -95,7 +95,7 @@
 
     function renderStats() {
       const inUse = tools.filter(t => t.status === 'in_use');
-      const yearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      const yearAgo = sydneyDateKey(new Date(Date.now() - 365 * 86400000));
       const per = tools.filter(t => t.kind === 'perishable' && t.purchase_date && t.purchase_date >= yearAgo);
       document.getElementById('stat-tools').textContent = inUse.filter(t => t.kind === 'tool').length;
       document.getElementById('stat-value').textContent = money(inUse.reduce((s, t) => s + (Number(t.cost) || 0) * (t.kind === 'perishable' ? (Number(t.quantity) || 1) : 1), 0));
@@ -144,7 +144,7 @@
     // Perishables per vehicle over the last 12 months against the fleet average. Each van has one
     // driver, so heavy use shows by vehicle (the owner's "50 drill bits for one van").
     function renderByVehicle(body) {
-      const yearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      const yearAgo = sydneyDateKey(new Date(Date.now() - 365 * 86400000));
       const per = tools.filter(t => t.kind === 'perishable' && t.purchase_date && t.purchase_date >= yearAgo);
       const stockVans = vehicles.filter(v => v.holds_stock);
       const rows = [...stockVans.map(v => ({ key: v.id, label: v.vehicle_name || v.rego, driver: driverName(v), items: per.filter(t => t.location_type === 'vehicle' && t.vehicle_id === v.id) })),
@@ -245,8 +245,14 @@
           if (q('#tl-photo').files[0]) p.photo_path = await uploadPrivateFile(q('#tl-photo').files[0], folder);
           if (q('#tl-receipt').files[0]) p.receipt_path = await uploadPrivateFile(q('#tl-receipt').files[0], folder);
           if (isNew) {
-            const { error } = await supabaseClient.rpc('tool_create', { p });
+            const { data: newId, error } = await supabaseClient.rpc('tool_create', { p });
             if (error) throw error;
+            // tool_create lands every tool as In use. A tool added as broken, lost
+            // or sold gets its status and note through tool_update, which logs it.
+            if (p.status !== 'in_use' && newId) {
+              const { error: statusErr } = await supabaseClient.rpc('tool_update', { p_id: newId, p: { status: p.status, status_note: p.status_note } });
+              if (statusErr) throw statusErr;
+            }
           } else {
             const { error } = await supabaseClient.rpc('tool_update', { p_id: t.id, p });
             if (error) throw error;

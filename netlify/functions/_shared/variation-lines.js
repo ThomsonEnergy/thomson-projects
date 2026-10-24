@@ -78,9 +78,12 @@ async function loadVariationLines(supabaseAdmin, projectId, { ids = null } = {})
 
     // Hours per person: clocked on the stage + logged by hand.
     const hoursByStaff = {};
-    (clockRows || []).filter(t => t.cost_centre_id === e.cost_centre_id).forEach((t) => {
+    (clockRows || []).forEach((t) => {
+      const stageIds = entryCentreIds(t);
+      if (!e.cost_centre_id || !stageIds.includes(e.cost_centre_id)) return;
       const k = t.staff_id || 'unknown';
-      hoursByStaff[k] = (hoursByStaff[k] || 0) + (new Date(t.clock_out) - new Date(t.clock_in)) / 3600000;
+      // paid hours (the unpaid break taken off); a split entry gives this stage its even share
+      hoursByStaff[k] = (hoursByStaff[k] || 0) + entryHours(t) / stageIds.length;
     });
     (hourRows || []).filter(h => h.variation_id === e.id).forEach((h) => {
       const k = h.staff_id || 'unknown';

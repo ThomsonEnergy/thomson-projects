@@ -195,7 +195,9 @@ ${channel.is_social ? '- This is the Social channel: tag only clear work talk ab
 }
 
 // Works through messages Sparky has not looked at yet (newest two days).
-// Each is claimed first so two runs never do the same one twice.
+// Each is claimed first (ai_processed_at set) so two runs never do the same one twice; when the work
+// fails (AssemblyAI timed out, Anthropic overloaded) the claim is given back, so the next sweep tries
+// again, within the two day window (F35 in docs/BUG_REVIEW_2026-10-23.md).
 async function processPending(admin, { limit = 15 } = {}) {
   const { data: rows } = await admin.from('chat_messages')
     .select('*').is('ai_processed_at', null).is('deleted_at', null).eq('is_bot', false)
@@ -208,6 +210,7 @@ async function processPending(admin, { limit = 15 } = {}) {
   for (const row of rows) {
     const { data: claimed } = await admin.from('chat_messages').update({ ai_processed_at: new Date().toISOString() }).eq('id', row.id).is('ai_processed_at', null).select('id');
     if (!claimed || !claimed.length) continue;
+    const release = () => admin.from('chat_messages').update({ ai_processed_at: null }).eq('id', row.id).then(() => {}, (e) => console.error('chat tagger could not release:', row.id, e.message));
     try {
       apiKey = apiKey || await getIntegrationKey('anthropic');
       if (!channels[row.channel_id]) {
@@ -225,12 +228,18 @@ async function processPending(admin, { limit = 15 } = {}) {
             row.voice_transcript = await cleanTranscript(apiKey, raw, staffNames).catch(() => raw);
             await admin.from('chat_messages').update({ voice_transcript: row.voice_transcript }).eq('id', row.id);
           }
-        } catch (err) { console.error('chat voice transcript failed:', row.id, err.message); }
+        } catch (err) {
+          // no transcript yet: left for the next sweep rather than tagged blind and forgotten
+          console.error('chat voice transcript failed, will retry:', row.id, err.message);
+          await release();
+          continue;
+        }
       }
       await tagMessage(admin, apiKey, row, channels[row.channel_id], people);
       done++;
     } catch (err) {
-      console.error('chat tagger failed:', row.id, err.message);
+      console.error('chat tagger failed, will retry:', row.id, err.message);
+      await release();
     }
   }
   return done;

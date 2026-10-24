@@ -4,11 +4,13 @@ const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 // Drafts a full scope-of-works document from a brief, the stage names/
 // descriptions already generated, and optionally the actual content of
-// uploaded plans or electricity bills — pulled from the private
+// uploaded plans or electricity bills, pulled from the private
 // project-documents bucket so the client never has to send large files
 // through the browser twice.
 
-const MAX_DOCS = 12; // supporting documents plus the electricity bill pages from step 1
+// Supporting documents plus the electricity bill pages from step 1. Anything past this many is not sent;
+// the response says so (left_out) instead of dropping them quietly (F30 in docs/BUG_REVIEW_2026-10-23.md).
+const MAX_DOCS = 20;
 
 function mimeFor(path) {
   const ext = (path.split('.').pop() || '').toLowerCase();
@@ -38,12 +40,16 @@ exports.handler = async (event) => {
     const { supabaseAdmin } = auth;
 
     const docBlocks = [];
-    for (const path of documentPaths.slice(0, MAX_DOCS)) {
+    const paths = Array.isArray(documentPaths) ? documentPaths.map(String) : [];
+    const fileName = (p) => p.split('/').pop();
+    const leftOut = paths.slice(MAX_DOCS).map(fileName);
+    const skipped = [];
+    for (const path of paths.slice(0, MAX_DOCS)) {
       const mediaType = mimeFor(path);
-      if (!mediaType) continue; // skip anything we don't know how to hand to the model
+      if (!mediaType) { skipped.push(fileName(path)); continue; } // nothing we know how to hand to the model
 
       const { data, error } = await supabaseAdmin.storage.from('project-documents').download(path);
-      if (error || !data) continue; // best-effort — one bad file shouldn't block the whole draft
+      if (error || !data) { skipped.push(fileName(path)); continue; } // best effort: one bad file does not block the whole draft
 
       const buffer = Buffer.from(await data.arrayBuffer());
       const base64 = buffer.toString('base64');
@@ -130,7 +136,10 @@ Write the scope of works now (plain text - no markdown headers/asterisks, use pl
     const data = await res.json();
     const sow = data.content.map((b) => b.text || '').join('').trim();
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, sow }) };
+    const notes = [];
+    if (leftOut.length) notes.push(`Only the first ${MAX_DOCS} documents were given to the AI; not used: ${leftOut.join(', ')}.`);
+    if (skipped.length) notes.push(`Could not be read (use PDF, JPG, PNG or WEBP): ${skipped.join(', ')}.`);
+    return { statusCode: 200, body: JSON.stringify({ ok: true, sow, documents_used: docBlocks.length, left_out: leftOut, skipped, warning: notes.join(' ') || null }) };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
