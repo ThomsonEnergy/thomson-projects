@@ -1,6 +1,7 @@
 const { getAdminClient } = require('./_shared/require-admin');
 const { selfBaseUrl } = require('./_shared/site-url');
 const { requireActiveUser } = require('./_shared/require-active-user');
+const { requireInternal } = require('./_shared/require-internal');
 
 // Renders the actual client-facing quote.html / invoice.html page (via headless Chromium) into a
 // real PDF. Both pages are laid out as A4 sheets with their own letterhead, so the PDF is the page
@@ -186,22 +187,14 @@ async function renderPageToPdfUnsafe(url, pdfOptions) {
   }
 }
 
-// Chromium takes a few seconds to start, and the database lookups that come before the render
-// take a moment too, so the browser is started first (see handle) and picked up here.
-let pendingBrowser = null;
+// Chromium is started here, only once the record to print has been found (see handle): a made-up
+// id must not cost a browser start.
 const timings = {};
 const markTime = (name, since) => { timings[name] = Date.now() - since; };
 
 async function renderOnce(url, pdfOptions) {
   const t0 = Date.now();
-  let browser;
-  if (pendingBrowser) {
-    const started = pendingBrowser;
-    pendingBrowser = null;
-    browser = await started.catch(() => getBrowser()); // the early start failed: try once normally
-  } else {
-    browser = await getBrowser();
-  }
+  const browser = await getBrowser();
   markTime('browserReadyWaitMs', t0);
   let page;
   try {
@@ -262,6 +255,17 @@ async function handle(event) {
   try {
     ({ doc_type, record_id } = JSON.parse(event.body || '{}'));
 
+    // Who is asking: a logged-in staff member (the job, invoice and PO pages send their session
+    // token), or another function on this site (warm-pdf, finalize-quote-documents, the invoice
+    // refresh after a payment) with the internal secret. Nobody else: a render is a Chromium run on
+    // the 4 GB function and overwrites the document's PDF.
+    const internal = requireInternal(event);
+    let actor = null;
+    if (!internal) {
+      actor = await requireActiveUser(event);
+      if (!actor) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Please log in again' }) };
+    }
+
     // warm-pdf.js pings this every few minutes so the function stays loaded and Chromium is already
     // unpacked when someone really asks for a PDF (unpacking it is a few seconds on a cold start).
     if (doc_type === 'warm') {
@@ -272,17 +276,14 @@ async function handle(event) {
     if (!doc_type || !record_id) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'doc_type and record_id are required' }) };
 
     // Adding the Schedule of Rates to a job (Documents page) files a document on the job, so it
-    // needs a logged-in staff member. The other types only refresh a document's own PDF.
-    let actor = null;
-    if (doc_type === 'schedule_of_rates') {
+    // needs a logged-in staff member even on an internal call. The other types only refresh a
+    // document's own PDF.
+    if (doc_type === 'schedule_of_rates' && !actor) {
       actor = await requireActiveUser(event);
       if (!actor) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Please log in again' }) };
     }
 
-    // Start Chromium now, while the lookups below happen.
-    pendingBrowser = getBrowser();
-    pendingBrowser.catch(() => {}); // a failed early start is reported when it is picked up in renderOnce
-
+    // Chromium is started by the render itself, after the record below has been found.
     supabaseAdmin = getAdminClient();
     const siteUrl = selfBaseUrl();
     if (doc_type === 'quote') await supabaseAdmin.from('projects').update({ quote_pdf_error: null }).eq('id', record_id);
@@ -397,8 +398,6 @@ async function handle(event) {
     return { statusCode: 200, body: JSON.stringify({ ok: true, path, timings }) };
   } catch (err) {
     console.error('generate-client-document-pdf failed:', err);
-    // the early-started browser was never used: do not leave it running
-    if (pendingBrowser) { const unused = pendingBrowser; pendingBrowser = null; unused.then((b) => killBrowser(b), () => {}); }
     if (supabaseAdmin && record_id) {
       if (doc_type === 'quote') await supabaseAdmin.from('projects').update({ quote_pdf_error: err.message }).eq('id', record_id).then(() => {}, () => {});
       else if (doc_type === 'invoice') await supabaseAdmin.from('invoices').update({ pdf_error: err.message }).eq('id', record_id).then(() => {}, () => {});

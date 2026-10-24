@@ -44,7 +44,8 @@ async function syncAssetSerialsToProject(projectId, assetType) {
 function assetIsoDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-function assetToday() { return assetIsoDate(new Date()); }
+// Today in Sydney, whatever the device clock says (sydneyDateKey is in supabase-client.js).
+function assetToday() { return sydneyDateKey(new Date()); }
 function assetAddMonths(iso, months) {
   const d = new Date(iso + 'T00:00:00');
   const day = d.getDate();
@@ -226,7 +227,7 @@ async function openAssetPanel(opts = {}) {
         </div>
         ${history.length ? `
           <p class="subtitle" style="margin:14px 0 4px; font-weight:600;">Emails about this asset</p>
-          ${history.map(h => `<p class="subtitle" style="margin:0 0 2px; font-size:12px;">${assetFmtDate(h.sent_at.slice(0, 10))} - ${h.outcome === 'skipped' ? 'skipped' : 'sent'} ${h.kind}${h.campaign_name ? ' (' + escapeHtml(h.campaign_name) + ')' : ''}${h.sent_to ? ' to ' + escapeHtml(h.sent_to) : ''}</p>`).join('')}` : ''}` : ''}
+          ${history.map(h => `<p class="subtitle" style="margin:0 0 2px; font-size:12px;">${assetFmtDate(sydneyDateKey(new Date(h.sent_at)))} - ${h.outcome === 'skipped' ? 'skipped' : 'sent'} ${h.kind}${h.campaign_name ? ' (' + escapeHtml(h.campaign_name) + ')' : ''}${h.sent_to ? ' to ' + escapeHtml(h.sent_to) : ''}</p>`).join('')}` : ''}` : ''}
 
       <div id="as-msg"></div>
       <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">

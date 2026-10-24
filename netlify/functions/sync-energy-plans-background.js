@@ -2,16 +2,17 @@
 // the AER's Consumer Data Right product data into energy_plans, for the plan suggestions on a quote
 // (docs/IDEAS_BACKLOG.md item 34). Started by sync-energy-plans.js about once a day.
 //
-// Public by design (a background function's URL can be called by anyone): it only refreshes public
-// plan data, and it does nothing when a download is running or ran recently (the same check as the
-// sweep), so calling it cannot do more than the nightly run does.
+// Only the sweep may start it: the call carries the internal secret (_shared/require-internal.js), so a
+// stranger cannot start twenty parallel 13 minute downloads. It also does nothing when a download is
+// running or ran recently (the same check as the sweep).
 //
 // Only plans that changed since the last download are fetched in full. Each run is logged in
 // energy_plan_sync_runs with counts, errors and a few raw samples of what the feed returned.
 
 const { getAdminClient } = require('./_shared/require-admin');
+const { requireInternal } = require('./_shared/require-internal');
 const { due } = require('./sync-energy-plans');
-const { CONVERTER_VERSION, NETWORKS, networkKey, discoverBrands, listPlans, fetchPlanDetail, convertPlan } = require('./_shared/energy-plans');
+const { CONVERTER_VERSION, NETWORKS, networkKey, discoverBrands, listPlans, fetchPlanDetail, convertPlan, expandPostcodes } = require('./_shared/energy-plans');
 
 const BUDGET_MS = 13 * 60000;
 const clip = (v, n = 12000) => { try { const t = JSON.stringify(v); return t.length > n ? t.slice(0, n) + '...' : t; } catch (_) { return null; } };
@@ -24,7 +25,8 @@ async function pool(items, size, fn, stop) {
   await Promise.all(workers);
 }
 
-exports.handler = async () => {
+exports.handler = async (event) => {
+  if (!requireInternal(event)) return { statusCode: 403, body: 'Forbidden' };
   const admin = getAdminClient();
   const { data: last } = await admin.from('energy_plan_sync_runs').select('status, started_at').order('started_at', { ascending: false }).limit(1).maybeSingle();
   if (!due(last)) return { statusCode: 200, body: 'Not due' };
@@ -45,7 +47,7 @@ exports.handler = async () => {
     // what is stored now, so unchanged plans are not fetched again
     const stored = new Map();
     for (let from = 0; ; from += 1000) {
-      const { data, error } = await admin.from('energy_plans').select('plan_id, last_updated, costable, converter:notes->converter').range(from, from + 999);
+      const { data, error } = await admin.from('energy_plans').select('plan_id, last_updated, costable, active, converter:notes->converter').range(from, from + 999);
       if (error) throw new Error(error.message);
       (data || []).forEach(p => stored.set(p.plan_id, p));
       if (!data || data.length < 1000) break;
@@ -81,13 +83,18 @@ exports.handler = async () => {
       const { error } = await admin.from('energy_plans').upsert(rows, { onConflict: 'plan_id' });
       if (error) errors.push({ step: 'save', error: error.message.slice(0, 300) }); else counts.plans_saved += rows.length;
     };
+    // a plan put away earlier that is published again unchanged: switched back on without a fetch
+    const backOn = [];
     await pool(queue, 10, async ({ brand, summary, nets }) => {
       const id = summary.planId;
       if (!id) return;
       seen.add(id);
       const had = stored.get(id);
       // unchanged since the last download, and converted by this version of the converter
-      if (had && Number(had.converter) >= CONVERTER_VERSION && summary.lastUpdated && had.last_updated && new Date(had.last_updated).getTime() >= new Date(summary.lastUpdated).getTime()) return;
+      if (had && Number(had.converter) >= CONVERTER_VERSION && summary.lastUpdated && had.last_updated && new Date(had.last_updated).getTime() >= new Date(summary.lastUpdated).getTime()) {
+        if (had.active === false) backOn.push(id);
+        return;
+      }
       try {
         const { detail, version } = await fetchPlanDetail(brand, id);
         if (!detail) { errors.push({ brand: brand.id, plan: id, step: 'detail', error: 'no detail' }); return; }
@@ -105,8 +112,8 @@ exports.handler = async () => {
           customer_type: String(detail.customerType || summary.customerType || '').toUpperCase() || null,
           pricing_model: (detail.electricityContract && detail.electricityContract.pricingModel) || detail.pricingModel || summary.pricingModel || null,
           distributors,
-          included_postcodes: (geo.includedPostcodes || []).map(String),
-          excluded_postcodes: (geo.excludedPostcodes || []).map(String),
+          included_postcodes: expandPostcodes(geo.includedPostcodes),
+          excluded_postcodes: expandPostcodes(geo.excludedPostcodes),
           effective_from: detail.effectiveFrom || summary.effectiveFrom || null,
           effective_to: detail.effectiveTo || summary.effectiveTo || null,
           last_updated: detail.lastUpdated || summary.lastUpdated || null,
@@ -123,8 +130,13 @@ exports.handler = async () => {
       }
     }, outOfTime);
     await flush();
+    for (let k = 0; k < backOn.length; k += 500) {
+      const { error } = await admin.from('energy_plans').update({ active: true }).in('plan_id', backOn.slice(k, k + 500));
+      if (error) errors.push({ step: 'reactivate', error: error.message.slice(0, 300) });
+    }
 
-    // plans a listed brand no longer publishes are put away (kept for quotes that already show them)
+    // plans a listed brand no longer publishes are put away (kept for quotes that already show them).
+    // A brand whose list failed (any HTTP error, logged above) is not in listedBrands, so its plans stay as they are.
     if (!outOfTime()) {
       const gone = [...stored.keys()].filter(id => !seen.has(id));
       for (let k = 0; k < gone.length; k += 500) {

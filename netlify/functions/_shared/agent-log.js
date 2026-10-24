@@ -20,6 +20,7 @@ const AGENTS = {
   'mailbox-work': { label: 'Postie: email agent (sorting, labels, drafts, clean up)', every: 60 },
   'send-notifications': { label: 'Phone notifications', every: 1 },
   'sync-overheads-nightly': { label: 'Xero overheads sync (nightly)', every: 1440 },
+  'sync-leave-balances': { label: 'Xero leave balances (nightly)', every: 1440 },
   'archive-completed-jobs': { label: 'Archive completed jobs (nightly)', every: 1440 },
   'sweep-job-booked': { label: 'Job Booked check (nightly)', every: 1440 },
   'sweep-quote-expiry': { label: 'Quote and variation expiry (nightly)', every: 1440 },

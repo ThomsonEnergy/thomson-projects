@@ -7,11 +7,16 @@
 //   buildMimeMessage(...)  the same, base64url-encoded: the { raw } shape the JSON
 //                          endpoint wants (used when there are no attachments)
 
+// A header value is one line: a CR or LF inside it would start another header (a hidden Bcc or
+// Reply-To). Every value written below goes through this first.
+const headerSafe = (v) => String(v == null ? '' : v).replace(/[\r\n]+/g, ' ');
+
 function encodeHeaderWord(text) {
   // Only the display name portion of From ever needs this - subjects with
   // non-ASCII are rare for this app's use (client names/subjects are
   // almost always plain English) but this keeps a stray apostrophe-heavy
   // name from producing a malformed header.
+  text = headerSafe(text);
   return /^[\x20-\x7e]*$/.test(text) ? text : `=?UTF-8?B?${Buffer.from(text, 'utf-8').toString('base64')}?=`;
 }
 
@@ -23,6 +28,7 @@ function base64Body(text) {
 
 // Header-safe filename: a plain ASCII fallback plus the real UTF-8 name (RFC 2231).
 function fileNameParams(name) {
+  name = headerSafe(name);
   const ascii = String(name || 'file').replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   const params = `filename="${ascii}"`;
   return /^[\x20-\x7e]*$/.test(name) ? params : `${params}; filename*=UTF-8''${encodeURIComponent(name)}`;
@@ -33,14 +39,14 @@ const newBoundary = () => `te_${Date.now().toString(36)}_${Math.random().toStrin
 // attachments: [{ filename, mime, content: Buffer }]
 function buildRfc822({ fromName, fromAddress, to, cc, subject, bodyText, bodyHtml, inReplyTo, references, attachments }) {
   const headers = [
-    `From: ${encodeHeaderWord(fromName)} <${fromAddress}>`,
-    `To: ${(Array.isArray(to) ? to : [to]).join(', ')}`,
+    `From: ${encodeHeaderWord(fromName)} <${headerSafe(fromAddress)}>`,
+    `To: ${(Array.isArray(to) ? to : [to]).map(headerSafe).join(', ')}`,
   ];
-  if (cc && cc.length) headers.push(`Cc: ${(Array.isArray(cc) ? cc : [cc]).join(', ')}`);
+  if (cc && cc.length) headers.push(`Cc: ${(Array.isArray(cc) ? cc : [cc]).map(headerSafe).join(', ')}`);
   headers.push(`Subject: ${encodeHeaderWord(subject || '')}`);
   headers.push('MIME-Version: 1.0');
-  if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`);
-  if (references) headers.push(`References: ${references}`);
+  if (inReplyTo) headers.push(`In-Reply-To: ${headerSafe(inReplyTo)}`);
+  if (references) headers.push(`References: ${headerSafe(references)}`);
 
   // The readable part as { headerLine, lines } so it can sit at the top level or inside multipart/mixed.
   const readable = () => {
@@ -66,7 +72,7 @@ function buildRfc822({ fromName, fromAddress, to, cc, subject, bodyText, bodyHtm
     for (const a of attachments) {
       out.push(
         `--${mixed}`,
-        `Content-Type: ${a.mime || 'application/octet-stream'}; name="${String(a.filename).replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '_')}"`,
+        `Content-Type: ${headerSafe(a.mime || 'application/octet-stream')}; name="${headerSafe(a.filename).replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '_')}"`,
         `Content-Disposition: attachment; ${fileNameParams(a.filename)}`,
         'Content-Transfer-Encoding: base64',
         '',

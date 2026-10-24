@@ -57,7 +57,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     function timeAgo(dateStr) {
@@ -73,6 +73,14 @@
     function sourceLabel(source) {
       return { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form' }[source] || source;
     }
+
+    // A value inside a PostgREST filter (.or('email.eq.…')): quoted, so a comma, bracket or
+    // dot in a website-typed email or phone cannot add a clause or break the lookup (F21).
+    function pgQuote(value) {
+      return '"' + String(value).replace(/[\\"]/g, (m) => '\\' + m) + '"';
+    }
+    // Text from the website lead form, kept plain before it names a job or quote (S11).
+    const plainText = (s) => String(s || '').replace(/[<>]/g, '').trim();
 
     // Pretty labels for the flexible `details` JSON each source sends
     // (see WEBSITE_LEAD_CAPTURE.md) - falls back to the raw key for
@@ -106,8 +114,9 @@
 
     async function generateSummaryFor(lead) {
       try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const res = await fetch('/.netlify/functions/generate-lead-summary', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
           body: JSON.stringify({ source: lead.source, details: lead.details, name: lead.name }),
         });
         const data = await res.json();
@@ -224,8 +233,8 @@
 
       (async () => {
         const clauses = [];
-        if (lead.email) clauses.push(`email.eq.${lead.email}`);
-        if (lead.phone) clauses.push(`phone.eq.${lead.phone}`);
+        if (lead.email) clauses.push(`email.eq.${pgQuote(lead.email)}`);
+        if (lead.phone) clauses.push(`phone.eq.${pgQuote(lead.phone)}`);
         if (!clauses.length) return;
         const { data: cbs } = await supabaseClient.from('callback_requests').select('*').or(clauses.join(',')).order('requested_date', { ascending: false });
         if (!cbs || !cbs.length) return;
@@ -261,8 +270,10 @@
       try {
         let clientId = null;
         if (lead.email || lead.phone) {
-          const orClauses = [lead.email ? `email.eq.${lead.email}` : null, lead.phone ? `phone.eq.${lead.phone}` : null].filter(Boolean);
-          const { data: existing } = await supabaseClient.from('clients').select('id').or(orClauses.join(',')).limit(1).maybeSingle();
+          const orClauses = [lead.email ? `email.eq.${pgQuote(lead.email)}` : null, lead.phone ? `phone.eq.${pgQuote(lead.phone)}` : null].filter(Boolean);
+          const { data: existing, error: lookupErr } = await supabaseClient.from('clients').select('id').or(orClauses.join(',')).limit(1).maybeSingle();
+          // A failed lookup must not make a duplicate client
+          if (lookupErr) throw lookupErr;
           if (existing) clientId = existing.id;
         }
         // An existing client's job at a new address becomes a saved site; a new client's
@@ -270,14 +281,14 @@
         const clientSiteId = clientId ? await resolveClientSite(clientId, lead.address_formatted || lead.address_line) : null;
         if (!clientId) {
           const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({
-            name: lead.name || 'New client', email: lead.email || null, phone: lead.phone || null, address: lead.address_formatted || lead.address_line || null,
+            name: plainText(lead.name) || 'New client', email: lead.email || null, phone: lead.phone || null, address: lead.address_formatted || lead.address_line || null,
           }).select('id').single();
           if (clientErr) throw clientErr;
           clientId = newClient.id;
         }
 
         const { data: project, error } = await supabaseClient.from('projects').insert({
-          name: `${lead.name || 'New enquiry'} - ${lead.ai_title || sourceLabel(lead.source)}`,
+          name: `${plainText(lead.name) || 'New enquiry'} - ${plainText(lead.ai_title) || sourceLabel(lead.source)}`,
           sow_text: lead.ai_summary || null,
           notes: leadContextText(lead),
           client_id: clientId,
@@ -301,7 +312,7 @@
         await supabaseClient.from('leads').update({ status: 'converted' }).eq('id', lead.id);
         window.location.href = `/project.html?id=${project.id}`;
       } catch (err) {
-        msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         btn.disabled = false;
         btn.textContent = 'Create job';
       }
@@ -424,8 +435,8 @@
     // means phone matches won't always hit, email is more reliable).
     async function matchCallbackToRecords(r) {
       const leadClauses = [];
-      if (r.email) leadClauses.push(`email.eq.${r.email}`);
-      if (r.phone) leadClauses.push(`phone.eq.${r.phone}`);
+      if (r.email) leadClauses.push(`email.eq.${pgQuote(r.email)}`);
+      if (r.phone) leadClauses.push(`phone.eq.${pgQuote(r.phone)}`);
       let leadsMatch = [];
       if (leadClauses.length) {
         const { data } = await supabaseClient.from('leads').select('id, name, email, phone, created_at').or(leadClauses.join(','));
@@ -433,8 +444,8 @@
       }
 
       const projectClauses = [];
-      if (r.email) projectClauses.push(`client_email.eq.${r.email}`);
-      if (r.phone) projectClauses.push(`client_phone.eq.${r.phone}`);
+      if (r.email) projectClauses.push(`client_email.eq.${pgQuote(r.email)}`);
+      if (r.phone) projectClauses.push(`client_phone.eq.${pgQuote(r.phone)}`);
       let projectsMatch = [];
       if (projectClauses.length) {
         const { data } = await supabaseClient.from('projects').select('id, name, job_number, quote_number, pipeline_stage, client_name, created_at').or(projectClauses.join(','));

@@ -107,9 +107,9 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/template-questions.js?v=3"></script>
-  <script src="/js/email-compose.js?v=8"></script>
+  <script src="/js/email-compose.js?v=9"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // Editing a saved quote now happens on the quote's own page, in steps (backlog item 27).
@@ -170,10 +170,12 @@
       const resultsEl = document.getElementById('client-search-results');
       if (q.length < 2) { resultsEl.style.display = 'none'; return; }
       clientSearchTimeout = setTimeout(async () => {
+        // Characters that are special in a filter or a like pattern match any single character instead (F24)
+        const pattern = `%${q.replace(/[%_*"\\]/g, '_')}%`;
         const { data, error } = await supabaseClient
           .from('clients')
           .select('*')
-          .or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`)
+          .or(`name.ilike."${pattern}",email.ilike."${pattern}",phone.ilike."${pattern}"`)
           .limit(8);
         if (error || !data || !data.length) {
           resultsEl.innerHTML = `<div style="padding:10px 12px; font-size:13px; color:var(--muted);">No matches</div>`;
@@ -257,14 +259,13 @@
           return;
         }
 
-        // Keep the linked client record in sync, or create one if this quote was built without
-        // picking an existing client. The job's site address never overwrites the client's office
-        // address; a new client's first site is the best guess for their office address.
+        // An existing client's record is left alone: the name, email, phone and terms typed here
+        // stay on this quote only (F20). Without a picked client, one is created from them; the
+        // job's site address never overwrites the client's office address, a new client's first
+        // site is the best guess for their office address.
         let clientId = selectedClientId;
-        const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
-        if (clientId) {
-          await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
-        } else {
+        if (!clientId) {
+          const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
           const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({ ...clientFields, address: client_address || null }).select().single();
           if (clientErr) { msg.innerHTML = `<div class="error-box">Could not save client: ${escapeHtml(clientErr.message)}</div>`; return; }
           clientId = newClient.id;

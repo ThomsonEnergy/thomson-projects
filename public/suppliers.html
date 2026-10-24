@@ -61,7 +61,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allSuppliers = [];
@@ -72,7 +72,8 @@
       const { data: suppliers, error } = await supabaseClient.from('suppliers').select('*').order('name');
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
-      const { data: summaries } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: null });
+      // pricing roles only (the function refuses Staff): then the tiles say so instead of showing $0
+      const { data: summaries, error: sumErr } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: null });
       const summaryBySupplier = Object.fromEntries((summaries || []).map(s => [s.supplier_id, s]));
 
       allSuppliers = (suppliers || []).map(s => ({ ...s, summary: summaryBySupplier[s.id] || { invoiced_not_paid: 0, approved_for_payment: 0, not_approved: 0, overdue: 0 } }));
@@ -84,10 +85,10 @@
         overdue: acc.overdue + Number(s.summary.overdue),
       }), { outstanding: 0, approved: 0, pending: 0, overdue: 0 });
 
-      document.getElementById('stat-outstanding').textContent = money(totals.outstanding);
-      document.getElementById('stat-approved').textContent = money(totals.approved);
-      document.getElementById('stat-pending').textContent = money(totals.pending);
-      document.getElementById('stat-overdue').textContent = money(totals.overdue);
+      document.getElementById('stat-outstanding').textContent = sumErr ? 'n/a' : money(totals.outstanding);
+      document.getElementById('stat-approved').textContent = sumErr ? 'n/a' : money(totals.approved);
+      document.getElementById('stat-pending').textContent = sumErr ? 'n/a' : money(totals.pending);
+      document.getElementById('stat-overdue').textContent = sumErr ? 'n/a' : money(totals.overdue);
 
       renderSuppliers();
     }

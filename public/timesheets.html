@@ -156,7 +156,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let myUserId = null;
@@ -211,8 +211,8 @@
       const ids = [...new Set([...overlaps.map(o => o.staffId), ...stale.map(s => s.staff_id)])];
       const { data: people } = await supabaseClient.from('profiles').select('id, full_name').in('id', ids);
       (people || []).forEach(p => { issueNames[p.id] = p.full_name || 'Someone'; });
-      const who = (id) => (id === myUserId ? 'You' : (issueNames[id] || 'Someone'));
-      const ref = (e) => (e.projects ? projectRef(e.projects) : 'General / Office');
+      const who = (id) => escapeHtml(id === myUserId ? 'You' : (issueNames[id] || 'Someone'));
+      const ref = (e) => escapeHtml(e.projects ? projectRef(e.projects) : 'General / Office');
       const range = (e) => `${fmtDateTime(e.clock_in)} - ${e.clock_out ? fmtTime(e.clock_out) : 'now'}`;
       el.innerHTML = `
         <div class="card" style="border-color:var(--red);">
@@ -221,12 +221,12 @@
           ${overlaps.map(o => `
             <div class="day-item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
               <span><strong>${who(o.staffId)}</strong>: ${ref(o.a)} (${range(o.a)}) overlaps ${ref(o.b)} (${range(o.b)})</span>
-              <button type="button" class="secondary fix-day-btn" data-date="${o.date}" data-staff="${o.staffId}" style="flex-shrink:0;">Fix</button>
+              <button type="button" class="secondary fix-day-btn" data-date="${escapeHtml(o.date)}" data-staff="${escapeHtml(o.staffId)}" style="flex-shrink:0;">Fix</button>
             </div>`).join('')}
           ${stale.map(s => `
             <div class="day-item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
               <span><strong>${who(s.staff_id)}</strong> is still clocked in to ${ref(s)} since ${fmtDateTime(s.clock_in)} - add the clock-out time</span>
-              <button type="button" class="secondary fix-day-btn" data-date="${sydneyDateKey(new Date(s.clock_in))}" data-staff="${s.staff_id}" style="flex-shrink:0;">Fix</button>
+              <button type="button" class="secondary fix-day-btn" data-date="${sydneyDateKey(new Date(s.clock_in))}" data-staff="${escapeHtml(s.staff_id)}" style="flex-shrink:0;">Fix</button>
             </div>`).join('')}
         </div>`;
       el.querySelectorAll('.fix-day-btn').forEach(b => b.addEventListener('click', () => {
@@ -247,8 +247,10 @@
     // ---------- pay week (Friday - Thursday) helpers ----------
 
     function getPayWeekStart(d) {
-      const diff = (d.getDay() - 5 + 7) % 7; // days since the most recent Friday
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+      // The pay week follows the Sydney calendar date, not the device's.
+      const s = new Date(sydneyDateKey(d) + 'T00:00:00');
+      const diff = (s.getDay() - 5 + 7) % 7; // days since the most recent Friday
+      return new Date(s.getFullYear(), s.getMonth(), s.getDate() - diff);
     }
     function addDays(d, n) {
       return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
@@ -303,8 +305,8 @@
         .select('id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, clock_out, xero_pushed_at, break_taken, break_start, break_minutes, break_skip_reason, projects(name, job_number, quote_number)')
         .eq('staff_id', myUserId)
         .is('sm8_activity_uuid', null) // ServiceM8 imports show on the job only
-        .gte('clock_in', rangeStart.toISOString())
-        .lt('clock_in', rangeEndExclusive.toISOString())
+        .gte('clock_in', sydneyMidnightUtc(localDateStr(rangeStart)).toISOString())
+        .lt('clock_in', sydneyMidnightUtc(localDateStr(rangeEndExclusive)).toISOString())
         .order('clock_in');
       if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
@@ -332,9 +334,10 @@
       const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
       el.innerHTML = days.map(day => {
         const dStr = localDateStr(day);
-        const dayEntries = (entries || []).filter(e => localDateStr(new Date(e.clock_in)) === dStr);
+        const dayEntries = (entries || []).filter(e => sydneyDateKey(new Date(e.clock_in)) === dStr);
         const onLeave = (leave || []).find(l => dStr >= l.start_date && dStr <= l.end_date);
-        const totalMs = dayEntries.reduce((s, e) => s + (e.clock_out ? new Date(e.clock_out) - new Date(e.clock_in) : 0), 0);
+        // paid time: the unpaid break on the row comes off (one row per shift carries break_minutes)
+        const totalMs = dayEntries.reduce((s, e) => s + (e.clock_out ? Math.max(0, new Date(e.clock_out) - new Date(e.clock_in) - (e.break_taken && e.break_minutes ? e.break_minutes * 60000 : 0)) : 0), 0);
 
         let bodyHtml;
         if (dayEntries.length) {
@@ -396,15 +399,18 @@
       const { data: entries, error } = await supabaseClient
         .from('time_entries')
         .select('staff_id, clock_in, clock_out, break_taken, break_minutes, break_skip_reason')
-        .gte('clock_in', rangeStart.toISOString())
-        .lt('clock_in', rangeEndExclusive.toISOString());
+        .gte('clock_in', sydneyMidnightUtc(localDateStr(rangeStart)).toISOString())
+        .lt('clock_in', sydneyMidnightUtc(localDateStr(rangeEndExclusive)).toISOString());
       if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
       const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
       const entriesFor = (staffId, dStr) => (entries || [])
-        .filter(e => e.staff_id === staffId && e.clock_out && localDateStr(new Date(e.clock_in)) === dStr);
-      const hoursFor = (staffId, dStr) => entriesFor(staffId, dStr)
+        .filter(e => e.staff_id === staffId && e.clock_out && sydneyDateKey(new Date(e.clock_in)) === dStr);
+      // clock span (for the "long day with no break" check) and paid hours (the unpaid break comes off)
+      const spanHoursFor = (staffId, dStr) => entriesFor(staffId, dStr)
         .reduce((s, e) => s + (new Date(e.clock_out) - new Date(e.clock_in)), 0) / 3600000;
+      const hoursFor = (staffId, dStr) => entriesFor(staffId, dStr)
+        .reduce((s, e) => s + Math.max(0, new Date(e.clock_out) - new Date(e.clock_in) - (e.break_taken && e.break_minutes ? e.break_minutes * 60000 : 0)), 0) / 3600000;
 
       el.innerHTML = `
         <div style="overflow-x:auto;">
@@ -447,7 +453,7 @@
           if (!dayEntries.length) return;
           const breakEntry = breakInfoFor(dayEntries);
           if (!breakEntry) {
-            if (hoursFor(s.id, dStr) > 6) {
+            if (spanHoursFor(s.id, dStr) > 6) {
               exceptions.push({ staffName: s.full_name || 'Unnamed', staffId: s.id, dStr, day: d, note: 'Break not recorded', isSkip: false });
             }
           } else if (breakEntry.break_taken === false) {
@@ -1038,14 +1044,10 @@
           }
         }
 
-        for (const removed of dayRemovedBlocks) {
-          const { error } = await supabaseClient.from('time_entries').delete().eq('id', removed.id);
-          if (error) throw error;
-          if (removed.origProjectId) {
-            await logActivity('project', removed.origProjectId, 'timesheet_removed', `Timesheet entry removed for ${fmtLogDay(dateStr)} (was ${fmtLogRange(removed.origClockIn, removed.origClockOut)})`);
-          }
-        }
-
+        // Every block is checked before anything is written, so a bad block
+        // cannot leave the day half saved (removed blocks already gone, the
+        // rest not yet in). The first error stops the save with nothing changed.
+        const plans = [];
         for (const block of dayBlocks) {
           const isNew = !block.id;
           if (isNew && !block.clockInTime) continue; // an untouched blank "add another job" row
@@ -1056,7 +1058,18 @@
           if (clockOut && clockOut <= clockIn) throw new Error('Finish time must be after start time for one of the jobs listed.');
           if (block.projectId && block.centres.length && !block.ccIds.length) throw new Error('Pick at least one stage for every job block.');
           if (block.projectLahaApproved && block.stayedOvernight === null && isSelf) throw new Error('Let us know if you stayed overnight for the LAHA-approved job.');
+          plans.push({ block, clockIn, clockOut });
+        }
 
+        for (const removed of dayRemovedBlocks) {
+          const { error } = await supabaseClient.from('time_entries').delete().eq('id', removed.id);
+          if (error) throw error;
+          if (removed.origProjectId) {
+            await logActivity('project', removed.origProjectId, 'timesheet_removed', `Timesheet entry removed for ${fmtLogDay(dateStr)} (was ${fmtLogRange(removed.origClockIn, removed.origClockOut)})`);
+          }
+        }
+
+        for (const { block, clockIn, clockOut } of plans) {
           const isBreakTarget = block === breakTargetBlock && breakFields;
           const doingSplit = !block.xeroPushed && block.ccIds.length > 1 && block.splitPercentages.length === block.ccIds.length && clockOut;
           const projectId = block.projectId;
@@ -1083,6 +1096,9 @@
               }))
             );
             if (insErr) throw insErr;
+            // The segments are in before the original goes, so a dropped
+            // connection can only leave double hours (the overlap card
+            // catches those), never lost hours.
             if (block.id) {
               const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', block.id);
               if (delErr) throw delErr;
@@ -1095,6 +1111,8 @@
 
           const fields = { project_id: projectId, time_category: projectId ? 'job' : block.timeCategory, stayed_overnight: block.stayedOvernight };
           if (block.ccIds.length === 1) { fields.cost_centre_id = block.ccIds[0]; fields.selected_cost_centre_ids = null; }
+          // A variation stage picked here stays in selected_cost_centre_ids: the
+          // variation card and billing read that list as well as cost_centre_id.
           else if (block.ccIds.length > 1) { fields.cost_centre_id = null; fields.selected_cost_centre_ids = block.ccIds; }
           else { fields.cost_centre_id = null; fields.selected_cost_centre_ids = null; }
           if (!block.xeroPushed) {
@@ -1147,7 +1165,7 @@
     }
 
     document.getElementById('add-today-entry-btn').addEventListener('click', () => {
-      openDayEditPanel(localDateStr(new Date()));
+      openDayEditPanel(sydneyDateKey(new Date()));
     });
 
     document.getElementById('add-tafe-day-btn').addEventListener('click', () => {
@@ -1155,7 +1173,7 @@
           <h2 style="margin-top:0;">TAFE day</h2>
           <p class="subtitle" style="margin-top:0;">Adds an 8 hour TAFE timesheet: 7:00am to 3:30pm with a 30 minute unpaid break at 12:00.</p>
           <label>Which day?</label>
-          <input type="date" id="tafe-date" value="${localDateStr(new Date())}" />
+          <input type="date" id="tafe-date" value="${sydneyDateKey(new Date())}" />
           <div style="margin-top:14px; display:flex; gap:8px;">
             <button type="button" id="tafe-save">Add TAFE day</button>
             <button type="button" class="secondary" id="tafe-cancel">Cancel</button>
@@ -1305,10 +1323,10 @@
 
         let html = `<div class="success-box">Pushed ${data.pushed} timesheet${data.pushed === 1 ? '' : 's'}.</div>`;
         if (data.warnings && data.warnings.length) {
-          html += `<div class="error-box" style="margin-top:8px;">${data.warnings.join('<br>')}</div>`;
+          html += `<div class="error-box" style="margin-top:8px;">${data.warnings.map(w => escapeHtml(w)).join('<br>')}</div>`;
         }
         if (data.skipped && data.skipped.length) {
-          html += `<div class="error-box" style="margin-top:8px;">Skipped: ${data.skipped.join('; ')}</div>`;
+          html += `<div class="error-box" style="margin-top:8px;">Skipped: ${data.skipped.map(s => escapeHtml(s)).join('; ')}</div>`;
         }
         msg.innerHTML = html;
       } catch (err) {
@@ -1336,7 +1354,7 @@
       listEl.innerHTML = data.map(l => `
         <div class="project-list-item" data-id="${l.id}">
           <div>
-            <div class="name">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff member')} - ${l.leave_type} leave</div>
+            <div class="name">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff member')} - ${escapeHtml(l.leave_type)} leave</div>
             <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + escapeHtml(l.notes) : ''}</div>
           </div>
           <div>
@@ -1422,7 +1440,7 @@
       if (aiPf || fixParams.get('fix')) await Promise.all([projectsReady, issuesReady]);
       if (aiPf) {
         aiPrefillClear();
-        const day = /^\d{4}-\d{2}-\d{2}$/.test(aiPf.date || '') ? aiPf.date : localDateStr(new Date());
+        const day = /^\d{4}-\d{2}-\d{2}$/.test(aiPf.date || '') ? aiPf.date : sydneyDateKey(new Date());
         openDayEditPanel(day, myUserId, myProfileName, aiPf);
       }
       if (fixParams.get('fix')) {

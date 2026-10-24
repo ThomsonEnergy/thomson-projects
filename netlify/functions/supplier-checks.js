@@ -35,12 +35,18 @@ exports.handler = async (event) => {
     if (action === 'check_bill') return json(200, { ok: true, ...(await checkBillAndSiblings(admin, id)) });
 
     if (action === 'approve_bill' || action === 'resolve_bill') {
-      const { data: bill } = await admin.from('supplier_bills').select('id, supplier_id, bill_number, check_status, due_date, paid').eq('id', id).maybeSingle();
+      const { data: bill } = await admin.from('supplier_bills').select('id, supplier_id, bill_number, check_status, due_date, paid, po_id').eq('id', id).maybeSingle();
       if (!bill) return json(404, { ok: false, error: 'That bill was not found.' });
       if (action === 'approve_bill') {
         const { data: sup } = await admin.from('suppliers').select('name, needs_review').eq('id', bill.supplier_id).maybeSingle();
         if (sup?.needs_review) return json(400, { ok: false, error: `${sup.name} was created automatically. Open the supplier, check their details (especially the bank account) and press Save first.` });
         if (bill.paid) return json(400, { ok: false, error: 'That bill is already paid.' });
+        // closing the PO (every line received) is the approval step for a bill on a PO (docs/PO_REVIEW.md 6):
+        // approving by hand before that would pay for gear that has not arrived
+        if (bill.po_id) {
+          const { data: po } = await admin.from('purchase_orders').select('po_number, closed_at').eq('id', bill.po_id).maybeSingle();
+          if (po && !po.closed_at) return json(400, { ok: false, error: `${po.po_number || 'The PO'} is still open: this bill is approved when the PO is closed (every line received or back ordered). Close the PO first.` });
+        }
         // pay on the later of the supplier's terms date and today: approving late never pays early
         const today = sydneyToday();
         await admin.from('supplier_bills').update({ approved_for_payment: true, approved_by: user.id, approved_at: now, pay_on: bill.due_date && bill.due_date > today ? bill.due_date : today }).eq('id', id);

@@ -37,12 +37,20 @@ exports.handler = async (event) => {
       return { statusCode: 404, body: JSON.stringify({ error: 'Time entry not found' }) };
     }
 
+    // Stored the way the clock-out and the Timesheets editor store it, which is
+    // what the costing, variation billing and invoiceable actuals read (see
+    // entryCentreIds in _shared/compute-labour-cost.js): one stage goes on
+    // cost_centre_id, several (a split entry) go on selected_cost_centre_ids
+    // with cost_centre_id null. The list wins when both are sent, as it does
+    // when they are read.
+    const stageIds = [...new Set((Array.isArray(selected_cost_centre_ids) && selected_cost_centre_ids.length
+      ? selected_cost_centre_ids : [cost_centre_id]).filter(Boolean))];
     const { error: updateErr } = await supabaseAdmin
       .from('time_entries')
       .update({
         project_id: project_id || null,
-        cost_centre_id: cost_centre_id || null,
-        selected_cost_centre_ids: selected_cost_centre_ids && selected_cost_centre_ids.length ? selected_cost_centre_ids : null,
+        cost_centre_id: stageIds.length === 1 ? stageIds[0] : null,
+        selected_cost_centre_ids: stageIds.length > 1 ? stageIds : null,
         time_category: time_category || 'job',
       })
       .eq('id', entryId);

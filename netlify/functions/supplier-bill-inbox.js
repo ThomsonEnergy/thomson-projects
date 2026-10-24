@@ -2,7 +2,8 @@
 // Body: { action, id, ... } - the buttons on the Emailed bills page (supplier-bills.html).
 // Pricing roles only (the same people who can save supplier bills).
 //
-//   save          { id, po_id }        save the bill against that PO (po_id null = no PO)
+//   save          { id, po_id, amount } save the bill against that PO (po_id null = no PO); amount is the
+//                                      bill total the person has confirmed (inc GST, as on the bill)
 //   set_supplier  { id, supplier_id }  supplier picked by hand: match the POs again
 //   mark_saved    { id, bill_id }      saved through the full review screen instead
 //   not_a_bill    { id }               not a bill (statement, remittance, spam): put aside
@@ -21,14 +22,17 @@ exports.handler = async (event) => {
   const { supabaseAdmin, user } = auth;
 
   try {
-    const { action, id, po_id: poId, supplier_id: supplierId, bill_id: billId } = JSON.parse(event.body || '{}');
+    const { action, id, po_id: poId, supplier_id: supplierId, bill_id: billId, amount } = JSON.parse(event.body || '{}');
     if (!id) return json(400, { ok: false, error: 'id is required' });
     const { data: item } = await supabaseAdmin.from('supplier_bill_inbox').select('*').eq('id', id).maybeSingle();
     if (!item) return json(404, { ok: false, error: 'That emailed bill was not found.' });
     const resolved = { resolved_by: user.id, resolved_at: new Date().toISOString() };
 
     if (action === 'save') {
-      const newBillId = await saveInboxItemAsBill(supabaseAdmin, id, { poId: poId || null, userId: user.id });
+      // the total the reader found is never saved unseen: the person confirms (or corrects) it first
+      const confirmedTotal = Number(amount);
+      if (!(confirmedTotal > 0)) return json(400, { ok: false, error: 'Confirm the bill total first.' });
+      const newBillId = await saveInboxItemAsBill(supabaseAdmin, id, { poId: poId || null, userId: user.id, amount: confirmedTotal });
       return json(200, { ok: true, bill_id: newBillId });
     }
 

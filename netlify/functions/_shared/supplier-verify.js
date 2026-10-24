@@ -64,6 +64,8 @@ async function checkSupplierDetails(ex, matchedSupplier) {
 // A new supplier from a bill nobody matched. The name is the registered business name that best
 // matches the bill when the ABN checked out, otherwise the name as read. Marked needs_review: the
 // bank details are not trusted (or paid to) until a person has opened and saved the supplier.
+// Returns null when a supplier with that name is already saved (names are unique): the bill then
+// waits for a person to pick the supplier, since its ABN or bank details did not match the saved one.
 async function createSupplierFromBill(admin, ex, abnCheck) {
   const verified = abnCheck && abnCheck.legal_name && !abnCheck.problems.length;
   let name = (ex.supplier || '').trim() || 'Unknown supplier';
@@ -71,6 +73,8 @@ async function createSupplierFromBill(admin, ex, abnCheck) {
     const m = bestName([...(abnCheck.business_names || []), abnCheck.legal_name], name);
     name = m.score >= 0.34 ? m.name : abnCheck.legal_name;
   }
+  const { data: taken } = await admin.from('suppliers').select('id').ilike('name', name.replace(/[\\%_]/g, '\\$&')).limit(1);
+  if ((taken || []).length) return null;
   const { data, error } = await admin.from('suppliers').insert({
     name,
     kind: ex.supplier_kind === 'contractor' ? 'contractor' : 'supplier',
@@ -91,6 +95,7 @@ async function createSupplierFromBill(admin, ex, abnCheck) {
     bpay_biller_code: ex.bpay_biller_code || null,
     bpay_reference: ex.bpay_reference || null,
   }).select('*').single();
+  if (error && error.code === '23505') return null; // the name was taken between the look-up and the insert
   if (error) throw error;
   await admin.from('activity_log').insert({ entity_type: 'supplier', entity_id: data.id, action: 'created', description: `${data.kind === 'contractor' ? 'Contractor' : 'Supplier'} "${name}" created automatically from an emailed bill${verified ? ' (ABN checked)' : ''}. Check the details before paying.`, changed_by: null });
   return data;

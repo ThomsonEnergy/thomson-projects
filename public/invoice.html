@@ -127,7 +127,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -225,7 +225,8 @@
         sections.push({ title: 'Claim summary', head: ['Stage', 'Stage value', 'Claimed to date', 'Remaining'], rows, headCls: ['', 'num', 'num', 'num'], widths: ['34%', '20%', '28%', '18%'] });
       }
       if (previousInvoices.length) {
-        sections.push({ title: 'Previous invoices on this job', head: ['Invoice', 'Date', 'Amount'], headCls: ['', 'ctr', 'num'], widths: ['44%', '28%', '28%'],
+        // these amounts come ex GST and before credit notes, so the heading says so (M39)
+        sections.push({ title: 'Previous invoices on this job (ex GST, before credits)', head: ['Invoice', 'Date', 'Amount (ex GST)'], headCls: ['', 'ctr', 'num'], widths: ['44%', '28%', '28%'],
           rows: previousInvoices.map((p) => ({ cells: [esc(p.invoice_number), p.sent_at ? dateText(new Date(p.sent_at)) : '', money(p.amount)], cls: ['', 'ctr', 'num'] })) });
       }
 

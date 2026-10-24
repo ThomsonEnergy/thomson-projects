@@ -8,11 +8,16 @@
 
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
   }
+
+  // The client import is a pricing-role page, and every call spends the Anthropic key.
+  const auth = await requirePricingRole(event);
+  if (!auth) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
 
   try {
     const { headers, sampleRows } = JSON.parse(event.body || '{}');

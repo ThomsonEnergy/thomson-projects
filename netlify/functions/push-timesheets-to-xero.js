@@ -22,8 +22,10 @@
 // hours, each tagged with the earnings rate mapped to that band in
 // Settings > Xero Mapping - so OT hours can post to a different Xero
 // account than ordinary hours. Only entries that haven't been pushed
-// before are included (xero_pushed_at is null) - safe to re-run without
-// double-pushing hours already sent.
+// before are pushed (xero_pushed_at is null), but a day's already-pushed
+// hours still count towards its bands and its public holiday, so a re-run
+// pays a late-added entry on top of the day already paid (never from
+// zero) and never pays the public holiday base day twice.
 //
 // Also pushes a LAHA (living-away-from-home allowance) line for every
 // night flagged at clock-out (time_entries.stayed_overnight, only asked
@@ -146,17 +148,26 @@ exports.handler = async (event) => {
 
     // Sydney pay week: Sydney midnight starting startDate up to (not
     // including) Sydney midnight after endDate, as real UTC instants.
-    const { data: entries, error: entriesErr } = await supabaseAdmin
+    const { data: allEntries, error: entriesErr } = await supabaseAdmin
       .from('time_entries')
       .select('*, profiles(xero_employee_id, full_name)')
       .gte('clock_in', sydneyMidnightUtc(startDate))
       .lt('clock_in', sydneyMidnightUtc(addDays(endDate, 1)))
-      .not('clock_out', 'is', null)
-      .is('xero_pushed_at', null)
-      // ServiceM8 imports were paid through Xero already (marked pushed
-      // anyway, this is belt and braces).
-      .is('sm8_activity_uuid', null);
+      .not('clock_out', 'is', null);
     if (entriesErr) throw entriesErr;
+    // Entries already pushed (and ServiceM8 imports, paid through Xero
+    // already) are never pushed again, but their hours stay in the picture:
+    // a re-run bands a late-added entry on top of the day already paid, and
+    // sees a public holiday that was worked as worked.
+    const isPushed = (e) => !!e.xero_pushed_at || !!e.sm8_activity_uuid;
+    const entries = (allEntries || []).filter(e => !isPushed(e));
+    // staffId -> Sydney date -> paid hours already pushed for that day
+    const pushedHoursByStaffDay = {};
+    (allEntries || []).filter(isPushed).forEach(e => {
+      const staffDays = (pushedHoursByStaffDay[e.staff_id] ||= {});
+      const key = localDateKey(e.clock_in);
+      staffDays[key] = (staffDays[key] || 0) + entryHours(e);
+    });
 
     const { data: holidays } = await supabaseAdmin.from('public_holidays').select('holiday_date');
     const holidaySet = new Set((holidays || []).map(h => h.holiday_date));
@@ -171,7 +182,7 @@ exports.handler = async (event) => {
     const weekdayHolidaysInRange = [...holidaySet].filter(d => d >= startDate && d <= endDate)
       .filter(d => { const dow = new Date(`${d}T12:00:00Z`).getUTCDay(); return dow >= 1 && dow <= 5; });
     const { data: staffProfiles } = await supabaseAdmin.from('profiles')
-      .select('id, full_name, xero_employee_id, employment_type, active');
+      .select('id, full_name, xero_employee_id, employment_type, employment_start_date, active');
     const profileById = Object.fromEntries((staffProfiles || []).map(p => [p.id, p]));
     const alreadyPaidHoliday = new Set();
     if (weekdayHolidaysInRange.length) {
@@ -179,6 +190,11 @@ exports.handler = async (event) => {
         .select('profile_id, holiday_date').in('holiday_date', weekdayHolidaysInRange);
       (paid || []).forEach(r => alreadyPaidHoliday.add(`${r.profile_id}|${r.holiday_date}`));
     }
+    // A holiday still to be dealt with for this person: not pushed before,
+    // and not from before they started (nobody is owed a day they were not
+    // yet employed for).
+    const holidayPending = (profileId, profile, d) => !alreadyPaidHoliday.has(`${profileId}|${d}`)
+      && !(profile.employment_start_date && profile.employment_start_date > d);
 
     const byStaff = {};
     entries.forEach(e => { (byStaff[e.staff_id] ||= []).push(e); });
@@ -186,7 +202,7 @@ exports.handler = async (event) => {
     // timesheet even if they logged no hours at all this period.
     (staffProfiles || []).filter(p => p.active && p.xero_employee_id && p.employment_type === 'full_time')
       .forEach(p => {
-        if (weekdayHolidaysInRange.some(d => !alreadyPaidHoliday.has(`${p.id}|${d}`))) byStaff[p.id] ||= [];
+        if (weekdayHolidaysInRange.some(d => holidayPending(p.id, p, d))) byStaff[p.id] ||= [];
       });
 
     if (!Object.keys(byStaff).length) {
@@ -226,10 +242,13 @@ exports.handler = async (event) => {
       const unitsByLabelBandDay = {};
       const byDay = {};
       staffEntries.forEach(e => { (byDay[localDateKey(e.clock_in)] ||= []).push(e); });
+      const pushedHoursByDay = pushedHoursByStaffDay[staffId] || {};
       Object.keys(byDay).forEach(dateKey => {
         const dayEntries = byDay[dateKey].slice().sort((a, b) => new Date(a.clock_in) - new Date(b.clock_in));
         const bands = dayBands(dateKey, holidaySet.has(dateKey), { ordinary: 'ordinary', ot1: 'ot1', ot2: 'ot2', publicHoliday: 'publicHoliday' });
-        let cumulative = 0;
+        // Hours already pushed for this day took the first bands when they
+        // were paid, so the new hours start where those left off.
+        let cumulative = pushedHoursByDay[dateKey] || 0;
         dayEntries.forEach(e => {
           const hours = entryHours(e);
           const start = cumulative, entryEnd = cumulative + hours;
@@ -268,11 +287,16 @@ exports.handler = async (event) => {
         continue;
       }
 
-      // Unworked weekday public holidays still owed to this person.
+      // Unworked weekday public holidays still owed to this person, and the
+      // worked ones (their base is paid per hour next to the penalty below,
+      // and recorded in public_holiday_pay_pushes once pushed so a re-run
+      // never adds the unworked base day on top).
       const unworkedHolidays = [];
+      const workedHolidays = [];
       weekdayHolidaysInRange.forEach(d => {
-        if (alreadyPaidHoliday.has(`${staffId}|${d}`)) return;
-        const workedHours = (byDay[d] || []).reduce((s, e) => s + entryHours(e), 0);
+        if (!holidayPending(staffId, staffProfile, d)) return;
+        const workedHours = (byDay[d] || []).reduce((s, e) => s + entryHours(e), 0) + (pushedHoursByDay[d] || 0);
+        if (workedHours > 0) workedHolidays.push({ date: d, hours: workedHours });
         if (staffProfile.employment_type === 'full_time') {
           if (workedHours === 0) unworkedHolidays.push(d);
           else if (workedHours < FULL_TIME_PUBLIC_HOLIDAY_HOURS) warnings.push(`${staffName} worked ${Math.round(workedHours * 100) / 100}h on the ${d} public holiday - check whether a top-up to ${FULL_TIME_PUBLIC_HOLIDAY_HOURS}h base pay is owed and add it in Xero if so.`);
@@ -363,6 +387,7 @@ exports.handler = async (event) => {
         results.push({ staff: staffName, timesheetId });
         allEntriesForThisStaff.forEach(e => pushedEntryIds.push(e.id));
         unworkedHolidays.forEach(d => paidHolidayRows.push({ profile_id: staffId, holiday_date: d, hours: FULL_TIME_PUBLIC_HOLIDAY_HOURS }));
+        workedHolidays.forEach(w => paidHolidayRows.push({ profile_id: staffId, holiday_date: w.date, hours: Math.round(w.hours * 100) / 100 }));
       } catch (err) {
         skipped.push(`${staffName}: ${err.message}`);
       }

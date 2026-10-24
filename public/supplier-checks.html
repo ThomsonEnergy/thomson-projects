@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let filter = 'approve', bills = [], statements = [], suppliers = [], missing = [];
@@ -151,7 +151,8 @@
 
     function render() {
       const body = document.getElementById('bc-body');
-      const toApprove = bills.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment && !b.paid);
+      // a bill on an open PO waits for the PO to close (gear received) before it can be approved (M18)
+      const toApprove = bills.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment && !b.paid && (!b.purchase_orders || b.purchase_orders.closed_at));
       const problems = bills.filter(b => ['problems', 'queried', 'no_po'].includes(b.check_status) && !b.paid && !b.approved_for_payment);
       const stIssues = statements.filter(s => ['issues', 'failed'].includes(s.status)).length;
       const counts = { approve: toApprove.length, problems: problems.length, statements: stIssues, missing: missing.length };

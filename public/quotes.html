@@ -41,7 +41,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     (async function () {
@@ -253,14 +253,18 @@
         }
 
         deleteBtn.textContent = 'Deleting...';
+        const deleted = [];
         try {
-          for (const p of clear) await deleteProject(p.id);
+          for (const p of clear) { await deleteProject(p.id); deleted.push(p); }
           parts.push(`<div class="success-box">Deleted ${clear.length} quote${clear.length === 1 ? '' : 's'}.</div>`);
           msg.innerHTML = parts.join('');
           location.reload();
         } catch (err) {
-          parts.push(`<div class="error-box">${err.message}</div>`);
+          // deleteProject stops at the first failed step. The quotes already gone come off the list here
+          // (a page reload would wipe this message), so what is shown matches the database.
+          parts.push(`<div class="error-box">${escapeHtml(err.message)}${deleted.length ? ` Deleted before it stopped: ${escapeHtml(deleted.map(p => p.name).join(', '))}.` : ''}</div>`);
           msg.innerHTML = parts.join('');
+          deleted.forEach(p => { const cb = panel.querySelector(`.quote-select[data-id="${p.id}"]`); if (cb) cb.parentElement.remove(); });
           deleteBtn.disabled = false;
           refreshDeleteBtn();
         }

@@ -3,6 +3,7 @@ const fetch = require('node-fetch');
 const { createClient } = require('@supabase/supabase-js');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { prepare, ACTION_TOOLS, ACTION_TOOL_NAMES } = require('./_shared/ai-actions');
+const { requireInternal } = require('./_shared/require-internal');
 
 const {
   CALC_TOOL, WEB_SEARCH_TOOL, QUERY_TOOL, KB_TOOL, READ_ENTRY_TOOL,
@@ -34,8 +35,15 @@ exports.handler = async (event) => {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
 
+    // Who may start this: ai-chat.js (it sends the internal header), or a call carrying a real
+    // user's own token. Anything else is dropped without touching the job.
     const { data: userData, error: userErr } = await userClient.auth.getUser(token);
-    if (userErr || !userData || !userData.user) throw new Error('Session expired - refresh the page and log in again.');
+    const realUser = !userErr && userData && userData.user;
+    if (!requireInternal(event) && !realUser) {
+      console.warn('ai-chat-background: refused a call with no internal header and no valid user token');
+      return { statusCode: 202, body: '' };
+    }
+    if (!realUser) throw new Error('Session expired - refresh the page and log in again.');
 
     const { data: profile } = await userClient.from('profiles').select('full_name, role').eq('id', userData.user.id).maybeSingle();
 
@@ -137,7 +145,8 @@ Personality: you are a tough, cheeky tradie robot in a hard hat and a black-and-
           const { data: rows, error } = tu.name === 'search_knowledge_base' ? await searchKnowledgeBase(userClient, tu.input)
             : tu.name === 'read_knowledge_entry' ? await readKnowledgeEntry(userClient, tu.input)
             : await runQuery(userClient, tu.input);
-          resultContent = error ? `Error: ${error.message}` : JSON.stringify(rows);
+          // capped like team chat (chat-ai.js): one broad lookup must not fill the whole turn
+          resultContent = error ? `Error: ${error.message}` : JSON.stringify(rows).slice(0, 30000);
         } catch (err) {
           resultContent = `Error: ${err.message}`;
         }

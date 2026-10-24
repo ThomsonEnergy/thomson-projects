@@ -9,12 +9,20 @@
 const { processStatements } = require('./_shared/statement-intake');
 const { runAgent } = require('./_shared/agent-log');
 const { extractAttachments } = require('./_shared/gmail-sync');
+const { requireInternal } = require('./_shared/require-internal');
 
-exports.handler = () => runAgent('statements', async () => {
-  const r = await processStatements({ budgetMs: 12 * 60 * 1000, extractAttachments });
-  const parts = [];
-  if (r.checked) parts.push(`${r.checked} bill${r.checked === 1 ? '' : 's'} checked against their PO`);
-  parts.push(...r.results.filter(x => !['not', 'error'].includes(x)));
-  if (r.results.includes('error')) parts.push('a statement could not be read yet');
-  return { quiet: !r.checked && !r.queued && !r.results.length, summary: parts.join('; ') || 'Nothing new', details: r, usage: r.usage };
-});
+exports.handler = (event) => {
+  // only the Gmail sync and the Bill checks function start it (x-internal-secret)
+  if (!requireInternal(event)) {
+    console.error('process-statements-background: refused, no internal secret');
+    return { statusCode: 202, body: '' };
+  }
+  return runAgent('statements', async () => {
+    const r = await processStatements({ budgetMs: 12 * 60 * 1000, extractAttachments });
+    const parts = [];
+    if (r.checked) parts.push(`${r.checked} bill${r.checked === 1 ? '' : 's'} checked against their PO`);
+    parts.push(...r.results.filter(x => !['not', 'error'].includes(x)));
+    if (r.results.includes('error')) parts.push('a statement could not be read yet');
+    return { quiet: !r.checked && !r.queued && !r.results.length, summary: parts.join('; ') || 'Nothing new', details: r, usage: r.usage };
+  });
+};

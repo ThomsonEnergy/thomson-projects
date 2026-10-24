@@ -174,7 +174,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allClients = [];
@@ -199,10 +199,12 @@
     }
 
     // --- contacts sub-form ---
-    function addContactRow({ contact_type = 'job', name = '', phone = '', email = '' } = {}) {
+    function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '' } = {}) {
       contactCount++;
       const row = document.createElement('div');
       row.className = 'contact-row';
+      // Existing contacts keep their id on save, so job_contacts and the projects contact columns stay linked (F45)
+      if (id) row.dataset.id = id;
       row.style.cssText = 'display:grid; grid-template-columns:1fr 1.4fr 1fr 1.4fr auto; gap:8px; margin-bottom:6px; align-items:center;';
       row.innerHTML = `
         <select class="ct-type" style="font-size:13px;">
@@ -477,7 +479,6 @@
       if (editingClientId) {
         const { error } = await supabaseClient.from('clients').update(clientFields).eq('id', editingClientId);
         if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-        await supabaseClient.from('client_contacts').delete().eq('client_id', editingClientId);
         await logActivity('client', editingClientId, 'updated', `Client "${name}" updated`);
       } else {
         const { data: inserted, error } = await supabaseClient.from('clients').insert(clientFields).select().single();
@@ -486,7 +487,10 @@
         await logActivity('client', clientId, 'created', `Client "${name}" added`);
       }
 
+      // Contacts keep their ids (job_contacts.client_contact_id and the projects contact columns
+      // point at them): existing rows are updated in place, new rows added, rows taken off the form deleted.
       const contacts = [...document.querySelectorAll('.contact-row')].map((row, i) => ({
+        id: row.dataset.id || null,
         client_id: clientId,
         contact_type: row.querySelector('.ct-type').value,
         name: row.querySelector('.ct-name').value.trim(),
@@ -494,11 +498,22 @@
         email: row.querySelector('.ct-email').value.trim(),
         sort_order: i,
       })).filter(c => c.name || c.phone || c.email);
-
-      if (contacts.length) {
-        const { error: contactErr } = await supabaseClient.from('client_contacts').insert(contacts);
-        if (contactErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(contactErr.message)}</div>`; return; }
+      const contactsBefore = editingClientId ? (allClients.find(x => x.id === editingClientId)?.client_contacts || []) : [];
+      const keptContactIds = contacts.filter(c => c.id).map(c => c.id);
+      const removedContactIds = contactsBefore.map(c => c.id).filter(id => !keptContactIds.includes(id));
+      const contactErrors = [];
+      if (removedContactIds.length) {
+        const { error: delErr } = await supabaseClient.from('client_contacts').delete().in('id', removedContactIds);
+        if (delErr) contactErrors.push(delErr.message);
       }
+      for (const c of contacts) {
+        const { id, ...fields } = c;
+        const { error: contactErr } = id
+          ? await supabaseClient.from('client_contacts').update(fields).eq('id', id)
+          : await supabaseClient.from('client_contacts').insert(fields);
+        if (contactErr) contactErrors.push(contactErr.message);
+      }
+      if (contactErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a contact did not: ${escapeHtml(contactErrors.join('; '))}</div>`; await loadClients(); return; }
 
       // Sites keep their ids (jobs link to them): existing rows are updated, new rows added,
       // rows taken off the form deleted (their jobs keep the address text).
@@ -608,9 +623,10 @@
       document.getElementById('mapping-status').textContent = 'Mapping columns with keyword matching - checking with AI for a better guess...';
 
       try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const res = await fetch('/.netlify/functions/analyze-csv-columns', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
           body: JSON.stringify({ headers: csvHeaders, sampleRows: csvRows.slice(0, 5) }),
         });
         const json = await res.json();

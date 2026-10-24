@@ -102,3 +102,10 @@
 # sync-energy-plans-background.js (docs/IDEAS_BACKLOG.md item 34).
 [functions.sync-energy-plans]
   schedule = "*/15 * * * *"
+
+# Once a day at 17:30 UTC (3:30am or 4:30am Sydney, before anyone is in): copies each linked
+# employee's leave balances from Xero Payroll into leave_balances for the Staff page - see
+# sync-leave-balances.js. Its "Refresh from Xero" button needs a plain HTTP function, since a
+# scheduled function cannot be called over HTTP in production.
+[functions.sync-leave-balances]
+  schedule = "30 17 * * *"

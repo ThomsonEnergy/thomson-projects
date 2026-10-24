@@ -256,9 +256,9 @@
   </div>
   <div id="approve-bar" class="q-approve-bar"></div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
-  <script src="/js/schedule-of-rates.js?v=2"></script>
-  <script src="/js/solar-roi.js?v=12"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/schedule-of-rates.js?v=3"></script>
+  <script src="/js/solar-roi.js?v=13"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -719,11 +719,13 @@
       const scope = parseScope(project.sow_text);
       const scopeRowsHtml = scope.rows.map(r => `
         <div class="row-x"><span class="x">${BOLT_SVG}</span><div><div class="h">${esc(r.h)}</div>${r.body.length ? `<div class="b">${bodyHtml(r.body)}</div>` : ''}</div></div>`).join('');
-      const designHtml = ((template === 'solar' || template === 'battery') && project.pylon_link) ? `
+      // the Pylon link is staff-typed: only an https link goes into the href, escaped (S31)
+      const pylonHref = (typeof project.pylon_link === 'string' && /^https:\/\/\S+$/i.test(project.pylon_link.trim())) ? project.pylon_link.trim() : '';
+      const designHtml = ((template === 'solar' || template === 'battery') && pylonHref) ? `
         <div class="design-box">
           <div class="sec-title" style="margin:0 0 8px;">System design</div>
           <p>${pylonSummary ? esc(pylonSummary) : 'See the full interactive design, panel layout, and return-on-investment calculation online.'}</p>
-          <a class="q-btn" href="${project.pylon_link}" target="_blank" rel="noopener">View interactive design &amp; ROI &rarr;</a>
+          <a class="q-btn" href="${esc(pylonHref)}" target="_blank" rel="noopener">View interactive design &amp; ROI &rarr;</a>
         </div>` : '';
       const scopeHtml = (project.sow_text || designHtml) ? `
         <section class="pg">
@@ -780,7 +782,9 @@
       const roiInputs = project.roi_inputs || {};
       // the two prices as typed, else the default split (battery stage less the BSTC, solar the rest), as on the quote page
       const roiPrices = roiPricesFor({ typedSolar: roiInputs.solar_price, typedBattery: roiInputs.battery_price, defaults: roiDefaultPrices({ centres: data.cost_centres, netCost: roiNetCost, bstcCredit: bstcOnly }) });
-      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, money, inputs: roiInputs, solarPrice: roiPrices.solar, batteryPrice: roiPrices.battery }) : { sections: [], asks: [], columns: [] };
+      // clientType sets the GST basis of the bill (a company's bill is ex GST unless roi_inputs.bill_gst says inc) (M10)
+      const roiClientType = isCompanyClient ? 'company' : 'individual';
+      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, money, inputs: roiInputs, solarPrice: roiPrices.solar, batteryPrice: roiPrices.battery, clientType: roiClientType }) : { sections: [], asks: [], columns: [] };
       const est = pres.est;
       const cur = est ? est.current : null;
       const br = project.bill_reading || {};
@@ -789,7 +793,7 @@
       const savingsLead = !pres.sections.length
         ? 'We want your savings estimate to be accurate, not a guess, so there are no figures here yet.'
         : cur && pres.dollars
-          ? `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day${pres.bills ? `, about ${money(cur.billNow)} a year at today's rates` : ''}. ${systemText} is estimated to save you <strong>${money(cur.totalSaving)} a year</strong>${cur.payback ? ` and pay for itself in about <strong>${esc(String(cur.payback))} years</strong>` : ''}${est.newSolarKw && est.batteryKwh && cur.solarPayback && cur.batteryPayback ? ` (the solar in ${esc(String(cur.solarPayback))} years, the battery in ${esc(String(cur.batteryPayback))})` : ''}.${est.alt ? ` On ${esc(est.alt.name)} the same system would save about ${money(est.alt.totalSaving)} a year.` : ''}`
+          ? `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day${pres.bills ? `, about ${money(cur.billNow)} a year at today's rates` : ''}. ${systemText} is estimated to save you <strong>${money(cur.totalSaving)} a year</strong>${cur.payback ? ` and pay for itself in about <strong>${esc(String(cur.payback))} years</strong>` : est.prices.total > 0 ? `. <strong>${esc(ROI_NOT_PAID_OFF)}</strong> at that saving` : ''}${est.newSolarKw && est.batteryKwh && cur.solarPayback && cur.batteryPayback ? ` (the solar in ${esc(String(cur.solarPayback))} years, the battery in ${esc(String(cur.batteryPayback))})` : ''}.${est.alt ? ` On ${esc(est.alt.name)} the same system would save about ${money(est.alt.totalSaving)} a year.` : ''}`
           : `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day. The figures below are what we can say from the pages we have.`;
       const asksHtml = pres.asks.length ? `
             <div class="sec-title" style="margin-top:22px;">What we still need from you</div>
@@ -805,7 +809,7 @@
       // saved on the quote, always with the disclaimer (a suggestion only, no endorsement, no payment).
       const planOpts = Array.isArray(roiInputs.plan_options) ? roiInputs.plan_options : [];
       const planCmp = roiWanted && planOpts.length && project.bill_reading
-        ? roiComparePlans({ reading: project.bill_reading, answers: roiAnswers, inputs: roiInputs, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, zoneRating: Number(project.stc_zone_rating) || 1.382, candidates: planOpts.map(o => ({ key: o.plan_id, roi_plan: o.roi_plan, adjust: o.adjust })) })
+        ? roiComparePlans({ reading: project.bill_reading, answers: roiAnswers, inputs: roiInputs, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, zoneRating: Number(project.stc_zone_rating) || 1.382, clientType: roiClientType, candidates: planOpts.map(o => ({ key: o.plan_id, roi_plan: o.roi_plan, adjust: o.adjust })) })
         : null;
       const planOptsHtml = planCmp ? (() => {
         const byKey = Object.fromEntries(planOpts.map(o => [o.plan_id, o]));

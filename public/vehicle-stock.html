@@ -31,7 +31,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const vehicleId = new URLSearchParams(window.location.search).get('id');
@@ -135,6 +135,7 @@
     }
 
     async function openCreatePoPanel() {
+      const myRole = await getMyRole();
       const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
       const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
 
@@ -156,7 +157,7 @@
           <details class="po-fold" style="margin-top:14px;">
             <summary>More options <span class="subtitle" style="font-weight:400; font-size:12px; margin-left:auto;">open PO, invoice</span></summary>
             ${poTypeChoiceHtml('cp')}
-            <button type="button" class="secondary btn-sm" id="cp-upload-invoice-btn" style="margin-top:10px;">Or upload the supplier's invoice instead</button>
+            ${isPricingRole(myRole) ? `<button type="button" class="secondary btn-sm" id="cp-upload-invoice-btn" style="margin-top:10px;">Or upload the supplier's invoice instead</button>` : ''}
           </details>
 
           <div style="margin-top:14px;">
@@ -168,7 +169,9 @@
       document.body.appendChild(overlay);
 
       const resolveSupplier = wireSupplierPicker(overlay, suppliers, { search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' });
-      wireUploadInvoiceButton(overlay.querySelector('#cp-upload-invoice-btn'), overlay.querySelector('#cp-msg'));
+      // reading the invoice is for Admin, Finance and Sales only, so nobody else is offered it (F9)
+      const cpUploadBtn = overlay.querySelector('#cp-upload-invoice-btn');
+      if (cpUploadBtn) wireUploadInvoiceButton(cpUploadBtn, overlay.querySelector('#cp-msg'));
 
       buildMaterialSearchRow(materials || [], 'cp-items-container');
       overlay.querySelector('#cp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'cp-items-container'));

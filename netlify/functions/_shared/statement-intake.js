@@ -21,6 +21,7 @@ const { getAdminClient } = require('./require-admin');
 const { gmailRequest } = require('./google-client');
 const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
+const { internalHeaders } = require('./require-internal');
 const fetch = require('node-fetch');
 const { matchSupplier, downloadAttachment } = require('./supplier-bill-intake');
 const { extractStatement } = require('./statement-ai');
@@ -35,9 +36,23 @@ const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-AU', { minimumFra
 const normNum = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^(inv|invoice)/, '').replace(/^0+/, '');
 const headerValue = (headers, name) => (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || null;
 
+// The file's type from its first bytes (supplier_statements has no mime column, and Claude rejects a
+// PNG, GIF or WEBP sent as image/jpeg), then the file name, then JPEG.
+function sniffMediaType(buffer, fileName) {
+  const head = Buffer.isBuffer(buffer) ? buffer.subarray(0, 12) : Buffer.alloc(0);
+  const text = (from, to) => head.subarray(from, to).toString('latin1');
+  if (text(0, 4) === '%PDF') return 'application/pdf';
+  if (head[0] === 0x89 && text(1, 4) === 'PNG') return 'image/png';
+  if (text(0, 3) === 'GIF') return 'image/gif';
+  if (text(0, 4) === 'RIFF' && text(8, 12) === 'WEBP') return 'image/webp';
+  if (head[0] === 0xff && head[1] === 0xd8) return 'image/jpeg';
+  const ext = ((String(fileName || '').match(/\.(pdf|png|gif|webp|jpe?g)$/i) || [])[1] || '').toLowerCase();
+  return { pdf: 'application/pdf', png: 'image/png', gif: 'image/gif', webp: 'image/webp' }[ext] || 'image/jpeg';
+}
+
 async function startStatementProcessing() {
   try {
-    const res = await fetch(`${selfBaseUrl()}/.netlify/functions/process-statements-background`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', timeout: 8000 });
+    const res = await fetch(`${selfBaseUrl()}/.netlify/functions/process-statements-background`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() }, body: '{}', timeout: 8000 });
     if (!res.ok && res.status !== 202) console.error('statement processing did not start:', res.status);
   } catch (err) {
     console.error('statement processing did not start:', err.message);
@@ -195,7 +210,7 @@ async function processStatements({ budgetMs = 12 * 60 * 1000, extractAttachments
     try {
       if (!claimed.file_path || !(claimed.lines || []).length) {
         const buffer = await downloadAttachment(claimed.gmail_message_id, claimed.attachment_part_id);
-        const mediaType = /\.pdf$/i.test(claimed.file_name || '') ? 'application/pdf' : 'image/jpeg';
+        const mediaType = sniffMediaType(buffer, claimed.file_name);
         const path = `statements/emailed/${new Date().toISOString().slice(0, 7)}/${Date.now()}-${String(claimed.file_name || 'statement').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
         const { error: upErr } = await admin.storage.from('project-documents').upload(path, buffer, { contentType: mediaType });
         if (upErr) throw upErr;

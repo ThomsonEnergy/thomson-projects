@@ -216,8 +216,12 @@ async function openSignedDocInNewTab(path, bucket) {
 // Settings > My Profile (a person's own licences).
 function expiryBadge(dateStr) {
   if (!dateStr) return `<span class="subtitle">No expiry set</span>`;
-  const days = Math.ceil((new Date(dateStr) - new Date(new Date().toDateString())) / 86400000);
-  const dateLabel = new Date(dateStr).toLocaleDateString('en-AU');
+  // A date-only expiry against the Sydney date, both at UTC midnight: today is 0 days and yesterday
+  // is expired. new Date('YYYY-MM-DD') alone is UTC midnight against a local midnight (bug F50).
+  const expiryKey = String(dateStr).slice(0, 10);
+  const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+  const days = Math.round((Date.parse(`${expiryKey}T00:00:00Z`) - Date.parse(`${todayKey}T00:00:00Z`)) / 86400000);
+  const dateLabel = new Date(`${expiryKey}T00:00:00Z`).toLocaleDateString('en-AU', { timeZone: 'UTC' });
   if (days < 0) return `<span style="color:var(--red); font-weight:600;">Expired ${dateLabel}</span>`;
   if (days <= 30) return `<span style="color:var(--red); font-weight:600;">${dateLabel} (${days}d)</span>`;
   return dateLabel;
@@ -971,11 +975,13 @@ async function generateClientPdf(docType, recordId) {
   const { data: before } = await supabaseClient.from(table).select(`${genKey}, ${errKey}`).eq('id', recordId).single();
   const startedAt = Date.now();
   const lastGenerated = before ? before[genKey] : null;
+  const { data: { session } } = await supabaseClient.auth.getSession();
   return new Promise((resolve, reject) => {
     let finished = false, timer = null;
     const finish = (fn, value) => { if (finished) return; finished = true; clearInterval(timer); fn(value); };
     fetch('/.netlify/functions/generate-client-document-pdf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc_type: docType, record_id: recordId }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ doc_type: docType, record_id: recordId }),
     }).then(async (res) => {
       let body = null; try { body = await res.json(); } catch (e) { /* not JSON: keep watching the record */ }
       if (res.ok && body && body.ok) finish(resolve, body);
@@ -998,20 +1004,20 @@ async function generateClientPdf(docType, recordId) {
 function autoGenerateInvoicePdf(invoiceId) {
   try {
     if (!invoiceId) return;
-    fetch('/.netlify/functions/generate-client-document-pdf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+    supabaseClient.auth.getSession().then(({ data: { session } }) => fetch('/.netlify/functions/generate-client-document-pdf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, keepalive: true,
       body: JSON.stringify({ doc_type: 'invoice', record_id: invoiceId }),
-    }).catch(() => {});
+    })).catch(() => {});
   } catch (e) { /* the Generate PDF button is still there */ }
 }
 
 function autoGenerateQuotePdf(project) {
   try {
     if (!project || !project.id || !project.quote_token || project.proposal_template === 'direct_job') return;
-    fetch('/.netlify/functions/generate-client-document-pdf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+    supabaseClient.auth.getSession().then(({ data: { session } }) => fetch('/.netlify/functions/generate-client-document-pdf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, keepalive: true,
       body: JSON.stringify({ doc_type: 'quote', record_id: project.id }),
-    }).catch(() => {});
+    })).catch(() => {});
   } catch (e) { /* the Generate PDF button is still there */ }
 }
 
@@ -2162,8 +2168,8 @@ function isPricingRole(role) {
 // column-level grants (see migration_007), so a role-check bug here can't
 // by itself leak pricing.
 const COST_CENTRE_COLS_BASE = 'id, project_id, name, description, sort_order';
-const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, estimated_labour_cost, estimated_material_cost, labour_cost, material_cost, invoiced_amount, stc_total, stc_system_kw, stc_zone_rating, stc_install_year, stc_price_per_certificate, variation_entry_id';
-const LINE_ITEM_COLS_BASE = 'id, cost_centre_id, description, item_type, sort_order, quantity';
+const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, estimated_labour_cost, estimated_material_cost, labour_cost, material_cost, invoiced_amount, stc_quantity, stc_total, stc_system_kw, stc_zone_rating, stc_install_year, stc_price_per_certificate, variation_entry_id';
+const LINE_ITEM_COLS_BASE = 'id, cost_centre_id, description, item_type, sort_order, quantity, ai_suggested';
 const LINE_ITEM_COLS_PRICING = 'unit_cost';
 
 async function costCentreColumns() {
@@ -2410,9 +2416,9 @@ const MAIN_NAV_ITEMS = [
   { key: 'leads', label: 'Leads', href: '/leads.html', icon: '&#127919;', group: 'sales', pricingOnly: true },
   { key: 'quotes', label: 'Quotes', href: '/quotes.html', icon: '&#128221;', group: 'sales' },
   { key: 'projects', label: 'Jobs', href: '/projects.html', icon: '&#128202;', group: 'sales' },
-  { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;', group: 'sales' },
+  { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;', group: 'sales', pricingOnly: true },
   { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;', group: 'sales', pricingOnly: true },
-  { key: 'reviews', label: 'Reviews', href: '/reviews.html', icon: '&#11088;', group: 'sales' },
+  { key: 'reviews', label: 'Reviews', href: '/reviews.html', icon: '&#11088;', group: 'sales', pricingOnly: true }, // review_requests is pricing-only
   { key: 'inbox', label: 'Inbox', href: '/inbox.html', icon: '&#128231;', group: 'sales', pricingOnly: true },
   { key: 'stcs', label: 'STCs', href: '/stcs.html', icon: '&#9728;', group: 'sales', pricingOnly: true },
   { key: 'assets', label: 'Customer equipment', href: '/assets.html', icon: '&#128295;', group: 'sales' },
@@ -3434,6 +3440,21 @@ function roundToQuarterHour(date) {
 // segment actually being closed - a break is a single point in time, not
 // something to duplicate onto a carried-over segment. Returns { error } -
 // never throws.
+
+// Inserts closed time_entries rows unless a row with that clock-in already exists for the person,
+// so a double tap or a retry after a dropped reply adds nothing twice (bug M14). Returns { error }.
+async function insertTimeEntriesOnce(staffId, rows) {
+  if (!rows.length) return { error: null };
+  const { data: existing, error: readErr } = await supabaseClient.from('time_entries')
+    .select('clock_in').eq('staff_id', staffId).in('clock_in', rows.map(r => r.clock_in));
+  if (readErr) return { error: readErr };
+  const have = new Set((existing || []).map(r => new Date(r.clock_in).toISOString()));
+  const missing = rows.filter(r => !have.has(new Date(r.clock_in).toISOString()));
+  if (!missing.length) return { error: null };
+  const { error } = await supabaseClient.from('time_entries').insert(missing);
+  return { error: error || null };
+}
+
 async function clockOutActiveEntry(entry, opts = {}) {
   const clockOutIso = opts.clockOutIso || new Date().toISOString();
   const carryFields = opts.carryFields || {};
@@ -3453,7 +3474,7 @@ async function clockOutActiveEntry(entry, opts = {}) {
       ...carryFields,
       clock_in: seg.clock_in, clock_out: seg.clock_out,
     }));
-    const { error: insErr } = await supabaseClient.from('time_entries').insert(extraEntries);
+    const { error: insErr } = await insertTimeEntriesOnce(entry.staff_id, extraEntries);
     if (insErr) return { error: insErr };
   }
   return { error: null };
@@ -3512,9 +3533,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
 
     // Has today's mandatory break already been answered against another
     // entry today? Generous UTC window, exact Sydney-date match in JS -
-    // same pattern used server-side for day banding. The same fetch also
-    // gives us everything ELSE clocked today, to check the 6-hour
-    // threshold below.
+    // same pattern used server-side for day banding.
     const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
     const { data: recent, error: recentErr } = await supabaseClient
       .from('time_entries')
@@ -3534,10 +3553,6 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   const todayKey = sydneyDateKey(new Date());
   const todaysEntries = (recentEntries || []).filter(r => sydneyDateKey(new Date(r.clock_in)) === todayKey);
   const breakAlreadyLogged = todaysEntries.some(r => r.break_taken !== null && r.break_taken !== undefined);
-  // Everything already clocked today (other entries) plus however long
-  // THIS entry ends up running once a clock-out time is picked below.
-  const otherTodayMs = todaysEntries.filter(r => r.id !== entry.id && r.clock_out)
-    .reduce((s, r) => s + (new Date(r.clock_out) - new Date(r.clock_in)), 0);
   // Overnight-stay is asked once per (day, job) - a mobilisation job
   // usually runs several consecutive days, so this only needs answering
   // once per day even if it's clocked in and out of more than once.
@@ -3614,10 +3629,10 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       combined.setHours(hh, mm, 0, 0);
       if (combined <= new Date(entry.clock_in)) { msg.innerHTML = `<div class="error-box">Clock-out must be after your clock-in time.</div>`; return; }
       state.outIso = combined.toISOString();
-      // Only worth asking about a break once today's actual worked hours
-      // (this entry included) pass 6 - a short day doesn't need one.
-      const todayHours = (otherTodayMs + (combined - new Date(entry.clock_in))) / 3600000;
-      if (breakAlreadyLogged || todayHours <= 6) proceedAfterBreak(); else renderStep2();
+      // Only worth asking about a break when this shift runs past 6 hours: a shorter one does not
+      // need one, and the break sits on this one row and comes off its paid hours (bug M1).
+      const shiftHours = (combined - new Date(entry.clock_in)) / 3600000;
+      if (breakAlreadyLogged || shiftHours <= 6) proceedAfterBreak(); else renderStep2();
     });
 
     refreshClockOutSplit();
@@ -3727,7 +3742,11 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       overlay.querySelector('#cko-break-yes').style.borderColor = '';
       detailEl.innerHTML = `<label style="margin-top:0">Why not?</label><input id="cko-break-reason" placeholder="e.g. too busy on site" />`;
     });
-    overlay.querySelector('#cko-back-btn').addEventListener('click', renderStep1);
+    // Back forgets the default answer below: a shift shortened to 6 hours or less on step 1 is never
+    // asked again, and must not carry a break it was never asked about.
+    overlay.querySelector('#cko-back-btn').addEventListener('click', () => { state.breakTaken = null; state.breakStart = ''; renderStep1(); });
+    // The default answer is yes, 30 minutes, so Continue works straight away; No is one tap.
+    if (state.breakTaken !== false) overlay.querySelector('#cko-break-yes').click();
     overlay.querySelector('#cko-break-continue-btn').addEventListener('click', () => {
       const msg = overlay.querySelector('#cko-msg');
       if (state.breakTaken === null) { msg.innerHTML = `<div class="error-box">Let us know if you took a break.</div>`; return; }
@@ -3756,7 +3775,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Staying overnight?</h2>
-        <p class="subtitle" style="margin-bottom:12px;">${projectRef(project)} is approved for LAHA (living-away-from-home allowance). Did you stay overnight away from home for it?</p>
+        <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))} is approved for LAHA (living-away-from-home allowance). Did you stay overnight away from home for it?</p>
         <div style="display:flex; gap:10px;">
           <button type="button" id="cko-laha-yes" style="flex:1;">Yes</button>
           <button type="button" class="secondary" id="cko-laha-no" style="flex:1;">No</button>
@@ -3768,8 +3787,19 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   }
 
   async function finalizeClockOut() {
+    // One save at a time: a second tap on Next, Yes, No or Continue while the first is still
+    // writing would run these writes again (bug M14).
+    if (state.saving) return;
+    state.saving = true;
+    overlay.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    const savingMsg = overlay.querySelector('#cko-msg');
+    if (savingMsg) savingMsg.innerHTML = `<p class="subtitle">Saving...</p>`;
+
     const onceFields = {};
-    if (state.breakTaken !== null) {
+    // The break question is only asked past 6 hours (step 1); a shorter shift never gets break fields,
+    // whatever an earlier pass through the break step left in state.
+    const shiftHoursNow = (new Date(state.outIso) - new Date(entry.clock_in)) / 3600000;
+    if (state.breakTaken !== null && shiftHoursNow > 6) {
       onceFields.break_taken = state.breakTaken;
       if (state.breakTaken) {
         const [hh, mm] = state.breakStart.split(':').map(Number);
@@ -3819,18 +3849,25 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       // The open entry becomes the first stage's segment (updated, never
       // deleted: deleting an open entry fires sync_project_booked and can
       // unbook the job, migration 20261023000000). The rest are inserted.
+      // The break sits on the longest segment so it always comes off in full (a short first segment
+      // could not hold 30 minutes); the overnight flag stays on the first.
+      const breakKeys = ['break_taken', 'break_start', 'break_minutes', 'break_skip_reason'];
+      const breakFields = Object.fromEntries(Object.entries(onceFields).filter(([k]) => breakKeys.includes(k)));
+      const otherOnce = Object.fromEntries(Object.entries(onceFields).filter(([k]) => !breakKeys.includes(k)));
+      const breakRow = rows.reduce((best, r, i) => (r.minutes > rows[best].minutes ? i : best), 0);
       const { error: upErr } = await supabaseClient.from('time_entries').update({
         cost_centre_id: rows[0].cost_centre_id, selected_cost_centre_ids: null,
-        clock_in: rows[0].clock_in, clock_out: rows[0].clock_out, ...onceFields,
+        clock_in: rows[0].clock_in, clock_out: rows[0].clock_out, ...otherOnce, ...(breakRow === 0 ? breakFields : {}),
       }).eq('id', entry.id);
       if (upErr) saveError = upErr;
 
-      const inserts = rows.slice(1).map(r => ({
+      const inserts = rows.slice(1).map((r, j) => ({
         staff_id: entry.staff_id, project_id: entry.project_id, cost_centre_id: r.cost_centre_id,
         time_category: entry.time_category, clock_in: r.clock_in, clock_out: r.clock_out,
+        ...(breakRow === j + 1 ? breakFields : {}),
       }));
       if (!saveError && inserts.length) {
-        const { error: insErr } = await supabaseClient.from('time_entries').insert(inserts);
+        const { error: insErr } = await insertTimeEntriesOnce(entry.staff_id, inserts);
         if (insErr) saveError = insErr;
       }
 
@@ -3840,12 +3877,14 @@ async function openClockOutModal(entry, onDone, opts = {}) {
           selected_cost_centre_ids: chosenCentres, time_category: entry.time_category,
           clock_in: seg.clock_in, clock_out: seg.clock_out,
         }));
-        const { error: e2 } = await supabaseClient.from('time_entries').insert(extra);
+        const { error: e2 } = await insertTimeEntriesOnce(entry.staff_id, extra);
         if (e2) saveError = e2;
       }
     }
 
+    state.saving = false;
     if (saveError) {
+      overlay.querySelectorAll('button').forEach(b => { b.disabled = false; });
       const msg = overlay.querySelector('#cko-msg');
       if (msg) msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(saveError))}</div>`;
       return;
@@ -4018,10 +4057,26 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   // long the before-you-go step took, not zero and not backdated.
   async function finishAndMaybeSwitch() {
     if (opts.switchTo) {
-      await supabaseClient.from('time_entries').insert({
+      const { error } = await supabaseClient.from('time_entries').insert({
         staff_id: entry.staff_id, project_id: opts.switchTo.projectId,
         time_category: 'job', clock_in: roundToQuarterHour(new Date()).toISOString(),
       });
+      // 23505 is the one-open-entry index: a retry whose first attempt did save. Anything else
+      // means clocked out but not clocked in, so say so instead of closing as if it worked (bug F28).
+      if (error && error.code !== '23505') {
+        overlay.innerHTML = `
+          <div class="card" style="max-width:460px; width:100%;">
+            <h2>Not clocked in yet</h2>
+            <div class="error-box">You are clocked out, but clocking in to ${escapeHtml(opts.switchTo.label)} did not save. ${escapeHtml(friendlyError(error))}</div>
+            <div style="margin-top:14px;">
+              <button type="button" id="cko-switch-retry">Try again</button>
+              <button type="button" class="secondary" id="cko-switch-close">Close</button>
+            </div>
+          </div>`;
+        overlay.querySelector('#cko-switch-retry').addEventListener('click', finishAndMaybeSwitch);
+        overlay.querySelector('#cko-switch-close').addEventListener('click', async () => { overlay.remove(); if (onDone) await onDone(); });
+        return;
+      }
     }
     overlay.remove();
     if (onDone) await onDone();
@@ -4425,7 +4480,7 @@ function openQuickJobPanel(onCreated) {
       <label>What's this job about</label>
       <textarea id="qj-brief" rows="2" placeholder="Brief description of the work"></textarea>
 
-      <label>Client - search existing, or just type a new one below</label>
+      <label id="qj-client-search-label">Client - search existing, or just type a new one below</label>
       <input id="qj-client-search" placeholder="Search existing clients..." autocomplete="off" />
       <div id="qj-client-results"></div>
 
@@ -4458,6 +4513,14 @@ function openQuickJobPanel(onCreated) {
     </div>`;
 
   let selectedClientId = null;
+
+  // Clients are read and written by Admin, Finance and Sales only (RLS). Anyone else types the
+  // client's name and the job carries it with no clients row, so the search is not shown (bug F7).
+  getMyRole().then(role => {
+    if (isPricingRole(role)) return;
+    overlay.querySelector('#qj-client-search-label').textContent = 'Client';
+    overlay.querySelector('#qj-client-search').style.display = 'none';
+  });
 
   let searchTimeout;
   overlay.querySelector('#qj-client-search').addEventListener('input', (e) => {
@@ -4510,7 +4573,8 @@ function openQuickJobPanel(onCreated) {
     confirmBtn.textContent = 'Creating...';
     try {
       let clientId = selectedClientId;
-      if (!clientId) {
+      // Only a pricing role may add the clients row; for anyone else the job keeps the typed name (bug F7).
+      if (!clientId && isPricingRole(await getMyRole())) {
         const { data: newClient, error: clientErr } = await supabaseClient
           .from('clients')
           .insert({ name: clientName, email: clientEmail, phone: clientPhone, address: clientAddress })
@@ -4796,10 +4860,10 @@ function openWarrantyJobPanel(originalProject, onCreated) {
   overlay.innerHTML = `
     <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
       <h2>Create warranty job</h2>
-      <p class="subtitle" style="margin-bottom:12px;">For ${projectRef(originalProject)}. Its own job number - clock in, log POs, and invoice it same as any job - but its cost pulls back against the original job's actual profit, and once you close it out you'll choose whether it's absorbed, billed to the manufacturer, or partly billed to the client.</p>
+      <p class="subtitle" style="margin-bottom:12px;">For ${escapeHtml(projectRef(originalProject))}. Its own job number - clock in, log POs, and invoice it same as any job - but its cost pulls back against the original job's actual profit, and once you close it out you'll choose whether it's absorbed, billed to the manufacturer, or partly billed to the client.</p>
 
       <label style="margin-top:0">Job name</label>
-      <input id="wj-name" value="${(originalProject.name || '').replace(/"/g, '&quot;')} - Warranty" />
+      <input id="wj-name" value="${escapeHtml(originalProject.name || '')} - Warranty" />
 
       <label>What's the warranty issue</label>
       <textarea id="wj-brief" rows="2" placeholder="Brief description of what's gone wrong"></textarea>
@@ -4807,7 +4871,7 @@ function openWarrantyJobPanel(originalProject, onCreated) {
       <div class="grid cols-2" style="margin-top:8px;">
         <div>
           <label style="margin-top:0">Client name</label>
-          <input id="wj-client-name" required value="${(originalProject.client_name || '').replace(/"/g, '&quot;')}" />
+          <input id="wj-client-name" required value="${escapeHtml(originalProject.client_name || '')}" />
         </div>
         <div>
           <label style="margin-top:0">Client email</label>
@@ -4818,7 +4882,7 @@ function openWarrantyJobPanel(originalProject, onCreated) {
       <input id="wj-client-phone" type="tel" autocomplete="tel" value="${escapeHtml(originalProject.client_phone || '')}" />
 
       <label>Site address</label>
-      <input id="wj-address" value="${(originalProject.client_address || '').replace(/"/g, '&quot;')}" />
+      <input id="wj-address" value="${escapeHtml(originalProject.client_address || '')}" />
 
       <div style="margin-top:14px;">
         <button id="wj-confirm-btn">Create warranty job</button>
@@ -5193,7 +5257,9 @@ function pylonSystemSummary(pylonData) {
   if (pylonData.summary?.dc_output_kw) parts.push(`${pylonData.summary.dc_output_kw}kW system`);
   [...(pylonData.module_types || []), ...(pylonData.inverter_types || []), ...(pylonData.storage_types || [])]
     .forEach(item => { if (item?.description) parts.push(`${item.quantity || 1}x ${item.description}`); });
-  return parts.join(' &middot; ');
+  // Plain text, so the middle dot is the character itself, not an HTML entity: the pages escape
+  // the whole summary (bug F4).
+  return parts.join(' · ');
 }
 
 // Kicks off a background extraction function and polls the resulting job
@@ -5535,8 +5601,9 @@ async function runComplianceCheck(projectId, phase, taskType, btnEl, resultEl) {
           inverters: pylonData.inverter_types || [],
           batteries: pylonData.storage_types || [],
         };
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const wordRes = await fetch('/.netlify/functions/generate-solar-tasks', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
           body: JSON.stringify({ missing: checkJson.missing, equipment }),
         });
         const wordJson = await wordRes.json();
@@ -5632,6 +5699,7 @@ async function quoteSendGate(project) {
 // cases differ only in whether `components` came from a prebuild's master
 // template or from saved cost_centre_line_items rows.
 function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
+  clientDescription = clientDescription || ''; // a cleared description is saved as null (bug F8)
   const group = document.createElement('div');
   group.className = 'li-prebuild-group';
   group.dataset.groupId = groupId;
@@ -5649,7 +5717,7 @@ function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
   group.innerHTML = `
     <div class="li-prebuild-header" style="display:grid; grid-template-columns:2fr 0.6fr 1fr auto; gap:8px; align-items:center; padding:10px; background:var(--surface-2);">
       <div>
-        <input class="li-prebuild-desc" value="${clientDescription.replace(/"/g, '&quot;')}" style="font-size:13px; font-weight:600;" />
+        <input class="li-prebuild-desc" value="${escapeHtml(clientDescription)}" style="font-size:13px; font-weight:600;" />
         <div class="subtitle" style="font-size:11px; margin-top:2px;">Prebuild - the client sees this one line, not the components below</div>
       </div>
       <input class="li-prebuild-qty" type="number" step="0.01" min="0.01" value="${qtyDisplay}" title="Quantity of this whole prebuild - rescales every component together" style="font-size:13px;" />
@@ -5812,6 +5880,8 @@ function renderStageLineItems(stageRow, lineItems) {
 // from the bill). Shared by every "create a PO" panel; `msgEl` shows
 // read/error status inline in that panel while it works.
 function wireUploadInvoiceButton(btnEl, msgEl) {
+  // The extraction function is for Admin, Finance and Sales only, so nobody else is offered it (bug F9).
+  getMyRole().then(role => { if (!isPricingRole(role)) btnEl.style.display = 'none'; });
   btnEl.addEventListener('click', () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -5863,11 +5933,13 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
 
   const found = await findMatchingSupplier(matchFields);
   const match = found?.supplier || null;
-  const fileBase64 = await fileToBase64(file);
+  // The file goes to storage and the supplier page downloads it by path: base64 in sessionStorage
+  // overflows the quota on a big phone photo and the click dies silently (bug F49).
+  const filePath = await uploadPrivateFile(file, 'ai-extraction-uploads');
 
   function proceedTo(supplierId) {
     sessionStorage.setItem('pending_upload', JSON.stringify({
-      ...extra, type: uploadType, extracted: extractedPayload, fileBase64, fileName: file.name, fileType: file.type,
+      ...extra, type: uploadType, extracted: extractedPayload, filePath, fileName: file.name, fileType: file.type,
     }));
     window.location.href = `/supplier-detail.html?id=${supplierId}&resume_upload=1`;
   }
@@ -6533,10 +6605,16 @@ function poWhereLabel(po) {
 // The short form used on buttons: "J7040", "Stock", "Van 2", "the Tools register".
 function poWhereShort(po) {
   const veh = po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : null;
-  if (po.po_kind === 'tools') return 'the Tools register';
+  if (po.po_kind === 'tools') return poToolsWhereShort(po);
   if (po.project_id) return po.projects && po.projects.job_number ? 'J' + po.projects.job_number : 'the job';
   if (po.vehicle_id) return veh || 'the vehicle';
   return 'Stock';
+}
+
+// Where a tool line lands when received: the Tools register, in the PO's vehicle when it has one (bug F40).
+function poToolsWhereShort(po) {
+  const veh = po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : null;
+  return 'the Tools register' + (po.vehicle_id ? ' in ' + (veh || 'the vehicle') : '');
 }
 
 function poWhereHref(po) {
@@ -6579,7 +6657,9 @@ function poNextStep(po, bills, { emailed, role } = {}) {
   if (redLine) return { key: 'bills', label: 'Decide on the bill lines in red', hint: 'A bill does not match this PO. Accept each red line, or deny the charge and the supplier is asked about it.' };
   if (po.status === 'received' && c.total) return { key: 'close', label: 'All received: close and approve', hint: 'Closing approves its bills for payment.' };
   if (!c.total) {
-    if (po.po_type === 'open' && po.supplier_id) return { key: 'invoice', label: "Upload the supplier's invoice", hint: 'An open PO takes its lines from the invoice.' };
+    // Reading the invoice is for pricing roles only (bug F9); anyone else adds the lines by hand.
+    if (po.po_type === 'open' && po.supplier_id && isPricingRole(role)) return { key: 'invoice', label: "Upload the supplier's invoice", hint: 'An open PO takes its lines from the invoice.' };
+    if (po.po_type === 'open' && po.supplier_id) return { key: 'add', label: 'Add the lines', hint: "What arrived, how many, and the unit cost. Admin, Finance or Sales can upload the supplier's invoice instead." };
     return { key: 'add', label: 'Add the lines', hint: 'What is being ordered, how many, and the unit cost.' };
   }
   if (po.supplier_id && !po.stock_source && !emailed && !c.received) return { key: 'email', label: 'Email the PO to the supplier', hint: 'Then tick each line below as it arrives.' };
@@ -6616,7 +6696,8 @@ function renderPoTickLines(po, canEdit) {
 
 // Where a ticked line goes when received from the PO page: the PO's own destination.
 function poReceiveDestination(po, li) {
-  if (poLineIsTool(li, po)) return { dest: 'tools', vehicleId: po.po_kind === 'tools' ? (po.vehicle_id || null) : null };
+  // A tool on a vehicle's PO goes to the Tools register in that vehicle, not at the Warehouse (bug F40).
+  if (poLineIsTool(li, po)) return { dest: 'tools', vehicleId: po.vehicle_id || null };
   if (po.project_id) return { dest: 'job', vehicleId: null };
   if (po.vehicle_id) return { dest: 'vehicle', vehicleId: po.vehicle_id };
   return { dest: 'warehouse', vehicleId: null };
@@ -6686,9 +6767,11 @@ function wirePoTickLines(container, po, { role, onComplete, bar, selectAll } = {
   const elsewhere = bar ? bar.querySelector('.po-receive-elsewhere') : null;
   const ticked = () => cbs.filter(cb => cb.checked).map(cb => items.find(li => li.id === cb.dataset.lineId)).filter(Boolean);
   const update = () => {
-    const n = ticked().length;
+    const lines = ticked();
+    const n = lines.length;
     if (bar) bar.style.display = n ? 'flex' : 'none';
-    if (btn) btn.textContent = `Receive ${n} to ${poWhereShort(po)}`;
+    // Only tools ticked: say where the tools go, not where the PO's stock goes (bug F40)
+    if (btn) btn.textContent = `Receive ${n} to ${n && lines.every(li => poLineIsTool(li, po)) ? poToolsWhereShort(po) : poWhereShort(po)}`;
     if (selectAll) selectAll.textContent = cbs.length && cbs.every(cb => cb.checked) ? 'Untick all' : 'Tick all';
   };
   cbs.forEach(cb => cb.addEventListener('change', update));
@@ -6745,7 +6828,7 @@ function openPoMoreMenu(po, role, onComplete, { onShowLog } = {}) {
     await logActivity('purchase_order', po.id, 'prices_toggled', `PO ${po.po_number || ''}: prices ${po.show_prices ? 'hidden on' : 'shown on'} the PO sent to the supplier`);
     if (onComplete) await onComplete();
   } });
-  if (po.supplier_id && open) items.push({ label: "Upload the supplier's invoice", onPick: () => uploadInvoiceForPo(po) });
+  if (po.supplier_id && open && isPricingRole(role)) items.push({ label: "Upload the supplier's invoice", onPick: () => uploadInvoiceForPo(po) });
   if (open) items.push({ label: po.status === 'received' ? 'Close and approve for payment' : 'Close the PO', hint: po.status === 'received' ? '' : 'Every line must be in, back ordered or moved off', onPick: () => closePurchaseOrder(po, onComplete) });
   if (!open && isFinanceRole(role)) items.push({ label: 'Reopen the PO', hint: 'Admin and Finance, with a note', onPick: async () => {
     const note = prompt(`Why is PO ${po.po_number || ''} being reopened?`);
@@ -7071,15 +7154,20 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
     if (low.has(b.dataset.id)) { low.delete(b.dataset.id); b.classList.add('secondary'); } else { low.add(b.dataset.id); b.classList.remove('secondary'); }
   }));
   q('#us-cancel').addEventListener('click', () => overlay.remove());
+  // The Stock PO once it has committed: a second press of Done (after a failed Running-low flag)
+  // never makes a second PO and never costs the job twice (bug F54).
+  let pulled = null;
   q('#us-done').addEventListener('click', async () => {
     const msg = q('#us-msg');
     const btn = q('#us-done');
-    if (!picked.length && !low.size) { msg.innerHTML = '<div class="error-box">Pick what you took, or Cancel.</div>'; return; }
-    for (const p of picked) if (p.left == null || p.left < 0) { msg.innerHTML = `<div class="error-box">Say how many ${escapeHtml(p.name)} are left in ${escapeHtml(placeLabel())}.</div>`; return; }
+    if (!pulled) {
+      if (!picked.length && !low.size) { msg.innerHTML = '<div class="error-box">Pick what you took, or Cancel.</div>'; return; }
+      for (const p of picked) if (p.left == null || p.left < 0) { msg.innerHTML = `<div class="error-box">Say how many ${escapeHtml(p.name)} are left in ${escapeHtml(placeLabel())}.</div>`; return; }
+    }
     btn.disabled = true; btn.textContent = 'Saving...';
     try {
-      let po = null;
-      if (picked.length) {
+      let po = pulled;
+      if (picked.length && !po) {
         const { data, error } = await supabaseClient.rpc('po_create_stock_pull', {
           p_project_id: projectId, p_cost_centre_id: null, p_source: source.type, p_vehicle_id: source.type === 'vehicle' ? source.vehicleId : null,
           p_lines: picked.map(p => ({ material_id: p.materialId || null, new_name: p.newName || null, quantity: p.qty, left_after: p.left })),
@@ -7087,10 +7175,24 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
         });
         if (error) throw error;
         po = data;
+        pulled = po;
+        // The picks are in: nothing above the flags can change any more
+        overlay.querySelectorAll('#us-sources button, #us-search, #us-results button, #us-picked input, #us-picked button, #us-add-new, #us-new input, #us-new button').forEach(el => { el.disabled = true; });
       }
-      for (const id of low) {
+      // Each flag that saves comes off the list, so a retry only redoes the ones that failed
+      let flagError = null;
+      for (const id of [...low]) {
         const { error } = await supabaseClient.rpc('stock_flag_low', { p_material_id: id, p_loc: source.type, p_vehicle_id: source.type === 'vehicle' ? source.vehicleId : null, p_note: null });
-        if (error) throw error;
+        if (error) { flagError = error; continue; }
+        low.delete(id);
+        const flagBtn = overlay.querySelector(`.us-low-btn[data-id="${id}"]`);
+        if (flagBtn) flagBtn.disabled = true;
+      }
+      if (flagError) {
+        msg.innerHTML = `<div class="error-box">${po ? `Stock PO ${escapeHtml(po.po_number)} is made and costed to ${escapeHtml(jobLabel || 'the job')}. ` : ''}The Running-low flag did not save: ${escapeHtml(friendlyError(flagError))} Press ${po ? 'Flag again' : 'Done'} to retry it${po ? ', or Close' : ''}.</div>`;
+        btn.disabled = false; btn.textContent = po ? 'Flag again' : 'Done';
+        if (po) { const cancel = q('#us-cancel'); cancel.textContent = 'Close'; cancel.onclick = async () => { overlay.remove(); if (onDone) await onDone(po); }; }
+        return;
       }
       lsSet(USED_STOCK_SOURCE_KEY, source);
       overlay.remove();
@@ -7237,8 +7339,10 @@ async function openStockTransferPanel({ fromLoc, fromVehicleId, fromLabel, toLoc
     btn.disabled = true; btn.textContent = 'Moving...';
     try {
       for (const p of picked) {
+        if (p.moved) continue; // moved by an earlier attempt: a retry never moves it twice (bug F18)
         const { error } = await supabaseClient.rpc('stock_transfer', { p_material_id: p.id, p_qty: p.qty, p_from_loc: fromLoc, p_from_vehicle: fromLoc === 'vehicle' ? fromVehicleId : null, p_to_loc: toLoc, p_to_vehicle: toLoc === 'vehicle' ? toVehicleId : null, p_left_after: p.left });
         if (error) throw new Error(`${p.name}: ${friendlyError(error)}`);
+        p.moved = true;
       }
       overlay.remove();
       showToast(`Moved ${picked.length} item${picked.length === 1 ? '' : 's'} to ${toLabel}`);
@@ -7542,7 +7646,9 @@ async function drawNextPoNumber() {
 // than typing every line item by hand later. The supplier is already
 // known from the PO, so this skips straight to the review screen on
 // that supplier's page instead of asking which supplier it's for.
-function uploadInvoiceForPo(po) {
+async function uploadInvoiceForPo(po) {
+  // The extraction function is for Admin, Finance and Sales only (bug F9).
+  if (!isPricingRole(await getMyRole())) { alert('Only Admin, Finance or Sales can upload a supplier invoice.'); return; }
   if (!po.supplier_id) {
     alert("This PO has no supplier attached - it was pulled from Warehouse stock, so there's no invoice to upload.");
     return;
@@ -7566,8 +7672,10 @@ function uploadInvoiceForPo(po) {
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
 
+      // By storage path, not base64 in sessionStorage (bug F49, see resolveSupplierAndHandoff)
+      const filePath = await uploadPrivateFile(file, 'ai-extraction-uploads');
       sessionStorage.setItem('pending_upload', JSON.stringify({
-        type: 'bill', extracted: data.extracted, fileBase64, fileName: file.name, fileType: file.type, preselectedPoId: po.id,
+        type: 'bill', extracted: data.extracted, filePath, fileName: file.name, fileType: file.type, preselectedPoId: po.id,
       }));
       window.location.href = `/supplier-detail.html?id=${po.supplier_id}&resume_upload=1`;
     } catch (err) {
@@ -7935,32 +8043,58 @@ async function checkCostCentreHasActivity(costCentre) {
 // database will do it - invoices/purchase orders first (since old-style
 // invoices can reference a cost_centre directly), then the cost
 // centres themselves, then the project.
+// Every step checks its error and stops at the first failure (M5), so a job is never left half
+// deleted without the caller knowing which step failed.
 async function deleteProject(projectId) {
-  const { data: centres } = await supabaseClient.from('cost_centres').select('id').eq('project_id', projectId);
-  const centreIds = (centres || []).map(c => c.id);
+  const step = (name, res) => { if (res.error) throw new Error(`Delete stopped at ${name}: ${res.error.message}`); return res.data; };
 
-  const { data: invoices } = await supabaseClient.from('invoices').select('id').eq('project_id', projectId);
+  const centres = step('cost centres (lookup)', await supabaseClient.from('cost_centres').select('id').eq('project_id', projectId));
+  const centreIds = (centres || []).map(c => c.id);
+  const invoices = step('invoices (lookup)', await supabaseClient.from('invoices').select('id').eq('project_id', projectId));
   const invoiceIds = (invoices || []).map(i => i.id);
-  if (invoiceIds.length) {
-    await supabaseClient.from('invoice_claims').delete().in('invoice_id', invoiceIds);
-    await supabaseClient.from('invoices').delete().in('id', invoiceIds);
+  const pos = step('purchase orders (lookup)', await supabaseClient.from('purchase_orders').select('id').eq('project_id', projectId));
+  const poIds = (pos || []).map(po => po.id);
+
+  // Everything that would make the database refuse the last steps is checked before the first delete:
+  // before this, the invoices and claims were already gone by the time the project delete failed, and
+  // the job was left standing with empty stages (bug M5). Pricing roles (the only ones who can delete)
+  // see every row of these tables, so the counts are complete. One message lists the lot.
+  const blockers = [];
+  const count = async (name, q) => {
+    const { count: n, error } = await q;
+    if (error) throw new Error(`Delete stopped at ${name} (check): ${error.message}`);
+    if (n) blockers.push(`${n} ${name}`);
+  };
+  const head = (table) => supabaseClient.from(table).select('id', { count: 'exact', head: true });
+  await count('timesheet entries', head('time_entries').eq('project_id', projectId));
+  await count('schedule bookings', head('schedule_assignments').eq('project_id', projectId));
+  await count('supplier bills', head('supplier_bills').eq('project_id', projectId));
+  await count('DNSP records', head('dnsp_records').eq('project_id', projectId));
+  await count('stock usage rows', head('job_material_usage').eq('project_id', projectId));
+  if (centreIds.length) await count('stock usage rows on its stages', head('job_material_usage').is('project_id', null).in('cost_centre_id', centreIds));
+  await count('PO lines moved onto it from other POs', head('purchase_order_line_items').eq('destination_job_id', projectId));
+  if (poIds.length) await count('received PO lines', head('purchase_order_line_items').in('po_id', poIds).eq('received', true));
+  if (blockers.length) {
+    throw new Error(`This job cannot be deleted while it has ${blockers.join(', ')}. Remove or move those first (received PO lines: Undo received), then try again.`);
   }
 
-  const { data: pos } = await supabaseClient.from('purchase_orders').select('id').eq('project_id', projectId);
-  const poIds = (pos || []).map(po => po.id);
+  if (invoiceIds.length) {
+    step('invoice claims', await supabaseClient.from('invoice_claims').delete().in('invoice_id', invoiceIds));
+    step('invoices', await supabaseClient.from('invoices').delete().in('id', invoiceIds));
+  }
+
   if (poIds.length) {
-    await supabaseClient.from('purchase_order_line_items').delete().in('po_id', poIds);
-    await supabaseClient.from('purchase_orders').delete().in('id', poIds);
+    step('purchase order lines', await supabaseClient.from('purchase_order_line_items').delete().in('po_id', poIds));
+    step('purchase orders', await supabaseClient.from('purchase_orders').delete().in('id', poIds));
   }
 
   if (centreIds.length) {
-    await supabaseClient.from('cost_centre_line_items').delete().in('cost_centre_id', centreIds);
-    await supabaseClient.from('cost_centre_photo_groups').delete().in('cost_centre_id', centreIds);
-    await supabaseClient.from('cost_centres').delete().in('id', centreIds);
+    step('stage line items', await supabaseClient.from('cost_centre_line_items').delete().in('cost_centre_id', centreIds));
+    step('stage photo groups', await supabaseClient.from('cost_centre_photo_groups').delete().in('cost_centre_id', centreIds));
+    step('cost centres', await supabaseClient.from('cost_centres').delete().in('id', centreIds));
   }
 
-  const { error } = await supabaseClient.from('projects').delete().eq('id', projectId);
-  if (error) throw error;
+  step('the project', await supabaseClient.from('projects').delete().eq('id', projectId));
 }
 
 // The only way a count is changed by hand: one server step (stock_set_count), locked and logged on
@@ -8004,22 +8138,22 @@ function timeCategoryOptionsHtml(selected) {
 }
 
 // A TAFE day is always 8 paid hours: 7:00am to 3:30pm with a 30 minute unpaid
-// break at 12:00, saved as two entries so the gap IS the break and the day
-// adds up to exactly 8 hours, which is what payroll counts. Refuses to
-// double up on time already logged that day. Throws on any problem.
-const TAFE_DAY = { start: '07:00', breakStart: '12:00', breakEnd: '12:30', end: '15:30' };
+// break at 12:00, saved as ONE entry with break_minutes on it (paid hours are
+// clock-out minus clock-in minus the break, the same as a clock-out), so the
+// day adds up to exactly 8 hours, which is what payroll counts (bug M9).
+// Refuses to double up on time already logged that day. Throws on any problem.
+const TAFE_DAY = { start: '07:00', breakStart: '12:00', end: '15:30' };
 async function createTafeDay(staffId, dateStr) {
   const t = (hhmm) => new Date(`${dateStr}T${hhmm}:00`);
   const { data: clash, error: clashErr } = await supabaseClient.from('time_entries').select('id')
     .eq('staff_id', staffId).lt('clock_in', t(TAFE_DAY.end).toISOString()).or(`clock_out.is.null,clock_out.gt.${t(TAFE_DAY.start).toISOString()}`);
   if (clashErr) throw clashErr;
   if (clash && clash.length) throw new Error('You already have time logged during that day. Open the day from your week list to change it, or remove it first.');
-  const base = { staff_id: staffId, project_id: null, time_category: 'tafe', notes: 'TAFE' };
-  const { error } = await supabaseClient.from('time_entries').insert([
-    { ...base, clock_in: t(TAFE_DAY.start).toISOString(), clock_out: t(TAFE_DAY.breakStart).toISOString(),
-      break_taken: true, break_start: t(TAFE_DAY.breakStart).toISOString(), break_minutes: 30, break_skip_reason: null },
-    { ...base, clock_in: t(TAFE_DAY.breakEnd).toISOString(), clock_out: t(TAFE_DAY.end).toISOString() },
-  ]);
+  const { error } = await supabaseClient.from('time_entries').insert({
+    staff_id: staffId, project_id: null, time_category: 'tafe', notes: 'TAFE',
+    clock_in: t(TAFE_DAY.start).toISOString(), clock_out: t(TAFE_DAY.end).toISOString(),
+    break_taken: true, break_start: t(TAFE_DAY.breakStart).toISOString(), break_minutes: 30, break_skip_reason: null,
+  });
   if (error) throw error;
 }
 
@@ -8046,6 +8180,8 @@ function pipelineStageLabel(key) {
   return s ? s.label : String(key || '').replace(/_/g, ' ');
 }
 
+// Plain text. Job names are typed by anyone (and by the website lead form), so wrap the result
+// in escapeHtml() before it goes into HTML (S11).
 function projectRef(project) {
   if (!project) return '';
   if (project.job_number) return `J${project.job_number} - ${project.name}`;
@@ -8073,17 +8209,18 @@ function invoiceClaimRows(invoice) {
   if (invoice.invoice_claims && invoice.invoice_claims.length) {
     return invoice.invoice_claims.slice()
       .sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
-      .map(ic => ({ stageName: ic.cost_centres?.name || 'Stage', labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount }));
+      .map(ic => ({ stageName: ic.cost_centres?.name || 'Stage', labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount, bstc_amount: ic.bstc_amount }));
   }
   return [{
     stageName: invoice.cost_centres?.name || invoice.description || 'Invoice',
-    labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount,
+    labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount, bstc_amount: invoice.bstc_amount,
   }];
 }
 
 // Groups an invoice's claims by Xero category (Labour/Materials/STC
-// credit) instead of by stage - this is how Xero actually receives it
-// (push-invoice-to-xero.js sends one line per stage per category), and
+// credit/BSTC credit) instead of by stage - this is how Xero actually receives it
+// (push-invoice-to-xero.js sends one line per stage per category, the battery
+// credit as its own line on the STC account), and
 // how it should read for anyone checking the coding before pushing.
 // clientType picks the right STC mapping (a company vs an individual
 // gets credited to a different account). Drops any category with
@@ -8097,6 +8234,7 @@ function xeroCategoryGroups(invoice, mappings, clientType) {
     { label: 'Labour', map: labourMap, lines: rows.map(r => ({ stageName: r.stageName, amount: Number(r.labour_amount) || 0 })).filter(l => l.amount > 0) },
     { label: 'Materials', map: materialsMap, lines: rows.map(r => ({ stageName: r.stageName, amount: Number(r.material_amount) || 0 })).filter(l => l.amount > 0) },
     { label: 'STC Credit', map: stcMap, lines: rows.map(r => ({ stageName: r.stageName, amount: -(Number(r.stc_amount) || 0) })).filter(l => l.amount !== 0) },
+    { label: 'BSTC Credit', map: stcMap, lines: rows.map(r => ({ stageName: r.stageName, amount: -(Number(r.bstc_amount) || 0) })).filter(l => l.amount !== 0) },
   ].filter(g => g.lines.length);
 }
 
@@ -8116,7 +8254,7 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
           <span style="text-align:right; font-weight:400;">${g.map ? `${g.map.xero_account_code} (${g.map.xero_tax_type})` : '<span style="color:var(--red);">Not mapped - set this in Settings &gt; Xero Mapping</span>'}</span>
         </div>
         ${g.lines.length > 1 ? g.lines.map(l => `<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); padding-left:12px;"><span>${escapeHtml(l.stageName)}</span><span>${money(l.amount)}</span></div>`).join('') : ''}
-        <div style="display:flex; justify-content:space-between; font-size:13px; ${g.lines.length > 1 ? 'border-top:1px solid var(--border); margin-top:2px; padding-top:2px;' : ''}"><span>${g.lines.length === 1 ? g.lines[0].stageName : 'Subtotal'}</span><span>${money(total)}</span></div>
+        <div style="display:flex; justify-content:space-between; font-size:13px; ${g.lines.length > 1 ? 'border-top:1px solid var(--border); margin-top:2px; padding-top:2px;' : ''}"><span>${g.lines.length === 1 ? escapeHtml(g.lines[0].stageName) : 'Subtotal'}</span><span>${money(total)}</span></div>
       </div>`;
   }).join('');
 }
@@ -8143,7 +8281,7 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
 (function loadWritingHelp() {
   if (typeof document === 'undefined' || document.querySelector('script[data-writing-help]')) return;
   const s = document.createElement('script');
-  s.src = '/js/writing-help.js?v=1';
+  s.src = '/js/writing-help.js?v=2';
   s.defer = true;
   s.dataset.writingHelp = '1';
   document.head.appendChild(s);

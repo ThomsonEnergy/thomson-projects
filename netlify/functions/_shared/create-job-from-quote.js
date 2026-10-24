@@ -17,6 +17,12 @@
 // approving just flipped job_number on the same row) - same proportional-
 // across-stages distribution, just raised against the new job's own
 // fresh cost_centres instead of the quote's.
+//
+// Order (bug review F43): the job, its copies and the deposit come first
+// and the quote is marked approved last. An attempt that stops part way
+// (the deposit threw, say) leaves a job at quote_approved with no deposit,
+// and the next approval click finishes the missing steps instead of
+// handing back a job that never gets its deposit.
 
 const crypto = require('crypto');
 const { computeDueDate } = require('./compute-due-date');
@@ -91,39 +97,61 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
     .single();
   if (insErr) throw insErr;
 
-  const { error: claimsErr } = await supabaseAdmin
-    .from('invoice_claims')
-    .insert(claimRows.map(c => ({ ...c, invoice_id: insertedInvoice.id })));
-  if (claimsErr) throw claimsErr;
+  // All or nothing from here: a failed step takes the part-made deposit back (its claims, the stage
+  // amounts and the invoice row), so the next approval click can raise it whole (F43).
+  const added = [];
+  try {
+    const { error: claimsErr } = await supabaseAdmin
+      .from('invoice_claims')
+      .insert(claimRows.map(c => ({ ...c, invoice_id: insertedInvoice.id })));
+    if (claimsErr) throw claimsErr;
 
-  await Promise.all(claimRows.map(c => {
-    const centre = centres.find(cc => cc.id === c.cost_centre_id);
-    const before = Number(centre?.invoiced_amount) || 0;
-    return supabaseAdmin.from('cost_centres').update({ invoiced_amount: before + c.labour_amount + c.material_amount }).eq('id', c.cost_centre_id);
-  }));
+    // Added in one database step (add_invoiced_amount, migration 20261101000000), the way create-invoice.js does it.
+    for (const c of claimRows) {
+      const amount = Math.round((c.labour_amount + c.material_amount) * 100) / 100;
+      const { error: addErr } = await supabaseAdmin.rpc('add_invoiced_amount', { p_centre_id: c.cost_centre_id, p_amount: amount });
+      if (addErr) throw addErr;
+      added.push({ centreId: c.cost_centre_id, amount });
+    }
+  } catch (err) {
+    try {
+      for (const a of added) await supabaseAdmin.rpc('add_invoiced_amount', { p_centre_id: a.centreId, p_amount: -a.amount });
+      await supabaseAdmin.from('invoice_claims').delete().eq('invoice_id', insertedInvoice.id);
+      await supabaseAdmin.from('invoices').delete().eq('id', insertedInvoice.id);
+    } catch (undoErr) {
+      console.error('create-job-from-quote: could not take back the part-made deposit invoice', insertedInvoice.id, undoErr.message);
+    }
+    throw err;
+  }
 
   return invoiceToken;
 }
 
-async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, approvalNote = null }) {
-  // Idempotent: if a job has already been created from this quote (a
-  // re-click, or the page reloading before a redirect landed), hand back
-  // the existing one rather than creating a second.
-  const { data: existingJob } = await supabaseAdmin
+// The quote becomes the frozen approved record. pipeline_stage: 'archived'
+// takes it off the active Job Pipeline board (dashboard.html) and out of any
+// "active projects" view that filters on pipeline_stage - it's a historical
+// record now, not something anyone needs to action. quotes.html doesn't
+// filter on pipeline_stage (only job_number/status), so this doesn't affect
+// its own Approved tab. Done last (F43): a quote not yet approved while its
+// job exists tells the next click that an earlier attempt stopped part way.
+async function markQuoteApproved(supabaseAdmin, quote, approvedBy, approvalNote) {
+  if (quote.status === 'approved' && quote.approved_at) return;
+  const { error } = await supabaseAdmin
     .from('projects')
-    .select('id, job_number')
-    .eq('source_quote_id', quoteId)
-    .maybeSingle();
-  if (existingJob) {
-    const { data: existingInvoice } = await supabaseAdmin
-      .from('invoices')
-      .select('invoice_token')
-      .eq('project_id', existingJob.id)
-      .eq('description', 'Deposit')
-      .maybeSingle();
-    return { jobId: existingJob.id, jobNumber: existingJob.job_number, invoiceToken: existingInvoice?.invoice_token || null };
-  }
+    .update({
+      status: 'approved', pipeline_stage: 'archived',
+      approved_at: new Date().toISOString(), approved_by: approvedBy, approval_note: approvalNote,
+    })
+    .eq('id', quote.id);
+  if (error) throw error;
+}
 
+// A job made moments ago is still being finished by the call that made it (a double tap, or the client and
+// staff approving together). Netlify stops a function long before this, so a half-made job older than this
+// is an earlier attempt that failed, and the next click finishes it.
+const STILL_BEING_MADE_MS = 60 * 1000;
+
+async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, approvalNote = null }) {
   const { data: quote, error: quoteErr } = await supabaseAdmin
     .from('projects')
     .select('*, cost_centres(*, cost_centre_line_items(*), cost_centre_photo_groups(*))')
@@ -131,165 +159,213 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
     .single();
   if (quoteErr || !quote) throw new Error('Quote not found');
 
-  // pipeline_stage: 'archived' takes the frozen quote off the active Job
-  // Pipeline board (dashboard.html) and out of any "active projects" view
-  // that filters on pipeline_stage - it's a historical record now, not
-  // something anyone needs to action. quotes.html doesn't filter on
-  // pipeline_stage (only job_number/status), so this doesn't affect its
-  // own Approved tab.
-  await supabaseAdmin
+  // Idempotent: if a job has already been created from this quote (a
+  // re-click, or the page reloading before a redirect landed), hand back
+  // the existing one rather than creating a second. Whole means its deposit
+  // was raised, or none was due and it moved on from quote_approved; a job
+  // that is neither, and older than a minute, is finished below (F43).
+  const { data: existingJob } = await supabaseAdmin
     .from('projects')
-    .update({
-      status: 'approved', pipeline_stage: 'archived',
-      approved_at: new Date().toISOString(), approved_by: approvedBy, approval_note: approvalNote,
-    })
-    .eq('id', quoteId);
-
-  const { data: job, error: jobErr } = await supabaseAdmin
-    .from('projects')
-    .insert({
-      name: quote.name,
-      client_id: quote.client_id,
-      client_name: quote.client_name,
-      client_email: quote.client_email,
-      client_phone: quote.client_phone,
-      client_address: quote.client_address,
-      client_site_id: quote.client_site_id,
-      sow_text: quote.sow_text,
-      installer_summary: quote.installer_summary,
-      installer_summary_generated_at: quote.installer_summary_generated_at,
-      installer_summary_hash: quote.installer_summary_hash,
-      proposal_subtitle: quote.proposal_subtitle,
-      terms_text: quote.terms_text,
-      deposit_percent: quote.deposit_percent,
-      pylon_link: quote.pylon_link,
-      pylon_project_id: quote.pylon_project_id,
-      pylon_data: quote.pylon_data,
-      reference_photos: quote.reference_photos,
-      cover_photos: quote.cover_photos,
-      proposal_template: quote.proposal_template,
-      template_answers: quote.template_answers,
-      // STC and BSTC credits live on the quote (item 27); the stage each is claimed with is
-      // re-pointed at the job's own stages below.
-      stc_quantity: quote.stc_quantity, stc_system_kw: quote.stc_system_kw, stc_zone_rating: quote.stc_zone_rating,
-      stc_install_year: quote.stc_install_year, stc_price_per_certificate: quote.stc_price_per_certificate, stc_total: quote.stc_total || 0,
-      bstc_quantity: quote.bstc_quantity, bstc_price_per_certificate: quote.bstc_price_per_certificate, bstc_total: quote.bstc_total || 0,
-      bstc_not_claimed: !!quote.bstc_not_claimed,
-      laha_approved: quote.laha_approved,
-      estimate_disclaimer_text: quote.estimate_disclaimer_text,
-      project_manager_contact_id: quote.project_manager_contact_id,
-      site_contact_id: quote.site_contact_id,
-      job_contact_id: quote.job_contact_id,
-      sales_contact_id: quote.sales_contact_id,
-      accounts_contact_id: quote.accounts_contact_id,
-      source_quote_id: quote.id,
-      // the client's signature and how it was approved stay with the job's own quote PDF
-      accepted_signed_by_name: quote.accepted_signed_by_name,
-      accepted_signature_data_url: quote.accepted_signature_data_url,
-      approved_at: new Date().toISOString(),
-      approval_note: approvalNote,
-      pipeline_stage: 'quote_approved',
-      status: 'in_progress',
-    })
-    .select()
-    .single();
-  if (jobErr) {
-    // Two approvals at the same moment (double tap, client and staff together): the unique index on
-    // source_quote_id (migration 20261101000000) lets only one job in. Hand back that one.
-    if (jobErr.code === '23505') return createJobFromQuote(supabaseAdmin, { quoteId, approvedBy, approvalNote });
-    throw jobErr;
+    .select('*')
+    .eq('source_quote_id', quoteId)
+    .maybeSingle();
+  let job = existingJob;
+  if (existingJob) {
+    const { data: existingInvoice } = await supabaseAdmin
+      .from('invoices')
+      .select('invoice_token')
+      .eq('project_id', existingJob.id)
+      .eq('description', 'Deposit')
+      .maybeSingle();
+    const whole = !!existingInvoice || existingJob.pipeline_stage !== 'quote_approved';
+    const stillBeingMade = Date.now() - new Date(existingJob.created_at).getTime() < STILL_BEING_MADE_MS;
+    if (whole || stillBeingMade) {
+      if (whole) await markQuoteApproved(supabaseAdmin, quote, approvedBy, approvalNote);
+      return { jobId: existingJob.id, jobNumber: existingJob.job_number, invoiceToken: existingInvoice?.invoice_token || null };
+    }
+  } else {
+    const { data: insertedJob, error: jobErr } = await supabaseAdmin
+      .from('projects')
+      .insert({
+        name: quote.name,
+        client_id: quote.client_id,
+        client_name: quote.client_name,
+        client_email: quote.client_email,
+        client_phone: quote.client_phone,
+        client_address: quote.client_address,
+        client_site_id: quote.client_site_id,
+        sow_text: quote.sow_text,
+        installer_summary: quote.installer_summary,
+        installer_summary_generated_at: quote.installer_summary_generated_at,
+        installer_summary_hash: quote.installer_summary_hash,
+        proposal_subtitle: quote.proposal_subtitle,
+        terms_text: quote.terms_text,
+        deposit_percent: quote.deposit_percent,
+        pylon_link: quote.pylon_link,
+        pylon_project_id: quote.pylon_project_id,
+        pylon_data: quote.pylon_data,
+        reference_photos: quote.reference_photos,
+        cover_photos: quote.cover_photos,
+        proposal_template: quote.proposal_template,
+        template_answers: quote.template_answers,
+        // The proposal's savings and investment pages, the scope brief and documents, and the site visit
+        // answer go with the job, so the job's quote PDF (rebuilt on every stage save) still shows what the
+        // client approved (bug review F3).
+        bill_reading: quote.bill_reading,
+        roi_inputs: quote.roi_inputs,
+        show_roi: quote.show_roi,
+        show_investment_breakdown: quote.show_investment_breakdown,
+        battery_kwh: quote.battery_kwh,
+        sow_brief: quote.sow_brief,
+        sow_documents: quote.sow_documents,
+        needs_site_visit: quote.needs_site_visit,
+        site_visit_decision: quote.site_visit_decision,
+        site_visit_reason: quote.site_visit_reason,
+        // STC and BSTC credits live on the quote (item 27); the stage each is claimed with is
+        // re-pointed at the job's own stages below.
+        stc_quantity: quote.stc_quantity, stc_system_kw: quote.stc_system_kw, stc_zone_rating: quote.stc_zone_rating,
+        stc_install_year: quote.stc_install_year, stc_price_per_certificate: quote.stc_price_per_certificate, stc_total: quote.stc_total || 0,
+        bstc_quantity: quote.bstc_quantity, bstc_price_per_certificate: quote.bstc_price_per_certificate, bstc_total: quote.bstc_total || 0,
+        bstc_not_claimed: !!quote.bstc_not_claimed,
+        laha_approved: quote.laha_approved,
+        estimate_disclaimer_text: quote.estimate_disclaimer_text,
+        project_manager_contact_id: quote.project_manager_contact_id,
+        site_contact_id: quote.site_contact_id,
+        job_contact_id: quote.job_contact_id,
+        sales_contact_id: quote.sales_contact_id,
+        accounts_contact_id: quote.accounts_contact_id,
+        source_quote_id: quote.id,
+        // the client's signature and how it was approved stay with the job's own quote PDF
+        accepted_signed_by_name: quote.accepted_signed_by_name,
+        accepted_signature_data_url: quote.accepted_signature_data_url,
+        approved_at: new Date().toISOString(),
+        approval_note: approvalNote,
+        pipeline_stage: 'quote_approved',
+        status: 'in_progress',
+      })
+      .select()
+      .single();
+    if (jobErr) {
+      // Two approvals at the same moment (double tap, client and staff together): the unique index on
+      // source_quote_id (migration 20261101000000) lets only one job in. Hand back that one.
+      if (jobErr.code === '23505') return createJobFromQuote(supabaseAdmin, { quoteId, approvedBy, approvalNote });
+      throw jobErr;
+    }
+    job = insertedJob;
   }
 
+  // From here on each step is skipped when an earlier attempt already did it (F43).
+  const retry = !!existingJob;
   const stages = (quote.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
-  const { data: newStages, error: stagesErr } = await supabaseAdmin
-    .from('cost_centres')
-    .insert(stages.map(s => ({
-      project_id: job.id,
-      name: s.name,
-      description: s.description,
-      sort_order: s.sort_order,
-      markup_percent: s.markup_percent,
-      estimated_labour_cost: s.estimated_labour_cost,
-      estimated_material_cost: s.estimated_material_cost,
-      quoted_amount: s.quoted_amount,
-      stc_total: s.stc_total,
-      stc_system_kw: s.stc_system_kw,
-      stc_zone_rating: s.stc_zone_rating,
-      stc_install_year: s.stc_install_year,
-      stc_price_per_certificate: s.stc_price_per_certificate,
-    })))
-    .select();
-  if (stagesErr) throw stagesErr;
-
-  // The credits' claim stages point at the quote's stages; point them at the job's copies.
-  const stageIdMap = Object.fromEntries(stages.map((s, i) => [s.id, newStages[i] && newStages[i].id]));
-  const creditStages = {};
-  if (quote.stc_cost_centre_id && stageIdMap[quote.stc_cost_centre_id]) creditStages.stc_cost_centre_id = stageIdMap[quote.stc_cost_centre_id];
-  if (quote.bstc_cost_centre_id && stageIdMap[quote.bstc_cost_centre_id]) creditStages.bstc_cost_centre_id = stageIdMap[quote.bstc_cost_centre_id];
-  if (Object.keys(creditStages).length) {
-    const { error: csErr } = await supabaseAdmin.from('projects').update(creditStages).eq('id', job.id);
-    if (csErr) throw csErr;
+  let newStages = [];
+  if (retry) {
+    const { data: haveStages, error: haveErr } = await supabaseAdmin.from('cost_centres').select('*').eq('project_id', job.id).order('sort_order');
+    if (haveErr) throw haveErr;
+    newStages = haveStages || [];
   }
+  if (!newStages.length && stages.length) {
+    const { data: insertedStages, error: stagesErr } = await supabaseAdmin
+      .from('cost_centres')
+      .insert(stages.map(s => ({
+        project_id: job.id,
+        name: s.name,
+        description: s.description,
+        sort_order: s.sort_order,
+        markup_percent: s.markup_percent,
+        estimated_labour_cost: s.estimated_labour_cost,
+        estimated_material_cost: s.estimated_material_cost,
+        quoted_amount: s.quoted_amount,
+        stc_quantity: s.stc_quantity,
+        stc_total: s.stc_total,
+        stc_system_kw: s.stc_system_kw,
+        stc_zone_rating: s.stc_zone_rating,
+        stc_install_year: s.stc_install_year,
+        stc_price_per_certificate: s.stc_price_per_certificate,
+      })))
+      .select();
+    if (stagesErr) throw stagesErr;
+    newStages = insertedStages || [];
 
-  const allLineItems = [];
-  const allPhotoGroups = [];
-  stages.forEach((s, i) => {
-    (s.cost_centre_line_items || []).forEach(li => {
-      allLineItems.push({
-        cost_centre_id: newStages[i].id,
-        description: li.description,
-        item_type: li.item_type,
-        quantity: li.quantity,
-        unit_cost: li.unit_cost,
-        rate_tier_id: li.rate_tier_id,
-        sort_order: li.sort_order,
-        // prebuild grouping, so the job's quote shows the client line, not every component
-        prebuild_group_id: li.prebuild_group_id,
-        prebuild_client_description: li.prebuild_client_description,
-        prebuild_base_quantity: li.prebuild_base_quantity,
+    // The credits' claim stages point at the quote's stages; point them at the job's copies.
+    const stageIdMap = Object.fromEntries(stages.map((s, i) => [s.id, newStages[i] && newStages[i].id]));
+    const creditStages = {};
+    if (quote.stc_cost_centre_id && stageIdMap[quote.stc_cost_centre_id]) creditStages.stc_cost_centre_id = stageIdMap[quote.stc_cost_centre_id];
+    if (quote.bstc_cost_centre_id && stageIdMap[quote.bstc_cost_centre_id]) creditStages.bstc_cost_centre_id = stageIdMap[quote.bstc_cost_centre_id];
+    if (Object.keys(creditStages).length) {
+      const { error: csErr } = await supabaseAdmin.from('projects').update(creditStages).eq('id', job.id);
+      if (csErr) throw csErr;
+    }
+
+    const allLineItems = [];
+    const allPhotoGroups = [];
+    stages.forEach((s, i) => {
+      (s.cost_centre_line_items || []).forEach(li => {
+        allLineItems.push({
+          cost_centre_id: newStages[i].id,
+          description: li.description,
+          item_type: li.item_type,
+          quantity: li.quantity,
+          unit_cost: li.unit_cost,
+          rate_tier_id: li.rate_tier_id,
+          sort_order: li.sort_order,
+          // prebuild grouping, so the job's quote shows the client line, not every component
+          prebuild_group_id: li.prebuild_group_id,
+          prebuild_client_description: li.prebuild_client_description,
+          prebuild_base_quantity: li.prebuild_base_quantity,
+        });
+      });
+      (s.cost_centre_photo_groups || []).forEach(pg => {
+        allPhotoGroups.push({
+          cost_centre_id: newStages[i].id,
+          description: pg.description,
+          photos: pg.photos,
+          sort_order: pg.sort_order,
+        });
       });
     });
-    (s.cost_centre_photo_groups || []).forEach(pg => {
-      allPhotoGroups.push({
-        cost_centre_id: newStages[i].id,
-        description: pg.description,
-        photos: pg.photos,
-        sort_order: pg.sort_order,
-      });
-    });
-  });
-  if (allLineItems.length) {
-    const { error: liErr } = await supabaseAdmin.from('cost_centre_line_items').insert(allLineItems);
-    if (liErr) throw liErr;
-  }
-  if (allPhotoGroups.length) {
-    const { error: pgErr } = await supabaseAdmin.from('cost_centre_photo_groups').insert(allPhotoGroups);
-    if (pgErr) throw pgErr;
+    if (allLineItems.length) {
+      const { error: liErr } = await supabaseAdmin.from('cost_centre_line_items').insert(allLineItems);
+      if (liErr) throw liErr;
+    }
+    if (allPhotoGroups.length) {
+      const { error: pgErr } = await supabaseAdmin.from('cost_centre_photo_groups').insert(allPhotoGroups);
+      if (pgErr) throw pgErr;
+    }
   }
 
   // The quote's contacts (Contacts tab) go with the job.
-  const { data: contacts } = await supabaseAdmin.from('job_contacts').select('side, role, name, company, phone, email, notes, profile_id, client_contact_id, sort_order, created_by').eq('project_id', quote.id);
-  if (contacts && contacts.length) {
-    const { error: jcErr } = await supabaseAdmin.from('job_contacts').insert(contacts.map((c) => ({ ...c, project_id: job.id })));
-    if (jcErr) throw jcErr;
+  const { data: haveContacts } = retry ? await supabaseAdmin.from('job_contacts').select('id').eq('project_id', job.id).limit(1) : { data: [] };
+  if (!(haveContacts || []).length) {
+    const { data: contacts } = await supabaseAdmin.from('job_contacts').select('side, role, name, company, phone, email, notes, profile_id, client_contact_id, sort_order, created_by').eq('project_id', quote.id);
+    if (contacts && contacts.length) {
+      const { error: jcErr } = await supabaseAdmin.from('job_contacts').insert(contacts.map((c) => ({ ...c, project_id: job.id })));
+      if (jcErr) throw jcErr;
+    }
   }
 
   // The agreed payment milestones go with the job too.
-  const { data: milestones } = await supabaseAdmin.from('payment_milestones').select('label, percent, sort_order').eq('project_id', quote.id);
-  if (milestones && milestones.length) {
-    const { error: msErr } = await supabaseAdmin.from('payment_milestones').insert(milestones.map(m => ({ ...m, project_id: job.id })));
-    if (msErr) throw msErr;
+  const { data: haveMilestones } = retry ? await supabaseAdmin.from('payment_milestones').select('id').eq('project_id', job.id).limit(1) : { data: [] };
+  if (!(haveMilestones || []).length) {
+    const { data: milestones } = await supabaseAdmin.from('payment_milestones').select('label, percent, sort_order').eq('project_id', quote.id);
+    if (milestones && milestones.length) {
+      const { error: msErr } = await supabaseAdmin.from('payment_milestones').insert(milestones.map(m => ({ ...m, project_id: job.id })));
+      if (msErr) throw msErr;
+    }
   }
 
   // Best-effort, doesn't block job creation if it fails - see
   // create-default-job-tasks.js.
-  await createDefaultJobTasks(supabaseAdmin, job, newStages);
+  const { data: haveTasks } = retry ? await supabaseAdmin.from('job_tasks').select('id').eq('project_id', job.id).limit(1) : { data: [] };
+  if (!(haveTasks || []).length) await createDefaultJobTasks(supabaseAdmin, job, newStages);
 
   const invoiceToken = await raiseDepositInvoice(supabaseAdmin, job, newStages);
   // No deposit invoice means nothing will ever fire the deposit-paid
   // webhook for this job - move it past that stage immediately instead
   // of leaving it stuck at 'quote_approved' forever.
   if (!invoiceToken) await advanceToActionOrReady(supabaseAdmin, job.id);
+
+  // Last, so a quote still not approved while its job exists marks an attempt that stopped part way.
+  await markQuoteApproved(supabaseAdmin, quote, approvedBy, approvalNote);
 
   return { jobId: job.id, jobNumber: job.job_number, invoiceToken };
 }

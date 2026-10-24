@@ -96,7 +96,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allEntries = [];
@@ -388,12 +388,19 @@
     // queue it here and walk away. The list shows the progress; a phone notification lands when it is done.
     let jobsByEntry = {};
     let jobPoll = null;
+    // A read of an entry that is queued or running: a second one would read and pay for the same pages twice (M21).
+    const readInProgress = (j) => !!j && (j.status === 'queued' || j.status === 'running');
     async function queueRead(entryId, mode) {
-      const { data: { user } } = await supabaseClient.auth.getUser();
-      const { data: job, error } = await supabaseClient.from('knowledge_read_jobs').insert({ entry_id: entryId, requested_by: user.id, mode }).select('id').single();
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (!session) throw new Error('Not signed in.');
+      // checked again here, fresh from the database: the list can be a few seconds old
+      const { data: open } = await supabaseClient.from('knowledge_read_jobs').select('id, status').eq('entry_id', entryId).in('status', ['queued', 'running']).limit(1);
+      if (open && open.length) throw new Error('A read of this entry is already queued or running. Wait for it to finish, then Read again if pages are still missing.');
+      const { data: job, error } = await supabaseClient.from('knowledge_read_jobs').insert({ entry_id: entryId, requested_by: session.user.id, mode }).select('id').single();
       if (error) throw error;
+      // the poke carries the login (the function refuses anonymous pokes); the sweep picks the job up if it is lost
       fetch('/.netlify/functions/read-knowledge-background', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: job.id }),
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ job_id: job.id }),
       }).catch(() => {});
     }
     async function loadJobs() {
@@ -417,15 +424,27 @@
     async function openReadPanel(entry) {
       const overlay = openModal(`<h2 style="margin-top:0;">Read again</h2><p class="subtitle">Checking the pages...</p>`, { maxWidth: 480, closeOnBackdrop: true });
       const card = overlay.querySelector('.card');
+      const lastJob = jobsByEntry[entry.id];
+      if (readInProgress(lastJob)) {
+        card.innerHTML = `
+          <h2 style="margin-top:0;">Read again</h2>
+          <p>${escapeHtml(entry.title)} is already being read (${lastJob.status === 'queued' ? 'queued' : `${lastJob.pages_done || 0} of ${lastJob.total_pages || '?'} pages done`}). A second read would read and pay for the same pages twice. Wait for it to finish, then Read again if pages are still missing.</p>
+          <button type="button" class="secondary" id="kb-read-cancel">Close</button>`;
+        card.querySelector('#kb-read-cancel').addEventListener('click', () => overlay.remove());
+        return;
+      }
       // Failed pages, plus pages where the picture read failed and only the thin text layer was kept.
       const { count: failedCount } = await supabaseClient.from('knowledge_pages').select('id', { count: 'exact', head: true }).eq('entry_id', entry.id).or('read_as.eq.failed,error.not.is.null');
       const { count: pageCount } = await supabaseClient.from('knowledge_pages').select('id', { count: 'exact', head: true }).eq('entry_id', entry.id);
+      // how many pages the PDF has: the last read counted them; before any read, the pages stored
+      const pdfPages = (lastJob && lastJob.pdf_pages) || pageCount || 0;
+      const pagesText = pdfPages ? `${pdfPages} pages` : 'every page';
       card.innerHTML = `
         <h2 style="margin-top:0;">Read again</h2>
-        <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(entry.title)}: ${pageCount || 0} pages stored${failedCount ? `, ${failedCount} could not be read` : ''}. The read runs on the server in the background, a page at a time, so you can close this and leave the page. You get a notification when it is done. Pages read as pictures cost a few cents each.</p>
+        <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(entry.title)}: ${pageCount || 0} pages stored${failedCount ? `, ${failedCount} could not be read` : ''}${pdfPages ? `, ${pdfPages} pages in the PDF` : ''}. The read runs on the server in the background, a page at a time, so you can close this and leave the page. You get a notification when it is done. Every page read as a picture is one AI call and costs a few cents${pdfPages >= 100 ? `: on ${pdfPages} pages that adds up, so read only the failed pages where you can` : ''}.</p>
         <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:0;"><input type="radio" name="kb-read-mode" value="failed" style="width:auto;" ${failedCount ? 'checked' : 'disabled'} /> Only the failed pages${failedCount ? ` (${failedCount})` : ' (none)'}</label>
-        <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="radio" name="kb-read-mode" value="auto" style="width:auto;" ${failedCount ? '' : 'checked'} /> Every page: the PDF's own text first, pictures where the text is thin or there is a table</label>
-        <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="radio" name="kb-read-mode" value="ocr" style="width:auto;" /> Every page as pictures (slowest and dearest, most thorough)</label>
+        <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="radio" name="kb-read-mode" value="auto" style="width:auto;" ${failedCount ? '' : 'checked'} /> Every page (${escapeHtml(pagesText)}): the PDF's own text first, pictures where the text is thin or there is a table</label>
+        <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="radio" name="kb-read-mode" value="ocr" style="width:auto;" /> Every page as pictures (${escapeHtml(pagesText)}, one call each: slowest and dearest, most thorough)</label>
         <div style="margin-top:14px;">
           <button type="button" id="kb-read-start">Start</button>
           <button type="button" class="secondary" id="kb-read-cancel">Close</button>
@@ -434,6 +453,8 @@
       card.querySelector('#kb-read-cancel').addEventListener('click', () => overlay.remove());
       card.querySelector('#kb-read-start').addEventListener('click', async () => {
         const mode = card.querySelector('input[name="kb-read-mode"]:checked').value;
+        // a whole long document as pictures is the dear one: say what it costs before it is queued
+        if (mode === 'ocr' && pdfPages >= 50 && !confirm(`Read all ${pdfPages} pages as pictures? That is ${pdfPages} AI calls at a few cents each, and it cannot be undone once the pages are read. Only the failed pages is usually enough.`)) return;
         card.querySelector('#kb-read-start').disabled = true;
         try {
           await queueRead(entry.id, mode);

@@ -11,6 +11,7 @@ Names only. Values never go in the repo, in chat, or in a commit.
 | `SUPABASE_ANON_KEY` | Public anon key. Optional in production (falls back to the live key in code). In other contexts it is required: `scripts/write-config.js` swaps it into the browser build and functions use it | Branch deploys / previews: staging branch anon key |
 | `DEV_MODE_PASSWORD` | Unlocks Dev Mode (`verify-dev-mode.js`) | All |
 | `CLAUDE_AGENT_KEY` | Lets Claude agents post comments on bugs (`add-agent-comment.js`) | All |
+| `INTERNAL_FUNCTION_SECRET` | Shared secret for calls between this site's own functions (the Gmail sync starting a background worker, warm-pdf, chat-ai-sweep, the invoice PDF refresh after a payment). Sent as the `x-internal-secret` header, checked by `requireInternal()` in `netlify/functions/_shared/require-internal.js`. Any long random string (for example 48 characters from a password manager), the same value in every context. Until it is set nothing is refused, only logged, so set it at the first deploy that carries the check | All |
 | `GITHUB_TOKEN` | Writes `BUGS_AND_UPDATES.md` to the repo (`sync-bugs-to-repo.js`) | Production |
 | `SERVICEM8_API_KEY` | Legacy SM8 functions and the SM8 import fallback | Production |
 | `PDF_KEEP_BROWSER` | Optional PDF function tuning flag | Optional |

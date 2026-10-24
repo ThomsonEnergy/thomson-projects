@@ -34,7 +34,8 @@ const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 const SECTIONS = ['priority', 'other', 'updates'];
 const PRICING = ['admin', 'finance', 'sales'];
 const addrOf = (raw) => { const m = String(raw || '').match(/<([^>]+)>/); return (m ? m[1] : String(raw || '')).trim().toLowerCase(); };
-const clean = (s, n) => String(s == null ? '' : s).replace(/—/g, ',').trim().slice(0, n);
+// one line, no em dashes: a line break in an address or subject would add a header to the email
+const clean = (s, n) => String(s == null ? '' : s).replace(/—/g, ',').replace(/[\r\n]+/g, ' ').trim().slice(0, n);
 
 class Refused extends Error {}
 

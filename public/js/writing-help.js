@@ -57,13 +57,20 @@
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), kind === 'polish' ? 60000 : 20000);
     try {
-      const res = await fetch('/.netlify/functions/polish-text', {
-        method: 'POST', signal: ctrl.signal,
-        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: kind, text, keep: kind === 'spell' ? keepList() : undefined }),
-      });
+      let res;
+      try {
+        res = await fetch('/.netlify/functions/polish-text', {
+          method: 'POST', signal: ctrl.signal,
+          headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: kind, text, keep: kind === 'spell' ? keepList() : undefined }),
+        });
+      } catch (err) {
+        throw new Error(err && err.name === 'AbortError' ? 'Took too long, try again' : 'No connection, try again');
+      }
+      // The server says why it stopped (the answer was cut off, the model declined, no key); show that
+      // word for word. A reply that is not JSON (a timeout page) gets a plain message, never a bare 500 (F29).
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+      if (!res.ok || !data.ok) throw new Error(data.error || `The server could not finish just now (status ${res.status}), try again`);
       return data;
     } finally { clearTimeout(timer); }
   }

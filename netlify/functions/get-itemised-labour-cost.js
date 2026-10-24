@@ -32,7 +32,7 @@ exports.handler = async (event) => {
 
     const { data: timeEntries, error } = await supabaseAdmin
       .from('time_entries')
-      .select('id, staff_id, clock_in, clock_out')
+      .select('id, staff_id, clock_in, clock_out, break_minutes')
       .eq('project_id', projectId)
       .not('clock_out', 'is', null);
     if (error) throw error;

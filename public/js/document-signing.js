@@ -22,7 +22,7 @@ function openDocumentSignPanel(opts) {
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
   overlay.innerHTML = `
     <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
-      <h2>${doc.title}</h2>
+      <h2>${escapeHtml(doc.title)}</h2>
       <div class="ob-doc-body" style="white-space:pre-wrap; line-height:1.6; max-height:260px; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px; margin-bottom:14px;">${bodyHtml}</div>
 
       ${isConsent ? `
@@ -93,11 +93,12 @@ function openDocumentSignPanel(opts) {
     if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; confirmBtn.disabled = false; return; }
     // Bakes the snapshot + signature + signer name/date into one PDF and
     // saves it to Storage. The page moves on whether or not it succeeds,
-    // so a slow or failed render never blocks anyone.
-    fetch('/.netlify/functions/generate-signed-document', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    // so a slow or failed render never blocks anyone. The function refuses
+    // a call without the signed-in user's token.
+    supabaseClient.auth.getSession().then(({ data: { session } }) => fetch('/.netlify/functions/generate-signed-document', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
       body: JSON.stringify({ signature_id: newSig.id }),
-    }).catch(() => {});
+    })).catch(() => {});
     overlay.remove();
     if (onSigned) await onSigned(response);
   });

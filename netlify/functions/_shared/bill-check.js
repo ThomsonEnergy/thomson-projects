@@ -10,9 +10,12 @@
 //   po_total_exceeded  every bill on the PO together comes to more than the PO (over 2%)
 //   duplicate_number   another bill from the same supplier has the same number
 //   possible_duplicate another bill from the same supplier, same amount, within 3 days
+//   no_lines           no line items were read off the bill: the total has not been checked by anyone
+//   total_differs      the bill's total is not what its lines add up to (ex GST or inc GST)
 // check_status: matches (nothing wrong), no_po (only that), problems, or it stays queried /
 // resolved once a person has dealt with it (the issues are still refreshed).
 // Line amounts are ex-GST on both sides (bill lines and PO lines), so totals compare like for like.
+// The bill's own total (supplier_bills.amount) is the figure on the bill, usually inc GST.
 
 const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // INV-0103, inv103 and INV 103 are the same number
@@ -85,6 +88,20 @@ async function checkBill(admin, billId) {
     const billedTotal = (allLines || []).reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0);
     if (poTotal > 0 && billedTotal > poTotal * 1.02 + 0.01) {
       issues.push({ kind: 'po_total_exceeded', text: `Bills on ${po.po_number} come to ${money(billedTotal)} ex GST, the PO is ${money(poTotal)}` });
+    }
+  }
+
+  // the bill's total against its own lines: a bill read as the "balance owing" figure, or a poor scan
+  // with no lines, must not count as matching (nobody has confirmed the total)
+  const amount = Number(bill.amount) || 0;
+  if (!(lines || []).length) {
+    issues.push({ kind: 'no_lines', text: `No line items on this bill: check the total ${money(amount)} against the bill itself` });
+  } else {
+    const linesTotal = lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0);
+    const incGst = Math.round(linesTotal * 1.1 * 100) / 100;
+    const tolerance = Math.max(1, amount * 0.001); // rounding on GST per line
+    if (Math.abs(linesTotal - amount) > tolerance && Math.abs(incGst - amount) > tolerance) {
+      issues.push({ kind: 'total_differs', text: `The lines add up to ${money(linesTotal)} ex GST (${money(incGst)} inc), the bill total is ${money(amount)}` });
     }
   }
 

@@ -13,6 +13,10 @@ const { voiceForUser } = require('./_shared/writing-style');
 const SPELL_MODEL = 'claude-haiku-5-5';
 const POLISH_MODEL = 'claude-sonnet-5-5';
 const MAX_CHARS = 8000;
+// A fixed ceiling, not one scaled to the text: the model's own thinking counts against max_tokens, so a
+// tight ceiling cut short answers off. When the answer is still cut off it is asked for once more with
+// double the room (F29 in docs/BUG_REVIEW_2026-10-23.md).
+const MAX_TOKENS = 8000;
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 const words = (s) => (String(s).trim().match(/\S+/g) || []).length;
@@ -31,7 +35,20 @@ async function claude(apiKey, body) {
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Anthropic API error: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
-  const data = await res.json();
+  return res.json();
+}
+
+// The two failures the page is told about by name (422); anything else is a generic 500.
+const CUT_OFF = 'The answer was cut off twice';
+const DECLINED = 'The model declined this text';
+const KNOWN_ERRORS = [CUT_OFF, DECLINED];
+
+// The corrected text, or a thrown error when the model stopped early or refused.
+async function complete(apiKey, body) {
+  let data = await claude(apiKey, { ...body, max_tokens: MAX_TOKENS });
+  if (data.stop_reason === 'max_tokens') data = await claude(apiKey, { ...body, max_tokens: MAX_TOKENS * 2 });
+  if (data.stop_reason === 'max_tokens') throw new Error(CUT_OFF);
+  if (data.stop_reason === 'refusal') throw new Error(DECLINED);
   return JSON.parse((data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim()).text;
 }
 
@@ -64,13 +81,12 @@ exports.handler = async (event) => {
 
   try {
     const apiKey = await getIntegrationKey('anthropic');
-    const maxTokens = Math.min(8000, Math.ceil(text.length / 2) + 300);
     const user = `<text>\n${text}\n</text>`;
     let out;
     if (mode === 'spell') {
       const keep = (Array.isArray(body.keep) ? body.keep : []).map((w) => String(w).replace(/[^\p{L}\p{N}'\-]/gu, '')).filter(Boolean).slice(0, 200);
-      out = await claude(apiKey, {
-        model: SPELL_MODEL, max_tokens: maxTokens,
+      out = await complete(apiKey, {
+        model: SPELL_MODEL,
         output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
         system: SPELL_SYSTEM(keep), messages: [{ role: 'user', content: user }],
       });
@@ -78,8 +94,8 @@ exports.handler = async (event) => {
       if (!out || Math.abs(words(out) - words(text)) > Math.max(1, Math.round(words(text) * 0.05))) out = text;
     } else {
       const voice = await voiceForUser(auth.supabaseAdmin, auth.user.id);
-      out = await claude(apiKey, {
-        model: POLISH_MODEL, max_tokens: maxTokens + 500,
+      out = await complete(apiKey, {
+        model: POLISH_MODEL,
         output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
         system: POLISH_SYSTEM(voice), messages: [{ role: 'user', content: user }],
       });
@@ -91,6 +107,7 @@ exports.handler = async (event) => {
     return json(200, { ok: true, text: out, changed: out !== text });
   } catch (err) {
     console.error('polish-text failed:', err.message);
+    if (KNOWN_ERRORS.includes(err.message)) return json(422, { ok: false, error: `${err.message}.` });
     return json(500, { ok: false, error: 'Could not check the text just now.' });
   }
 };

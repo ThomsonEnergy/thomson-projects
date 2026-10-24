@@ -85,7 +85,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/licence-share.js?v=1"></script>
   <script>
@@ -146,7 +146,7 @@
           <h2>${existing ? 'Edit' : 'Add'} insurance / licence</h2>
           <label style="margin-top:0">Certificate (optional - reads it automatically)</label>
           <input type="file" id="cred-file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
-          <div id="cred-file-status" class="subtitle" style="margin:4px 0 10px;">${fileName ? `Attached: ${fileName}` : ''}</div>
+          <div id="cred-file-status" class="subtitle" style="margin:4px 0 10px;">${fileName ? `Attached: ${escapeHtml(fileName)}` : ''}</div>
           <label>Type</label>
           <select id="cred-type">
             <option value="insurance" ${existing?.credential_type !== 'licence' ? 'selected' : ''}>Insurance</option>
@@ -478,7 +478,7 @@
           <h2>${existing ? 'Edit' : 'Add'} licence - ${escapeHtml(employeeName)}</h2>
           <label style="margin-top:0">Certificate (optional - reads it automatically)</label>
           <input type="file" id="elic-file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
-          <div id="elic-file-status" class="subtitle" style="margin:4px 0 10px;">${fileName ? `Attached: ${fileName}` : ''}</div>
+          <div id="elic-file-status" class="subtitle" style="margin:4px 0 10px;">${fileName ? `Attached: ${escapeHtml(fileName)}` : ''}</div>
           <label>Licence name</label>
           <input id="elic-name" placeholder="e.g. Electrical Licence" value="${escapeHtml(existing?.licence_name || '')}" />
           <div class="grid cols-2">

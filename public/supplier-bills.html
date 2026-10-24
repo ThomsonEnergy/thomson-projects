@@ -64,7 +64,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=119"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const FILTERS = {
@@ -195,7 +195,13 @@
       el.querySelector('.sb-save')?.addEventListener('click', (e) => {
         const poId = el.querySelector('.sb-po')?.value || null;
         if (!poId && !confirm('Save this bill with no PO?')) return;
-        run(e.target, { action: 'save', id: item.id, po_id: poId }, 'Saving...');
+        // the total read off the bill is shown and confirmed (or corrected) by a person before it is saved (M4)
+        const ex = item.extracted || {};
+        const raw = prompt(`Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
+        if (raw === null) return;
+        const amount = Number(String(raw).replace(/[^0-9.]/g, ''));
+        if (!(amount > 0)) { showErr(new Error('Enter the bill total as a number, more than zero.')); return; }
+        run(e.target, { action: 'save', id: item.id, po_id: poId, amount }, 'Saving...');
       });
       el.querySelector('.sb-not-bill')?.addEventListener('click', (e) => run(e.target, { action: 'not_a_bill', id: item.id }, 'Putting aside...'));
       el.querySelector('.sb-reopen')?.addEventListener('click', (e) => run(e.target, { action: 'reopen', id: item.id }, 'Moving...'));
@@ -215,7 +221,7 @@
           if (item.supplier_id) {
             const poId = el.querySelector('.sb-po')?.value || null;
             sessionStorage.setItem('pending_upload', JSON.stringify({
-              ...extra, type: 'bill', extracted: item.extracted, fileBase64: await fileToBase64(file), fileName: file.name, fileType: file.type, preselectedPoId: poId,
+              ...extra, type: 'bill', extracted: item.extracted, filePath: await uploadPrivateFile(file, 'ai-extraction-uploads'), fileName: file.name, fileType: file.type, preselectedPoId: poId,
             }));
             window.location.href = `/supplier-detail.html?id=${item.supplier_id}&resume_upload=1`;
           } else {

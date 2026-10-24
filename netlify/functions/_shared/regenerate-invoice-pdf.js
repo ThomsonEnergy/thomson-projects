@@ -6,6 +6,7 @@
 // not make a payment webhook fail (the Regenerate PDF button on the invoice still works).
 const fetch = require('node-fetch');
 const { selfBaseUrl } = require('./site-url');
+const { internalHeaders } = require('./require-internal');
 
 async function regenerateInvoicePdf(invoiceId, waitMs = 3000) {
   if (!invoiceId) return;
@@ -13,7 +14,7 @@ async function regenerateInvoicePdf(invoiceId, waitMs = 3000) {
   try {
     await Promise.race([
       fetch(`${base}/.netlify/functions/generate-client-document-pdf`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() },
         body: JSON.stringify({ doc_type: 'invoice', record_id: invoiceId }),
       }).catch(() => {}),
       new Promise((resolve) => setTimeout(resolve, waitMs)),

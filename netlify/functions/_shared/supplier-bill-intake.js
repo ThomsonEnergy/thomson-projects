@@ -18,6 +18,7 @@ const { getAdminClient } = require('./require-admin');
 const { gmailRequest } = require('./google-client');
 const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
+const { internalHeaders } = require('./require-internal');
 const { extractSupplierInvoiceWithUsage } = require('./supplier-invoice-ai');
 const { checkBillAndSiblings, normNum, isFreight } = require('./bill-check');
 
@@ -95,7 +96,7 @@ async function downloadAttachment(gmailMessageId, partId) {
 async function startSupplierBillProcessing() {
   try {
     const res = await fetch(`${selfBaseUrl()}/.netlify/functions/process-supplier-bills-background`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', timeout: 8000,
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() }, body: '{}', timeout: 8000,
     });
     if (!res.ok && res.status !== 202) console.error('supplier bill processing did not start:', res.status);
   } catch (err) {
@@ -338,6 +339,7 @@ async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null,
   const ex = row.extracted || {};
   let supplierMatch = null;
   let sharedBy = null, sharedHow = ''; // suppliers sharing the bill's ABN or bank details (MMEM): a person picks
+  let sameName = false; // a saved supplier has this name but a different ABN or bank details: a person picks
   if (supplierId) {
     const { data: s } = await supabaseAdmin.from('suppliers').select('*').eq('id', supplierId).maybeSingle();
     if (s) supplierMatch = { supplier: s, how: 'picked by hand' };
@@ -347,7 +349,9 @@ async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null,
     if (supplierMatch && !supplierMatch.supplier) { sharedBy = supplierMatch.shared; sharedHow = supplierMatch.how; supplierMatch = null; }
     if (!supplierMatch && !sharedBy && allowCreate && (ex.document_type || 'invoice') === 'invoice' && (ex.supplier || ex.abn)) {
       const { createSupplierFromBill } = require('./supplier-verify'); // here, not at the top: it requires this file
-      supplierMatch = { supplier: await createSupplierFromBill(supabaseAdmin, ex, abnCheck), how: 'created' };
+      const created = await createSupplierFromBill(supabaseAdmin, ex, abnCheck);
+      if (created) supplierMatch = { supplier: created, how: 'created' };
+      else sameName = true; // the name is taken (unique): never a second supplier with the same name
     }
   }
   const sid = supplierMatch?.supplier.id || null;
@@ -393,7 +397,9 @@ async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null,
     reason = `${sharedBy.map(x => x.name).join(' and ')} share this ${sharedHow}${ex.our_account_number && sharedHow !== 'account number' ? ` and our account number ${ex.our_account_number} matches neither` : ''}${ex.our_account_number ? '' : ' and the bill has no account number'}: pick which account by the account number on the bill${sharedHow === 'account number' ? ' (two suppliers have the same account number saved: fix it on their pages)' : ''}. ${po.reason}`;
   } else if (!sid) {
     confidence = po.confidence === 'none' ? 'none' : 'guess';
-    reason = `Supplier "${ex.supplier || 'unknown'}" not recognised. ${po.reason}`;
+    reason = sameName
+      ? `A supplier named "${ex.supplier || 'unknown'}" is already saved, but the ABN or bank details on this bill are different. If it really is them, pick the supplier and check the details (especially the bank account) before paying. ${po.reason}`
+      : `Supplier "${ex.supplier || 'unknown'}" not recognised. ${po.reason}`;
   } else if (supplierMatch.how === 'name') {
     confidence = 'guess'; // a name alone is never enough to save automatically
   }
@@ -421,7 +427,9 @@ async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null,
 // Saves an inbox row as a supplier bill against a PO (or no PO). Lines are linked to the
 // PO's lines where the description matches, and flagged the same way the manual review
 // screen flags them. Stock levels and material prices are left alone.
-async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId = null } = {}) {
+// amount: the total a person confirmed on the Emailed bills page; the auto-save has none and
+// takes the total as read (the bill check then compares it with the lines before any approval).
+async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId = null, amount = null } = {}) {
   const { data: item, error: itemErr } = await supabaseAdmin.from('supplier_bill_inbox').select('*').eq('id', itemId).maybeSingle();
   if (itemErr) throw itemErr;
   if (!item) throw new Error('That emailed bill was not found.');
@@ -439,10 +447,13 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   let po = null;
   if (poId) {
     const { data } = await supabaseAdmin.from('purchase_orders')
-      .select('id, po_number, po_type, closed_at, purchase_order_line_items(id, material_id, description, unit_cost)').eq('id', poId).maybeSingle();
+      .select('id, po_number, po_type, closed_at, supplier_id, supplier_name, purchase_order_line_items(id, material_id, description, unit_cost)').eq('id', poId).maybeSingle();
     if (!data) throw new Error('That PO no longer exists.');
+    // a suggested PO can be another supplier's (our PO number on their bill): never save against it (same rule as supplier_bill_save_review)
+    if (data.supplier_id !== supplier.id) throw new Error(`${data.po_number || 'That PO'} is for ${data.supplier_name || 'another supplier'}, not ${supplier.name}. Pick one of ${supplier.name}'s POs, or save with no PO.`);
     po = data;
   }
+  const billAmount = amount != null ? Number(amount) : (Number(ex.total) || 0);
 
   let dueDate = null;
   if (ex.bill_date) {
@@ -458,7 +469,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     bill_number: ex.bill_number || null,
     bill_date: ex.bill_date || null,
     due_date: dueDate,
-    amount: Number(ex.total) || 0,
+    amount: billAmount,
     po_id: po?.id || null,
     po_reference: ex.our_order_reference || null,
     file_path: item.file_path,
@@ -506,7 +517,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   await checkBillAndSiblings(supabaseAdmin, bill.id);
 
   const who = userId ? '' : ' automatically';
-  const desc = `Bill ${ex.bill_number || ''} (${money(ex.total)}) from ${supplier.name} saved${who} from an invoice@ email`.replace(/\s+/g, ' ');
+  const desc = `Bill ${ex.bill_number || ''} (${money(billAmount)}) from ${supplier.name} saved${who} from an invoice@ email`.replace(/\s+/g, ' ');
   const log = [{ entity_type: 'supplier', entity_id: supplier.id, action: 'bill_emailed', description: desc + (po ? ` against ${po.po_number}` : ''), changed_by: userId }];
   if (po) log.push({ entity_type: 'purchase_order', entity_id: po.id, action: 'bill_emailed', description: desc, changed_by: userId });
   await supabaseAdmin.from('activity_log').insert(log);

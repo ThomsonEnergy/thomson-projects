@@ -129,6 +129,8 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
           TaxType: materialsMap.xero_tax_type,
         });
       }
+      // Each certificate credit is its own line, so Xero works out its GST per credit: the same
+      // per-credit rounding invoice.html and get_invoice_balance_due use (bug review M25).
       if (Number(c.stc_amount) > 0) {
         if (!stcMap) throw new Error(`No Xero mapping found for STC credits (${clientType}) - set it up in Settings > Xero Mapping first.`);
         lineItems.push({

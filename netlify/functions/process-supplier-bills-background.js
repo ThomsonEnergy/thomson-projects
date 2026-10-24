@@ -10,10 +10,20 @@
 const { processSupplierBills } = require('./_shared/supplier-bill-intake');
 const { runAgent } = require('./_shared/agent-log');
 const { extractAttachments, extractPlainText } = require('./_shared/gmail-sync');
+const { requireInternal } = require('./_shared/require-internal');
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-exports.handler = () => runAgent('supplier-bills', async () => {
+exports.handler = (event) => {
+  // only the Gmail sync, the email agent and the Emailed bills function start it (x-internal-secret)
+  if (!requireInternal(event)) {
+    console.error('process-supplier-bills-background: refused, no internal secret');
+    return { statusCode: 202, body: '' };
+  }
+  return runAgent('supplier-bills', processSupplierBillsRun);
+};
+
+async function processSupplierBillsRun() {
   const r = await processSupplierBills({ budgetMs: 12 * 60 * 1000, extractAttachments, extractPlainText });
   const c = r.counts;
   const read = Object.values(c).reduce((a, b) => a + b, 0);
@@ -31,4 +41,4 @@ exports.handler = () => runAgent('supplier-bills', async () => {
     needsMe: r.waiting,
     usage: r.usage,
   };
-});
+}

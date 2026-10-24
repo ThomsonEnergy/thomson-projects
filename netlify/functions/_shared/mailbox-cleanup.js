@@ -184,7 +184,27 @@ async function modifyAll(mailbox, q, { add = [], remove = [] }, { startedAt, bud
   }
 }
 
+// The sender's mailto: is their text, sent from the staff member's own Gmail, so only one plain
+// address is accepted and the subject and body are cut at the first line break (a CR or LF in
+// the header would add a Bcc or any other header). Returns null when it is not safe to send.
+const ONE_ADDRESS = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+const oneLine = (s, n) => String(s || '').split(/[\r\n]/)[0].replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, n);
+function parseUnsubscribeMailto(mailto) {
+  let u;
+  try { u = new URL(mailto); } catch (e) { return null; }
+  if (u.protocol !== 'mailto:') return null;
+  let to;
+  try { to = decodeURIComponent(u.pathname).trim(); } catch (e) { return null; }
+  if (!ONE_ADDRESS.test(to)) return null; // one address, nothing else (no commas, spaces or line breaks)
+  return {
+    to,
+    subject: oneLine(u.searchParams.get('subject'), 200) || 'unsubscribe',
+    bodyText: oneLine(u.searchParams.get('body'), 1000) || 'unsubscribe',
+  };
+}
+
 // Unsubscribe the way the sender asks: one-click link, otherwise an email to their unsubscribe address.
+// Returns 'unsubscribed', 'emailed:<address>', 'link:<url>' or 'no_unsubscribe'.
 async function unsubscribe(mailbox, row) {
   const header = row.list_unsubscribe || '';
   const links = [...header.matchAll(/<([^>]+)>/g)].map((m) => m[1]);
@@ -194,13 +214,11 @@ async function unsubscribe(mailbox, row) {
     const res = await fetch(https, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click', timeout: 10000 });
     if (res.ok || res.status === 202 || res.status === 204) return 'unsubscribed';
   }
-  if (mailto) {
-    const u = new URL(mailto);
-    const to = decodeURIComponent(u.pathname);
-    const subject = u.searchParams.get('subject') || 'unsubscribe';
-    const raw = buildMimeMessage({ fromName: '', fromAddress: mailbox.address, to, subject, bodyText: u.searchParams.get('body') || 'unsubscribe' });
+  const mail = mailto ? parseUnsubscribeMailto(mailto) : null;
+  if (mail) {
+    const raw = buildMimeMessage({ fromName: '', fromAddress: mailbox.address, to: mail.to, subject: mail.subject, bodyText: mail.bodyText });
     await gmailRequest('messages/send', { method: 'POST', body: { raw } }, mailbox);
-    return 'unsubscribed';
+    return 'emailed:' + mail.to;
   }
   if (https) return 'link:' + https;
   return 'no_unsubscribe';
@@ -224,7 +242,8 @@ async function runQueuedActions(admin, mailbox, { startedAt, budgetMs }) {
     try {
       if (row.queued_action === 'unsubscribe' && !String(row.done_action || '').startsWith('unsubscribe')) {
         const u = await unsubscribe(mailbox, row);
-        result = u.startsWith('link:') ? u : u === 'no_unsubscribe' ? 'archive (no unsubscribe link)' : 'unsubscribe';
+        // the address the email went to is kept, so the Clean up list can show it
+        result = u.startsWith('link:') ? u : u.startsWith('emailed:') ? `unsubscribe (emailed ${u.slice(8)})` : u === 'no_unsubscribe' ? 'archive (no unsubscribe link)' : 'unsubscribe';
         // remember it, so a run that runs out of time does not unsubscribe twice
         await admin.from('mailbox_cleanup_senders').update({ done_action: result }).eq('mailbox_id', mailbox.id).eq('sender', row.sender);
       }

@@ -6,8 +6,11 @@
 // POST { action: 'mark_paid', bill_ids, paid_on, reference }
 //      Records those bills as paid: one supplier_payments row per supplier (the batch), each bill
 //      gets paid, paid_at, paid_by, payment_id and the reference. Refuses a bill that is not approved.
+//      One database step (supplier_bills_mark_paid): the bills are locked, checked and marked with
+//      their batch rows all or nothing, so two presses within seconds cannot record them twice.
 // POST { action: 'undo_paid', bill_id, note }
-//      Takes a bill back to unpaid (wrong tick) and reduces its batch row.
+//      Takes a bill back to unpaid (wrong tick) and reduces its batch row (the last bill of a batch
+//      removes the batch row: the status list has no 'reversed').
 //
 // Sending the money is still done in Airwallex or by bank transfer by hand. Airwallex payouts need a
 // payout-enabled API key, a beneficiary per supplier and the accountant's sign-off (backlog item 1);
@@ -62,34 +65,13 @@ exports.handler = async (event) => {
       if (!ids.length) return json(400, { ok: false, error: 'Pick at least one bill.' });
       const paidOn = /^\d{4}-\d{2}-\d{2}$/.test(body.paid_on || '') ? body.paid_on : sydneyToday();
       const reference = String(body.reference || '').trim().slice(0, 120) || null;
-      const { data: bills, error } = await admin.from('supplier_bills')
-        .select('id, bill_number, amount, supplier_id, paid, approved_for_payment, suppliers(name)')
-        .in('id', ids);
+      // the database function locks the bills, refuses one that is not approved, already paid or without a
+      // supplier, then writes the batch rows, marks the bills and logs it in one transaction. It raises
+      // (code P0001) with a plain message when something is wrong, and returns one row per supplier.
+      const { data: paid, error } = await admin.rpc('supplier_bills_mark_paid', { p_bill_ids: ids, p_paid_on: paidOn, p_reference: reference, p_user: user.id });
+      if (error && error.code === 'P0001') return json(400, { ok: false, error: error.message });
       if (error) throw error;
-      const notApproved = (bills || []).filter(b => !b.approved_for_payment);
-      if (notApproved.length) return json(400, { ok: false, error: `Not approved for payment yet: ${notApproved.map(b => b.bill_number || '(no number)').join(', ')}. Approve first.` });
-      const toPay = (bills || []).filter(b => !b.paid && b.supplier_id);
-      if (!toPay.length) return json(400, { ok: false, error: 'Those bills are already paid.' });
-
-      const groups = {};
-      toPay.forEach(b => { (groups[b.supplier_id] = groups[b.supplier_id] || []).push(b); });
-      const results = [];
-      const now = new Date().toISOString();
-      for (const [supplierId, list] of Object.entries(groups)) {
-        const total = list.reduce((s, b) => s + (Number(b.amount) || 0), 0);
-        const { data: payment, error: payErr } = await admin.from('supplier_payments').insert({
-          supplier_id: supplierId, total_amount: total, status: 'paid', initiated_by: user.id,
-          paid_on: paidOn, reference, bill_count: list.length,
-        }).select('id').single();
-        if (payErr) throw payErr;
-        const { error: upErr } = await admin.from('supplier_bills')
-          .update({ paid: true, paid_at: now, paid_by: user.id, payment_id: payment.id, payment_reference: reference })
-          .in('id', list.map(b => b.id)).eq('paid', false);
-        if (upErr) throw upErr;
-        const name = list[0].suppliers?.name || 'Supplier';
-        await log(supplierId, 'bills_paid', `Paid ${money(total)} on ${paidOn}${reference ? ` (${reference})` : ''}: bill${list.length === 1 ? '' : 's'} ${list.map(b => b.bill_number || '(no number)').join(', ')}`);
-        results.push({ supplierId, supplier: name, amount: total, billCount: list.length });
-      }
+      const results = (paid || []).map(r => ({ supplierId: r.supplier_id, supplier: r.supplier || 'Supplier', amount: Number(r.amount) || 0, billCount: Number(r.bill_count) || 0 }));
       return json(200, { ok: true, results });
     }
 
@@ -102,11 +84,14 @@ exports.handler = async (event) => {
         .update({ paid: false, paid_at: null, paid_by: null, payment_id: null, payment_reference: null }).eq('id', bill.id);
       if (upErr) throw upErr;
       if (bill.payment_id) {
-        const { data: pay } = await admin.from('supplier_payments').select('id, total_amount, bill_count').eq('id', bill.payment_id).maybeSingle();
-        if (pay) {
-          const total = Math.max(0, (Number(pay.total_amount) || 0) - (Number(bill.amount) || 0));
-          await admin.from('supplier_payments').update({ total_amount: total, bill_count: Math.max(0, (pay.bill_count || 1) - 1), status: total > 0 ? 'paid' : 'reversed' }).eq('id', pay.id);
-        }
+        // the batch row follows the bills still on it: their total and count, or gone when this was the last one
+        const { data: left, error: leftErr } = await admin.from('supplier_bills').select('amount').eq('payment_id', bill.payment_id).eq('paid', true);
+        if (leftErr) throw leftErr;
+        const total = Math.round((left || []).reduce((s, b) => s + (Number(b.amount) || 0), 0) * 100) / 100;
+        const { error: batchErr } = (left || []).length
+          ? await admin.from('supplier_payments').update({ total_amount: total, bill_count: left.length, status: 'paid' }).eq('id', bill.payment_id)
+          : await admin.from('supplier_payments').delete().eq('id', bill.payment_id);
+        if (batchErr) throw batchErr;
       }
       if (bill.supplier_id) await log(bill.supplier_id, 'bill_unpaid', `Bill ${bill.bill_number || '(no number)'} (${money(bill.amount)}) marked not paid${body.note ? ': ' + String(body.note).slice(0, 200) : ''}`);
       return json(200, { ok: true });

@@ -2,6 +2,7 @@ const fetch = require('node-fetch');
 const { getAdminClient } = require('./_shared/require-admin');
 const { selfBaseUrl } = require('./_shared/site-url');
 const { runAgent } = require('./_shared/agent-log');
+const { internalHeaders } = require('./_shared/require-internal');
 
 // Every 15 minutes (netlify.toml): starts the retail plan download (sync-energy-plans-background.js)
 // when the last good one is over 20 hours old and none is running, so the plans refresh about once a
@@ -22,7 +23,7 @@ exports.handler = () => runAgent('sync-energy-plans', async () => {
   const { data: last } = await admin.from('energy_plan_sync_runs').select('status, started_at').order('started_at', { ascending: false }).limit(1).maybeSingle();
   if (!due(last)) return { quiet: true };
   const res = await fetch(`${selfBaseUrl()}/.netlify/functions/sync-energy-plans-background`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sweep: true }),
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() }, body: JSON.stringify({ sweep: true }),
   });
   return { summary: `Started the retail plan download (${res.status})` };
 });
