@@ -1839,7 +1839,7 @@
           <h2>${sig.document_title_snapshot}</h2>
           <p class="subtitle" style="margin-bottom:10px;">Signed ${new Date(sig.signed_at).toLocaleString('en-AU')} as ${sig.signed_by_name} - shown exactly as it was at the time, even if the template has since changed.</p>
           <div style="white-space:pre-wrap; line-height:1.6; max-height:320px; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px;">${sig.document_body_snapshot}</div>
-          ${sig.signature_data_url ? `<img src="${sig.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
+          ${/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(sig.signature_data_url || '') ? `<img src="${sig.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
           ${sig.file_path ? `<button type="button" class="secondary" id="download-signed-doc-modal-btn" style="margin-top:10px; display:block; font-size:12px; padding:6px 10px;">View signed PDF (with Fair Work Statement if applicable)</button>` : ''}
           <button type="button" class="secondary" id="close-signed-doc-btn" style="margin-top:14px;">Close</button>
         </div>`;

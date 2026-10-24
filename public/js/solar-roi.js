@@ -98,8 +98,11 @@ function roiInputsIncGst(inputs) {
     ? { ...s, rate: roiLiftGst(s.rate), peak: roiLiftGst(s.peak), shoulder: roiLiftGst(s.shoulder), off_peak: roiLiftGst(s.off_peak), solar_soak: roiLiftGst(s.solar_soak), controlled: roiLiftGst(s.controlled), supply: roiLiftGst(s.supply) }
     : s);
   const deal = (d) => (d && typeof d === 'object' ? { ...d, rate: roiLiftGst(d.rate) } : d);
-  // bill_gst becomes 'inc' so a second pass over the same inputs changes nothing
-  return { ...inp, bill_gst: 'inc', current: plan(inp.current), alt: plan(inp.alt), export: deal(inp.export), grid_charge: deal(inp.grid_charge) };
+  // Only what came off the bill is lifted: the current plan and the grid charge (a buy rate). The second
+  // plan (alt) is a retailer's published offer typed in as is, inc GST already, and the export rate is a
+  // credit, which carries no GST (like the feed-in tariff). bill_gst becomes 'inc' so a second pass over
+  // the same inputs changes nothing.
+  return { ...inp, bill_gst: 'inc', current: plan(inp.current), grid_charge: deal(inp.grid_charge) };
 }
 // The arguments of the public functions below with the bill and the inputs on an inc GST basis, plus
 // billGst (what the bill was). Safe to call twice: once normalised the arguments carry billGst.

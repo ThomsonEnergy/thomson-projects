@@ -336,7 +336,8 @@
         const dStr = localDateStr(day);
         const dayEntries = (entries || []).filter(e => sydneyDateKey(new Date(e.clock_in)) === dStr);
         const onLeave = (leave || []).find(l => dStr >= l.start_date && dStr <= l.end_date);
-        const totalMs = dayEntries.reduce((s, e) => s + (e.clock_out ? new Date(e.clock_out) - new Date(e.clock_in) : 0), 0);
+        // paid time: the unpaid break on the row comes off (one row per shift carries break_minutes)
+        const totalMs = dayEntries.reduce((s, e) => s + (e.clock_out ? Math.max(0, new Date(e.clock_out) - new Date(e.clock_in) - (e.break_taken && e.break_minutes ? e.break_minutes * 60000 : 0)) : 0), 0);
 
         let bodyHtml;
         if (dayEntries.length) {
@@ -405,8 +406,11 @@
       const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
       const entriesFor = (staffId, dStr) => (entries || [])
         .filter(e => e.staff_id === staffId && e.clock_out && sydneyDateKey(new Date(e.clock_in)) === dStr);
-      const hoursFor = (staffId, dStr) => entriesFor(staffId, dStr)
+      // clock span (for the "long day with no break" check) and paid hours (the unpaid break comes off)
+      const spanHoursFor = (staffId, dStr) => entriesFor(staffId, dStr)
         .reduce((s, e) => s + (new Date(e.clock_out) - new Date(e.clock_in)), 0) / 3600000;
+      const hoursFor = (staffId, dStr) => entriesFor(staffId, dStr)
+        .reduce((s, e) => s + Math.max(0, new Date(e.clock_out) - new Date(e.clock_in) - (e.break_taken && e.break_minutes ? e.break_minutes * 60000 : 0)), 0) / 3600000;
 
       el.innerHTML = `
         <div style="overflow-x:auto;">
@@ -449,7 +453,7 @@
           if (!dayEntries.length) return;
           const breakEntry = breakInfoFor(dayEntries);
           if (!breakEntry) {
-            if (hoursFor(s.id, dStr) > 6) {
+            if (spanHoursFor(s.id, dStr) > 6) {
               exceptions.push({ staffName: s.full_name || 'Unnamed', staffId: s.id, dStr, day: d, note: 'Break not recorded', isSkip: false });
             }
           } else if (breakEntry.break_taken === false) {

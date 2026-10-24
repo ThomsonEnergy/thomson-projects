@@ -73,15 +73,21 @@
       // the same sum calculate_balance_due does, before credit notes (used until the server answers, or if it cannot)
       const sub = r2(Number(inv.labour_amount || 0) + Number(inv.material_amount || 0));
       const project = inv.cost_centres?.projects || inv.projects;
-      const stc = Number(inv.stc_amount || 0) + Number(inv.bstc_amount || 0);
-      const stcIncGst = project?.clients?.client_type === 'company' ? r2(stc * 1.10) : r2(stc);
-      return r2(sub + r2(sub * 0.10) - stcIncGst);
+      // each credit rounded on its own, the way get_invoice_balance_due and the Xero lines do (M25)
+      const incGst = (n) => (project?.clients?.client_type === 'company' ? r2(n * 1.10) : r2(n));
+      return r2(sub + r2(sub * 0.10) - incGst(Number(inv.stc_amount || 0)) - incGst(Number(inv.bstc_amount || 0)));
     }
     const invoiceTotal = (inv) => invoiceTotals[inv.id] ?? invoiceTotalFallback(inv);
+    // The server figure differs from the fallback only where a credit note exists, so only those invoices
+    // are asked for (one call each): a few hundred invoices with none would otherwise mean a call apiece on
+    // every visit. If the credit note list cannot be read, every invoice is asked, as before.
     async function loadInvoiceTotals(invoices) {
       const out = {};
-      for (let i = 0; i < invoices.length; i += 20) {
-        await Promise.all(invoices.slice(i, i + 20).map(async (inv) => {
+      const { data: notes, error: notesErr } = await supabaseClient.from('credit_notes').select('invoice_id');
+      const credited = notesErr ? null : new Set((notes || []).map(n => n.invoice_id));
+      const need = credited ? invoices.filter(inv => credited.has(inv.id)) : invoices;
+      for (let i = 0; i < need.length; i += 20) {
+        await Promise.all(need.slice(i, i + 20).map(async (inv) => {
           const { data: bal, error } = await supabaseClient.rpc('get_invoice_balance_due', { p_invoice_id: inv.id });
           if (!error && bal != null) out[inv.id] = Number(bal);
         }));

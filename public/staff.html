@@ -595,7 +595,7 @@
       const jobHours90 = hours(entries.filter(e => e.time_category === 'job' && e.project_id));
       const total90 = hours(entries);
       const daysWorked90 = new Set(entries.map(e => sydneyDateKey(new Date(e.clock_in)))).size;
-      const yearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      const yearAgo = sydneyDateKey(new Date(Date.now() - 365 * 86400000));
       const tiles = [
         [hours(last30).toFixed(1), 'Hours, last 30 days'],
         [total90.toFixed(1), 'Hours, last 90 days'],
