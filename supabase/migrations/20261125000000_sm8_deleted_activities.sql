@@ -13,6 +13,7 @@ create table if not exists public.sm8_deleted_activities (
 );
 alter table public.sm8_deleted_activities enable row level security;
 revoke all on table public.sm8_deleted_activities from anon, authenticated;
+grant select, insert, update, delete on table public.sm8_deleted_activities to service_role;
 
 create or replace function public.time_entries_remember_sm8_delete()
 returns trigger
