@@ -21,7 +21,9 @@
 //
 // Safe to re-run: each ServiceM8 record id is stored once (unique indexes,
 // migration 20261021000000). A re-run moves time to a newly matched person
-// and ticks tasks that were ticked in ServiceM8 since.
+// and ticks tasks that were ticked in ServiceM8 since. Times an admin
+// corrected on the job are never overwritten, and entries an admin deleted
+// (sm8_deleted_activities, migration 20261125000000) are not re-added.
 
 const { sm8GetAll } = require('./sm8-import');
 
@@ -51,10 +53,16 @@ async function copyJobLabour(supabaseAdmin, project, activities, profileByStaff,
     .select('id, staff_id, sm8_activity_uuid').eq('project_id', project.id).not('sm8_activity_uuid', 'is', null);
   if (error) throw error;
   const existingByUuid = new Map((existing || []).map(e => [e.sm8_activity_uuid, e]));
+  // deleted on the job by an admin (wrong in ServiceM8): never brought back
+  const { data: gone, error: goneErr } = await supabaseAdmin.from('sm8_deleted_activities')
+    .select('sm8_activity_uuid').eq('project_id', project.id);
+  if (goneErr) throw goneErr;
+  const deletedUuids = new Set((gone || []).map(g => g.sm8_activity_uuid));
   const nowIso = new Date().toISOString();
   const inserts = [];
 
   for (const a of activities) {
+    if (deletedUuids.has(a.uuid)) { summary.timeDeleted++; continue; }
     const clockIn = sm8DateToIso(a.start_date);
     const clockOut = sm8DateToIso(a.end_date);
     if (!clockIn || !clockOut || clockOut <= clockIn) { summary.timeSkippedNoTimes++; continue; }
@@ -240,7 +248,7 @@ async function sm8JobGroups(apiKey, projects) {
 async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary, groups) {
   Object.assign(summary, {
     jobs: 0, letteredJobs: 0, jobErrors: [], activitiesSeen: 0, checklistSeen: 0,
-    timeAdded: 0, timeAlready: 0, timeMoved: 0, timeSkippedUnmatched: 0, timeSkippedNoTimes: 0, unmatchedStaff: {},
+    timeAdded: 0, timeAlready: 0, timeMoved: 0, timeSkippedUnmatched: 0, timeSkippedNoTimes: 0, timeDeleted: 0, unmatchedStaff: {},
     checklistAdded: 0, checklistAlready: 0, checklistTicked: 0,
   });
 

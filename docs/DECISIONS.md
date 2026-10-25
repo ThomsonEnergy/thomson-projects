@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 25 Oct 2026
 
+- Feature (into `staging`): admins can fix the times of, or delete, ServiceM8 imported labour on the job (Edit on the labour list), and a deleted one stays deleted on re-import. Migration 20261125000000. Detail: `docs/PROJECT_SPEC.md` A27.
 - Bug fix: Timesheets team week grid now skips ServiceM8 imported labour (already paid, job only), same as My week and the day editor. It was adding them to the day total (Sean Carney, Fri 16 Oct, showed 19.5 h, real 8.25 h). Code: `public/timesheets.html`.
 
 ## 24 Oct 2026

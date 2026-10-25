@@ -7920,10 +7920,33 @@
           ? entry.selected_cost_centre_ids
           : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
         const category = entry.time_category && entry.time_category !== 'job' ? entry.time_category : 'job';
+        // ServiceM8 imports can be wrong in ServiceM8 itself: admins can fix the times or delete them
+        // (Sydney times; our own staff's entries are edited in Timesheets instead)
+        const isSm8 = !!entry.sm8_activity_uuid;
+        const sydParts = (iso) => {
+          const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(iso)).map(x => [x.type, x.value]));
+          return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
+        };
+        const sydToIso = (dateKey, time) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^\d{2}:\d{2}$/.test(time)) return null;
+          const naive = new Date(`${dateKey}T${time}:00Z`).getTime();
+          const guess = naive - sydneyOffsetMinutesAt(new Date(naive)) * 60000;
+          return new Date(naive - sydneyOffsetMinutesAt(new Date(guess)) * 60000).toISOString();
+        };
+        const inParts = isSm8 ? sydParts(entry.clock_in) : null;
+        const outParts = isSm8 && entry.clock_out ? sydParts(entry.clock_out) : { date: inParts?.date || '', time: '' };
 
         editCell.innerHTML = `
           <div style="padding:10px; background:var(--surface-2); border-radius:8px;">
-            <label style="margin-top:0;">Category</label>
+            ${isSm8 ? `
+            <p class="subtitle" style="margin:0 0 6px;">ServiceM8 check-in. Fix the times if they are wrong in ServiceM8, or delete it. A new ServiceM8 import will not undo either.</p>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <div><label style="margin-top:0;">Start date</label><input type="date" class="td-in-date" value="${inParts.date}" /></div>
+              <div><label style="margin-top:0;">Start time</label><input type="time" class="td-in-time" value="${inParts.time}" /></div>
+              <div><label>Finish date</label><input type="date" class="td-out-date" value="${outParts.date}" /></div>
+              <div><label>Finish time</label><input type="time" class="td-out-time" value="${outParts.time}" /></div>
+            </div>` : ''}
+            <label style="${isSm8 ? '' : 'margin-top:0;'}">Category</label>
             <select class="td-category">
               <option value="job" ${category === 'job' ? 'selected' : ''}>Job - split across stage(s) below</option>
               ${timeCategoryOptionsHtml(category)}
@@ -7939,6 +7962,7 @@
             <div style="margin-top:12px;">
               <button type="button" class="td-save-btn">Save</button>
               <button type="button" class="secondary td-cancel-btn">Cancel</button>
+              ${isSm8 ? `<button type="button" class="secondary td-delete-btn" style="color:var(--red);">Delete</button>` : ''}
             </div>
             <div class="td-edit-msg"></div>
           </div>`;
@@ -7959,12 +7983,21 @@
             msg.innerHTML = `<div class="error-box">Tick at least one stage, or choose a non-job category.</div>`;
             return;
           }
+          let times = {};
+          if (isSm8) {
+            const clockIn = sydToIso(editCell.querySelector('.td-in-date').value, editCell.querySelector('.td-in-time').value);
+            const clockOut = sydToIso(editCell.querySelector('.td-out-date').value, editCell.querySelector('.td-out-time').value);
+            if (!clockIn || !clockOut) { msg.innerHTML = `<div class="error-box">Fill in the start and finish date and time.</div>`; return; }
+            if (clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Finish must be after start.</div>`; return; }
+            times = { clock_in: clockIn, clock_out: clockOut };
+          }
           try {
             const { data: { session } } = await supabaseClient.auth.getSession();
             const res = await fetch('/.netlify/functions/admin-update-time-entry', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
               body: JSON.stringify({
+                ...times,
                 entryId: entry.id,
                 project_id: newCategory === 'job' ? project.id : null,
                 cost_centre_id: newCategory === 'job' && checkedIds.length === 1 ? checkedIds[0] : null,
@@ -7974,6 +8007,27 @@
             });
             const data = await res.json();
             if (!res.ok || !data.ok) throw new Error(data.error || 'Update failed');
+
+            await refreshList();
+            const refreshed = await loadProject();
+            if (refreshed) render(refreshed, pricingVisible);
+          } catch (err) {
+            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+          }
+        });
+        editCell.querySelector('.td-delete-btn')?.addEventListener('click', async () => {
+          const msg = editCell.querySelector('.td-edit-msg');
+          const hrs = hoursFor(entry);
+          if (!confirm(`Delete this ServiceM8 entry for ${entry.profiles?.full_name || 'this person'}${hrs === null ? '' : ` (${hrs.toFixed(2)} hours)`}? It comes off this job's labour cost and a new ServiceM8 import will not bring it back.`)) return;
+          try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch('/.netlify/functions/admin-update-time-entry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({ entryId: entry.id, delete: true }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Delete failed');
 
             await refreshList();
             const refreshed = await loadProject();
