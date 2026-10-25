@@ -4,7 +4,8 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 25 Oct 2026
 
-- Feature (into `staging`): admins can fix the times of, or delete, ServiceM8 imported labour on the job (Edit on the labour list), and a deleted one stays deleted on re-import. Migration 20261125000000. Detail: `docs/PROJECT_SPEC.md` A27.
+- Staging database is behind: its newest migration on 26 Oct was 20261025000000, so merges into `staging` are not running migrations by themselves. 20261125000000 (ServiceM8 time delete, PR 216) was applied to staging by hand, with one fake ServiceM8 row on J9002 to test with. Owner to check Supabase Dashboard > Branches > staging (and the GitHub integration) before release night.
+- Feature (into `staging`, PR 216): admins can fix the times of, or delete, ServiceM8 imported labour on the job (Edit on the labour list), and a deleted one stays deleted on re-import. Migration 20261125000000. Detail: `docs/PROJECT_SPEC.md` A27 (on `staging` until release).
 - Bug fix: Timesheets team week grid now skips ServiceM8 imported labour (already paid, job only), same as My week and the day editor. It was adding them to the day total (Sean Carney, Fri 16 Oct, showed 19.5 h, real 8.25 h). Code: `public/timesheets.html`.
 
 ## 24 Oct 2026
