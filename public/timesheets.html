@@ -399,6 +399,7 @@
       const { data: entries, error } = await supabaseClient
         .from('time_entries')
         .select('staff_id, clock_in, clock_out, break_taken, break_minutes, break_skip_reason')
+        .is('sm8_activity_uuid', null) // ServiceM8 imports show on the job only, already paid
         .gte('clock_in', sydneyMidnightUtc(localDateStr(rangeStart)).toISOString())
         .lt('clock_in', sydneyMidnightUtc(localDateStr(rangeEndExclusive)).toISOString());
       if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
