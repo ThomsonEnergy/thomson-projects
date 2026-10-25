@@ -137,9 +137,10 @@ function matchClient(company, contacts, clients) {
   return { match, candidates };
 }
 
-// Returns { rows, summary } - one row per open ServiceM8 job, ready for the
-// review screen.
-async function loadSm8OpenJobs(supabaseAdmin) {
+// Returns { rows, summary } - one row per open ServiceM8 job, and per open
+// quote dated in the last quotesSinceMonths months (kind 'job' / 'quote'),
+// ready for the review screen.
+async function loadSm8OpenJobs(supabaseAdmin, { quotesSinceMonths = 6 } = {}) {
   const apiKey = await getIntegrationKey('servicem8');
 
   const [workOrders, quoteJobs, companies, companyContacts, jobContacts, notes] = await Promise.all([
@@ -194,7 +195,7 @@ async function loadSm8OpenJobs(supabaseAdmin) {
 
   const [{ data: clients, error: clientsErr }, { data: imported, error: importedErr }] = await Promise.all([
     supabaseAdmin.from('clients').select('id, name, email, phone, address, sm8_company_uuid').limit(10000),
-    supabaseAdmin.from('projects').select('id, job_number, sm8_job_uuid').not('sm8_job_uuid', 'is', null),
+    supabaseAdmin.from('projects').select('id, job_number, quote_number, sm8_job_uuid').not('sm8_job_uuid', 'is', null),
   ]);
   if (clientsErr) throw clientsErr;
   if (importedErr) throw importedErr;
@@ -206,7 +207,18 @@ async function loadSm8OpenJobs(supabaseAdmin) {
   const notesByJob = group(notes, 'related_object_uuid');
   const importedByUuid = new Map((imported || []).map(p => [p.sm8_job_uuid, p]));
 
-  const rows = jobs.map(job => {
+  // ServiceM8 marks a quote as sent (quote_sent, with the time in
+  // quote_sent_stamp) the same way it marks invoices.
+  const quoteSentDate = (job) => {
+    const d = String(job.quote_sent_stamp || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) && d !== '0000-00-00' ? d : '';
+  };
+  const quoteCutoff = new Date(Date.now() - quotesSinceMonths * 30.5 * 86400000).toISOString().slice(0, 10);
+  const quotes = quotesSinceMonths > 0
+    ? quoteJobs.filter(q => !claimOf(q) && String(q.quote_date || q.date || '').slice(0, 10) >= quoteCutoff)
+    : [];
+
+  const shape = (job, kind) => {
     const company = companyByUuid.get(job.company_uuid) || { uuid: job.company_uuid || '', name: '' };
     const coContacts = contactsByCompany.get(company.uuid) || [];
     const jContacts = contactsByJob.get(job.uuid) || [];
@@ -255,7 +267,10 @@ async function loadSm8OpenJobs(supabaseAdmin) {
     return {
       sm8JobUuid: job.uuid,
       sm8JobNumber: String(job.generated_job_id || ''),
-      sm8Date: String(job.work_order_date || job.date || '').slice(0, 10),
+      kind,
+      sm8Date: String((kind === 'quote' ? job.quote_date : job.work_order_date) || job.date || '').slice(0, 10),
+      quoteSent: kind === 'quote' ? (isOn(job.quote_sent) || !!quoteSentDate(job)) : null,
+      quoteSentDate: kind === 'quote' ? quoteSentDate(job) : null,
       companyUuid: company.uuid || '',
       companyName,
       companyAddress: clean(company.address || company.billing_address),
@@ -274,17 +289,21 @@ async function loadSm8OpenJobs(supabaseAdmin) {
       notesText: buildNotesText(job, jobNotes),
       clientMatch: match ? { clientId: match.clientId, reason: match.reason, ambiguous: !!match.ambiguous } : null,
       candidates: candidates.map(c => ({ id: c.id, name: c.name, email: c.email || '', phone: c.phone || '', address: c.address || '' })),
-      alreadyImported: already ? { projectId: already.id, jobNumber: already.job_number } : null,
+      alreadyImported: already ? { projectId: already.id, jobNumber: already.job_number, quoteNumber: already.quote_number } : null,
       warnings,
     };
-  }).sort((a, b) => (Number(a.sm8JobNumber) || 0) - (Number(b.sm8JobNumber) || 0));
+  };
+  const byNumber = (a, b) => (Number(a.sm8JobNumber) || 0) - (Number(b.sm8JobNumber) || 0);
+  const rows = [...jobs.map(j => shape(j, 'job')).sort(byNumber), ...quotes.map(q => shape(q, 'quote')).sort(byNumber)];
 
   return {
     rows,
     summary: {
-      workOrders: rows.length,
+      workOrders: rows.filter(r => r.kind === 'job').length,
+      quotes: rows.filter(r => r.kind === 'quote').length,
       alreadyImported: rows.filter(r => r.alreadyImported).length,
-      quotesNotImported: quoteJobs.length,
+      quotesNotImported: quoteJobs.filter(q => !claimOf(q)).length - quotes.length,
+      quotesSinceMonths,
       claimsFound: seenClaims.size,
       orphanClaims,
     },

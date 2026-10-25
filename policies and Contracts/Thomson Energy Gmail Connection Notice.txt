@@ -1,0 +1,18 @@
+DRAFT v1, 18 Oct 2026. For adviser review (Formby or HR adviser). Shown in TEops (Inbox > My inbox) before a staff member connects their work Gmail; the wording in public/inbox.html (NOTICE_TEXT, NOTICE_VERSION 1) is the live copy. Each answer is recorded in gmail_connect_notices.
+
+Connecting your work Gmail to TEops
+
+What happens if you connect
+- TEops copies your work email (your @thomsonenergy.com.au inbox): the last 60 days, then new email as it arrives, so you can read, sort and reply from TEops.
+- Sparky (the AI in TEops) reads your work email to sort it (needs a reply, other, subscriptions and updates), file it under labels, match it to jobs and draft replies for you to check. Nothing is ever sent without you pressing Send.
+- Emails tagged to a job show on that job for the team. Everything else in your inbox stays private to you: other staff, directors included, do not see it in TEops.
+- You can disconnect any time in Inbox > My inbox. Your private emails are then removed from TEops straight away; emails tagged to a job stay on the job as business records.
+
+Your rights under the Workplace Surveillance Act 2005 (NSW)
+- TEops reading your work email this way is computer surveillance under the Act. The law says you must get written notice at least 14 days before it starts. This is that notice.
+- You can agree to it starting now. Agreeing waives the 14 days notice for this. It is your choice.
+- If you do not agree, nothing is connected now and nothing changes for your job or pay. Connect becomes available 14 days from today, and only if you choose to press it then.
+
+Please also read the Notice of Workplace Surveillance and Computer Surveillance Policy in your signed documents.
+
+Buttons: "I agree and waive the 14 days notice: connect now" / "I don't agree" / "Not now" (records nothing).

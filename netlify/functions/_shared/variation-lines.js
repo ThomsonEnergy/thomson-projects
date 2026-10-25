@@ -5,14 +5,16 @@
 //
 // A do-and-charge variation has its own cost centre from the moment it is logged,
 // which is what the team picks when clocking in. What gets billed:
-//   labour     the hours clocked on that stage (time_entries) plus any hours logged
-//              by hand on the Variations tab, each at that person's own sell rate
-//              (their rate tier)
+//   labour     the hours clocked on that stage (time_entries, less the unpaid break, and a
+//              split entry's share of its hours) plus any hours logged by hand on the
+//              Variations tab, each at that person's own sell rate (their rate tier)
 //   materials  Stock cost price x (1 + the stage markup), like a quoted stage
 //   prebuilds  each component at the prebuild's own price (labour components are
 //              sell rates, material components get the markup)
 // No prices are stored with those rows - they are worked out here, at billing time,
 // and server side because a person's rate tier sits on their profile.
+
+const { entryHours, entryCentreIds } = require('./compute-labour-cost');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -38,8 +40,11 @@ async function loadVariationLines(supabaseAdmin, projectId, { ids = null } = {})
   const [{ data: hourRows }, { data: matRows }, { data: clockRows }, { data: centres }] = await Promise.all([
     supabaseAdmin.from('job_variation_hours').select('variation_id, staff_id, hours').in('variation_id', entryIds),
     supabaseAdmin.from('job_variation_materials').select('*').in('variation_id', entryIds).order('created_at', { ascending: true }),
+    // Clocked to the stage directly, or as one of the stages of a split entry (cost_centre_id
+    // null, the stages in selected_cost_centre_ids): the same two shapes the job costing reads.
     centreIds.length
-      ? supabaseAdmin.from('time_entries').select('staff_id, cost_centre_id, clock_in, clock_out').in('cost_centre_id', centreIds).not('clock_out', 'is', null)
+      ? supabaseAdmin.from('time_entries').select('staff_id, cost_centre_id, selected_cost_centre_ids, clock_in, clock_out, break_minutes')
+        .or(`cost_centre_id.in.(${centreIds.join(',')}),selected_cost_centre_ids.ov.{${centreIds.join(',')}}`).not('clock_out', 'is', null)
       : Promise.resolve({ data: [] }),
     centreIds.length
       ? supabaseAdmin.from('cost_centres').select('id, quoted_amount').in('id', centreIds)
@@ -73,9 +78,12 @@ async function loadVariationLines(supabaseAdmin, projectId, { ids = null } = {})
 
     // Hours per person: clocked on the stage + logged by hand.
     const hoursByStaff = {};
-    (clockRows || []).filter(t => t.cost_centre_id === e.cost_centre_id).forEach((t) => {
+    (clockRows || []).forEach((t) => {
+      const stageIds = entryCentreIds(t);
+      if (!e.cost_centre_id || !stageIds.includes(e.cost_centre_id)) return;
       const k = t.staff_id || 'unknown';
-      hoursByStaff[k] = (hoursByStaff[k] || 0) + (new Date(t.clock_out) - new Date(t.clock_in)) / 3600000;
+      // paid hours (the unpaid break taken off); a split entry gives this stage its even share
+      hoursByStaff[k] = (hoursByStaff[k] || 0) + entryHours(t) / stageIds.length;
     });
     (hourRows || []).filter(h => h.variation_id === e.id).forEach((h) => {
       const k = h.staff_id || 'unknown';

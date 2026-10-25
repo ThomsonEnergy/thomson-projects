@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Clients - Thomson Energy</title>
+<title>Clients - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
 </head>
 <body>
@@ -51,6 +51,7 @@
                 <button id="new-client-btn">+ New client</button>
               </div>
             </div>
+            <div id="clients-list-msg"></div>
             <div id="clients-list"><p class="subtitle">Loading...</p></div>
           </div>
         </div>
@@ -72,17 +73,18 @@
               </div>
               <div>
                 <label style="margin-top:0">Phone</label>
-                <input id="c-phone" />
+                <input id="c-phone" type="tel" autocomplete="tel" />
               </div>
             </div>
             <div class="grid cols-3">
               <div style="grid-column: span 2;">
-                <label>Address</label>
+                <label>Office / billing address</label>
                 <input id="c-address" />
+                <p class="subtitle" style="margin:4px 0 0; font-size:11px;">Used on invoices, quote covers and the Xero contact. Where the work happens goes under Sites below; a job never changes this address.</p>
               </div>
               <div>
                 <label>ABN</label>
-                <input id="c-abn" placeholder="Filled in by the search above, or type one directly" />
+                <input id="c-abn" inputmode="numeric" placeholder="Filled in by the search above, or type one directly" />
               </div>
             </div>
             <div class="grid cols-3">
@@ -110,6 +112,11 @@
             <label>Contacts</label>
             <div id="contacts-rows"></div>
             <button type="button" class="secondary" id="add-contact-btn" style="font-size:12px; padding:6px 12px;">+ Add contact</button>
+
+            <label>Sites</label>
+            <p class="subtitle" style="margin:0 0 6px; font-size:11px;">Places this client has work done, other than the office address. A new site address on a job is added here by itself. Removing a site keeps the address on its jobs.</p>
+            <div id="sites-rows"></div>
+            <button type="button" class="secondary" id="add-site-btn" style="font-size:12px; padding:6px 12px;">+ Add site</button>
 
             <div style="margin-top:16px;">
               <button id="save-client-btn">Save client</button>
@@ -167,8 +174,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let allClients = [];
     let editingClientId = null;
@@ -192,10 +199,12 @@
     }
 
     // --- contacts sub-form ---
-    function addContactRow({ contact_type = 'job', name = '', phone = '', email = '' } = {}) {
+    function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '' } = {}) {
       contactCount++;
       const row = document.createElement('div');
       row.className = 'contact-row';
+      // Existing contacts keep their id on save, so job_contacts and the projects contact columns stay linked (F45)
+      if (id) row.dataset.id = id;
       row.style.cssText = 'display:grid; grid-template-columns:1fr 1.4fr 1fr 1.4fr auto; gap:8px; margin-bottom:6px; align-items:center;';
       row.innerHTML = `
         <select class="ct-type" style="font-size:13px;">
@@ -205,15 +214,36 @@
           <option value="sales" ${contact_type === 'sales' ? 'selected' : ''}>Sales contact</option>
           <option value="project_manager" ${contact_type === 'project_manager' ? 'selected' : ''}>Project manager</option>
         </select>
-        <input class="ct-name" placeholder="Name" value="${name || ''}" style="font-size:13px;" />
-        <input class="ct-phone" placeholder="Phone" value="${phone || ''}" style="font-size:13px;" />
-        <input class="ct-email" placeholder="Email" value="${email || ''}" style="font-size:13px;" />
+        <input class="ct-name" placeholder="Name" value="${escapeHtml(name)}" style="font-size:13px;" />
+        <input class="ct-phone" type="tel" placeholder="Phone" value="${escapeHtml(phone)}" style="font-size:13px;" />
+        <input class="ct-email" type="email" autocapitalize="off" placeholder="Email" value="${escapeHtml(email)}" style="font-size:13px;" />
         <button type="button" class="secondary ct-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
       row.querySelector('.ct-remove').addEventListener('click', () => row.remove());
       document.getElementById('contacts-rows').appendChild(row);
     }
     document.getElementById('add-contact-btn').addEventListener('click', () => addContactRow());
+
+    // --- sites sub-form (client_sites) ---
+    function addSiteRow({ id = '', label = '', address = '', jobs = 0 } = {}) {
+      const row = document.createElement('div');
+      row.className = 'site-row';
+      row.dataset.id = id;
+      row.dataset.jobs = jobs;
+      row.style.cssText = 'display:grid; grid-template-columns:1fr 2.4fr auto auto; gap:8px; margin-bottom:6px; align-items:center;';
+      row.innerHTML = `
+        <input class="st-label" placeholder="Label (e.g. Warehouse)" value="${escapeHtml(label)}" style="font-size:13px;" />
+        <input class="st-address" placeholder="Site address" value="${escapeHtml(address)}" style="font-size:13px;" />
+        <span class="subtitle" style="font-size:12px; white-space:nowrap;">${jobs ? jobs + ' job' + (jobs === 1 ? '' : 's') : ''}</span>
+        <button type="button" class="secondary st-remove" style="padding:6px 10px; font-size:12px;">x</button>
+      `;
+      row.querySelector('.st-remove').addEventListener('click', () => {
+        if (jobs && !confirm(`${jobs} job${jobs === 1 ? ' uses' : 's use'} this site. The jobs keep their address; the site just drops off this list. Remove it?`)) return;
+        row.remove();
+      });
+      document.getElementById('sites-rows').appendChild(row);
+    }
+    document.getElementById('add-site-btn').addEventListener('click', () => addSiteRow());
 
     function resetEditForm() {
       editingClientId = null;
@@ -227,6 +257,7 @@
       document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
       document.getElementById('contacts-rows').innerHTML = '';
+      document.getElementById('sites-rows').innerHTML = '';
       document.getElementById('delete-client-btn').style.display = 'none';
       document.getElementById('save-client-msg').innerHTML = '';
       addContactRow();
@@ -306,7 +337,7 @@
           <div style="flex:1;">
             <strong>${escapeHtml(row.client.name)}</strong> ${row.confident ? '<span class="badge accepted" style="font-size:10px;">Confident match</span>' : '<span class="badge draft" style="font-size:10px;">Check this one</span>'}
             <select class="abn-row-select" data-i="${i}" style="margin-top:6px;">
-              ${row.results.map((r, ri) => `<option value="${ri}" ${ri === row.chosenIndex ? 'selected' : ''}>${escapeHtml(r.name)} - ABN ${r.abn || 'none'}${r.status ? ' (' + escapeHtml(r.status) + ')' : ''}</option>`).join('')}
+              ${row.results.map((r, ri) => `<option value="${ri}" ${ri === row.chosenIndex ? 'selected' : ''}>${escapeHtml(r.name)} - ABN ${escapeHtml(r.abn || 'none')}${r.status ? ' (' + escapeHtml(r.status) + ')' : ''}</option>`).join('')}
             </select>
           </div>
         </div>`;
@@ -336,7 +367,7 @@
           applyMsg.innerHTML = `<div class="success-box">Updated ${checkedIndexes.length} client${checkedIndexes.length === 1 ? '' : 's'}.</div>`;
           await loadClients();
         } catch (err) {
-          applyMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          applyMsg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         }
         applyBtn.disabled = false;
         applyBtn.textContent = 'Apply selected';
@@ -355,9 +386,9 @@
     // --- list + search ---
     async function loadClients() {
       const listEl = document.getElementById('clients-list');
-      const { data, error } = await supabaseClient.from('clients').select('*, client_contacts(*)').order('name');
+      const { data, error } = await supabaseClient.from('clients').select('*, client_contacts(*), client_sites(*)').order('name');
       if (error) {
-        listEl.innerHTML = `<div class="error-box">${error.message}</div>`;
+        listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
         return;
       }
       allClients = data;
@@ -373,11 +404,11 @@
       listEl.innerHTML = clients.map(c => `
         <div class="project-list-item" data-id="${c.id}" style="cursor:pointer;">
           <div>
-            <div class="name">${c.name}</div>
-            <div class="meta">${[c.email, c.phone, mapsLink(c.address)].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}</div>
+            <div class="name">${escapeHtml(c.name)}</div>
+            <div class="meta">${[escapeHtml(c.email), escapeHtml(c.phone), mapsLink(c.address)].filter(Boolean).join(' &middot; ')} ${(c.client_contacts || []).length ? ' &middot; ' + c.client_contacts.length + ' contact' + (c.client_contacts.length === 1 ? '' : 's') : ''}${(c.client_sites || []).length ? ' &middot; ' + c.client_sites.length + ' site' + (c.client_sites.length === 1 ? '' : 's') : ''}</div>
           </div>
           <div style="text-align:right;">
-            <span class="badge draft">${(c.payment_terms || 'cod').replace('_', ' ').toUpperCase()}</span>
+            <span class="badge draft">${escapeHtml((c.payment_terms || 'cod').replace('_', ' ').toUpperCase())}</span>
             <div class="subtitle" style="font-size:11px; margin-top:4px;">${c.client_type === 'company' ? 'Company' : 'Individual'}</div>
           </div>
         </div>
@@ -397,9 +428,12 @@
       ));
     });
 
-    function openClientForEdit(id) {
+    async function openClientForEdit(id) {
       const c = allClients.find(x => x.id === id);
       if (!c) return;
+      const { data: siteJobs } = await supabaseClient.from('projects').select('client_site_id').eq('client_id', c.id).not('client_site_id', 'is', null);
+      const jobsPerSite = {};
+      (siteJobs || []).forEach(j => { jobsPerSite[j.client_site_id] = (jobsPerSite[j.client_site_id] || 0) + 1; });
       editingClientId = c.id;
       document.getElementById('edit-heading').textContent = 'Edit client';
       document.getElementById('c-name').value = c.name || '';
@@ -413,6 +447,9 @@
       document.getElementById('contacts-rows').innerHTML = '';
       (c.client_contacts || []).forEach(addContactRow);
       if (!(c.client_contacts || []).length) addContactRow();
+      document.getElementById('sites-rows').innerHTML = '';
+      (c.client_sites || []).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+        .forEach(st => addSiteRow({ id: st.id, label: st.label || '', address: st.address || '', jobs: jobsPerSite[st.id] || 0 }));
       document.getElementById('delete-client-btn').style.display = 'inline-flex';
       document.getElementById('save-client-msg').innerHTML = '';
       showEditTab();
@@ -422,7 +459,11 @@
       const msg = document.getElementById('save-client-msg');
       const name = document.getElementById('c-name').value.trim();
       if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
-
+      const btn = document.getElementById('save-client-btn');
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      try {
       const clientFields = {
         name,
         email: document.getElementById('c-email').value.trim(),
@@ -437,17 +478,19 @@
       let clientId = editingClientId;
       if (editingClientId) {
         const { error } = await supabaseClient.from('clients').update(clientFields).eq('id', editingClientId);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-        await supabaseClient.from('client_contacts').delete().eq('client_id', editingClientId);
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         await logActivity('client', editingClientId, 'updated', `Client "${name}" updated`);
       } else {
         const { data: inserted, error } = await supabaseClient.from('clients').insert(clientFields).select().single();
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         clientId = inserted.id;
         await logActivity('client', clientId, 'created', `Client "${name}" added`);
       }
 
+      // Contacts keep their ids (job_contacts.client_contact_id and the projects contact columns
+      // point at them): existing rows are updated in place, new rows added, rows taken off the form deleted.
       const contacts = [...document.querySelectorAll('.contact-row')].map((row, i) => ({
+        id: row.dataset.id || null,
         client_id: clientId,
         contact_type: row.querySelector('.ct-type').value,
         name: row.querySelector('.ct-name').value.trim(),
@@ -455,14 +498,55 @@
         email: row.querySelector('.ct-email').value.trim(),
         sort_order: i,
       })).filter(c => c.name || c.phone || c.email);
-
-      if (contacts.length) {
-        const { error: contactErr } = await supabaseClient.from('client_contacts').insert(contacts);
-        if (contactErr) { msg.innerHTML = `<div class="error-box">${contactErr.message}</div>`; return; }
+      const contactsBefore = editingClientId ? (allClients.find(x => x.id === editingClientId)?.client_contacts || []) : [];
+      const keptContactIds = contacts.filter(c => c.id).map(c => c.id);
+      const removedContactIds = contactsBefore.map(c => c.id).filter(id => !keptContactIds.includes(id));
+      const contactErrors = [];
+      if (removedContactIds.length) {
+        const { error: delErr } = await supabaseClient.from('client_contacts').delete().in('id', removedContactIds);
+        if (delErr) contactErrors.push(delErr.message);
       }
+      for (const c of contacts) {
+        const { id, ...fields } = c;
+        const { error: contactErr } = id
+          ? await supabaseClient.from('client_contacts').update(fields).eq('id', id)
+          : await supabaseClient.from('client_contacts').insert(fields);
+        if (contactErr) contactErrors.push(contactErr.message);
+      }
+      if (contactErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a contact did not: ${escapeHtml(contactErrors.join('; '))}</div>`; await loadClients(); return; }
+
+      // Sites keep their ids (jobs link to them): existing rows are updated, new rows added,
+      // rows taken off the form deleted (their jobs keep the address text).
+      const siteRows = [...document.querySelectorAll('.site-row')].map(row => ({
+        id: row.dataset.id || null,
+        label: row.querySelector('.st-label').value.trim() || null,
+        address: row.querySelector('.st-address').value.trim(),
+      })).filter(st => st.address);
+      const before = editingClientId ? (allClients.find(x => x.id === editingClientId)?.client_sites || []) : [];
+      const keptIds = siteRows.filter(st => st.id).map(st => st.id);
+      const removedIds = before.map(st => st.id).filter(id => !keptIds.includes(id));
+      const siteErrors = [];
+      if (removedIds.length) {
+        const { error } = await supabaseClient.from('client_sites').delete().in('id', removedIds);
+        if (error) siteErrors.push(error.message);
+      }
+      for (const st of siteRows) {
+        const { error } = st.id
+          ? await supabaseClient.from('client_sites').update({ label: st.label, address: st.address }).eq('id', st.id)
+          : await supabaseClient.from('client_sites').insert({ client_id: clientId, label: st.label, address: st.address });
+        if (error) siteErrors.push(/client_sites_client_address_uidx/.test(error.message) ? `"${st.address}" is already a site for this client.` : error.message);
+      }
+      if (siteErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a site did not: ${escapeHtml(siteErrors.join('; '))}</div>`; await loadClients(); return; }
 
       await loadClients();
       document.querySelector('.settings-tab[data-panel="list"]').click();
+      const listMsg = document.getElementById('clients-list-msg');
+      listMsg.innerHTML = '<div class="success-box">Client saved.</div>';
+      setTimeout(() => { listMsg.innerHTML = ''; }, 4000);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
     });
 
     document.getElementById('delete-client-btn').addEventListener('click', async () => {
@@ -490,7 +574,7 @@
           renderCsvMapping();
         },
         error: (err) => {
-          document.getElementById('import-msg').innerHTML = `<div class="error-box">${err.message}</div>`;
+          document.getElementById('import-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         },
       });
     });
@@ -539,9 +623,10 @@
       document.getElementById('mapping-status').textContent = 'Mapping columns with keyword matching - checking with AI for a better guess...';
 
       try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const res = await fetch('/.netlify/functions/analyze-csv-columns', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
           body: JSON.stringify({ headers: csvHeaders, sampleRows: csvRows.slice(0, 5) }),
         });
         const json = await res.json();
@@ -565,7 +650,7 @@
             <div>
               <label style="margin-top:0">${f.label} <span class="subtitle" style="font-size:11px;">(ctrl/cmd-click to add fallback columns)</span></label>
               <select class="csv-map-select" data-field="${f.key}" multiple size="4">
-                ${csvHeaders.map(h => `<option value="${h}" ${preselect.includes(h) ? 'selected' : ''}>${h}</option>`).join('')}
+                ${csvHeaders.map(h => `<option value="${escapeHtml(h)}" ${preselect.includes(h) ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}
               </select>
             </div>`;
         }
@@ -574,7 +659,7 @@
             <label style="margin-top:0">${f.label}</label>
             <select class="csv-map-select" data-field="${f.key}">
               <option value="">-- Not in file --</option>
-              ${csvHeaders.map(h => `<option value="${h}" ${h === mapping[f.key] ? 'selected' : ''}>${h}</option>`).join('')}
+              ${csvHeaders.map(h => `<option value="${escapeHtml(h)}" ${h === mapping[f.key] ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}
             </select>
           </div>`;
       }).join('');
@@ -586,7 +671,7 @@
           <label style="margin-top:0">${f.label}</label>
           <select class="csv-map-select-optional" data-field="${f.key}">
             <option value="">-- Not in file --</option>
-            ${csvHeaders.map(h => `<option value="${h}" ${h === guessColumn(f.guesses) ? 'selected' : ''}>${h}</option>`).join('')}
+            ${csvHeaders.map(h => `<option value="${escapeHtml(h)}" ${h === guessColumn(f.guesses) ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}
           </select>
         </div>`).join('');
       optionalEl.querySelectorAll('.csv-map-select-optional').forEach(sel => sel.addEventListener('change', () => { findIncomplete(); }));
@@ -635,7 +720,7 @@
         <table>
           <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th></tr></thead>
           <tbody>
-            ${preview.map(r => `<tr><td>${r.name || ''}</td><td>${r.email || ''}</td><td>${r.phone || ''}</td><td>${r.address || ''}</td></tr>`).join('')}
+            ${preview.map(r => `<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.email)}</td><td>${escapeHtml(r.phone)}</td><td>${escapeHtml(r.address)}</td></tr>`).join('')}
           </tbody>
         </table>
         <p class="subtitle" style="margin-top:8px;">Showing first 8 of ${csvRows.length} rows.</p>`;
@@ -693,7 +778,7 @@
           const fields = ['name', 'email', 'phone', 'address'];
           return `
           <div class="card" style="background:var(--surface-2); margin-bottom:14px;">
-            <h3 style="margin:0 0 10px;">${group.candidates[0].name} <span class="subtitle">(${group.candidates.length} version${group.candidates.length === 1 ? '' : 's'} found)</span></h3>
+            <h3 style="margin:0 0 10px;">${escapeHtml(group.candidates[0].name)} <span class="subtitle">(${group.candidates.length} version${group.candidates.length === 1 ? '' : 's'} found)</span></h3>
             <table>
               <thead><tr><th>Source</th>${fields.map(f => `<th style="text-transform:capitalize;">${f}</th>`).join('')}</tr></thead>
               <tbody>
@@ -704,7 +789,7 @@
                       <td>
                         <label style="display:flex; align-items:center; gap:6px; font-weight:400; margin:0;">
                           <input type="radio" name="dupe-${gIdx}-${f}" value="${cIdx}" ${cIdx === 0 ? 'checked' : ''} />
-                          ${c[f] || '<span class="subtitle">(empty)</span>'}
+                          ${c[f] ? escapeHtml(c[f]) : '<span class="subtitle">(empty)</span>'}
                         </label>
                       </td>`).join('')}
                   </tr>`).join('')}
@@ -750,9 +835,9 @@
               ${incomplete.map(r => `
                 <tr>
                   <td data-label=""><input type="checkbox" class="incomplete-exclude-checkbox" data-index="${r.index}" /></td>
-                  <td data-label="Name">${r.name}</td>
+                  <td data-label="Name">${escapeHtml(r.name)}</td>
                   <td data-label="Email"><input type="email" class="incomplete-email-input" data-index="${r.index}" placeholder="Add an email" /></td>
-                  <td data-label="Phone"><input class="incomplete-phone-input" data-index="${r.index}" placeholder="Add a phone number" /></td>
+                  <td data-label="Phone"><input class="incomplete-phone-input" type="tel" data-index="${r.index}" placeholder="Add a phone number" /></td>
                 </tr>`).join('')}
             </tbody>
           </table>`;
@@ -876,7 +961,7 @@
         document.getElementById('csv-file').value = '';
         await loadClients();
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       }
       btn.disabled = false;
       btn.textContent = 'Import clients';
@@ -901,7 +986,7 @@
               <div class="empty-icon">&#128274;</div>
               <h2>Not available for your role</h2>
               <p>Clients are limited to Sales, Finance, and Admin accounts.</p>
-              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Projects</a>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Pipeline</a>
             </div>
           </div>`;
         return;
@@ -909,6 +994,12 @@
 
       resetEditForm();
       await loadClients();
+      // ?id= (from the top bar search) opens that client straight away
+      const deepClientId = new URLSearchParams(window.location.search).get('id');
+      if (deepClientId) {
+        if (allClients.some(c => c.id === deepClientId)) openClientForEdit(deepClientId);
+        else showToast('That client could not be found', { error: true });
+      }
     })();
   </script>
 </body>

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Chat - TEops</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/chat.css?v=5" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
+</head>
+<body class="chat-page">
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="chat-app" id="chat-app">
+    <aside class="ch-side">
+      <div class="ch-side-head">
+        <h1>Chat</h1>
+        <div class="ch-side-btns">
+          <button type="button" class="secondary" id="ch-new-dm" title="Message someone">&#9998; New</button>
+          <button type="button" class="secondary" id="ch-new-channel" title="Make a channel for a group">+ Channel</button>
+        </div>
+      </div>
+      <input type="search" id="ch-filter" placeholder="Search chats" autocomplete="off" />
+      <div class="ch-list" id="ch-list"><p class="subtitle" style="padding:14px;">Loading...</p></div>
+    </aside>
+
+    <section class="ch-conv" id="ch-conv">
+      <div class="ch-empty" id="ch-empty"><p class="subtitle">Pick a chat on the left.</p></div>
+    </section>
+
+    <section class="ch-thread" id="ch-thread"></section>
+  </div>
+
+  <div id="ch-offline" class="ch-offline" style="display:none;">No signal. Messages will send when you're back online.</div>
+
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
+  <script src="/js/chat.js?v=5"></script>
+</body>
+</html>

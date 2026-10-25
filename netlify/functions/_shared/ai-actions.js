@@ -9,6 +9,8 @@
 // (their own token, so the database rules apply exactly as in the app: anyone
 // can make tasks, only admin / finance / sales can change the Schedule).
 
+const { prepareOps, executeOps, OPS_TOOLS, OPS_TOOL_NAMES } = require('./ops-actions');
+
 const TASK_TYPES = ['prejob', 'onsite', 'handover', 'quote'];
 const BLOCK_KINDS = ['job', 'site_visit', 'quoting', 'admin', 'maintenance', 'tafe', 'training', 'other'];
 const KIND_LABEL = { job: 'on the job', site_visit: 'for a site visit', quoting: 'quoting', admin: 'office / admin', office: 'office / admin', maintenance: 'maintenance', tafe: 'TAFE', training: 'training', other: 'other' };
@@ -110,6 +112,7 @@ const describeBooking = (a) => `${hhmm(a.start_time)}-${hhmm(a.end_time)} ${a.pr
 
 // ---------- prepare: check + describe one action (no changes made) ----------
 async function prepare(client, type, input, ctx = {}) {
+  if (OPS_TOOL_NAMES.includes(type)) return prepareOps(client, type, input);
   input = input || {};
   const warnings = [];
   try {
@@ -289,6 +292,7 @@ const permissionMessage = (err, what = 'schedule') => (err && (err.code === '425
   : (err && err.message) || 'Something went wrong.');
 
 async function execute(client, userId, type, params) {
+  if (OPS_TOOL_NAMES.includes(type)) return executeOps(client, userId, type, params);
   const input = { ...(params || {}) };
   // A proposal's params hold the resolved ids; map them back onto what prepare()
   // takes so everything is checked again, by id, at the moment it is confirmed.
@@ -333,13 +337,11 @@ async function execute(client, userId, type, params) {
   if (type === 'add_timesheet') {
     const at = (t) => sydneyToUtc(p.date, t).toISOString();
     const base = { staff_id: p.staff_id, project_id: p.project_id || null, time_category: p.category, notes: (p.note ? p.note + ' - ' : '') + 'added with the AI assistant' };
-    const rows = p.break_minutes
-      ? [
-        { ...base, clock_in: at(p.start_time), clock_out: at(p.break_start), break_taken: true, break_start: at(p.break_start), break_minutes: p.break_minutes, break_skip_reason: null },
-        { ...base, clock_in: at(addMinutes(p.break_start, p.break_minutes)), clock_out: at(p.end_time) },
-      ]
-      : [{ ...base, clock_in: at(p.start_time), clock_out: at(p.end_time) }];
-    const { error } = await client.from('time_entries').insert(rows);
+    // One row for the whole shift with the unpaid break on it, the same shape as a clock-out
+    // (never two rows split at the break: pay, costing and billing take break_minutes off the one row).
+    const row = { ...base, clock_in: at(p.start_time), clock_out: at(p.end_time) };
+    if (p.break_minutes) Object.assign(row, { break_taken: true, break_start: at(p.break_start), break_minutes: p.break_minutes, break_skip_reason: null });
+    const { error } = await client.from('time_entries').insert(row);
     if (error) return { ok: false, error: permissionMessage(error, 'timesheet') };
     return { ok: true, message: `Done. Timesheet added for ${p.staff_name} on ${fmtDay(p.date)}.` };
   }
@@ -418,7 +420,7 @@ const ACTION_TOOLS = [
   },
   {
     name: 'add_timesheet',
-    description: 'Propose adding a timesheet entry for time already worked (yours by default; only admin and finance can add time for someone else). Needs the date, start and finish times, and either a job or a kind of time (quoting, admin, maintenance, tafe, training, other). If there was an unpaid break, give unpaid_break_minutes (and break_start if not 12:00): the shift is then entered as two blocks so the unpaid time is not paid. Timesheets feed payroll, so never guess times or days: ask.' + PROPOSE_NOTE,
+    description: 'Propose adding a timesheet entry for time already worked (yours by default; only admin and finance can add time for someone else). Needs the date, start and finish times, and either a job or a kind of time (quoting, admin, maintenance, tafe, training, other). If there was an unpaid break, give unpaid_break_minutes (and break_start if not 12:00): the break is recorded on the shift so the unpaid time is not paid. Timesheets feed payroll, so never guess times or days: ask.' + PROPOSE_NOTE,
     input_schema: { type: 'object', properties: {
       date: { type: 'string', description: 'YYYY-MM-DD, a day that has already happened.' }, start_time: { type: 'string', description: 'HH:MM 24 hour' }, end_time: { type: 'string', description: 'HH:MM 24 hour' },
       category: { type: 'string', enum: TIME_CATEGORIES }, job: { type: 'string', description: 'Job number or words from its name/client, for job time.' },
@@ -447,6 +449,7 @@ const ACTION_TOOLS = [
     input_schema: { type: 'object', properties: { assignment_id: { type: 'string' } }, required: ['assignment_id'] },
   },
 ];
+ACTION_TOOLS.push(...OPS_TOOLS); // ops manager actions (_shared/ops-actions.js)
 const ACTION_TOOL_NAMES = ACTION_TOOLS.map(t => t.name);
 
 module.exports = { prepare, execute, ACTION_TOOLS, ACTION_TOOL_NAMES, resolveStaff, resolveJob };

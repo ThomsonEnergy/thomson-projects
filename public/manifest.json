@@ -1,6 +1,6 @@
 {
-  "name": "Thomson Energy Projects",
-  "short_name": "TE Projects",
+  "name": "TEops",
+  "short_name": "TEops",
   "description": "Internal project management and quoting tool for Thomson Energy",
   "start_url": "/index.html",
   "display": "standalone",

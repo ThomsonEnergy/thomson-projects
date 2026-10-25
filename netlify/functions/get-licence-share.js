@@ -23,15 +23,20 @@ exports.handler = async (event) => {
     if (!share || share.revoked) return json(404, { ok: false, error: 'This link is no longer available.' });
     if (share.expires_at && new Date(share.expires_at) < new Date()) return json(410, { ok: false, error: 'This link has expired. Ask Thomson Energy for a new one.' });
 
-    const [{ data: credentials }, { data: licences }, { data: company }] = await Promise.all([
+    const [{ data: credentials, error: credErr }, { data: licences, error: licErr }, { data: company }] = await Promise.all([
       share.company_credential_ids.length
         ? supabaseAdmin.from('company_credentials').select('id, credential_type, name, provider, reference_number, expiry_date, file_path, file_name').in('id', share.company_credential_ids)
         : Promise.resolve({ data: [] }),
       share.employee_licence_ids.length
-        ? supabaseAdmin.from('profile_licences').select('id, profile_id, licence_name, licence_number, expiry_date, file_path, file_name, profiles(full_name)').in('id', share.employee_licence_ids)
+        ? supabaseAdmin.from('profile_licences').select('id, profile_id, licence_name, licence_number, expiry_date, file_path, file_name, profiles!profile_licences_profile_id_fkey(full_name)').in('id', share.employee_licence_ids)
         : Promise.resolve({ data: [] }),
       supabaseAdmin.from('company_settings').select('company_name, abn, phone, website').limit(1).maybeSingle(),
     ]);
+    // profile_licences has three links to profiles (profile_id, notes_updated_by,
+    // update_requested_by), so the join above names the FK. Fail loudly rather
+    // than quietly dropping a group of documents from the page.
+    if (credErr) throw credErr;
+    if (licErr) throw licErr;
 
     const paths = [...(credentials || []), ...(licences || [])].map(r => r.file_path).filter(Boolean);
     const urls = {};

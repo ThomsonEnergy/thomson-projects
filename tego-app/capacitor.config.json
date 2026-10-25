@@ -1,0 +1,21 @@
+{
+  "appId": "au.com.thomsonenergy.app",
+  "appName": "TEgo",
+  "webDir": "native-shell",
+  "appendUserAgent": "TEgoApp",
+  "backgroundColor": "#000000",
+  "server": {
+    "url": "https://projects.thomsonenergy.com.au/index.html",
+    "errorPath": "offline.html"
+  },
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#000000",
+    "limitsNavigationsToAppBoundDomains": false
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}

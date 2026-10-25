@@ -1,0 +1,61 @@
+DRAFT v1, 18 Oct 2026. For adviser review (Formby or HR adviser) before use.
+
+Thomson Energy Australia Pty Ltd
+Notice of Workplace Surveillance and Computer Surveillance Policy
+
+This notice is given under the Workplace Surveillance Act 2005 (NSW). Signing it confirms you have received and read it. It does not mean you agree to the optional AI features or location tracking: those have their own consent forms, and you can say no to both.
+
+1. Who this covers
+All employees of Thomson Energy Australia Pty Ltd (the company), whether full time, part time or casual.
+
+2. Why we do this
+We use the TEops app and AI (artificial intelligence) tools to cut down on admin: matching messages and emails to the right job, writing summaries, drafting replies, turning voice messages into text and answering questions about a job. It is not used to score, rate or rank individual staff.
+
+3. What we record and read (computer surveillance)
+The following work systems are recorded and stored by the company:
+- TEops team chat, job feeds, comments, notes and photos.
+- Voice messages sent through TEops (audio and the written transcript).
+- Business text messages (SMS) and calls made or received through the company number in TEops, including voicemail and its transcript. Calls are not recorded unless you are told otherwise in writing first.
+- Work email: the shared sales@ inbox, and your own work Gmail only if you choose to connect it to TEops.
+- Meeting recordings made in TEops (everyone in the meeting is told before recording starts).
+- Your activity in TEops (what you created or changed and when), as already shown in the app's activity log.
+
+AI processing of these systems only applies to staff who sign the separate AI Features Consent. If you do not consent, your messages are still stored as normal business records, but AI does not read, tag, summarise or draft from them.
+
+4. What we do not record
+- Your personal phone, personal texts, personal email, personal social media or personal apps.
+- Anything outside the work systems listed above.
+- The Social channel in team chat is only scanned to spot work talk so it can be matched to a job. AI never summarises, reports on or keeps a record of personal chat.
+
+5. How it is carried out
+Messages, emails, texts and voice messages are stored in TEops (hosted by Supabase). Sparky (the AI) is a member of every TEops team chat and reads chat messages as they arrive. For email, texts and calls, AI reads them only for staff who consent, using these service providers: Anthropic (Claude), AssemblyAI (speech to text), Google (Gmail) and Twilio (texts and calls). Some of these providers process data outside Australia. Nothing is ever sent to a customer or supplier by AI without a person pressing send.
+
+6. Continuous or intermittent
+Continuous and ongoing, for as long as you are employed. It is not for a limited period.
+
+7. When it starts
+Computer surveillance and AI processing start on [START DATE], which is at least 14 days after this notice is given to you, unless you agree in writing to a shorter period.
+
+8. Location tracking (not started yet)
+Location tracking will only start once the TEops iPhone app is released, and only for staff who sign the separate Location Tracking Consent and allow location on their iPhone. When it starts:
+- Your location is recorded once at the moment you clock in and once when you clock out, and checked against the job site.
+- While you have started an "On my way" trip, your location is shared until you arrive, so the customer can be given an arrival time.
+- It is never recorded when you are clocked off.
+- The app shows a clear indicator whenever your location is being recorded.
+You will be given written notice of the start date at least 14 days before location tracking begins.
+
+9. Who can see it and how it is used
+- Messages and emails tagged to a job can be seen by staff working on that job.
+- Untagged emails from your own connected inbox stay private to you.
+- Directors can access stored records when needed for running the business, for example to answer a customer complaint, a safety incident, a legal claim, or a suspected breach of company policy or the law. Records may be used as evidence in those matters.
+- Records are kept as business records for as long as the law requires (generally at least 7 years for employee and financial records), then deleted.
+
+10. Your rights
+- You can withdraw AI consent or location consent at any time in TEops or by telling a director. It takes effect straight away.
+- Saying no or withdrawing has no effect on your employment, pay or the work you are given.
+- You can ask to see the information the company holds about you.
+
+11. Questions
+Ask Jasper Thomson (Director) on 0455 415 464 or jasper@thomsonenergy.com.au.
+
+By signing, I confirm I have received and read this notice and the company's computer surveillance policy above.

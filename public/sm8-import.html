@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .imp-filters { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
   .imp-filters button { font-size:12px; padding:5px 10px; }
@@ -63,11 +63,13 @@
 
   <div class="wrap">
     <h1>ServiceM8 Import</h1>
-    <p class="subtitle">Brings the jobs still open in ServiceM8 (status Work Order) across as Direct Jobs. Loading the list is a dry run: it only reads from ServiceM8 and saves nothing. Check each job, untick any you would rather finish in ServiceM8, then press Import. Jobs already brought across are skipped, so this can be run again on cutover day.</p>
+    <p class="subtitle">Brings the jobs still open in ServiceM8 (status Work Order) across as jobs, and open quotes (status Quote) from the last few months as quotes: Quote sent if ServiceM8 sent it, otherwise Draft quote. Loading the list is a dry run: it only reads from ServiceM8 and saves nothing. Nothing is ticked to start: search a ServiceM8 number, check it, tick it and press Import, one at a time or several. Jobs already brought across are skipped, so this can be run again on cutover day.</p>
 
     <div class="card">
       <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <button id="load-btn">Load open jobs from ServiceM8</button>
+        <label style="margin:0; display:flex; gap:6px; align-items:center; font-weight:normal;">Plus open quotes from the last
+          <input type="number" id="quote-months" value="6" min="0" max="120" style="width:70px; margin:0;" /> months</label>
         <span id="load-msg" class="subtitle"></span>
       </div>
     </div>
@@ -76,7 +78,8 @@
       <div class="stat"><div class="label">Open jobs in ServiceM8</div><div class="value" id="stat-open">-</div></div>
       <div class="stat"><div class="label">Already imported</div><div class="value" id="stat-done">-</div></div>
       <div class="stat"><div class="label">Need checking</div><div class="value" id="stat-check">-</div></div>
-      <div class="stat"><div class="label">Quotes (not imported)</div><div class="value" id="stat-quotes">-</div></div>
+      <div class="stat"><div class="label">Open quotes to bring</div><div class="value" id="stat-quote-rows">-</div></div>
+      <div class="stat"><div class="label">Older quotes (left behind)</div><div class="value" id="stat-quotes">-</div></div>
     </div>
 
     <div id="review" class="card" style="display:none;">
@@ -84,7 +87,10 @@
       <p class="subtitle" style="margin:0 0 12px;">All amounts are ex GST, like everywhere else in the app. Each job comes across with its ServiceM8 line items: every bundle as a prebuild with its real parts and labour, at the prices the client was quoted, so labour and materials split properly when it is invoiced to Xero. Lettered jobs (4515A deposit, 4515B progress claim, and so on) are not imported as jobs: a Completed one counts toward 4515's invoiced to date, and the app only lets you invoice what is left. Check the Labour/Material choice on any line that is not part of a prebuild.</p>
       <div id="orphan-claims"></div>
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
-        <div class="imp-filters" id="filters"></div>
+        <div>
+          <input type="search" id="imp-search" placeholder="Search ServiceM8 number, client, name or address" style="margin:0 0 8px; max-width:420px;" />
+          <div class="imp-filters" id="filters"></div>
+        </div>
         <div class="imp-filters">
           <button type="button" class="secondary" id="tick-all-btn">Tick all</button>
           <button type="button" class="secondary" id="untick-all-btn">Untick all</button>
@@ -98,18 +104,30 @@
     </div>
 
     <div class="card">
-      <h2 style="margin:0 0 6px;">Docs and photos</h2>
-      <p class="subtitle" style="margin:0 0 12px;">Once jobs are imported, this copies their ServiceM8 attachments across: pictures into the job's Photos, everything else (PDFs, plans, HEIC photos, videos...) into its Documents under a "ServiceM8" folder. It runs in the background, so you can leave this page, and it is safe to press again: copied files are skipped, failed ones are retried, and anything left over when a run hits its 15 minute limit is picked up next time.</p>
+      <h2 style="margin:0 0 6px;">Staff</h2>
+      <p class="subtitle" style="margin:0 0 12px;">Match each ServiceM8 staff member to their TEops login, so their check-ins land on the right person and ticked checklist items show who ticked them. Do this before importing. Matches are suggested by email, mobile, then name; nothing is saved until you press Save. Anyone left on "Not matched" has their time skipped (the summary below says how much).</p>
       <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <button id="copy-btn">Copy docs and photos</button>
+        <button id="staff-load-btn" class="secondary">Load ServiceM8 staff</button>
+        <button id="staff-save-btn" style="display:none;">Save staff matches</button>
+        <span id="staff-msg" class="subtitle"></span>
+      </div>
+      <div id="staff-list" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 6px;">Timesheets, checklists, docs and photos</h2>
+      <p class="subtitle" style="margin:0 0 12px;">Starts by itself once jobs are imported (and after saving staff matches). For every imported job it brings across: each ServiceM8 check-in as a timesheet entry on the job (shown on the job only, marked already paid, never sent to Xero again), every checklist item as a task (ticked if it was ticked), pictures into Photos and other files (PDFs, plans, HEIC photos, videos...) into Documents under a "ServiceM8" folder. It runs in the background, so you can leave this page, and it is safe to press again: nothing is doubled up, failed files are retried, and anything left over when a run hits its 15 minute limit is picked up next time.</p>
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <button id="copy-btn">Copy timesheets, checklists, docs and photos</button>
         <span id="copy-msg" class="subtitle"></span>
       </div>
+      <div id="copy-summary" style="margin-top:12px;"></div>
       <div id="copy-progress" style="margin-top:12px;"></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     const BATCH = 5;
     const LINES_BATCH = 8;
@@ -123,6 +141,8 @@
 
     const FILTERS = [
       { value: 'all', label: 'All' },
+      { value: 'jobs', label: 'Jobs' },
+      { value: 'quotes', label: 'Quotes' },
       { value: 'check', label: 'Need checking' },
       { value: 'new-client', label: 'New clients' },
       { value: 'done', label: 'Already imported' },
@@ -215,11 +235,12 @@
       btn.disabled = true;
       msg.textContent = 'Reading open jobs, clients, contacts and notes from ServiceM8...';
       try {
-        const data = await callFn('sm8-import-preview');
+        const data = await callFn('sm8-import-preview', { quotesSinceMonths: Number(document.getElementById('quote-months').value) || 0 });
         rows = data.rows;
         edits.clear();
         rows.forEach(r => edits.set(r.sm8JobUuid, {
-          include: !r.alreadyImported,
+          // Nothing ticked to start: search a number and tick what to bring.
+          include: false,
           name: r.suggestedName,
           clientId: r.clientMatch ? r.clientMatch.clientId : 'new',
           jobType: 'quoted',
@@ -229,12 +250,13 @@
           typeOverrides: {},
           lines: null,
           linesError: null,
-          result: r.alreadyImported ? { ok: true, skipped: true, projectId: r.alreadyImported.projectId, jobNumber: r.alreadyImported.jobNumber } : null,
+          result: r.alreadyImported ? { ok: true, skipped: true, projectId: r.alreadyImported.projectId, jobNumber: r.alreadyImported.jobNumber, quoteNumber: r.alreadyImported.quoteNumber } : null,
         }));
         document.getElementById('stat-open').textContent = data.summary.workOrders;
         document.getElementById('stat-done').textContent = data.summary.alreadyImported;
         document.getElementById('stat-check').textContent = rows.filter(r => !r.alreadyImported && needsCheck(r)).length;
         document.getElementById('stat-quotes').textContent = data.summary.quotesNotImported;
+        document.getElementById('stat-quote-rows').textContent = data.summary.quotes || 0;
         const orphans = data.summary.orphanClaims || [];
         document.getElementById('orphan-claims').innerHTML = orphans.length
           ? `<div class="error-box" style="margin-bottom:12px;">Open claims in ServiceM8 whose main job is not open, so they are not imported: ${orphans.map(n => '#' + escapeHtml(n)).join(', ')}. Check those in ServiceM8.</div>`
@@ -242,7 +264,7 @@
         document.getElementById('stats').style.display = '';
         document.getElementById('review').style.display = rows.length ? '' : 'none';
         msg.textContent = rows.length
-          ? `Loaded ${rows.length} open job${rows.length === 1 ? '' : 's'}. Nothing has been saved.`
+          ? `Loaded ${data.summary.workOrders} open job${data.summary.workOrders === 1 ? '' : 's'} and ${data.summary.quotes || 0} open quote${data.summary.quotes === 1 ? '' : 's'}. Nothing has been saved.`
           : 'No open Work Order jobs found in ServiceM8.';
         btn.textContent = 'Reload from ServiceM8';
         renderFilters();
@@ -266,9 +288,18 @@
       }));
     }
 
+    let search = '';
     function visibleRows() {
+      const q = search.trim().toLowerCase().replace(/^#/, '');
       return rows.filter(r => {
+        if (q) {
+          const e = edits.get(r.sm8JobUuid);
+          const hay = [r.sm8JobNumber, r.companyName, r.siteAddress, r.description, e && e.name].join(' ').toLowerCase();
+          if (!q.split(/\s+/).every(w => hay.includes(w))) return false;
+        }
         const e = edits.get(r.sm8JobUuid);
+        if (filter === 'jobs') return r.kind !== 'quote';
+        if (filter === 'quotes') return r.kind === 'quote';
         if (filter === 'check') return !r.alreadyImported && needsCheck(r);
         if (filter === 'new-client') return !r.alreadyImported && e.clientId === 'new';
         if (filter === 'done') return !!(e.result && e.result.ok);
@@ -310,7 +341,10 @@
     // Completed claims.
     function jobSection(r, e, locked) {
       const f = jobFigures(e);
-      const typeSelect = `
+      const typeSelect = r.kind === 'quote'
+        ? `<div><label>Comes across as</label><div>${r.quoteSent ? `Quote sent${r.quoteSentDate ? ' ' + new Date(r.quoteSentDate).toLocaleDateString('en-AU') : ''}` : 'Draft quote (not sent from ServiceM8)'}</div></div>
+        <div><label>Stage name</label><input data-field="stageName" value="${escAttr(e.stageName)}" ${locked} /></div>`
+        : `
         <div><label>Job type</label><select data-field="jobType" ${locked}>
           <option value="quoted" ${e.jobType === 'quoted' ? 'selected' : ''}>Quoted - invoice the remaining balance</option>
           <option value="do_and_charge" ${e.jobType === 'do_and_charge' ? 'selected' : ''}>Do and charge - invoice actual time and materials</option>
@@ -353,7 +387,7 @@
         <div class="imp-grid">
           ${typeSelect}
           ${valueField}
-          <div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${escAttr(e.invoiced)}" ${locked} /><div class="imp-meta">Left to invoice <strong class="imp-left">${money(f.value - f.invoiced)}</strong>${stc ? ' before STCs' : ''}</div></div>
+          ${r.kind === 'quote' ? '' : `<div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${escAttr(e.invoiced)}" ${locked} /><div class="imp-meta">Left to invoice <strong class="imp-left">${money(f.value - f.invoiced)}</strong>${stc ? ' before STCs' : ''}</div></div>`}
         </div>
         ${claims.length ? `<div class="imp-claims">ServiceM8 claims: ${claims.map(c => `#${escapeHtml(c.number)} ${money(c.valueExGst)} ${c.invoiced ? 'invoiced' : `<span style="color:var(--red);">not invoiced (${escapeHtml(c.status)})</span>`}`).join(' &middot; ')}</div>` : ''}
         ${groupRows ? `<details style="margin-top:10px;"><summary>Line items (${f.lines.length})${standaloneCount ? ` - check Labour/Material on the ${standaloneCount} line${standaloneCount === 1 ? '' : 's'} outside a prebuild` : ''}</summary>
@@ -368,11 +402,14 @@
       return '\n\nServiceM8 claims at the move (ex GST):\n' + claims.map(c => `#${c.number}: $${c.valueExGst.toFixed(2)}, ${c.invoiced ? 'invoiced' : `not invoiced yet (${c.status})`}`).join('\n');
     }
 
-    function resultLine(e) {
+    function resultLine(e, r) {
       if (!e.result) return '';
       if (!e.result.ok) return `<div class="imp-result fail">Import failed: ${escapeHtml(e.result.error)}</div>`;
-      const link = `<a href="/project.html?id=${e.result.projectId}" target="_blank">J${e.result.jobNumber}</a>`;
-      return `<div class="imp-result ok">${e.result.skipped ? 'Already in the app as' : 'Imported as'} ${link}</div>`;
+      const ref = e.result.jobNumber ? `J${e.result.jobNumber}` : e.result.quoteNumber ? `Q${e.result.quoteNumber}` : 'this job';
+      const link = `<a href="/project.html?id=${e.result.projectId}" target="_blank">${ref}</a>`;
+      // A ServiceM8 quote brought across earlier that is now a Work Order.
+      const approveHint = e.result.skipped && r && r.kind === 'job' && !e.result.jobNumber && e.result.quoteNumber ? ' (brought across as a quote: approve it there to make it the job)' : '';
+      return `<div class="imp-result ok">${e.result.skipped ? 'Already in the app as' : 'Imported as'} ${link}${approveHint}</div>`;
     }
 
     function renderList() {
@@ -387,8 +424,8 @@
         return `
           <div class="imp-job ${!e.include && !done ? 'excluded' : ''}" data-uuid="${r.sm8JobUuid}">
             <div class="imp-job-head">
-              <label><input type="checkbox" data-field="include" ${e.include && !done ? 'checked' : ''} ${locked} /> ServiceM8 #${escapeHtml(r.sm8JobNumber)}</label>
-              <div class="imp-meta">${r.sm8Date ? 'Work order ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}ServiceM8 total ${money(r.sm8Total)} inc GST${r.invoiceSent && !r.claims.length ? ' &middot; invoice sent' : ''}${r.paymentAmount > 0 ? ' &middot; ' + money(r.paymentAmount) + ' paid' : ''}</div>
+              <label><input type="checkbox" data-field="include" ${e.include && !done ? 'checked' : ''} ${locked} /> ${r.kind === 'quote' ? '<span class="badge info">Quote</span> ' : ''}ServiceM8 #${escapeHtml(r.sm8JobNumber)}</label>
+              <div class="imp-meta">${r.kind === 'quote' ? `${r.sm8Date ? 'Quoted ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}${r.quoteSent ? 'Sent' + (r.quoteSentDate ? ' ' + new Date(r.quoteSentDate).toLocaleDateString('en-AU') : '') : '<span style="color:var(--red);">Not sent</span>'} &middot; ` : ''}${r.kind !== 'quote' && r.sm8Date ? 'Work order ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}ServiceM8 total ${money(r.sm8Total)} inc GST${r.invoiceSent && !r.claims.length ? ' &middot; invoice sent' : ''}${r.paymentAmount > 0 ? ' &middot; ' + money(r.paymentAmount) + ' paid' : ''}</div>
             </div>
             <div class="imp-grid">
               <div style="grid-column:1 / -1;"><label>Job name</label><input data-field="name" value="${escAttr(e.name)}" ${locked} /></div>
@@ -403,7 +440,7 @@
               <pre>${escapeHtml(r.description || '(no description)')}</pre>
               <pre>${escapeHtml(r.notesText)}</pre>
             </details>
-            ${resultLine(e)}
+            ${resultLine(e, r)}
           </div>`;
       }).join('');
 
@@ -447,7 +484,7 @@
     function updateImportBar() {
       const n = selectedRows().length;
       const btn = document.getElementById('import-btn');
-      btn.textContent = linesLoading ? 'Reading line items...' : `Import ${n} selected job${n === 1 ? '' : 's'}`;
+      btn.textContent = linesLoading ? 'Reading line items...' : `Import ${n} selected job${n === 1 ? '' : 's'} and quote${n === 1 ? '' : 's'}`;
       btn.disabled = n === 0 || linesLoading;
     }
 
@@ -484,6 +521,7 @@
             const e = edits.get(r.sm8JobUuid);
             return {
               sm8JobUuid: r.sm8JobUuid, sm8JobNumber: r.sm8JobNumber,
+              kind: r.kind, quoteSent: !!r.quoteSent, quoteSentDate: r.quoteSentDate || null,
               companyUuid: r.companyUuid, companyName: r.companyName, companyAddress: r.companyAddress,
               clientEmail: r.clientEmail, clientPhone: r.clientPhone, siteAddress: r.siteAddress,
               description: r.description, notesText: r.notesText + claimsNote(e),
@@ -513,6 +551,8 @@
         msg.innerHTML = failed
           ? `<span style="color:var(--red);">${ok} imported, ${failed} failed. Fix the failed ones and press Import again; the imported ones are skipped.</span>`
           : `<span style="color:var(--green);">${ok} job${ok === 1 ? '' : 's'} imported.</span>`;
+        // Then bring their timesheets, checklists, docs and photos across.
+        if (ok) startCopy();
       } finally {
         loadBtn.disabled = false;
         updateImportBar();
@@ -533,7 +573,92 @@
     let copyPollTimer = null;
     let copyStartedAt = 0;
 
+    // ---- Staff matches (sm8-staff.js) ----
+    let staffData = null;
+
+    async function loadStaff() {
+      const msg = document.getElementById('staff-msg');
+      const btn = document.getElementById('staff-load-btn');
+      btn.disabled = true;
+      msg.textContent = 'Reading staff from ServiceM8...';
+      try {
+        staffData = await callFn('sm8-staff', {});
+        renderStaff();
+        msg.textContent = '';
+        document.getElementById('staff-save-btn').style.display = '';
+      } catch (err) {
+        msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderStaff() {
+      const el = document.getElementById('staff-list');
+      const { staff, profiles } = staffData;
+      if (!staff.length) { el.innerHTML = '<p class="subtitle">No staff found in ServiceM8.</p>'; return; }
+      const options = (selected) => `<option value="">Not matched (skip their time)</option>` + profiles.map(p =>
+        `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${escapeHtml(p.name)}${p.active ? '' : ' (inactive)'}</option>`).join('');
+      el.innerHTML = `
+        <table class="responsive-stack">
+          <thead><tr><th>ServiceM8 staff</th><th>TEops person</th><th>Why</th></tr></thead>
+          <tbody>${staff.map(s => `
+            <tr>
+              <td data-label="ServiceM8 staff">${escapeHtml(s.name)}${s.active ? '' : ' <span class="subtitle">(inactive in ServiceM8)</span>'}${s.email ? `<div class="imp-meta">${escapeHtml(s.email)}</div>` : ''}</td>
+              <td data-label="TEops person"><select data-sm8-staff="${escAttr(s.uuid)}" style="margin:0;">${options(s.match ? s.match.profileId : '')}</select></td>
+              <td data-label="Why" class="imp-meta">${s.match ? escapeHtml(s.match.reason) : '-'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function saveStaff() {
+      const msg = document.getElementById('staff-msg');
+      const links = [...document.querySelectorAll('#staff-list select[data-sm8-staff]')].map(sel => ({ sm8StaffUuid: sel.dataset.sm8Staff, profileId: sel.value || null }));
+      const picked = links.map(l => l.profileId).filter(Boolean);
+      if (new Set(picked).size !== picked.length) { msg.innerHTML = '<span style="color:var(--red);">The same TEops person is picked twice. Each person can only match one ServiceM8 staff member.</span>'; return; }
+      const btn = document.getElementById('staff-save-btn');
+      btn.disabled = true;
+      try {
+        const data = await callFn('sm8-staff', { links });
+        msg.innerHTML = `<span style="color:var(--green);">${data.saved} match${data.saved === 1 ? '' : 'es'} saved.</span>`;
+        await loadStaff();
+        // Jobs already imported: bring the newly matched staff's time across.
+        const { count } = await supabaseClient.from('projects').select('id', { count: 'exact', head: true }).not('sm8_job_uuid', 'is', null);
+        if (count) startCopy();
+      } catch (err) {
+        msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // Latest run's timesheet and checklist summary (sm8_copy_runs).
+    async function loadCopySummary() {
+      const el = document.getElementById('copy-summary');
+      const { data: run } = await supabaseClient.from('sm8_copy_runs').select('started_at, finished_at, summary').order('started_at', { ascending: false }).limit(1).maybeSingle();
+      if (!run) { el.innerHTML = ''; return false; }
+      if (!run.finished_at) {
+        // A run past the background function's 15 minute limit died part way.
+        if (Date.now() - new Date(run.started_at).getTime() > 16 * 60000) { el.innerHTML = '<p class="subtitle" style="color:var(--red);">The last run stopped part way. Press the button to run it again.</p>'; return false; }
+        el.innerHTML = '<p class="subtitle">Reading timesheets and checklists from ServiceM8...</p>';
+        return true;
+      }
+      const s = run.summary || {};
+      const unmatched = Object.entries(s.unmatchedStaff || {});
+      el.innerHTML = `
+        <p class="subtitle" style="margin:0;">Last run ${new Date(run.finished_at).toLocaleString()}: ${s.jobs || 0} job${s.jobs === 1 ? '' : 's'} checked${s.letteredJobs ? `, with ${s.letteredJobs} lettered job${s.letteredJobs === 1 ? '' : 's'} (4515A and so on) folded in` : ''}. ServiceM8 had ${s.activitiesSeen || 0} time record${s.activitiesSeen === 1 ? '' : 's'} and ${s.checklistSeen || 0} checklist item${s.checklistSeen === 1 ? '' : 's'} on them.</p>
+        <p style="margin:6px 0 0; font-size:13px;">Timesheets: ${s.timeAdded || 0} added${s.timeAlready ? `, ${s.timeAlready} already in` : ''}${s.timeMoved ? `, ${s.timeMoved} moved to a newly matched person` : ''}${s.timeSkippedNoTimes ? `, ${s.timeSkippedNoTimes} skipped (no check-out time)` : ''}.</p>
+        ${s.quotes ? `<p style="margin:4px 0 0; font-size:13px;">Quotes: ${s.quotesWithProposal || 0} of ${s.quotes} have a quote or proposal PDF from ServiceM8 (in Documents, folder "ServiceM8 proposal").</p>` : ''}
+        <p style="margin:4px 0 0; font-size:13px;">Checklist tasks: ${s.checklistAdded || 0} added${s.checklistAlready ? `, ${s.checklistAlready} already in` : ''}${s.checklistTicked ? `, ${s.checklistTicked} newly ticked` : ''}.</p>
+        ${unmatched.length ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">${s.timeSkippedUnmatched} check-in${s.timeSkippedUnmatched === 1 ? '' : 's'} skipped, staff not matched: ${unmatched.map(([name, n]) => `${escapeHtml(name)} (${n})`).join(', ')}. Match them under Staff above and save; their time comes across then.</p>` : ''}
+        ${s.error ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">Stopped: ${escapeHtml(s.error)}</p>` : ''}
+        ${(s.jobErrors || []).length ? `<p style="margin:6px 0 0; font-size:13px; color:var(--red);">Could not read: ${s.jobErrors.map(j => `${escapeHtml(String(j.ref || 'J' + j.jobNumber))} (${escapeHtml(j.error)})`).join(', ')}. Press the button again to retry.</p>` : ''}`;
+      return false;
+    }
+
     async function loadCopyProgress() {
+      const summaryRunning = await loadCopySummary();
       const count = (status) => {
         let q = supabaseClient.from('sm8_attachment_copies').select('id', { count: 'exact', head: true });
         if (status) q = q.in('status', status);
@@ -545,7 +670,7 @@
       ]);
       const el = document.getElementById('copy-progress');
       if (!total) {
-        el.innerHTML = copyStartedAt ? '<p class="subtitle">Asking ServiceM8 for the file list...</p>' : '<p class="subtitle">Nothing copied yet.</p>';
+        el.innerHTML = copyStartedAt ? '<p class="subtitle">Asking ServiceM8 for the file list...</p>' : '<p class="subtitle">No docs or photos copied yet.</p>';
       } else {
         const pct = Math.round((copied / total) * 100);
         el.innerHTML = `
@@ -556,7 +681,7 @@
       }
       // Keep polling while files are waiting, and for a couple of minutes
       // after pressing the button (queueing the list comes first).
-      const running = waiting > 0 || (copyStartedAt && Date.now() - copyStartedAt < 120000);
+      const running = summaryRunning || waiting > 0 || (copyStartedAt && Date.now() - copyStartedAt < 120000);
       if (!running) {
         if (copyStartedAt) document.getElementById('copy-msg').textContent = failed ? 'Finished, with some failures - press again to retry them.' : 'Finished.';
         copyStartedAt = 0;
@@ -569,6 +694,7 @@
     async function startCopy() {
       const btn = document.getElementById('copy-btn');
       const msg = document.getElementById('copy-msg');
+      if (btn.disabled) return; // already running
       btn.disabled = true;
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
@@ -589,9 +715,12 @@
     }
 
     document.getElementById('copy-btn').addEventListener('click', startCopy);
+    document.getElementById('staff-load-btn').addEventListener('click', loadStaff);
+    document.getElementById('staff-save-btn').addEventListener('click', saveStaff);
     document.getElementById('tick-all-btn').addEventListener('click', () => setAllIncluded(true));
     document.getElementById('untick-all-btn').addEventListener('click', () => setAllIncluded(false));
     document.getElementById('load-btn').addEventListener('click', loadPreview);
+    document.getElementById('imp-search').addEventListener('input', (ev) => { search = ev.target.value; renderList(); });
     document.getElementById('import-btn').addEventListener('click', runImport);
 
     (async function () {

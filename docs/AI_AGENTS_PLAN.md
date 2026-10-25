@@ -12,17 +12,20 @@ AI agents run as much admin as possible. Jasper directs them from his phone and 
 - **Claude API** (pay-as-you-go via Claude Console, separate from the Pro plan) powers the agents. Monthly spend caps and alerts from day one.
 - Build and ship with Claude Code cloud sessions from phone or laptop. Claude Projects (TE Projects) is for planning and reads `docs/` via GitHub.
 
-**Already live and reused:** Xero (accounting + payroll), Web Push notifications (`sw.js`, `notifications.js`, `send-notifications.js`, per-type prefs, badge), shared sales@ Gmail inbox (`sync-gmail` every 5 min), company and per-job feeds, Sparky AI chat (`ai-chat.js`), meeting transcription (`transcribe-meeting.js`, AssemblyAI).
+**Already live and reused:** Xero (accounting + payroll), Web Push notifications (`sw.js`, `notifications.js`, `send-notifications.js`, per-type prefs, badge), shared sales@ Gmail inbox (`sync-gmail` every 5 min), company and per-job feeds, Sparky AI chat (`ai-chat.js`), meeting transcription (`transcribe-meeting.js`, AssemblyAI), Knowledge Base reader (`read-knowledge-background.js`, `read-knowledge-sweep.js` every 2 minutes, spec A32).
 
 ## How agents run
 
-- Each agent is a **Supabase Edge Function**. None exist yet; this adds a `supabase/functions/` folder.
+- Agents run as **Netlify functions** (decided 18 Oct 2026, instead of Supabase Edge Functions, so there is one place to look when something breaks). Long work runs as background functions (up to 15 minutes). Every worker reports through `_shared/agent-log.js`.
 - Prompts live as files in `agents/prompts/`, separate from logic.
 - Triggered by pg_cron schedules or database webhooks (event-driven preferred). Secrets in Supabase secrets, never in code.
 - Edge Functions have per-run time limits. Long jobs are split into steps, or moved to a small cloud server later if needed.
 - Least privilege: each agent gets only the access its job needs.
 
 ## Ops manager agent
+
+**Version 1 built 18 Oct 2026** (`docs/PROJECT_SPEC.md` A30): worker log, Needs me list, 5am Sydney digest to Jasper only (more people later via `company_settings.ops_manager_user_ids`), Ops manager page, and the assistant acts as the manager in chat with Confirm-only actions. Not yet: Phase 2 (requesting new workers via GitHub issues), per-agent token budgets.
+
 
 - Workers report to it, not to Jasper. It handles what it can within set rules and escalates the rest.
 - Jasper talks to it inside TEops: a chat screen, a questions/approvals inbox, and a daily digest (done, stuck, needs me), delivered via existing Web Push.
@@ -36,6 +39,10 @@ AI agents run as much admin as possible. Jasper directs them from his phone and 
 3. Scheduling and job allocation (suggestions only, a human confirms)
 4. Compliance docs and certificates (AI prepares, the licensed signatory reviews and signs every one)
 
+Already built: **price list reader** (emailed price lists keep material costs current, `docs/PROJECT_SPEC.md` A11b), **supplier bill intake** (invoice@ emails read, matched to POs, suggest-only until proven; `docs/PROJECT_SPEC.md` A11a).
+
+Also built: **licence and insurance expiry** (nightly, `sweep-licence-expiry.js`, reminders only; `docs/PROJECT_SPEC.md` B3).
+
 Drafts, not sends, for the first few weeks. Later workers: payment reconciliation, weather (see docs/IDEAS_BACKLOG.md items 1 and 4).
 
 ## Email (per-user opt-in)
@@ -44,11 +51,12 @@ Drafts, not sends, for the first few weeks. Later workers: payment reconciliatio
 - Agents tag emails to jobs (auto when sure, suggest when guessing, "tagged by Claude" with one-tap undo), summarise, and draft replies (in TEops and Gmail). Nothing sends without the user's click.
 - **Tagged threads show on the job for everyone. Untagged emails stay private** to that user.
 - Team questions about a job are answered from tagged emails, drafts and messages.
-- Only users with an AI start date are processed. Full detail: docs/IDEAS_BACKLOG.md item 5.
+- Built 18 Oct 2026 (spec A18): email agent sorts Priority / Other / Subscriptions and updates, applies labels, tags jobs, drafts Priority replies, suggests per-sender clean up. Haiku 5.5 sorts, Opus 5.5 drafts. Runs in `mailbox-work-background.js`, reports to the ops manager as "Postie: email agent". 19 Oct 2026: Postie also spots supplier invoices sent to sales@, passes them to the bill reader (**Tally**) and drafts a "please use invoice@" reply; Tally drafts "invoice@ is for invoices only" replies (spec A11a). 19 Oct 2026: Postie drafts in the mailbox owner's own voice (style guide learned from their sent replies, Settings > Email Agent) and answers instead of recapping the sender (spec A18). Company voice (jasper@) is the default for every mailbox, each can switch to its own. Spell check (Haiku 5.5) and Polish (Sonnet 5.5) on every multi-line text box (spec A33). 20 Oct 2026: label sweeps (a new label or changed description makes Postie file the inbox's last 60 days under it), labels made by Postie itself when a mailbox's auto_labels switch is on (duplicate guard, AI tag), and who-has-it on every conversation (replied by, claimed, assigned; the assignee alone gets the new-mail notification) with a Tagged to jobs view (spec A18). A 7am booking reminder (`remind-client-bookings.js`, no AI): whoever booked a job starting within 3 days with the client not told gets a phone notification (spec A34).
+- A personal mailbox is processed only once its owner connected it, after the Gmail notice (agree and waive the 14 days, or 14 days after the notice). Full detail: docs/IDEAS_BACKLOG.md item 5.
 
 ## Team chat (replaces WhatsApp entirely, including social chat)
 
-**Built today:** company feed and per-job feeds with posts, likes, comments and @mentions (migrations 019, 123, 124), Web Push, Sparky AI chat. **Not built:** channels, DMs, threaded replies as a chat view, Realtime delivery, offline queue.
+**Live 18 Oct 2026:** channels, DMs, threads, photos, files, voice messages, # job tags, Realtime, instant push, offline queue, plus the tagger, voice transcripts and @Sparky in chat. Detail: `docs/PROJECT_SPEC.md` A19a. **Not built:** Siri Shortcut (backlog item 2), Sparky answering questions without being @mentioned (left out on purpose to keep it quiet), editable vocabulary list.
 
 Build on the existing feeds:
 - Channels (General, Social, others) and DMs, threaded replies, photos and files to Supabase Storage (compressed), Supabase Realtime for instant delivery.
@@ -68,7 +76,11 @@ Build on the existing feeds:
 
 - **NSW Workplace Surveillance Act 2005:** written notice (generally 14 days) plus a computer surveillance policy before AI reading of email, chat or voice starts. Adviser review first. One notice covers email, chat, voice, SMS and location.
 - Staff sign in TEops with a versioned re-sign and two tick boxes (AI features, location). AI start date per user = sign date if ticked, else none. Users with no AI start date are excluded from all agent processing; manual tagging still works.
-- Onboarding signing (migration 098) already exists and is extended for this. Full detail: docs/IDEAS_BACKLOG.md item 6.
+- Built: versioned re-sign and AI / location consent with dates per user (migration 20261018120000, `profiles.ai_consent_at`). Every agent must skip users with no `ai_consent_at`, and anything before the notice start date, except team chat: Sparky is a member of every chat (channels and DMs), so chat needs no AI consent (owner's lawyer, 18 Oct 2026). Staff who don't want Sparky involved text outside the app. Full detail: docs/IDEAS_BACKLOG.md item 6.
+
+## Retail plan suggestions (built 23 Oct 2026)
+
+Suggests electricity plans for a quote's address from the AER's Consumer Data Right plan data (downloaded daily by `sync-energy-plans`, listed on the ops manager's workers), costed with the savings estimate's own maths, not an AI web search; staff choose what goes on the proposal and nothing is sent automatically. Writes only its own `energy_plans` table. Wholesale-price plans are not estimated (the app says so); a proper wholesale estimate is backlogged as item 35. Detail in `docs/IDEAS_BACKLOG.md` item 34.
 
 ## Safety
 

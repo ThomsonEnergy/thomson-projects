@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
+const { threadForUser } = require('./_shared/mailboxes');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 
 // POST { thread_id }   (any signed-in staff member)
@@ -130,7 +131,8 @@ exports.handler = async (event) => {
   try {
     const { thread_id: threadId } = JSON.parse(event.body || '{}');
     if (!threadId) return json(400, { ok: false, error: 'thread_id is required' });
-    const { data: thread } = await supabaseAdmin.from('email_threads').select('id, subject, client_id').eq('id', threadId).maybeSingle();
+    const seen = await threadForUser(supabaseAdmin, threadId, auth.user.id);
+    const thread = seen && seen.thread;
     if (!thread) return json(404, { ok: false, error: 'Conversation not found' });
     const { data: emails } = await supabaseAdmin.from('emails')
       .select('id, direction, from_address, to_addresses, sent_at, body_text, body_html, attachments')
@@ -148,7 +150,7 @@ exports.handler = async (event) => {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 1500, messages: [{ role: 'user', content: buildPrompt(thread.subject, transcript) }] }),
+      body: JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 1500, messages: [{ role: 'user', content: buildPrompt(thread.subject, transcript) }] }),
     });
     if (!res.ok) throw new Error(`Anthropic API error: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
     const data = await res.json();

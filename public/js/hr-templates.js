@@ -108,7 +108,12 @@ function hrText(value, blankLines = 3) {
 }
 function hrBox(checked) { return `<span class="box">${checked ? '&#10003;' : ''}</span>`; }
 function hrYesNo(v) { return `Yes ${hrBox(v === true)} &nbsp; No ${hrBox(v === false)}`; }
-function hrSig(dataUrl) { return dataUrl ? `<img src="${hrEsc(dataUrl)}" alt="signature" />` : ''; }
+// A saved signature only goes in an img when it is a PNG or JPEG data URL (the same rule as
+// hrSafeSig in hr-shared.js, repeated here because letter.html loads this file without that one).
+function hrSig(dataUrl) {
+  const ok = typeof dataUrl === 'string' && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(dataUrl);
+  return ok ? `<img src="${dataUrl}" alt="signature" />` : '';
+}
 
 const HR_BASE_CSS = `
   @page { size: A4; margin: 16mm 15mm; }

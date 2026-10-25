@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Invoices - Thomson Energy</title>
+<title>Invoices - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -32,21 +32,77 @@
     <p class="subtitle">Every claim raised from the app, across every job. Push to Xero and payment status still happen from the job page - this is the overview.</p>
 
     <div class="grid cols-4">
-      <div class="stat"><div class="label">Total</div><div class="value" id="stat-total">-</div></div>
-      <div class="stat"><div class="label">This month</div><div class="value" id="stat-month">-</div></div>
-      <div class="stat"><div class="label">Outstanding</div><div class="value" id="stat-outstanding">-</div></div>
-      <div class="stat"><div class="label">Overdue</div><div class="value" id="stat-overdue">-</div></div>
+      <div class="stat"><div class="label">Total (inc GST)</div><div class="value" id="stat-total">-</div></div>
+      <div class="stat"><div class="label">This month (inc GST)</div><div class="value" id="stat-month">-</div></div>
+      <div class="stat"><div class="label">Outstanding (inc GST)</div><div class="value" id="stat-outstanding">-</div></div>
+      <div class="stat"><div class="label">Overdue (inc GST)</div><div class="value" id="stat-overdue">-</div></div>
     </div>
 
     <div class="card">
-      <h2 style="margin:0 0 14px;">All invoices</h2>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+        <input id="invoice-search" placeholder="Search by invoice, job number, job or client..." style="max-width:340px;" />
+        <select id="invoice-filter">
+          <option value="unpaid" selected>Unpaid</option>
+          <option value="overdue">Overdue</option>
+          <option value="paid">Paid</option>
+          <option value="no_xero">Not yet in Xero</option>
+          <option value="all">All</option>
+        </select>
+      </div>
       <div id="invoices-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
+    let allInvoices = null, allMappings = [];
+    // ?id= (from the top bar search) shows just that invoice until the user asks for all
+    let focusInvoiceId = new URLSearchParams(window.location.search).get('id');
+
+    // Overdue starts the day after the due date, on the Sydney date, the same as the client's invoice page (M23).
+    const sydneyToday = () => sydneyDateKey(new Date());
+    const isOverdue = (inv) => !inv.paid_at && !!inv.due_date && inv.due_date < sydneyToday();
+
+    // Every money figure on this page is the same number: the invoice total inc GST, less the STC credit
+    // (with GST for a company) and less credit notes, from get_invoice_balance_due, so Total, This month,
+    // the Amount column, Outstanding and Overdue all agree with each other and with the client's invoice (M37).
+    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    let invoiceTotals = {}; // invoice id -> that total, once the server has answered
+    function invoiceTotalFallback(inv) {
+      // the same sum calculate_balance_due does, before credit notes (used until the server answers, or if it cannot)
+      const sub = r2(Number(inv.labour_amount || 0) + Number(inv.material_amount || 0));
+      const project = inv.cost_centres?.projects || inv.projects;
+      // each credit rounded on its own, the way get_invoice_balance_due and the Xero lines do (M25)
+      const incGst = (n) => (project?.clients?.client_type === 'company' ? r2(n * 1.10) : r2(n));
+      return r2(sub + r2(sub * 0.10) - incGst(Number(inv.stc_amount || 0)) - incGst(Number(inv.bstc_amount || 0)));
+    }
+    const invoiceTotal = (inv) => invoiceTotals[inv.id] ?? invoiceTotalFallback(inv);
+    // The server figure differs from the fallback only where a credit note exists, so only those invoices
+    // are asked for (one call each): a few hundred invoices with none would otherwise mean a call apiece on
+    // every visit. If the credit note list cannot be read, every invoice is asked, as before.
+    async function loadInvoiceTotals(invoices) {
+      const out = {};
+      const { data: notes, error: notesErr } = await supabaseClient.from('credit_notes').select('invoice_id');
+      const credited = notesErr ? null : new Set((notes || []).map(n => n.invoice_id));
+      const need = credited ? invoices.filter(inv => credited.has(inv.id)) : invoices;
+      for (let i = 0; i < need.length; i += 20) {
+        await Promise.all(need.slice(i, i + 20).map(async (inv) => {
+          const { data: bal, error } = await supabaseClient.rpc('get_invoice_balance_due', { p_invoice_id: inv.id });
+          if (!error && bal != null) out[inv.id] = Number(bal);
+        }));
+      }
+      return out;
+    }
+
+    function clearInvoiceFocus() {
+      if (!focusInvoiceId) return;
+      focusInvoiceId = null;
+      try { history.replaceState(null, '', '/invoices.html'); } catch (e) { /* not supported */ }
+      document.title = 'Invoices - TEops';
+      if (typeof setPageTitle === 'function') setPageTitle('Invoices');
+    }
+
     async function loadInvoices() {
       const listEl = document.getElementById('invoices-list');
       const [{ data, error }, { data: mappings }] = await Promise.all([
@@ -67,65 +123,105 @@
         return;
       }
 
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      allInvoices = data;
+      allMappings = mappings || [];
+      invoiceTotals = {};
+      ['stat-total', 'stat-month', 'stat-outstanding', 'stat-overdue'].forEach(id => { document.getElementById(id).textContent = '...'; });
+      renderInvoiceList();
 
+      // the list shows straight away; the figures (and the Amount column) settle once the server has answered
+      invoiceTotals = await loadInvoiceTotals(data);
+      const thisMonthKey = sydneyToday().slice(0, 7);
       let total = 0, thisMonth = 0, outstanding = 0, overdue = 0;
-
       data.forEach(inv => {
-        const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
-        const sentAt = new Date(inv.sent_at);
+        const amount = invoiceTotal(inv);
         total += amount;
-        if (sentAt >= startOfMonth) thisMonth += amount;
+        if (inv.sent_at && sydneyDateKey(new Date(inv.sent_at)).slice(0, 7) === thisMonthKey) thisMonth += amount;
         if (!inv.paid_at) {
           outstanding += amount;
-          if (inv.due_date && new Date(inv.due_date + 'T00:00:00') < now) overdue += amount;
+          if (isOverdue(inv)) overdue += amount;
         }
       });
-
       document.getElementById('stat-total').textContent = money(total);
       document.getElementById('stat-month').textContent = money(thisMonth);
       document.getElementById('stat-outstanding').textContent = money(outstanding);
       document.getElementById('stat-overdue').textContent = money(overdue);
+      if (allInvoices === data) renderInvoiceList();
+    }
 
-      listEl.innerHTML = `
+    function renderInvoiceList() {
+      if (!allInvoices) return;
+      const listEl = document.getElementById('invoices-list');
+      const q = document.getElementById('invoice-search').value.trim().toLowerCase();
+      const filter = document.getElementById('invoice-filter').value;
+
+      const focusInv = focusInvoiceId && allInvoices.find(inv => inv.id === focusInvoiceId);
+      if (focusInvoiceId && !focusInv) { showToast('That invoice could not be found', { error: true }); clearInvoiceFocus(); }
+      if (focusInv) {
+        const ref = focusInv.invoice_number || 'Invoice';
+        if (typeof setPageTitle === 'function') setPageTitle(ref); else document.title = `${ref} - TEops`;
+      }
+      let rows = allInvoices;
+      if (focusInv) rows = [focusInv];
+      else if (filter === 'unpaid') rows = rows.filter(inv => !inv.paid_at);
+      else if (filter === 'overdue') rows = rows.filter(inv => isOverdue(inv));
+      else if (filter === 'paid') rows = rows.filter(inv => !!inv.paid_at);
+      else if (filter === 'no_xero') rows = rows.filter(inv => !inv.xero_invoice_id);
+
+      if (q && !focusInv) {
+        rows = rows.filter(inv => {
+          const project = inv.cost_centres?.projects || inv.projects;
+          return [inv.invoice_number, project?.job_number, project?.name, project?.client_name]
+            .some(v => v != null && String(v).toLowerCase().includes(q));
+        });
+      }
+
+      if (!rows.length) {
+        listEl.innerHTML = `<p class="subtitle">No invoices match. ${allInvoices.length} in total; try All or clear the search.</p>`;
+        return;
+      }
+
+      listEl.innerHTML = (focusInv ? `<p class="subtitle" style="margin:0 0 10px;">Showing ${escapeHtml(focusInv.invoice_number || 'one invoice')} only. <a href="/invoices.html" class="link-quiet" id="inv-show-all">Show all invoices</a></p>` : '') + `
         <table class="responsive-stack">
-          <thead><tr><th>Invoice</th><th>Job</th><th>Stage</th><th class="num">Amount</th><th>Sent</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Job</th><th>Stage</th><th class="num">Amount (inc GST)</th><th>Sent</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            ${data.map(inv => {
+            ${rows.map(inv => {
               const cc = inv.cost_centres;
               const claimStages = (inv.invoice_claims || []).map(ic => ic.cost_centres?.name).filter(Boolean);
               const project = cc?.projects || inv.projects;
               const projectId = cc?.project_id || inv.project_id;
               const clientType = project?.clients?.client_type || 'individual';
               const stageLabel = cc ? (cc.name || '-') : (claimStages.length ? (claimStages.length > 1 ? `${claimStages.length} stages` : claimStages[0]) : '-');
-              const amount = Number(inv.labour_amount) + Number(inv.material_amount) - Number(inv.stc_amount || 0);
-              const isOverdue = !inv.paid_at && inv.due_date && new Date(inv.due_date + 'T00:00:00') < now;
+              const amount = invoiceTotal(inv);
+              const overdue = isOverdue(inv);
               return `
                 <tr>
-                  <td data-label="Invoice">${inv.invoice_number}</td>
-                  <td data-label="Job">${project ? `#${project.job_number || '-'} ${project.name}` : '-'}</td>
-                  <td data-label="Stage" title="${claimStages.join(', ')}">${stageLabel}</td>
+                  <td data-label="Invoice">${escapeHtml(inv.invoice_number)}</td>
+                  <td data-label="Job">${project ? `#${escapeHtml(project.job_number || '-')} ${escapeHtml(project.name)}` : '-'}</td>
+                  <td data-label="Stage" title="${escapeHtml(claimStages.join(', '))}">${escapeHtml(stageLabel)}</td>
                   <td class="num" data-label="Amount">${money(amount)}</td>
                   <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
                   <td data-label="Status">
                     ${inv.paid_at ? '<span class="badge accepted">Paid</span>'
-                      : isOverdue ? '<span class="badge draft" style="color:var(--red);">Overdue</span>'
+                      : overdue ? '<span class="badge red">Overdue</span>'
                       : '<span class="badge sent">Awaiting payment</span>'}
                     ${inv.xero_invoice_id ? '' : '<span class="subtitle" style="font-size:11px; display:block;">Not yet in Xero</span>'}
                   </td>
                   <td data-label="">
                     <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:8px;">View</a>
-                    ${project && projectId ? `<a class="link-quiet" href="/project.html?id=${projectId}" style="font-size:12px; margin-right:8px;">Job</a>` : ''}
+                    ${project && projectId ? `<a class="link-quiet" href="/project.html?id=${projectId}&tab=invoices" style="font-size:12px; margin-right:8px;">Job</a>` : ''}
                     <button type="button" class="secondary xero-toggle-btn" data-id="${inv.id}" style="font-size:12px; padding:4px 8px;">Xero breakdown</button>
                   </td>
                 </tr>
                 <tr class="xero-row" data-for="${inv.id}" style="display:none;">
-                  <td colspan="7" style="background:var(--surface-2);">${xeroBreakdownHtml(inv, mappings, clientType)}</td>
+                  <td colspan="7" style="background:var(--surface-2);">${xeroBreakdownHtml(inv, allMappings, clientType)}</td>
                 </tr>`;
             }).join('')}
           </tbody>
         </table>`;
+
+      const showAll = listEl.querySelector('#inv-show-all');
+      if (showAll) showAll.addEventListener('click', (e) => { e.preventDefault(); clearInvoiceFocus(); document.getElementById('invoice-filter').value = 'all'; renderInvoiceList(); });
 
       listEl.querySelectorAll('.xero-toggle-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -142,11 +238,29 @@
       if (!session) return;
       syncThemeFromProfile();
       renderMainNav('invoices');
+      // Opened from a search link: show every match, not just unpaid ones
+      if (new URLSearchParams(window.location.search).get('q')) document.getElementById('invoice-filter').value = 'all';
+      document.getElementById('invoice-search').addEventListener('input', () => { clearInvoiceFocus(); renderInvoiceList(); });
+      document.getElementById('invoice-filter').addEventListener('change', () => { clearInvoiceFocus(); renderInvoiceList(); });
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
+
+      // Field staff do not see Invoices in the nav; a typed URL gets the same answer
+      if (!isPricingRole(await getMyRole())) {
+        document.querySelector('.wrap').innerHTML = `
+          <div class="card">
+            <div class="empty-state">
+              <div class="empty-icon">&#128274;</div>
+              <h2>Not available for your role</h2>
+              <p>Invoices are limited to Sales, Finance, and Admin accounts.</p>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Pipeline</a>
+            </div>
+          </div>`;
+        return;
+      }
       await loadInvoices();
     })();
   </script>

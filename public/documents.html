@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Documents - TEops</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Documents</h1>
+    <p class="subtitle">Company documents and templates we send to clients (not job paperwork, that lives on each job, and not how-tos, those live in Knowledge). To send one, open the job, go to Documents, press "Add from Documents", then attach it from the job's Emails tab.</p>
+
+    <div class="card">
+      <h2>Library</h2>
+      <div id="cd-list"><p class="subtitle">Loading...</p></div>
+      <div id="cd-list-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Add a document</h2>
+      <label style="margin-top:0">Title</label>
+      <input id="cd-title" placeholder="e.g. Battery warranty information" />
+      <label>File</label>
+      <input type="file" id="cd-file" />
+      <div style="margin-top:12px;"><button id="cd-add-btn">Add</button></div>
+      <div id="cd-add-msg"></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/schedule-of-rates.js?v=3"></script>
+  <script>
+    const esc = escapeHtml;
+    let myRole = null;
+
+    async function openDoc(doc) {
+      if (doc.kind === 'schedule_of_rates') { window.open('/rates.html', '_blank'); return; }
+      try { await openSignedDocInNewTab(doc.file_path); }
+      catch (err) {
+        const listEl = document.getElementById('cd-list');
+        listEl.querySelectorAll('.cd-open-error').forEach(el => el.remove());
+        listEl.insertAdjacentHTML('afterbegin', `<div class="error-box cd-open-error">Could not open: ${esc(err.message)}</div>`);
+      }
+    }
+
+    async function loadDocs() {
+      const listEl = document.getElementById('cd-list');
+      const [{ data: docs, error }, { data: sor }] = await Promise.all([
+        supabaseClient.from('company_documents').select('*, profiles(full_name)').order('sort_order').order('title'),
+        supabaseClient.rpc('get_schedule_of_rates'),
+      ]);
+      if (error) { listEl.innerHTML = `<div class="error-box">${esc(error.message)}</div>`; return; }
+      if (!docs.length) { listEl.innerHTML = `<p class="subtitle">No documents yet.</p>`; return; }
+
+      const reviewed = sor && sor.reviewed_on;
+      const due = reviewed ? new Date(reviewed + 'T00:00:00') : null;
+      if (due) due.setMonth(due.getMonth() + 6);
+      const overdue = due && due <= new Date();
+      const sorNote = reviewed
+        ? `Rates current as at ${esc(ratesAsAtText(reviewed))}. <span style="${overdue ? 'color:var(--red); font-weight:600;' : ''}">${overdue ? 'Review overdue' : 'Next review'}: ${esc(due.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }))}</span>${isPricingRole(myRole) ? ' (Settings &gt; Billable Rates)' : ''}`
+        : 'Rates have no review date yet (Settings &gt; Billable Rates).';
+
+      listEl.innerHTML = `<table>
+        <thead><tr><th>Document</th><th></th></tr></thead>
+        <tbody>${docs.map(d => `
+          <tr data-id="${d.id}">
+            <td>
+              <input class="cd-title-input" data-id="${d.id}" value="${esc(d.title)}" style="font-weight:600;" />
+              <div class="subtitle" style="margin-top:4px; font-size:12px;">${d.kind === 'schedule_of_rates'
+                ? `Built in, always shows the live rates. ${sorNote}`
+                : `${esc(d.file_name || '')}${d.profiles?.full_name ? ` &middot; added by ${esc(d.profiles.full_name)}` : ''} &middot; ${esc(new Date(d.created_at).toLocaleDateString('en-AU'))}`}</div>
+            </td>
+            <td style="white-space:nowrap; text-align:right;">
+              <button class="secondary cd-view-btn" data-id="${d.id}" style="font-size:12px; padding:6px 10px;">View</button>
+              ${d.kind === 'schedule_of_rates' ? `<button class="secondary cd-link-btn" style="font-size:12px; padding:6px 10px;">Copy link</button>` : ''}
+              ${d.kind === 'file' && myRole === 'admin' ? `<button class="secondary cd-del-btn" data-id="${d.id}" style="font-size:12px; padding:6px 10px;">Delete</button>` : ''}
+            </td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+
+      const byId = Object.fromEntries(docs.map(d => [d.id, d]));
+      listEl.querySelectorAll('.cd-view-btn').forEach(btn => btn.addEventListener('click', () => openDoc(byId[btn.dataset.id])));
+      listEl.querySelectorAll('.cd-link-btn').forEach(btn => btn.addEventListener('click', async () => {
+        const url = `${window.location.origin}/rates.html`;
+        try { await navigator.clipboard.writeText(url); btn.textContent = 'Copied'; }
+        catch (e) { prompt('Copy this link:', url); }
+      }));
+      listEl.querySelectorAll('.cd-title-input').forEach(input => input.addEventListener('change', async () => {
+        const title = input.value.trim();
+        if (!title) { input.value = byId[input.dataset.id].title; return; }
+        const { error } = await supabaseClient.from('company_documents').update({ title }).eq('id', input.dataset.id);
+        if (error) alert('Could not rename: ' + error.message);
+      }));
+      listEl.querySelectorAll('.cd-del-btn').forEach(btn => btn.addEventListener('click', async () => {
+        const doc = byId[btn.dataset.id];
+        if (!confirm(`Delete "${doc.title}" from Documents? Jobs it was already added to keep their copy.`)) return;
+        const { error } = await supabaseClient.from('company_documents').delete().eq('id', doc.id);
+        if (error) { alert(error.message); return; }
+        await supabaseClient.storage.from('project-documents').remove([doc.file_path]);
+        await logActivity('company_document', doc.id, 'deleted', `Deleted "${doc.title}" from Documents`);
+        await loadDocs();
+      }));
+    }
+
+    document.getElementById('cd-add-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('cd-add-btn');
+      const msg = document.getElementById('cd-add-msg');
+      const fileInput = document.getElementById('cd-file');
+      const file = fileInput.files[0];
+      const title = document.getElementById('cd-title').value.trim() || (file ? file.name.replace(/\.[^.]+$/, '') : '');
+      if (!file) { msg.innerHTML = `<div class="error-box">Choose a file first.</div>`; return; }
+      btn.disabled = true; btn.textContent = 'Uploading...'; msg.innerHTML = '';
+      try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const path = await uploadPrivateFile(file, 'company-documents');
+        const { data: row, error } = await supabaseClient.from('company_documents')
+          .insert({ title, kind: 'file', file_path: path, file_name: file.name, mime_type: file.type, created_by: user.id, sort_order: 10 })
+          .select('id').single();
+        if (error) throw error;
+        await logActivity('company_document', row.id, 'added', `Added "${title}" to Documents`);
+        fileInput.value = '';
+        document.getElementById('cd-title').value = '';
+        msg.innerHTML = `<div class="success-box">Added.</div>`;
+        await loadDocs();
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Add';
+      }
+    });
+
+    (async () => {
+      const session = await requireLogin();
+      if (!session) return;
+      renderMainNav('documents');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      myRole = await getMyRole();
+      await loadDocs();
+    })();
+  </script>
+</body>
+</html>

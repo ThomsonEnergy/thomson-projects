@@ -19,6 +19,19 @@ function ratesStatus(p) {
   return same ? 'in_xero' : 'changed';
 }
 
+// Every auth user, page by page (listUsers gives 50 a page by default, so past 50 accounts
+// people silently vanished from Users & Roles: F36 in docs/BUG_REVIEW_2026-10-23.md).
+async function allAuthUsers(supabaseAdmin) {
+  const users = [];
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw error;
+    users.push(...((data && data.users) || []));
+    if (!data || !data.nextPage || !(data.users || []).length) break;
+  }
+  return users;
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== 'GET') {
     return { statusCode: 405, body: 'Method not allowed' };
@@ -31,8 +44,7 @@ exports.handler = async (event) => {
   const { supabaseAdmin } = auth;
 
   try {
-    const { data: authList, error: authErr } = await supabaseAdmin.auth.admin.listUsers();
-    if (authErr) throw authErr;
+    const authUsers = await allAuthUsers(supabaseAdmin);
 
     const { data: profiles, error: profileErr } = await supabaseAdmin
       .from('profiles')
@@ -41,7 +53,7 @@ exports.handler = async (event) => {
 
     const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
 
-    const users = authList.users.map(u => ({
+    const users = authUsers.map(u => ({
       id: u.id,
       email: u.email,
       invited_at: u.invited_at || u.created_at,

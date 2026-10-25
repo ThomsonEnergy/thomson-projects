@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>New quote - Thomson Energy</title>
+<title>New quote - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -29,41 +29,27 @@
 
   <div class="wrap">
     <h1 id="page-title">New quote</h1>
-    <p class="subtitle" id="page-numbers"></p>
-    <p class="subtitle">Break the job into stages, each priced separately.</p>
+    <p class="subtitle">Pick the proposal, enter the client, press Create. The quote then takes you through the pre-quote information, a site visit if needed, pricing, the scope of works and sending, one step at a time.</p>
 
     <div class="card">
-      <h2>Proposal template</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Changes what this quote asks for and how it's presented to the client.</p>
+      <h2>Proposal</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Sets the questions asked, the rules checked before sending and how the proposal looks to the client.</p>
       <div class="grid cols-3" id="template-picker">
         <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
         <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
+        <button type="button" class="secondary template-option" data-template="battery">Battery Proposal</button>
         <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
         <button type="button" class="secondary template-option" data-template="renovation">Renovation</button>
         <button type="button" class="secondary template-option" data-template="service_work">Service Work</button>
       </div>
-      <p class="subtitle" style="margin-top:10px;">Need to skip the quote entirely? Use "+ New job (no quote)" on the Job pipeline board instead.</p>
       <p class="subtitle" id="template-note" style="margin:12px 0 0;"></p>
-    </div>
-
-    <div class="card" id="estimate-disclaimer-card" style="display:none;">
-      <h2>Estimate wording</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Shown as a banner on the client's estimate page. Edit if this job needs different wording.</p>
-      <textarea id="p-estimate-disclaimer" style="min-height:80px;"></textarea>
-    </div>
-
-    <div class="card" id="template-questions-card" style="display:none;">
-      <h2 id="template-questions-title"></h2>
-      <p class="subtitle" style="margin-bottom:10px;">Answers here set up this job's task list once the quote is approved - not shown to the client.</p>
-      <div class="grid cols-2" id="template-questions"></div>
+      <p class="subtitle" style="margin-top:6px;">Need to skip the quote entirely? Use "+ New job (no quote)" on the Pipeline board instead.</p>
     </div>
 
     <div class="card">
       <h2>Project &amp; client</h2>
-      <label>Project name</label>
+      <label>Project name <span class="req" aria-hidden="true">*</span></label>
       <input id="p-name" placeholder="e.g. 14 Miller St - New Build" required />
-      <label>Proposal subtitle (optional)</label>
-      <input id="p-subtitle" placeholder="e.g. Grid-Connected Solar Photovoltaic System" />
 
       <label>Client</label>
       <div style="display:flex; gap:8px; align-items:start;">
@@ -77,7 +63,7 @@
 
       <div class="grid cols-3" style="margin-top:14px;">
         <div>
-          <label style="margin-top:0">Client name</label>
+          <label style="margin-top:0">Client name <span class="req" aria-hidden="true">*</span></label>
           <input id="p-client" required />
         </div>
         <div>
@@ -86,13 +72,15 @@
         </div>
         <div>
           <label style="margin-top:0">Client phone</label>
-          <input id="p-phone" />
+          <input id="p-phone" type="tel" autocomplete="tel" />
         </div>
       </div>
       <div class="grid cols-3">
         <div style="grid-column: span 2;">
           <label>Site address</label>
-          <input id="p-address" />
+          <select id="p-site-pick" style="display:none; margin-bottom:6px;"></select>
+          <input id="p-address" placeholder="Where the work is done" />
+          <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new address is saved as a site for this client. The client's office address stays as it is (Clients page).</p>
         </div>
         <div>
           <label>Payment terms</label>
@@ -107,173 +95,50 @@
       <p class="subtitle" style="margin-top:6px;"><a class="link-quiet" href="/clients.html" target="_blank">Manage clients &amp; contacts &rarr;</a></p>
     </div>
 
+
     <div class="card">
       <h2>Notes</h2>
-      <p class="subtitle" style="margin-bottom:8px;">Background/context that should stick around regardless of how the scope of works changes - e.g. what a lead originally asked for. Not shown to the client.</p>
-      <textarea id="p-notes" placeholder="Internal notes..."></textarea>
+      <p class="subtitle" style="margin-bottom:8px;">What the client asked for, in a few lines. Kept with the quote and the job, not shown to the client. The AI scope of works reads it too.</p>
+      <textarea id="p-notes" placeholder="e.g. Wants a 10 kW system with a battery, bill around $900 a quarter, tile roof, two storey"></textarea>
+      <div id="lead-attachments-note"></div>
     </div>
 
-    <div class="card" id="job-contacts-card" style="display:none;">
-      <h2>Who's running this job</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Picked from this client's contact list. Used so correspondence like variations goes to the right person, not just whoever's first on file.</p>
-      <div class="grid cols-3" id="job-contacts-selects"></div>
-    </div>
-
-    <div class="card" id="pylon-card">
-      <h2>Pylon system design</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Start here for a solar job: create the design/quote in Pylon first, then paste the resulting proposal link below before filling in the scope of works and pricing.</p>
-      <button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:6px;">Create job in Pylon &rarr;</button>
-      <div id="pylon-create-msg"></div>
-      <label style="margin-top:10px;">Pylon proposal link</label>
-      <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." />
-      <div class="grid cols-3" style="margin-top:10px;">
-        <div style="grid-column: span 2;">
-          <label>Pylon project ID (optional, for pulling system data)</label>
-          <input id="p-pylon-id" placeholder="Requires a Pylon API key set up under Settings > API Keys" />
-        </div>
-        <div style="display:flex; align-items:end;">
-          <button type="button" class="secondary" id="pylon-pull-btn" style="width:100%;">Pull from Pylon</button>
-        </div>
-      </div>
-      <div id="pylon-msg"></div>
-    </div>
-
-    <div class="card">
-      <h2>Write the scope of works with AI</h2>
-      <p class="subtitle" style="margin-bottom:10px;">A few rough notes, plus anything useful to attach - plans, drawings, or an electricity bill. Drafts each stage's description first, then a full scope of works using those.</p>
-      <textarea id="p-brief" placeholder="e.g. Single storey new build, 3 bed 2 bath, standard fitout, ducted air con, solar-ready switchboard"></textarea>
-
-      <div id="lead-attachments-import"></div>
-
-      <label>Supporting documents (optional)</label>
-      <div id="sow-doc-list" style="margin-bottom:8px;"></div>
-      <input type="file" id="sow-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple />
-      <p class="subtitle" style="margin:6px 0 0; font-size:12px;">PDF plans/drawings or photos of bills work best. A handful of files, not a full folder.</p>
-      <div id="sow-doc-msg"></div>
-
-      <label style="margin-top:16px;">Scope of works style</label>
-      <div style="display:flex; gap:16px; margin-bottom:4px;">
-        <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="sow-style" value="story" checked style="width:auto;" /> Story-flowing (residential homeowners)</label>
-        <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="sow-style" value="structured" style="width:auto;" /> Structured &amp; numbered (commercial builders)</label>
-      </div>
-
-      <button type="button" id="generate-scope-btn" style="margin-top:10px;">Generate scope of works with AI</button>
-      <div id="generate-msg"></div>
-    </div>
-
-    <div class="card">
-      <h2>Scope of works document</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Paste in your full scope of works, or generate it above. Shown as its own section in the proposal, above the pricing table.</p>
-      <textarea id="p-sow" style="min-height:260px;" placeholder="Paste your scope of works here..."></textarea>
-      <button type="button" class="secondary" id="cleanup-sow-btn" style="margin-top:10px;">&#129529; Cleanup with AI</button>
-      <p class="subtitle" style="margin:4px 0 0;">Rewrites the wording/formatting of what's in the box above right now - use it after generating a draft and then editing it by hand, instead of generating a fresh one from scratch.</p>
-      <div id="cleanup-sow-msg"></div>
-    </div>
-
-    <div class="card">
-      <h2>What it will look like</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Reference photos, renders, or similar completed jobs.</p>
-      <div id="reference-thumbs" style="margin-bottom:10px;"></div>
-      <input type="file" id="reference-file" accept="image/*" multiple />
-      <div id="reference-msg"></div>
-    </div>
-
-    <div class="card">
-      <h2>Stages / cost centres</h2>
-      <div class="grid cols-3" style="margin-bottom:16px;">
-        <div>
-          <label style="margin-top:0">Default markup %</label>
-          <input id="default-markup" type="number" step="1" value="45" />
-        </div>
-        <div>
-          <label style="margin-top:0">Default $ per STC</label>
-          <input id="default-stc-price" type="number" step="0.01" value="35" />
-        </div>
-        <div>
-          <label style="margin-top:0">Default STC zone</label>
-          <select id="default-stc-zone">
-            ${STC_ZONES.map(z => `<option value="${z.rating}" ${z.rating === 1.382 ? 'selected' : ''}>${z.label}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div id="cc-rows"></div>
-      <button type="button" class="secondary" id="add-row">+ Add stage</button>
-    </div>
-
-    <div class="card">
-      <h2>Total</h2>
-      <div class="stat" style="max-width:220px;">
-        <div class="label">Quoted total</div>
-        <div class="value" id="total-display">$0.00</div>
-      </div>
-    </div>
-
-    <div class="card" id="deposit-card">
-      <h2>Payment schedule</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Shown to the client on the proposal. The remainder is invoiced stage by stage as each is completed.</p>
-      <div style="max-width:160px;">
-        <label style="margin-top:0">Deposit %</label>
-        <input id="p-deposit" type="number" step="1" value="10" />
-      </div>
-
-      <div style="margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border);">
-        <label style="margin-top:0">Custom milestones (optional)</label>
-        <p class="subtitle" style="margin-bottom:8px;">Replaces the schedule shown to the client above with your own named stages - e.g. "10% deposit, 40% on ordering materials, 20% on booking install day, 30% on commissioning". Doesn't change what's automatically invoiced when the quote's approved - that's still the Deposit % above.</p>
-        <div id="milestone-rows"></div>
-        <button type="button" class="secondary" id="add-milestone-btn" style="font-size:12px; padding:6px 10px;">+ Add milestone</button>
-        <p class="subtitle" id="milestone-total-note" style="margin-top:6px;"></p>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Living away from home</h2>
-      <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:400;">
-        <input type="checkbox" id="p-laha-approved" style="width:auto;" /> LAHA approved for this job
-      </label>
-      <p class="subtitle" style="margin-top:6px;">For jobs more than 100km from base with a Mobilisation stage already covering travel/LAHA in the quote. Once approved, staff clocking out of this job are asked whether they stayed overnight, and the allowance gets added to their pay automatically.</p>
-    </div>
-
-    <div class="card" id="solar-compliance-card" style="display:none;">
-      <h2>Compliance checklist</h2>
-      <p class="subtitle" style="margin-bottom:10px;">What NETCC and the Clean Energy Regulator require before this quote is sent - checked against this job's own data, not a guess.</p>
-      <button type="button" class="secondary" id="compliance-check-btn">Check compliance</button>
-      <div id="compliance-check-result" style="margin-top:12px;"></div>
-    </div>
-
-    <div class="card">
-      <h2>Terms and conditions</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Prefilled from your default terms in Settings. Edit here if this job needs something different.</p>
-      <textarea id="p-terms" style="min-height:180px;"></textarea>
-    </div>
-
-    <button id="save-btn">Save quote</button>
+    <button id="save-btn">Create quote</button>
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/template-questions.js"></script>
-  <script src="/js/email-compose.js?v=4"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/template-questions.js?v=3"></script>
+  <script src="/js/email-compose.js?v=9"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
+    // Editing a saved quote now happens on the quote's own page, in steps (backlog item 27).
     const editId = new URLSearchParams(window.location.search).get('id');
+    if (editId) window.location.replace(`/project.html?id=${encodeURIComponent(editId)}&tab=quote`);
+
     let prefillLeadId = null;
     let prefillEmailThreadId = null; // quote started from an inbox conversation
-    let referencePhotos = [];
-    let rowCount = 0;
+    let prefillBrief = ''; // a lead's or email's summary of the work, saved as the AI brief
     let currentTemplate = 'new_build';
-    let templateAnswers = {};
     let companySettings = {};
     let selectedClientId = null;
-    let RATE_TIERS = [];
-    let currentJobNumber = null;
-    const rowsEl = document.getElementById('cc-rows');
+    const sitePicker = attachSitePicker(document.getElementById('p-site-pick'), document.getElementById('p-address'));
 
-    function renumberStages() {
-      document.querySelectorAll('.cc-row').forEach((row, i) => {
-        const label = row.querySelector('.cc-number');
-        if (label) label.textContent = currentJobNumber ? `(${costCentreNumber(currentJobNumber, i + 1)})` : `(stage ${i + 1})`;
-      });
+    const TEMPLATE_INFO = {
+      new_build: { note: 'Multi-stage project with a deposit and a full scope of works.', photoCategory: 'electrical' },
+      solar: { note: 'Solar questions (grid, existing system, roof, switchboard, supply), tick Batteries as well on the quote to add the battery set. Pylon design on the cover, STC credit on the quote.', photoCategory: 'solar' },
+      battery: { note: 'Battery questions (usable kWh, backup, location to AS/NZS 5139, CEC list, VPP, federal discount), the SAA and Clean Energy Regulator rules checked before sending, BSTC credit on the quote.', photoCategory: 'solar' },
+      renovation: { note: 'Multi-stage renovation with a deposit. Asks about asbestos, switchboard, approvals and occupancy, which set up the pre-work and handover tasks.', photoCategory: 'electrical' },
+      service_work: { note: 'Single-stage service call or repair with a deposit. Asks about urgency, access and parts.', photoCategory: 'electrical' },
+      quick_estimate: { note: 'Single cost centre, no deposit, labelled "Estimate only" for the client and invoiced from actual hours and materials.', photoCategory: 'general' },
+    };
+
+    function applyTemplate(template) {
+      currentTemplate = template;
+      document.querySelectorAll('.template-option').forEach(btn => btn.classList.toggle('active', btn.dataset.template === template));
+      document.getElementById('template-note').textContent = (TEMPLATE_INFO[template] || TEMPLATE_INFO.new_build).note;
     }
+    document.querySelectorAll('.template-option').forEach(btn => btn.addEventListener('click', () => applyTemplate(btn.dataset.template)));
 
     // ---------- client picker ----------
 
@@ -281,22 +146,21 @@
       selectedClientId = client ? client.id : null;
       const note = document.getElementById('selected-client-note');
       if (client) {
-        note.innerHTML = `Using existing client: <strong>${client.name}</strong>. Edits below only apply to this quote unless you also update it on the <a class="link-quiet" href="/clients.html" target="_blank">Clients page</a>.`;
+        note.innerHTML = `Using existing client: <strong>${escapeHtml(client.name)}</strong>. Edits below only apply to this quote unless you also update it on the <a class="link-quiet" href="/clients.html" target="_blank">Clients page</a>.`;
         document.getElementById('p-client').value = client.name || '';
         document.getElementById('p-email').value = client.email || '';
         document.getElementById('p-phone').value = client.phone || '';
-        document.getElementById('p-address').value = client.address || '';
         document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
       } else {
         note.textContent = 'No client selected - search above, or just fill in the fields below to create one when you save.';
       }
+      sitePicker.setClient(client);
       document.getElementById('client-search-results').style.display = 'none';
     }
 
     document.getElementById('clear-client-btn').addEventListener('click', () => {
       document.getElementById('client-search-input').value = '';
       setSelectedClient(null);
-      loadJobContactPickers(null);
     });
 
     let clientSearchTimeout = null;
@@ -306,10 +170,12 @@
       const resultsEl = document.getElementById('client-search-results');
       if (q.length < 2) { resultsEl.style.display = 'none'; return; }
       clientSearchTimeout = setTimeout(async () => {
+        // Characters that are special in a filter or a like pattern match any single character instead (F24)
+        const pattern = `%${q.replace(/[%_*"\\]/g, '_')}%`;
         const { data, error } = await supabaseClient
           .from('clients')
           .select('*')
-          .or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`)
+          .or(`name.ilike."${pattern}",email.ilike."${pattern}",phone.ilike."${pattern}"`)
           .limit(8);
         if (error || !data || !data.length) {
           resultsEl.innerHTML = `<div style="padding:10px 12px; font-size:13px; color:var(--muted);">No matches</div>`;
@@ -318,8 +184,8 @@
         }
         resultsEl.innerHTML = data.map(c => `
           <div class="client-result" data-id="${c.id}" style="padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">
-            <div style="font-weight:600;">${c.name}</div>
-            <div style="color:var(--muted); font-size:12px;">${[c.email, c.phone].filter(Boolean).join(' · ')}</div>
+            <div style="font-weight:600;">${escapeHtml(c.name)}</div>
+            <div style="color:var(--muted); font-size:12px;">${[c.email, c.phone].filter(Boolean).map(escapeHtml).join(' · ')}</div>
           </div>
         `).join('');
         resultsEl.querySelectorAll('.client-result').forEach(row => {
@@ -327,7 +193,6 @@
             const client = data.find(c => c.id === row.dataset.id);
             document.getElementById('client-search-input').value = client.name;
             setSelectedClient(client);
-            loadJobContactPickers(client.id);
           });
         });
         resultsEl.style.display = 'block';
@@ -340,1078 +205,6 @@
       }
     });
 
-    const TEMPLATE_INFO = {
-      new_build: {
-        note: 'Multi-stage project with a deposit and full scope of works.',
-        photoCategory: 'electrical',
-        singleStage: false,
-        showDeposit: true,
-        showPylon: false,
-      },
-      solar: {
-        note: 'Pylon design link is prominent on the cover page. Defaults to a single stage - add more if needed.',
-        photoCategory: 'solar',
-        singleStage: false,
-        showDeposit: true,
-        showPylon: true,
-      },
-      renovation: {
-        note: 'Multi-stage renovation with a deposit. Asks reno-specific questions (asbestos, switchboard, approvals, occupancy) that set up the pre-work and handover tasks.',
-        photoCategory: 'electrical', singleStage: false, showDeposit: true, showPylon: false,
-      },
-      service_work: {
-        note: 'Single-stage service call or repair with a deposit. Asks about urgency, access and parts, and sets up the pre-visit and sign-off tasks.',
-        photoCategory: 'electrical', singleStage: true, showDeposit: true, showPylon: false,
-      },
-      quick_estimate: {
-        note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page - invoiced from actual hours and materials, not this figure.',
-        photoCategory: 'general',
-        singleStage: true,
-        showDeposit: false,
-        showPylon: false,
-      },
-    };
-
-    function applyTemplate(template, applyDefaults = false) {
-      const prevTemplate = currentTemplate;
-      currentTemplate = template;
-      document.querySelectorAll('.template-option').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.template === template);
-      });
-      const info = TEMPLATE_INFO[template];
-      document.getElementById('template-note').textContent = info.note;
-      document.getElementById('add-row').style.display = info.singleStage ? 'none' : 'inline-flex';
-      document.querySelectorAll('.remove-row').forEach(btn => {
-        btn.style.display = info.singleStage ? 'none' : 'inline-flex';
-      });
-      // Trim to a single stage if this template doesn't allow multiples.
-      if (info.singleStage) {
-        [...document.querySelectorAll('.cc-row')].slice(1).forEach(row => row.remove());
-      }
-      const depositCard = document.getElementById('deposit-card');
-      if (depositCard) depositCard.style.display = info.showDeposit ? 'block' : 'none';
-      if (!info.showDeposit) document.getElementById('p-deposit').value = 0;
-      else if (applyDefaults) applyTemplatePaymentDefaults(prevTemplate, template);
-
-      const disclaimerCard = document.getElementById('estimate-disclaimer-card');
-      const disclaimerField = document.getElementById('p-estimate-disclaimer');
-      disclaimerCard.style.display = template === 'quick_estimate' ? 'block' : 'none';
-      if (template === 'quick_estimate' && !disclaimerField.value.trim()) {
-        disclaimerField.value = companySettings.default_estimate_disclaimer
-          || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.';
-      }
-
-      const questionsEl = document.getElementById('template-questions');
-      Object.assign(templateAnswers, readTemplateAnswers(questionsEl));
-      document.getElementById('template-questions-card').style.display = TEMPLATE_QUESTIONS[template] ? 'block' : 'none';
-      document.getElementById('template-questions-title').textContent = TEMPLATE_QUESTION_TITLES[template] || '';
-      renderTemplateQuestions(questionsEl, template, templateAnswers);
-
-      document.getElementById('pylon-card').style.display = info.showPylon ? 'block' : 'none';
-      if (!info.showPylon) {
-        document.getElementById('p-pylon-link').value = '';
-        document.getElementById('p-pylon-id').value = '';
-      }
-      document.getElementById('solar-compliance-card').style.display = info.showPylon ? 'block' : 'none';
-    }
-
-    document.querySelectorAll('.template-option').forEach(btn => {
-      btn.addEventListener('click', () => applyTemplate(btn.dataset.template, true));
-    });
-
-    // ---------- line items ----------
-
-    function lineItemTotal(li) {
-      return (parseFloat(li.querySelector('.li-qty').value) || 0) * (parseFloat(li.querySelector('.li-cost').value) || 0);
-    }
-
-    function addLineItem(stageRow, { description = '', item_type = 'material', quantity = 1, unit_cost = '', rate_tier_id = '', prebuild_group_id = null, prebuild_client_description = null, prebuild_base_quantity = null } = {}, container = null) {
-      const li = document.createElement('div');
-      li.className = 'li-row';
-      // Set only when this line came from "Add a prebuild" - lets the
-      // client-facing quote collapse every component added in one click
-      // back into a single line showing the prebuild's own client-facing
-      // description, without changing how staff see/edit each line here.
-      // prebuildBaseQuantity is the un-multiplied per-unit quantity from
-      // the master prebuild - lets the group's own quantity control (see
-      // renderPrebuildGroup) rescale every component from the same base
-      // instead of compounding a rescale-of-a-rescale.
-      li.dataset.prebuildGroupId = prebuild_group_id || '';
-      li.dataset.prebuildClientDescription = prebuild_client_description || '';
-      li.dataset.prebuildBaseQuantity = prebuild_base_quantity ?? '';
-      li.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 0.6fr 1fr 1fr auto; gap:8px; margin-bottom:6px; align-items:center;';
-      const isLabour = item_type === 'labour';
-      const descPlaceholder = isLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
-      li.innerHTML = `
-        <input class="li-desc" placeholder="${descPlaceholder}" value="${description}" style="font-size:13px;" />
-        <select class="li-type" style="font-size:13px;">
-          <option value="material" ${item_type === 'material' ? 'selected' : ''}>Material</option>
-          <option value="labour" ${item_type === 'labour' ? 'selected' : ''}>Labour</option>
-        </select>
-        <input class="li-qty" type="number" step="0.01" value="${quantity}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="font-size:13px;" />
-        <select class="li-tier" style="font-size:13px; display:${isLabour ? 'block' : 'none'};">
-          <option value="">-- Select tier --</option>
-          ${RATE_TIERS.map(t => `<option value="${t.id}" data-rate="${t.sell_rate}" ${rate_tier_id === t.id ? 'selected' : ''}>${t.name} ($${t.sell_rate}/hr)</option>`).join('')}
-        </select>
-        <input class="li-cost" type="number" step="0.01" value="${unit_cost}" placeholder="Unit cost $" style="font-size:13px; display:${isLabour ? 'none' : 'block'};" />
-        <div class="li-total" style="font-size:13px; font-weight:600;">$0.00</div>
-        <button type="button" class="secondary li-remove" style="padding:6px 10px; font-size:12px;">x</button>
-      `;
-      (container || stageRow.querySelector('.li-rows')).appendChild(li);
-      decorateLineItemRow(li);
-      const recalc = () => updateStageTotals(stageRow);
-
-      li.querySelector('.li-qty').addEventListener('input', recalc);
-      li.querySelector('.li-cost').addEventListener('input', recalc);
-
-      li.querySelector('.li-tier').addEventListener('change', (e) => {
-        const selected = e.target.selectedOptions[0];
-        li.querySelector('.li-cost').value = selected?.dataset.rate || '';
-        recalc();
-      });
-
-      li.querySelector('.li-type').addEventListener('change', (e) => {
-        const nowLabour = e.target.value === 'labour';
-        li.querySelector('.li-qty').placeholder = nowLabour ? 'Hours' : 'Qty';
-        li.querySelector('.li-desc').placeholder = nowLabour ? 'Optional - defaults to the rate tier name' : 'e.g. Solar panels';
-        li.querySelector('.li-tier').style.display = nowLabour ? 'block' : 'none';
-        li.querySelector('.li-cost').style.display = nowLabour ? 'none' : 'block';
-        if (nowLabour) {
-          // Switching to Labour - pick up whatever tier's already selected, if any
-          const selected = li.querySelector('.li-tier').selectedOptions[0];
-          li.querySelector('.li-cost').value = selected?.dataset.rate || '';
-        }
-        recalc();
-      });
-
-      li.querySelector('.li-remove').addEventListener('click', () => { li.remove(); recalc(); });
-      updateStageTotals(stageRow);
-    }
-
-    function updateStageTotals(stageRow) {
-      const items = [...stageRow.querySelectorAll('.li-row')];
-      let labour = 0, material = 0;
-      items.forEach(li => {
-        const total = lineItemTotal(li);
-        li.querySelector('.li-total').textContent = money(total);
-        if (li.querySelector('.li-type').value === 'labour') labour += total; else material += total;
-      });
-      // Labour is priced straight off the billable rate tier's sell rate -
-      // it's already a sell price, not a cost, so markup only applies to
-      // materials (cost price -> sell price). Marking labour up again on
-      // top would double the margin already baked into the tier rate.
-      const markup = parseFloat(stageRow.querySelector('.cc-markup').value) || 0;
-      const salePrice = material * (1 + markup / 100) + labour;
-      stageRow.querySelector('.cc-labour-total').textContent = money(labour);
-      stageRow.querySelector('.cc-material-total').textContent = money(material);
-      stageRow.querySelector('.cc-sale-price').textContent = money(salePrice);
-      stageRow.dataset.labourTotal = labour.toFixed(2);
-      stageRow.dataset.materialTotal = material.toFixed(2);
-      stageRow.dataset.salePrice = salePrice.toFixed(2);
-      updateTotal();
-    }
-
-    // getPrebuilds()/getMaterials()/openStockPicker() are shared - see js/supabase-client.js
-
-    // ---------- payment milestones ----------
-
-    function milestoneRowHtml(m = {}) {
-      return `
-        <div class="milestone-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-          <input class="milestone-label" placeholder="e.g. On booking install day" value="${m.label || ''}" style="flex:2;" />
-          <input class="milestone-percent" type="number" step="1" min="0" max="100" placeholder="%" value="${m.percent ?? ''}" style="flex:1; max-width:90px;" />
-          <button type="button" class="secondary remove-milestone-btn" style="padding:8px 10px;">&times;</button>
-        </div>`;
-    }
-
-    function refreshMilestoneTotal() {
-      const total = [...document.querySelectorAll('.milestone-percent')].reduce((s, inp) => s + (parseFloat(inp.value) || 0), 0);
-      const rowCount = document.querySelectorAll('.milestone-row').length;
-      const note = document.getElementById('milestone-total-note');
-      if (!rowCount) { note.textContent = ''; return; }
-      note.innerHTML = Math.round(total) === 100
-        ? `Total: ${total}% - looks right.`
-        : `<span style="color:var(--red);">Total: ${total}% - should add up to 100%.</span>`;
-    }
-
-    function wireMilestoneRows() {
-      document.querySelectorAll('.remove-milestone-btn').forEach(btn => {
-        btn.onclick = () => { btn.closest('.milestone-row').remove(); refreshMilestoneTotal(); };
-      });
-      document.querySelectorAll('.milestone-percent').forEach(inp => { inp.oninput = refreshMilestoneTotal; });
-    }
-
-    document.getElementById('add-milestone-btn').addEventListener('click', () => {
-      document.getElementById('milestone-rows').insertAdjacentHTML('beforeend', milestoneRowHtml());
-      wireMilestoneRows();
-      refreshMilestoneTotal();
-    });
-
-    function readMilestones() {
-      return [...document.querySelectorAll('.milestone-row')]
-        .map((row, i) => ({
-          label: row.querySelector('.milestone-label').value.trim(),
-          percent: parseFloat(row.querySelector('.milestone-percent').value) || 0,
-          sort_order: i,
-        }))
-        .filter(m => m.label && m.percent > 0);
-    }
-
-    // ---------- stages ----------
-
-    let pylonKw = null;
-
-    function addRow({
-      name = '', description = '', markup_percent = null, stc_total = 0,
-      stc_system_kw = null, stc_zone_rating = null, stc_install_year = null, stc_price_per_certificate = null,
-      lineItems = [], photoGroups = [],
-    } = {}) {
-      rowCount++;
-      const defaultMarkup = markup_percent !== null ? markup_percent : (parseFloat(document.getElementById('default-markup').value) || 45);
-      const defaultStcPrice = stc_price_per_certificate ?? (parseFloat(document.getElementById('default-stc-price').value) || 35);
-      const defaultStcZone = Number(stc_zone_rating ?? (parseFloat(document.getElementById('default-stc-zone').value) || 1.382));
-      const defaultStcKw = stc_system_kw ?? pylonKw ?? '';
-      const defaultStcYear = stc_install_year || new Date().getFullYear();
-      const div = document.createElement('div');
-      div.className = 'cc-row';
-      div.dataset.name = name;
-      div.innerHTML = `
-        <div class="cc-row-top">
-          <div>
-            <label style="margin-top:0">Stage name <span class="cc-number" style="color:var(--muted); font-weight:400;"></span></label>
-            <input class="cc-name" placeholder="e.g. Rough In" value="${name}" />
-          </div>
-          <div>
-            <label style="margin-top:0">Description</label>
-            <input class="cc-desc" placeholder="What's covered in this stage" value="${description}" />
-          </div>
-        </div>
-
-        <div style="margin-top:12px;">
-          <label style="margin-top:0">Line items</label>
-          <div class="li-rows"></div>
-          <button type="button" class="secondary prebuild-add" style="font-size:12px; padding:6px 12px;">+ Search material / prebuild</button>
-          <button type="button" class="secondary li-add" style="font-size:12px; padding:6px 12px;">+ Add custom line</button>
-        </div>
-
-        <div style="margin-top:16px;">
-          <label style="margin-top:0">Photos for this stage</label>
-          <div class="photo-groups"></div>
-          <button type="button" class="secondary pg-add" style="font-size:12px; padding:6px 12px;">+ Add photo group</button>
-        </div>
-
-        <div class="cc-row-costs" style="grid-template-columns: 1fr 1fr 0.7fr 1fr;">
-          <div>
-            <label style="margin-top:0">Labour total</label>
-            <div class="readout cc-labour-total">$0.00</div>
-          </div>
-          <div>
-            <label style="margin-top:0">Materials total</label>
-            <div class="readout cc-material-total">$0.00</div>
-          </div>
-          <div>
-            <label style="margin-top:0">Markup %</label>
-            <input class="cc-markup" type="number" step="1" value="${defaultMarkup}" />
-          </div>
-          <div>
-            <label style="margin-top:0">Sale price</label>
-            <div class="readout cc-sale-price">$0.00</div>
-          </div>
-        </div>
-        <div style="margin-top:10px; padding:12px; background:var(--surface-2); border-radius:8px;">
-          <label style="margin-top:0; font-weight:600;">STC credit (optional)</label>
-          <div class="grid cols-4" style="margin-top:6px;">
-            <div>
-              <label style="margin-top:0; font-size:12px;">System size (kW)</label>
-              <input class="cc-stc-kw" type="number" step="0.01" value="${defaultStcKw}" placeholder="0.00" />
-            </div>
-            <div>
-              <label style="margin-top:0; font-size:12px;">Zone rating</label>
-              <select class="cc-stc-zone">
-                ${STC_ZONES.map(z => `<option value="${z.rating}" ${defaultStcZone === z.rating ? 'selected' : ''}>${z.label}</option>`).join('')}
-              </select>
-            </div>
-            <div>
-              <label style="margin-top:0; font-size:12px;">Install year</label>
-              <input class="cc-stc-year" type="number" step="1" value="${defaultStcYear}" />
-            </div>
-            <div>
-              <label style="margin-top:0; font-size:12px;">$ per STC</label>
-              <input class="cc-stc-price" type="number" step="0.01" value="${defaultStcPrice}" />
-            </div>
-          </div>
-          <p class="subtitle cc-stc-calc-line" style="margin:8px 0 0;"></p>
-          <label style="margin-top:10px;">STC total ($) - auto-filled from the calculator above, or type your own</label>
-          <input class="cc-stc-total" type="number" step="0.01" value="${stc_total}" placeholder="0.00" />
-        </div>
-        <div style="text-align:right; margin-top:10px;">
-          <button type="button" class="secondary remove-row">Remove stage</button>
-        </div>`;
-      rowsEl.appendChild(div);
-      renumberStages();
-
-      function recalcStc() {
-        const kw = parseFloat(div.querySelector('.cc-stc-kw').value) || 0;
-        const zoneRating = parseFloat(div.querySelector('.cc-stc-zone').value) || 0;
-        const installYear = parseInt(div.querySelector('.cc-stc-year').value, 10) || new Date().getFullYear();
-        const price = parseFloat(div.querySelector('.cc-stc-price').value) || 0;
-        const qty = calculateStcQuantity({ kw, zoneRating, installYear });
-        div.querySelector('.cc-stc-calc-line').textContent = qty
-          ? `= ${qty} STCs x ${money(price)} = ${money(qty * price)}`
-          : '';
-        if (qty) div.querySelector('.cc-stc-total').value = (qty * price).toFixed(2);
-      }
-      div.querySelectorAll('.cc-stc-kw, .cc-stc-zone, .cc-stc-year, .cc-stc-price').forEach(el => {
-        el.addEventListener('input', recalcStc);
-        el.addEventListener('change', recalcStc);
-      });
-      recalcStc();
-
-      div.querySelector('.cc-markup').addEventListener('input', () => updateStageTotals(div));
-      div.querySelector('.cc-name').addEventListener('input', (e) => { div.dataset.name = e.target.value.trim(); });
-      div.querySelector('.li-add').addEventListener('click', () => addLineItem(div));
-      div.querySelector('.prebuild-add').addEventListener('click', () => openStockPicker(div));
-      div.querySelector('.pg-add').addEventListener('click', () => addPhotoGroup(div));
-      div.querySelector('.remove-row').addEventListener('click', () => { div.remove(); updateTotal(); renumberStages(); });
-      if (TEMPLATE_INFO[currentTemplate].singleStage) {
-        div.querySelector('.remove-row').style.display = 'none';
-      }
-
-      renderStageLineItems(div, lineItems);
-
-      photoGroups.forEach(pg => addPhotoGroup(div, pg));
-    }
-
-    // ---------- per-stage photo groups ----------
-
-    function addPhotoGroup(stageRow, { description = '', photos = [] } = {}) {
-      const pg = document.createElement('div');
-      pg.className = 'pg-row';
-      pg.style.cssText = 'border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px;';
-      pg.dataset.photos = JSON.stringify(photos);
-      pg.innerHTML = `
-        <input class="pg-desc" placeholder="e.g. Existing switchboard" value="${description}" style="margin-bottom:8px;" />
-        <div class="pg-thumbs" style="margin-bottom:8px;"></div>
-        <input type="file" class="pg-file" accept="image/*" multiple style="font-size:12px;" />
-        <button type="button" class="secondary pg-remove" style="font-size:12px; padding:6px 12px;">Remove group</button>
-      `;
-      stageRow.querySelector('.photo-groups').appendChild(pg);
-
-      const renderThumbs = () => {
-        const arr = JSON.parse(pg.dataset.photos);
-        renderPhotoThumbs(pg.querySelector('.pg-thumbs'), arr, () => {
-          pg.dataset.photos = JSON.stringify(arr);
-        });
-      };
-      renderThumbs();
-
-      // Fires the moment photos are chosen - previously needed a second
-      // "Upload" click that staff often skipped, assuming picking the
-      // file was already the whole job done.
-      pg.querySelector('.pg-file').addEventListener('change', async () => {
-        const fileInput = pg.querySelector('.pg-file');
-        if (!fileInput.files.length) return;
-        const urls = await uploadPhotos(fileInput.files, 'stage-photos');
-        const arr = JSON.parse(pg.dataset.photos);
-        arr.push(...urls);
-        pg.dataset.photos = JSON.stringify(arr);
-        fileInput.value = '';
-        renderThumbs();
-      });
-      pg.querySelector('.pg-remove').addEventListener('click', () => pg.remove());
-    }
-
-    function updateTotal() {
-      const prices = [...document.querySelectorAll('.cc-row')].map(r => parseFloat(r.dataset.salePrice) || 0);
-      document.getElementById('total-display').textContent = money(prices.reduce((a, b) => a + b, 0));
-    }
-
-    document.getElementById('add-row').addEventListener('click', () => addRow());
-
-    // ---------- AI scope descriptions ----------
-
-    // ---------- supporting documents for the AI helper ----------
-
-    let sowDocs = []; // { path, name, mime }
-
-    function renderSowDocList() {
-      const el = document.getElementById('sow-doc-list');
-      if (!sowDocs.length) { el.innerHTML = ''; return; }
-      el.innerHTML = sowDocs.map((d, i) => `
-        <div style="display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:6px 10px; margin:0 8px 8px 0; font-size:12px;">
-          ${d.name}
-          <button type="button" data-i="${i}" class="sow-doc-remove" style="padding:2px 6px; font-size:11px;">x</button>
-        </div>
-      `).join('');
-      el.querySelectorAll('.sow-doc-remove').forEach(btn => {
-        btn.addEventListener('click', () => { sowDocs.splice(parseInt(btn.dataset.i), 1); renderSowDocList(); });
-      });
-    }
-
-    document.getElementById('sow-doc-file').addEventListener('change', async () => {
-      const fileInput = document.getElementById('sow-doc-file');
-      const msg = document.getElementById('sow-doc-msg');
-      if (!fileInput.files.length) return;
-      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
-      try {
-        for (const file of fileInput.files) {
-          const path = await uploadPrivateFile(file, 'sow-source');
-          sowDocs.push({ path, name: file.name, mime: file.type });
-        }
-        renderSowDocList();
-        fileInput.value = '';
-        msg.innerHTML = '';
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-      }
-    });
-
-    // ---------- AI scope of works helper ----------
-
-    document.getElementById('generate-scope-btn').addEventListener('click', async () => {
-      const btn = document.getElementById('generate-scope-btn');
-      const msg = document.getElementById('generate-msg');
-      const brief = document.getElementById('p-brief').value.trim();
-      const projectName = document.getElementById('p-name').value.trim();
-      const rows = [...document.querySelectorAll('.cc-row')];
-      const stageNames = rows.map(r => r.dataset.name).filter(Boolean);
-
-      if (!brief) { msg.innerHTML = `<div class="error-box">Add a few notes first.</div>`; return; }
-      if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first.</div>`; return; }
-
-      btn.disabled = true;
-      msg.innerHTML = '';
-      try {
-        btn.textContent = 'Drafting stage names and descriptions...';
-        const scopeRes = await fetch('/.netlify/functions/generate-scope', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectName: projectName || 'This project', brief, stageNames }),
-        });
-        const scopeJson = await scopeRes.json();
-        if (!scopeJson.ok) throw new Error(scopeJson.error);
-
-        // AI suggests both a fitting name and a description per stage, in
-        // the same order the rows are currently in - apply both, then
-        // renumber (cost centre numbers are position-based, not tied to
-        // the name, so this is safe even though names just changed).
-        rows.forEach((row, i) => {
-          const stage = scopeJson.stages[i];
-          if (!stage) return;
-          if (stage.name) {
-            row.querySelector('.cc-name').value = stage.name;
-            row.dataset.name = stage.name.trim();
-          }
-          if (stage.description) row.querySelector('.cc-desc').value = stage.description;
-        });
-        renumberStages();
-
-        const updatedStageNames = rows.map(r => r.dataset.name).filter(Boolean);
-        const updatedDescriptions = Object.fromEntries(rows.map(r => [r.dataset.name, r.querySelector('.cc-desc').value]));
-
-        btn.textContent = 'Writing scope of works...';
-        const sowStyle = document.querySelector('input[name="sow-style"]:checked').value;
-        const sowRes = await fetch('/.netlify/functions/generate-sow', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectName: projectName || 'This project',
-            brief,
-            stageNames: updatedStageNames,
-            stageDescriptions: updatedDescriptions,
-            documentPaths: sowDocs.map(d => d.path),
-            style: sowStyle,
-            template: currentTemplate,
-          }),
-        });
-        const sowJson = await sowRes.json();
-        if (!sowJson.ok) throw new Error(sowJson.error);
-        document.getElementById('p-sow').value = sowJson.sow;
-
-        msg.innerHTML = `<div class="success-box">Stage names, descriptions, and scope of works drafted. Review and edit as needed.</div>`;
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Generate scope of works with AI';
-      }
-    });
-
-    document.getElementById('cleanup-sow-btn').addEventListener('click', async () => {
-      const btn = document.getElementById('cleanup-sow-btn');
-      const msg = document.getElementById('cleanup-sow-msg');
-      const current = document.getElementById('p-sow').value.trim();
-      if (!current) { msg.innerHTML = `<div class="error-box">Nothing to clean up yet - write or generate a scope of works first.</div>`; return; }
-
-      const sowStyle = document.querySelector('input[name="sow-style"]:checked').value;
-      const styleNote = sowStyle === 'structured'
-        ? 'This follows the "structured & numbered" house style for commercial builders/developers - formal, numbered sub-sections by discipline/phase, ending in an Exclusions section. Keep that structure.'
-        : 'This follows the "story-flowing" house style for residential homeowners - plain-English, one section per major component with a short bolded heading, closing with a bulleted inclusions list, no numbered sections or Exclusions clause. Keep that structure.';
-
-      btn.disabled = true;
-      btn.textContent = 'Cleaning up...';
-      msg.innerHTML = '';
-      try {
-        const res = await fetch('/.netlify/functions/cleanup-text', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: current,
-            instructions: `This is a scope-of-works document on an electrical/solar contractor's client-facing quote. ${styleNote} Plain text, no markdown headers/asterisks. Do not include pricing.`,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not clean this up');
-        document.getElementById('p-sow').value = data.text;
-        msg.innerHTML = `<div class="success-box">Cleaned up.</div>`;
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-      }
-      btn.disabled = false;
-      btn.textContent = '🧹 Cleanup with AI';
-    });
-
-    // ---------- reference photos ----------
-
-    document.getElementById('reference-file').addEventListener('change', async () => {
-      const fileInput = document.getElementById('reference-file');
-      const msg = document.getElementById('reference-msg');
-      if (!fileInput.files.length) return;
-      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
-      try {
-        const urls = await uploadPhotos(fileInput.files, 'reference');
-        referencePhotos.push(...urls);
-        renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
-        fileInput.value = '';
-        msg.innerHTML = '';
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-      }
-    });
-
-    // ---------- Pylon ----------
-
-    document.getElementById('pylon-create-btn').addEventListener('click', async () => {
-      const btn = document.getElementById('pylon-create-btn');
-      const msg = document.getElementById('pylon-create-msg');
-      const name = document.getElementById('p-client').value.trim();
-      const address = document.getElementById('p-address').value.trim();
-      if (!name || !address) { msg.innerHTML = `<div class="error-box">Enter the client name and site address first.</div>`; return; }
-      // Pylon's create API has no dedup by address/customer and this app
-      // has no way to search their existing projects either (confirmed
-      // against their docs - no address/email/phone filter on
-      // GET /v1/solar_projects), so the only guard available is our own
-      // record of having already pushed this one.
-      if (document.getElementById('p-pylon-id').value.trim() && !confirm('This quote already has a Pylon project ID - creating another will make a duplicate project in Pylon for this address. Continue anyway?')) return;
-      btn.disabled = true;
-      btn.textContent = 'Creating in Pylon...';
-      msg.innerHTML = '';
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/push-to-pylon', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({
-            name, address,
-            email: document.getElementById('p-email').value.trim() || null,
-            phone: document.getElementById('p-phone').value.trim() || null,
-            referenceNumber: document.getElementById('p-name').value.trim() || null,
-          }),
-        });
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error);
-        if (json.pylonProjectId) document.getElementById('p-pylon-id').value = json.pylonProjectId;
-        msg.innerHTML = `<div class="success-box">Created in Pylon${json.referenceNumber ? ` as ${json.referenceNumber}` : ''} with the client/site details filled in. <a class="link-quiet" href="https://app.getpylon.com/app" target="_blank" rel="noopener">Open Pylon</a> to finish the design, then paste the resulting proposal link above.</div>`;
-      } catch (err) {
-        // Falls back to just opening Pylon manually either way - e.g. a
-        // Pylon account without solar-project-creation API access
-        // (403 feature_not_available) shouldn't leave staff with no way
-        // to create the job at all, just without the auto-filled details.
-        msg.innerHTML = `<div class="error-box">${err.message} - <a class="link-quiet" href="https://app.getpylon.com/app" target="_blank" rel="noopener">open Pylon</a> and create it manually instead.</div>`;
-      }
-      btn.disabled = false;
-      btn.textContent = 'Create job in Pylon →';
-    });
-
-    document.getElementById('pylon-pull-btn').addEventListener('click', async () => {
-      const msg = document.getElementById('pylon-msg');
-      const pylonProjectId = document.getElementById('p-pylon-id').value.trim();
-      if (!editId) {
-        msg.innerHTML = `<div class="error-box">Save this quote first, then come back to pull Pylon data.</div>`;
-        return;
-      }
-      if (!pylonProjectId) {
-        msg.innerHTML = `<div class="error-box">Enter a Pylon project ID first.</div>`;
-        return;
-      }
-      msg.innerHTML = '';
-      try {
-        const res = await fetch('/.netlify/functions/pylon-sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId: editId, pylonProjectId }),
-        });
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error);
-        const summary = pylonSystemSummary(json.pylonData);
-        msg.innerHTML = `<div class="success-box">Pulled from Pylon.${summary ? ' ' + summary : ' No hardware summary came back - check the function logs against the field names in the Pylon API docs.'}</div>`;
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message} (check Settings &gt; API Keys &gt; Pylon, and that this Pylon project ID is correct)</div>`;
-      }
-    });
-
-    document.getElementById('compliance-check-btn').addEventListener('click', async () => {
-      const resultEl = document.getElementById('compliance-check-result');
-      if (!editId) {
-        resultEl.innerHTML = `<div class="error-box">Save this quote first, then come back to run the compliance check.</div>`;
-        return;
-      }
-      const btn = document.getElementById('compliance-check-btn');
-      btn.disabled = true;
-      btn.textContent = 'Checking...';
-      resultEl.innerHTML = '';
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const checkRes = await fetch('/.netlify/functions/check-solar-compliance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ projectId: editId, phase: 'quote' }),
-        });
-        const checkJson = await checkRes.json();
-        if (!checkJson.ok) throw new Error(checkJson.error);
-
-        if (!checkJson.missing.length) {
-          resultEl.innerHTML = `<div class="success-box">Everything on the checklist is in place.</div>`;
-          return;
-        }
-
-        resultEl.innerHTML = `
-          <div class="error-box">
-            <p style="margin:0 0 8px; font-weight:600;">${checkJson.missing.length} thing${checkJson.missing.length === 1 ? '' : 's'} missing:</p>
-            <ul style="margin:0 0 10px; padding-left:18px;">${checkJson.missing.map(m => `<li>${m.label}</li>`).join('')}</ul>
-            <button type="button" class="secondary" id="create-compliance-tasks-btn">Create tasks for these</button>
-          </div>`;
-
-        document.getElementById('create-compliance-tasks-btn').addEventListener('click', async (e) => {
-          const createBtn = e.target;
-          createBtn.disabled = true;
-          createBtn.textContent = 'Creating...';
-          try {
-            const { data: proj } = await supabaseClient.from('projects').select('pylon_data').eq('id', editId).single();
-            const pylonData = proj?.pylon_data || {};
-            const equipment = {
-              panels: pylonData.module_types || [],
-              inverters: pylonData.inverter_types || [],
-              batteries: pylonData.storage_types || [],
-            };
-            const wordRes = await fetch('/.netlify/functions/generate-solar-tasks', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ missing: checkJson.missing, equipment }),
-            });
-            const wordJson = await wordRes.json();
-            if (!wordJson.ok) throw new Error(wordJson.error);
-
-            const { data: { user } } = await supabaseClient.auth.getUser();
-            const { error: insErr } = await supabaseClient.from('job_tasks').insert(
-              wordJson.tasks.map(t => ({
-                project_id: editId, description: t.description, task_type: 'quote', created_by: user.id,
-              }))
-            );
-            if (insErr) throw insErr;
-            resultEl.innerHTML = `<div class="success-box">${wordJson.tasks.length} task${wordJson.tasks.length === 1 ? '' : 's'} added - see the Tasks card on the quote page.</div>`;
-          } catch (err) {
-            createBtn.disabled = false;
-            createBtn.textContent = 'Create tasks for these';
-            resultEl.insertAdjacentHTML('beforeend', `<div class="error-box">${err.message}</div>`);
-          }
-        });
-      } catch (err) {
-        resultEl.innerHTML = `<div class="error-box">${err.message}</div>`;
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Check compliance';
-      }
-    });
-
-    // ---------- save (create or update) ----------
-
-    // ---------- job contact assignment ----------
-
-    const JOB_CONTACT_TYPES = [
-      { key: 'project_manager_contact_id', type: 'project_manager', label: 'Project manager' },
-      { key: 'site_contact_id', type: 'site', label: 'Site supervisor' },
-      { key: 'job_contact_id', type: 'job', label: 'Job contact' },
-      { key: 'sales_contact_id', type: 'sales', label: 'Sales contact' },
-      { key: 'accounts_contact_id', type: 'accounts', label: 'Accounts contact' },
-    ];
-    let assignedContactIds = {}; // { project_manager_contact_id: uuid, ... }
-
-    async function loadJobContactPickers(clientId, preselected = {}) {
-      const card = document.getElementById('job-contacts-card');
-      const container = document.getElementById('job-contacts-selects');
-      assignedContactIds = { ...preselected };
-
-      if (!clientId) { card.style.display = 'none'; return; }
-
-      const { data: contacts, error } = await supabaseClient
-        .from('client_contacts')
-        .select('*')
-        .eq('client_id', clientId);
-      if (error || !contacts || !contacts.length) { card.style.display = 'none'; return; }
-
-      card.style.display = 'block';
-      container.innerHTML = JOB_CONTACT_TYPES.map(t => {
-        const options = contacts.filter(c => c.contact_type === t.type);
-        if (!options.length) return '';
-        return `
-          <div>
-            <label style="margin-top:0">${t.label}</label>
-            <select class="job-contact-select" data-key="${t.key}">
-              <option value="">-- Not assigned --</option>
-              ${options.map(c => `<option value="${c.id}" ${preselected[t.key] === c.id ? 'selected' : ''}>${c.name || c.phone || c.email}</option>`).join('')}
-            </select>
-          </div>`;
-      }).join('');
-
-      if (!container.innerHTML.trim()) {
-        card.style.display = 'none';
-        return;
-      }
-
-      container.querySelectorAll('.job-contact-select').forEach(sel => {
-        sel.addEventListener('change', () => {
-          assignedContactIds[sel.dataset.key] = sel.value || null;
-        });
-        assignedContactIds[sel.dataset.key] = sel.value || null;
-      });
-    }
-
-    document.getElementById('save-btn').addEventListener('click', async () => {
-      const msg = document.getElementById('msg');
-      msg.innerHTML = '';
-
-      const name = document.getElementById('p-name').value.trim();
-      const client_name = document.getElementById('p-client').value.trim();
-      const client_email = document.getElementById('p-email').value.trim();
-      const client_phone = document.getElementById('p-phone').value.trim();
-      const client_address = document.getElementById('p-address').value.trim();
-      const payment_terms = document.getElementById('p-payment-terms').value;
-      const sow_text = document.getElementById('p-sow').value;
-      const proposal_subtitle = document.getElementById('p-subtitle').value.trim();
-      const terms_text = document.getElementById('p-terms').value;
-      const deposit_percent = parseFloat(document.getElementById('p-deposit').value) || 0;
-      const pylon_link = document.getElementById('p-pylon-link').value.trim();
-      const pylon_project_id = document.getElementById('p-pylon-id').value.trim();
-
-      const stageRows = [...document.querySelectorAll('.cc-row')];
-      const stagesPayload = stageRows.map((row, i) => ({
-        name: row.querySelector('.cc-name').value.trim(),
-        description: row.querySelector('.cc-desc').value.trim(),
-        markup_percent: parseFloat(row.querySelector('.cc-markup').value) || 0,
-        stc_total: parseFloat(row.querySelector('.cc-stc-total').value) || 0,
-        stc_system_kw: parseFloat(row.querySelector('.cc-stc-kw').value) || null,
-        stc_zone_rating: parseFloat(row.querySelector('.cc-stc-zone').value) || 1.382,
-        stc_install_year: parseInt(row.querySelector('.cc-stc-year').value, 10) || null,
-        stc_price_per_certificate: parseFloat(row.querySelector('.cc-stc-price').value) || null,
-        estimated_labour_cost: parseFloat(row.dataset.labourTotal) || 0,
-        estimated_material_cost: parseFloat(row.dataset.materialTotal) || 0,
-        quoted_amount: parseFloat(row.dataset.salePrice) || 0,
-        sort_order: i,
-        lineItems: [...row.querySelectorAll('.li-row')].map((li, j) => {
-          const item_type = li.querySelector('.li-type').value;
-          const rate_tier_id = li.querySelector('.li-tier').value || null;
-          let description = li.querySelector('.li-desc').value.trim();
-          // Labour description is optional - if left blank, fall back to
-          // the rate tier's own name (e.g. "Principal Electrician") rather
-          // than dropping the line entirely.
-          if (!description && item_type === 'labour' && rate_tier_id) {
-            description = RATE_TIERS.find(t => t.id === rate_tier_id)?.name || '';
-          }
-          return {
-            description, item_type,
-            quantity: parseFloat(li.querySelector('.li-qty').value) || 0,
-            unit_cost: parseFloat(li.querySelector('.li-cost').value) || 0,
-            rate_tier_id,
-            sort_order: j,
-            prebuild_group_id: li.dataset.prebuildGroupId || null,
-            prebuild_client_description: li.dataset.prebuildClientDescription || null,
-            prebuild_base_quantity: li.dataset.prebuildBaseQuantity ? parseFloat(li.dataset.prebuildBaseQuantity) : null,
-          };
-        }).filter(li => li.description),
-        photoGroups: [...row.querySelectorAll('.pg-row')].map((pg, j) => ({
-          description: pg.querySelector('.pg-desc').value.trim(),
-          photos: JSON.parse(pg.dataset.photos || '[]').map(url => ({ url })),
-          sort_order: j,
-        })).filter(pg => pg.description || pg.photos.length),
-      })).filter(s => s.name);
-
-      if (!name || !client_name || stagesPayload.length === 0) {
-        msg.innerHTML = `<div class="error-box">Please fill in the project name, client name, and at least one stage.</div>`;
-        return;
-      }
-
-      // Keep the linked client record in sync, or create one if this quote
-      // was built without picking an existing client.
-      let clientId = selectedClientId;
-      const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, address: client_address || null, payment_terms };
-      if (clientId) {
-        await supabaseClient.from('clients').update(clientFields).eq('id', clientId);
-      } else {
-        const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert(clientFields).select().single();
-        if (clientErr) { msg.innerHTML = `<div class="error-box">Could not save client: ${clientErr.message}</div>`; return; }
-        clientId = newClient.id;
-      }
-
-      const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
-      const allPhotos = (settings && settings.portfolio_photos) || [];
-      const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
-      const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
-
-      const projectFields = {
-        name, client_id: clientId, client_name, client_email, client_phone, client_address,
-        sow_text, proposal_subtitle, terms_text,
-        notes: document.getElementById('p-notes').value.trim() || null,
-        deposit_percent, pylon_link, pylon_project_id,
-        laha_approved: document.getElementById('p-laha-approved').checked,
-        reference_photos: referencePhotos.map(url => ({ url })),
-        cover_photos: coverPhotos,
-        proposal_template: currentTemplate,
-        template_answers: readTemplateAnswers(document.getElementById('template-questions')),
-        estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
-        project_manager_contact_id: assignedContactIds.project_manager_contact_id || null,
-        site_contact_id: assignedContactIds.site_contact_id || null,
-        job_contact_id: assignedContactIds.job_contact_id || null,
-        sales_contact_id: assignedContactIds.sales_contact_id || null,
-        accounts_contact_id: assignedContactIds.accounts_contact_id || null,
-      };
-      if (!editId && prefillLeadId) projectFields.lead_id = prefillLeadId;
-      // Only on creation - re-saving edits to an already-sent/approved
-      // quote must never reset its pipeline_stage back to draft.
-      if (!editId) projectFields.pipeline_stage = 'draft_quote';
-
-      // Quote number is drawn once, atomically, only when a new quote is
-      // created - editing an existing one never reassigns it. Job number
-      // is NOT drawn here - a database trigger assigns it automatically
-      // the moment the quote is approved (or immediately for Time &
-      // Materials, which skips straight to booked below). No job number
-      // yet is itself the signal that a quote isn't approved.
-      if (!editId) {
-        const { data: quoteNum, error: qErr } = await supabaseClient.rpc('get_next_number', { counter_name: 'quote' });
-        if (qErr) {
-          msg.innerHTML = `<div class="error-box">Could not draw a quote number: ${qErr.message}</div>`;
-          return;
-        }
-        projectFields.quote_number = quoteNum;
-      }
-
-      let projectId = editId;
-      if (editId) {
-        const { error: updateErr } = await supabaseClient.from('projects').update(projectFields).eq('id', editId);
-        if (updateErr) { msg.innerHTML = `<div class="error-box">${updateErr.message}</div>`; return; }
-        // Simplest way to keep stages/line items in sync with edits: replace them.
-        const { error: delErr } = await supabaseClient.from('cost_centres').delete().eq('project_id', editId);
-        if (delErr) { msg.innerHTML = `<div class="error-box">${delErr.message}</div>`; return; }
-      } else {
-        const { data: project, error: projErr } = await supabaseClient.from('projects').insert(projectFields).select().single();
-        if (projErr) { msg.innerHTML = `<div class="error-box">${projErr.message}</div>`; return; }
-        projectId = project.id;
-        if (prefillLeadId) await supabaseClient.from('leads').update({ status: 'converted' }).eq('id', prefillLeadId);
-        if (prefillEmailThreadId) { try { await emailTagThreadToProject(prefillEmailThreadId, projectId, 'client', 'Quote created from this email'); } catch (e) { console.error('Could not tag the email to the quote:', e); } }
-      }
-
-      // Replace-all, same approach as stages just below - simplest way to
-      // handle add/edit/remove/reorder of the milestone list in one save.
-      await supabaseClient.from('payment_milestones').delete().eq('project_id', projectId);
-      const milestonesPayload = readMilestones();
-      if (milestonesPayload.length) {
-        const { error: msErr } = await supabaseClient.from('payment_milestones').insert(milestonesPayload.map(m => ({ ...m, project_id: projectId })));
-        if (msErr) { msg.innerHTML = `<div class="error-box">${msErr.message}</div>`; return; }
-      }
-
-      const { data: insertedStages, error: ccErr } = await supabaseClient
-        .from('cost_centres')
-        .insert(stagesPayload.map(({ lineItems, photoGroups, ...s }) => ({ ...s, project_id: projectId })))
-        .select();
-      if (ccErr) { msg.innerHTML = `<div class="error-box">${ccErr.message}</div>`; return; }
-
-      const allLineItems = [];
-      const allPhotoGroups = [];
-      insertedStages.forEach((stage, i) => {
-        stagesPayload[i].lineItems.forEach(li => allLineItems.push({ ...li, cost_centre_id: stage.id }));
-        stagesPayload[i].photoGroups.forEach(pg => allPhotoGroups.push({ ...pg, cost_centre_id: stage.id }));
-      });
-      if (allLineItems.length) {
-        const { error: liErr } = await supabaseClient.from('cost_centre_line_items').insert(allLineItems);
-        if (liErr) { msg.innerHTML = `<div class="error-box">${liErr.message}</div>`; return; }
-      }
-      if (allPhotoGroups.length) {
-        const { error: pgErr } = await supabaseClient.from('cost_centre_photo_groups').insert(allPhotoGroups);
-        if (pgErr) { msg.innerHTML = `<div class="error-box">${pgErr.message}</div>`; return; }
-      }
-
-      await logActivity('project', projectId, editId ? 'stage_updated' : 'created', editId ? 'Quote details and stages updated' : 'Quote created');
-
-      // Write the installer summary now (only if the scope is new or changed) so
-      // it is waiting on the job card by the time the work is booked.
-      if (sow_text && sow_text.trim()) { try { await requestInstallerSummary(projectId, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
-
-      try { const { data: tk } = await supabaseClient.from('projects').select('quote_token').eq('id', projectId).single(); autoGenerateQuotePdf({ id: projectId, quote_token: tk && tk.quote_token, proposal_template: currentTemplate }); } catch (e) { /* the Generate PDF button is still there */ }
-      window.location.href = `/project.html?id=${projectId}`;
-    });
-
-    // ---------- load (edit mode) or start fresh ----------
-
-    async function offerLeadAttachmentImport(leadId) {
-      if (!leadId) return;
-      const { data: lead, error } = await supabaseClient.from('leads').select('details').eq('id', leadId).maybeSingle();
-      if (error || !lead) return;
-      const attachments = (lead.details && lead.details.attachments) || [];
-      if (!attachments.length) return;
-
-      const container = document.getElementById('lead-attachments-import');
-      container.innerHTML = `
-        <div class="success-box" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-          <span>${attachments.length} file${attachments.length === 1 ? '' : 's'} attached to this enquiry (photos/bills) - import into the AI helper?</span>
-          <button type="button" class="secondary" id="import-lead-files-btn" style="flex-shrink:0;">Import</button>
-        </div>`;
-
-      document.getElementById('import-lead-files-btn').addEventListener('click', async (e) => {
-        const btn = e.target;
-        btn.disabled = true;
-        btn.textContent = 'Importing...';
-        try {
-          for (const att of attachments) {
-            const { data: fileBlob, error: dlErr } = await supabaseClient.storage.from('lead-uploads').download(att.path);
-            if (dlErr) continue;
-            const newPath = `sow-source/${Date.now()}-${att.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-            const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(newPath, fileBlob);
-            if (upErr) continue;
-            sowDocs.push({ path: newPath, name: att.name, mime: att.type });
-          }
-          renderSowDocList();
-          container.innerHTML = `<div class="success-box">Imported. They'll be used next time you generate the scope of works.</div>`;
-        } catch (err) {
-          container.innerHTML = `<div class="error-box">${err.message}</div>`;
-        }
-      });
-    }
-
-    // Photos and bills attached to the email the quote was started from, offered to the AI helper
-    // the same way a website enquiry's files are.
-    function offerEmailAttachmentImport(files) {
-      const usable = (files || []).filter(a => /^(application\/pdf|image\/(jpeg|png|webp))$/i.test(a.mime || '') && (!a.size || a.size <= 4 * 1024 * 1024));
-      if (!usable.length) return;
-      const container = document.getElementById('lead-attachments-import');
-      container.innerHTML = `
-        <div class="success-box" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-          <span>${usable.length} file${usable.length === 1 ? '' : 's'} attached to the email (photos/bills/plans) - import into the AI helper?</span>
-          <button type="button" class="secondary" id="import-email-files-btn" style="flex-shrink:0;">Import</button>
-        </div>`;
-      document.getElementById('import-email-files-btn').addEventListener('click', async (e) => {
-        const btn = e.target;
-        btn.disabled = true; btn.textContent = 'Importing...';
-        let done = 0;
-        for (const att of usable) {
-          try {
-            const f = await fetchEmailAttachment(att.email_id, att.part_id);
-            const bin = atob(String(f.data).replace(/-/g, '+').replace(/_/g, '/'));
-            const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            const newPath = `sow-source/${Date.now()}-${(att.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-            const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(newPath, new Blob([bytes], { type: f.mime || att.mime }));
-            if (upErr) continue;
-            sowDocs.push({ path: newPath, name: att.name, mime: f.mime || att.mime });
-            done++;
-          } catch (err) { console.error('Could not import', att.name, err); }
-        }
-        renderSowDocList();
-        container.innerHTML = done
-          ? `<div class="success-box">Imported ${done} file${done === 1 ? '' : 's'}. They'll be used next time you generate the scope of works.</div>`
-          : `<div class="error-box">Could not import the files. You can still add them with the file box below.</div>`;
-      });
-    }
-
-    async function loadForEdit() {
-      const { data: project, error } = await supabaseClient
-        .from('projects')
-        .select('*, cost_centres(*, cost_centre_line_items(*), cost_centre_photo_groups(*)), payment_milestones(*)')
-        .eq('id', editId)
-        .single();
-      if (error) {
-        document.getElementById('msg').innerHTML = `<div class="error-box">${error.message}</div>`;
-        return;
-      }
-      document.getElementById('page-title').textContent = 'Edit quote';
-      currentJobNumber = project.job_number;
-      document.getElementById('page-numbers').textContent = [
-        project.quote_number ? `Q${project.quote_number}` : null,
-        project.job_number ? `J${project.job_number}` : null,
-      ].filter(Boolean).join(' · ');
-      templateAnswers = project.template_answers || {};
-      applyTemplate(project.proposal_template || 'new_build');
-      document.getElementById('p-estimate-disclaimer').value = project.estimate_disclaimer_text || '';
-      offerLeadAttachmentImport(project.lead_id);
-      document.getElementById('p-name').value = project.name;
-      document.getElementById('p-subtitle').value = project.proposal_subtitle || '';
-      document.getElementById('p-client').value = project.client_name;
-      document.getElementById('p-email').value = project.client_email || '';
-      document.getElementById('p-phone').value = project.client_phone || '';
-      document.getElementById('p-address').value = project.client_address || '';
-      document.getElementById('p-notes').value = project.notes || '';
-      if (project.client_id) {
-        selectedClientId = project.client_id;
-        const { data: client } = await supabaseClient.from('clients').select('*').eq('id', project.client_id).maybeSingle();
-        if (client) {
-          document.getElementById('client-search-input').value = client.name;
-          document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
-          document.getElementById('selected-client-note').innerHTML = `Linked to existing client: <strong>${client.name}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
-        }
-        await loadJobContactPickers(project.client_id, {
-          project_manager_contact_id: project.project_manager_contact_id,
-          site_contact_id: project.site_contact_id,
-          job_contact_id: project.job_contact_id,
-          sales_contact_id: project.sales_contact_id,
-          accounts_contact_id: project.accounts_contact_id,
-        });
-      }
-      document.getElementById('p-sow').value = project.sow_text || '';
-      document.getElementById('p-terms').value = project.terms_text || '';
-      document.getElementById('p-deposit').value = project.deposit_percent;
-      document.getElementById('p-laha-approved').checked = !!project.laha_approved;
-      (project.payment_milestones || []).slice().sort((a, b) => a.sort_order - b.sort_order).forEach(m => {
-        document.getElementById('milestone-rows').insertAdjacentHTML('beforeend', milestoneRowHtml(m));
-      });
-      wireMilestoneRows();
-      refreshMilestoneTotal();
-      document.getElementById('p-pylon-link').value = project.pylon_link || '';
-      document.getElementById('p-pylon-id').value = project.pylon_project_id || '';
-      referencePhotos = (project.reference_photos || []).map(p => p.url || p);
-      renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
-      pylonKw = project.pylon_data?.summary?.dc_output_kw || null;
-
-      const stages = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
-      stages.forEach(stage => {
-        addRow({
-          name: stage.name,
-          description: stage.description,
-          markup_percent: stage.markup_percent,
-          stc_total: stage.stc_total || 0,
-          stc_system_kw: stage.stc_system_kw,
-          stc_zone_rating: stage.stc_zone_rating,
-          stc_install_year: stage.stc_install_year,
-          stc_price_per_certificate: stage.stc_price_per_certificate,
-          lineItems: (stage.cost_centre_line_items || [])
-            .sort((a, b) => a.sort_order - b.sort_order)
-            .map(li => ({
-              description: li.description, item_type: li.item_type, quantity: li.quantity, unit_cost: li.unit_cost, rate_tier_id: li.rate_tier_id,
-              prebuild_group_id: li.prebuild_group_id, prebuild_client_description: li.prebuild_client_description, prebuild_base_quantity: li.prebuild_base_quantity,
-            })),
-          photoGroups: (stage.cost_centre_photo_groups || [])
-            .sort((a, b) => a.sort_order - b.sort_order)
-            .map(pg => ({ description: pg.description, photos: (pg.photos || []).map(p => p.url || p) })),
-        });
-      });
-      updateTotal();
-    }
 
     // ---------- address autocomplete ----------
 
@@ -1439,7 +232,98 @@
       });
     }
 
+    // ---------- create ----------
+
+    document.getElementById('save-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('msg');
+      msg.innerHTML = '';
+      clearFieldFlags();
+
+      const btn = document.getElementById('save-btn');
+      const label = btn.textContent;
+      let navigated = false;
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
+      try {
+        const name = document.getElementById('p-name').value.trim();
+        const client_name = document.getElementById('p-client').value.trim();
+        const client_email = document.getElementById('p-email').value.trim();
+        const client_phone = document.getElementById('p-phone').value.trim();
+        const client_address = document.getElementById('p-address').value.trim();
+        const payment_terms = document.getElementById('p-payment-terms').value;
+
+        if (!name || !client_name) {
+          if (!name) flagRequiredField(document.getElementById('p-name'), 'Enter a project name.');
+          else flagRequiredField(document.getElementById('p-client'), 'Enter the client name, or pick a client above.');
+          msg.innerHTML = `<div class="error-box">Fill in the fields marked * (the first one is highlighted above).</div>`;
+          return;
+        }
+
+        // An existing client's record is left alone: the name, email, phone and terms typed here
+        // stay on this quote only (F20). Without a picked client, one is created from them; the
+        // job's site address never overwrites the client's office address, a new client's first
+        // site is the best guess for their office address.
+        let clientId = selectedClientId;
+        if (!clientId) {
+          const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
+          const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({ ...clientFields, address: client_address || null }).select().single();
+          if (clientErr) { msg.innerHTML = `<div class="error-box">Could not save client: ${escapeHtml(clientErr.message)}</div>`; return; }
+          clientId = newClient.id;
+        }
+        const client_site_id = await resolveClientSite(clientId, client_address, selectedClientId ? (sitePicker.client() || {}).address : client_address);
+
+        const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
+        const allPhotos = (settings && settings.portfolio_photos) || [];
+        const wantCategory = (TEMPLATE_INFO[currentTemplate] || TEMPLATE_INFO.new_build).photoCategory;
+        const coverPhotos = allPhotos.filter(p => (p.category || 'general') === wantCategory);
+
+        // Quote number is drawn once, atomically, when the quote is created. The job number is
+        // assigned by a database trigger the moment the quote is approved.
+        const { data: quoteNum, error: qErr } = await supabaseClient.rpc('get_next_number', { counter_name: 'quote' });
+        if (qErr) { msg.innerHTML = `<div class="error-box">Could not draw a quote number: ${escapeHtml(qErr.message)}</div>`; return; }
+
+        const payDefaults = TEMPLATE_PAYMENT_DEFAULTS[currentTemplate] || { deposit: 10, milestones: [] };
+        const projectFields = {
+          name, quote_number: quoteNum,
+          client_id: clientId, client_name, client_email, client_phone, client_address, client_site_id,
+          notes: document.getElementById('p-notes').value.trim() || null,
+          sow_brief: prefillBrief || '',
+          sow_text: '', proposal_subtitle: '',
+          terms_text: companySettings.default_terms || '',
+          deposit_percent: payDefaults.deposit,
+          reference_photos: [], cover_photos: coverPhotos,
+          proposal_template: currentTemplate,
+          template_answers: {},
+          estimate_disclaimer_text: currentTemplate === 'quick_estimate'
+            ? (companySettings.default_estimate_disclaimer || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.')
+            : '',
+          pipeline_stage: 'draft_quote',
+        };
+        if (prefillLeadId) projectFields.lead_id = prefillLeadId;
+
+        const { data: project, error: projErr } = await supabaseClient.from('projects').insert(projectFields).select().single();
+        if (projErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(projErr.message)}</div>`; return; }
+        const projectId = project.id;
+        if (prefillLeadId) await supabaseClient.from('leads').update({ status: 'converted' }).eq('id', prefillLeadId);
+        if (prefillEmailThreadId) { try { await emailTagThreadToProject(prefillEmailThreadId, projectId, 'client', 'Quote created from this email'); } catch (e) { console.error('Could not tag the email to the quote:', e); } }
+
+        if (payDefaults.milestones.length) {
+          const { error: msErr } = await supabaseClient.from('payment_milestones').insert(payDefaults.milestones.map((m, i) => ({ label: m.label, percent: m.percent, sort_order: i, project_id: projectId })));
+          if (msErr) console.error('Milestones not saved:', msErr.message);
+        }
+
+        await logActivity('project', projectId, 'created', 'Quote created');
+        navigated = true;
+        window.location.href = `/project.html?id=${projectId}&tab=quote`;
+      } finally {
+        if (!navigated) { btn.disabled = false; btn.textContent = label; }
+      }
+    });
+
+    // ---------- start ----------
+
     (async function () {
+      if (editId) return;
       const session = await requireLogin();
       if (!session) return;
       syncThemeFromProfile();
@@ -1458,14 +342,11 @@
               <div class="empty-icon">&#128274;</div>
               <h2>Not available for your role</h2>
               <p>Quoting and pricing are limited to Sales, Finance, and Admin accounts. Ask an admin if you need access.</p>
-              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Projects</a>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Pipeline</a>
             </div>
           </div>`;
         return;
       }
-
-      const { data: tiersData } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
-      RATE_TIERS = tiersData || [];
 
       const { data: settingsRow } = await supabaseClient
         .from('company_settings')
@@ -1475,88 +356,75 @@
       companySettings = settingsRow || {};
       loadAddressAutocomplete(companySettings.google_maps_api_key);
 
-      if (editId) {
-        await loadForEdit();
-      } else {
-        const params = new URLSearchParams(window.location.search);
-        const aiPf = aiPrefillRead('new_quote');
-        const requestedTemplate = (aiPf && TEMPLATE_INFO[aiPf.template] ? aiPf.template : null) || params.get('template') || 'new_build';
-        applyTemplate(requestedTemplate, true);
-        document.getElementById('p-terms').value = companySettings.default_terms || '';
-        ['Site Power', 'Rough In', 'Fit Off', 'Finishing Touches'].forEach(n => addRow({ name: n }));
-        updateTotal();
+      const params = new URLSearchParams(window.location.search);
+      const aiPf = aiPrefillRead('new_quote');
+      const requestedTemplate = (aiPf && TEMPLATE_INFO[aiPf.template] ? aiPf.template : null) || params.get('template') || 'new_build';
+      applyTemplate(TEMPLATE_INFO[requestedTemplate] ? requestedTemplate : 'new_build');
 
-        // Converting a lead (see leads.html) - prefill the client/site
-        // details it already captured rather than making staff retype
-        // them, seed the scope-of-works brief with its AI summary so
-        // "Generate scope of works with AI" has something to work from,
-        // and put the full captured context (summary + every question/
-        // answer it submitted) into Notes, which - unlike the brief above
-        // (a one-time AI input) or sow_text (gets rewritten as the scope
-        // evolves) - persists for as long as the job exists.
-        prefillLeadId = params.get('lead_id');
-        if (prefillLeadId) {
-          const { data: lead } = await supabaseClient.from('leads').select('*').eq('id', prefillLeadId).maybeSingle();
-          if (lead) {
-            const sourceLabels = { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form' };
-            document.getElementById('p-name').value = `${lead.name || 'New enquiry'} - ${lead.ai_title || sourceLabels[lead.source] || lead.source}`;
-            document.getElementById('p-client').value = lead.name || '';
-            document.getElementById('p-email').value = lead.email || '';
-            document.getElementById('p-phone').value = lead.phone || '';
-            document.getElementById('p-address').value = lead.address_formatted || lead.address_line || '';
-            document.getElementById('p-brief').value = lead.ai_summary || '';
+      // Converting a lead (see leads.html): prefill the client and site it captured, keep its
+      // summary as the AI brief, and put the full captured context into Notes.
+      prefillLeadId = params.get('lead_id');
+      if (prefillLeadId) {
+        const { data: lead } = await supabaseClient.from('leads').select('*').eq('id', prefillLeadId).maybeSingle();
+        if (lead) {
+          const sourceLabels = { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form' };
+          document.getElementById('p-name').value = `${lead.name || 'New enquiry'} - ${lead.ai_title || sourceLabels[lead.source] || lead.source}`;
+          document.getElementById('p-client').value = lead.name || '';
+          document.getElementById('p-email').value = lead.email || '';
+          document.getElementById('p-phone').value = lead.phone || '';
+          document.getElementById('p-address').value = lead.address_formatted || lead.address_line || '';
+          prefillBrief = lead.ai_summary || '';
+          const qandaRows = Object.entries(lead.details || {}).filter(([k]) => k !== 'attachments');
+          const qanda = qandaRows.length
+            ? qandaRows.map(([k, v]) => `${k}: ${typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v}`).join('\n')
+            : '(no further details captured)';
+          document.getElementById('p-notes').value = `Website enquiry (${sourceLabels[lead.source] || lead.source}), ${new Date(lead.created_at).toLocaleDateString('en-AU')}.\n\n${lead.ai_summary ? lead.ai_summary + '\n\n' : ''}${qanda}`;
+          const attachments = (lead.details && lead.details.attachments) || [];
+          if (attachments.length) document.getElementById('lead-attachments-note').innerHTML = `<p class="subtitle" style="margin-top:8px;">${attachments.length} file${attachments.length === 1 ? '' : 's'} came with this enquiry. They are offered to the AI scope of works on the quote's Scope of works step.</p>`;
+        }
+      }
 
-            const qandaRows = Object.entries(lead.details || {}).filter(([k]) => k !== 'attachments');
-            const qanda = qandaRows.length
-              ? qandaRows.map(([k, v]) => `${k}: ${typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v}`).join('\n')
-              : '(no further details captured)';
-            document.getElementById('p-notes').value = `Website enquiry (${sourceLabels[lead.source] || lead.source}), ${new Date(lead.created_at).toLocaleDateString('en-AU')}.\n\n${lead.ai_summary ? lead.ai_summary + '\n\n' : ''}${qanda}`;
-
-            offerLeadAttachmentImport(prefillLeadId);
+      // Started from an inbox conversation (Create quote / job from this email): the AI already
+      // read the email and the person checked it, so fill in the client, site and the work required.
+      const fromEmailThread = params.get('from_email');
+      const emailPf = fromEmailThread ? emailQuoteHandoffRead(fromEmailThread) : null;
+      if (emailPf) {
+        prefillEmailThreadId = fromEmailThread;
+        const setV = (id, v) => { if (v) document.getElementById(id).value = v; };
+        if (emailPf.clientId) {
+          const { data: client } = await supabaseClient.from('clients').select('*').eq('id', emailPf.clientId).maybeSingle();
+          if (client) {
+            document.getElementById('client-search-input').value = client.name;
+            setSelectedClient(client);
           }
         }
+        setV('p-name', emailPf.name); setV('p-client', emailPf.client_name); setV('p-email', emailPf.client_email);
+        setV('p-phone', emailPf.client_phone); setV('p-address', emailPf.address);
+        sitePicker.refresh();
+        prefillBrief = emailPf.work || '';
+        setV('p-notes', emailPf.notes);
+        const banner = document.createElement('div');
+        banner.className = 'success-box';
+        banner.style.cssText = 'margin-bottom:14px;';
+        banner.textContent = 'Filled in from the email. Check the client details and press Create quote. The email conversation is tagged to the quote when it is created.';
+        document.getElementById('page-title').insertAdjacentElement('afterend', banner);
+        emailQuoteHandoffClear();
+      }
 
-        // Started from an inbox conversation (Create quote / job from this email): the AI already
-        // read the email and the person checked it, so fill in the client, site and the work required.
-        const fromEmailThread = params.get('from_email');
-        const emailPf = fromEmailThread ? emailQuoteHandoffRead(fromEmailThread) : null;
-        if (emailPf) {
-          prefillEmailThreadId = fromEmailThread;
-          const setV = (id, v) => { if (v) document.getElementById(id).value = v; };
-          if (emailPf.clientId) {
-            const { data: client } = await supabaseClient.from('clients').select('*').eq('id', emailPf.clientId).maybeSingle();
-            if (client) {
-              document.getElementById('client-search-input').value = client.name;
-              setSelectedClient(client);
-              loadJobContactPickers(client.id);
-            }
-          }
-          setV('p-name', emailPf.name); setV('p-client', emailPf.client_name); setV('p-email', emailPf.client_email);
-          setV('p-phone', emailPf.client_phone); setV('p-address', emailPf.address);
-          setV('p-brief', emailPf.work); setV('p-notes', emailPf.notes);
-          const banner = document.createElement('div');
-          banner.className = 'success-box';
-          banner.style.cssText = 'margin-bottom:14px;';
-          banner.textContent = 'Filled in from the email. Add the stages and prices, then save. Nothing is saved yet, and the email conversation will be tagged to this quote when you save.';
-          document.getElementById('page-title').insertAdjacentElement('afterend', banner);
-          offerEmailAttachmentImport(emailPf.attachments);
-          emailQuoteHandoffClear();
-        }
-
-        // Filled in by the AI assistant from the chat: put what it knows into the form for
-        // the person to check and finish. Nothing is saved until they save the quote.
-        if (aiPf) {
-          const setIf = (id, v) => { if (typeof v === 'string' && v) document.getElementById(id).value = v; };
-          setIf('p-name', aiPf.name); setIf('p-client', aiPf.client_name); setIf('p-email', aiPf.client_email);
-          setIf('p-phone', aiPf.client_phone); setIf('p-address', aiPf.client_address); setIf('p-notes', aiPf.notes); setIf('p-brief', aiPf.brief);
-          const banner = document.createElement('div');
-          banner.className = 'success-box';
-          banner.style.cssText = 'margin-bottom:14px;';
-          banner.textContent = 'Filled in from your chat with the assistant. Check it over, add the stages and prices, then save. Nothing is saved yet.';
-          const pageTitle = document.getElementById('page-title');
-          pageTitle.insertAdjacentElement('afterend', banner);
-          aiPrefillClear();
-        }
+      // Filled in by the AI assistant from the chat: put what it knows into the form for the
+      // person to check. Nothing is saved until Create quote.
+      if (aiPf) {
+        const setIf = (id, v) => { if (typeof v === 'string' && v) document.getElementById(id).value = v; };
+        setIf('p-name', aiPf.name); setIf('p-client', aiPf.client_name); setIf('p-email', aiPf.client_email);
+        setIf('p-phone', aiPf.client_phone); setIf('p-address', aiPf.client_address); setIf('p-notes', aiPf.notes);
+        if (typeof aiPf.brief === 'string') prefillBrief = aiPf.brief;
+        sitePicker.refresh();
+        const banner = document.createElement('div');
+        banner.className = 'success-box';
+        banner.style.cssText = 'margin-bottom:14px;';
+        banner.textContent = 'Filled in from your chat with the assistant. Check it over and press Create quote. Nothing is saved yet.';
+        document.getElementById('page-title').insertAdjacentElement('afterend', banner);
+        aiPrefillClear();
       }
     })();
   </script>

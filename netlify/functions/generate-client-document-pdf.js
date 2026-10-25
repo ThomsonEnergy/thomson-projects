@@ -1,5 +1,7 @@
 const { getAdminClient } = require('./_shared/require-admin');
 const { selfBaseUrl } = require('./_shared/site-url');
+const { requireActiveUser } = require('./_shared/require-active-user');
+const { requireInternal } = require('./_shared/require-internal');
 
 // Renders the actual client-facing quote.html / invoice.html page (via headless Chromium) into a
 // real PDF. Both pages are laid out as A4 sheets with their own letterhead, so the PDF is the page
@@ -98,7 +100,32 @@ async function getBrowser() {
   return browser;
 }
 
+// Unpacking Chromium (into /tmp) is shared by every caller in this instance and always finished
+// before use. The warm ping used to start it without waiting, so the instance could be frozen
+// mid-write once it answered, and the next PDF then found a half-written file and failed with
+// "spawn ETXTBSY". A failed unpack is forgotten so the next caller tries again.
+let chromiumPathPromise = null;
+function chromiumPath() {
+  if (!chromiumPathPromise) {
+    chromiumPathPromise = require('@sparticuz/chromium').executablePath();
+    chromiumPathPromise.catch(() => { chromiumPathPromise = null; });
+  }
+  return chromiumPathPromise;
+}
+
 async function launchBrowser() {
+  try {
+    return await launchBrowserOnce();
+  } catch (err) {
+    // the file can still be busy for a moment after it is written: wait and try once more
+    if (!/ETXTBSY/.test(String(err && (err.code || err.message)))) throw err;
+    console.warn('Chromium file busy (ETXTBSY), retrying once:', err.message);
+    await new Promise((res) => setTimeout(res, 1500));
+    return launchBrowserOnce();
+  }
+}
+
+async function launchBrowserOnce() {
   // Required lazily, inside the function, rather than at module top level -
   // requiring puppeteer-core at module load time meant simply IMPORTING
   // this file (which Netlify's function bundler/router does for every
@@ -132,7 +159,7 @@ async function launchBrowser() {
     // /tmp disk-backed memory instead, which is the documented fix for
     // exactly this failure mode in a Lambda-style container.
     args: [...chromium.args, '--disable-dev-shm-usage'],
-    executablePath: await chromium.executablePath(),
+    executablePath: await chromiumPath(),
     headless: chromium.headless,
     // Puppeteer's default connects to the browser over a WebSocket to
     // its remote-debugging port, which needs a native WebSocket global
@@ -160,22 +187,14 @@ async function renderPageToPdfUnsafe(url, pdfOptions) {
   }
 }
 
-// Chromium takes a few seconds to start, and the database lookups that come before the render
-// take a moment too, so the browser is started first (see handle) and picked up here.
-let pendingBrowser = null;
+// Chromium is started here, only once the record to print has been found (see handle): a made-up
+// id must not cost a browser start.
 const timings = {};
 const markTime = (name, since) => { timings[name] = Date.now() - since; };
 
 async function renderOnce(url, pdfOptions) {
   const t0 = Date.now();
-  let browser;
-  if (pendingBrowser) {
-    const started = pendingBrowser;
-    pendingBrowser = null;
-    browser = await started.catch(() => getBrowser()); // the early start failed: try once normally
-  } else {
-    browser = await getBrowser();
-  }
+  const browser = await getBrowser();
   markTime('browserReadyWaitMs', t0);
   let page;
   try {
@@ -236,19 +255,35 @@ async function handle(event) {
   try {
     ({ doc_type, record_id } = JSON.parse(event.body || '{}'));
 
+    // Who is asking: a logged-in staff member (the job, invoice and PO pages send their session
+    // token), or another function on this site (warm-pdf, finalize-quote-documents, the invoice
+    // refresh after a payment) with the internal secret. Nobody else: a render is a Chromium run on
+    // the 4 GB function and overwrites the document's PDF.
+    const internal = requireInternal(event);
+    let actor = null;
+    if (!internal) {
+      actor = await requireActiveUser(event);
+      if (!actor) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Please log in again' }) };
+    }
+
     // warm-pdf.js pings this every few minutes so the function stays loaded and Chromium is already
     // unpacked when someone really asks for a PDF (unpacking it is a few seconds on a cold start).
     if (doc_type === 'warm') {
-      require('@sparticuz/chromium').executablePath().catch(() => {});
+      await chromiumPath().catch(() => {}); // finish unpacking before answering, see chromiumPath
       return { statusCode: 200, body: JSON.stringify({ ok: true, warm: true }) };
     }
 
     if (!doc_type || !record_id) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'doc_type and record_id are required' }) };
 
-    // Start Chromium now, while the lookups below happen.
-    pendingBrowser = getBrowser();
-    pendingBrowser.catch(() => {}); // a failed early start is reported when it is picked up in renderOnce
+    // Adding the Schedule of Rates to a job (Documents page) files a document on the job, so it
+    // needs a logged-in staff member even on an internal call. The other types only refresh a
+    // document's own PDF.
+    if (doc_type === 'schedule_of_rates' && !actor) {
+      actor = await requireActiveUser(event);
+      if (!actor) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Please log in again' }) };
+    }
 
+    // Chromium is started by the render itself, after the record below has been found.
     supabaseAdmin = getAdminClient();
     const siteUrl = selfBaseUrl();
     if (doc_type === 'quote') await supabaseAdmin.from('projects').update({ quote_pdf_error: null }).eq('id', record_id);
@@ -319,6 +354,41 @@ async function handle(event) {
       const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
       if (upErr) throw upErr;
       await supabaseAdmin.from('job_variation_entries').update({ pdf_path: path, pdf_generated_at: new Date().toISOString() }).eq('id', entry.id);
+    } else if (doc_type === 'po') {
+      // A purchase order for the supplier: po.html is the invoice layout without the payment parts.
+      const { data: po, error } = await supabaseAdmin.from('purchase_orders').select('id, po_token').eq('id', record_id).single();
+      if (error || !po) throw new Error(error?.message || 'PO not found');
+
+      const finalPdf = await renderPageToPdf(`${siteUrl}/po.html?token=${po.po_token}&print=1`, {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+
+      path = `client-documents/purchase-orders/${po.id}.pdf`;
+      const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
+      if (upErr) throw upErr;
+      await supabaseAdmin.from('purchase_orders').update({ pdf_path: path, pdf_generated_at: new Date().toISOString() }).eq('id', po.id);
+    } else if (doc_type === 'schedule_of_rates') {
+      // record_id is the job: the Schedule of Rates at today's rates goes in its "Company docs"
+      // folder, so the job keeps the version the client was sent and the job email can attach it.
+      const { data: project, error } = await supabaseAdmin.from('projects').select('id').eq('id', record_id).single();
+      if (error || !project) throw new Error(error?.message || 'Job not found');
+
+      const finalPdf = await renderPageToPdf(`${siteUrl}/rates.html?print=1`, {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+
+      const day = new Date().toLocaleDateString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', year: 'numeric' });
+      path = `documents/${project.id}/${Date.now()}-Schedule_of_Rates.pdf`;
+      const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf' });
+      if (upErr) throw upErr;
+      const { error: docErr } = await supabaseAdmin.from('project_documents').insert({
+        project_id: project.id, folder: 'Company docs', file_path: path, file_name: `Schedule of Rates (${day}).pdf`, mime_type: 'application/pdf', uploaded_by: actor.user.id,
+      });
+      if (docErr) throw docErr;
     } else {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: `Unknown doc_type "${doc_type}"` }) };
     }
@@ -328,8 +398,6 @@ async function handle(event) {
     return { statusCode: 200, body: JSON.stringify({ ok: true, path, timings }) };
   } catch (err) {
     console.error('generate-client-document-pdf failed:', err);
-    // the early-started browser was never used: do not leave it running
-    if (pendingBrowser) { const unused = pendingBrowser; pendingBrowser = null; unused.then((b) => killBrowser(b), () => {}); }
     if (supabaseAdmin && record_id) {
       if (doc_type === 'quote') await supabaseAdmin.from('projects').update({ quote_pdf_error: err.message }).eq('id', record_id).then(() => {}, () => {});
       else if (doc_type === 'invoice') await supabaseAdmin.from('invoices').update({ pdf_error: err.message }).eq('id', record_id).then(() => {}, () => {});

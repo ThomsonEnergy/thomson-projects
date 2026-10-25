@@ -10,8 +10,8 @@
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/document-fonts.css?v=1" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="/js/vendor/supabase-2.js"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   /* The invoice is laid out as A4 sheets (794 x 1123 px at 96 dpi), the same on screen and in the PDF.
      Each sheet repeats the letterhead and invoice number; a long list of items continues on the next
@@ -96,6 +96,25 @@
   .as-paper .inv-sheet { margin: 0; box-shadow: none; }
   .as-paper .inv-pay-btn { display: none !important; }
   .as-paper .inv-paylink { display: inline-block !important; }
+  /* Phone: a plain full-size summary card above the zoomed A4 sheet (never printed, never in the PDF).
+     The 8px wrap gutter keeps the zoomed sheet (window width minus 16px) on screen. */
+  .doc-sum { display: none; }
+  @media (max-width: 839px) {
+    .wrap { padding-left: 8px !important; padding-right: 8px !important; }
+    .doc-sum { display: block; background: #fff; color: #0a0a0a; border-radius: 12px; padding: 18px 16px; margin: 0 0 18px; box-shadow: 0 4px 18px rgba(15,23,42,0.12); font-size: 16px; line-height: 1.45; }
+    .doc-sum .ds-kicker { font-size: 14px; font-weight: 600; color: #4b5563; }
+    .doc-sum .ds-amount { font-size: 34px; font-weight: 700; margin: 2px 0; }
+    .doc-sum .ds-due.overdue { color: #b42318; font-weight: 700; }
+    .doc-sum .ds-pay { display: flex; justify-content: center; width: 100%; min-height: 52px; margin-top: 14px; background: #0b3d91; color: #fff; font-size: 17px; font-weight: 700; border-radius: 10px; }
+    .doc-sum h3 { font-size: 16px; margin: 16px 0 6px; padding-top: 14px; border-top: 1px solid #e5e7eb; }
+    .doc-sum .ds-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+    .doc-sum .ds-row .k { color: #4b5563; }
+    .doc-sum .ds-row .v { font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+    .doc-sum .ds-note { font-size: 14px; color: #4b5563; margin: 14px 0 0; }
+    .doc-sum a { color: #0b3d91; }
+  }
+  @media print { .doc-sum { display: none !important; } }
+  .as-paper .doc-sum { display: none !important; }
 </style>
 </head>
 <body>
@@ -108,7 +127,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -146,13 +165,15 @@
       // for a company (stc_credit_inc_gst, migration 153).
       const isCompanyClient = inv.client_type === 'company';
       const stcAmount = inv.stc_credit_inc_gst != null ? Number(inv.stc_credit_inc_gst) : (Number(inv.stc_amount) || 0);
+      // Battery certificates on their own line (item 27), same GST treatment.
+      const bstcAmount = inv.bstc_credit_inc_gst != null ? Number(inv.bstc_credit_inc_gst) : (Number(inv.bstc_amount) || 0);
       const subtotal = labourAmount + materialAmount;
       const gst = Math.round(subtotal * 0.10 * 100) / 100;
       const totalIncGst = subtotal + gst;
       // Balance due comes straight from the server (the same number the card payment charges),
       // never recalculated here, so the two can never drift apart.
       const balanceDue = Number(inv.balance_due);
-      const amountApplied = Math.max(0, Math.round((totalIncGst - stcAmount - balanceDue) * 100) / 100);
+      const amountApplied = Math.max(0, Math.round((totalIncGst - stcAmount - bstcAmount - balanceDue) * 100) / 100);
       const isPaid = !!inv.paid_at;
       const isDeposit = !!(inv.is_deposit || /^deposit$/i.test(inv.description || ''));
       const dueDate = inv.due_date ? new Date(inv.due_date + 'T00:00:00') : null;
@@ -204,7 +225,8 @@
         sections.push({ title: 'Claim summary', head: ['Stage', 'Stage value', 'Claimed to date', 'Remaining'], rows, headCls: ['', 'num', 'num', 'num'], widths: ['34%', '20%', '28%', '18%'] });
       }
       if (previousInvoices.length) {
-        sections.push({ title: 'Previous invoices on this job', head: ['Invoice', 'Date', 'Amount'], headCls: ['', 'ctr', 'num'], widths: ['44%', '28%', '28%'],
+        // these amounts come ex GST and before credit notes, so the heading says so (M39)
+        sections.push({ title: 'Previous invoices on this job (ex GST, before credits)', head: ['Invoice', 'Date', 'Amount (ex GST)'], headCls: ['', 'ctr', 'num'], widths: ['44%', '28%', '28%'],
           rows: previousInvoices.map((p) => ({ cells: [esc(p.invoice_number), p.sent_at ? dateText(new Date(p.sent_at)) : '', money(p.amount)], cls: ['', 'ctr', 'num'] })) });
       }
 
@@ -223,10 +245,12 @@
       const detailRows = [
         !isStandalone && project.job_number ? ['Job No.', `J${project.job_number}`] : null,
         !isStandalone && project.quote_number ? ['Quote No.', `Q${project.quote_number}`] : null,
-        project.client_address ? ['Site', project.client_address] : null,
+        !isStandalone && project.client_address ? ['Site', project.client_address] : null,
         !isStandalone && project.name ? ['Job Name', project.name] : null,
       ].filter(Boolean);
 
+      // Bill to: the client's office / billing address; the job site is in the details rows.
+      const billAddress = project.client_office_address || project.client_address;
       const sheetHtml = (first) => `
         <section class="inv-sheet">
           ${isOverdue ? '<div class="inv-stamp">OVERDUE</div>' : (isPaid ? '<div class="inv-stamp paid">PAID</div>' : '')}
@@ -238,7 +262,7 @@
             <div class="inv-contact">${contactLines.join('<br>')}</div>
           </div>
           <div class="inv-meta-row">
-            <div class="inv-bill">${first ? `${esc(project.client_name || '')}${project.client_address ? '<br>' + esc(project.client_address).replace(/,\s*/g, '<br>') : ''}` : ''}</div>
+            <div class="inv-bill">${first ? `${esc(project.client_name || '')}${billAddress ? '<br>' + esc(billAddress).replace(/,\s*/g, '<br>') : ''}` : ''}</div>
             <div class="inv-right">
               <div class="inv-strip">
                 <div><div class="k">Please pay by</div><div class="v">${dueDate ? dateText(dueDate) : 'On receipt'}</div></div>
@@ -263,6 +287,7 @@
               <div><span class="k">GST</span><span class="v">${money(gst)}</span></div>
               <div><span class="k">Total inc GST</span><span class="v">${money(totalIncGst)}</span></div>
               ${stcAmount > 0 ? `<div><span class="k">STC Credit${isCompanyClient ? ' (inc GST)' : ''}</span><span class="v">-${money(stcAmount)}</span></div>` : ''}
+              ${bstcAmount > 0 ? `<div><span class="k">BSTC Credit (battery)${isCompanyClient ? ' (inc GST)' : ''}</span><span class="v">-${money(bstcAmount)}</span></div>` : ''}
               <div><span class="k">Amount Applied</span><span class="v">${money(amountApplied)}</span></div>
               <div><span class="k">Balance Due</span><span class="v">${money(balanceDue)}</span></div>
             </div>
@@ -293,8 +318,34 @@
           </div>
         </div>`;
 
+      // Phone: a plain summary card above the A4 sheet (the CSS shows it only under 840px; never in the PDF).
+      const invNo = String(inv.invoice_number).replace(/^INV-?/i, '');
+      const dueText = isPaid ? 'Paid in full, thank you' : (isOverdue ? 'Overdue, was due ' + dateText(dueDate) : (dueDate ? 'Please pay by ' + dateText(dueDate) : 'Please pay on receipt'));
+      const bankRows = [
+        s.bank_name ? ['Bank', s.bank_name] : null,
+        s.bank_account_name ? ['Account name', s.bank_account_name] : null,
+        s.bank_bsb ? ['BSB', s.bank_bsb] : null,
+        s.bank_account_number ? ['Account no.', s.bank_account_number] : null,
+        ['Reference', inv.invoice_number],
+      ].filter(Boolean);
+      const summaryHtml = isPrint ? '' : `
+        <div class="doc-sum">
+          <div class="ds-kicker">Tax invoice ${esc(invNo)}${isDeposit ? ' &middot; Deposit' : ''}</div>
+          <div class="ds-amount">${money(balanceDue)}</div>
+          <div class="ds-due${isOverdue ? ' overdue' : ''}">${esc(dueText)}</div>
+          ${isPaid ? '' : `
+          <button type="button" id="sum-pay-btn" class="ds-pay" data-token="${esc(token)}">Pay online now</button>
+          <div id="sum-pay-msg"></div>
+          <h3>Or pay by bank transfer</h3>
+          ${bankRows.map(([k, v]) => `<div class="ds-row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}
+          ${s.payment_details_text ? `<div style="white-space:pre-wrap; margin-top:6px;">${esc(s.payment_details_text)}</div>` : ''}
+          ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? '<div>Contact us for payment details.</div>' : ''}
+          ${s.phone ? `<div style="margin-top:8px;">Card over the phone: <a href="${esc('tel:' + String(s.phone).replace(/[^+\d]/g, ''))}">${esc(s.phone)}</a></div>` : ''}`}
+          <p class="ds-note">The full invoice is below. Use Print / Save as PDF for a copy.</p>
+        </div>`;
+
       // ---- build the sheets, moving rows onto a new sheet whenever one fills up ----
-      content.innerHTML = '<div class="inv-sheets" id="inv-sheets"></div>';
+      content.innerHTML = summaryHtml + '<div class="inv-sheets" id="inv-sheets"></div>';
       const host = document.getElementById('inv-sheets');
       const sheets = [];
       const addSheet = () => {
@@ -351,31 +402,33 @@
       // a phone is narrower than a sheet: shrink the sheets to fit rather than reflowing them
       if (!isPrint && window.innerWidth < 840) host.style.zoom = String(Math.max(0.3, (window.innerWidth - 16) / 794));
 
+      // Pay online: the sheet's button and the phone summary card's button start the same payment.
       const payBtn = document.getElementById('pay-online-btn');
-      // opened from the "Pay online now" link in the PDF: go straight to the card payment
-      if (payBtn && !isPrint && new URLSearchParams(window.location.search).get('pay') === '1') setTimeout(() => payBtn.click(), 300);
-      if (payBtn) {
-        payBtn.addEventListener('click', async () => {
-          const msgEl = document.getElementById('pay-online-msg');
-          payBtn.disabled = true;
-          payBtn.textContent = 'Preparing secure payment...';
-          msgEl.innerHTML = '';
-          try {
-            const res = await fetch('/.netlify/functions/get-or-create-payment-link', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: payBtn.dataset.token }),
-            });
-            const result = await res.json();
-            if (!res.ok || !result.ok) throw new Error(result.error || 'Could not start payment');
-            window.location.href = result.url;
-          } catch (err) {
-            msgEl.innerHTML = `<p style="color:#c0392b; margin:6px 0 0;">${esc(err.message)}</p>`;
-            payBtn.disabled = false;
-            payBtn.textContent = 'Pay online now';
-          }
-        });
+      const sumPayBtn = document.getElementById('sum-pay-btn');
+      const payButtons = [payBtn, sumPayBtn].filter(Boolean);
+      async function startPayment(btn, msgEl) {
+        payButtons.forEach((b) => { b.disabled = true; });
+        btn.textContent = 'Preparing secure payment...';
+        msgEl.innerHTML = '';
+        try {
+          const res = await fetch('/.netlify/functions/get-or-create-payment-link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: btn.dataset.token }),
+          });
+          const result = await res.json();
+          if (!res.ok || !result.ok) throw new Error(result.error || 'Could not start payment');
+          window.location.href = result.url;
+        } catch (err) {
+          msgEl.innerHTML = `<p style="color:#c0392b; margin:6px 0 0;">${esc(err.message)}</p>`;
+          payButtons.forEach((b) => { b.disabled = false; b.textContent = 'Pay online now'; });
+        }
       }
+      if (payBtn) payBtn.addEventListener('click', () => startPayment(payBtn, document.getElementById('pay-online-msg')));
+      if (sumPayBtn) sumPayBtn.addEventListener('click', () => startPayment(sumPayBtn, document.getElementById('sum-pay-msg')));
+      // opened from the "Pay online now" link in the PDF or email: go straight to the card payment
+      const autoPayBtn = (sumPayBtn && window.innerWidth < 840) ? sumPayBtn : payBtn;
+      if (autoPayBtn && !isPrint && new URLSearchParams(window.location.search).get('pay') === '1') setTimeout(() => autoPayBtn.click(), 300);
     }
 
     load().then(async () => {

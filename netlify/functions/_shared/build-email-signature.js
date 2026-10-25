@@ -166,7 +166,9 @@ async function emailSafeLogoUrl(uploadedUrl) {
 // Loads the signed-in staff member's profile plus company details and
 // builds their signature - shared by the send path and the Settings preview
 // so what's previewed is exactly what gets sent.
-async function signatureForUser(supabaseAdmin, user) {
+// email: the address shown in the signature. sales@ unless the email goes out from the
+// person's own inbox (My inbox), when it is their own address.
+async function signatureForUser(supabaseAdmin, user, { email } = {}) {
   const [{ data: profile }, { data: company }] = await Promise.all([
     supabaseAdmin.from('profiles')
       .select('full_name, job_title, photo_url, email_signature, email_signature_include_photo')
@@ -181,11 +183,23 @@ async function signatureForUser(supabaseAdmin, user) {
     jobTitle: profile?.job_title,
     credentials: profile?.email_signature,
     mobile: SIGNATURE_PHONE,
-    email: SIGNATURE_EMAIL,
+    email: email || SIGNATURE_EMAIL,
     photoUrl: profile?.photo_url,
     includePhoto: profile?.email_signature_include_photo,
   }, { ...(company || {}), logo_url });
   return { ...sig, fullName: profile?.full_name };
 }
 
-module.exports = { buildSignature, plainTextToHtml, plainTextWithoutButtons, signatureForUser, emailSafeLogoUrl, SIGNATURE_EMAIL, SIGNATURE_PHONE };
+// The signature for an agent's automatic email (Tally on invoice@, Postie on sales@): the
+// company branding with the agent's name, no photo.
+async function signatureForAgent(supabaseAdmin, { name, jobTitle, email }) {
+  const { data: company } = await supabaseAdmin.from('company_settings')
+    .select('company_name, phone, address, website, licenses, logo_url, social_facebook, social_instagram, social_linkedin')
+    .eq('id', 1).single();
+  const logo_url = await emailSafeLogoUrl(company?.logo_url);
+  return buildSignature({
+    fullName: name, jobTitle, credentials: 'Automatic reply from Thomson Energy', mobile: SIGNATURE_PHONE, email, includePhoto: false,
+  }, { ...(company || {}), logo_url });
+}
+
+module.exports = { buildSignature, signatureForAgent, plainTextToHtml, plainTextWithoutButtons, signatureForUser, emailSafeLogoUrl, SIGNATURE_EMAIL, SIGNATURE_PHONE };

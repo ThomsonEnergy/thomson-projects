@@ -1,4 +1,5 @@
-// Sending email from the shared sales@ inbox - used by the Inbox page and by the job page.
+// Sending email from the Sales inbox (sales@) or your own My inbox - used by the Inbox page and by the job page.
+//   emailAction(action, body)  posts to email-actions (labels, sections, drafts, clean up) and returns its answer
 //   emailLocalFilePicker(el)   an "Attach files" button + chips; returns { files(), clear() }
 //   emailSendNow(payload)      uploads nothing itself: posts to send-gmail and returns { threadId }
 //   openEmailComposer(opts)    the compose / reply window, with job documents to attach
@@ -76,6 +77,17 @@ async function emailUploadFiles(files) {
   return out;
 }
 
+async function emailAction(action, body) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const res = await fetch('/.netlify/functions/email-actions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ action, ...(body || {}) }),
+  });
+  const text = await res.text();
+  let data; try { data = JSON.parse(text); } catch (e) { throw new Error(`That did not work (status ${res.status}). Try again.`); }
+  if (!data.ok) throw new Error(data.error || 'That did not work.');
+  return data;
+}
+
 async function emailSendNow(payload) {
   const { data: { session } } = await supabaseClient.auth.getSession();
   const res = await fetch('/.netlify/functions/send-gmail', {
@@ -89,7 +101,9 @@ async function emailSendNow(payload) {
 
 // opts: { title, to, cc, subject, body, replyToThreadId, projectId, tagKind, quoteLink: {url, label, buttonText, checked},
 //         reviewRequest: {projectId, clientName, clientEmail} (shows "Ask for a review"),
-//         attachOptions: [{ group, label, bucket, path, name, size, checked }], onSent(threadId) }
+//         attachOptions: [{ group, label, bucket, path, name, size, checked }], onSent(threadId),
+//         mailbox: { id, address, kind } (send from My inbox instead of sales@), draftId (a saved draft: Save draft
+//         button, and the draft is cleared once sent), onDraftSaved() }
 function openEmailComposer(opts) {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:120; padding:16px;';
@@ -98,11 +112,11 @@ function openEmailComposer(opts) {
   overlay.innerHTML = `
     <div class="card" style="max-width:640px; width:100%; max-height:92vh; overflow-y:auto;">
       <h2 style="margin-top:0;">${escapeHtml(opts.title || 'New email')}</h2>
-      <p class="subtitle" style="margin:0 0 8px; font-size:12px;">Sent from sales@thomsonenergy.com.au with your name and signature.</p>
+      <p class="subtitle" style="margin:0 0 8px; font-size:12px;">Sent from ${escapeHtml(opts.mailbox && opts.mailbox.kind === 'personal' ? opts.mailbox.address : 'sales@thomsonenergy.com.au')} with your name and signature.</p>
       <label style="margin-top:0">To</label>
-      <input id="ec-to" value="${escapeHtml(opts.to || '')}" placeholder="client@example.com (separate several with commas)" />
+      <input id="ec-to" value="${escapeHtml(opts.to || '')}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="client@example.com (separate several with commas)" />
       <label>Cc (optional)</label>
-      <input id="ec-cc" value="${escapeHtml(opts.cc || '')}" />
+      <input id="ec-cc" value="${escapeHtml(opts.cc || '')}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" />
       <label>Subject</label>
       <input id="ec-subject" value="${escapeHtml(opts.subject || '')}" />
       <label>Message</label>
@@ -118,6 +132,7 @@ function openEmailComposer(opts) {
       <div id="ec-picker"></div>
       <div style="margin-top:16px; display:flex; gap:8px;">
         <button type="button" id="ec-send">Send</button>
+        ${opts.mailbox ? '<button type="button" class="secondary" id="ec-save">Save draft</button>' : ''}
         <button type="button" class="secondary" id="ec-cancel">Cancel</button>
       </div>
       <div id="ec-msg" style="margin-top:8px;"></div>
@@ -125,6 +140,25 @@ function openEmailComposer(opts) {
   document.body.appendChild(overlay);
   const picker = emailLocalFilePicker(overlay.querySelector('#ec-picker'));
   overlay.querySelector('#ec-cancel').addEventListener('click', () => overlay.remove());
+  let draftId = opts.draftId || null;
+  const saveBtn = overlay.querySelector('#ec-save');
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    const msg = overlay.querySelector('#ec-msg');
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
+    try {
+      const r = await emailAction('save_draft', {
+        draft_id: draftId || undefined, mailbox_id: opts.mailbox.id, thread_id: opts.replyToThreadId || undefined,
+        to: overlay.querySelector('#ec-to').value.trim(), cc: overlay.querySelector('#ec-cc').value.trim(),
+        subject: overlay.querySelector('#ec-subject').value.trim(), body: overlay.querySelector('#ec-body').value,
+      });
+      draftId = r.draft_id;
+      overlay.remove();
+      if (opts.onDraftSaved) await opts.onDraftSaved();
+    } catch (err) {
+      msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      saveBtn.disabled = false; saveBtn.textContent = 'Save draft';
+    }
+  });
   overlay.querySelector('#ec-send').addEventListener('click', async () => {
     const msg = overlay.querySelector('#ec-msg'), btn = overlay.querySelector('#ec-send');
     const to = overlay.querySelector('#ec-to').value.trim(), subject = overlay.querySelector('#ec-subject').value.trim();
@@ -153,6 +187,7 @@ function openEmailComposer(opts) {
         replyToThreadId: opts.replyToThreadId || undefined,
         attachments: [...chosen.map(o => ({ bucket: o.bucket, path: o.path, name: o.name })), ...uploaded.map(u => ({ bucket: u.bucket, path: u.path, name: u.name }))],
         tagProjectId: opts.projectId || undefined, tagKind: opts.tagKind || 'client',
+        mailboxId: opts.mailbox && !opts.replyToThreadId ? opts.mailbox.id : undefined, draftId: draftId || undefined,
       });
       overlay.remove();
       if (opts.onSent) await opts.onSent(data.threadId);
@@ -240,7 +275,7 @@ function openTagEmailModal({ threadId, projectId, onSaved }) {
 //  - Job (no quote): created straight away like "+ New job (no quote)".
 // Either way the conversation is tagged to the new job so it shows on its Emails tab.
 const EMAIL_QUOTE_HANDOFF_KEY = 'te_email_quote_handoff';
-const EMAIL_TEMPLATES = { service_work: 'Service work', new_build: 'New build', renovation: 'Renovation', solar: 'Solar proposal', quick_estimate: 'Quick estimate' };
+const EMAIL_TEMPLATES = { service_work: 'Service work', new_build: 'New build', renovation: 'Renovation', solar: 'Solar proposal', battery: 'Battery proposal', quick_estimate: 'Quick estimate' };
 
 function openCreateFromEmailModal(threadId) {
   const overlay = document.createElement('div');
@@ -257,6 +292,8 @@ function openCreateFromEmailModal(threadId) {
   (async () => {
     let result;
     try {
+      // Pricing roles only: the clients insert and the quote page are closed to other roles (F46).
+      if (!isPricingRole(await getMyRole())) throw new Error('Only sales, finance and admin can create a quote or job from an email. Tag it to a job instead, or ask one of them.');
       const { data: { session } } = await supabaseClient.auth.getSession();
       const res = await fetch('/.netlify/functions/extract-email-job', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
@@ -325,9 +362,10 @@ function openCreateFromEmailModal(threadId) {
           if (ce) throw ce;
           clientId = nc.id;
         }
+        const clientSiteId = useExisting ? await resolveClientSite(clientId, form.address) : null;
         const { data: project, error } = await supabaseClient.from('projects').insert({
           name: form.name, sow_text: form.work || null, notes, client_id: clientId, client_name: form.client_name,
-          client_email: form.client_email || null, client_phone: form.client_phone || null, client_address: form.address || null,
+          client_email: form.client_email || null, client_phone: form.client_phone || null, client_address: form.address || null, client_site_id: clientSiteId,
           proposal_template: 'direct_job', pipeline_stage: 'job_booked', status: 'in_progress',
         }).select('id').single();
         if (error) throw error;

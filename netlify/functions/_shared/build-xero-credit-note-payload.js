@@ -15,6 +15,19 @@
 
 const { getOrCreateContact } = require('./build-xero-invoice-payload');
 
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// What a credit note takes off the invoice, GST included, the way Xero totals it and
+// get_invoice_balance_due applies it: labour and materials plus GST, less each certificate credit
+// taken back (plus GST for a company client, GST-free for an individual, each credit rounded on its
+// own, bug review M25). Negative means the note would raise what the client owes (bug review M24).
+function creditNoteTotalIncGst(claims, clientType) {
+  const sum = (key) => (claims || []).reduce((s, c) => s + (Number(c[key]) || 0), 0);
+  const work = r2(sum('labour_amount') + sum('material_amount'));
+  const creditIncGst = (n) => (clientType === 'company' ? r2(n * 1.1) : r2(n));
+  return r2(work + r2(work * 0.1) - creditIncGst(sum('stc_amount')) - creditIncGst(sum('bstc_amount')));
+}
+
 async function buildXeroCreditNotePayload(supabaseAdmin, creditNoteId) {
   const { data: creditNote, error: cnErr } = await supabaseAdmin
     .from('credit_notes')
@@ -123,10 +136,25 @@ async function buildXeroCreditNotePayload(supabaseAdmin, creditNoteId) {
         TaxType: stcMap.xero_tax_type,
       });
     }
+    if (Number(c.bstc_amount) > 0) {
+      if (!stcMap) throw new Error(`No Xero mapping found for STC credits (${clientType}) - set it up in Settings > Xero Mapping first.`);
+      lineItems.push({
+        Description: `${stageName} - BSTC credit reversal (${invoice.invoice_number})`,
+        Quantity: 1,
+        UnitAmount: -Number(c.bstc_amount),
+        AccountCode: stcMap.xero_account_code,
+        TaxType: stcMap.xero_tax_type,
+      });
+    }
   });
   if (!lineItems.length) throw new Error('This credit note has no amounts on it');
+  // Xero refuses a credit note whose total is negative, and such a note would raise what the client owes
+  // here: taking back an STC credit is a new invoice, not a credit note (bug review M24).
+  if (creditNoteTotalIncGst(claims, clientType) < 0) {
+    throw new Error('This credit note has a negative total (the STC or BSTC credit taken back is more than the work credited), which Xero refuses. Taking back an STC credit is a new invoice, not a credit note.');
+  }
 
   return { creditNote, invoice, contactId, reference, lineItems };
 }
 
-module.exports = { buildXeroCreditNotePayload };
+module.exports = { buildXeroCreditNotePayload, creditNoteTotalIncGst };

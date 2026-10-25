@@ -8,11 +8,16 @@
 
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
   }
+
+  // The client import is a pricing-role page, and every call spends the Anthropic key.
+  const auth = await requirePricingRole(event);
+  if (!auth) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
 
   try {
     const { headers, sampleRows } = JSON.parse(event.body || '{}');
@@ -46,7 +51,7 @@ Respond with ONLY a JSON object, no other text, no markdown fences, using the ex
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-5-5',
         max_tokens: 300,
         messages: [{ role: 'user', content: prompt }],
       }),

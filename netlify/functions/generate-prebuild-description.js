@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 // Drafts a prebuild's client-facing description in the house format: an
 // ALL CAPS "SUPPLY AND INSTALL NEW ..." title line, then a short trade-
@@ -13,6 +14,8 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
+  // Pricing roles only: it spends the Anthropic key.
+  if (!(await requirePricingRole(event))) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
   try {
     const { name, components } = JSON.parse(event.body || '{}');
     if (!name) {
@@ -64,7 +67,7 @@ Respond with ONLY the description text (title line, blank line, paragraph) - no 
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-5-5',
         max_tokens: 400,
         messages: [{ role: 'user', content: prompt }],
       }),

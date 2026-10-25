@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Suppliers - Thomson Energy</title>
+<title>Suppliers - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -37,7 +37,7 @@
         <button class="secondary" id="upload-bill-btn" style="margin-right:8px;">Upload bill</button>
         <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
         <button class="secondary" id="upload-statement-btn" style="margin-right:8px;">Upload statement</button>
-        <button class="secondary" id="run-payments-btn" style="margin-right:8px;">Run payments due today</button>
+        <button class="secondary" id="run-payments-btn" style="margin-right:8px;">Pay bills due</button>
         <button id="add-supplier-btn">+ Add supplier</button>
       </div>
     </div>
@@ -50,22 +50,30 @@
     </div>
 
     <div class="card">
+      <div id="supplier-kind" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+        <button type="button" class="secondary" data-kind="all" style="font-size:13px; padding:6px 14px; border-radius:20px;">All</button>
+        <button type="button" class="secondary" data-kind="supplier" style="font-size:13px; padding:6px 14px; border-radius:20px;">Suppliers</button>
+        <button type="button" class="secondary" data-kind="contractor" style="font-size:13px; padding:6px 14px; border-radius:20px;">Contractors</button>
+        <button type="button" class="secondary" data-kind="review" style="font-size:13px; padding:6px 14px; border-radius:20px;">New, check details</button>
+      </div>
       <input id="supplier-search" placeholder="Search suppliers..." style="margin-bottom:14px; max-width:320px;" />
       <div id="suppliers-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let allSuppliers = [];
+    let kindFilter = 'all';
 
     async function loadSuppliers() {
       const listEl = document.getElementById('suppliers-list');
       const { data: suppliers, error } = await supabaseClient.from('suppliers').select('*').order('name');
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
-      const { data: summaries } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: null });
+      // pricing roles only (the function refuses Staff): then the tiles say so instead of showing $0
+      const { data: summaries, error: sumErr } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: null });
       const summaryBySupplier = Object.fromEntries((summaries || []).map(s => [s.supplier_id, s]));
 
       allSuppliers = (suppliers || []).map(s => ({ ...s, summary: summaryBySupplier[s.id] || { invoiced_not_paid: 0, approved_for_payment: 0, not_approved: 0, overdue: 0 } }));
@@ -77,10 +85,10 @@
         overdue: acc.overdue + Number(s.summary.overdue),
       }), { outstanding: 0, approved: 0, pending: 0, overdue: 0 });
 
-      document.getElementById('stat-outstanding').textContent = money(totals.outstanding);
-      document.getElementById('stat-approved').textContent = money(totals.approved);
-      document.getElementById('stat-pending').textContent = money(totals.pending);
-      document.getElementById('stat-overdue').textContent = money(totals.overdue);
+      document.getElementById('stat-outstanding').textContent = sumErr ? 'n/a' : money(totals.outstanding);
+      document.getElementById('stat-approved').textContent = sumErr ? 'n/a' : money(totals.approved);
+      document.getElementById('stat-pending').textContent = sumErr ? 'n/a' : money(totals.pending);
+      document.getElementById('stat-overdue').textContent = sumErr ? 'n/a' : money(totals.overdue);
 
       renderSuppliers();
     }
@@ -90,7 +98,13 @@
     function renderSuppliers() {
       const listEl = document.getElementById('suppliers-list');
       const q = document.getElementById('supplier-search').value.trim().toLowerCase();
-      const filtered = q ? allSuppliers.filter(s => s.name.toLowerCase().includes(q)) : allSuppliers;
+      const byKind = allSuppliers.filter(s => kindFilter === 'all' || (kindFilter === 'review' ? s.needs_review : (s.kind || 'supplier') === kindFilter));
+      const filtered = q ? byKind.filter(s => s.name.toLowerCase().includes(q)) : byKind;
+      document.querySelectorAll('#supplier-kind button').forEach(b => {
+        b.style.background = b.dataset.kind === kindFilter ? 'var(--accent)' : '';
+        b.style.color = b.dataset.kind === kindFilter ? '#fff' : '';
+        if (b.dataset.kind === 'review') { const n = allSuppliers.filter(s => s.needs_review).length; b.textContent = n ? `New, check details (${n})` : 'New, check details'; }
+      });
 
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">No suppliers yet - add one to get started.</p>`; return; }
 
@@ -102,9 +116,9 @@
               const terms = s.credit_terms_type === 'cod' ? 'COD' : `${s.credit_terms_days} ${CREDIT_TERMS_LABELS[s.credit_terms_type]}`;
               const overdue = Number(s.summary.overdue);
               return `
-                <tr class="supplier-row-link" data-id="${s.id}" style="cursor:pointer;">
-                  <td data-label="Supplier"><strong>${s.name}</strong></td>
-                  <td data-label="Terms">${terms}</td>
+                <tr class="supplier-row-link" data-id="${escapeHtml(s.id)}" style="cursor:pointer;">
+                  <td data-label="Supplier"><a href="/supplier-detail.html?id=${encodeURIComponent(s.id)}" style="color:inherit; text-decoration:none;"><strong>${escapeHtml(s.name)}</strong></a>${s.kind === 'contractor' ? ' <span class="badge draft">Contractor</span>' : ''}${s.needs_review ? ' <span class="badge" style="background:#d08a00; color:#fff;">New, check details</span>' : ''}</td>
+                  <td data-label="Terms">${escapeHtml(terms)}</td>
                   <td class="num" data-label="Invoiced, not paid">${money(s.summary.invoiced_not_paid)}</td>
                   <td class="num" data-label="Overdue">${overdue > 0 ? `<span style="color:var(--red); font-weight:600;">${money(overdue)}</span>` : money(0)}</td>
                 </tr>`;
@@ -113,11 +127,13 @@
         </table>`;
 
       listEl.querySelectorAll('.supplier-row-link').forEach(row => {
-        row.addEventListener('click', () => { window.location.href = `/supplier-detail.html?id=${row.dataset.id}`; });
+        // The name is a real link (long-press, new tab, copy); the rest of the row follows it
+        row.addEventListener('click', (e) => { if (!e.target.closest('a')) row.querySelector('a').click(); });
       });
     }
 
     document.getElementById('supplier-search').addEventListener('input', renderSuppliers);
+    document.querySelectorAll('#supplier-kind button').forEach(b => b.addEventListener('click', () => { kindFilter = b.dataset.kind; renderSuppliers(); }));
 
     function openSupplierPanel() {
       const overlay = document.createElement('div');
@@ -127,9 +143,11 @@
           <h2>Add supplier</h2>
           <label style="margin-top:0">Name</label>
           <input id="sup-name" />
+          <label>Type</label>
+          <select id="sup-kind"><option value="supplier">Supplier (goods, materials)</option><option value="contractor">Contractor (labour, services)</option></select>
           <div class="grid cols-2">
             <div><label>Contact email</label><input id="sup-email" type="email" /></div>
-            <div><label>Contact phone</label><input id="sup-phone" /></div>
+            <div><label>Contact phone</label><input id="sup-phone" type="tel" /></div>
           </div>
           <label>Credit terms</label>
           <div class="grid cols-2">
@@ -155,18 +173,28 @@
         const msg = overlay.querySelector('#sup-msg');
         const name = overlay.querySelector('#sup-name').value.trim();
         if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
+        const btn = overlay.querySelector('#sup-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const { data: newSupplier, error } = await supabaseClient.from('suppliers').insert({
           name,
           contact_email: overlay.querySelector('#sup-email').value.trim() || null,
           contact_phone: overlay.querySelector('#sup-phone').value.trim() || null,
           credit_terms_type: overlay.querySelector('#sup-terms-type').value,
+          kind: overlay.querySelector('#sup-kind').value,
           credit_terms_days: parseInt(overlay.querySelector('#sup-terms-days').value) || 0,
           notes: overlay.querySelector('#sup-notes').value.trim() || null,
         }).select('id').single();
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         await logActivity('supplier', newSupplier.id, 'created', `Supplier "${name}" added`);
         overlay.remove();
         await loadSuppliers();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 
@@ -191,10 +219,7 @@
     // with the Stock page's own "Upload pricelist" button.
 
     document.getElementById('upload-bill-btn').addEventListener('click', () => pickFileAndRun(async (file) => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the invoice...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the invoice...</p>`, { maxWidth: 400 });
       try {
         const fileBase64 = await fileToBase64(file);
         const { data: { session } } = await supabaseClient.auth.getSession();
@@ -207,79 +232,84 @@
         overlay.remove();
         await resolveSupplierAndHandoff(data.extracted, 'bill', data.extracted, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="ub-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="ub-close">Close</button>`;
         overlay.querySelector('#ub-close').addEventListener('click', () => overlay.remove());
       }
     }));
 
     document.getElementById('upload-pricelist-btn').addEventListener('click', () => pickFileAndRun(async (file) => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the price list - this can take a little longer for a long document...</p>`, { maxWidth: 400 });
       try {
         const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', file, file.type);
         overlay.remove();
         await resolveSupplierAndHandoff(data.supplier, 'pricelist', { items: data.items }, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="up-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="up-close">Close</button>`;
         overlay.querySelector('#up-close').addEventListener('click', () => overlay.remove());
       }
     }));
 
     document.getElementById('upload-statement-btn').addEventListener('click', () => pickFileAndRun(async (file) => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the statement...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the statement...</p>`, { maxWidth: 400 });
       try {
         const data = await runBackgroundExtraction('statement', 'extract-statement-background', file, file.type);
         overlay.remove();
         await resolveSupplierAndHandoff(data, 'statement', data, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that statement</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="us-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that statement</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="us-close">Close</button>`;
         overlay.querySelector('#us-close').addEventListener('click', () => overlay.remove());
       }
     }));
 
+    // Bills due for payment: approved bills whose pay-on date is today or earlier. Pay them in Airwallex
+    // or by bank transfer, then Record as paid (date and reference kept on each bill and the batch).
+    // Sending to Airwallex from here is a later build (needs a payout key and beneficiaries).
     document.getElementById('run-payments-btn').addEventListener('click', async () => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:500px; width:100%;"><p class="subtitle">Checking what's due...</p></div>`;
-      document.body.appendChild(overlay);
-
-      try {
+      const overlay = openModal(`<p class="subtitle">Checking what's due...</p>`, { maxWidth: 560 });
+      const call = async (method, body) => {
         const { data: { session } } = await supabaseClient.auth.getSession();
         const res = await fetch('/.netlify/functions/run-supplier-payments', {
-          headers: { Authorization: `Bearer ${session.access_token}` },
+          method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: body ? JSON.stringify(body) : undefined,
         });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not check due payments');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+        return data;
+      };
+      const dayText = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
 
+      try {
+        const data = await call('GET');
         if (!data.preview.length) {
-          overlay.querySelector('.card').innerHTML = `<h2>Nothing due today</h2><p class="subtitle">No approved, unpaid bills have a due date today or earlier.</p><button type="button" class="secondary" id="rp-close-btn">Close</button>`;
+          overlay.querySelector('.card').innerHTML = `<h2>Nothing due</h2><p class="subtitle">No approved, unpaid bills have a pay-on date of today or earlier. A bill is approved when its PO is closed (or by hand on Bill checks), and its pay-on date is the later of the supplier's terms and the day it was approved.</p><button type="button" class="secondary" id="rp-close-btn">Close</button>`;
           overlay.querySelector('#rp-close-btn').addEventListener('click', () => overlay.remove());
           return;
         }
 
         const totalDue = data.preview.reduce((s, p) => s + p.total, 0);
+        const billCount = data.preview.reduce((s, p) => s + p.billCount, 0);
         overlay.querySelector('.card').innerHTML = `
-          <h2>Confirm payments</h2>
-          <p class="subtitle" style="margin-bottom:14px;">These become Airwallex transfers - nothing pays out until you also approve them directly inside Airwallex.</p>
+          <h2>Bills due for payment</h2>
+          <p class="subtitle" style="margin-bottom:12px;">Approved bills with a pay-on date of today or earlier. Pay them in Airwallex or by bank transfer, then record them here so they show as paid.</p>
           <table>
-            <thead><tr><th>Supplier</th><th class="num">Bills</th><th class="num">Amount</th></tr></thead>
+            <thead><tr><th></th><th>Supplier</th><th>Bills</th><th class="num">Amount</th></tr></thead>
             <tbody>
               ${data.preview.map(p => `
                 <tr>
-                  <td>${p.supplierName}${!p.hasBankDetails ? ' <span class="badge draft" style="color:var(--red);">No bank details</span>' : ''}</td>
-                  <td class="num">${p.billCount}</td>
+                  <td><input type="checkbox" class="rp-pick" data-supplier-id="${escapeHtml(p.supplierId)}" checked style="width:auto;" /></td>
+                  <td>${escapeHtml(p.supplierName)}${!p.hasBankDetails ? ' <span class="badge red">No bank details</span>' : ''}</td>
+                  <td style="font-size:12px;">${p.bills.map(b => `${escapeHtml(b.billNumber || '(no number)')} ${money(b.amount)}${b.payOn && b.payOn < data.today ? ` <span style="color:var(--red);">due ${escapeHtml(dayText(b.payOn))}</span>` : ''}`).join('<br />')}</td>
                   <td class="num">${money(p.total)}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
           <p style="text-align:right; font-weight:600; margin-top:10px;">Total: ${money(totalDue)}</p>
+          <div class="grid cols-2" style="margin-top:10px;">
+            <div><label style="margin-top:0;">Paid on</label><input type="date" id="rp-paid-on" value="${escapeHtml(data.today)}" /></div>
+            <div><label style="margin-top:0;">Reference (optional)</label><input id="rp-reference" placeholder="e.g. Airwallex batch 20 Oct" /></div>
+          </div>
           <div style="margin-top:14px;">
-            <button id="rp-confirm-btn">Confirm & send to Airwallex</button>
+            <button id="rp-confirm-btn">Record ${billCount} bill${billCount === 1 ? '' : 's'} as paid</button>
             <button type="button" class="secondary" id="rp-cancel-btn">Cancel</button>
           </div>
           <div id="rp-msg"></div>`;
@@ -288,29 +318,27 @@
         overlay.querySelector('#rp-confirm-btn').addEventListener('click', async () => {
           const confirmBtn = overlay.querySelector('#rp-confirm-btn');
           const msg = overlay.querySelector('#rp-msg');
+          const picked = new Set([...overlay.querySelectorAll('.rp-pick:checked')].map(c => c.dataset.supplierId));
+          const billIds = data.preview.filter(p => picked.has(p.supplierId)).flatMap(p => p.bills.map(b => b.id));
+          if (!billIds.length) { msg.innerHTML = `<div class="error-box">Tick at least one supplier.</div>`; return; }
+          if (!confirm(`Record ${billIds.length} bill${billIds.length === 1 ? '' : 's'} as paid? Only do this once the money has actually been sent.`)) return;
+          const label = confirmBtn.textContent;
           confirmBtn.disabled = true;
-          confirmBtn.textContent = 'Processing...';
+          confirmBtn.textContent = 'Recording...';
           try {
-            const res2 = await fetch('/.netlify/functions/run-supplier-payments', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${session.access_token}` },
-            });
-            const data2 = await res2.json();
-            if (!res2.ok || !data2.ok) throw new Error(data2.error || 'Payment run failed');
-            msg.innerHTML = data2.results.map(r => r.ok
-              ? `<div class="success-box">${r.supplier}: ${money(r.amount)} sent to Airwallex.</div>`
-              : `<div class="error-box">${r.supplier}: ${r.error}</div>`).join('');
+            const r = await call('POST', { action: 'mark_paid', bill_ids: billIds, paid_on: overlay.querySelector('#rp-paid-on').value, reference: overlay.querySelector('#rp-reference').value });
+            msg.innerHTML = r.results.map(x => `<div class="success-box">${escapeHtml(x.supplier)}: ${money(x.amount)} recorded as paid (${x.billCount} bill${x.billCount === 1 ? '' : 's'}).</div>`).join('');
             confirmBtn.style.display = 'none';
             overlay.querySelector('#rp-cancel-btn').textContent = 'Close';
             await loadSuppliers();
           } catch (err) {
-            msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+            msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
             confirmBtn.disabled = false;
-            confirmBtn.textContent = 'Confirm & send to Airwallex';
+            confirmBtn.textContent = label;
           }
         });
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't check payments</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="rp-err-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't check payments</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="rp-err-close">Close</button>`;
         overlay.querySelector('#rp-err-close').addEventListener('click', () => overlay.remove());
       }
     });

@@ -3,7 +3,10 @@
 const SUPABASE_URL = 'https://ziakpklnzkbbjjnqgkmz.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InppYWtwa2xuemtiYmpqbnFna216Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcwOTg2OTIsImV4cCI6MjEwMjY3NDY5Mn0.xuEorSGdx9rI_ySM6V4MOxoQLOTD1OCWdrSXKMKnFAE';
 
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// The browser must never serve an API answer from its cache: on 21 Oct 2026 a short-lived
+// "more than one relationship" error (a 300, which browsers may cache) kept coming back from disk
+// cache for ten minutes after the database was fixed. no-cache makes every request go to Supabase.
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { 'Cache-Control': 'no-cache' } } });
 
 // Logging out anywhere ends every session for that user (signOut's default
 // scope is global), but other tabs and devices keep a copy of the old token
@@ -14,6 +17,20 @@ const onLoginPage = window.location.pathname.endsWith('/login.html');
 function goToLogin() {
   if (!onLoginPage) window.location.href = '/login.html';
 }
+
+// Log out from anywhere (the phone menu row): asks first, ends the session, goes to login.
+window.__teLogout = async () => {
+  if (!confirm('Log out of TEops?')) return;
+  await supabaseClient.auth.signOut();
+  window.location.href = '/login.html';
+};
+// Every page's own #logout-link handler runs after this capture-phase guard, so the same
+// question is asked there without touching those pages.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('#logout-link');
+  if (!a) return;
+  if (!confirm('Log out of TEops?')) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
 
 // Asks Supabase whether this browser's session is still alive. Only a
 // definite rejection logs out: offline or a server hiccup leaves it alone.
@@ -36,7 +53,10 @@ function checkSessionAlive() {
 
 // Another tab in this browser logged out.
 supabaseClient.auth.onAuthStateChange((event) => {
-  if (event === 'SIGNED_OUT') goToLogin();
+  if (event === 'SIGNED_OUT') {
+    try { sessionStorage.removeItem('te-profile'); } catch (e) { /* storage blocked */ }
+    goToLogin();
+  }
 });
 
 // Logged out on another device: recheck when the tab comes back into view,
@@ -63,21 +83,89 @@ async function requireLogin() {
     window.location.href = '/login.html';
     return null;
   }
-  if (!(await checkSessionAlive())) return null;
-
   // Every page calls requireLogin() as its first act, so this is the one
-  // shared place to force incomplete onboarding to finish before anyone
-  // touches the rest of the app - covers all pages without editing each
-  // one individually.
-  if (!window.location.pathname.endsWith('/onboarding.html')) {
-    const { data: profile } = await supabaseClient.from('profiles').select('onboarding_completed_at').eq('id', session.user.id).maybeSingle();
+  // shared place to send incomplete onboarding to the onboarding page -
+  // covers all pages without editing each one individually. "Finish later"
+  // on that page lets them into the app until their next login, with a
+  // banner on every page until it's done.
+  const path = window.location.pathname;
+  const gated = !path.endsWith('/onboarding.html') && !path.endsWith('/policy-update.html');
+  // The session check, the one profile read (shared through getMyProfile by
+  // the nav, theme and role checks) and the pending documents check all go
+  // out together. A failed pending check (e.g. code deployed before its
+  // migration) never blocks anyone.
+  const [alive, profile, pending] = await Promise.all([
+    checkSessionAlive(),
+    getMyProfile(),
+    gated ? supabaseClient.rpc('my_pending_documents') : Promise.resolve(null),
+  ]);
+  if (!alive) return null;
+
+  if (gated) {
     if (profile && !profile.onboarding_completed_at) {
-      window.location.href = '/onboarding.html';
-      return null;
+      if (!onboardingDeferred(session)) {
+        window.location.href = '/onboarding.html';
+        return null;
+      }
+      showOnboardingBanner();
+    } else if (profile && pending && !pending.error && pending.data && pending.data.length) {
+      // Onboarding done, but a policy has a new version (or a new policy or
+      // consent form was added). Same "later" rule as onboarding: once per
+      // login, with a banner until it's signed.
+      if (!policyUpdateDeferred(session)) {
+        window.location.href = '/policy-update.html?next=' + encodeURIComponent(path + window.location.search + window.location.hash);
+        return null;
+      }
+      showPolicyUpdateBanner();
     }
   }
 
   return session;
+}
+
+// "Remind me later" lasts until the next login or the end of the day,
+// whichever comes first: phones stay logged in for weeks, so a login alone
+// could put it off forever.
+const POLICY_LATER_KEY = 'te-policy-later';
+function policyLaterMarker(session) {
+  return `${onboardingLaterMarker(session)}|${new Date().toDateString()}`;
+}
+function deferPolicyUpdate(session) {
+  try { localStorage.setItem(POLICY_LATER_KEY, policyLaterMarker(session)); } catch (e) { /* storage blocked: they'll just see it again */ }
+}
+function policyUpdateDeferred(session) {
+  try { return localStorage.getItem(POLICY_LATER_KEY) === policyLaterMarker(session); } catch (e) { return false; }
+}
+
+function showPolicyUpdateBanner() {
+  if (document.getElementById('policy-update-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'policy-update-banner';
+  bar.style.cssText = 'display:flex; align-items:center; justify-content:center; gap:12px; flex-wrap:wrap; padding:10px 16px; background:var(--accent-dim); color:var(--text); border-bottom:1px solid var(--border); font-size:14px; text-align:center;';
+  bar.innerHTML = `<span>You have a policy to read and sign.</span><a href="/policy-update.html" style="color:var(--accent); font-weight:700;">Sign now</a>`;
+  document.body.prepend(bar);
+}
+
+// "Finish later" lasts until the next login: the saved marker is tied to
+// this login's sign-in time, which changes every time they log in again.
+const ONBOARDING_LATER_KEY = 'te-onboarding-later';
+function onboardingLaterMarker(session) {
+  return `${session.user.id}|${session.user.last_sign_in_at || ''}`;
+}
+function deferOnboarding(session) {
+  try { localStorage.setItem(ONBOARDING_LATER_KEY, onboardingLaterMarker(session)); } catch (e) { /* storage blocked: they'll just see onboarding again */ }
+}
+function onboardingDeferred(session) {
+  try { return localStorage.getItem(ONBOARDING_LATER_KEY) === onboardingLaterMarker(session); } catch (e) { return false; }
+}
+
+function showOnboardingBanner() {
+  if (document.getElementById('onboarding-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'onboarding-banner';
+  bar.style.cssText = 'display:flex; align-items:center; justify-content:center; gap:12px; flex-wrap:wrap; padding:10px 16px; background:var(--accent-dim); color:var(--text); border-bottom:1px solid var(--border); font-size:14px; text-align:center;';
+  bar.innerHTML = `<span>Your onboarding isn't finished yet.</span><a href="/onboarding.html" style="color:var(--accent); font-weight:700;">Finish now</a>`;
+  document.body.prepend(bar);
 }
 
 function money(n) {
@@ -105,16 +193,67 @@ async function getSignedDocUrl(path, bucket = 'project-documents') {
   return data.signedUrl;
 }
 
+// Opens a private file in a new tab the way iOS Safari and a WKWebView allow:
+// the blank tab is opened on the tap itself (synchronously, before any await),
+// then pointed at the signed link once it arrives. Call it synchronously from
+// the tap handler with no await before it in that branch, or the tab is blocked
+// as a popup. bucket undefined falls through to getSignedDocUrl's
+// project-documents default. Closes the blank tab and rethrows on failure.
+async function openSignedDocInNewTab(path, bucket) {
+  const win = window.open('', '_blank');
+  try {
+    const url = await getSignedDocUrl(path, bucket);
+    if (win) win.location.href = url;
+    else window.location.href = url;
+  } catch (err) {
+    if (win) win.close();
+    throw err;
+  }
+}
+
 // Expiry date display for licences / insurance: red when expired or within
 // 30 days. Shared by the Team page (company and employee licences) and
 // Settings > My Profile (a person's own licences).
 function expiryBadge(dateStr) {
   if (!dateStr) return `<span class="subtitle">No expiry set</span>`;
-  const days = Math.ceil((new Date(dateStr) - new Date(new Date().toDateString())) / 86400000);
-  const dateLabel = new Date(dateStr).toLocaleDateString('en-AU');
+  // A date-only expiry against the Sydney date, both at UTC midnight: today is 0 days and yesterday
+  // is expired. new Date('YYYY-MM-DD') alone is UTC midnight against a local midnight (bug F50).
+  const expiryKey = String(dateStr).slice(0, 10);
+  const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+  const days = Math.round((Date.parse(`${expiryKey}T00:00:00Z`) - Date.parse(`${todayKey}T00:00:00Z`)) / 86400000);
+  const dateLabel = new Date(`${expiryKey}T00:00:00Z`).toLocaleDateString('en-AU', { timeZone: 'UTC' });
   if (days < 0) return `<span style="color:var(--red); font-weight:600;">Expired ${dateLabel}</span>`;
   if (days <= 30) return `<span style="color:var(--red); font-weight:600;">${dateLabel} (${days}d)</span>`;
   return dateLabel;
+}
+
+// The note under a licence / insurance ("Paid renewal, waiting on card") and, for an
+// employee licence, the open "Ask to update" request. names: { profileId: full_name }.
+function licenceNoteHtml(rec, names) {
+  const who = (id) => (id && names && names[id]) ? ` by ${escapeHtml(names[id])}` : '';
+  const day = (ts) => new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'Australia/Sydney' });
+  let out = '';
+  if (rec.notes) out += `<span class="subtitle" style="display:block; font-size:12px; white-space:pre-wrap;">Note: ${escapeHtml(rec.notes)}${rec.notes_updated_at ? ` <span style="opacity:0.7;">(${day(rec.notes_updated_at)}${who(rec.notes_updated_by)})</span>` : ''}</span>`;
+  if (rec.update_requested_at) out += `<span style="display:block; font-size:12px; color:var(--accent); font-weight:600;">Update asked ${day(rec.update_requested_at)}${who(rec.update_requested_by)}</span>`;
+  return out;
+}
+
+// Saves a person's licence rows from an edit form: rows with an id are updated in place (so
+// notes, update requests and anything not in the form stay), new rows are added, and licences
+// no longer in the form are removed. oldIds: the ids loaded into the form.
+async function saveLicenceRows(oldIds, rows) {
+  for (const { id, ...fields } of rows) {
+    const { error } = id
+      ? await supabaseClient.from('profile_licences').update(fields).eq('id', id)
+      : await supabaseClient.from('profile_licences').insert(fields);
+    if (error) throw error;
+  }
+  const kept = new Set(rows.map(r => r.id).filter(Boolean));
+  const gone = (oldIds || []).filter(id => !kept.has(id));
+  if (gone.length) {
+    const { error } = await supabaseClient.from('profile_licences').delete().in('id', gone);
+    if (error) throw error;
+  }
 }
 
 async function runCredentialExtraction(file) {
@@ -174,7 +313,12 @@ function loadPdfLib() {
 }
 
 // Renders one page of an already-loaded pdf.js document to a JPEG data URL,
-// scaled so its longest edge is `longEdge` pixels.
+// scaled so its longest edge is `longEdge` pixels. width/height are the page
+// as shown (its crop box, in points, after the page's own rotation). toPdf is
+// the matrix that takes a point on that shown page (x right, y up, origin at
+// its bottom-left corner) to the PDF's own coordinates, so anything drawn on
+// the picture can be written back onto the page exactly where it was drawn,
+// whatever the page's box origin, crop or rotation.
 async function renderPdfPageToDataUrl(pdf, pageNumber, longEdge) {
   const page = await pdf.getPage(pageNumber);
   const base = page.getViewport({ scale: 1 });
@@ -187,7 +331,20 @@ async function renderPdfPageToDataUrl(pdf, pageNumber, longEdge) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvasContext: ctx, viewport }).promise;
-  return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), width: base.width, height: base.height };
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), width: base.width, height: base.height, toPdf: pdfPageMatrix(base) };
+}
+
+// The matrix (a b c d e f) from "shown page" space (x right, y up, origin at the
+// bottom-left of what pdf.js drew) to PDF user space, worked out from the
+// viewport's own transform so it matches the picture pixel for pixel.
+function pdfPageMatrix(viewport) {
+  const [a, b, c, d, e, f] = viewport.transform; // user space -> canvas (y down)
+  const det = a * d - b * c;
+  if (!det) return null;
+  const toUser = (cx, cy) => [(d * (cx - e) - c * (cy - f)) / det, (-b * (cx - e) + a * (cy - f)) / det];
+  const shown = (x, y) => toUser(x, viewport.height - y); // shown page (y up) -> canvas -> user
+  const o = shown(0, 0), px = shown(1, 0), py = shown(0, 1);
+  return [px[0] - o[0], px[1] - o[1], py[0] - o[0], py[1] - o[1], o[0], o[1]];
 }
 
 // First-page thumbnail of a PDF at a URL, as a data URL (for tiles that
@@ -205,10 +362,21 @@ async function renderPdfThumbnail(url, longEdge = 360) {
 // image pixels, y down) onto a PDF page as real vector graphics. Throws if
 // anything can't be drawn (e.g. text pdf-lib can't encode) so the caller can
 // fall back to flattening that page.
-function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
+// `shown` is what renderPdfPageToDataUrl returned for the page ({ width,
+// height, toPdf }): the shapes are placed on the page as it was shown and the
+// whole lot is wrapped in that one transform, so they land where they were
+// drawn even when the page's box does not start at 0,0, is cropped, or is
+// rotated. Without it the page's own media box is used as is.
+function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H, shown = null) {
   const { rgb, LineCapStyle } = PDFLib;
-  const { width: pw, height: ph } = page.getSize();
+  const { width: pw, height: ph } = shown || page.getSize();
   const k = pw / W;
+  if (shown && shown.toPdf) {
+    if (!PDFLib.concatTransformationMatrix || !PDFLib.pushGraphicsState) throw new Error('PDF editor cannot place the markup');
+    page.pushOperators(PDFLib.pushGraphicsState(), PDFLib.concatTransformationMatrix(...shown.toPdf));
+  }
+  try { drawShapesInPageSpace(); } finally { if (shown && shown.toPdf) page.pushOperators(PDFLib.popGraphicsState()); }
+  function drawShapesInPageSpace() {
   const X = (x) => x * k;
   const Y = (y) => ph - y * k;
   const map = { X, Y, k, ph };
@@ -324,17 +492,91 @@ function drawShapesOnPdfPage(PDFLib, page, font, shapes, W, H) {
       }
     }
   }
+  }
+}
+
+// Pinch to zoom (two fingers), ctrl/cmd + wheel and, when `dragPans` is on, a
+// one-finger or mouse drag to pan, on a scrolling `holder` whose zoomed
+// picture getEl() returns. setZoom(z) applies a level; the helper keeps the
+// point under the fingers still and (listening in the capture phase) stops a
+// second finger reaching the picture's own handlers, so a pinch over the
+// markup canvas never draws. onPinchStart lets the editor drop a stroke the
+// first finger had started. Returns zoomAt / zoomBy for buttons.
+function wirePinchZoom(holder, getEl, { getZoom, setZoom, min = 1, max = 8, dragPans = false, onPinchStart } = {}) {
+  const pointers = new Map();
+  let pinch = null; // { dist, zoom } while two fingers are down
+  let drag = null;  // { x, y, left, top } while one finger / the mouse pans
+  let lastMid = null;
+  const zoomAt = (z, cx, cy) => {
+    z = Math.min(max, Math.max(min, z));
+    const el = getEl();
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const fx = r.width ? (cx - r.left) / r.width : 0.5, fy = r.height ? (cy - r.top) / r.height : 0.5;
+    setZoom(z);
+    const n = el.getBoundingClientRect();
+    holder.scrollLeft += (n.left + fx * n.width) - cx;
+    holder.scrollTop += (n.top + fy * n.height) - cy;
+  };
+  holder.addEventListener('pointerdown', (e) => {
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { dist: Math.max(1, Math.hypot(a[0] - b[0], a[1] - b[1])), zoom: getZoom() };
+      lastMid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      drag = null;
+      if (onPinchStart) onPinchStart();
+      e.stopPropagation();
+    } else if (pointers.size === 1 && dragPans) {
+      drag = { x: e.clientX, y: e.clientY, left: holder.scrollLeft, top: holder.scrollTop };
+    }
+  }, true);
+  holder.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pinch && pointers.size >= 2) {
+      const [a, b] = [...pointers.values()];
+      const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      holder.scrollLeft -= mid[0] - lastMid[0];
+      holder.scrollTop -= mid[1] - lastMid[1];
+      lastMid = mid;
+      zoomAt(pinch.zoom * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.dist, mid[0], mid[1]);
+      e.stopPropagation();
+      e.preventDefault();
+    } else if (drag) {
+      holder.scrollLeft = drag.left - (e.clientX - drag.x);
+      holder.scrollTop = drag.top - (e.clientY - drag.y);
+    }
+  }, true);
+  const up = (e) => {
+    const wasPinch = !!pinch;
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (!pointers.size) drag = null;
+    if (wasPinch) e.stopPropagation();
+  };
+  holder.addEventListener('pointerup', up, true);
+  holder.addEventListener('pointercancel', up, true);
+  holder.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    zoomAt(getZoom() * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
+  }, { passive: false });
+  const zoomBy = (f) => { const r = holder.getBoundingClientRect(); zoomAt(getZoom() * f, r.left + r.width / 2, r.top + r.height / 2); };
+  return { zoomAt, zoomBy };
 }
 
 // Shared in-app PDF viewer - one place quotes, invoices, documents and signed
 // onboarding documents all show up. Pages are rendered to images (pdf.js)
-// so a PDF looks and behaves like a photo: click through the pages, and -
-// when `opts.projectId` is given - mark a page up with the same editor
-// photos use. "Save marked-up copy" writes a NEW PDF into that project's
-// Documents (the original is never changed): untouched pages are kept as
-// they were, marked-up pages are replaced with the annotated picture.
-// opts: { projectId, folder, onSaved, bucket }. Falls back to the browser's own PDF
-// viewer in an iframe if pdf.js can't be loaded.
+// so a PDF looks and behaves like a photo: click through the pages, zoom
+// (buttons, pinch, ctrl + wheel) and - when `opts.projectId` is given - mark
+// a page up with the same editor photos use. "Save markup" either replaces
+// the document that was opened (new file stored, its row pointed at it, the
+// old file removed) or saves a new document with a name of your choosing;
+// untouched pages are kept as they were, marked-up pages get the drawings as
+// vectors over the original page (flattened to a picture only if that fails).
+// opts: { projectId, folder, onSaved, bucket, startPage }. Falls back to the
+// browser's own PDF viewer in an iframe if pdf.js can't be loaded.
 async function openPdfViewer(path, title, opts = {}) {
   ensureDarkOverlayStyles();
   const overlay = document.createElement('div');
@@ -390,7 +632,8 @@ async function openPdfViewer(path, title, opts = {}) {
   const rendered = {};            // pageIndex -> { dataUrl, width, height }
   const annotated = new Map();    // pageIndex -> { blob (flattened JPEG), shapes, width, height }
   const annotatedUrls = new Map(); // pageIndex -> object URL of that blob (for display only)
-  let index = 0;
+  let index = Math.min(Math.max(0, parseInt(opts.startPage, 10) || 0), pageCount - 1);
+  let zoom = 1; // 1 = the page fitted to the screen; kept while paging
 
   async function pageImage(i) {
     if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
@@ -487,14 +730,19 @@ async function openPdfViewer(path, title, opts = {}) {
         ${docRowId ? `<button type="button" class="secondary" id="pv-rename" style="padding:6px 12px;">Rename page</button>` : ''}
         ${canMarkup ? `<button type="button" id="pv-markup" style="padding:6px 12px;">Mark up this page</button>` : ''}
         ${canMarkup ? `<button type="button" class="secondary" id="pv-planpages" style="padding:6px 12px;">Copy page into plan pages</button>` : ''}
-        ${canMarkup && annotated.size ? `<button type="button" id="pv-save" style="padding:6px 12px;">Save marked-up copy (${annotated.size} page${annotated.size === 1 ? '' : 's'})</button>` : ''}
+        ${canMarkup && annotated.size ? `<button type="button" id="pv-save" style="padding:6px 12px;">Save markup (${annotated.size} page${annotated.size === 1 ? '' : 's'})</button>` : ''}
+        <span style="display:inline-flex; gap:4px; align-items:center;">
+          <button type="button" class="secondary" id="pv-zoom-out" aria-label="Zoom out" style="padding:6px 12px;">&minus;</button>
+          <button type="button" class="secondary" id="pv-zoom-fit" style="padding:6px 10px; font-size:12px; min-width:52px;">${Math.round(zoom * 100)}%</button>
+          <button type="button" class="secondary" id="pv-zoom-in" aria-label="Zoom in" style="padding:6px 12px;">+</button>
+        </span>
         <a id="pv-download" class="link-quiet" href="${signedUrl}" target="_blank" style="color:#fff; font-size:13px;">Download original</a>
         <button type="button" class="secondary" id="pv-close" style="padding:6px 12px;">Close</button>
       </div>
       ${pageCount > 1 && pageNames.some(Boolean) ? `<div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;">${Array.from({ length: pageCount }, (_, i) => `<button type="button" class="secondary pv-tab" data-i="${i}" style="padding:5px 12px; font-size:12px; ${i === index ? 'outline:2px solid #fff;' : ''}">${escapeHtml(pageLabel(i))}</button>`).join('')}</div>` : ''}
       <div id="pv-msg" style="color:#fca5a5; font-size:12px; min-height:14px;"></div>
-      <div style="flex:1; min-height:0; width:100%; overflow:auto; display:flex; justify-content:center;">
-        <p id="pv-loading" style="color:#fff;">Rendering page...</p>
+      <div id="pv-holder" style="flex:1; min-height:0; width:100%; overflow:auto; display:flex; touch-action:none; overscroll-behavior:contain; cursor:grab;">
+        <p id="pv-loading" style="color:#fff; margin:0 auto;">Rendering page...</p>
       </div>`;
     overlay.querySelector('#pv-close').addEventListener('click', close);
     if (pageCount > 1) {
@@ -505,7 +753,26 @@ async function openPdfViewer(path, title, opts = {}) {
     const img = await pageImage(index);
     const holder = overlay.querySelector('#pv-loading') && overlay.querySelector('#pv-loading').parentElement;
     if (!holder) return; // navigated away / closed while rendering
-    holder.innerHTML = `<img src="${img.url}" style="max-width:100%; max-height:100%; object-fit:contain; background:#fff; border-radius:4px; align-self:flex-start;" />`;
+    // At 100% the page fits the space (contain); zoomed in, its width is that
+    // fitted width times the zoom and the holder scrolls. margin:auto (not
+    // justify-content) centres a small page without clipping a big one's left edge.
+    holder.innerHTML = `<img id="pv-page" src="${img.url}" draggable="false" style="max-width:100%; max-height:100%; object-fit:contain; background:#fff; border-radius:4px; align-self:flex-start; margin:0 auto; user-select:none; -webkit-user-drag:none;" />`;
+    const pageEl = holder.querySelector('#pv-page');
+    const fitWidth = () => {
+      const iw = pageEl.naturalWidth || 1, ih = pageEl.naturalHeight || 1;
+      return Math.min(holder.clientWidth, holder.clientHeight * iw / ih, iw);
+    };
+    const applyZoom = () => {
+      if (zoom <= 1) { zoom = 1; pageEl.style.width = ''; pageEl.style.maxWidth = '100%'; pageEl.style.maxHeight = '100%'; }
+      else { pageEl.style.maxWidth = 'none'; pageEl.style.maxHeight = 'none'; pageEl.style.width = `${Math.round(fitWidth() * zoom)}px`; }
+      const fitBtn = overlay.querySelector('#pv-zoom-fit');
+      if (fitBtn) fitBtn.textContent = `${Math.round(zoom * 100)}%`;
+    };
+    if (pageEl.complete && pageEl.naturalWidth) applyZoom(); else pageEl.addEventListener('load', applyZoom, { once: true });
+    const zoomer = wirePinchZoom(holder, () => pageEl, { getZoom: () => zoom, setZoom: (z) => { zoom = z; applyZoom(); }, min: 1, max: 8, dragPans: true });
+    overlay.querySelector('#pv-zoom-in').addEventListener('click', () => zoomer.zoomBy(1.5));
+    overlay.querySelector('#pv-zoom-out').addEventListener('click', () => zoomer.zoomBy(1 / 1.5));
+    overlay.querySelector('#pv-zoom-fit').addEventListener('click', () => { zoom = 1; applyZoom(); });
 
     overlay.querySelectorAll('.pv-tab').forEach(b => b.addEventListener('click', () => { index = parseInt(b.dataset.i, 10); render(); }));
     const renameBtn = overlay.querySelector('#pv-rename');
@@ -536,6 +803,7 @@ async function openPdfViewer(path, title, opts = {}) {
           otherSummaries: others.map(a => summariseMarkup(a.shapes)),
           inheritedScale: (others.map(a => a.shapes.find(sh => sh.type === 'scale')).find(Boolean)) || null,
         } : {};
+        planExtra.saveLabel = 'Done, back to the document';
         openPhotoMarkup(rendered[pageIndex].dataUrl, async (blob, shapes, size) => {
           if (annotatedUrls.has(pageIndex)) URL.revokeObjectURL(annotatedUrls.get(pageIndex));
           annotated.set(pageIndex, { blob, shapes, width: size.width, height: size.height });
@@ -545,60 +813,112 @@ async function openPdfViewer(path, title, opts = {}) {
       });
     }
     const saveBtn = overlay.querySelector('#pv-save');
-    if (saveBtn) saveBtn.addEventListener('click', async () => {
-      const msgEl = overlay.querySelector('#pv-msg');
-      saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; msgEl.textContent = '';
+    if (saveBtn) saveBtn.addEventListener('click', openSaveDialog);
+  }
+
+  // Builds the marked-up PDF: untouched pages as they were, each marked-up
+  // page with its drawings laid over the ORIGINAL page as vector shapes (text
+  // stays selectable, file stays small), placed with the renderer's own
+  // page transform so they sit exactly where they were drawn. Only if that
+  // fails is the page swapped for the flattened picture.
+  async function buildMarkedUpPdf() {
+    const PDFLib = await loadPdfLib();
+    const doc = await PDFLib.PDFDocument.load(bytes);
+    const font = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+    for (const [i, a] of annotated) {
+      if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
+      const { width, height } = rendered[i];
+      const page = doc.getPage(i);
+      let drawn = false;
+      try { drawShapesOnPdfPage(PDFLib, page, font, a.shapes, a.width, a.height, rendered[i]); drawn = true; }
+      catch (shapeErr) { console.warn('Could not draw markup as vectors, flattening this page instead:', shapeErr.message); }
+      if (!drawn) {
+        const jpg = await doc.embedJpg(await a.blob.arrayBuffer());
+        doc.insertPage(i, [width, height]).drawImage(jpg, { x: 0, y: 0, width, height });
+        doc.removePage(i + 1);
+      }
+    }
+    return doc.save();
+  }
+
+  // Save markup: replace the document that was opened (keeps its name and
+  // tile; the new file is stored, the row pointed at it and the old file
+  // removed) or save a new document with a name of your choosing. Either
+  // way the saved document opens straight back up on the same page.
+  function openSaveDialog() {
+    const cleanTitle = String(title || 'Document').replace(/\.pdf$/i, '').replace(/(\s*\(marked up\)|\s*-\s*marked up(\s+\d+)?)+$/i, '').trim() || 'Document';
+    const suggested = `${cleanTitle} - marked up` === String(title || '').replace(/\.pdf$/i, '').trim() ? `${cleanTitle} - marked up 2` : `${cleanTitle} - marked up`;
+    const canReplace = !!docRowId;
+    const dlg = document.createElement('div');
+    dlg.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:350; display:flex; align-items:center; justify-content:center; padding:16px;';
+    dlg.innerHTML = `
+      <div class="card" style="max-width:460px; width:100%; max-height:90vh; overflow-y:auto;">
+        <h2>Save markup</h2>
+        <p class="subtitle" style="margin-bottom:10px;">${annotated.size} page${annotated.size === 1 ? '' : 's'} marked up. The drawings are kept as part of the PDF.</p>
+        ${canReplace ? `<label style="display:flex; align-items:flex-start; gap:8px; font-weight:400; margin-top:0;"><input type="radio" name="pv-save-how" value="replace" checked style="width:auto; margin-top:3px;" /> <span><strong>Replace this document</strong><br /><span class="subtitle">${escapeHtml(title || 'Document')} is updated in place.</span></span></label>` : ''}
+        <label style="display:flex; align-items:flex-start; gap:8px; font-weight:400; margin-top:${canReplace ? '8px' : '0'};"><input type="radio" name="pv-save-how" value="new" ${canReplace ? '' : 'checked'} style="width:auto; margin-top:3px;" /> <span><strong>Save as a new document</strong><br /><span class="subtitle">The one you opened stays as it is.</span></span></label>
+        <div id="pv-save-new" style="margin-top:8px; ${canReplace ? 'display:none;' : ''}">
+          <label>Name</label>
+          <input id="pv-save-name" value="${escapeHtml(suggested)}" />
+        </div>
+        <div id="pv-save-msg"></div>
+        <div style="margin-top:12px; display:flex; gap:8px;">
+          <button type="button" id="pv-save-go">Save</button>
+          <button type="button" class="secondary" id="pv-save-cancel">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(dlg);
+    const how = () => (dlg.querySelector('input[name="pv-save-how"]:checked') || {}).value || 'new';
+    dlg.querySelectorAll('input[name="pv-save-how"]').forEach(r => r.addEventListener('change', () => { dlg.querySelector('#pv-save-new').style.display = how() === 'new' ? '' : 'none'; }));
+    dlg.querySelector('#pv-save-cancel').addEventListener('click', () => dlg.remove());
+    dlg.querySelector('#pv-save-go').addEventListener('click', async () => {
+      const msgEl = dlg.querySelector('#pv-save-msg');
+      const goBtn = dlg.querySelector('#pv-save-go');
+      const replace = how() === 'replace' && canReplace;
+      const newName = dlg.querySelector('#pv-save-name').value.trim().replace(/\.pdf$/i, '');
+      if (!replace && !newName) { msgEl.innerHTML = '<div class="error-box">Give the new document a name.</div>'; return; }
+      goBtn.disabled = true; goBtn.textContent = 'Saving...'; msgEl.innerHTML = '';
       try {
-        const PDFLib = await loadPdfLib();
-        const doc = await PDFLib.PDFDocument.load(bytes);
-        const font = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
-        for (const [i, a] of annotated) {
-          if (!rendered[i]) rendered[i] = await renderPdfPageToDataUrl(pdf, i + 1, 1800);
-          const { width, height } = rendered[i];
-          const page = doc.getPage(i);
-          const size = page.getSize();
-          // Normal case: lay the drawings over the ORIGINAL page as vector
-          // shapes, so its text stays selectable and the file stays small.
-          // Only when the page is rotated or cropped in a way the shapes
-          // wouldn't line up with does it fall back to swapping in the
-          // flattened picture of the page.
-          const lineUp = page.getRotation().angle === 0 && Math.abs(size.width - width) < 1.5 && Math.abs(size.height - height) < 1.5;
-          let drawn = false;
-          if (lineUp) {
-            try { drawShapesOnPdfPage(PDFLib, page, font, a.shapes, a.width, a.height); drawn = true; }
-            catch (shapeErr) { console.warn('Could not draw markup as vectors, flattening this page instead:', shapeErr.message); }
-          }
-          if (!drawn) {
-            const jpg = await doc.embedJpg(await a.blob.arrayBuffer());
-            doc.insertPage(i, [width, height]).drawImage(jpg, { x: 0, y: 0, width, height });
-            doc.removePage(i + 1);
-          }
-        }
-        const outBytes = await doc.save();
+        const outBytes = await buildMarkedUpPdf();
         const { data: { user } } = await supabaseClient.auth.getUser();
         const outPath = `documents/${opts.projectId}/${Date.now()}-marked-up.pdf`;
         const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(outPath, new Blob([outBytes], { type: 'application/pdf' }), { contentType: 'application/pdf' });
         if (upErr) throw upErr;
-        const baseName = String(title || 'Document').replace(/\.pdf$/i, '');
-        const { error: insErr } = await supabaseClient.from('project_documents').insert({
-          project_id: opts.projectId, folder: opts.folder || 'Marked up', file_path: outPath,
-          file_name: `${baseName} (marked up).pdf`, mime_type: 'application/pdf', uploaded_by: user.id,
-          page_names: pageNames.some(Boolean) ? pageNames : null,
-          // Counts of what's now marked up, so the job/quote can export a
-          // schedule PDF later (carries forward what was already on the plan).
-          plan_summary: (() => {
-            if (typeof mergePlanSummary !== 'function') return planSummary;
-            const merged = mergePlanSummary(planSummary, annotated);
-            return planSummaryIsEmpty(merged) ? null : merged;
-          })(),
-        });
-        if (insErr) throw insErr;
+        // Counts of what's now marked up, so the job/quote can export a
+        // schedule PDF later (carries forward what was already on the plan).
+        const summary = (() => {
+          if (typeof mergePlanSummary !== 'function') return planSummary;
+          const merged = mergePlanSummary(planSummary, annotated);
+          return planSummaryIsEmpty(merged) ? null : merged;
+        })();
+        const names = pageNames.some(Boolean) ? pageNames : null;
+        let savedTitle = title;
+        if (replace) {
+          const { data: updated, error: updErr } = await supabaseClient.from('project_documents')
+            .update({ file_path: outPath, page_names: names, plan_summary: summary }).eq('id', docRowId).select('id, file_name');
+          if (updErr) throw updErr;
+          if (!updated || !updated.length) throw new Error('Could not update the document. Refresh and try again.');
+          savedTitle = updated[0].file_name || title;
+          // A leftover file is harmless; the row no longer points at it.
+          await supabaseClient.storage.from('project-documents').remove([path]).catch(() => {});
+        } else {
+          savedTitle = `${newName}.pdf`;
+          const { error: insErr } = await supabaseClient.from('project_documents').insert({
+            project_id: opts.projectId, folder: opts.folder || 'Marked up', file_path: outPath,
+            file_name: savedTitle, mime_type: 'application/pdf', uploaded_by: user.id,
+            page_names: names, plan_summary: summary,
+          });
+          if (insErr) throw insErr;
+        }
+        dlg.remove();
         annotatedUrls.forEach(u => URL.revokeObjectURL(u));
         close();
         if (opts.onSaved) opts.onSaved();
+        if (typeof showToast === 'function') showToast(replace ? `Saved over ${savedTitle}` : `Saved as ${savedTitle}`);
+        openPdfViewer(outPath, savedTitle, { ...opts, startPage: index });
       } catch (err) {
-        msgEl.textContent = `Could not save: ${err.message}`;
-        saveBtn.disabled = false; saveBtn.textContent = `Save marked-up copy (${annotated.size} page${annotated.size === 1 ? '' : 's'})`;
+        msgEl.innerHTML = `<div class="error-box">Could not save: ${escapeHtml(err.message)}</div>`;
+        goBtn.disabled = false; goBtn.textContent = 'Save';
       }
     });
   }
@@ -655,11 +975,13 @@ async function generateClientPdf(docType, recordId) {
   const { data: before } = await supabaseClient.from(table).select(`${genKey}, ${errKey}`).eq('id', recordId).single();
   const startedAt = Date.now();
   const lastGenerated = before ? before[genKey] : null;
+  const { data: { session } } = await supabaseClient.auth.getSession();
   return new Promise((resolve, reject) => {
     let finished = false, timer = null;
     const finish = (fn, value) => { if (finished) return; finished = true; clearInterval(timer); fn(value); };
     fetch('/.netlify/functions/generate-client-document-pdf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc_type: docType, record_id: recordId }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ doc_type: docType, record_id: recordId }),
     }).then(async (res) => {
       let body = null; try { body = await res.json(); } catch (e) { /* not JSON: keep watching the record */ }
       if (res.ok && body && body.ok) finish(resolve, body);
@@ -682,20 +1004,20 @@ async function generateClientPdf(docType, recordId) {
 function autoGenerateInvoicePdf(invoiceId) {
   try {
     if (!invoiceId) return;
-    fetch('/.netlify/functions/generate-client-document-pdf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+    supabaseClient.auth.getSession().then(({ data: { session } }) => fetch('/.netlify/functions/generate-client-document-pdf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, keepalive: true,
       body: JSON.stringify({ doc_type: 'invoice', record_id: invoiceId }),
-    }).catch(() => {});
+    })).catch(() => {});
   } catch (e) { /* the Generate PDF button is still there */ }
 }
 
 function autoGenerateQuotePdf(project) {
   try {
     if (!project || !project.id || !project.quote_token || project.proposal_template === 'direct_job') return;
-    fetch('/.netlify/functions/generate-client-document-pdf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+    supabaseClient.auth.getSession().then(({ data: { session } }) => fetch('/.netlify/functions/generate-client-document-pdf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, keepalive: true,
       body: JSON.stringify({ doc_type: 'quote', record_id: project.id }),
-    }).catch(() => {});
+    })).catch(() => {});
   } catch (e) { /* the Generate PDF button is still there */ }
 }
 
@@ -732,26 +1054,113 @@ async function compressImage(file, maxDimension = 1920, quality = 0.82) {
     const name = file.name.replace(/\.[^.]+$/, '') + '.' + ext;
     return new File([blob], name, { type: outputType });
   } catch (err) {
-    console.warn('compressImage: falling back to original file —', err.message);
+    console.warn('compressImage: falling back to original file:', err.message);
     return file;
   }
+}
+
+// Uploads one or more files to a bucket one at a time and never throws for a
+// single bad file. Returns { urls, paths, failed: [{ file, message, error }] }.
+// onProgress(done, total) fires before each file and once at the end;
+// onUploaded(url, file, index, path) is awaited after each file lands (a
+// throw there counts the file as failed and removes the just-uploaded object
+// so a retry leaves no orphan). stopOnError stops at the first failure.
+async function uploadPhotosBatch(fileList, folder, bucket = 'proposal-photos', { onProgress, onUploaded, stopOnError = false } = {}) {
+  const files = Array.from(fileList || []);
+  const total = files.length;
+  const urls = [];
+  const paths = [];
+  const failed = [];
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    if (onProgress) onProgress(i, total);
+    let path = null;
+    try {
+      const compressed = await compressImage(file);
+      path = `${folder}/${Date.now()}-${compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const { error } = await supabaseClient.storage.from(bucket).upload(path, compressed);
+      if (error) throw error;
+      const { data } = supabaseClient.storage.from(bucket).getPublicUrl(path);
+      const url = data.publicUrl;
+      if (onUploaded) {
+        try {
+          await onUploaded(url, file, i, path);
+        } catch (err) {
+          try { await supabaseClient.storage.from(bucket).remove([path]); } catch (_) { /* best effort */ }
+          throw err;
+        }
+      }
+      urls.push(url);
+      paths.push(path);
+    } catch (err) {
+      failed.push({ file, message: (err && err.message) || String(err), error: err });
+      if (stopOnError) break;
+    }
+  }
+  if (onProgress) onProgress(total, total);
+  return { urls, paths, failed };
 }
 
 // Uploads one or more files to a public bucket and returns their public
 // URLs. `folder` keeps things tidy, e.g. 'portfolio' or a project id.
 // `bucket` defaults to proposal-photos (quotes/portfolio); site photos
 // taken from the clock-out flow use 'site-photos' instead.
-async function uploadPhotos(fileList, folder, bucket = 'proposal-photos') {
-  const urls = [];
-  for (const file of fileList) {
-    const compressed = await compressImage(file);
-    const path = `${folder}/${Date.now()}-${compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const { error } = await supabaseClient.storage.from(bucket).upload(path, compressed);
-    if (error) throw error;
-    const { data } = supabaseClient.storage.from(bucket).getPublicUrl(path);
-    urls.push(data.publicUrl);
-  }
+// Stops at the first failure and throws it (wrapper over uploadPhotosBatch).
+// opts.onProgress(done, total) is optional.
+async function uploadPhotos(fileList, folder, bucket = 'proposal-photos', opts = {}) {
+  const { urls, failed } = await uploadPhotosBatch(fileList, folder, bucket, { ...opts, stopOnError: true });
+  if (failed.length) throw failed[0].error;
   return urls;
+}
+
+// Wires a multi-file input to upload site photos into the 'site-photos'
+// bucket under `${projectId}/`, inserting one project_photos row per file as
+// it lands. Shows "Uploading n of N...", disables the input while running, then
+// "N photos added" or "x of N added. y failed: names (reason) [Retry y]" with
+// the failed File objects kept in memory for the retry. staffId defaults to
+// the logged-in user. onAdded(urls) runs after each run that added anything.
+function wireSitePhotoInput(fileInput, msgEl, { projectId, staffId, onAdded } = {}) {
+  let pending = [];
+  let clearTimer = null;
+  async function run(files) {
+    if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
+    const total = files.length;
+    if (!total) return;
+    fileInput.disabled = true;
+    msgEl.innerHTML = `<p class="subtitle">Uploading 1 of ${total}...</p>`;
+    let uploader = staffId;
+    if (!uploader) {
+      try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        uploader = user.id;
+      } catch (err) {
+        fileInput.disabled = false;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message || String(err))}</div>`;
+        return;
+      }
+    }
+    const { urls, failed } = await uploadPhotosBatch(files, projectId, 'site-photos', {
+      onProgress: (done, t) => { if (done < t) msgEl.innerHTML = `<p class="subtitle">Uploading ${done + 1} of ${t}...</p>`; },
+      onUploaded: async (url) => {
+        const { error } = await supabaseClient.from('project_photos').insert({ project_id: projectId, staff_id: uploader, url });
+        if (error) throw error;
+      },
+    });
+    fileInput.disabled = false;
+    fileInput.value = '';
+    pending = failed.map(f => f.file);
+    if (urls.length && onAdded) await onAdded(urls);
+    if (!failed.length) {
+      msgEl.innerHTML = `<div class="success-box">${urls.length} photo${urls.length === 1 ? '' : 's'} added.</div>`;
+      clearTimer = setTimeout(() => { if (!pending.length) msgEl.innerHTML = ''; }, 4000);
+      return;
+    }
+    msgEl.innerHTML = `<div class="error-box">${urls.length} of ${total} added. ${failed.length} failed: ${failed.map(f => escapeHtml(f.file.name)).join(', ')} (${escapeHtml(failed[0].message)}). <button type="button" class="secondary site-photo-retry-btn" style="margin-left:8px;">Retry ${failed.length}</button></div>`;
+    msgEl.querySelector('.site-photo-retry-btn').addEventListener('click', () => run(pending));
+  }
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) run(Array.from(fileInput.files));
+  });
 }
 
 // Requests a resized, recompressed rendition of a Supabase Storage photo
@@ -765,6 +1174,12 @@ async function uploadPhotos(fileList, folder, bucket = 'proposal-photos') {
 // it, and costs nothing extra to add since every photo in this app is
 // already a Supabase Storage public URL. Falls back to the original URL
 // untouched for anything that isn't (e.g. a blank/missing value).
+// Site photos can be videos (ServiceM8 brought some across): those play
+// in a <video> rather than going through the image tools.
+function isVideoUrl(url) {
+  return /\.(mp4|mov|m4v|webm)$/i.test(String(url || '').split('?')[0]);
+}
+
 function supaImageVariant(url, width = 1200, quality = 70) {
   if (!url || typeof url !== 'string') return url;
   const marker = '/storage/v1/object/public/';
@@ -807,12 +1222,15 @@ function ensureDarkOverlayStyles() {
 // `opts` (optional) turns on naming and markup for callers whose photos are
 // real database rows: { captions: string[], onRename(index, name),
 // onMarkup(index, blob), onClose() }. Without it, it's a plain viewer.
+// onDelete(index) adds a Delete button: it resolves once the photo is gone, the viewer then
+// drops that entry from urls and captions and the caller drops it from its own list.
+// canDelete(index) (optional) returning false hides Delete for that photo.
 function openPhotoLightbox(urls, startIndex = 0, opts = null) {
   let index = startIndex;
   ensureDarkOverlayStyles();
   const overlay = document.createElement('div');
   overlay.className = 'te-dark-overlay';
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:300; display:flex; align-items:center; justify-content:center;';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:300; display:flex; align-items:center; justify-content:center; touch-action:pan-y pinch-zoom;';
   const navBtnStyle = 'position:absolute; top:50%; transform:translateY(-50%); background:rgba(255,255,255,0.1); color:#fff; border:none; width:44px; height:44px; border-radius:50%; font-size:20px; cursor:pointer;';
 
   function close() {
@@ -821,19 +1239,22 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
   }
 
   function render() {
-    const editable = opts && (opts.onRename || opts.onMarkup);
+    const editable = opts && (opts.onRename || opts.onMarkup || opts.onDelete || opts.onPostToFeed);
+    const canDel = !!(opts && opts.onDelete && (!opts.canDelete || opts.canDelete(index)));
     overlay.innerHTML = `
-      <button type="button" id="lb-close" style="position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.1); color:#fff; border:none; width:36px; height:36px; border-radius:50%; font-size:18px; cursor:pointer;">&times;</button>
+      <button type="button" id="lb-close" aria-label="Close" style="position:absolute; top:calc(env(safe-area-inset-top, 0px) + 12px); right:12px; background:rgba(255,255,255,0.1); color:#fff; border:none; width:44px; height:44px; border-radius:50%; font-size:24px; cursor:pointer;">&times;</button>
       ${urls.length > 1 ? `<button type="button" id="lb-prev" style="${navBtnStyle} left:16px;">&larr;</button>` : ''}
-      <img src="${urls[index]}" style="max-width:88vw; max-height:${editable ? '74vh' : '85vh'}; object-fit:contain; border-radius:8px;${editable ? ' margin-bottom:60px;' : ''}" />
+      <img src="${escapeHtml(urls[index])}" draggable="false" style="max-width:88vw; max-height:${editable ? '74vh' : '85vh'}; object-fit:contain; border-radius:8px; user-select:none; -webkit-user-drag:none;${editable ? ' margin-bottom:60px;' : ''}" />
       ${urls.length > 1 ? `<button type="button" id="lb-next" style="${navBtnStyle} right:16px;">&rarr;</button>` : ''}
       ${urls.length > 1 ? `<div style="position:absolute; bottom:${editable ? '70px' : '20px'}; left:0; right:0; text-align:center; color:#fff; font-size:13px;">${index + 1} / ${urls.length}</div>` : ''}
       ${editable ? `
-        <div style="position:absolute; bottom:14px; left:50%; transform:translateX(-50%); display:flex; gap:8px; align-items:center; width:min(560px, 92vw);">
-          ${opts.onRename ? `<input id="lb-name" placeholder="Name this photo..." value="${String((opts.captions && opts.captions[index]) || '').replace(/"/g, '&quot;')}" style="flex:1; margin:0;" />` : '<span style="flex:1;"></span>'}
+        <div style="position:absolute; bottom:14px; left:50%; transform:translateX(-50%); display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:flex-end; width:min(560px, 92vw);">
+          ${opts.onRename ? `<input id="lb-name" placeholder="Name this photo..." value="${escapeHtml((opts.captions && opts.captions[index]) || '')}" style="flex:1; min-width:150px; margin:0;" />` : '<span style="flex:1;"></span>'}
+          ${opts.onPostToFeed ? `<button type="button" class="secondary" id="lb-post" style="white-space:nowrap;">Post to feed</button>` : ''}
           ${opts.onMarkup ? `<button type="button" id="lb-markup" style="white-space:nowrap;">Mark up</button>` : ''}
+          ${canDel ? `<span id="lb-del-wrap" style="display:flex; gap:6px; align-items:center;"><button type="button" class="secondary" id="lb-delete" style="white-space:nowrap;">Delete</button></span>` : ''}
         </div>
-        <div id="lb-msg" style="position:absolute; bottom:56px; left:0; right:0; text-align:center; color:#fca5a5; font-size:12px;"></div>` : ''}
+        <div id="lb-msg" style="position:absolute; top:calc(env(safe-area-inset-top, 0px) + 64px); left:16px; right:16px; text-align:center; color:#fca5a5; font-size:13px;"></div>` : ''}
     `;
     overlay.querySelector('#lb-close').addEventListener('click', close);
     if (urls.length > 1) {
@@ -851,6 +1272,9 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
         } catch (err) { msgEl.textContent = `Could not save the name: ${err.message}`; }
       });
     }
+    // Post to feed (job site photos): the caller opens its own form over the viewer.
+    const postBtn = overlay.querySelector('#lb-post');
+    if (postBtn) postBtn.addEventListener('click', (e) => { e.stopPropagation(); opts.onPostToFeed(index); });
     const markupBtn = overlay.querySelector('#lb-markup');
     if (markupBtn) {
       markupBtn.addEventListener('click', () => {
@@ -860,12 +1284,59 @@ function openPhotoLightbox(urls, startIndex = 0, opts = null) {
         });
       });
     }
+    const deleteBtn = overlay.querySelector('#lb-delete');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wrap = overlay.querySelector('#lb-del-wrap');
+        wrap.innerHTML = `<span style="color:#fff; font-size:13px; white-space:nowrap;">Really delete?</span><button type="button" class="danger" id="lb-del-yes">Yes</button><button type="button" class="secondary" id="lb-del-no">No</button>`;
+        const yesBtn = wrap.querySelector('#lb-del-yes');
+        const noBtn = wrap.querySelector('#lb-del-no');
+        noBtn.addEventListener('click', (ev) => { ev.stopPropagation(); render(); });
+        yesBtn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          yesBtn.disabled = true; noBtn.disabled = true; yesBtn.textContent = 'Deleting...';
+          try {
+            await opts.onDelete(index);
+          } catch (err) {
+            const msgEl = overlay.querySelector('#lb-msg');
+            if (msgEl) msgEl.textContent = `Could not delete it: ${friendlyError(err, 'try again')}`;
+            yesBtn.disabled = false; noBtn.disabled = false; yesBtn.textContent = 'Yes';
+            return;
+          }
+          urls.splice(index, 1);
+          if (opts.captions) opts.captions.splice(index, 1);
+          if (!urls.length) close();
+          else { if (index >= urls.length) index = urls.length - 1; render(); }
+        });
+      });
+    }
   }
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  // Swipe left / right moves through the set; only a tap (not a drag) on the dark area closes.
+  let downX = null, downY = null, moved = false;
+  overlay.addEventListener('pointerdown', (e) => {
+    if (!e.isPrimary || e.target.closest('input, textarea, button')) { downX = null; return; }
+    downX = e.clientX; downY = e.clientY; moved = false;
+  });
+  overlay.addEventListener('pointermove', (e) => {
+    if (downX !== null && (Math.abs(e.clientX - downX) > 10 || Math.abs(e.clientY - downY) > 10)) moved = true;
+  });
+  overlay.addEventListener('pointerup', (e) => {
+    if (downX === null) return;
+    const dx = e.clientX - downX, dy = e.clientY - downY;
+    downX = null;
+    const zoomed = window.visualViewport && window.visualViewport.scale > 1.01;
+    if (urls.length > 1 && !zoomed && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+      index = dx < 0 ? (index + 1) % urls.length : (index - 1 + urls.length) % urls.length;
+      render();
+    }
+  });
+  overlay.addEventListener('pointercancel', () => { downX = null; moved = true; });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay && !moved) close(); });
   document.addEventListener('keydown', function onKey(e) {
     if (!document.body.contains(overlay)) { document.removeEventListener('keydown', onKey); return; }
     if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-    if (document.querySelector('.photo-markup-overlay')) return; // markup editor is on top
+    if (document.querySelector('.photo-markup-overlay, .feed-photo-post-overlay')) return; // markup editor or post form is on top
     if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
     else if (e.key === 'ArrowLeft' && urls.length > 1) { index = (index - 1 + urls.length) % urls.length; render(); }
     else if (e.key === 'ArrowRight' && urls.length > 1) { index = (index + 1) % urls.length; render(); }
@@ -901,7 +1372,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     if (!res.ok) throw new Error('Could not load the photo');
     bitmap = await createImageBitmap(await res.blob());
   } catch (err) {
-    overlay.innerHTML = `<p style="color:#fca5a5;">${err.message}</p><button type="button" id="mk-err-close">Close</button>`;
+    overlay.innerHTML = `<p style="color:#fca5a5;">${escapeHtml(err.message)}</p><button type="button" id="mk-err-close">Close</button>`;
     overlay.querySelector('#mk-err-close').addEventListener('click', () => overlay.remove());
     return;
   }
@@ -916,6 +1387,8 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
   let tool = 'pen', colour = COLOURS[0], sizeIdx = 1;
   let fillMode = 0; // boxes only: 0 outline, 1 solid fill, 2 see-through highlight
   const FILL_LABELS = ['Outline', 'Solid fill', 'Highlight'];
+  // The PDF viewer hands the page back to itself to be saved from there, so its button says so.
+  const saveLabel = extra.saveLabel || 'Save marked-up copy';
   // initialShapes lets a caller reopen earlier work (the PDF viewer does, so
   // a marked-up page can be edited again as shapes, not as a flattened picture).
   const shapes = initialShapes ? JSON.parse(JSON.stringify(initialShapes)) : [];
@@ -995,16 +1468,49 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       <button type="button" class="secondary" id="mk-toggle-tools" style="padding:6px 12px; font-size:13px;">Hide tools</button>
       <span id="mk-summary" style="color:#fff; font-size:13px; display:none;"></span>
       <button type="button" class="secondary" id="mk-undo2" style="padding:6px 12px; font-size:13px; display:none;">Undo</button>
+      <span style="display:inline-flex; gap:4px; align-items:center;">
+        <button type="button" class="secondary" id="mk-zoom-out" aria-label="Zoom out" style="padding:6px 12px; font-size:13px;">&minus;</button>
+        <button type="button" class="secondary" id="mk-zoom-fit" style="padding:6px 10px; font-size:12px; min-width:52px;">100%</button>
+        <button type="button" class="secondary" id="mk-zoom-in" aria-label="Zoom in" style="padding:6px 12px; font-size:13px;">+</button>
+      </span>
+      <span style="color:#94a3b8; font-size:11px;">Pinch (or ctrl + scroll) to zoom, two fingers to pan</span>
     </div>
-    <canvas id="mk-canvas" width="${W}" height="${H}" style="max-width:94vw; max-height:${plan ? '52vh' : '62vh'}; touch-action:none; border-radius:6px; cursor:crosshair; flex-shrink:0;"></canvas>
+    <div id="mk-zoom" style="max-width:94vw; max-height:${plan ? '52vh' : '62vh'}; overflow:auto; flex-shrink:0; touch-action:none; overscroll-behavior:contain; border-radius:6px;">
+      <canvas id="mk-canvas" width="${W}" height="${H}" style="display:block; touch-action:none; cursor:crosshair;"></canvas>
+    </div>
     <div id="mk-msg" style="color:#fca5a5; font-size:12px;"></div>
     <div style="display:flex; gap:8px;">
-      <button type="button" id="mk-save">Save marked-up copy</button>
+      <button type="button" id="mk-save">${escapeHtml(saveLabel)}</button>
       <button type="button" class="secondary" id="mk-cancel">Cancel</button>
     </div>`;
 
   const canvas = overlay.querySelector('#mk-canvas');
   const ctx = canvas.getContext('2d');
+  // Zoom: 100% is the page fitted to the space the canvas has; above that the
+  // canvas is shown bigger and its holder scrolls. Drawing already maps the
+  // pointer through the canvas's on-screen size, so nothing else changes.
+  const zoomHolder = overlay.querySelector('#mk-zoom');
+  let zoom = 1;
+  const fitScale = () => {
+    const maxW = Math.max(100, window.innerWidth * 0.94), maxH = Math.max(100, window.innerHeight * (plan ? 0.52 : 0.62));
+    return Math.min(1, maxW / W, maxH / H);
+  };
+  const applyZoom = () => {
+    canvas.style.width = `${Math.round(W * fitScale() * zoom)}px`;
+    overlay.querySelector('#mk-zoom-fit').textContent = `${Math.round(zoom * 100)}%`;
+  };
+  applyZoom();
+  const onResize = () => { if (document.body.contains(overlay)) applyZoom(); else window.removeEventListener('resize', onResize); };
+  window.addEventListener('resize', onResize);
+  const zoomer = wirePinchZoom(zoomHolder, () => canvas, {
+    getZoom: () => zoom, setZoom: (z) => { zoom = z; applyZoom(); }, min: 1, max: 8,
+    // A second finger means zoom, not draw: drop whatever the first finger started.
+    onPinchStart: () => { current = null; dragging = null; resizing = null; pendingTap = null; redraw(); },
+  });
+  overlay.querySelector('#mk-zoom-in').addEventListener('click', () => zoomer.zoomBy(1.5));
+  overlay.querySelector('#mk-zoom-out').addEventListener('click', () => zoomer.zoomBy(1 / 1.5));
+  overlay.querySelector('#mk-zoom-fit').addEventListener('click', () => { zoom = 1; applyZoom(); });
+  let pendingTap = null; // { tool, x, y }: a tap that acts when the finger lifts, so a pinch never places anything
   const baseWidth = () => Math.max(3, W / 300) * SIZES[sizeIdx];
   const symbolSide = () => Math.max(22, W / 45) * SYMBOL_SIZES[sizeIdx];
   const ppm = () => (plan ? scalePxPerMetre(shapes) : null);
@@ -1431,9 +1937,11 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       redraw();
       return;
     }
-    if (tool === 'erase') {
-      const hit = shapeAt(x, y);
-      if (hit) { shapes.splice(shapes.indexOf(hit), 1); redraw(); }
+    // Taps (delete, place a symbol, add a cable point) act when the finger
+    // lifts, so two fingers landing to zoom never delete or place anything.
+    if (tool === 'erase' || tool === 'symbol' || tool === 'cable') {
+      if (tool === 'cable' && !ppm()) { window.alert('Set the scale first (use "Set scale" on something you know the length of) so cable lengths can be measured.'); return; }
+      pendingTap = { tool, x, y };
       return;
     }
     if (tool === 'text') {
@@ -1443,19 +1951,6 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
         // Straight into Move so the text can be dragged to the right spot.
         setTool('move');
       }
-      return;
-    }
-    if (tool === 'symbol') {
-      const side = symbolSide();
-      shapes.push({ type: 'symbol', symbolId: currentSymbol, colour, side, width: Math.max(1.5, side * 0.06), x1: x - side / 2, y1: y - side / 2, ...(circuit ? { label: circuit } : {}) });
-      redraw();
-      return;
-    }
-    if (tool === 'cable') {
-      if (!ppm()) { window.alert('Set the scale first (use "Set scale" on something you know the length of) so cable lengths can be measured.'); return; }
-      if (!cableDraft) cableDraft = { type: 'cable', colour, width: baseWidth(), cable: cableName(), points: [[x, y]] };
-      else cableDraft.points.push([x, y]);
-      refreshControls(); redraw();
       return;
     }
     canvas.setPointerCapture(e.pointerId);
@@ -1503,6 +1998,23 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     }
   });
   const finish = () => {
+    if (pendingTap) {
+      const { tool: t, x, y } = pendingTap;
+      pendingTap = null;
+      if (t === 'erase') {
+        const hit = shapeAt(x, y);
+        if (hit) { shapes.splice(shapes.indexOf(hit), 1); redraw(); }
+      } else if (t === 'symbol') {
+        const side = symbolSide();
+        shapes.push({ type: 'symbol', symbolId: currentSymbol, colour, side, width: Math.max(1.5, side * 0.06), x1: x - side / 2, y1: y - side / 2, ...(circuit ? { label: circuit } : {}) });
+        redraw();
+      } else if (t === 'cable') {
+        if (!cableDraft) cableDraft = { type: 'cable', colour, width: baseWidth(), cable: cableName(), points: [[x, y]] };
+        else cableDraft.points.push([x, y]);
+        refreshControls(); redraw();
+      }
+      return;
+    }
     if (resizing) { resizing = null; redraw(); return; }
     if (dragging) { dragging = null; redraw(); return; }
     if (!current) return;
@@ -1525,7 +2037,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
     redraw();
   };
   canvas.addEventListener('pointerup', finish);
-  canvas.addEventListener('pointercancel', finish);
+  canvas.addEventListener('pointercancel', () => { pendingTap = null; finish(); });
 
   overlay.querySelector('#mk-save').addEventListener('click', async () => {
     const saveBtn = overlay.querySelector('#mk-save');
@@ -1548,7 +2060,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
       overlay.remove();
     } catch (err) {
       msgEl.textContent = err.message;
-      saveBtn.disabled = false; saveBtn.textContent = 'Save marked-up copy';
+      saveBtn.disabled = false; saveBtn.textContent = saveLabel;
     }
   });
 
@@ -1563,7 +2075,7 @@ async function openPhotoMarkup(url, onSave, initialShapes = null, extra = {}) {
 function renderPhotoThumbs(containerEl, photosArray, onChange) {
   containerEl.innerHTML = photosArray.map((url, i) => `
     <div style="position:relative; display:inline-block; margin:0 8px 8px 0;">
-      <img src="${url}" data-i="${i}" class="thumb-view" style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid var(--border); cursor:pointer;" />
+      <img src="${escapeHtml(isVideoUrl(url) ? url : supaImageVariant(url, 200, 60))}" loading="lazy" data-i="${i}" class="thumb-view" style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid var(--border); cursor:pointer;" />
       <button type="button" data-i="${i}" class="thumb-remove" style="position:absolute; top:-6px; right:-6px; width:20px; height:20px; padding:0; border-radius:50%; font-size:11px; line-height:1;">x</button>
     </div>
   `).join('');
@@ -1585,15 +2097,61 @@ function renderPhotoThumbs(containerEl, photosArray, onChange) {
 let _cachedRole = null;
 async function getMyRole() {
   if (_cachedRole) return _cachedRole;
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) return 'staff';
-  const { data } = await supabaseClient
-    .from('profiles')
-    .select('role')
-    .eq('id', session.user.id)
-    .maybeSingle();
-  _cachedRole = data?.role || 'staff';
+  const profile = await getMyProfile();
+  _cachedRole = profile?.role || 'staff';
   return _cachedRole;
+}
+
+// The logged-in user's own profile row, read once per page (requireLogin
+// starts it, and the nav, theme, role and Home tiles all share that one
+// read). A copy is kept in sessionStorage by user id so the next page can
+// paint its nav straight away from getCachedProfile(); that copy is only
+// for painting, anything that decides access waits for getMyProfile().
+// Returns null when there is no session, no row, or the read failed.
+const PROFILE_CACHE_KEY = 'te-profile';
+const MY_PROFILE_COLS = 'id, role, full_name, theme, home_shortcuts, onboarding_completed_at, active';
+let _profilePromise = null;
+let _myProfile;
+function getMyProfile() {
+  if (_myProfile !== undefined) return Promise.resolve(_myProfile);
+  if (_profilePromise) return _profilePromise;
+  _profilePromise = (async () => {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) return null;
+    const { data, error } = await supabaseClient.from('profiles').select(MY_PROFILE_COLS).eq('id', session.user.id).maybeSingle();
+    if (error) { console.error('getMyProfile failed:', error.message); return null; } // not kept, so the next call tries again
+    _myProfile = data || null;
+    saveCachedProfile(_myProfile);
+    return _myProfile;
+  })().finally(() => { _profilePromise = null; });
+  return _profilePromise;
+}
+function saveCachedProfile(profile) {
+  try {
+    if (profile && profile.id) sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
+    else sessionStorage.removeItem(PROFILE_CACHE_KEY);
+  } catch (e) { /* storage blocked: the next page just reads it again */ }
+}
+// Last page's copy, only if it belongs to whoever is logged in now. Pages await
+// requireLogin (which reads the profile fresh) before the nav paints, so this copy
+// only matters when that fresh read failed; it is used for painting, never access.
+async function getCachedProfile() {
+  if (_myProfile) return _myProfile;
+  try {
+    const raw = sessionStorage.getItem(PROFILE_CACHE_KEY);
+    if (!raw) return null;
+    const copy = JSON.parse(raw);
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    return session && copy && copy.id === session.user.id ? copy : null;
+  } catch (e) { return null; }
+}
+// Keeps this page's copy (and the next page's) in step after the user changes their own row.
+function patchMyProfile(fields) {
+  if (_myProfile) { _myProfile = { ..._myProfile, ...fields }; saveCachedProfile(_myProfile); return; }
+  try {
+    const raw = sessionStorage.getItem(PROFILE_CACHE_KEY);
+    if (raw) sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ ...JSON.parse(raw), ...fields }));
+  } catch (e) { /* storage blocked */ }
 }
 
 function isFinanceRole(role) {
@@ -1610,8 +2168,8 @@ function isPricingRole(role) {
 // column-level grants (see migration_007), so a role-check bug here can't
 // by itself leak pricing.
 const COST_CENTRE_COLS_BASE = 'id, project_id, name, description, sort_order';
-const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, estimated_labour_cost, estimated_material_cost, labour_cost, material_cost, invoiced_amount, stc_total, stc_system_kw, stc_zone_rating, stc_install_year, stc_price_per_certificate, variation_entry_id';
-const LINE_ITEM_COLS_BASE = 'id, cost_centre_id, description, item_type, sort_order, quantity';
+const COST_CENTRE_COLS_PRICING = 'markup_percent, quoted_amount, estimated_labour_cost, estimated_material_cost, labour_cost, material_cost, invoiced_amount, stc_quantity, stc_total, stc_system_kw, stc_zone_rating, stc_install_year, stc_price_per_certificate, variation_entry_id';
+const LINE_ITEM_COLS_BASE = 'id, cost_centre_id, description, item_type, sort_order, quantity, ai_suggested';
 const LINE_ITEM_COLS_PRICING = 'unit_cost';
 
 async function costCentreColumns() {
@@ -1640,7 +2198,90 @@ function moneyOrHidden(n) {
 // whatever the row itself does.
 function mapsLink(address) {
   if (!address) return '';
-  return `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" rel="noopener" class="link-quiet" onclick="event.stopPropagation()">${address}</a>`;
+  return `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" rel="noopener" class="link-quiet" onclick="event.stopPropagation()">${escapeHtml(address)}</a>`;
+}
+
+// ---------- Client sites ----------
+// A client has one office / billing address (clients.address, used on formal documents) and
+// any number of job sites (client_sites). A job keeps the site address it uses in
+// projects.client_address and links to the saved site through projects.client_site_id.
+
+function sameAddress(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+async function loadClientSites(clientId) {
+  if (!clientId) return [];
+  const { data } = await supabaseClient.from('client_sites').select('id, label, address, notes').eq('client_id', clientId).order('created_at');
+  return data || [];
+}
+
+// Which saved site a job address is. The office address is not a site (null). A new address
+// is saved as a site for the client (unless save is false) and its id returned. Pass the
+// client's office address when it is to hand; otherwise it is looked up.
+async function resolveClientSite(clientId, address, officeAddress, { save = true } = {}) {
+  address = String(address || '').trim();
+  if (!clientId || !address) return null;
+  if (officeAddress === undefined) {
+    const { data: c } = await supabaseClient.from('clients').select('address').eq('id', clientId).maybeSingle();
+    officeAddress = c ? c.address : null;
+  }
+  if (sameAddress(address, officeAddress)) return null;
+  const sites = await loadClientSites(clientId);
+  const found = sites.find(s => sameAddress(s.address, address));
+  if (found) return found.id;
+  if (!save) return null;
+  const { data, error } = await supabaseClient.from('client_sites').insert({ client_id: clientId, address }).select('id').single();
+  if (error) {
+    // Two people saving the same new site at once: the unique index keeps one row, use it.
+    const again = (await loadClientSites(clientId)).find(s => sameAddress(s.address, address));
+    return again ? again.id : null;
+  }
+  return data.id;
+}
+
+// Site picker above a job's address box: the client's office address, their saved sites, or
+// another address typed below. The text box always holds the address the job uses; the
+// picker is hidden until a client is chosen.
+function attachSitePicker(selectEl, inputEl) {
+  let client = null, sites = [];
+  const render = () => {
+    if (!client) { selectEl.style.display = 'none'; selectEl.innerHTML = ''; return; }
+    const cur = inputEl.value.trim();
+    const opts = [];
+    if (client.address) opts.push({ v: 'office', t: `Office address: ${client.address}` });
+    sites.forEach(s => opts.push({ v: s.id, t: (s.label ? s.label + ': ' : '') + s.address }));
+    opts.push({ v: 'new', t: sites.length || client.address ? 'Another site (type the address below)' : 'Site address (type it below)' });
+    let selected = 'new';
+    const match = sites.find(s => sameAddress(s.address, cur));
+    if (cur && client.address && sameAddress(cur, client.address)) selected = 'office';
+    else if (match) selected = match.id;
+    else if (!cur && client.address) selected = 'office';
+    selectEl.innerHTML = opts.map(o => `<option value="${escapeHtml(o.v)}"${o.v === selected ? ' selected' : ''}>${escapeHtml(o.t)}</option>`).join('');
+    selectEl.style.display = '';
+  };
+  selectEl.addEventListener('change', () => {
+    const v = selectEl.value;
+    if (v === 'office') inputEl.value = client.address || '';
+    else if (v === 'new') { inputEl.value = ''; inputEl.focus(); }
+    else { const s = sites.find(x => x.id === v); if (s) inputEl.value = s.address; }
+  });
+  inputEl.addEventListener('input', () => { if (client) render(); });
+  inputEl.addEventListener('change', () => { if (client) render(); });
+  return {
+    client: () => client,
+    // Fills an empty address box with the office address (a home owner's site is their home).
+    async setClient(c) {
+      // Switching client: an address that came from the old client's picker goes with them.
+      const cur = inputEl.value.trim();
+      if (client && cur && (sameAddress(cur, client.address) || sites.some(s => sameAddress(s.address, cur)))) inputEl.value = '';
+      client = c || null;
+      sites = client ? await loadClientSites(client.id) : [];
+      if (client && !inputEl.value.trim() && client.address) inputEl.value = client.address;
+      render();
+    },
+    refresh: render,
+  };
 }
 
 // Dev Mode - a time-limited unlock (20 min) for the most dangerous admin
@@ -1697,87 +2338,155 @@ function fuzzyMatchScore(a, b) {
 // last resort, fuzzy business name matching. Returns null if nothing
 // matches confidently enough - the caller should offer to create a new
 // supplier rather than silently guessing wrong.
+// Supplier names without the words every company has. Same list and rules as matchSupplier()
+// in netlify/functions/_shared/supplier-bill-intake.js: account number, then ABN, then bank
+// details, and a name only when nothing on the bill disagrees. MMEM's Haymans and Greentech
+// share an ABN and bank account, so only our account number tells them apart.
+const SUPPLIER_NAME_FILLER = new Set(['pty', 'ltd', 'limited', 'australia', 'australian', 'aust', 'group', 'company', 'the', 'and', 'trading', 'holdings', 'services', 'supplies', 'supply', 'wholesale', 'wholesalers', 'electrical', 'electric', 'solar', 'energy', 'nsw', 'sydney']);
+function supplierNameScore(a, b) {
+  const words = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !SUPPLIER_NAME_FILLER.has(w));
+  const wordsA = new Set(words(a));
+  const wordsB = words(b);
+  if (!wordsA.size || !wordsB.length) return 0;
+  return wordsB.filter(w => wordsA.has(w)).length / Math.max(wordsA.size, wordsB.length);
+}
+
+// Returns { supplier, how }, { supplier: null, shared: [suppliers], how } when the ABN or bank
+// details belong to more than one supplier and our account number is missing, or null.
 async function findMatchingSupplier(fields) {
   const { name, ourAccountNumber, abn, bsb, bankAccountNumber } = typeof fields === 'string' ? { name: fields } : fields;
   const { data: suppliers } = await supabaseClient.from('suppliers').select('*');
   const list = suppliers || [];
+  const digits = (v) => String(v || '').replace(/\D/g, '');
 
-  if (ourAccountNumber) {
-    const match = list.find(s => s.our_account_number && s.our_account_number.trim() === String(ourAccountNumber).trim());
-    if (match) return match;
+  const acct = String(ourAccountNumber || '').trim();
+  if (acct) {
+    const hits = list.filter(s => s.our_account_number && s.our_account_number.trim().toLowerCase() === acct.toLowerCase());
+    if (hits.length === 1) return { supplier: hits[0], how: 'account number' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'account number' };
   }
-  if (abn) {
-    const normalizedAbn = String(abn).replace(/\s/g, '');
-    const match = list.find(s => s.abn && s.abn.replace(/\s/g, '') === normalizedAbn);
-    if (match) return match;
+  const abnDigits = digits(abn);
+  if (abnDigits) {
+    const hits = list.filter(s => digits(s.abn) === abnDigits);
+    if (hits.length === 1) return { supplier: hits[0], how: 'ABN' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'ABN' };
   }
-  if (bsb && bankAccountNumber) {
-    const match = list.find(s => s.bsb === bsb && s.bank_account_number === bankAccountNumber);
-    if (match) return match;
+  const bsbDigits = digits(bsb), bankDigits = digits(bankAccountNumber);
+  if (bsbDigits && bankDigits) {
+    const hits = list.filter(s => digits(s.bsb) === bsbDigits && digits(s.bank_account_number) === bankDigits);
+    if (hits.length === 1) return { supplier: hits[0], how: 'bank details' };
+    if (hits.length > 1) return { supplier: null, shared: hits, how: 'bank details' };
   }
 
   let best = null, bestScore = 0;
   list.forEach(s => {
-    const score = fuzzyMatchScore(s.name, name);
+    if (abnDigits && digits(s.abn) && digits(s.abn) !== abnDigits) return; // the bill's ABN is someone else's
+    if (bsbDigits && bankDigits && digits(s.bank_account_number) && (digits(s.bsb) !== bsbDigits || digits(s.bank_account_number) !== bankDigits)) return;
+    const score = supplierNameScore(s.name, name);
     if (score > bestScore) { bestScore = score; best = s; }
   });
-  return bestScore >= 0.5 ? best : null;
+  return bestScore >= 0.5 ? { supplier: best, how: 'name' } : null;
 }
 
-// Single source of truth for the main nav - every page calls
+// Browser tab title: "<text> - TEops" (e.g. "J7003 Smith reno - TEops").
+// Kept in window.__teBaseTitle so the notification bell's "(3) " unread
+// prefix is added to this title instead of the one the page loaded with.
+function setPageTitle(text) {
+  const clean = String(text || '').trim();
+  window.__teBaseTitle = clean ? `${clean} - TEops` : 'TEops';
+  if (typeof window.__teApplyTitle === 'function') window.__teApplyTitle();
+  else document.title = window.__teBaseTitle;
+}
+
+// Single source of truth for the main nav: every page calls
 // renderMainNav('key') into empty <nav id="topbar-tabs"> and
 // <div id="mobile-menu-dropdown"> containers, instead of each page
-// hand-maintaining its own copy of the same 13 links (which is exactly
-// how small nav inconsistencies kept creeping in before this existed).
+// hand-maintaining its own copy of the links.
+// group: which menu the page sits in (NAV_GROUPS below, in that order).
+// An item with no group (Pipeline) is a top bar icon, kept here only so
+// its key still works as a Home tile.
+const NAV_GROUPS = [
+  { key: 'sales', label: 'Sales' },
+  { key: 'purchases', label: 'Purchases' },
+  { key: 'team', label: 'Team' },
+  { key: 'office', label: 'Office' },
+];
 const MAIN_NAV_ITEMS = [
-  { key: 'my-day', label: 'My Day', href: '/my-day.html', icon: '&#127749;' },
-  { key: 'inbox', label: 'Inbox', href: '/inbox.html', icon: '&#128231;' },
-  { key: 'leads', label: 'Leads', href: '/leads.html', icon: '&#127919;' },
-  { key: 'quotes', label: 'Quotes', href: '/quotes.html', icon: '&#128221;' },
-  { key: 'projects', label: 'Projects', href: '/projects.html', icon: '&#128202;' },
-  { key: 'job-pipeline', label: 'Job pipeline', href: '/dashboard.html', icon: '&#128203;' },
-  { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;' },
-  { key: 'stcs', label: 'STCs', href: '/stcs.html', icon: '&#9728;', pricingOnly: true },
-  { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html', icon: '&#128230;' },
-  { key: 'tasks', label: 'Tasks', href: '/tasks.html', icon: '&#9989;' },
-  { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;' },
-  { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;' },
-  { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;' },
-  { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;' },
-  { key: 'reviews', label: 'Reviews', href: '/reviews.html', icon: '&#11088;' },
-  { key: 'assets', label: 'Assets', href: '/assets.html', icon: '&#128295;' },
-  { key: 'stock', label: 'Stock', href: '/stock.html', icon: '&#128736;' },
-  { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', icon: '&#129513;', pricingOnly: true },
-  { key: 'overheads', label: 'Overheads', href: '/overheads.html', icon: '&#128178;', financeOnly: true },
-  { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html', icon: '&#128218;' },
-  { key: 'support', label: 'Tech Support', href: '/support.html', icon: '&#128222;' },
-  { key: 'team', label: 'Team', href: '/team.html', icon: '&#128101;' },
-  { key: 'incidents', label: 'Incidents', href: '/incidents.html', icon: '&#9888;', financeOnly: true },
-  { key: 'dnsp', label: 'DNSP', href: '/dnsp.html', icon: '&#9889;' },
-  { key: 'fleet', label: 'Fleet', href: '/fleet.html', icon: '&#128666;' },
-  { key: 'bugs', label: 'Bugs & Updates', href: '/bugs.html', icon: '&#128030;' },
-  { key: 'logs', label: 'Logs', href: '/logs.html', icon: '&#128209;', adminOnly: true },
+  // Sales
+  { key: 'leads', label: 'Leads', href: '/leads.html', icon: '&#127919;', group: 'sales', pricingOnly: true },
+  { key: 'quotes', label: 'Quotes', href: '/quotes.html', icon: '&#128221;', group: 'sales' },
+  { key: 'projects', label: 'Jobs', href: '/projects.html', icon: '&#128202;', group: 'sales' },
+  { key: 'invoices', label: 'Invoices', href: '/invoices.html', icon: '&#128179;', group: 'sales', pricingOnly: true },
+  { key: 'clients', label: 'Clients', href: '/clients.html', icon: '&#128100;', group: 'sales', pricingOnly: true },
+  { key: 'reviews', label: 'Reviews', href: '/reviews.html', icon: '&#11088;', group: 'sales', pricingOnly: true }, // review_requests is pricing-only
+  { key: 'inbox', label: 'Inbox', href: '/inbox.html', icon: '&#128231;', group: 'sales', pricingOnly: true },
+  { key: 'stcs', label: 'STCs', href: '/stcs.html', icon: '&#9728;', group: 'sales', pricingOnly: true },
+  { key: 'assets', label: 'Customer equipment', href: '/assets.html', icon: '&#128295;', group: 'sales' },
+  // Purchases
+  { key: 'purchase-orders', label: 'Purchase Orders', href: '/purchase-orders.html', icon: '&#128230;', group: 'purchases' },
+  { key: 'stock', label: 'Stock', href: '/stock.html', icon: '&#128736;', group: 'purchases' },
+  { key: 'tools', label: 'Tools', href: '/tools.html', icon: '&#9874;', group: 'purchases' },
+  { key: 'fleet', label: 'Vehicles', href: '/fleet.html', icon: '&#128666;', group: 'purchases' },
+  { key: 'suppliers', label: 'Suppliers', href: '/suppliers.html', icon: '&#128194;', group: 'purchases' },
+  { key: 'support', label: 'Tech Support', href: '/support.html', icon: '&#128222;', group: 'purchases' },
+  { key: 'supplier-bills', label: 'Emailed bills', href: '/supplier-bills.html', icon: '&#129534;', group: 'purchases', pricingOnly: true },
+  { key: 'supplier-checks', label: 'Bill checks', href: '/supplier-checks.html', icon: '&#9989;', group: 'purchases', pricingOnly: true },
+  { key: 'price-lists', label: 'Price lists', href: '/price-lists.html', icon: '&#127991;', group: 'purchases', pricingOnly: true },
+  { key: 'prebuilds', label: 'Prebuilds', href: '/prebuilds.html', icon: '&#129513;', group: 'purchases', pricingOnly: true },
+  // Team
+  { key: 'my-day', label: 'My Day', href: '/my-day.html', icon: '&#127749;', group: 'team' },
+  { key: 'schedule', label: 'Schedule', href: '/schedule.html', icon: '&#128197;', group: 'team' },
+  { key: 'tasks', label: 'Tasks', href: '/tasks.html', icon: '&#9989;', group: 'team' },
+  { key: 'timesheets', label: 'Timesheets', href: '/timesheets.html', icon: '&#9203;', group: 'team' },
+  { key: 'chat', label: 'Chat', href: '/chat.html', icon: '&#128172;', group: 'team' },
+  { key: 'meetings', label: 'Meetings', href: '/meetings.html', icon: '&#128483;', group: 'team' },
+  { key: 'knowledge', label: 'Knowledge', href: '/knowledge.html', icon: '&#128218;', group: 'team' },
+  { key: 'documents', label: 'Documents', href: '/documents.html', icon: '&#128196;', group: 'team' },
+  { key: 'incidents', label: 'Incidents', href: '/incidents.html', icon: '&#9888;', group: 'team', financeOnly: true },
+  { key: 'team', label: 'Team', href: '/team.html', icon: '&#128101;', group: 'team' },
+  // Office
+  { key: 'overheads', label: 'Overheads', href: '/overheads.html', icon: '&#128178;', group: 'office', financeOnly: true },
+  { key: 'ops', label: 'Ops manager', href: '/ops.html', icon: '&#129302;', group: 'office', adminOnly: true },
+  { key: 'bugs', label: 'Updates and ideas', href: '/bugs.html', icon: '&#128030;', group: 'office' },
+  { key: 'dnsp', label: 'DNSP', href: '/dnsp.html', icon: '&#9889;', group: 'office' },
+  { key: 'logs', label: 'Logs', href: '/logs.html', icon: '&#128209;', group: 'office', adminOnly: true },
+  { key: 'settings', label: 'Settings', href: '/settings.html', icon: '&#9881;', group: 'office' },
+  // Top bar icon only (renderMainNav adds it), never in a menu group
+  { key: 'job-pipeline', label: 'Pipeline', href: '/dashboard.html', icon: '&#128203;' },
 ];
 
-// Fallback for anyone who hasn't customized their Home page tiles yet
-// (profiles.home_shortcuts is null) - the set that used to be hardcoded
-// on home.html, so existing users see no change until they actually open
-// "Edit" there.
-// Doesn't include Schedule - that's already one click away via its own
-// topbar icon on every page, unlike everything else here.
+// The pages this role may open, in menu order. Home tiles use it too.
+function navItemsForRole(role) {
+  return MAIN_NAV_ITEMS.filter(item =>
+    (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)) && (!item.financeOnly || isFinanceRole(role)));
+}
+
+// Home tiles for anyone who hasn't customized them yet
+// (profiles.home_shortcuts is null). The office roles keep the set that
+// used to be hardcoded on home.html; field staff get their own day-to-day
+// pages instead of office ones they can't open.
 const DEFAULT_HOME_SHORTCUTS = [
   'job-pipeline', 'projects', 'timesheets', 'quotes', 'invoices', 'suppliers',
   'leads', 'clients', 'stock', 'team', 'fleet', 'bugs',
 ];
+const STAFF_DEFAULT_HOME_SHORTCUTS = [
+  'my-day', 'chat', 'tasks', 'timesheets', 'knowledge', 'team', 'documents', 'projects',
+];
+// The tiles this person actually sees. getMyHomeShortcuts() hands back the
+// DEFAULT_HOME_SHORTCUTS array itself when nothing was saved (home.html
+// checks that by identity), and this swaps in the staff set for field staff.
+function effectiveHomeShortcuts(saved, role) {
+  return saved === DEFAULT_HOME_SHORTCUTS && !isPricingRole(role) ? STAFF_DEFAULT_HOME_SHORTCUTS : saved;
+}
+function homeShortcutsFromProfile(profile) {
+  return effectiveHomeShortcuts((profile && profile.home_shortcuts) || DEFAULT_HOME_SHORTCUTS, (profile && profile.role) || 'staff');
+}
 
 let _cachedHomeShortcuts = null;
 async function getMyHomeShortcuts() {
   if (_cachedHomeShortcuts) return _cachedHomeShortcuts;
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) return DEFAULT_HOME_SHORTCUTS;
-  const { data, error } = await supabaseClient.from('profiles').select('home_shortcuts').eq('id', session.user.id).maybeSingle();
-  if (error) console.error('getMyHomeShortcuts failed:', error.message); // surfaced, not swallowed - a column-grant or RLS gap here silently fell back to defaults before
-  _cachedHomeShortcuts = data?.home_shortcuts || DEFAULT_HOME_SHORTCUTS;
+  const profile = await getMyProfile();
+  _cachedHomeShortcuts = (profile && profile.home_shortcuts) || DEFAULT_HOME_SHORTCUTS;
   return _cachedHomeShortcuts;
 }
 async function setMyHomeShortcuts(keys) {
@@ -1786,78 +2495,179 @@ async function setMyHomeShortcuts(keys) {
   const { error } = await supabaseClient.from('profiles').update({ home_shortcuts: keys }).eq('id', session.user.id);
   if (error) { console.error('setMyHomeShortcuts failed:', error.message); throw error; }
   _cachedHomeShortcuts = keys; // only cache once the write's actually confirmed to have gone through
+  patchMyProfile({ home_shortcuts: keys });
 }
 async function toggleHomeShortcut(key) {
-  const current = (await getMyHomeShortcuts()).slice();
+  const current = effectiveHomeShortcuts(await getMyHomeShortcuts(), await getMyRole()).slice();
   const idx = current.indexOf(key);
   if (idx === -1) current.push(key); else current.splice(idx, 1);
   await setMyHomeShortcuts(current);
   return current.includes(key);
 }
 
+// Phone menu: which group is open (one at a time), remembered on this device.
+const NAV_OPEN_GROUP_KEY = 'te-nav-open-group';
+function navOpenGroup() {
+  try { return localStorage.getItem(NAV_OPEN_GROUP_KEY) || ''; } catch (e) { return ''; }
+}
+function setNavOpenGroup(key) {
+  try { if (key) localStorage.setItem(NAV_OPEN_GROUP_KEY, key); else localStorage.removeItem(NAV_OPEN_GROUP_KEY); } catch (e) { /* storage blocked: just not remembered */ }
+}
+
+// Pipeline icon in the top bar, before Schedule. Pages' top bars are
+// hand-written HTML, so it is added here rather than on each page.
+function addPipelineTopbarIcon() {
+  const right = document.querySelector('.topbar-right');
+  if (!right || document.getElementById('pipeline-topbar-link')) return;
+  const link = document.createElement('a');
+  link.href = '/dashboard.html'; link.id = 'pipeline-topbar-link'; link.className = 'topbar-icon-link'; link.title = 'Pipeline';
+  link.innerHTML = '&#128203;';
+  const before = right.querySelector('a.topbar-icon-link[href="/schedule.html"]') || right.querySelector('a.topbar-icon-link[href="/settings.html"]');
+  right.insertBefore(link, before || right.firstChild);
+}
+// Lights up the top bar icon (Pipeline, Schedule, Settings) for the page you are on.
+function markActiveTopbarIcon() {
+  const here = window.location.pathname;
+  document.querySelectorAll('.topbar-right a.topbar-icon-link[href^="/"]').forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === here);
+  });
+}
+
 // Async (unlike before) so an admin-only/pricing-only link can be filtered
 // out for everyone else before it's ever painted, not hidden after the
-// fact - existing callers don't need to change, they just fire-and-forget
+// fact. Existing callers don't need to change, they just fire-and-forget
 // this same as always, nothing downstream awaits it.
 async function renderMainNav(activeKey) {
   const tabsEl = document.getElementById('topbar-tabs');
   const dropdownEl = document.getElementById('mobile-menu-dropdown');
-  const role = await getMyRole();
-  const items = MAIN_NAV_ITEMS.filter(item =>
-    (!item.adminOnly || role === 'admin') && (!item.pricingOnly || isPricingRole(role)) && (!item.financeOnly || isFinanceRole(role)));
-  // On a computer the top bar only carries starred pages (plus the page you
-  // are on), with everything else under "More", so there is no sideways
-  // scrolling. The phone menu still lists every page. Both are painted from
-  // the same list; the "in bar" ones are just hidden from the desktop menu
-  // by CSS.
-  const paint = (shortcuts) => {
-    const inBar = (item) => shortcuts.includes(item.key) || item.key === activeKey;
+  // Pages with no key of their own (Schedule, Settings, Updates and ideas) are found by address.
+  if (!activeKey) {
+    const here = MAIN_NAV_ITEMS.find(item => item.href === window.location.pathname);
+    activeKey = here ? here.key : null;
+  }
+  addPipelineTopbarIcon();
+  markActiveTopbarIcon();
+
+  // On a computer the top bar carries starred pages (plus the page you are
+  // on), then one button per group that drops down that group's pages. On
+  // a phone (bar collapsed) the ☰ menu has Home, Schedule and starred pages
+  // first, then the groups as headers that open one at a time.
+  let painted = '';
+  const paint = (role, shortcuts) => {
+    const sig = role + '|' + shortcuts.join(',');
+    if (sig === painted) return;
+    painted = sig;
+    const items = navItemsForRole(role);
+    const grouped = items.filter(item => item.group);
+    const inBar = (item) => item.group && (shortcuts.includes(item.key) || item.key === activeKey);
     const starHtml = (key) => {
       const starred = shortcuts.includes(key);
       return `<span class="nav-star ${starred ? 'starred' : ''}" data-key="${key}" title="${starred ? 'Remove from Home page and top bar' : 'Add to Home page and top bar'}" onclick="event.preventDefault(); event.stopPropagation(); window.__onNavStarClick(this);">${starred ? '&#9733;' : '&#9734;'}</span>`;
     };
-    const linkHtml = (item, asTab) =>
-      `<a href="${item.href}" class="${asTab ? 'topbar-tab' : ''} ${item.key === activeKey ? 'active' : ''} ${!asTab && inBar(item) ? 'nav-in-bar' : ''}"><span style="display:flex; align-items:center; gap:5px;">${starHtml(item.key)}${item.label}</span></a>`;
-    const hasMore = items.some(item => !inBar(item));
-    if (tabsEl) tabsEl.innerHTML = items.filter(inBar).map(item => linkHtml(item, true)).join('') +
-      (hasMore ? `<button type="button" class="topbar-tab nav-more-btn" onclick="window.__onNavMoreClick(this)">More &#9662;</button>` : '');
-    if (dropdownEl) dropdownEl.innerHTML = items.map(item => linkHtml(item, false)).join('');
+    const tabHtml = (item) =>
+      `<a href="${item.href}" class="topbar-tab ${item.key === activeKey ? 'active' : ''}"><span style="display:flex; align-items:center; gap:5px;">${starHtml(item.key)}${item.label}</span></a>`;
+    const rowHtml = (item, withStar) =>
+      `<a href="${item.href}" class="${item.key === activeKey ? 'active' : ''}"><span class="nav-row-label">${withStar ? starHtml(item.key) : ''}<span class="nav-row-icon" aria-hidden="true">${item.icon}</span>${item.label}</span></a>`;
+    const groups = NAV_GROUPS.map(g => ({ ...g, items: grouped.filter(item => item.group === g.key) })).filter(g => g.items.length);
+
+    if (tabsEl) tabsEl.innerHTML = grouped.filter(inBar).map(tabHtml).join('') +
+      groups.map(g => `<button type="button" class="topbar-tab nav-group-btn${g.items.some(i => i.key === activeKey) ? ' has-active' : ''}" data-group="${g.key}" aria-haspopup="true" onclick="window.__onNavGroupClick(this)">${g.label} &#9662;</button>`).join('');
+
+    if (dropdownEl) {
+      const openGroup = navOpenGroup();
+      const schedule = items.find(i => i.key === 'schedule');
+      const pinned = [{ key: 'home', label: 'Home', href: '/home.html', icon: '&#127968;' }]
+        .concat(schedule ? [schedule] : [])
+        .concat(grouped.filter(item => shortcuts.includes(item.key) && item.key !== 'schedule'));
+      dropdownEl.innerHTML =
+        `<div class="nav-pinned">${pinned.map(item => rowHtml(item, false)).join('')}</div>` +
+        groups.map(g => `<div class="nav-group${g.key === openGroup ? ' expanded' : ''}" data-group="${g.key}">` +
+          `<button type="button" class="nav-group-head" aria-expanded="${g.key === openGroup}" onclick="window.__onNavGroupHeadClick(this)"><span>${g.label}</span><span class="nav-group-caret" aria-hidden="true">&#9662;</span></button>` +
+          `<div class="nav-group-items">${g.items.map(item => rowHtml(item, true)).join('')}</div></div>`).join('') +
+        '<a href="#" class="nav-logout" onclick="event.preventDefault(); window.__teLogout();">Log out</a>';
+      // Repainted while a laptop group menu was open: keep that group showing.
+      const deskGroup = dropdownEl.dataset.deskGroup;
+      if (deskGroup && dropdownEl.classList.contains('group-mode')) {
+        const g = dropdownEl.querySelector(`.nav-group[data-group="${deskGroup}"]`);
+        if (g) g.classList.add('desk-open'); else dropdownEl.classList.remove('open');
+      }
+    }
   };
-  paint(await getMyHomeShortcuts());
+
+  // Paint straight away from the last page's copy of the profile, then
+  // again (only if anything differs) once this page's read lands.
+  const cached = await getCachedProfile();
+  if (cached) paint(cached.role || 'staff', homeShortcutsFromProfile(cached));
+  { const role = await getMyRole(); paint(role, effectiveHomeShortcuts(await getMyHomeShortcuts(), role)); }
 
   // Delegated via single globals so the inline onclicks above (needed
   // since tabs/dropdown get fully replaced on every paint, which would
   // otherwise leak listeners) have one stable place to call into. A star
-  // repaints the nav so the page moves between the bar and the menu.
+  // repaints the nav so the page moves in or out of the bar.
   window.__onNavStarClick = async (el) => {
     try {
       await toggleHomeShortcut(el.dataset.key);
-      paint(await getMyHomeShortcuts());
+      { const role = await getMyRole(); paint(role, effectiveHomeShortcuts(await getMyHomeShortcuts(), role)); }
     } catch (err) {
-      alert('Could not save that - ' + err.message);
+      alert('Could not save that: ' + err.message);
     }
   };
-  // "More" opens the same dropdown the phone uses, lined up under the button
-  window.__onNavMoreClick = (btn) => {
+  // Laptop: a group button opens the shared dropdown showing just that
+  // group, lined up under the button. A second click on it closes it.
+  window.__onNavGroupClick = (btn) => {
     if (!dropdownEl) return;
+    const key = btn.dataset.group;
+    const wasThis = dropdownEl.classList.contains('open') && dropdownEl.classList.contains('group-mode') && dropdownEl.dataset.deskGroup === key;
+    dropdownEl.querySelectorAll('.nav-group.desk-open').forEach(g => g.classList.remove('desk-open'));
+    if (wasThis) { dropdownEl.classList.remove('open'); return; }
+    const g = dropdownEl.querySelector(`.nav-group[data-group="${key}"]`);
+    if (!g) return;
+    g.classList.add('desk-open');
+    dropdownEl.dataset.deskGroup = key;
+    dropdownEl.classList.add('group-mode', 'open');
     const bar = dropdownEl.parentElement.getBoundingClientRect();
     const left = btn.getBoundingClientRect().left - bar.left;
     dropdownEl.style.setProperty('--more-left', Math.max(8, Math.min(left, bar.width - 268)) + 'px');
-    dropdownEl.classList.toggle('open');
+  };
+  // Phone: tapping a group header opens it and closes the one that was open.
+  window.__onNavGroupHeadClick = (head) => {
+    const g = head.closest('.nav-group');
+    if (!g) return;
+    const opening = !g.classList.contains('expanded');
+    dropdownEl.querySelectorAll('.nav-group.expanded').forEach(o => {
+      o.classList.remove('expanded');
+      const h = o.querySelector('.nav-group-head'); if (h) h.setAttribute('aria-expanded', 'false');
+    });
+    if (opening) { g.classList.add('expanded'); head.setAttribute('aria-expanded', 'true'); }
+    setNavOpenGroup(opening ? g.dataset.group : '');
   };
   if (!window.__navOutsideClose) {
     window.__navOutsideClose = true;
     document.addEventListener('click', (e) => {
       const menu = document.getElementById('mobile-menu-dropdown');
       if (menu && menu.classList.contains('open') && !menu.contains(e.target) &&
-          !e.target.closest('.nav-more-btn, #mobile-menu-btn')) menu.classList.remove('open');
+          !e.target.closest('.nav-group-btn, #mobile-menu-btn')) menu.classList.remove('open');
     });
-    // The ☰ button opens the same menu from the far left, wherever "More" last put it
+    document.addEventListener('keydown', (e) => {
+      const menu = document.getElementById('mobile-menu-dropdown');
+      if (e.key === 'Escape' && menu && menu.classList.contains('open')) menu.classList.remove('open');
+    });
+    // The ☰ button (capture phase, before the page's own toggle) switches
+    // the menu back to the full grouped list and starts it just under the bar.
     const menuBtn = document.getElementById('mobile-menu-btn');
-    if (menuBtn) menuBtn.addEventListener('click', () => dropdownEl && dropdownEl.style.removeProperty('--more-left'), true);
+    if (menuBtn) menuBtn.addEventListener('click', () => {
+      if (!dropdownEl) return;
+      if (dropdownEl.classList.contains('group-mode')) dropdownEl.classList.remove('open');
+      dropdownEl.classList.remove('group-mode');
+      dropdownEl.querySelectorAll('.nav-group.desk-open').forEach(g => g.classList.remove('desk-open'));
+      dropdownEl.style.removeProperty('--more-left');
+      const barEl = dropdownEl.closest('.topbar');
+      if (barEl) dropdownEl.style.setProperty('--menu-top', Math.max(0, Math.round(barEl.getBoundingClientRect().bottom)) + 'px');
+    }, true);
   }
   watchTopbarFit();
   renderAIChatWidget();
+  loadChatBadge();
   loadNotificationBell();
   loadGlobalSearch();
 }
@@ -1866,7 +2676,17 @@ async function renderMainNav(activeKey) {
 // the tabs fold into the ☰ menu if they don't all fit, then the search box
 // shrinks to an icon, then the icons tighten up. Re-checked whenever the
 // bar changes size or something is added to it (bell, search, a star).
+// Spoken labels for the top bar icons (from their title text) and the menu button, so
+// VoiceOver reads Menu, Search everything, Chat, Notifications, Schedule, Settings.
+function labelTopbarIcons() {
+  document.querySelectorAll('.topbar-icon-link[title]:not([aria-label])').forEach(a => a.setAttribute('aria-label', a.title.replace(/\s*\(.*\)$/, '')));
+  const m = document.getElementById('mobile-menu-btn');
+  if (m && !m.hasAttribute('aria-label')) m.setAttribute('aria-label', 'Menu');
+}
+if (document.readyState !== 'loading') labelTopbarIcons(); else document.addEventListener('DOMContentLoaded', labelTopbarIcons);
+
 function fitTopbar() {
+  labelTopbarIcons();
   const bar = document.querySelector('.topbar');
   const right = bar && bar.querySelector('.topbar-right');
   if (!right) return;
@@ -1875,10 +2695,12 @@ function fitTopbar() {
     return right.getBoundingClientRect().right > inner + 0.5;
   };
   const tabs = document.getElementById('topbar-tabs');
-  bar.classList.remove('nav-collapsed', 'search-compact', 'topbar-tight');
+  bar.classList.remove('nav-collapsed', 'search-compact', 'topbar-tight', 'topbar-nologo');
   if (window.innerWidth <= 700 || (tabs && tabs.scrollWidth > tabs.clientWidth + 1) || overflowing()) bar.classList.add('nav-collapsed');
   if (overflowing()) bar.classList.add('search-compact');
   if (overflowing()) bar.classList.add('topbar-tight');
+  // Last resort on small phones: the wordmark goes (Home is the first row of the ☰ menu)
+  if (overflowing() && bar.classList.contains('nav-collapsed')) bar.classList.add('topbar-nologo');
 }
 window.__fitTopbar = fitTopbar;
 
@@ -1901,17 +2723,148 @@ function loadGlobalSearch() {
   if (window.__globalSearchScript || !document.querySelector('.topbar-right')) return;
   window.__globalSearchScript = true;
   const s = document.createElement('script');
-  s.src = '/js/global-search.js?v=1';
+  s.src = '/js/global-search.js?v=4';
   document.head.appendChild(s);
 }
 
 // The notification bell + phone push setup live in their own file, loaded once
 // on any page that shows the top bar.
+// Messages icon in the top bar (the Chat icon): unread chats (not muted, from
+// chat_unread_total) plus unread shared inbox emails (the `messages` channel rows of
+// the notifications table, migration 20261120000000). Kept up to date by Realtime and a
+// once-a-minute refresh. Tap opens a panel with Chats and Emails; a row opens the chat
+// or the Inbox thread. The bell (notifications.js) never shows chats or emails.
+let _msgOpen = false, _msgMe = null, _chatBadgeBusy = false;
+function loadChatBadge() {
+  const right = document.querySelector('.topbar-right');
+  if (!right || document.getElementById('chat-topbar-link')) return;
+  const link = document.createElement('a');
+  link.href = '/chat.html'; link.id = 'chat-topbar-link'; link.className = 'topbar-icon-link'; link.title = 'Messages';
+  link.style.position = 'relative';
+  link.innerHTML = '&#128172;<span id="chat-topbar-badge" style="position:absolute; top:-5px; right:-6px; min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:#e5484d; color:#fff; font-size:11px; font-weight:700; display:none; align-items:center; justify-content:center; line-height:1;"></span>';
+  right.insertBefore(link, right.firstChild);
+
+  const panel = document.createElement('div');
+  panel.id = 'msg-panel';
+  panel.style.cssText = 'position:fixed; top:56px; right:10px; width:min(400px, 94vw); max-height:78vh; overflow-y:auto; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.45); z-index:250; display:none;';
+  document.body.appendChild(panel);
+  if (!document.getElementById('msg-styles')) {
+    const st = document.createElement('style');
+    st.id = 'msg-styles';
+    st.textContent = `
+      .msg-head { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--surface); }
+      .msg-head h3 { margin:0; font-size:15px; }
+      .msg-head a, .msg-link { color:var(--accent); font-size:12px; text-decoration:none; background:none; border:none; cursor:pointer; padding:2px 4px; }
+      .msg-sec { display:flex; justify-content:space-between; align-items:center; padding:8px 14px 4px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+      .msg-row { display:flex; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); cursor:pointer; color:inherit; text-decoration:none; }
+      .msg-row:hover { background:var(--surface-2); }
+      .msg-dot { width:9px; height:9px; border-radius:50%; background:var(--accent); margin-top:5px; flex-shrink:0; }
+      .msg-title { font-size:14px; font-weight:700; word-break:break-word; }
+      .msg-body { font-size:12px; color:var(--muted); margin-top:2px; word-break:break-word; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+      .msg-empty { padding:6px 14px 12px; font-size:13px; color:var(--muted); }
+    `;
+    document.head.appendChild(st);
+  }
+  link.addEventListener('click', async (e) => { e.preventDefault(); e.stopPropagation(); if (_msgOpen) closeMessagesPanel(); else await openMessagesPanel(); });
+  document.addEventListener('click', (e) => { if (_msgOpen && !panel.contains(e.target) && !link.contains(e.target)) closeMessagesPanel(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMessagesPanel(); });
+  panel.addEventListener('click', onMessagesPanelClick);
+
+  supabaseClient.auth.getSession().then(({ data: { session } }) => {
+    _msgMe = session ? session.user.id : null;
+    refreshChatBadge();
+    setInterval(refreshChatBadge, 60000);
+    try {
+      let t = null;
+      const bump = () => { clearTimeout(t); t = setTimeout(refreshChatBadge, 1500); };
+      const ch = supabaseClient.channel('chat-badge-' + Math.random().toString(36).slice(2))
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, bump);
+      if (_msgMe) ch.on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${_msgMe}` }, bump);
+      ch.subscribe();
+    } catch (e) { /* the minute refresh still keeps it current */ }
+  });
+}
+function unreadEmailsQuery() {
+  return supabaseClient.from('notifications').select('id, title, body, link, created_at').eq('user_id', _msgMe).eq('channel', 'messages').eq('kind', 'email').is('read_at', null).order('created_at', { ascending: false });
+}
+async function refreshChatBadge() {
+  const badge = document.getElementById('chat-topbar-badge');
+  if (!badge || _chatBadgeBusy) return;
+  _chatBadgeBusy = true;
+  try {
+    const [chat, mail] = await Promise.all([
+      supabaseClient.rpc('chat_unread_total'),
+      _msgMe ? supabaseClient.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', _msgMe).eq('channel', 'messages').eq('kind', 'email').is('read_at', null) : Promise.resolve({ count: 0 }),
+    ]);
+    const n = (chat.error ? 0 : (chat.data || 0)) + (mail.error ? 0 : (mail.count || 0));
+    badge.textContent = n > 99 ? '99+' : String(n);
+    badge.style.display = n ? 'flex' : 'none';
+    if (_msgOpen) renderMessagesPanel();
+  } finally {
+    _chatBadgeBusy = false;
+  }
+}
+async function openMessagesPanel() {
+  const panel = document.getElementById('msg-panel');
+  if (!panel) return;
+  _msgOpen = true;
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="msg-head"><h3>Messages</h3></div><p class="msg-empty">Loading...</p>';
+  await renderMessagesPanel();
+}
+function closeMessagesPanel() {
+  _msgOpen = false;
+  const panel = document.getElementById('msg-panel');
+  if (panel) panel.style.display = 'none';
+}
+function msgAgo(iso) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  if (s < 7 * 86400) return Math.floor(s / 86400) + 'd ago';
+  return new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+}
+async function renderMessagesPanel() {
+  const panel = document.getElementById('msg-panel');
+  if (!panel || !_msgOpen) return;
+  const [chans, mails] = await Promise.all([
+    supabaseClient.rpc('chat_my_channels'),
+    _msgMe ? unreadEmailsQuery().limit(30) : Promise.resolve({ data: [] }),
+  ]);
+  const chats = (chans.data || []).filter(c => c.unread > 0 && !c.muted && !c.archived_at);
+  const emails = mails.data || [];
+  const chatTitle = (c) => c.kind === 'dm' ? ((c.members || []).map(m => m.full_name).join(', ') || 'Direct message') : '#' + c.name;
+  const row = (href, title, body, time, extra) => `<a class="msg-row" href="${escapeHtml(href)}" ${extra || ''}><span class="msg-dot"></span><div style="min-width:0;"><div class="msg-title">${escapeHtml(title)}</div>${body ? `<div class="msg-body">${escapeHtml(body)}</div>` : ''}<div class="msg-body">${escapeHtml(time)}</div></div></a>`;
+  panel.innerHTML = `
+    <div class="msg-head"><h3>Messages</h3><span><a href="/chat.html">Open Chat</a> <a href="/inbox.html">Open Inbox</a></span></div>
+    <div class="msg-sec"><span>Chats</span></div>
+    ${chats.length ? chats.map(c => row('/chat.html?c=' + c.id, chatTitle(c) + (c.unread > 1 ? ` (${c.unread})` : ''), (c.last_author ? c.last_author + ': ' : '') + (c.last_body || ''), c.last_message_at ? msgAgo(c.last_message_at) : '')).join('') : '<p class="msg-empty">No unread chats.</p>'}
+    <div class="msg-sec"><span>Emails</span>${emails.length ? '<button type="button" class="msg-link" id="msg-mail-readall">Mark all read</button>' : ''}</div>
+    ${emails.length ? emails.map(n => row(n.link || '/inbox.html', n.title, n.body, msgAgo(n.created_at), `data-mail="${n.id}"`)).join('') : '<p class="msg-empty">No unread emails.</p>'}`;
+}
+async function onMessagesPanelClick(e) {
+  const mail = e.target.closest('[data-mail]');
+  if (mail) {
+    // read now, then go (the Inbox would mark it read too, but the badge should drop straight away)
+    e.preventDefault();
+    await supabaseClient.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', mail.dataset.mail).eq('user_id', _msgMe);
+    window.location.href = mail.getAttribute('href');
+    return;
+  }
+  if (e.target.id === 'msg-mail-readall') {
+    e.target.disabled = true;
+    await supabaseClient.from('notifications').update({ read_at: new Date().toISOString() }).eq('user_id', _msgMe).eq('channel', 'messages').eq('kind', 'email').is('read_at', null);
+    await refreshChatBadge();
+    await renderMessagesPanel();
+  }
+}
+
 function loadNotificationBell() {
   if (window.__notifLoaded || !document.querySelector('.topbar-right')) return;
   window.__notifLoaded = true;
   const s = document.createElement('script');
-  s.src = '/js/notifications.js?v=3';
+  s.src = '/js/notifications.js?v=16';
   document.head.appendChild(s);
 }
 
@@ -1922,11 +2875,99 @@ function loadNotificationBell() {
 // to whatever this logged-in staff member is allowed to see) to answer
 // with real numbers instead of guessing.
 // Shared HTML-escape for dropping any plain text (AI output, anything not
-// already known-safe) into an innerHTML template literal.
+// already known-safe) into an innerHTML template literal. Quotes are
+// escaped too, so it is also safe inside value="..." / data-x="..." attributes
+// (text like Olex "TPS" 2.5mm is not cut off).
 function escapeHtml(s) {
-  const div = document.createElement('div');
-  div.textContent = s == null ? '' : String(s);
-  return div.innerHTML;
+  return (s == null ? '' : String(s))
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// True when the error is a dropped connection (Safari 'Load failed', Chrome 'Failed to fetch',
+// Firefox 'NetworkError', timeouts, Supabase AuthRetryableFetchError, or the phone says it is
+// offline and the error is the fetch kind), not a refusal from the server.
+function isNetworkError(err) {
+  if (!err) return false;
+  const msg = String(typeof err === 'string' ? err : (err.message || err.error_description || err.error || ''));
+  if (/failed to fetch|load failed|networkerror|network request failed|network connection was lost|internet connection appears to be offline|fetch failed|failed to send a request|err_internet_disconnected|err_network_changed/i.test(msg)) return true;
+  if (err.name === 'AuthRetryableFetchError') return true;
+  return navigator.onLine === false && (err.name === 'TypeError' || err.name === 'AbortError' || /^TypeError/.test(msg));
+}
+
+// The message a person sees for an error: 'No signal...' for a dropped connection, else the
+// error's own message, else the fallback. Returns plain text: wrap it in escapeHtml() when it
+// goes into HTML (alert() and textContent need nothing).
+function friendlyError(err, fallback = 'Something went wrong. Try again.') {
+  if (isNetworkError(err)) return 'No signal. Try again when you have reception.';
+  const msg = typeof err === 'string' ? err : (err && (err.message || err.error_description || err.error)) || '';
+  return String(msg || fallback);
+}
+
+// Short confirmation at the bottom of the screen ('Saved'). One at a time, above modals,
+// plain text (set with textContent). { error: true } gives a red border and keeps it up longer.
+function showToast(message, { error = false, ms } = {}) {
+  document.querySelectorAll('.te-toast').forEach(t => t.remove());
+  const t = document.createElement('div');
+  t.className = 'te-toast';
+  t.setAttribute('role', 'status');
+  t.setAttribute('aria-live', 'polite');
+  t.style.cssText = `position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom, 0px)); transform:translateX(-50%); z-index:2100; max-width:calc(100vw - 32px); background:var(--surface-2); color:var(--text); border:1px solid ${error ? 'var(--red)' : 'var(--border)'}; padding:10px 16px; border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.4); font-size:14px; text-align:center; pointer-events:none;`;
+  t.textContent = String(message == null ? '' : message);
+  (document.body || document.documentElement).appendChild(t);
+  setTimeout(() => t.remove(), ms || (error ? 5000 : 2600));
+  return t;
+}
+
+// Red 'No signal' pill at the top of every page while the browser says it is offline, and a
+// 'Back online' toast when the connection returns. Driven by the online / offline events only.
+function initNoSignalBanner() {
+  if (window.__noSignalBanner) return;
+  window.__noSignalBanner = true;
+  let el = null;
+  const show = () => {
+    if (!document.body) return;
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'no-signal-banner';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      el.textContent = 'No signal';
+      el.style.cssText = 'position:fixed; top:calc(env(safe-area-inset-top, 0px) + 8px); left:50%; transform:translateX(-50%); z-index:2000; background:#b91c1c; color:#fff; padding:6px 14px; border-radius:999px; font-size:13px; font-weight:600; box-shadow:0 4px 14px rgba(0,0,0,0.35); pointer-events:none; white-space:nowrap;';
+    }
+    if (!el.isConnected) document.body.appendChild(el);
+  };
+  const hide = () => {
+    if (el && el.isConnected) { el.remove(); showToast('Back online'); }
+  };
+  window.addEventListener('offline', show);
+  window.addEventListener('online', hide);
+  const first = () => { if (navigator.onLine === false) show(); };
+  if (document.body) first(); else document.addEventListener('DOMContentLoaded', first);
+}
+initNoSignalBanner();
+
+// Points at a required field a Save found empty: red outline, a one-line error under it
+// (under `after` when the field sits in a wrapper), scrolled to the middle of the screen
+// and focused. Call it before the handler's first await so iOS still opens the keyboard.
+// The outline and message clear on the next input in that field or on clearFieldFlags().
+function flagRequiredField(field, message, after = field) {
+  clearFieldFlags();
+  field.classList.add('field-invalid');
+  const note = document.createElement('div');
+  note.className = 'error-box field-error-msg';
+  note.textContent = message;
+  after.insertAdjacentElement('afterend', note);
+  field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (typeof field.focus === 'function') field.focus({ preventScroll: true });
+  field.addEventListener('input', () => { field.classList.remove('field-invalid'); note.remove(); }, { once: true });
+}
+function clearFieldFlags(root = document) {
+  root.querySelectorAll('.field-error-msg').forEach(n => n.remove());
+  root.querySelectorAll('.field-invalid').forEach(n => n.classList.remove('field-invalid'));
 }
 
 // Proxies abn-lookup.js (which itself proxies abr.business.gov.au - needs
@@ -2089,6 +3130,8 @@ function renderAIChatWidget() {
     if (show) { renderMessages(); input.focus(); }
   }
   wrap.querySelector('#ai-chat-toggle').addEventListener('click', () => togglePanel(!panel.classList.contains('open')));
+  // Lets a page ask the assistant something with one tap (the Ops page's "Ask the manager" buttons).
+  window.askAssistant = (text) => { togglePanel(true); input.value = text; send(); };
   wrap.querySelector('#ai-chat-close').addEventListener('click', () => togglePanel(false));
   wrap.querySelector('#ai-chat-clear').addEventListener('click', () => {
     _aiChatHistory = [];
@@ -2181,8 +3224,8 @@ function aiProposalCardHtml(p, mi, pi) {
   else if (p.type === 'open_form') foot = aiSafeLink(p.link)
     ? `<div style="margin-top:8px;"><a class="btn" href="${escapeHtml(p.link)}" style="font-size:12px; padding:6px 14px; display:inline-block; text-decoration:none;">Open it to finish</a></div>` : '';
   else foot = `<div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; align-items:center;">
-      <button type="button" data-ai-act="do" data-m="${mi}" data-p="${pi}" style="font-size:12px; padding:5px 12px;">${p.destructive ? 'Yes, remove it' : 'Do it'}</button>
-      <button type="button" class="secondary" data-ai-act="skip" data-m="${mi}" data-p="${pi}" style="font-size:12px; padding:5px 12px;">Skip</button>
+      <button type="button" class="btn-sm" data-ai-act="do" data-m="${mi}" data-p="${pi}">${p.destructive ? 'Yes, remove it' : 'Do it'}</button>
+      <button type="button" class="secondary btn-sm" data-ai-act="skip" data-m="${mi}" data-p="${pi}">Skip</button>
       ${aiSafeLink(p.edit_link) ? `<a href="${escapeHtml(p.edit_link)}" class="link-quiet" style="font-size:12px; margin-left:4px;">Edit it first</a>` : ''}</div>`;
   return `<div style="max-width:85%; margin:-2px 0 10px; padding:9px 11px; border-radius:10px; border:1px dashed var(--accent); background:var(--surface);">
     <div style="font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted);">${p.type === 'open_form' ? 'Filled in for you' : p.state === 'pending' ? 'Waiting for your OK' : 'Change'}</div>
@@ -2308,6 +3351,20 @@ function sydneyMidnightUtc(dateKey) {
   const guess = new Date(naive.getTime() - sydneyOffsetMinutesAt(naive) * 60000);
   return new Date(naive.getTime() - sydneyOffsetMinutesAt(guess) * 60000);
 }
+// The day a tradie is next back on site: the day after dateKey (a Sydney
+// YYYY-MM-DD), with Saturday and Sunday rolled to Monday. Works at UTC
+// noon so daylight saving cannot shift the date.
+function nextWorkingDayKey(dateKey) {
+  const d = new Date(`${dateKey}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  if (d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 2);
+  else if (d.getUTCDay() === 0) d.setUTCDate(d.getUTCDate() + 1);
+  return sydneyDateKey(d);
+}
+// 'Tue 20 Oct' for a YYYY-MM-DD key.
+function dayKeyLabel(dateKey) {
+  return new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', '');
+}
 function splitAtSydneyMidnight(clockInIso, clockOutIso) {
   const segments = [];
   let cursor = new Date(clockInIso);
@@ -2336,6 +3393,7 @@ async function findTimesheetProblems({ staffId = null, days = 45 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   let q = supabaseClient.from('time_entries')
     .select('id, staff_id, clock_in, clock_out, project_id, projects(name, job_number, quote_number)')
+    .is('sm8_activity_uuid', null) // ServiceM8 imports: on the job only, already paid
     .gte('clock_in', since).order('clock_in');
   if (staffId) q = q.eq('staff_id', staffId);
   const { data } = await q;
@@ -2382,6 +3440,21 @@ function roundToQuarterHour(date) {
 // segment actually being closed - a break is a single point in time, not
 // something to duplicate onto a carried-over segment. Returns { error } -
 // never throws.
+
+// Inserts closed time_entries rows unless a row with that clock-in already exists for the person,
+// so a double tap or a retry after a dropped reply adds nothing twice (bug M14). Returns { error }.
+async function insertTimeEntriesOnce(staffId, rows) {
+  if (!rows.length) return { error: null };
+  const { data: existing, error: readErr } = await supabaseClient.from('time_entries')
+    .select('clock_in').eq('staff_id', staffId).in('clock_in', rows.map(r => r.clock_in));
+  if (readErr) return { error: readErr };
+  const have = new Set((existing || []).map(r => new Date(r.clock_in).toISOString()));
+  const missing = rows.filter(r => !have.has(new Date(r.clock_in).toISOString()));
+  if (!missing.length) return { error: null };
+  const { error } = await supabaseClient.from('time_entries').insert(missing);
+  return { error: error || null };
+}
+
 async function clockOutActiveEntry(entry, opts = {}) {
   const clockOutIso = opts.clockOutIso || new Date().toISOString();
   const carryFields = opts.carryFields || {};
@@ -2401,7 +3474,7 @@ async function clockOutActiveEntry(entry, opts = {}) {
       ...carryFields,
       clock_in: seg.clock_in, clock_out: seg.clock_out,
     }));
-    const { error: insErr } = await supabaseClient.from('time_entries').insert(extraEntries);
+    const { error: insErr } = await insertTimeEntriesOnce(entry.staff_id, extraEntries);
     if (insErr) return { error: insErr };
   }
   return { error: null };
@@ -2422,61 +3495,81 @@ async function clockOutActiveEntry(entry, opts = {}) {
 // this clock-out (and its before-you-go step) is done - see
 // openJobSwitchModal.
 async function openClockOutModal(entry, onDone, opts = {}) {
-  let project = null, centres = [];
-  if (entry.project_id) {
-    const [{ data: proj }, { data: cc }] = await Promise.all([
-      supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved, pipeline_stage').eq('id', entry.project_id).maybeSingle(),
-      supabaseClient.from('cost_centres').select('id, name, variation_entry_id').eq('project_id', entry.project_id).order('sort_order'),
-    ]);
-    project = proj;
-    // A variation is a stage here too, but only while there is still work to do on it (see My Day);
-    // a stage this shift was already ticked against always stays.
-    let usable = cc || [];
-    const variationIds = usable.map(c => c.variation_entry_id).filter(Boolean);
-    if (variationIds.length) {
-      const { data: vEntries } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
-      const open = new Set((vEntries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
-      const already = new Set([...(entry.selected_cost_centre_ids || []), entry.cost_centre_id].filter(Boolean));
-      usable = usable.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id) || already.has(c.id));
-    }
-    centres = usable.map((c, i) => ({ id: c.id, name: c.name, number: costCentreNumber(proj ? proj.job_number : null, i + 1) }));
-  }
+  // Overlay first, before any await, so a second tap on poor signal lands
+  // on it instead of stacking a second modal.
+  if (document.getElementById('clock-modal-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'clock-modal-overlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><p class="subtitle">Loading...</p></div>`;
+  document.body.appendChild(overlay);
+
+  let project = null, centres = [], recentEntries = [], loadError = null;
   let chosenCentres = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
     ? entry.selected_cost_centre_ids.slice()
     : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
   let splitPercentages = [];
+  try {
+    if (entry.project_id) {
+      const [{ data: proj, error: projErr }, { data: cc, error: ccErr }] = await Promise.all([
+        supabaseClient.from('projects').select('id, name, job_number, quote_number, laha_approved, pipeline_stage, ccew_file_path, ccew_not_required_reason').eq('id', entry.project_id).maybeSingle(),
+        supabaseClient.from('cost_centres').select('id, name, variation_entry_id').eq('project_id', entry.project_id).order('sort_order'),
+      ]);
+      loadError = projErr || ccErr || null;
+      project = proj;
+      // A variation is a stage here too, but only while there is still work to do on it (see My Day);
+      // a stage this shift was already ticked against always stays.
+      let usable = cc || [];
+      const variationIds = usable.map(c => c.variation_entry_id).filter(Boolean);
+      if (variationIds.length) {
+        const { data: vEntries, error: vErr } = await supabaseClient.from('job_variation_entries').select('id, variation_type, status, approval_status').in('id', variationIds);
+        if (vErr) loadError = vErr;
+        const open = new Set((vEntries || []).filter(e => e.status === 'to_bill' && (e.variation_type === 'do_and_charge' || e.approval_status === 'approved')).map(e => e.id));
+        const already = new Set([...(entry.selected_cost_centre_ids || []), entry.cost_centre_id].filter(Boolean));
+        usable = usable.filter(c => !c.variation_entry_id || open.has(c.variation_entry_id) || already.has(c.id));
+      }
+      centres = usable.map((c, i) => ({ id: c.id, name: c.name, number: costCentreNumber(proj ? proj.job_number : null, i + 1) }));
+    }
 
-  // Has today's mandatory break already been answered against another
-  // entry today? Generous UTC window, exact Sydney-date match in JS -
-  // same pattern used server-side for day banding. The same fetch also
-  // gives us everything ELSE clocked today, to check the 6-hour
-  // threshold below.
-  const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
-  const { data: recentEntries } = await supabaseClient
-    .from('time_entries')
-    .select('id, project_id, clock_in, clock_out, break_taken, stayed_overnight')
-    .eq('staff_id', entry.staff_id)
-    .gte('clock_in', windowStart.toISOString());
+    // Has today's mandatory break already been answered against another
+    // entry today? Generous UTC window, exact Sydney-date match in JS -
+    // same pattern used server-side for day banding.
+    const windowStart = new Date(); windowStart.setUTCDate(windowStart.getUTCDate() - 1);
+    const { data: recent, error: recentErr } = await supabaseClient
+      .from('time_entries')
+      .select('id, project_id, clock_in, clock_out, break_taken, stayed_overnight')
+      .eq('staff_id', entry.staff_id)
+      .gte('clock_in', windowStart.toISOString());
+    if (recentErr) loadError = recentErr;
+    recentEntries = recent || [];
+  } catch (e) {
+    loadError = e;
+  }
+  if (loadError) {
+    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load your clock-out. ${escapeHtml(friendlyError(loadError))}</div><button type="button" class="secondary" id="cko-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+    overlay.querySelector('#cko-close-btn').addEventListener('click', () => overlay.remove());
+    return;
+  }
   const todayKey = sydneyDateKey(new Date());
   const todaysEntries = (recentEntries || []).filter(r => sydneyDateKey(new Date(r.clock_in)) === todayKey);
   const breakAlreadyLogged = todaysEntries.some(r => r.break_taken !== null && r.break_taken !== undefined);
-  // Everything already clocked today (other entries) plus however long
-  // THIS entry ends up running once a clock-out time is picked below.
-  const otherTodayMs = todaysEntries.filter(r => r.id !== entry.id && r.clock_out)
-    .reduce((s, r) => s + (new Date(r.clock_out) - new Date(r.clock_in)), 0);
   // Overnight-stay is asked once per (day, job) - a mobilisation job
   // usually runs several consecutive days, so this only needs answering
   // once per day even if it's clocked in and out of more than once.
   const lahaAlreadyLogged = todaysEntries.some(r => r.project_id === entry.project_id && r.stayed_overnight !== null && r.stayed_overnight !== undefined);
 
-  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '', stayedOvernight: null };
-
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
-  document.body.appendChild(overlay);
+  const state = { outIso: roundToQuarterHour(new Date()).toISOString(), breakTaken: null, breakStart: '', breakMinutes: 30, breakSkipReason: '', stayedOvernight: null, markedComplete: false };
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function timePartLocal(d) { return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+  // Sensible break-start default so Yes then Continue works without the
+  // picker: 12:00 when it falls inside the shift, else the shift midpoint.
+  function defaultBreakStart() {
+    const inD = new Date(entry.clock_in), outD = new Date(state.outIso);
+    const noon = new Date(outD); noon.setHours(12, 0, 0, 0);
+    if (noon > inD && noon < outD) return '12:00';
+    return timePartLocal(roundToQuarterHour(new Date((inD.getTime() + outD.getTime()) / 2)));
+  }
   function totalMinutesForSplit() {
     const mins = Math.round((new Date(state.outIso) - new Date(entry.clock_in)) / 60000);
     return mins > 0 ? mins : 0;
@@ -2487,12 +3580,12 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Confirm clock-out</h2>
-        <p class="subtitle" style="margin-bottom:12px;">${project ? projectRef(project) : 'General / Office'}</p>
+        <p class="subtitle" style="margin-bottom:12px;">${project ? escapeHtml(projectRef(project)) : 'General / Office'}</p>
         ${centres.length ? `
           <label style="margin-top:0">Stage(s) this time counts against</label>
           <div id="cko-cc-chips">${centres.map(c => `
             <button type="button" class="cc-chip ${chosenCentres.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
-              <span class="cc-chip-num">${c.number}</span> ${c.name}
+              <span class="cc-chip-num">${escapeHtml(c.number)}</span> ${escapeHtml(c.name)}
             </button>`).join('')}</div>
         ` : ''}
         <div id="cko-split-section" style="display:none; margin-top:10px;"></div>
@@ -2536,10 +3629,10 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       combined.setHours(hh, mm, 0, 0);
       if (combined <= new Date(entry.clock_in)) { msg.innerHTML = `<div class="error-box">Clock-out must be after your clock-in time.</div>`; return; }
       state.outIso = combined.toISOString();
-      // Only worth asking about a break once today's actual worked hours
-      // (this entry included) pass 6 - a short day doesn't need one.
-      const todayHours = (otherTodayMs + (combined - new Date(entry.clock_in))) / 3600000;
-      if (breakAlreadyLogged || todayHours <= 6) proceedAfterBreak(); else renderStep2();
+      // Only worth asking about a break when this shift runs past 6 hours: a shorter one does not
+      // need one, and the break sits on this one row and comes off its paid hours (bug M1).
+      const shiftHours = (combined - new Date(entry.clock_in)) / 3600000;
+      if (breakAlreadyLogged || shiftHours <= 6) proceedAfterBreak(); else renderStep2();
     });
 
     refreshClockOutSplit();
@@ -2570,7 +3663,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       ${splitCentres.map((c, i) => `
         <div style="margin-bottom:10px;">
           <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:3px; gap:8px;">
-            <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${c.number}</strong> ${c.name}</span>
+            <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${escapeHtml(c.number)}</strong> ${escapeHtml(c.name)}</span>
             <span style="display:flex; align-items:center; gap:4px;">
               <input type="number" min="0" max="100" value="${splitPercentages[i]}" class="cko-split-number" data-index="${i}" style="width:50px; padding:3px 5px; text-align:right;" />%
               <span class="cko-split-label subtitle" data-index="${i}" style="min-width:60px; text-align:right;">${fmtDuration(Math.round(totalMin * splitPercentages[i] / 100) * 60000)}</span>
@@ -2614,6 +3707,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   }
 
   function renderStep2() {
+    if (!state.breakStart) state.breakStart = defaultBreakStart();
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Did you take your break today?</h2>
@@ -2648,7 +3742,11 @@ async function openClockOutModal(entry, onDone, opts = {}) {
       overlay.querySelector('#cko-break-yes').style.borderColor = '';
       detailEl.innerHTML = `<label style="margin-top:0">Why not?</label><input id="cko-break-reason" placeholder="e.g. too busy on site" />`;
     });
-    overlay.querySelector('#cko-back-btn').addEventListener('click', renderStep1);
+    // Back forgets the default answer below: a shift shortened to 6 hours or less on step 1 is never
+    // asked again, and must not carry a break it was never asked about.
+    overlay.querySelector('#cko-back-btn').addEventListener('click', () => { state.breakTaken = null; state.breakStart = ''; renderStep1(); });
+    // The default answer is yes, 30 minutes, so Continue works straight away; No is one tap.
+    if (state.breakTaken !== false) overlay.querySelector('#cko-break-yes').click();
     overlay.querySelector('#cko-break-continue-btn').addEventListener('click', () => {
       const msg = overlay.querySelector('#cko-msg');
       if (state.breakTaken === null) { msg.innerHTML = `<div class="error-box">Let us know if you took a break.</div>`; return; }
@@ -2677,7 +3775,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Staying overnight?</h2>
-        <p class="subtitle" style="margin-bottom:12px;">${projectRef(project)} is approved for LAHA (living-away-from-home allowance). Did you stay overnight away from home for it?</p>
+        <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))} is approved for LAHA (living-away-from-home allowance). Did you stay overnight away from home for it?</p>
         <div style="display:flex; gap:10px;">
           <button type="button" id="cko-laha-yes" style="flex:1;">Yes</button>
           <button type="button" class="secondary" id="cko-laha-no" style="flex:1;">No</button>
@@ -2689,13 +3787,26 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   }
 
   async function finalizeClockOut() {
+    // One save at a time: a second tap on Next, Yes, No or Continue while the first is still
+    // writing would run these writes again (bug M14).
+    if (state.saving) return;
+    state.saving = true;
+    overlay.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    const savingMsg = overlay.querySelector('#cko-msg');
+    if (savingMsg) savingMsg.innerHTML = `<p class="subtitle">Saving...</p>`;
+
     const onceFields = {};
-    if (state.breakTaken !== null) {
+    // The break question is only asked past 6 hours (step 1); a shorter shift never gets break fields,
+    // whatever an earlier pass through the break step left in state.
+    const shiftHoursNow = (new Date(state.outIso) - new Date(entry.clock_in)) / 3600000;
+    if (state.breakTaken !== null && shiftHoursNow > 6) {
       onceFields.break_taken = state.breakTaken;
       if (state.breakTaken) {
         const [hh, mm] = state.breakStart.split(':').map(Number);
         const breakStartDate = new Date(state.outIso);
         breakStartDate.setHours(hh, mm, 0, 0);
+        // Overnight shift: a break time later than the clock-out belongs to the day before
+        if (breakStartDate > new Date(state.outIso)) breakStartDate.setDate(breakStartDate.getDate() - 1);
         onceFields.break_start = breakStartDate.toISOString();
         onceFields.break_minutes = state.breakMinutes;
       } else {
@@ -2735,13 +3846,30 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         cursor = segEnd;
       });
 
-      const inserts = rows.map((r, i) => ({
+      // The open entry becomes the first stage's segment (updated, never
+      // deleted: deleting an open entry fires sync_project_booked and can
+      // unbook the job, migration 20261023000000). The rest are inserted.
+      // The break sits on the longest segment so it always comes off in full (a short first segment
+      // could not hold 30 minutes); the overnight flag stays on the first.
+      const breakKeys = ['break_taken', 'break_start', 'break_minutes', 'break_skip_reason'];
+      const breakFields = Object.fromEntries(Object.entries(onceFields).filter(([k]) => breakKeys.includes(k)));
+      const otherOnce = Object.fromEntries(Object.entries(onceFields).filter(([k]) => !breakKeys.includes(k)));
+      const breakRow = rows.reduce((best, r, i) => (r.minutes > rows[best].minutes ? i : best), 0);
+      const { error: upErr } = await supabaseClient.from('time_entries').update({
+        cost_centre_id: rows[0].cost_centre_id, selected_cost_centre_ids: null,
+        clock_in: rows[0].clock_in, clock_out: rows[0].clock_out, ...otherOnce, ...(breakRow === 0 ? breakFields : {}),
+      }).eq('id', entry.id);
+      if (upErr) saveError = upErr;
+
+      const inserts = rows.slice(1).map((r, j) => ({
         staff_id: entry.staff_id, project_id: entry.project_id, cost_centre_id: r.cost_centre_id,
         time_category: entry.time_category, clock_in: r.clock_in, clock_out: r.clock_out,
-        ...(i === 0 ? onceFields : {}),
+        ...(breakRow === j + 1 ? breakFields : {}),
       }));
-      const { error: insErr } = await supabaseClient.from('time_entries').insert(inserts);
-      if (insErr) saveError = insErr;
+      if (!saveError && inserts.length) {
+        const { error: insErr } = await insertTimeEntriesOnce(entry.staff_id, inserts);
+        if (insErr) saveError = insErr;
+      }
 
       if (!saveError && segments.length > 1) {
         const extra = segments.slice(1).map(seg => ({
@@ -2749,87 +3877,176 @@ async function openClockOutModal(entry, onDone, opts = {}) {
           selected_cost_centre_ids: chosenCentres, time_category: entry.time_category,
           clock_in: seg.clock_in, clock_out: seg.clock_out,
         }));
-        const { error: e2 } = await supabaseClient.from('time_entries').insert(extra);
+        const { error: e2 } = await insertTimeEntriesOnce(entry.staff_id, extra);
         if (e2) saveError = e2;
-      }
-      if (!saveError) {
-        const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', entry.id);
-        if (delErr) saveError = delErr;
       }
     }
 
+    state.saving = false;
     if (saveError) {
+      overlay.querySelectorAll('button').forEach(b => { b.disabled = false; });
       const msg = overlay.querySelector('#cko-msg');
-      if (msg) msg.innerHTML = `<div class="error-box">${saveError.message}</div>`;
+      if (msg) msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(saveError))}</div>`;
       return;
     }
     // Only asked for an actual job (not a quote/site-visit), and only
     // while it's genuinely mid-install - once it's moved on to handover
     // or beyond there's nothing left to ask about here.
-    if (project && project.job_number && ['job_booked', 'job_not_complete'].includes(project.pipeline_stage)) renderStepJobStatus();
+    if (project && project.job_number && ['job_booked', 'job_not_complete'].includes(project.pipeline_stage) && await clockOutAsksMe(project.id)) renderStepJobStatus();
     else if (project) renderStep3();
     else await finishAndMaybeSwitch();
   }
 
-  // "Complete" moves the job on to Client Handover. "Not complete - back
-  // tomorrow" is the routine, no-note-needed case for an ordinary
+  // Who gets "How's the job?" (backlog item 33): the job's Thomson Energy site manager when
+  // they clocked in on it today, else the highest site rank on the job today (ties: first
+  // clock-in). Worked out on the server (clockout_asks_me, migration 20261121000000) because
+  // Staff cannot read each other's time entries. If that call fails, ask as before.
+  async function clockOutAsksMe(projectId) {
+    try {
+      const { data, error } = await supabaseClient.rpc('clockout_asks_me', { p_project_id: projectId });
+      if (error) throw error;
+      return data !== false;
+    } catch (err) {
+      console.error('clockout_asks_me failed, asking anyway:', err);
+      return true;
+    }
+  }
+
+  // "Complete" moves the job on to Client Handover. "Not complete, back
+  // <next working day>" is the routine, no-note-needed case for an ordinary
   // multi-day job - it auto-books the same person on the same job for
-  // the next calendar day and flags (doesn't block) if that slot's
-  // already got something else on it. This is separate from the
-  // Job Not Complete a PM can still set by hand from the pipeline board
-  // for something genuinely stuck, not just "see you tomorrow".
+  // the next working day (Sat/Sun roll to Mon) and flags (doesn't block)
+  // if that slot's already got something else on it, keeping the warning
+  // up until Continue. The quiet "Not finished, do not book me" link sets
+  // Job Not Complete with no booking, for the PM to schedule. This is
+  // separate from the Job Not Complete a PM can still set by hand from
+  // the pipeline board for something genuinely stuck.
   function renderStepJobStatus() {
+    // Back-in day: the next working day, or any day in the next 7 (the window
+    // book_back_after_clockout allows), counted from today in Sydney so an
+    // edited earlier clock-out time never offers a day that has already gone.
+    const baseKey = [sydneyDateKey(new Date(state.outIso)), sydneyDateKey(new Date())].sort().pop();
+    const backOptions = [];
+    for (let i = 1; i <= 7; i++) { const d = new Date(`${baseKey}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + i); backOptions.push(sydneyDateKey(d)); }
+    let backKey = nextWorkingDayKey(baseKey);
+    if (!backOptions.includes(backKey)) backKey = backOptions[0];
+    let backLabel = dayKeyLabel(backKey);
     overlay.innerHTML = `
       <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>How's the job?</h2>
-        <p class="subtitle" style="margin-bottom:12px;">${projectRef(project)}</p>
-        <div style="display:flex; flex-direction:column; gap:10px;">
+        <p class="subtitle" style="margin-bottom:12px;">${escapeHtml(projectRef(project))}</p>
+        <div id="cko-job-status-buttons" style="display:flex; flex-direction:column; gap:10px;">
           <button type="button" id="cko-job-complete">Complete</button>
-          <button type="button" class="secondary" id="cko-job-not-complete">Not complete - back tomorrow</button>
+          <label for="cko-back-day" style="margin:4px 0 0; font-size:12px; font-weight:400;" class="subtitle">Not complete? Pick the day to come back</label>
+          <select id="cko-back-day" style="margin:0;">${backOptions.map(k => `<option value="${k}" ${k === backKey ? 'selected' : ''}>${escapeHtml(dayKeyLabel(k))}</option>`).join('')}</select>
+          <button type="button" class="secondary" id="cko-job-not-complete">Not complete, back ${backLabel}</button>
         </div>
+        <a href="#" id="cko-job-no-book" class="link-quiet" style="display:block; text-align:center; font-size:13px; padding:10px; margin-top:6px;">Not finished, do not book me</a>
         <div id="cko-job-status-msg" style="margin-top:10px;"></div>
       </div>`;
 
-    overlay.querySelector('#cko-job-complete').addEventListener('click', async () => {
-      await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+    overlay.querySelector('#cko-back-day').addEventListener('change', (e) => {
+      backKey = e.target.value;
+      backLabel = dayKeyLabel(backKey);
+      const b = overlay.querySelector('#cko-job-not-complete');
+      if (b) b.textContent = `Not complete, back ${backLabel}`;
+    });
+
+    // Only one of Complete / Not complete / do not book me may run at a time
+    const lockJobStatus = (on) => {
+      ['#cko-job-complete', '#cko-job-not-complete', '#cko-back-day'].forEach(s => { const b = overlay.querySelector(s); if (b) b.disabled = on; });
+      const l = overlay.querySelector('#cko-job-no-book');
+      if (l) { l.style.pointerEvents = on ? 'none' : ''; l.style.opacity = on ? '0.6' : ''; }
+    };
+    overlay.querySelector('#cko-job-complete').addEventListener('click', async (e) => {
+      lockJobStatus(true);
+      const { data: moved, error: mvErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'client_handover' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']).select('id');
+      const statusMsg = overlay.querySelector('#cko-job-status-msg');
+      if (mvErr) {
+        statusMsg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(mvErr))}</div>`;
+        lockJobStatus(false);
+        return;
+      }
+      if (!moved || !moved.length) {
+        // Nothing moved (the job left Job Booked meanwhile): say so, don't log it as done.
+        statusMsg.innerHTML = `<div class="error-box">The job is no longer in Job Booked, so it was not moved to Client Handover. Your clock-out is saved, let your PM know.</div>`;
+        setTimeout(renderStep3, 3000);
+        return;
+      }
       await logActivity('project', project.id, 'job_complete', 'Marked complete at clock-out - moved to Client Handover');
+      state.markedComplete = true;
       renderStep3();
     });
 
     overlay.querySelector('#cko-job-not-complete').addEventListener('click', async () => {
       const msgEl = overlay.querySelector('#cko-job-status-msg');
       const btn = overlay.querySelector('#cko-job-not-complete');
-      btn.disabled = true;
+      const label = btn.textContent;
+      lockJobStatus(true);
+      btn.textContent = 'Booking...';
       try {
-        await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+        const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+        if (ncErr) throw ncErr;
 
-        const tomorrow = new Date(state.outIso);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-
-        const { data: existingTomorrow } = await supabaseClient
+        const { data: existingOnBackDay } = await supabaseClient
           .from('schedule_assignments')
           .select('id, project_id, projects(name, job_number)')
           .eq('staff_id', entry.staff_id)
-          .eq('assignment_date', tomorrowStr);
-        const doubleBooked = (existingTomorrow || []).filter(a => a.project_id !== project.id);
+          .eq('assignment_date', backKey);
+        const doubleBooked = (existingOnBackDay || []).filter(a => a.project_id !== project.id);
+        let alreadyHere = (existingOnBackDay || []).some(a => a.project_id === project.id);
 
-        await supabaseClient.from('schedule_assignments').insert({
-          staff_id: entry.staff_id, project_id: project.id, block_type: 'job',
-          assignment_date: tomorrowStr, start_time: '07:00', end_time: '15:00',
-        });
-        await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - booked back in for ${tomorrowStr}`);
+        // Server function: Staff-role tradies cannot write schedule_assignments directly
+        let bookErr = null;
+        if (!alreadyHere) {
+          const { data: booked, error } = await supabaseClient.rpc('book_back_after_clockout', { p_project_id: project.id, p_date: backKey });
+          bookErr = error;
+          if (booked === 'already') alreadyHere = true;
+        }
+        if (bookErr) {
+          // Job is Not Complete either way; say plainly that the booking did not go in
+          await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - could not book back in for ${backKey}, PM to schedule`);
+          overlay.querySelector('#cko-job-status-buttons').style.display = 'none';
+          overlay.querySelector('#cko-job-no-book').style.display = 'none';
+          msgEl.innerHTML = `<div class="error-box">Job marked Not complete, but you could not be booked back in for ${backLabel}. Let your PM know so they can book you.</div><button type="button" id="cko-job-status-continue" style="width:100%; margin-top:10px;">Continue</button>`;
+          overlay.querySelector('#cko-job-status-continue').addEventListener('click', renderStep3);
+          return;
+        }
+        await logActivity('project', project.id, 'job_not_complete', `Not complete at clock-out - ${alreadyHere ? 'already booked' : 'booked back in'} for ${backKey}`);
 
         if (doubleBooked.length) {
-          await logActivity('project', project.id, 'schedule_conflict', `Also booked on ${tomorrowStr} against: ${doubleBooked.map(a => a.projects?.name || 'another job').join(', ')}`);
-          msgEl.innerHTML = `<div class="error-box">Heads up - you're already booked on something else for ${tomorrowStr} too. Let your PM know.</div>`;
-          setTimeout(renderStep3, 2500);
+          await logActivity('project', project.id, 'schedule_conflict', `Also booked on ${backKey} against: ${doubleBooked.map(a => a.projects?.name || 'another job').join(', ')}`);
+          const others = doubleBooked.map(a => a.projects ? projectRef(a.projects) : 'another job').join(', ');
+          // Hide the choices: the booking is already in, nothing else to tap.
+          overlay.querySelector('#cko-job-status-buttons').style.display = 'none';
+          overlay.querySelector('#cko-job-no-book').style.display = 'none';
+          msgEl.innerHTML = `<div class="error-box">Heads up: you're booked back on this job for ${backLabel}, but you're already booked that day on ${escapeHtml(others)} too. Let your PM know.</div><button type="button" id="cko-job-status-continue" style="width:100%; margin-top:10px;">Continue</button>`;
+          overlay.querySelector('#cko-job-status-continue').addEventListener('click', renderStep3);
         } else {
           renderStep3();
         }
       } catch (err) {
-        msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
-        btn.disabled = false;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+        btn.textContent = label;
+        lockJobStatus(false);
+      }
+    });
+
+    // Not finished, but leave the booking to the PM: no schedule row.
+    // Does not set state.markedComplete, so no CCEW ask follows.
+    overlay.querySelector('#cko-job-no-book').addEventListener('click', async (e) => {
+      e.preventDefault();
+      const link = e.currentTarget;
+      const msgEl = overlay.querySelector('#cko-job-status-msg');
+      lockJobStatus(true);
+      try {
+        const { error: ncErr } = await supabaseClient.from('projects').update({ pipeline_stage: 'job_not_complete' }).eq('id', project.id).in('pipeline_stage', ['job_booked', 'job_not_complete']);
+        if (ncErr) throw ncErr;
+        await logActivity('project', project.id, 'job_not_complete', 'Not complete at clock-out - not rebooked, PM to schedule');
+        renderStep3();
+      } catch (err) {
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+        lockJobStatus(false);
       }
     });
   }
@@ -2840,24 +4057,51 @@ async function openClockOutModal(entry, onDone, opts = {}) {
   // long the before-you-go step took, not zero and not backdated.
   async function finishAndMaybeSwitch() {
     if (opts.switchTo) {
-      await supabaseClient.from('time_entries').insert({
+      const { error } = await supabaseClient.from('time_entries').insert({
         staff_id: entry.staff_id, project_id: opts.switchTo.projectId,
         time_category: 'job', clock_in: roundToQuarterHour(new Date()).toISOString(),
       });
+      // 23505 is the one-open-entry index: a retry whose first attempt did save. Anything else
+      // means clocked out but not clocked in, so say so instead of closing as if it worked (bug F28).
+      if (error && error.code !== '23505') {
+        overlay.innerHTML = `
+          <div class="card" style="max-width:460px; width:100%;">
+            <h2>Not clocked in yet</h2>
+            <div class="error-box">You are clocked out, but clocking in to ${escapeHtml(opts.switchTo.label)} did not save. ${escapeHtml(friendlyError(error))}</div>
+            <div style="margin-top:14px;">
+              <button type="button" id="cko-switch-retry">Try again</button>
+              <button type="button" class="secondary" id="cko-switch-close">Close</button>
+            </div>
+          </div>`;
+        overlay.querySelector('#cko-switch-retry').addEventListener('click', finishAndMaybeSwitch);
+        overlay.querySelector('#cko-switch-close').addEventListener('click', async () => { overlay.remove(); if (onDone) await onDone(); });
+        return;
+      }
     }
     overlay.remove();
     if (onDone) await onDone();
+    if (!opts.switchTo) await maybeAskUsedStock(entry, project);
   }
 
   function renderStep3() {
+    // Only after Complete actually moved the job, and only while no CCEW
+    // (or not-required reason) is on file, same test as the job page.
+    const askCcew = state.markedComplete && project && project.job_number && !project.ccew_file_path && !project.ccew_not_required_reason;
     overlay.innerHTML = `
       <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
         <h2>Before you go...</h2>
-        <p class="subtitle" style="margin-bottom:12px;">You're clocked out of ${projectRef(project)}.${opts.switchTo ? ` Next up: ${opts.switchTo.label}.` : ''}</p>
+        <p class="subtitle" style="margin-bottom:12px;">You're clocked out of ${escapeHtml(projectRef(project))}.${opts.switchTo ? ` Next up: ${escapeHtml(opts.switchTo.label)}.` : ''}</p>
+
+        ${askCcew ? `
+        <div id="cko-ccew-block" style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
+          <label style="margin-top:0">CCEW (optional, while you have it in hand)</label>
+          <label class="btn secondary" style="width:100%; justify-content:center; margin:0; cursor:pointer;">&#128247; Take photo of the CCEW<input type="file" id="cko-ccew-file" accept="image/*" capture="environment" style="display:none;" /></label>
+          <div id="cko-ccew-msg"></div>
+        </div>` : ''}
 
         <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:10px;">
           <label style="margin-top:0">Site photos</label>
-          <input type="file" id="cko-photo-file" accept="image/*" multiple capture="environment" />
+          <input type="file" id="cko-photo-file" accept="image/*" multiple />
           <div id="cko-photo-msg"></div>
         </div>
 
@@ -2873,7 +4117,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         </div>
 
         <a href="/project.html?id=${project.id}" class="link-quiet" style="display:block; text-align:center; margin-bottom:10px; font-size:13px;">Go to job page</a>
-        <button type="button" id="cko-finish-btn" style="width:100%;">${opts.switchTo ? `Clock into ${opts.switchTo.label}` : 'Done'}</button>
+        <button type="button" id="cko-finish-btn" style="width:100%;">${opts.switchTo ? `Clock into ${escapeHtml(opts.switchTo.label)}` : 'Done'}</button>
       </div>`;
 
     let sigCanvas = null, sigCtx = null, hasSignature = false;
@@ -2886,7 +4130,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         <input id="cko-note-signed-name" placeholder="Full name" />
         <label>Signature</label>
         <canvas id="cko-note-sig-canvas" width="380" height="120" style="width:100%; max-width:380px; height:120px; border:1px solid var(--border); border-radius:6px; touch-action:none; background:#fff; display:block;"></canvas>
-        <button type="button" class="secondary" id="cko-note-sig-clear-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Clear signature</button>`;
+        <button type="button" class="secondary" id="cko-note-sig-clear-btn" style="margin-top:8px;">Clear signature</button>`;
       sigCanvas = section.querySelector('#cko-note-sig-canvas');
       sigCtx = sigCanvas.getContext('2d');
       sigCtx.strokeStyle = '#000'; sigCtx.lineWidth = 2; sigCtx.lineJoin = 'round'; sigCtx.lineCap = 'round';
@@ -2905,18 +4149,43 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     // Fires the moment photos are chosen - previously needed a second
     // "Upload" click that staff often skipped, assuming picking the file
     // was already the whole job done.
-    overlay.querySelector('#cko-photo-file').addEventListener('change', async () => {
-      const fileInput = overlay.querySelector('#cko-photo-file');
-      const msg = overlay.querySelector('#cko-photo-msg');
-      if (!fileInput.files.length) return;
-      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
+    wireSitePhotoInput(overlay.querySelector('#cko-photo-file'), overlay.querySelector('#cko-photo-msg'), { projectId: project.id, staffId: entry.staff_id });
+
+    // CCEW photo: same store as the job page's Compliance - CCEW card
+    // (ccew/<project id> in project-documents, projects.ccew_file_path).
+    const ccewInput = overlay.querySelector('#cko-ccew-file');
+    if (ccewInput) ccewInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const msg = overlay.querySelector('#cko-ccew-msg');
+      const labelBtn = ccewInput.parentElement;
+      const labelText = labelBtn.firstChild.textContent;
+      ccewInput.disabled = true;
+      labelBtn.style.opacity = '0.5';
+      labelBtn.firstChild.textContent = 'Uploading...';
+      msg.innerHTML = '';
       try {
-        const urls = await uploadPhotos(fileInput.files, project.id, 'site-photos');
-        const { error } = await supabaseClient.from('project_photos').insert(urls.map(url => ({ project_id: project.id, staff_id: entry.staff_id, url })));
+        const path = await uploadPrivateFile(file, `ccew/${project.id}`);
+        // Never overwrite one someone uploaded from the job page meanwhile.
+        const { data: upd, error } = await supabaseClient.from('projects').update({ ccew_file_path: path, ccew_not_required_reason: null }).eq('id', project.id).is('ccew_file_path', null).select('id');
         if (error) throw error;
-        fileInput.value = '';
-        msg.innerHTML = `<div class="success-box">${urls.length} photo${urls.length === 1 ? '' : 's'} added.</div>`;
-      } catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+        if (!upd || !upd.length) {
+          msg.innerHTML = `<div class="success-box">A CCEW was already uploaded for this job, nothing more to do.</div>`;
+          labelBtn.style.display = 'none';
+          return;
+        }
+        project.ccew_file_path = path;
+        await logActivity('project', project.id, 'ccew_uploaded', 'CCEW photo uploaded at clock-out');
+        labelBtn.style.display = 'none';
+        msg.innerHTML = `<div class="success-box">CCEW uploaded. You can view or replace it under Compliance - CCEW on the job page.</div>`;
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+      } finally {
+        ccewInput.disabled = false;
+        ccewInput.value = '';
+        labelBtn.style.opacity = '';
+        labelBtn.firstChild.textContent = labelText;
+      }
     });
 
     overlay.querySelector('#cko-note-save-btn').addEventListener('click', async () => {
@@ -2932,7 +4201,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
         row.signature_data_url = sigCanvas.toDataURL('image/png');
       }
       const { error } = await supabaseClient.from('project_field_notes').insert(row);
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       overlay.querySelector('#cko-note-text').value = '';
       msg.innerHTML = `<div class="success-box">Note saved.</div>`;
     });
@@ -2974,7 +4243,7 @@ async function openJobSwitchModal(entry, onDone) {
     resultsEl.innerHTML = `
       ${label ? `<p class="subtitle" style="margin:0 0 4px; font-size:12px;">${label}</p>` : ''}
       <div style="border:1px solid var(--border); border-radius:8px;">
-        ${results.filter(p => p.id !== entry.project_id).map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${projectRef(p).replace(/"/g, '&quot;')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)} <span class="subtitle">${p.client_name || ''}</span></div>`).join('')}
+        ${results.filter(p => p.id !== entry.project_id).map(p => `<div class="job-pick-row" data-id="${p.id}" data-label="${escapeHtml(projectRef(p))}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))} <span class="subtitle">${escapeHtml(p.client_name || '')}</span></div>`).join('')}
       </div>`;
     resultsEl.querySelectorAll('.job-pick-row').forEach(row => {
       row.addEventListener('click', () => {
@@ -3117,12 +4386,30 @@ async function loadClockableCostCentres(projectId) {
 // clocked in somewhere, use openClockOutModal with switchTo instead.
 // `project` needs id/name/job_number/quote_number. Calls `onDone` once in.
 async function openJobClockInModal(project, onDone) {
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  const centres = await loadClockableCostCentres(project.id);
+  // Overlay first, before any await (see openClockOutModal).
+  if (document.getElementById('clock-modal-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'clock-modal-overlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+  overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><p class="subtitle">Loading...</p></div>`;
+  document.body.appendChild(overlay);
+
+  let user = null, centres = [], loadError = null;
+  try {
+    const { data, error } = await supabaseClient.auth.getUser();
+    user = data ? data.user : null;
+    if (error) loadError = error;
+    centres = await loadClockableCostCentres(project.id);
+  } catch (e) {
+    loadError = e;
+  }
+  if (loadError || !user) {
+    overlay.innerHTML = `<div class="card" style="max-width:460px; width:100%;"><div class="error-box">Could not load the job. ${escapeHtml(loadError ? friendlyError(loadError) : 'Log in again, then try.')}</div><button type="button" class="secondary" id="jci-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
+    overlay.querySelector('#jci-close-btn').addEventListener('click', () => overlay.remove());
+    return;
+  }
   let chosen = centres.length === 1 ? [centres[0].id] : [];
 
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
   overlay.innerHTML = `
     <div class="card" style="max-width:460px; width:100%; max-height:85vh; overflow-y:auto;">
       <h2>Clock in</h2>
@@ -3140,7 +4427,6 @@ async function openJobClockInModal(project, onDone) {
         <button type="button" class="secondary" id="jci-cancel">Cancel</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
 
   const hint = overlay.querySelector('#jci-hint');
   overlay.querySelectorAll('.cc-chip').forEach(chip => chip.addEventListener('click', () => {
@@ -3164,7 +4450,7 @@ async function openJobClockInModal(project, onDone) {
     if (chosen.length === 1) entry.cost_centre_id = chosen[0];
     else if (chosen.length > 1) entry.selected_cost_centre_ids = chosen;
     const { error } = await supabaseClient.from('time_entries').insert(entry);
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; e.target.disabled = false; return; }
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; e.target.disabled = false; return; }
     overlay.remove();
     if (onDone) await onDone();
   });
@@ -3186,22 +4472,22 @@ function openQuickJobPanel(onCreated) {
   overlay.innerHTML = `
     <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
       <h2>New job - no quote</h2>
-      <p class="subtitle" style="margin-bottom:12px;">Skips the quote/proposal step entirely and goes straight to Job Booked. Time and materials get logged against it as normal (timesheets, POs, or manually); invoice it for whatever's actually been spent once it's done.</p>
+      <p class="subtitle" style="margin-bottom:12px;">Creates a job number straight away so you can clock in and log materials.</p>
 
-      <label style="margin-top:0">Job name</label>
+      <label style="margin-top:0">Job name *</label>
       <input id="qj-name" placeholder="e.g. 14 Miller St - Switchboard Repair" />
 
       <label>What's this job about</label>
       <textarea id="qj-brief" rows="2" placeholder="Brief description of the work"></textarea>
 
-      <label>Client - search existing, or just type a new one below</label>
+      <label id="qj-client-search-label">Client - search existing, or just type a new one below</label>
       <input id="qj-client-search" placeholder="Search existing clients..." autocomplete="off" />
       <div id="qj-client-results"></div>
 
       <div class="grid cols-2" style="margin-top:8px;">
         <div>
-          <label style="margin-top:0">Client name</label>
-          <input id="qj-client-name" required />
+          <label style="margin-top:0">Client name *</label>
+          <input id="qj-client-name" />
         </div>
         <div>
           <label style="margin-top:0">Client email</label>
@@ -3209,7 +4495,7 @@ function openQuickJobPanel(onCreated) {
         </div>
       </div>
       <label>Client phone</label>
-      <input id="qj-client-phone" />
+      <input id="qj-client-phone" type="tel" inputmode="tel" autocomplete="tel" />
 
       <label>Site address</label>
       <input id="qj-address" placeholder="Job site address" />
@@ -3228,6 +4514,14 @@ function openQuickJobPanel(onCreated) {
 
   let selectedClientId = null;
 
+  // Clients are read and written by Admin, Finance and Sales only (RLS). Anyone else types the
+  // client's name and the job carries it with no clients row, so the search is not shown (bug F7).
+  getMyRole().then(role => {
+    if (isPricingRole(role)) return;
+    overlay.querySelector('#qj-client-search-label').textContent = 'Client';
+    overlay.querySelector('#qj-client-search').style.display = 'none';
+  });
+
   let searchTimeout;
   overlay.querySelector('#qj-client-search').addEventListener('input', (e) => {
     clearTimeout(searchTimeout);
@@ -3243,7 +4537,7 @@ function openQuickJobPanel(onCreated) {
       const resultsEl = overlay.querySelector('#qj-client-results');
       if (!data || !data.length) { resultsEl.innerHTML = `<p class="subtitle" style="margin-top:4px;">No matches - fill in the fields below to add them as a new client.</p>`; return; }
       resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-        ${data.map(c => `<div class="client-pick-row" data-id="${c.id}" data-name="${c.name}" data-email="${c.email || ''}" data-phone="${c.phone || ''}" data-address="${c.address || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${c.name} <span class="subtitle">${c.email || ''}</span></div>`).join('')}
+        ${data.map(c => `<div class="client-pick-row" data-id="${c.id}" data-name="${escapeHtml(c.name)}" data-email="${escapeHtml(c.email || '')}" data-phone="${escapeHtml(c.phone || '')}" data-address="${escapeHtml(c.address || '')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(c.name)} <span class="subtitle">${escapeHtml(c.email || '')}</span></div>`).join('')}
       </div>`;
       resultsEl.querySelectorAll('.client-pick-row').forEach(row => {
         row.addEventListener('click', () => {
@@ -3279,7 +4573,8 @@ function openQuickJobPanel(onCreated) {
     confirmBtn.textContent = 'Creating...';
     try {
       let clientId = selectedClientId;
-      if (!clientId) {
+      // Only a pricing role may add the clients row; for anyone else the job keeps the typed name (bug F7).
+      if (!clientId && isPricingRole(await getMyRole())) {
         const { data: newClient, error: clientErr } = await supabaseClient
           .from('clients')
           .insert({ name: clientName, email: clientEmail, phone: clientPhone, address: clientAddress })
@@ -3288,6 +4583,7 @@ function openQuickJobPanel(onCreated) {
         if (clientErr) throw clientErr;
         clientId = newClient.id;
       }
+      const clientSiteId = selectedClientId ? await resolveClientSite(clientId, clientAddress) : null;
 
       const { data: project, error } = await supabaseClient.from('projects').insert({
         name,
@@ -3297,8 +4593,10 @@ function openQuickJobPanel(onCreated) {
         client_email: clientEmail,
         client_phone: clientPhone,
         client_address: clientAddress,
+        client_site_id: clientSiteId,
         proposal_template: 'direct_job',
-        pipeline_stage: 'job_booked',
+        // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
+        pipeline_stage: 'ready_to_book',
         status: 'in_progress',
         laha_approved: overlay.querySelector('#qj-laha-approved').checked,
       }).select('id, name, job_number').single();
@@ -3314,13 +4612,14 @@ function openQuickJobPanel(onCreated) {
       overlay.remove();
       if (onCreated) onCreated(project);
     } catch (err) {
-      panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      panelMsg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
       confirmBtn.disabled = false;
       confirmBtn.textContent = 'Create job';
     }
   });
 
   document.body.appendChild(overlay);
+  overlay.querySelector('#qj-name').focus();
 }
 
 // Re-checked any time the handover data fields are saved or a
@@ -3342,6 +4641,10 @@ async function checkAndAdvanceHandover(projectId) {
       && !!(project.inverter_serial_numbers || '').trim() && !!project.formbay_lodgement_status;
     if (!dataComplete) return;
   }
+  // A battery job needs the NMI and the Formbay lodgement; serials live on the Installed equipment card.
+  if (project.proposal_template === 'battery') {
+    if (!(project.nmi || '').trim() || !project.formbay_lodgement_status) return;
+  }
 
   const { data: outstanding } = await supabaseClient
     .from('job_tasks')
@@ -3357,7 +4660,7 @@ async function checkAndAdvanceHandover(projectId) {
 // Mirrors advance-job-stage.js's server-side logic (run right after a
 // deposit is paid) - re-checked any time a required-before-scheduling
 // task is completed or a new one is added, but only while the job
-// hasn't been scheduled yet (awaiting_action/ready_to_book). Once it's
+// hasn't been scheduled yet (awaiting_action/ready_to_book; awaiting_client_action is hand-moved only). Once it's
 // actually job_booked or further along, a task change shouldn't silently
 // move it backwards - see PROJECT_SPEC/the job-not-complete flow for
 // how a job returns to awaiting_action deliberately instead.
@@ -3442,13 +4745,13 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
     <div class="card" style="max-width:460px; width:100%; max-height:88vh; overflow-y:auto;">
       <h2>Schedule inspection</h2>
       <label style="margin-top:0">Checklist</label>
-      <select id="si-template">${templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}</select>
+      <select id="si-template">${templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}</select>
       <label>Assign to</label>
-      <select id="si-staff">${(staff || []).map(s => `<option value="${s.id}">${s.full_name || 'Unnamed'}</option>`).join('')}</select>
+      <select id="si-staff">${(staff || []).map(s => `<option value="${s.id}">${escapeHtml(s.full_name || 'Unnamed')}</option>`).join('')}</select>
       <div class="grid cols-3">
         <div>
           <label>Date</label>
-          <input type="date" id="si-date" value="${new Date().toISOString().slice(0, 10)}" />
+          <input type="date" id="si-date" value="${sydneyDateKey(new Date())}" />
         </div>
         <div>
           <label>Start time</label>
@@ -3499,7 +4802,7 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
     const labelFor = (a) => a.block_type === 'site_inspection' ? 'Inspection' + (a.projects?.name ? ': ' + a.projects.name : '')
       : a.projects ? `${a.block_type === 'site_visit' ? 'Site visit: ' : ''}${a.projects.name}${a.projects.job_number ? ' #' + a.projects.job_number : ''}`
       : `${{ training: 'Training', office: 'Office / admin', other: 'Other' }[a.block_type] || 'Office / admin'}${a.note ? ' - ' + a.note : ''}`;
-    previewEl.innerHTML = existing.map(a => `<p style="margin:2px 0;">${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${labelFor(a)}</p>`).join('');
+    previewEl.innerHTML = existing.map(a => `<p style="margin:2px 0;">${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${escapeHtml(labelFor(a))}</p>`).join('');
   }
   overlay.querySelector('#si-staff').addEventListener('change', refreshDayPreview);
   overlay.querySelector('#si-date').addEventListener('change', refreshDayPreview);
@@ -3535,7 +4838,7 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
       overlay.remove();
       if (onScheduled) onScheduled(inspection);
     } catch (err) {
-      msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       confirmBtn.disabled = false;
       confirmBtn.textContent = 'Schedule';
     }
@@ -3557,10 +4860,10 @@ function openWarrantyJobPanel(originalProject, onCreated) {
   overlay.innerHTML = `
     <div class="card" style="max-width:480px; width:100%; max-height:85vh; overflow-y:auto;">
       <h2>Create warranty job</h2>
-      <p class="subtitle" style="margin-bottom:12px;">For ${projectRef(originalProject)}. Its own job number - clock in, log POs, and invoice it same as any job - but its cost pulls back against the original job's actual profit, and once you close it out you'll choose whether it's absorbed, billed to the manufacturer, or partly billed to the client.</p>
+      <p class="subtitle" style="margin-bottom:12px;">For ${escapeHtml(projectRef(originalProject))}. Its own job number - clock in, log POs, and invoice it same as any job - but its cost pulls back against the original job's actual profit, and once you close it out you'll choose whether it's absorbed, billed to the manufacturer, or partly billed to the client.</p>
 
       <label style="margin-top:0">Job name</label>
-      <input id="wj-name" value="${(originalProject.name || '').replace(/"/g, '&quot;')} - Warranty" />
+      <input id="wj-name" value="${escapeHtml(originalProject.name || '')} - Warranty" />
 
       <label>What's the warranty issue</label>
       <textarea id="wj-brief" rows="2" placeholder="Brief description of what's gone wrong"></textarea>
@@ -3568,18 +4871,18 @@ function openWarrantyJobPanel(originalProject, onCreated) {
       <div class="grid cols-2" style="margin-top:8px;">
         <div>
           <label style="margin-top:0">Client name</label>
-          <input id="wj-client-name" required value="${(originalProject.client_name || '').replace(/"/g, '&quot;')}" />
+          <input id="wj-client-name" required value="${escapeHtml(originalProject.client_name || '')}" />
         </div>
         <div>
           <label style="margin-top:0">Client email</label>
-          <input id="wj-client-email" type="email" value="${originalProject.client_email || ''}" />
+          <input id="wj-client-email" type="email" value="${escapeHtml(originalProject.client_email || '')}" />
         </div>
       </div>
       <label>Client phone</label>
-      <input id="wj-client-phone" value="${originalProject.client_phone || ''}" />
+      <input id="wj-client-phone" type="tel" autocomplete="tel" value="${escapeHtml(originalProject.client_phone || '')}" />
 
       <label>Site address</label>
-      <input id="wj-address" value="${(originalProject.client_address || '').replace(/"/g, '&quot;')}" />
+      <input id="wj-address" value="${escapeHtml(originalProject.client_address || '')}" />
 
       <div style="margin-top:14px;">
         <button id="wj-confirm-btn">Create warranty job</button>
@@ -3606,6 +4909,7 @@ function openWarrantyJobPanel(originalProject, onCreated) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Creating...';
     try {
+      const clientSiteId = await resolveClientSite(originalProject.client_id, clientAddress);
       const { data: project, error } = await supabaseClient.from('projects').insert({
         name,
         sow_text: brief || null,
@@ -3614,8 +4918,10 @@ function openWarrantyJobPanel(originalProject, onCreated) {
         client_email: clientEmail,
         client_phone: clientPhone,
         client_address: clientAddress,
+        client_site_id: clientSiteId,
         proposal_template: 'direct_job',
-        pipeline_stage: 'job_booked',
+        // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
+        pipeline_stage: 'ready_to_book',
         status: 'in_progress',
         warranty_of_project_id: originalProject.id,
       }).select('id, name, job_number').single();
@@ -3629,7 +4935,7 @@ function openWarrantyJobPanel(originalProject, onCreated) {
       overlay.remove();
       if (onCreated) onCreated(project);
     } catch (err) {
-      panelMsg.innerHTML = `<div class="error-box">${err.message}</div>`;
+      panelMsg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       confirmBtn.disabled = false;
       confirmBtn.textContent = 'Create warranty job';
     }
@@ -3680,8 +4986,10 @@ const STC_STATUSES = [
 ];
 const stcStatusLabel = (v) => (STC_STATUSES.find(s => s.value === v) || { label: v || '-' }).label;
 
-// Number of STCs a quote stage was priced on: from the calculator inputs, or the $ total / price per STC.
+// Number of STCs a quote stage was priced on: the count typed on the stage, else the calculator
+// inputs, else the $ total / price per STC.
 function stcCountForStage(stage) {
+  if (Number(stage.stc_quantity) > 0) return Math.round(Number(stage.stc_quantity));
   const qty = calculateStcQuantity({ kw: Number(stage.stc_system_kw) || 0, zoneRating: Number(stage.stc_zone_rating) || 0, installYear: stage.stc_install_year });
   if (qty) return qty;
   const price = Number(stage.stc_price_per_certificate) || 35;
@@ -3949,7 +5257,9 @@ function pylonSystemSummary(pylonData) {
   if (pylonData.summary?.dc_output_kw) parts.push(`${pylonData.summary.dc_output_kw}kW system`);
   [...(pylonData.module_types || []), ...(pylonData.inverter_types || []), ...(pylonData.storage_types || [])]
     .forEach(item => { if (item?.description) parts.push(`${item.quantity || 1}x ${item.description}`); });
-  return parts.join(' &middot; ');
+  // Plain text, so the middle dot is the character itself, not an HTML entity: the pages escape
+  // the whole summary (bug F4).
+  return parts.join(' · ');
 }
 
 // Kicks off a background extraction function and polls the resulting job
@@ -4013,7 +5323,7 @@ function supplierPickerHtml(ids) {
       <p class="subtitle" style="margin:0 0 8px;">No match - this'll be created as a new supplier.</p>
       <div class="grid cols-2">
         <div><label style="margin-top:0">Contact email</label><input id="${ids.newEmail}" type="email" /></div>
-        <div><label style="margin-top:0">Contact phone</label><input id="${ids.newPhone}" /></div>
+        <div><label style="margin-top:0">Contact phone</label><input id="${ids.newPhone}" type="tel" /></div>
       </div>
     </div>`;
 }
@@ -4042,7 +5352,7 @@ function wireSupplierPicker(overlay, suppliers, ids) {
       const matches = (suppliers || []).filter(s => s.name.toLowerCase().includes(q.toLowerCase()));
       if (matches.length) {
         resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-          ${matches.map(s => `<div class="supplier-pick-row" data-id="${s.id}" data-name="${s.name.replace(/"/g, '&quot;')}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${s.name}</div>`).join('')}
+          ${matches.map(s => `<div class="supplier-pick-row" data-id="${s.id}" data-name="${escapeHtml(s.name)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(s.name)}</div>`).join('')}
         </div>`;
         resultsEl.querySelectorAll('.supplier-pick-row').forEach(row => {
           row.addEventListener('click', () => {
@@ -4154,13 +5464,28 @@ async function openStockPicker(stageRow) {
       <label>Search</label>
       <input id="stock-pick-search" placeholder="Name, category..." autocomplete="off" />
       <div id="stock-pick-results" style="margin-top:8px;"></div>
-      <div style="margin-top:16px; text-align:right;">
+      <div style="margin-top:16px; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="secondary" id="stock-pick-new-prebuild" title="Make a prebuild the library does not have yet, save it to the library and add it to this stage">+ New prebuild</button>
         <button type="button" class="secondary" id="stock-pick-cancel">Cancel</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('#stock-pick-cancel').addEventListener('click', () => overlay.remove());
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  // Found the library has no prebuild for this? Make it here (same form as the Prebuilds page,
+  // js/prebuild-form.js): saved to the library, then added to the stage like any picked prebuild.
+  overlay.querySelector('#stock-pick-new-prebuild').addEventListener('click', () => {
+    if (typeof openPrebuildForm !== 'function') { alert('The prebuild form did not load. Refresh the page and try again.'); return; }
+    const qty = parseFloat(overlay.querySelector('#stock-pick-qty').value) || 1;
+    overlay.remove();
+    openPrebuildForm({
+      onSaved: (prebuild) => {
+        _prebuildsCache = null;
+        addPrebuildToStage(stageRow, prebuild, qty);
+      },
+    });
+  });
 
   const resultsEl = overlay.querySelector('#stock-pick-results');
   function renderResults() {
@@ -4175,13 +5500,13 @@ async function openStockPicker(stageRow) {
     resultsEl.innerHTML = [
       ...prebuildMatches.map(p => `
         <div class="stock-pick-row" data-kind="prebuild" data-id="${p.id}" style="padding:10px; border-radius:8px; cursor:pointer; border-bottom:0.5px solid var(--border);">
-          <div style="font-weight:600;">${p.name} <span class="subtitle" style="font-weight:400;">Prebuild</span></div>
-          <div class="subtitle" style="font-size:12px;">${p.category}${p.subcategory ? ' / ' + p.subcategory : ''}</div>
+          <div style="font-weight:600;">${escapeHtml(p.name)} <span class="subtitle" style="font-weight:400;">Prebuild</span></div>
+          <div class="subtitle" style="font-size:12px;">${escapeHtml(p.category)}${p.subcategory ? ' / ' + escapeHtml(p.subcategory) : ''}</div>
         </div>`),
       ...materialMatches.map(m => `
         <div class="stock-pick-row" data-kind="material" data-id="${m.id}" style="padding:10px; border-radius:8px; cursor:pointer; border-bottom:0.5px solid var(--border);">
-          <div style="font-weight:600;">${m.name} <span class="subtitle" style="font-weight:400;">Material - ${money(m.cost_price)}</span></div>
-          <div class="subtitle" style="font-size:12px;">${m.category || ''}</div>
+          <div style="font-weight:600;">${escapeHtml(m.name)} <span class="subtitle" style="font-weight:400;">Material - ${money(m.cost_price)}</span></div>
+          <div class="subtitle" style="font-size:12px;">${escapeHtml(m.category || '')}</div>
         </div>`),
     ].join('');
     resultsEl.querySelectorAll('.stock-pick-row').forEach(row => {
@@ -4194,31 +5519,171 @@ async function openStockPicker(stageRow) {
           return;
         }
         const prebuild = prebuilds.find(p => p.id === row.dataset.id);
-        // One group id shared by every component this click adds - lets the
-        // client-facing quote collapse them back into a single line (the
-        // prebuild's own client_description) while staff still see and can
-        // edit each component individually here. A second "Add prebuild"
-        // for the same prebuild gets its own group, so it collapses on its
-        // own rather than merging with the first.
-        const groupId = crypto.randomUUID();
-        const clientDescription = prebuild.client_description || prebuild.name;
-        const components = (prebuild.prebuild_components || []).map(comp => ({
-          description: `${prebuild.name} - ${comp.description}`,
-          item_type: comp.item_type,
-          quantity: (parseFloat(comp.quantity) || 0) * qty,
-          unit_cost: comp.unit_cost,
-          // Un-multiplied - the group's own quantity control rescales from
-          // this base rather than the qty typed into this picker, which
-          // only sets the starting point.
-          prebuild_base_quantity: parseFloat(comp.quantity) || 0,
-        }));
-        renderPrebuildGroup(stageRow, groupId, clientDescription, components);
+        addPrebuildToStage(stageRow, prebuild, qty);
         overlay.remove();
       });
     });
   }
   overlay.querySelector('#stock-pick-search').addEventListener('input', renderResults);
   renderResults();
+}
+
+// Prebuild categories that get their own stage (cost centre) on a quote or job, named after the
+// category, so lifts, scaffold, travel and site setup price, cost and invoice on their own.
+const PREBUILD_OWN_STAGE_CATEGORIES = ['Access equipment', 'Mobilisation'];
+function prebuildOwnStageName(prebuild) {
+  const cat = String((prebuild && prebuild.category) || '').trim().toLowerCase();
+  return PREBUILD_OWN_STAGE_CATEGORIES.find(c => c.toLowerCase() === cat) || null;
+}
+
+// Adds one prebuild (with its prebuild_components) to a stage as a collapsed group. One group id
+// is shared by every component this call adds - lets the client-facing quote collapse them back
+// into a single line (the prebuild's own client_description) while staff still see and can edit
+// each component individually. A second add of the same prebuild gets its own group, so it
+// collapses on its own rather than merging with the first.
+function addPrebuildToStage(stageRow, prebuild, qty = 1) {
+  // Access equipment and Mobilisation go into their own stage (project.html's stageForPrebuild).
+  if (typeof stageForPrebuild === 'function') stageRow = stageForPrebuild(stageRow, prebuild) || stageRow;
+  const groupId = crypto.randomUUID();
+  const clientDescription = prebuild.client_description || prebuild.name;
+  const components = (prebuild.prebuild_components || []).map(comp => ({
+    description: `${prebuild.name} - ${comp.description}`,
+    item_type: comp.item_type,
+    quantity: (parseFloat(comp.quantity) || 0) * qty,
+    unit_cost: comp.unit_cost,
+    // Un-multiplied - the group's own quantity control rescales from this base rather than the
+    // qty typed into the picker, which only sets the starting point.
+    prebuild_base_quantity: parseFloat(comp.quantity) || 0,
+  }));
+  return renderPrebuildGroup(stageRow, groupId, clientDescription, components);
+}
+
+// Ready-to-send check for a quote (backlog item 24): required pre-quote answers, a priced stage,
+// deposit and terms, plus the NETCC / CER / SAA rules for solar and battery quotes. Runs
+// check-solar-compliance (phase 'quote') and shows what is missing, with a button that turns the
+// gaps into job tasks. `taskType` is the job_tasks.task_type the created tasks get.
+async function runComplianceCheck(projectId, phase, taskType, btnEl, resultEl) {
+  btnEl.disabled = true;
+  const originalLabel = btnEl.textContent;
+  btnEl.textContent = 'Checking...';
+  resultEl.innerHTML = '';
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const checkRes = await fetch('/.netlify/functions/check-solar-compliance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ projectId, phase }),
+    });
+    const checkJson = await checkRes.json();
+    if (!checkJson.ok) throw new Error(checkJson.error);
+
+    if (!checkJson.missing.length) {
+      resultEl.innerHTML = `<div class="success-box">Everything on the checklist is in place.</div>`;
+      return;
+    }
+
+    resultEl.innerHTML = `
+      <div class="error-box">
+        <p style="margin:0 0 8px; font-weight:600;">${checkJson.missing.length} thing${checkJson.missing.length === 1 ? '' : 's'} missing:</p>
+        <ul style="margin:0 0 10px; padding-left:18px;">${checkJson.missing.map(m => `<li>${escapeHtml(m.label)}</li>`).join('')}</ul>
+        <button type="button" class="secondary create-compliance-tasks-btn">Create tasks for these</button>
+      </div>`;
+
+    resultEl.querySelector('.create-compliance-tasks-btn').addEventListener('click', async (e) => {
+      const createBtn = e.target;
+      createBtn.disabled = true;
+      createBtn.textContent = 'Creating...';
+      try {
+        const { data: proj } = await supabaseClient.from('projects').select('pylon_data').eq('id', projectId).single();
+        const pylonData = proj?.pylon_data || {};
+        const equipment = {
+          panels: pylonData.module_types || [],
+          inverters: pylonData.inverter_types || [],
+          batteries: pylonData.storage_types || [],
+        };
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const wordRes = await fetch('/.netlify/functions/generate-solar-tasks', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ missing: checkJson.missing, equipment }),
+        });
+        const wordJson = await wordRes.json();
+        if (!wordJson.ok) throw new Error(wordJson.error);
+
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const { error: insErr } = await supabaseClient.from('job_tasks').insert(
+          wordJson.tasks.map(t => ({ project_id: projectId, description: t.description, task_type: taskType, created_by: user.id }))
+        );
+        if (insErr) throw insErr;
+        resultEl.innerHTML = `<div class="success-box">${wordJson.tasks.length} task${wordJson.tasks.length === 1 ? '' : 's'} added.</div>`;
+        if (typeof loadJobTasks === 'function' && document.getElementById('job-tasks-list')) await loadJobTasks(projectId);
+      } catch (err) {
+        createBtn.disabled = false;
+        createBtn.textContent = 'Create tasks for these';
+        resultEl.insertAdjacentHTML('beforeend', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
+      }
+    });
+  } catch (err) {
+    resultEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+  } finally {
+    btnEl.disabled = false;
+    btnEl.textContent = originalLabel;
+  }
+}
+
+// Ready-to-send gate before a quote is emailed or moved to Quote Sent. Resolves true when it may
+// go: nothing missing, or Admin / Finance chose Send anyway with a reason (saved on the quote and
+// written to the activity log). Resolves false to stop. A check that cannot run also stops it.
+async function quoteSendGate(project) {
+  let checkJson;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const res = await fetch('/.netlify/functions/check-solar-compliance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ projectId: project.id, phase: 'quote' }),
+    });
+    checkJson = await res.json();
+    if (!checkJson.ok) throw new Error(checkJson.error);
+  } catch (err) {
+    showToast('Could not run the ready-to-send check: ' + friendlyError(err), { error: true });
+    return false;
+  }
+  const missing = checkJson.missing || [];
+  if (!missing.length) return true;
+
+  const role = await getMyRole();
+  const canOverride = role === 'admin' || role === 'finance';
+  return new Promise((resolve) => {
+    const overlay = openModal(`
+      <h2>Not ready to send</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Fix these on the quote first${canOverride ? ', or send anyway with a reason (kept on the quote and in the log)' : ''}:</p>
+      <ul style="margin:0 0 12px; padding-left:18px;">${missing.map(m => `<li>${escapeHtml(m.label)}</li>`).join('')}</ul>
+      ${canOverride ? `<label style="margin-top:0">Reason for sending anyway</label><input id="gate-reason" placeholder="e.g. client needs a budget figure today, design to follow" />` : ''}
+      <div style="margin-top:14px; display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+        <button type="button" class="secondary" id="gate-cancel">Back to the quote</button>
+        ${canOverride ? `<button type="button" id="gate-send">Send anyway</button>` : ''}
+      </div>
+      <div id="gate-msg"></div>`, { maxWidth: 520 });
+    overlay.querySelector('#gate-cancel').addEventListener('click', () => { overlay.remove(); resolve(false); });
+    const sendBtn = overlay.querySelector('#gate-send');
+    if (sendBtn) sendBtn.addEventListener('click', async () => {
+      const reason = overlay.querySelector('#gate-reason').value.trim();
+      if (!reason) { overlay.querySelector('#gate-msg').innerHTML = `<div class="error-box">Enter a reason first.</div>`; return; }
+      sendBtn.disabled = true;
+      try {
+        const { error } = await supabaseClient.from('projects')
+          .update({ send_gate_override_reason: reason, send_gate_override_at: new Date().toISOString() })
+          .eq('id', project.id);
+        if (error) throw error;
+        await logActivity('project', project.id, 'send_gate_override', `Sent with ready-to-send gaps: ${reason}. Missing: ${missing.map(m => m.label).join('; ')}`);
+        overlay.remove();
+        resolve(true);
+      } catch (err) {
+        sendBtn.disabled = false;
+        overlay.querySelector('#gate-msg').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+      }
+    });
+  });
 }
 
 // Renders one "prebuild instance" as a single collapsed control in a
@@ -4234,6 +5699,7 @@ async function openStockPicker(stageRow) {
 // cases differ only in whether `components` came from a prebuild's master
 // template or from saved cost_centre_line_items rows.
 function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
+  clientDescription = clientDescription || ''; // a cleared description is saved as null (bug F8)
   const group = document.createElement('div');
   group.className = 'li-prebuild-group';
   group.dataset.groupId = groupId;
@@ -4251,19 +5717,19 @@ function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
   group.innerHTML = `
     <div class="li-prebuild-header" style="display:grid; grid-template-columns:2fr 0.6fr 1fr auto; gap:8px; align-items:center; padding:10px; background:var(--surface-2);">
       <div>
-        <input class="li-prebuild-desc" value="${clientDescription.replace(/"/g, '&quot;')}" style="font-size:13px; font-weight:600;" />
+        <input class="li-prebuild-desc" value="${escapeHtml(clientDescription)}" style="font-size:13px; font-weight:600;" />
         <div class="subtitle" style="font-size:11px; margin-top:2px;">Prebuild - the client sees this one line, not the components below</div>
       </div>
       <input class="li-prebuild-qty" type="number" step="0.01" min="0.01" value="${qtyDisplay}" title="Quantity of this whole prebuild - rescales every component together" style="font-size:13px;" />
       <div class="li-prebuild-total" style="font-size:13px; font-weight:600;">$0.00</div>
       <div style="white-space:nowrap;">
-        <button type="button" class="secondary li-prebuild-toggle" style="font-size:12px; padding:6px 10px;">Components &#9656;</button>
-        <button type="button" class="secondary li-prebuild-remove" style="font-size:12px; padding:6px 10px;">Remove</button>
+        <button type="button" class="secondary btn-sm li-prebuild-toggle">Components &#9656;</button>
+        <button type="button" class="secondary btn-sm li-prebuild-remove">Remove</button>
       </div>
     </div>
     <div class="li-prebuild-components" style="display:none; padding:10px 10px 4px 20px;">
       <div class="li-prebuild-rows"></div>
-      <button type="button" class="secondary li-prebuild-add-component" style="font-size:12px; padding:6px 12px; margin-top:4px;">+ Add component</button>
+      <button type="button" class="secondary btn-sm li-prebuild-add-component" style="margin-top:4px;">+ Add component</button>
     </div>`;
   stageRow.querySelector('.li-rows').appendChild(group);
 
@@ -4327,6 +5793,61 @@ function renderPrebuildGroup(stageRow, groupId, clientDescription, components) {
   rowsEl.addEventListener('click', (e) => { if (e.target.classList.contains('li-remove')) recalcGroupTotal(); });
 
   recalcGroupTotal();
+  return group;
+}
+
+// Item 25: a prebuild group the AI added stays tagged "AI added, check" (amber edge, the reason,
+// a Confirm button) until a person confirms or removes it. Saved as ai_suggested on each of its
+// lines, and the ready-to-send gate lists any still tagged.
+function markPrebuildGroupAi(group, reason) {
+  if (!group || group.dataset.aiSuggested === '1') return;
+  group.dataset.aiSuggested = '1';
+  group.style.borderLeft = '4px solid #d97706';
+  const header = group.querySelector('.li-prebuild-header > div');
+  const tag = document.createElement('div');
+  tag.className = 'li-ai-tag';
+  tag.style.cssText = 'display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:11px; margin-top:4px;';
+  tag.innerHTML = `<span class="badge amber">AI added, check</span>${reason ? `<span class="subtitle" style="font-size:11px;">${escapeHtml(reason)}</span>` : ''}<button type="button" class="secondary btn-sm li-ai-confirm">Confirm</button>`;
+  header.appendChild(tag);
+  tag.querySelector('.li-ai-confirm').addEventListener('click', () => { delete group.dataset.aiSuggested; group.style.borderLeft = ''; tag.remove(); });
+}
+
+// Item 25: AI picks prebuilds from the library for each stage, from the scope of works, the
+// pre-quote answers and the stage names. Each is added to its stage through the normal prebuild
+// path and tagged for a person to confirm. Works on both quote pages (#cc-rows).
+async function suggestStagePrebuilds({ projectId = null, template = '', sow = '', answersText = '', btnEl, msgEl }) {
+  const rows = [...document.querySelectorAll('#cc-rows .cc-row')];
+  const stages = rows.map(r => ({ name: r.querySelector('.cc-name').value.trim(), description: r.querySelector('.cc-desc').value.trim() }));
+  if (!stages.some(s => s.name)) { msgEl.innerHTML = `<div class="error-box">Name at least one stage first.</div>`; return; }
+  if (!sow.trim() && !answersText.trim()) { msgEl.innerHTML = `<div class="error-box">Write or generate the scope of works first, or answer the pre-quote questions, so the AI knows what the job is.</div>`; return; }
+  btnEl.disabled = true;
+  const label = btnEl.textContent;
+  btnEl.textContent = 'Reading the scope...';
+  msgEl.innerHTML = '';
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const res = await fetch('/.netlify/functions/suggest-stage-prebuilds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ projectId, template, stages, sow, answersText }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) throw new Error(json.error || 'Could not suggest prebuilds');
+    const picks = json.suggestions || [];
+    if (!picks.length) { msgEl.innerHTML = `<div class="success-box">${json.note || 'No prebuild in the library clearly fits this scope. Add them by hand with + Search material / prebuild.'}</div>`; return; }
+    picks.forEach(s => {
+      const row = rows[s.stageIndex];
+      if (!row) return;
+      const group = addPrebuildToStage(row, s.prebuild, s.quantity);
+      markPrebuildGroupAi(group, s.reason);
+    });
+    msgEl.innerHTML = `<div class="success-box">${picks.length} prebuild${picks.length === 1 ? '' : 's'} added and tagged "AI added, check". Open each stage, press Confirm or Remove on every tagged one; the quote cannot be sent with a tag left.</div>`;
+  } catch (err) {
+    msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+  } finally {
+    btnEl.disabled = false;
+    btnEl.textContent = label;
+  }
 }
 
 // Renders a stage's saved line items into its editor, collapsing any that
@@ -4343,7 +5864,8 @@ function renderStageLineItems(stageRow, lineItems) {
     if (li.prebuild_group_id) {
       const groupMembers = lineItems.filter(m => m.prebuild_group_id === li.prebuild_group_id);
       groupMembers.forEach(m => rendered.add(m.id));
-      renderPrebuildGroup(stageRow, li.prebuild_group_id, li.prebuild_client_description, groupMembers);
+      const group = renderPrebuildGroup(stageRow, li.prebuild_group_id, li.prebuild_client_description, groupMembers);
+      if (groupMembers.some(m => m.ai_suggested)) markPrebuildGroupAi(group, '');
     } else {
       rendered.add(li.id);
       addLineItem(stageRow, li);
@@ -4358,6 +5880,8 @@ function renderStageLineItems(stageRow, lineItems) {
 // from the bill). Shared by every "create a PO" panel; `msgEl` shows
 // read/error status inline in that panel while it works.
 function wireUploadInvoiceButton(btnEl, msgEl) {
+  // The extraction function is for Admin, Finance and Sales only, so nobody else is offered it (bug F9).
+  getMyRole().then(role => { if (!isPricingRole(role)) btnEl.style.display = 'none'; });
   btnEl.addEventListener('click', () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -4378,7 +5902,7 @@ function wireUploadInvoiceButton(btnEl, msgEl) {
         msgEl.innerHTML = '';
         await resolveSupplierAndHandoff(data.extracted, 'bill', data.extracted, file);
       } catch (err) {
-        msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       }
     };
     input.click();
@@ -4390,7 +5914,9 @@ function wireUploadInvoiceButton(btnEl, msgEl) {
 // confirms a match, lets the person pick manually, or creates a brand
 // new supplier automatically, then hands off to that supplier's own page
 // with the extraction already done (no re-uploading, no re-running AI).
-async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload, file) {
+// extra: more fields for the supplier page, e.g. { inboxItemId } when the file came from
+// the Emailed bills page, so saving it there also ticks it off that list.
+async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload, file, extra = {}) {
   const matchFields = {
     name: extracted.supplier || extracted, // bills/statements pass the object, pricelist passes just the name string
     ourAccountNumber: extracted.our_account_number,
@@ -4405,21 +5931,26 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
   overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><p class="subtitle">Working out which supplier this is...</p></div>`;
   document.body.appendChild(overlay);
 
-  const match = await findMatchingSupplier(matchFields);
-  const fileBase64 = await fileToBase64(file);
+  const found = await findMatchingSupplier(matchFields);
+  const match = found?.supplier || null;
+  // The file goes to storage and the supplier page downloads it by path: base64 in sessionStorage
+  // overflows the quota on a big phone photo and the click dies silently (bug F49).
+  const filePath = await uploadPrivateFile(file, 'ai-extraction-uploads');
 
   function proceedTo(supplierId) {
     sessionStorage.setItem('pending_upload', JSON.stringify({
-      type: uploadType, extracted: extractedPayload, fileBase64, fileName: file.name, fileType: file.type,
+      ...extra, type: uploadType, extracted: extractedPayload, filePath, fileName: file.name, fileType: file.type,
     }));
     window.location.href = `/supplier-detail.html?id=${supplierId}&resume_upload=1`;
   }
 
-  if (match) {
+  if (found?.shared) {
+    showManualPick(`${found.shared.map(s => escapeHtml(s.name)).join(' and ')} share this ${found.how}. Pick the one whose account number is on the document${matchFields.ourAccountNumber ? ` (it says ${escapeHtml(matchFields.ourAccountNumber)})` : ''}.`, found.shared);
+  } else if (match) {
     overlay.querySelector('.card').innerHTML = `
-      <h2>Is this ${match.name}?</h2>
-      <p class="subtitle" style="margin-bottom:14px;">${matchFields.ourAccountNumber ? `Matched by account number ${matchFields.ourAccountNumber}.` : (matchFields.abn ? `Matched by ABN.` : `The document says "${extractedSupplierName}".`)}</p>
-      <button id="rs-yes-btn">Yes, that's ${match.name}</button>
+      <h2>Is this ${escapeHtml(match.name)}?</h2>
+      <p class="subtitle" style="margin-bottom:14px;">${found.how === 'name' ? `Matched by name only (no ABN or bank details to confirm). The document says "${escapeHtml(extractedSupplierName)}".` : `Matched by ${found.how === 'account number' ? `account number ${escapeHtml(matchFields.ourAccountNumber)}` : found.how}.`}</p>
+      <button id="rs-yes-btn">Yes, that's ${escapeHtml(match.name)}</button>
       <button type="button" class="secondary" id="rs-no-btn">No, pick a different supplier</button>`;
     overlay.querySelector('#rs-yes-btn').addEventListener('click', () => proceedTo(match.id));
     overlay.querySelector('#rs-no-btn').addEventListener('click', () => showManualPick());
@@ -4427,11 +5958,13 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
     showNewSupplierPrompt();
   }
 
-  async function showManualPick() {
-    const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
+  // note: trusted HTML (already escaped); only: the suppliers to offer (default all)
+  async function showManualPick(note = '', only = null) {
+    const suppliers = only || (await supabaseClient.from('suppliers').select('id, name').order('name')).data;
     overlay.querySelector('.card').innerHTML = `
       <h2>Pick the supplier</h2>
-      <select id="rs-manual-select"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+      ${note ? `<p class="subtitle" style="margin-bottom:10px;">${note}</p>` : ''}
+      <select id="rs-manual-select"><option value="">-- Select --</option>${(suppliers || []).map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select>
       <p class="subtitle" style="margin:10px 0;">Or</p>
       <button type="button" class="secondary" id="rs-new-instead-btn">This is actually a new supplier</button>
       <div style="margin-top:14px;"><button id="rs-manual-continue-btn">Continue</button></div>`;
@@ -4443,7 +5976,7 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
   }
 
   async function showNewSupplierPrompt() {
-    overlay.querySelector('.card').innerHTML = `<h2>Creating supplier</h2><p class="subtitle">Setting up "${extractedSupplierName}" - you can add or adjust anything anytime from their page.</p>`;
+    overlay.querySelector('.card').innerHTML = `<h2>Creating supplier</h2><p class="subtitle">Setting up "${escapeHtml(extractedSupplierName)}" - you can add or adjust anything anytime from their page.</p>`;
     const { data: created, error } = await supabaseClient.from('suppliers').insert({
       name: extractedSupplierName || 'Unknown supplier',
       credit_terms_type: 'net_days',
@@ -4459,7 +5992,7 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
       bpay_reference: extracted.bpay_reference || null,
     }).select('id').single();
     if (error) {
-      overlay.querySelector('.card').innerHTML = `<h2>Couldn't create the supplier</h2><div class="error-box">${error.message}</div><button type="button" class="secondary" id="rs-new-err-close">Close</button>`;
+      overlay.querySelector('.card').innerHTML = `<h2>Couldn't create the supplier</h2><div class="error-box">${escapeHtml(error.message)}</div><button type="button" class="secondary" id="rs-new-err-close">Close</button>`;
       overlay.querySelector('#rs-new-err-close').addEventListener('click', () => overlay.remove());
       return;
     }
@@ -4471,65 +6004,1595 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
 // a PO gets ticked off and sent wherever it actually needs to go, not
 // just wherever the PO as a whole defaults to (buying materials for a
 // job and a tool for the van in the same order needs two destinations).
-function renderPoLineItemsReceivable(po, canEdit) {
-  const items = po.purchase_order_line_items || [];
-  return items.map(li => {
-    if (li.received) {
-      const destLabel = li.destination_type === 'job' ? 'Job' : li.destination_type === 'vehicle' ? 'Vehicle' : 'Warehouse';
-      return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
-        <span>${li.description} — ${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}</span>
-        <span class="badge accepted" style="font-size:11px;">Received - ${destLabel}</span>
+// ---------- Purchase order lines and PO controls (shared by the job page and Purchase Orders) ----------
+// Receiving, undo, move and stock POs all go through server steps (migration 20261025000000) so the
+// stock counts, job costs and PO status change together, for every role.
+
+function poQty(n) { return String(Math.round((Number(n) || 0) * 100) / 100); }
+
+function poLineMoney(li) {
+  return `${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}`;
+}
+
+function poPlaceLabel(type) {
+  return type === 'job' ? 'Job' : type === 'vehicle' ? 'Vehicle' : type === 'tools' ? 'Tools register' : 'Warehouse';
+}
+function poLineIsTool(li, po) { return !!(li.is_tool || (po && po.po_kind === 'tools')); }
+
+
+// Shared modal: dark backdrop and a card that scrolls inside itself (at most 88% of the screen
+// tall), so a tall form is never cut off on a phone. innerHtml is the card's content (escape
+// outside text). Returns the overlay; the card is overlay.querySelector('.card').
+// closeOnBackdrop: a tap (not a drag) on the dark area closes it; leave it off on forms so a
+// stray tap never loses typing.
+function openModal(innerHtml, { maxWidth = 460, zIndex = 100, closeOnBackdrop = false } = {}) {
+  const overlay = document.createElement('div');
+  overlay.className = 'te-modal';
+  overlay.style.cssText = `position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:${Number(zIndex) || 100}; padding:16px;`;
+  overlay.innerHTML = `<div class="card" style="max-width:${Number(maxWidth) || 460}px; width:100%; max-height:88vh; overflow-y:auto; overscroll-behavior:contain;">${innerHtml}</div>`;
+  if (closeOnBackdrop) {
+    let downOnBackdrop = false;
+    overlay.addEventListener('pointerdown', (e) => { downOnBackdrop = e.target === overlay; });
+    overlay.addEventListener('click', (e) => { if (downOnBackdrop && e.target === overlay) overlay.remove(); });
+  }
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function poOverlay(innerHtml, maxWidth = 420) {
+  return openModal(innerHtml, { maxWidth });
+}
+
+async function stockVehicles() {
+  const { data } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
+  return data || [];
+}
+
+// Job search inside a panel: input + results + "Selected: J123". onPick(job) gets { id, label }.
+function wirePanelJobSearch(overlay, ids, onPick) {
+  const input = overlay.querySelector(ids.input);
+  const resultsEl = overlay.querySelector(ids.results);
+  let timer;
+  input.addEventListener('input', (e) => {
+    clearTimeout(timer);
+    onPick(null);
+    const q = e.target.value.trim();
+    if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+    timer = setTimeout(async () => {
+      const results = await searchProjects(q);
+      resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
+        ${results.map(p => `<div class="pjs-pick" data-id="${p.id}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))}</div>`).join('')}
       </div>`;
+      resultsEl.querySelectorAll('.pjs-pick').forEach(row => {
+        row.addEventListener('click', () => {
+          const p = results.find(r => r.id === row.dataset.id);
+          input.value = projectRef(p);
+          resultsEl.innerHTML = '';
+          onPick({ id: p.id, label: projectRef(p) });
+        });
+      });
+    }, 250);
+  });
+}
+
+async function poJobLabel(projectId) {
+  if (!projectId) return null;
+  const { data } = await supabaseClient.from('projects').select('name, job_number').eq('id', projectId).maybeSingle();
+  return data ? (data.job_number ? `J${data.job_number}` : data.name) : 'this job';
+}
+
+// Receive: on a job PO it goes to that job (or the Warehouse / a vehicle); a different job is Move.
+async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComplete) {
+  const vehicles = await stockVehicles();
+  const jobLabel = await poJobLabel(po.project_id);
+  const isTool = poLineIsTool(lineItem, po);
+  const overlay = poOverlay(`
+    <h2>Receive item</h2>
+    <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}${isTool ? ' (a ' + (lineItem.tool_kind === 'perishable' ? 'perishable' : 'tool') + ': it lands in the Tools register, not stock or the job)' : ''}</p>
+    <label style="margin-top:0">Send to</label>
+    <select id="rl-dest-type">
+      ${isTool ? `<option value="tools">Tools register, at the Warehouse</option>${vehicles.length ? '<option value="tools_vehicle">Tools register, in a vehicle</option>' : ''}` : `
+      ${po.project_id ? `<option value="job">This job (${escapeHtml(jobLabel)})</option>` : '<option value="otherjob">A job</option>'}
+      <option value="warehouse">Warehouse</option>
+      ${vehicles.length ? '<option value="vehicle">A vehicle</option>' : ''}`}
+    </select>
+    <div id="rl-job-section" style="display:none; margin-top:8px;">
+      <input id="rl-job-search" placeholder="Search for the job..." autocomplete="off" />
+      <div id="rl-job-results"></div>
+    </div>
+    <div id="rl-vehicle-section" style="display:none; margin-top:8px;">
+      <select id="rl-vehicle-select">${vehicles.map(v => `<option value="${v.id}" ${v.id === po.vehicle_id ? 'selected' : ''}>${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}</select>
+    </div>
+    ${po.project_id ? '<p class="subtitle" style="font-size:12px; margin-top:8px;">For another job, open that job and make the PO there (or use Move once received).</p>' : ''}
+    <div style="margin-top:14px;">
+      <button id="rl-confirm-btn">Confirm received</button>
+      <button type="button" class="secondary" id="rl-cancel-btn">Cancel</button>
+    </div>
+    <div id="rl-msg"></div>`);
+
+  const destSel = overlay.querySelector('#rl-dest-type');
+  const wanted = isTool ? (po.vehicle_id ? 'tools_vehicle' : 'tools') : defaultDestination === 'job' ? (po.project_id ? 'job' : 'otherjob') : defaultDestination;
+  if ([...destSel.options].some(o => o.value === wanted)) destSel.value = wanted;
+  function syncSections() {
+    overlay.querySelector('#rl-job-section').style.display = destSel.value === 'otherjob' ? 'block' : 'none';
+    overlay.querySelector('#rl-vehicle-section').style.display = (destSel.value === 'vehicle' || destSel.value === 'tools_vehicle') ? 'block' : 'none';
+  }
+  destSel.addEventListener('change', syncSections);
+  syncSections();
+  let pickedJob = null;
+  wirePanelJobSearch(overlay, { input: '#rl-job-search', results: '#rl-job-results' }, (j) => { pickedJob = j; });
+
+  overlay.querySelector('#rl-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#rl-confirm-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#rl-confirm-btn');
+    const label = btn.textContent;
+    const msg = overlay.querySelector('#rl-msg');
+    const dest = destSel.value === 'tools_vehicle' ? 'tools' : destSel.value;
+    const vehicleId = (destSel.value === 'vehicle' || destSel.value === 'tools_vehicle') ? overlay.querySelector('#rl-vehicle-select').value : null;
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      let error;
+      if (dest === 'otherjob') {
+        if (!pickedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
+        ({ error } = await supabaseClient.rpc('po_move_line', { p_line_id: lineItem.id, p_qty: Number(lineItem.quantity), p_dest: 'job', p_job_id: pickedJob.id, p_vehicle_id: null, p_cost_centre_id: null }));
+      } else {
+        ({ error } = await supabaseClient.rpc('po_receive_line', { p_line_id: lineItem.id, p_dest: dest, p_vehicle_id: vehicleId }));
+      }
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
+  });
+}
+
+
+// Undo received (e.g. ticked by mistake, or it was really back ordered). Needs a note once the PO is
+// closed or a bill on it is approved - the server checks the bills too.
+function openUndoReceivePanel(lineItem, po, onComplete) {
+  const approved = !!(po.closed_at || po.approved_for_payment);
+  const overlay = poOverlay(`
+    <h2>Undo received</h2>
+    <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}, received to ${poPlaceLabel(lineItem.destination_type)}. Undoing takes it back off ${lineItem.destination_type === 'job' ? "the job's costs" : 'that stock count'}.</p>
+    <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:0;"><input type="checkbox" id="ur-backorder" style="width:auto;" /> It's back ordered (mark it back ordered instead)</label>
+    <div id="ur-eta-section" style="display:none;">
+      <label>Expected date (optional)</label>
+      <input type="date" id="ur-eta" />
+    </div>
+    <label>Note ${po.closed_at ? '(needed: this PO is closed, undoing reopens it - Admin or Finance only)' : approved ? '(needed: this PO is approved for payment)' : '(needed if a bill on it is approved for payment)'}</label>
+    <textarea id="ur-note" style="min-height:60px;" placeholder="Why it isn't received"></textarea>
+    <div style="margin-top:14px;">
+      <button id="ur-confirm-btn">Undo received</button>
+      <button type="button" class="secondary" id="ur-cancel-btn">Cancel</button>
+    </div>
+    <div id="ur-msg"></div>`);
+  const bo = overlay.querySelector('#ur-backorder');
+  bo.addEventListener('change', () => { overlay.querySelector('#ur-eta-section').style.display = bo.checked ? 'block' : 'none'; });
+  overlay.querySelector('#ur-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#ur-confirm-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#ur-confirm-btn');
+    const label = btn.textContent;
+    const msg = overlay.querySelector('#ur-msg');
+    const note = overlay.querySelector('#ur-note').value.trim();
+    if (approved && !note) { msg.innerHTML = `<div class="error-box">Add a note saying why.</div>`; return; }
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      const { error } = await supabaseClient.rpc('po_undo_receive', {
+        p_line_id: lineItem.id, p_note: note || null, p_backorder: bo.checked,
+        p_eta: bo.checked ? (overlay.querySelector('#ur-eta').value || null) : null,
+      });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
+  });
+}
+
+// Move all or part of a line (unused gear) to another job, the Warehouse or a vehicle.
+async function openMoveLineItemPanel(lineItem, po, onComplete) {
+  const vehicles = await stockVehicles();
+  const where = lineItem.received ? `Received to ${poPlaceLabel(lineItem.destination_type)}` : 'Not received yet';
+  const overlay = poOverlay(`
+    <h2>Move item</h2>
+    <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}. ${where}.</p>
+    <label style="margin-top:0">How many</label>
+    <input id="mv-qty" type="number" step="1" min="0" max="${lineItem.quantity}" value="${lineItem.quantity}" />
+    <label>Move to</label>
+    <select id="mv-dest">
+      <option value="job">A job</option>
+      <option value="warehouse">Warehouse</option>
+      ${vehicles.length ? '<option value="vehicle">A vehicle</option>' : ''}
+    </select>
+    <div id="mv-job-section" style="margin-top:8px;">
+      <input id="mv-job-search" placeholder="Search for the job..." autocomplete="off" />
+      <div id="mv-job-results"></div>
+      <div id="mv-stage-section" style="display:none;">
+        <label>Stage (optional)</label>
+        <select id="mv-stage"></select>
+      </div>
+    </div>
+    <div id="mv-vehicle-section" style="display:none; margin-top:8px;">
+      <select id="mv-vehicle">${vehicles.map(v => `<option value="${v.id}">${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}</select>
+    </div>
+    <p class="subtitle" style="font-size:12px; margin-top:8px;">${lineItem.received ? 'It comes off where it is now and goes on the new place. Not if that job has already invoiced it.' : 'It is received straight to the new place.'}</p>
+    <div style="margin-top:14px;">
+      <button id="mv-confirm-btn">Move</button>
+      <button type="button" class="secondary" id="mv-cancel-btn">Cancel</button>
+    </div>
+    <div id="mv-msg"></div>`);
+  const destSel = overlay.querySelector('#mv-dest');
+  function syncSections() {
+    overlay.querySelector('#mv-job-section').style.display = destSel.value === 'job' ? 'block' : 'none';
+    overlay.querySelector('#mv-vehicle-section').style.display = destSel.value === 'vehicle' ? 'block' : 'none';
+  }
+  destSel.addEventListener('change', syncSections);
+  syncSections();
+  let pickedJob = null;
+  wirePanelJobSearch(overlay, { input: '#mv-job-search', results: '#mv-job-results' }, async (j) => {
+    pickedJob = j;
+    const stageSection = overlay.querySelector('#mv-stage-section');
+    if (!j) { stageSection.style.display = 'none'; return; }
+    const { data: centres } = await supabaseClient.from('cost_centres').select('id, name').eq('project_id', j.id).order('sort_order');
+    overlay.querySelector('#mv-stage').innerHTML = `<option value="">Whole job</option>${(centres || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}`;
+    stageSection.style.display = (centres || []).length ? 'block' : 'none';
+  });
+
+  overlay.querySelector('#mv-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#mv-confirm-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#mv-confirm-btn');
+    const label = btn.textContent;
+    const msg = overlay.querySelector('#mv-msg');
+    const qty = parseFloat(overlay.querySelector('#mv-qty').value);
+    const dest = destSel.value;
+    if (!(qty > 0)) { msg.innerHTML = `<div class="error-box">Enter how many to move.</div>`; return; }
+    if (dest === 'job' && !pickedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
+    btn.disabled = true; btn.textContent = 'Moving...';
+    try {
+      const { error } = await supabaseClient.rpc('po_move_line', {
+        p_line_id: lineItem.id, p_qty: qty, p_dest: dest,
+        p_job_id: dest === 'job' ? pickedJob.id : null,
+        p_vehicle_id: dest === 'vehicle' ? overlay.querySelector('#mv-vehicle').value : null,
+        p_cost_centre_id: dest === 'job' ? (overlay.querySelector('#mv-stage').value || null) : null,
+      });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
+  });
+}
+
+// Turns a PO line that isn't in Stock into a Stock item (filled in from the line; sell = cost + default markup).
+async function openAddLineToStockPanel(lineItem, po, onComplete) {
+  const [{ data: suppliers }, { data: cats }, { data: settings }] = await Promise.all([
+    supabaseClient.from('suppliers').select('id, name').order('name'),
+    supabaseClient.from('materials').select('category').not('category', 'is', null),
+    supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
+  ]);
+  const markupSetting = parseFloat(settings?.default_markup_percent);
+  const markup = Number.isFinite(markupSetting) ? markupSetting : 45;
+  const categories = [...new Set((cats || []).map(c => c.category).filter(Boolean))].sort();
+  const cost = Number(lineItem.unit_cost) || 0;
+  const overlay = poOverlay(`
+    <h2>Add to Stock</h2>
+    <p class="subtitle" style="margin-bottom:10px;">From PO ${escapeHtml(po.po_number || '')}. ${lineItem.received && lineItem.destination_type !== 'job' ? `The ${poQty(lineItem.quantity)} already received to ${poPlaceLabel(lineItem.destination_type)} are added to that count.` : 'The line is linked to the new Stock item.'}</p>
+    <label style="margin-top:0">Name</label>
+    <input id="als-name" value="${escapeHtml(lineItem.description)}" />
+    <label>Category (optional)</label>
+    <input id="als-category" list="als-categories" />
+    <datalist id="als-categories">${categories.map(c => `<option value="${escapeHtml(c)}">`).join('')}</datalist>
+    <label>Supplier</label>
+    <select id="als-supplier"><option value="">None</option>${(suppliers || []).map(sp => `<option value="${sp.id}" ${sp.id === po.supplier_id ? 'selected' : ''}>${escapeHtml(sp.name)}</option>`).join('')}</select>
+    <div class="grid cols-3">
+      <div><label>Cost price</label><input id="als-cost" type="number" step="0.01" value="${cost}" /></div>
+      <div><label>Sell price</label><input id="als-sell" type="number" step="0.01" value="${Math.round(cost * (1 + markup / 100) * 100) / 100}" /></div>
+      <div><label>Minimum qty</label><input id="als-min" type="number" step="1" value="0" /></div>
+    </div>
+    <div style="margin-top:14px;">
+      <button id="als-save-btn">Add to Stock</button>
+      <button type="button" class="secondary" id="als-cancel-btn">Cancel</button>
+    </div>
+    <div id="als-msg"></div>`, 480);
+  overlay.querySelector('#als-cost').addEventListener('input', (e) => {
+    overlay.querySelector('#als-sell').value = Math.round((parseFloat(e.target.value) || 0) * (1 + markup / 100) * 100) / 100;
+  });
+  overlay.querySelector('#als-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#als-save-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#als-save-btn');
+    const label = btn.textContent;
+    const msg = overlay.querySelector('#als-msg');
+    btn.disabled = true; btn.textContent = 'Adding...';
+    try {
+      const { error } = await supabaseClient.rpc('po_line_add_to_stock', {
+        p_line_id: lineItem.id,
+        p_name: overlay.querySelector('#als-name').value.trim(),
+        p_category: overlay.querySelector('#als-category').value.trim() || null,
+        p_supplier_id: overlay.querySelector('#als-supplier').value || null,
+        p_cost: parseFloat(overlay.querySelector('#als-cost').value) || 0,
+        p_sell: parseFloat(overlay.querySelector('#als-sell').value) || 0,
+        p_minimum: parseFloat(overlay.querySelector('#als-min').value) || 0,
+      });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
+  });
+}
+
+// "Show prices on the PO" tick box for the Create PO panels (off by default).
+function poShowPricesHtml(prefix) {
+  return `<label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:10px;"><input type="checkbox" id="${prefix}-show-prices" style="width:auto;" /> Show prices on the PO sent to the supplier</label>`;
+}
+
+// A PO's state, kept by the database from its lines (migration 20261108000000):
+// Ordered (nothing in yet), Part received, All received (close it to approve its bills), Closed (approved).
+function poStatusLabel(po) {
+  if (po.closed_at) return 'Closed';
+  if (po.status === 'received') return 'All received';
+  if (po.status === 'part_received') return 'Part received';
+  return 'Ordered';
+}
+
+// Status badge plus the Stock PO badge. role decides Edit lines (pricing) and Reopen (Admin/Finance) below.
+function renderPoBadges(po) {
+  const cls = po.closed_at ? 'accepted' : po.status === 'received' ? 'sent' : 'draft';
+  const stock = po.stock_source ? `<span class="badge draft" style="margin-left:6px;">Stock PO, from ${escapeHtml(po.supplier_name || 'Warehouse')}</span>` : '';
+  const open = po.po_type === 'open' && !po.closed_at ? '<span class="badge draft" style="margin-left:6px;" title="Lines are filled in from the supplier\'s invoice">Open PO: lines from the invoice</span>' : '';
+  const tools = po.po_kind === 'tools' ? '<span class="badge draft" style="margin-left:6px;" title="Lines land in the Tools register, not stock or a job">Tools PO</span>' : '';
+  return `<span class="badge ${cls}" style="margin-left:6px;">${poStatusLabel(po)}</span>${stock}${open}${tools}`;
+}
+
+// The two notes on a PO: for the supplier (printed on po.html) and internal (staff only).
+function renderPoNotes(po) {
+  const block = (label, text) => text ? `<div style="font-size:13px; margin-top:6px;"><span class="subtitle" style="font-size:12px;">${label}</span><div style="white-space:pre-wrap;">${escapeHtml(text)}</div></div>` : '';
+  return block('Notes for supplier (on the PO)', po.supplier_notes) + block('Internal notes', po.internal_notes);
+}
+
+// Two notes boxes for a Create PO panel; read them back with readPoNotesFields.
+function poNotesFieldsHtml(prefix) {
+  return `<label>Notes for supplier (optional, printed on the PO)</label>
+    <textarea id="${prefix}-supplier-notes" style="min-height:50px;" placeholder="e.g. Deliver to site, call Sean on arrival"></textarea>
+    <label>Internal notes (optional, staff only)</label>
+    <textarea id="${prefix}-internal-notes" style="min-height:50px;"></textarea>`;
+}
+
+function readPoNotesFields(root, prefix) {
+  return {
+    supplier_notes: root.querySelector(`#${prefix}-supplier-notes`).value.trim() || null,
+    internal_notes: root.querySelector(`#${prefix}-internal-notes`).value.trim() || null,
+  };
+}
+
+function openPoNotesPanel(po, onComplete) {
+  const overlay = poOverlay(`
+    <h2>Notes on PO ${escapeHtml(po.po_number || '')}</h2>
+    ${poNotesFieldsHtml('pn')}
+    <div style="margin-top:14px;">
+      <button id="pn-save-btn">Save notes</button>
+      <button type="button" class="secondary" id="pn-cancel-btn">Cancel</button>
+    </div>
+    <div id="pn-msg"></div>`, 480);
+  overlay.querySelector('#pn-supplier-notes').value = po.supplier_notes || '';
+  overlay.querySelector('#pn-internal-notes').value = po.internal_notes || '';
+  overlay.querySelector('#pn-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#pn-save-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#pn-msg');
+    const next = readPoNotesFields(overlay, 'pn');
+    const changed = [];
+    if ((po.supplier_notes || null) !== next.supplier_notes) changed.push('notes for supplier');
+    if ((po.internal_notes || null) !== next.internal_notes) changed.push('internal notes');
+    if (!changed.length) { overlay.remove(); return; }
+    const { error } = await supabaseClient.from('purchase_orders').update(next).eq('id', po.id);
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+    await logActivity('purchase_order', po.id, 'notes_edited', `PO ${po.po_number || ''}: ${changed.join(' and ')} changed`);
+    overlay.remove();
+    if (onComplete) await onComplete();
+  });
+}
+
+
+// Close a PO (the approval step). Every line must be received, back ordered or moved off; back ordered
+// lines are the closer's call: wait, or close now and cancel them off the PO. The server checks the same.
+async function closePurchaseOrder(po, onComplete) {
+  const lines = po.purchase_order_line_items || [];
+  const lineText = (li) => `${li.description} x${poQty(li.quantity)}`;
+  const notIn = lines.filter(li => !li.received && !li.is_backordered);
+  if (notIn.length) {
+    alert(`Not received yet: ${notIn.map(lineText).join(', ')}. Receive it, mark it back ordered, or move it off the PO before closing.`);
+    return;
+  }
+  const backordered = lines.filter(li => !li.received && li.is_backordered);
+  const choice = await new Promise(resolve => {
+    const overlay = openModal(`
+      <h2>Close PO ${escapeHtml(po.po_number || '')}</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Closing approves it for payment, with its bills that match it. Nothing more can be added or received unless Admin or Finance reopen it.</p>
+      ${backordered.length ? `<div class="error-box" style="margin-bottom:10px;">Back ordered: ${escapeHtml(backordered.map(lineText).join(', '))}.<br />Wait for it, or close now and cancel it off the PO.</div>` : ''}
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        ${backordered.length
+          ? `<button type="button" id="cl-cancel-bo">Close now, cancel the back order${backordered.length === 1 ? '' : 's'}</button>
+             <button type="button" class="secondary" id="cl-wait">Wait for it</button>`
+          : `<button type="button" id="cl-close">Close and approve</button>
+             <button type="button" class="secondary" id="cl-wait">Not yet</button>`}
+      </div>`, { maxWidth: 420 });
+    overlay.querySelector('#cl-wait').addEventListener('click', () => { overlay.remove(); resolve(null); });
+    overlay.querySelector('#cl-close')?.addEventListener('click', () => { overlay.remove(); resolve({ cancelBackorders: false }); });
+    overlay.querySelector('#cl-cancel-bo')?.addEventListener('click', () => { overlay.remove(); resolve({ cancelBackorders: true }); });
+  });
+  if (!choice) return;
+  const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: true, p_note: null, p_cancel_backorders: choice.cancelBackorders });
+  if (error) { alert(friendlyError(error)); return; }
+  showToast(`PO ${po.po_number || ''} closed and approved for payment`);
+  if (onComplete) await onComplete();
+}
+
+
+// ---------- Bills on a PO (migration 20261109000000) ----------
+// Every bill linked to a PO with its lines: green = on the PO, red = not on the PO, charged more,
+// freight / delivery (always shown, never on a PO) or denied. Pricing roles decide each red line:
+// Accept (adds it to the PO and costs it, or takes the higher price) or Deny charge (the bill stays
+// unapproved and the please-explain email goes to the supplier). Staff see no bills (RLS).
+function poShortDay(iso) { return iso ? new Date(String(iso).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : ''; }
+
+async function loadBillsForPos(poIds) {
+  const out = {};
+  if (!poIds || !poIds.length) return out;
+  const { data, error } = await supabaseClient.from('supplier_bills')
+    .select('id, po_id, bill_number, bill_date, amount, paid, approved_for_payment, pay_on, check_status, query_sent_at, supplier_bill_line_items(id, description, quantity, unit_cost, po_line_item_id, flag_reason, resolution, resolution_note)')
+    .in('po_id', poIds).order('bill_date', { ascending: false });
+  if (error) { console.error('bills for POs:', error.message); return out; }
+  (data || []).forEach(b => { (out[b.po_id] = out[b.po_id] || []).push(b); });
+  return out;
+}
+
+function billStatusChip(b) {
+  if (b.paid) return '<span class="badge accepted">Paid</span>';
+  if (b.approved_for_payment) return `<span class="badge sent">Approved${b.pay_on ? ', pay ' + escapeHtml(poShortDay(b.pay_on)) : ''}</span>`;
+  if (b.check_status === 'queried') return '<span class="badge draft" style="color:var(--red);">Queried with supplier</span>';
+  if (b.check_status === 'problems') return '<span class="badge draft" style="color:var(--red);">Needs a decision</span>';
+  if (b.check_status === 'resolved') return '<span class="badge draft">Accepted, approved at close</span>';
+  return '<span class="badge draft">Approved at close</span>';
+}
+
+function billLineState(l) {
+  if (l.resolution === 'denied') return { red: true, label: 'Denied' + (l.resolution_note ? ': ' + l.resolution_note : '') };
+  if (l.resolution === 'added') return { red: false, label: 'Added to PO' };
+  if (l.resolution === 'accepted') return { red: false, label: 'Accepted' };
+  if (l.flag_reason) return { red: true, label: l.flag_reason };
+  if (l.po_line_item_id) return { red: false, label: 'On the PO' };
+  return { red: true, label: 'Not on the PO' };
+}
+
+function renderPoBills(bills, po, role) {
+  if (!bills || !bills.length) return '';
+  const canDecide = isPricingRole(role);
+  const needsWord = (b) => (b.supplier_bill_line_items || []).some(l => billLineState(l).red);
+  return `<div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
+    <div class="subtitle" style="font-size:12px; margin-bottom:4px;">Bills on this PO</div>
+    ${bills.map(b => `
+      <div class="po-bill" data-bill-id="${b.id}" style="margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
+          <span><strong>Bill ${escapeHtml(b.bill_number || '(no number)')}</strong>${b.bill_date ? ' &middot; ' + escapeHtml(poShortDay(b.bill_date)) : ''} &middot; ${money(b.amount)}</span>
+          <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${billStatusChip(b)}
+            ${canDecide && !b.paid && needsWord(b) ? `<button type="button" class="secondary btn-sm po-bill-query-btn" data-bill-id="${b.id}">${b.query_sent_at ? 'Email supplier again' : 'Query supplier'}</button>` : ''}
+          </span>
+        </div>
+        ${(b.supplier_bill_line_items || []).map(l => {
+          const st = billLineState(l);
+          const colour = st.red ? 'var(--red)' : 'var(--green)';
+          return `<div style="display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap; align-items:center; font-size:12px; padding:3px 0 3px 8px; border-left:3px solid ${colour}; margin-top:3px;">
+            <span>${escapeHtml(l.description)} &middot; ${poQty(l.quantity)} &times; ${money(l.unit_cost)} <span style="color:${colour};">${escapeHtml(st.label)}</span></span>
+            ${canDecide && !b.paid ? `<span style="display:flex; gap:4px; flex-wrap:wrap;">
+              ${st.red && l.resolution !== 'denied' ? `<button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="accept" data-desc="${escapeHtml(l.description)}" data-on-po="${l.po_line_item_id ? '1' : ''}">Accept</button>
+                <button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="deny" data-desc="${escapeHtml(l.description)}" style="color:var(--red);">Deny charge</button>` : ''}
+              ${l.resolution === 'accepted' || l.resolution === 'denied' ? `<button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="undo" data-desc="${escapeHtml(l.description)}">Undo</button>` : ''}
+            </span>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`).join('')}
+  </div>`;
+}
+
+async function supplierChecksCall(body) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const res = await fetch('/.netlify/functions/supplier-checks', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+  return data;
+}
+
+// Re-check a bill against its PO after a decision (issues and approval are kept by the server).
+async function recheckBill(billId) {
+  try { await supplierChecksCall({ action: 'check_bill', id: billId }); }
+  catch (err) { console.error('bill check did not run:', err.message); }
+}
+
+// The please-explain email to the supplier: written by the server (denied charges first, then
+// anything else that does not line up), edited here, sent only on Send. Resolves when closed.
+function openSupplierQueryEmail(billId) {
+  return new Promise(resolve => {
+    const overlay = openModal(`<p class="subtitle">Writing the email...</p>`, { maxWidth: 620 });
+    const close = () => { overlay.remove(); resolve(); };
+    supplierChecksCall({ action: 'draft_email', kind: 'bill_query', id: billId }).then(d => {
+      overlay.querySelector('.card').innerHTML = `
+        <h2>Email the supplier</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Sent from invoice@thomsonenergy.com.au. The bill stays unapproved until it is sorted; their reply shows on Bill checks.</p>
+        <label style="margin-top:0">To</label><input id="em-to" value="${escapeHtml(d.to || '')}" placeholder="supplier@example.com" />
+        <label>Subject</label><input id="em-subject" value="${escapeHtml(d.subject || '')}" />
+        <label>Message</label><textarea id="em-body" style="min-height:240px;">${escapeHtml(d.body || '')}</textarea>
+        <div style="margin-top:12px;"><button id="em-send">Send</button> <button type="button" class="secondary" id="em-cancel">Not now</button></div>
+        <div id="em-msg"></div>`;
+      overlay.querySelector('#em-cancel').addEventListener('click', close);
+      overlay.querySelector('#em-send').addEventListener('click', async (e) => {
+        e.target.disabled = true; e.target.textContent = 'Sending...';
+        try {
+          await supplierChecksCall({ action: 'send_email', kind: 'bill_query', id: billId, to: overlay.querySelector('#em-to').value.trim(), subject: overlay.querySelector('#em-subject').value.trim(), body: overlay.querySelector('#em-body').value });
+          showToast('Sent to the supplier');
+          close();
+        } catch (err) { overlay.querySelector('#em-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; e.target.disabled = false; e.target.textContent = 'Send'; }
+      });
+    }).catch(err => {
+      overlay.querySelector('.card').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="em-x">Close</button>`;
+      overlay.querySelector('#em-x').addEventListener('click', close);
+    });
+  });
+}
+
+function wirePoBillButtons(containerEl, onComplete) {
+  containerEl.querySelectorAll('.po-bill-line-btn').forEach(btn => btn.addEventListener('click', async () => {
+    const { lineId, action, desc, onPo } = btn.dataset;
+    let note = null;
+    if (action === 'accept') {
+      const freight = /(freight|delivery|deliver|shipping|postage|courier|handling|cartage)/i.test(desc);
+      if (!confirm(onPo ? `Accept the higher price for "${desc}"? The PO line and the job's cost take the billed price.`
+        : `Accept "${desc}"? It is added to the PO${freight ? ' and costed straight away' : ' and received the normal way'}.`)) return;
+    } else if (action === 'deny') {
+      note = prompt(`Deny "${desc}". Why? (goes in the email to the supplier)`, '');
+      if (note === null) return;
     }
-    const etaLabel = li.backorder_eta ? new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : null;
-    return `<div style="font-size:13px; display:flex; justify-content:space-between; align-items:center; padding:4px 0; flex-wrap:wrap; gap:6px;">
-      <span>${li.description} — ${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}
-        ${li.is_backordered ? `<span class="badge draft" style="font-size:11px; margin-left:6px;">Backordered${etaLabel ? ' - ETA ' + etaLabel : ''}</span>` : ''}
-      </span>
-      ${canEdit ? `
-        <span style="display:flex; gap:6px;">
-          <button type="button" class="secondary receive-line-item-btn" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">Receive</button>
-          <button type="button" class="secondary backorder-line-item-btn" data-line-id="${li.id}" style="font-size:11px; padding:4px 8px;">${li.is_backordered ? 'Update backorder' : 'Mark backordered'}</button>
-        </span>` : '<span class="subtitle" style="font-size:11px;">Not yet received</span>'}
+    btn.disabled = true;
+    const { error } = await supabaseClient.rpc('supplier_bill_line_resolve', { p_line_id: lineId, p_action: action, p_note: note });
+    if (error) { alert(friendlyError(error)); btn.disabled = false; return; }
+    const billId = btn.closest('.po-bill')?.dataset.billId;
+    if (billId) await recheckBill(billId);
+    if (action === 'deny' && billId) await openSupplierQueryEmail(billId);
+    if (onComplete) await onComplete();
+  }));
+  containerEl.querySelectorAll('.po-bill-query-btn').forEach(btn => btn.addEventListener('click', async () => {
+    await openSupplierQueryEmail(btn.dataset.billId);
+    if (onComplete) await onComplete();
+  }));
+}
+
+// Create PO panels: lines known now (a fixed PO, the invoice is matched to them) or an open PO whose
+// lines are filled in from the supplier's invoice when the bill is saved.
+function poTypeChoiceHtml(prefix) {
+  return `<label style="margin-top:14px;">Line items</label>
+    <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:6px;">
+      <label style="display:flex; align-items:center; gap:6px; font-weight:400; margin:0;"><input type="radio" name="${prefix}-po-type" value="fixed" checked style="width:auto;" /> Lines known now (the invoice is matched to them)</label>
+      <label style="display:flex; align-items:center; gap:6px; font-weight:400; margin:0;"><input type="radio" name="${prefix}-po-type" value="open" style="width:auto;" /> Open PO: lines filled in from the supplier's invoice</label>
+    </div>`;
+}
+function readPoTypeChoice(root, prefix) {
+  return root.querySelector(`input[name="${prefix}-po-type"]:checked`)?.value === 'open' ? 'open' : 'fixed';
+}
+
+
+// ---------- Simpler purchase orders (backlog item 31, 23 Oct 2026) ----------
+// One PO is one page (purchase-order.html). Lists show one short row per PO; the page shows the
+// next step, the lines with a tick box each (tick what arrived, one Receive button) and everything
+// else under More. Every receive, move, close and bill decision still goes through the same
+// database functions as before.
+
+function poLineCounts(po) {
+  const items = po.purchase_order_line_items || [];
+  const received = items.filter(li => li.received).length;
+  const backordered = items.filter(li => !li.received && li.is_backordered).length;
+  return { total: items.length, received, backordered, toReceive: items.length - received - backordered };
+}
+
+function poTotalAmount(po) {
+  const items = po.purchase_order_line_items || [];
+  return items.length ? items.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0) : Number(po.amount) || 0;
+}
+
+// Where the PO is going: "J7040 Smith", "Stock", "Van 2" or "Tools in Van 2".
+function poWhereLabel(po) {
+  const veh = po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : null;
+  if (po.po_kind === 'tools') return 'Tools' + (veh ? ' in ' + veh : '');
+  if (po.project_id) return po.projects ? `${po.projects.job_number ? 'J' + po.projects.job_number + ' ' : ''}${po.projects.name || ''}`.trim() : 'Job';
+  if (po.vehicle_id) return veh || 'Vehicle';
+  return 'Stock';
+}
+
+// The short form used on buttons: "J7040", "Stock", "Van 2", "the Tools register".
+function poWhereShort(po) {
+  const veh = po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : null;
+  if (po.po_kind === 'tools') return poToolsWhereShort(po);
+  if (po.project_id) return po.projects && po.projects.job_number ? 'J' + po.projects.job_number : 'the job';
+  if (po.vehicle_id) return veh || 'the vehicle';
+  return 'Stock';
+}
+
+// Where a tool line lands when received: the Tools register, in the PO's vehicle when it has one (bug F40).
+function poToolsWhereShort(po) {
+  const veh = po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : null;
+  return 'the Tools register' + (po.vehicle_id ? ' in ' + (veh || 'the vehicle') : '');
+}
+
+function poWhereHref(po) {
+  if (po.po_kind === 'tools') return '/tools.html';
+  if (po.project_id) return `/project.html?id=${encodeURIComponent(po.project_id)}&tab=pos`;
+  if (po.vehicle_id) return `/vehicle-stock.html?id=${encodeURIComponent(po.vehicle_id)}`;
+  return '/stock.html';
+}
+
+// A bill on the PO still waiting on us (a line not on the PO or charged more). Staff never see bills (RLS).
+function poBillNeedsDecision(b) { return !!b && !b.paid && b.check_status === 'problems'; }
+
+// One short row per PO for the lists (Purchase Orders page, the job page). Tap it to open the PO.
+function renderPoRow(po, { showWhere = true, note = '' } = {}) {
+  const c = poLineCounts(po);
+  const decide = (po.supplier_bills || []).filter(poBillNeedsDecision).length;
+  const chipCls = po.closed_at ? 'accepted' : po.status === 'received' ? 'sent' : po.status === 'part_received' ? 'info' : 'draft';
+  const progress = c.total
+    ? `${c.received} of ${c.total} received${c.backordered ? `, ${c.backordered} back ordered` : ''}`
+    : (po.po_type === 'open' && !po.closed_at ? 'Lines come from the invoice' : 'No lines yet');
+  return `<a class="po-row" href="/purchase-order.html?id=${encodeURIComponent(po.id)}" data-po-id="${escapeHtml(po.id)}">
+    <div class="po-row-main">
+      <div class="po-row-title"><strong>${escapeHtml(po.po_number || 'PO')}</strong> <span class="po-row-supplier">${escapeHtml(po.suppliers?.name || po.supplier_name || 'Unknown supplier')}</span></div>
+      <div class="po-row-sub">${showWhere ? `<span class="badge draft">${escapeHtml(poWhereLabel(po))}</span>` : ''}<span class="subtitle">${escapeHtml(progress)}</span>${note}</div>
+    </div>
+    <div class="po-row-side">
+      <span class="po-row-total">${money(poTotalAmount(po))}</span>
+      <span class="badge ${chipCls}">${poStatusLabel(po)}</span>
+      ${decide ? '<span class="badge red">Bill needs a decision</span>' : ''}
+    </div>
+  </a>`;
+}
+
+// The one thing to do next on a PO, in this order: decide on a bill line in red, close an
+// all-received PO, add lines (or the invoice on an open PO), email it, receive what arrived.
+function poNextStep(po, bills, { emailed, role } = {}) {
+  const c = poLineCounts(po);
+  if (po.closed_at) return { key: 'closed', label: 'Closed and approved for payment', hint: 'Nothing more to do. Admin or Finance can reopen it under More.', done: true };
+  const redLine = isPricingRole(role) && (bills || []).some(b => !b.paid && (b.supplier_bill_line_items || []).some(l => l.resolution !== 'denied' && billLineState(l).red));
+  if (redLine) return { key: 'bills', label: 'Decide on the bill lines in red', hint: 'A bill does not match this PO. Accept each red line, or deny the charge and the supplier is asked about it.' };
+  if (po.status === 'received' && c.total) return { key: 'close', label: 'All received: close and approve', hint: 'Closing approves its bills for payment.' };
+  if (!c.total) {
+    // Reading the invoice is for pricing roles only (bug F9); anyone else adds the lines by hand.
+    if (po.po_type === 'open' && po.supplier_id && isPricingRole(role)) return { key: 'invoice', label: "Upload the supplier's invoice", hint: 'An open PO takes its lines from the invoice.' };
+    if (po.po_type === 'open' && po.supplier_id) return { key: 'add', label: 'Add the lines', hint: "What arrived, how many, and the unit cost. Admin, Finance or Sales can upload the supplier's invoice instead." };
+    return { key: 'add', label: 'Add the lines', hint: 'What is being ordered, how many, and the unit cost.' };
+  }
+  if (po.supplier_id && !po.stock_source && !emailed && !c.received) return { key: 'email', label: 'Email the PO to the supplier', hint: 'Then tick each line below as it arrives.' };
+  if (c.toReceive) return { key: 'receive', label: 'Receive what arrived', hint: 'Tick the lines that came in, then press Receive.' };
+  if (c.backordered) return { key: 'close', label: `Waiting on ${c.backordered} back ordered line${c.backordered === 1 ? '' : 's'}`, hint: 'Wait for it, or close now and it is cancelled off the PO.', secondary: true };
+  return { key: 'close', label: 'Close PO' };
+}
+
+// Lines with a tick box each. Tick what arrived, then one Receive button (wirePoTickLines).
+// Received lines show where they went. Everything else for a line sits under its "..." button.
+function renderPoTickLines(po, canEdit) {
+  const items = po.purchase_order_line_items || [];
+  if (!items.length) return '<p class="subtitle" id="po-lines-empty">No lines yet.</p>';
+  const open = !po.closed_at;
+  return items.map(li => {
+    const tool = poLineIsTool(li, po);
+    const tickable = canEdit && open && !li.received;
+    const eta = li.backorder_eta ? ', ETA ' + new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
+    let state = '';
+    if (li.received) state = ` &middot; <span style="color:var(--green);">Received to ${poPlaceLabel(li.destination_type)}</span>`;
+    else if (li.is_backordered) state = ` &middot; <span style="color:var(--amber);">Back ordered${escapeHtml(eta)}</span>`;
+    const needsPrice = po.stock_source && !(Number(li.unit_cost) > 0) ? ' <span class="badge draft" style="color:var(--red);" title="Added from site without a price. Price it on the Stock page and this line takes the price.">Needs a price</span>' : '';
+    const toolChip = tool ? ` <span class="badge draft" title="Goes to the Tools register, not the job or stock">${li.tool_kind === 'perishable' ? 'Perishable' : 'Tool'}</span>` : '';
+    return `<div class="po-line${li.received ? ' is-received' : ''}" data-line-id="${escapeHtml(li.id)}">
+      <label class="po-line-tick">${tickable ? `<input type="checkbox" class="po-line-cb" data-line-id="${escapeHtml(li.id)}" aria-label="Arrived: ${escapeHtml(li.description)}" />` : `<span class="po-line-mark">${li.received ? '&#10003;' : ''}</span>`}</label>
+      <div class="po-line-body">
+        <div class="po-line-desc">${escapeHtml(li.description)}${toolChip}${needsPrice}</div>
+        <div class="po-line-meta">${poLineMoney(li)}${state}</div>
+      </div>
+      ${canEdit ? `<button type="button" class="secondary btn-sm po-line-more" data-line-id="${escapeHtml(li.id)}" aria-label="More for this line" title="More for this line">&#8943;</button>` : ''}
     </div>`;
   }).join('');
 }
 
-// Wires up every ".receive-line-item-btn"/".backorder-line-item-btn"
-// found in the container - call this after rendering a PO list that
-// used renderPoLineItemsReceivable.
-function wireReceiveLineItemButtons(containerEl, allPos, defaultDestinationFor, onComplete) {
-  function findLineItem(lineId) {
-    for (const po of allPos) {
-      const found = (po.purchase_order_line_items || []).find(li => li.id === lineId);
-      if (found) return { lineItem: found, parentPo: po };
-    }
-    return {};
+// Where a ticked line goes when received from the PO page: the PO's own destination.
+function poReceiveDestination(po, li) {
+  // A tool on a vehicle's PO goes to the Tools register in that vehicle, not at the Warehouse (bug F40).
+  if (poLineIsTool(li, po)) return { dest: 'tools', vehicleId: po.vehicle_id || null };
+  if (po.project_id) return { dest: 'job', vehicleId: null };
+  if (po.vehicle_id) return { dest: 'vehicle', vehicleId: po.vehicle_id };
+  return { dest: 'warehouse', vehicleId: null };
+}
+
+// A short list of actions in a small sheet, the same on a phone and a laptop.
+// items: [{ label, hint, danger, onPick }]. Resolves when it closes.
+function openActionSheet(title, items) {
+  return new Promise(resolve => {
+    const overlay = openModal(`
+      <h2 style="margin-bottom:10px;">${escapeHtml(title)}</h2>
+      <div class="te-sheet">
+        ${items.map((it, i) => `<button type="button" class="te-sheet-item${it.danger ? ' is-danger' : ''}" data-i="${i}">${escapeHtml(it.label)}${it.hint ? `<span class="te-sheet-hint">${escapeHtml(it.hint)}</span>` : ''}</button>`).join('')}
+        <button type="button" class="secondary te-sheet-cancel">Cancel</button>
+      </div>`, { maxWidth: 400, closeOnBackdrop: true });
+    const done = () => { overlay.remove(); resolve(); };
+    overlay.querySelector('.te-sheet-cancel').addEventListener('click', done);
+    overlay.querySelectorAll('.te-sheet-item').forEach(b => b.addEventListener('click', () => {
+      overlay.remove();
+      resolve();
+      const it = items[Number(b.dataset.i)];
+      if (it && it.onPick) it.onPick();
+    }));
+  });
+}
+
+// Mark a line as a tool (lands in the Tools register when received) or not.
+async function togglePoLineTool(li, po, onComplete) {
+  let kind = 'tool';
+  if (!li.is_tool) {
+    const answer = prompt(`"${li.description}": is it a tool, or a perishable (drill bits, blades)? Type tool or perishable.`, 'tool');
+    if (answer === null) return;
+    kind = /^p/i.test(answer.trim()) ? 'perishable' : 'tool';
+  } else if (!confirm(`"${li.description}" is no longer a tool? It goes back to ${po.project_id ? "the job's costs" : 'stock'} when received.`)) return;
+  const { error } = await supabaseClient.rpc('po_line_set_tool', { p_line_id: li.id, p_is_tool: !li.is_tool, p_kind: kind });
+  if (error) { alert(friendlyError(error)); return; }
+  if (onComplete) await onComplete();
+}
+
+// The "..." on a line: everything other than the plain tick-to-receive.
+function openPoLineMenu(li, po, role, onComplete) {
+  const open = !po.closed_at;
+  const tool = poLineIsTool(li, po);
+  const pricing = isPricingRole(role);
+  const items = [];
+  if (!li.received && open) {
+    items.push({ label: 'Receive somewhere else', hint: 'The Warehouse, a vehicle, or another job', onPick: () => openReceiveLineItemPanel(li, po, po.project_id ? 'job' : po.vehicle_id ? 'vehicle' : 'warehouse', onComplete) });
+    items.push({ label: li.is_backordered ? 'Update the back order' : 'Mark back ordered', hint: 'The supplier says it is delayed', onPick: () => openBackorderPanel(li, onComplete) });
+    if (!tool) items.push({ label: 'Move to another job, the Warehouse or a vehicle', hint: 'Not needed here', onPick: () => openMoveLineItemPanel(li, po, onComplete) });
   }
-  containerEl.querySelectorAll('.receive-line-item-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const { lineItem, parentPo } = findLineItem(btn.dataset.lineId);
-      if (lineItem) openReceiveLineItemPanel(lineItem, parentPo, defaultDestinationFor(parentPo), onComplete);
-    });
+  if (li.received) {
+    if (li.destination_type !== 'tools' && open) items.push({ label: 'Move some or all of it', hint: 'To another job, the Warehouse or a vehicle', onPick: () => openMoveLineItemPanel(li, po, onComplete) });
+    items.push({ label: 'Undo received', hint: po.closed_at ? 'Reopens the PO (Admin or Finance)' : 'Ticked by mistake, or really back ordered', onPick: () => openUndoReceivePanel(li, po, onComplete) });
+  }
+  if (pricing && !li.material_id && Number(li.quantity) > 0 && !tool) items.push({ label: 'Add to Stock', hint: 'Make it a Stock item', onPick: () => openAddLineToStockPanel(li, po, onComplete) });
+  if (pricing && !po.stock_source && open && po.po_kind !== 'tools') items.push({ label: li.is_tool ? 'Not a tool' : 'This is a tool', hint: li.is_tool ? 'Back to the job or stock when received' : 'Goes to the Tools register when received', onPick: () => togglePoLineTool(li, po, onComplete) });
+  if (!items.length) items.push({ label: 'Nothing to do on this line', onPick: () => {} });
+  openActionSheet(li.description.length > 48 ? li.description.slice(0, 46) + '...' : li.description, items);
+}
+
+// Wires the tick boxes, Select all, the Receive bar and every "..." in a container rendered with
+// renderPoTickLines. onComplete reloads the page's data.
+function wirePoTickLines(container, po, { role, onComplete, bar, selectAll } = {}) {
+  const items = po.purchase_order_line_items || [];
+  const cbs = [...container.querySelectorAll('.po-line-cb')];
+  const btn = bar ? bar.querySelector('.po-receive-btn') : null;
+  const elsewhere = bar ? bar.querySelector('.po-receive-elsewhere') : null;
+  const ticked = () => cbs.filter(cb => cb.checked).map(cb => items.find(li => li.id === cb.dataset.lineId)).filter(Boolean);
+  const update = () => {
+    const lines = ticked();
+    const n = lines.length;
+    if (bar) bar.style.display = n ? 'flex' : 'none';
+    // Only tools ticked: say where the tools go, not where the PO's stock goes (bug F40)
+    if (btn) btn.textContent = `Receive ${n} to ${n && lines.every(li => poLineIsTool(li, po)) ? poToolsWhereShort(po) : poWhereShort(po)}`;
+    if (selectAll) selectAll.textContent = cbs.length && cbs.every(cb => cb.checked) ? 'Untick all' : 'Tick all';
+  };
+  cbs.forEach(cb => cb.addEventListener('change', update));
+  if (selectAll) selectAll.addEventListener('click', (e) => {
+    e.preventDefault();
+    const all = cbs.length && cbs.every(cb => cb.checked);
+    cbs.forEach(cb => { cb.checked = !all; });
+    update();
   });
-  containerEl.querySelectorAll('.backorder-line-item-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const { lineItem } = findLineItem(btn.dataset.lineId);
-      if (lineItem) openBackorderPanel(lineItem, onComplete);
-    });
+  if (btn) btn.addEventListener('click', async () => {
+    const lines = ticked();
+    if (!lines.length) return;
+    const label = btn.textContent;
+    btn.disabled = true;
+    let done = 0, failure = null, failedLine = null;
+    try {
+      for (const li of lines) {
+        btn.textContent = `Receiving ${done + 1} of ${lines.length}...`;
+        const { dest, vehicleId } = poReceiveDestination(po, li);
+        const { error } = await supabaseClient.rpc('po_receive_line', { p_line_id: li.id, p_dest: dest, p_vehicle_id: vehicleId });
+        if (error && !/already received/i.test(error.message || '')) { failure = error; failedLine = li; break; }
+        done++;
+      }
+    } finally { btn.disabled = false; btn.textContent = label; }
+    if (onComplete) { try { await onComplete(); } catch (e) { console.error('refresh after receive failed:', e); } }
+    if (failure) alert(`Received ${done} of ${lines.length}. ${failedLine.description}: ${friendlyError(failure)}`);
+    else showToast(`Received ${done} line${done === 1 ? '' : 's'} to ${poWhereShort(po)}`);
   });
+  if (elsewhere) elsewhere.addEventListener('click', (e) => {
+    e.preventDefault();
+    const lines = ticked();
+    if (lines.length !== 1) { alert('Tick one line at a time to receive it somewhere else.'); return; }
+    openReceiveLineItemPanel(lines[0], po, po.project_id ? 'job' : po.vehicle_id ? 'vehicle' : 'warehouse', onComplete);
+  });
+  container.querySelectorAll('.po-line-more').forEach(b => b.addEventListener('click', () => {
+    const li = items.find(x => x.id === b.dataset.lineId);
+    if (li) openPoLineMenu(li, po, role, onComplete);
+  }));
+  update();
+}
+
+// The More menu on a PO page: everything that is not the next step.
+function openPoMoreMenu(po, role, onComplete, { onShowLog } = {}) {
+  const open = !po.closed_at;
+  const items = [];
+  if (open && !po.stock_source) items.push({ label: 'Add an item', onPick: () => openAddPoItemPanel(po, onComplete) });
+  if (open && isPricingRole(role) && (po.purchase_order_line_items || []).length) items.push({ label: 'Edit the lines', hint: 'Names, quantities, unit costs', onPick: () => openEditPoLinesPanel(po, onComplete) });
+  if (po.supplier_id && typeof openEmailComposer === 'function') items.push({ label: 'Email the PO to the supplier', onPick: () => emailPurchaseOrder(po, null) });
+  if (!po.stock_source) items.push({ label: 'View the PO (PDF)', onPick: () => window.open(`/po.html?token=${po.po_token}`, '_blank') });
+  items.push({ label: po.supplier_notes || po.internal_notes ? 'Edit the notes' : 'Add notes', hint: 'For the supplier, or internal', onPick: () => openPoNotesPanel(po, onComplete) });
+  if (!po.stock_source) items.push({ label: `Prices on the PO sent to the supplier: ${po.show_prices ? 'on' : 'off'}`, hint: 'Tap to switch', onPick: async () => {
+    const { error } = await supabaseClient.from('purchase_orders').update({ show_prices: !po.show_prices }).eq('id', po.id);
+    if (error) { alert(error.message); return; }
+    await logActivity('purchase_order', po.id, 'prices_toggled', `PO ${po.po_number || ''}: prices ${po.show_prices ? 'hidden on' : 'shown on'} the PO sent to the supplier`);
+    if (onComplete) await onComplete();
+  } });
+  if (po.supplier_id && open && isPricingRole(role)) items.push({ label: "Upload the supplier's invoice", onPick: () => uploadInvoiceForPo(po) });
+  if (open) items.push({ label: po.status === 'received' ? 'Close and approve for payment' : 'Close the PO', hint: po.status === 'received' ? '' : 'Every line must be in, back ordered or moved off', onPick: () => closePurchaseOrder(po, onComplete) });
+  if (!open && isFinanceRole(role)) items.push({ label: 'Reopen the PO', hint: 'Admin and Finance, with a note', onPick: async () => {
+    const note = prompt(`Why is PO ${po.po_number || ''} being reopened?`);
+    if (note === null) return;
+    if (!note.trim()) { alert('Add a note saying why.'); return; }
+    const { error } = await supabaseClient.rpc('po_set_closed', { p_po_id: po.id, p_closed: false, p_note: note.trim(), p_cancel_backorders: false });
+    if (error) { alert(friendlyError(error)); return; }
+    if (onComplete) await onComplete();
+  } });
+  if (onShowLog) items.push({ label: 'View the log', hint: 'Who did what, when', onPick: onShowLog });
+  openActionSheet(`PO ${po.po_number || ''}`, items);
+}
+
+// After Create: which PO number was made, with Email it now and Open it.
+// newPo needs id and po_number; supplier_id and project_id when it can be emailed.
+function showPoCreatedPanel(newPo, supplierName, { onDone } = {}) {
+  const canEmail = !!newPo.supplier_id && typeof openEmailComposer === 'function';
+  const overlay = openModal(`
+    <h2>${escapeHtml(newPo.po_number || 'PO')} created</h2>
+    <p class="subtitle" style="margin-bottom:14px;">For ${escapeHtml(supplierName || 'Warehouse')}. Quote ${escapeHtml(newPo.po_number || 'the PO number')} to the supplier; the gear is ticked off on the PO as it arrives.</p>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      ${canEmail ? '<button type="button" id="pc-email">Email it to the supplier now</button>' : ''}
+      <a class="btn secondary" id="pc-open" href="/purchase-order.html?id=${encodeURIComponent(newPo.id)}" style="text-align:center;">Open the PO</a>
+      <button type="button" class="secondary" id="pc-done">Done</button>
+    </div>`, { maxWidth: 400 });
+  const finish = async () => { overlay.remove(); if (onDone) await onDone(); };
+  overlay.querySelector('#pc-done').addEventListener('click', finish);
+  const emailBtn = overlay.querySelector('#pc-email');
+  if (emailBtn) emailBtn.addEventListener('click', async () => {
+    await emailPurchaseOrder(newPo, emailBtn);
+    finish();
+  });
+  return overlay;
+}
+
+// A PO the page can show: the PO with its lines, supplier, job, vehicle and bills. Returns null when not found.
+async function loadPurchaseOrderFull(poId) {
+  const { data, error } = await supabaseClient
+    .from('purchase_orders')
+    .select('*, purchase_order_line_items(*), suppliers(name, contact_email), projects(name, job_number), fleet_vehicles!vehicle_id(vehicle_name, rego)')
+    .eq('id', poId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  data.purchase_order_line_items = (data.purchase_order_line_items || []).sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  const [bills, { data: emailedRows }] = await Promise.all([
+    loadBillsForPos([poId]),
+    supabaseClient.from('activity_log').select('id').eq('entity_type', 'purchase_order').eq('entity_id', poId).eq('action', 'emailed').limit(1),
+  ]);
+  return { po: data, bills: bills[poId] || [], emailed: !!(emailedRows && emailedRows.length) };
+}
+
+
+// ---------- Guided tour: "Show me how" ----------
+// Spotlights the real buttons one at a time with a short card: Back, Next, Done. A step is
+// { target: css selector or () => element, title, text, before: async () => {} }. A step whose
+// target is not on the page shows the card in the middle. Remembered per key in localStorage so
+// the offer shows once; the Show me how button runs it any time.
+function startGuidedTour(steps, { key, onEnd } = {}) {
+  if (document.querySelector('.te-tour')) return;
+  const root = document.createElement('div');
+  root.className = 'te-tour';
+  root.innerHTML = `<div class="te-tour-spot"></div>
+    <div class="te-tour-card" role="dialog" aria-live="polite">
+      <div class="te-tour-step"></div>
+      <h3 class="te-tour-title"></h3>
+      <p class="te-tour-text"></p>
+      <div class="te-tour-btns">
+        <button type="button" class="secondary te-tour-back">Back</button>
+        <button type="button" class="te-tour-next">Next</button>
+        <button type="button" class="secondary te-tour-close" aria-label="Close the tour">&times;</button>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  const spot = root.querySelector('.te-tour-spot');
+  const card = root.querySelector('.te-tour-card');
+  let i = 0, target = null, raf = 0;
+
+  const place = () => {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (!target || !target.isConnected) {
+      spot.style.display = 'none';
+      card.style.left = '50%'; card.style.top = '50%'; card.style.transform = 'translate(-50%, -50%)'; card.style.bottom = 'auto';
+      return;
+    }
+    const r = target.getBoundingClientRect();
+    const pad = 6;
+    spot.style.display = 'block';
+    spot.style.left = `${r.left - pad}px`; spot.style.top = `${r.top - pad}px`;
+    spot.style.width = `${r.width + pad * 2}px`; spot.style.height = `${r.height + pad * 2}px`;
+    card.style.transform = 'none';
+    if (vw < 700) {
+      // phone: the card sits at the bottom, or the top when the target is low on the screen
+      card.style.left = '12px'; card.style.right = '12px';
+      if (r.bottom > vh * 0.55) { card.style.top = '12px'; card.style.bottom = 'auto'; }
+      else { card.style.top = 'auto'; card.style.bottom = 'calc(12px + env(safe-area-inset-bottom, 0px))'; }
+      return;
+    }
+    card.style.right = 'auto'; card.style.bottom = 'auto';
+    const cw = Math.min(360, vw - 24), ch = card.offsetHeight || 160;
+    let left = Math.max(12, Math.min(r.left, vw - cw - 12));
+    let top = r.bottom + 14;
+    if (top + ch > vh - 12) top = Math.max(12, r.top - ch - 14);
+    card.style.width = `${cw}px`; card.style.left = `${left}px`; card.style.top = `${top}px`;
+  };
+  const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(place); };
+
+  const end = (finished) => {
+    window.removeEventListener('resize', schedule);
+    window.removeEventListener('scroll', schedule, true);
+    document.removeEventListener('keydown', onKey);
+    root.remove();
+    if (key) { try { localStorage.setItem(`te-tour-${key}`, finished ? 'done' : 'closed'); } catch (e) { /* private mode */ } }
+    if (onEnd) onEnd(finished);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') end(false); if (e.key === 'ArrowRight' || e.key === 'Enter') go(i + 1); if (e.key === 'ArrowLeft') go(i - 1); };
+
+  const resolveTarget = (step) => {
+    try {
+      const t = typeof step.target === 'function' ? step.target() : (step.target ? document.querySelector(step.target) : null);
+      return t && t.isConnected ? t : null;
+    } catch (e) { return null; }
+  };
+
+  let busy = false;
+  const go = async (n) => {
+    if (busy) return;
+    if (n >= steps.length) { end(true); return; }
+    if (n < 0) n = 0;
+    busy = true;
+    try {
+      const step = steps[n];
+      if (step.before) { try { await step.before(); } catch (e) { console.error('tour step:', e); } }
+      i = n;
+      target = resolveTarget(step);
+      root.querySelector('.te-tour-step').textContent = `${i + 1} of ${steps.length}`;
+      root.querySelector('.te-tour-title').textContent = step.title || '';
+      root.querySelector('.te-tour-text').textContent = step.text || '';
+      root.querySelector('.te-tour-back').style.visibility = i === 0 ? 'hidden' : 'visible';
+      root.querySelector('.te-tour-next').textContent = i === steps.length - 1 ? 'Done' : 'Next';
+      if (target) {
+        target.scrollIntoView({ block: 'center', behavior: 'smooth', inline: 'nearest' });
+        await new Promise(r => setTimeout(r, 320));
+      }
+      place();
+    } finally { busy = false; }
+  };
+  root.querySelector('.te-tour-next').addEventListener('click', () => go(i + 1));
+  root.querySelector('.te-tour-back').addEventListener('click', () => go(i - 1));
+  root.querySelector('.te-tour-close').addEventListener('click', () => end(false));
+  window.addEventListener('resize', schedule);
+  window.addEventListener('scroll', schedule, true);
+  document.addEventListener('keydown', onKey);
+  go(0);
+}
+
+function guidedTourSeen(key) {
+  try { return !!localStorage.getItem(`te-tour-${key}`); } catch (e) { return true; }
+}
+
+// The one-time offer for someone new: a bar at the bottom with Show me and Not now.
+function offerGuidedTour(key, text, start) {
+  if (guidedTourSeen(key) || document.querySelector('.te-tour-offer')) return;
+  const bar = document.createElement('div');
+  bar.className = 'te-tour-offer';
+  bar.innerHTML = `<span>${escapeHtml(text)}</span><span class="te-tour-offer-btns"><button type="button" class="btn-sm te-offer-yes">Show me</button><button type="button" class="secondary btn-sm te-offer-no">Not now</button></span>`;
+  document.body.appendChild(bar);
+  const dismiss = () => { bar.remove(); try { localStorage.setItem(`te-tour-${key}`, 'offered'); } catch (e) { /* private mode */ } };
+  bar.querySelector('.te-offer-no').addEventListener('click', dismiss);
+  bar.querySelector('.te-offer-yes').addEventListener('click', () => { bar.remove(); start(); });
+}
+
+// ---------- Stock from My Day (migration 20261110000000) ----------
+// Used stock on a job: where it came from (the van assigned to you first), what, how many, and how
+// many are left there (prefilled from the app's count, so a wrong count is fixed on the spot). A part
+// not in Stock yet is added with a name and flagged "Needs a price". Makes a closed stock PO through
+// po_create_stock_pull, costed to the job. Consumables (counted by the pack) are not asked about;
+// they get a one-tap "Running low" instead.
+const USED_STOCK_SOURCE_KEY = 'teops-used-stock-source';
+const USED_STOCK_RECENT_KEY = 'teops-used-stock-recent';
+function lsGet(key, fallback) { try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch (e) { return fallback; } }
+function lsSet(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ } }
+
+async function loadPlaceCounts(loc, vehicleId) {
+  let q = supabaseClient.from('material_stock_by_location').select('material_id, quantity').eq('location_type', loc);
+  if (loc === 'vehicle') q = q.eq('vehicle_id', vehicleId);
+  const { data } = await q;
+  const have = {};
+  (data || []).forEach(r => { have[r.material_id] = Number(r.quantity) || 0; });
+  return have;
+}
+
+async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const [vehicles, { data: materials }, { data: mine }] = await Promise.all([
+    stockVehicles(),
+    supabaseClient.from('materials').select('id, name, is_consumable, pack_label, needs_price').order('name'),
+    supabaseClient.from('fleet_vehicles').select('id').eq('assigned_staff_id', user.id).eq('holds_stock', true).limit(1).maybeSingle(),
+  ]);
+  const allMats = materials || [];
+  const parts = allMats.filter(m => !m.is_consumable);
+  const consumables = allMats.filter(m => m.is_consumable);
+  let source = lsGet(USED_STOCK_SOURCE_KEY, null);
+  const valid = (s) => s && (s.type === 'warehouse' || (s.type === 'vehicle' && vehicles.some(v => v.id === s.vehicleId)));
+  if (mine?.id && vehicles.some(v => v.id === mine.id)) source = valid(source) ? source : { type: 'vehicle', vehicleId: mine.id };
+  if (!valid(source)) source = { type: 'warehouse' };
+  const recent = lsGet(USED_STOCK_RECENT_KEY, []);
+  const picked = [];   // { materialId, newName, name, qty, left, leftTouched }
+  const low = new Set();
+  let have = {};
+  const placeLabel = () => source.type === 'vehicle' ? (vehicles.find(v => v.id === source.vehicleId)?.vehicle_name || vehicles.find(v => v.id === source.vehicleId)?.rego || 'the van') : 'Warehouse';
+  const bigBtn = 'min-height:44px; font-size:15px;';
+
+  const overlay = openModal(`
+    <h2 style="margin-bottom:4px;">Stock used on ${escapeHtml(jobLabel || 'this job')}</h2>
+    <p class="subtitle" style="margin-bottom:10px;">Goes on the job's costs and keeps the counts right.</p>
+    <label style="margin-top:0">Where did it come from?</label>
+    <div id="us-sources" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
+    <label>What did you take?</label>
+    <input id="us-search" placeholder="Type part of the name..." autocomplete="off" />
+    <div id="us-results"></div>
+    <div id="us-picked" style="margin-top:8px;"></div>
+    <button type="button" class="secondary" id="us-add-new" style="margin-top:6px; ${bigBtn}">Not in Stock? + Add it</button>
+    <div id="us-new" style="display:none; border:1px solid var(--border); border-radius:8px; padding:8px; margin-top:6px;">
+      <input id="us-new-name" placeholder="What is it? e.g. 20mm conduit saddle" />
+      <div class="grid cols-2" style="margin-top:6px;">
+        <div><label style="margin-top:0; font-size:12px;">Took</label><input id="us-new-qty" type="number" inputmode="numeric" step="1" min="1" value="1" /></div>
+        <div><label style="margin-top:0; font-size:12px;">Left there</label><input id="us-new-left" type="number" inputmode="numeric" step="1" min="0" value="0" /></div>
+      </div>
+      <button type="button" id="us-new-ok" style="margin-top:6px; ${bigBtn}">Add it</button>
+    </div>
+    ${consumables.length ? `
+    <details style="margin-top:12px;"><summary class="subtitle" style="cursor:pointer;">Anything running low? (zip ties, saddles, tape...)</summary>
+      <div id="us-low" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+        ${consumables.map(c => `<button type="button" class="secondary btn-sm us-low-btn" data-id="${c.id}">${escapeHtml(c.name)}${c.pack_label ? ' <span class="subtitle">(' + escapeHtml(c.pack_label) + ')</span>' : ''}</button>`).join('')}
+      </div>
+    </details>` : ''}
+    <div style="margin-top:14px; display:flex; gap:8px;">
+      <button id="us-done" style="flex:1; ${bigBtn}">Done</button>
+      <button type="button" class="secondary" id="us-cancel" style="${bigBtn}">Cancel</button>
+    </div>
+    <div id="us-msg"></div>`, { maxWidth: 520 });
+
+  const q = (sel) => overlay.querySelector(sel);
+  function renderSources() {
+    const opts = [...vehicles.map(v => ({ type: 'vehicle', vehicleId: v.id, label: v.vehicle_name || v.rego })), { type: 'warehouse', label: 'Warehouse' }];
+    q('#us-sources').innerHTML = opts.map(o => {
+      const on = o.type === source.type && (o.type === 'warehouse' || o.vehicleId === source.vehicleId);
+      return `<button type="button" class="${on ? '' : 'secondary'} us-src-btn" data-type="${o.type}" data-vehicle="${o.vehicleId || ''}" style="${bigBtn} flex:1 1 40%;">${escapeHtml(o.label)}</button>`;
+    }).join('');
+    q('#us-sources').querySelectorAll('.us-src-btn').forEach(b => b.addEventListener('click', async () => {
+      source = b.dataset.type === 'vehicle' ? { type: 'vehicle', vehicleId: b.dataset.vehicle } : { type: 'warehouse' };
+      have = await loadPlaceCounts(source.type, source.vehicleId);
+      picked.forEach(p => { p.leftTouched = false; });
+      renderSources(); renderPicked();
+    }));
+  }
+  function addPick(m) {
+    const found = picked.find(p => p.materialId === m.id);
+    if (found) { found.qty += 1; }
+    else picked.push({ materialId: m.id, name: m.name, qty: 1, leftTouched: false, needsPrice: m.needs_price });
+    lsSet(USED_STOCK_RECENT_KEY, [m.id, ...recent.filter(id => id !== m.id)].slice(0, 10));
+    q('#us-search').value = ''; renderResults(''); renderPicked();
+  }
+  function renderResults(text) {
+    const el = q('#us-results');
+    const query = text.trim().toLowerCase();
+    let list;
+    if (query.length < 2) list = recent.map(id => parts.find(m => m.id === id)).filter(Boolean).filter(m => !picked.some(p => p.materialId === m.id)).slice(0, 6);
+    else list = parts.filter(m => matchesAllWords(m.name, query) && !picked.some(p => p.materialId === m.id)).slice(0, 8);
+    if (!list.length) { el.innerHTML = query.length >= 2 ? '<p class="subtitle" style="font-size:12px; margin:4px 0;">Nothing in Stock by that name. Use "Not in Stock? + Add it".</p>' : ''; return; }
+    el.innerHTML = `${query.length < 2 ? '<p class="subtitle" style="font-size:12px; margin:6px 0 2px;">Recent</p>' : ''}<div style="display:flex; flex-direction:column; gap:4px;">${list.map(m => `<button type="button" class="secondary us-pick" data-id="${m.id}" style="text-align:left; ${bigBtn}">${escapeHtml(m.name)} <span class="subtitle">(${poQty(have[m.id] || 0)} in ${escapeHtml(placeLabel())})</span></button>`).join('')}</div>`;
+    el.querySelectorAll('.us-pick').forEach(b => b.addEventListener('click', () => addPick(parts.find(m => m.id === b.dataset.id))));
+  }
+  function renderPicked() {
+    const el = q('#us-picked');
+    if (!picked.length) { el.innerHTML = ''; return; }
+    el.innerHTML = picked.map((p, i) => {
+      const h = p.materialId ? (have[p.materialId] || 0) : 0;
+      if (!p.leftTouched && p.materialId) p.left = Math.max(0, Math.round((h - p.qty) * 100) / 100);
+      return `<div class="us-line" data-i="${i}" style="border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+          <strong style="font-size:14px;">${escapeHtml(p.name)}${p.newName ? ' <span class="badge draft">New, needs a price</span>' : ''}</strong>
+          <button type="button" class="secondary btn-sm us-remove">&times;</button>
+        </div>
+        <div style="display:flex; gap:10px; align-items:end; margin-top:6px; flex-wrap:wrap;">
+          <div><label style="margin-top:0; font-size:12px;">Took</label>
+            <div style="display:flex; gap:4px; align-items:center;">
+              <button type="button" class="secondary us-minus" style="min-width:44px; ${bigBtn}">&minus;</button>
+              <input class="us-qty" type="number" inputmode="numeric" step="1" min="1" value="${p.qty}" style="width:64px; text-align:center;" />
+              <button type="button" class="secondary us-plus" style="min-width:44px; ${bigBtn}">+</button>
+            </div></div>
+          <div style="flex:1; min-width:120px;"><label style="margin-top:0; font-size:12px;">Left in ${escapeHtml(placeLabel())}? <span class="subtitle">(app had ${poQty(h)})</span></label>
+            <input class="us-left" type="number" inputmode="numeric" step="1" min="0" value="${p.left ?? ''}" /></div>
+        </div>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('.us-line').forEach(line => {
+      const p = picked[Number(line.dataset.i)];
+      const qtyEl = line.querySelector('.us-qty'), leftEl = line.querySelector('.us-left');
+      const sync = () => { p.qty = Math.max(1, parseInt(qtyEl.value, 10) || 1); qtyEl.value = p.qty; if (!p.leftTouched && p.materialId) { p.left = Math.max(0, (have[p.materialId] || 0) - p.qty); leftEl.value = p.left; } };
+      line.querySelector('.us-minus').addEventListener('click', () => { qtyEl.value = Math.max(1, p.qty - 1); sync(); });
+      line.querySelector('.us-plus').addEventListener('click', () => { qtyEl.value = p.qty + 1; sync(); });
+      qtyEl.addEventListener('input', sync);
+      leftEl.addEventListener('input', () => { p.leftTouched = true; p.left = leftEl.value === '' ? null : Math.max(0, parseFloat(leftEl.value) || 0); });
+      line.querySelector('.us-remove').addEventListener('click', () => { picked.splice(Number(line.dataset.i), 1); renderPicked(); renderResults(q('#us-search').value); });
+    });
+  }
+
+  have = await loadPlaceCounts(source.type, source.vehicleId);
+  renderSources(); renderResults(''); renderPicked();
+  q('#us-search').addEventListener('input', (e) => renderResults(e.target.value));
+  q('#us-add-new').addEventListener('click', () => { q('#us-new').style.display = 'block'; q('#us-new-name').focus(); });
+  q('#us-new-ok').addEventListener('click', () => {
+    const name = q('#us-new-name').value.trim();
+    if (!name) { q('#us-new-name').focus(); return; }
+    const existing = allMats.find(m => m.name.toLowerCase() === name.toLowerCase());
+    if (existing && !existing.is_consumable) { addPick(existing); }
+    else picked.push({ newName: name, name, qty: Math.max(1, parseInt(q('#us-new-qty').value, 10) || 1), left: Math.max(0, parseInt(q('#us-new-left').value, 10) || 0), leftTouched: true });
+    q('#us-new').style.display = 'none'; q('#us-new-name').value = ''; q('#us-new-qty').value = '1'; q('#us-new-left').value = '0';
+    renderPicked();
+  });
+  overlay.querySelectorAll('.us-low-btn').forEach(b => b.addEventListener('click', () => {
+    if (low.has(b.dataset.id)) { low.delete(b.dataset.id); b.classList.add('secondary'); } else { low.add(b.dataset.id); b.classList.remove('secondary'); }
+  }));
+  q('#us-cancel').addEventListener('click', () => overlay.remove());
+  // The Stock PO once it has committed: a second press of Done (after a failed Running-low flag)
+  // never makes a second PO and never costs the job twice (bug F54).
+  let pulled = null;
+  q('#us-done').addEventListener('click', async () => {
+    const msg = q('#us-msg');
+    const btn = q('#us-done');
+    if (!pulled) {
+      if (!picked.length && !low.size) { msg.innerHTML = '<div class="error-box">Pick what you took, or Cancel.</div>'; return; }
+      for (const p of picked) if (p.left == null || p.left < 0) { msg.innerHTML = `<div class="error-box">Say how many ${escapeHtml(p.name)} are left in ${escapeHtml(placeLabel())}.</div>`; return; }
+    }
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      let po = pulled;
+      if (picked.length && !po) {
+        const { data, error } = await supabaseClient.rpc('po_create_stock_pull', {
+          p_project_id: projectId, p_cost_centre_id: null, p_source: source.type, p_vehicle_id: source.type === 'vehicle' ? source.vehicleId : null,
+          p_lines: picked.map(p => ({ material_id: p.materialId || null, new_name: p.newName || null, quantity: p.qty, left_after: p.left })),
+          p_description: `Stock used on site (My Day)`,
+        });
+        if (error) throw error;
+        po = data;
+        pulled = po;
+        // The picks are in: nothing above the flags can change any more
+        overlay.querySelectorAll('#us-sources button, #us-search, #us-results button, #us-picked input, #us-picked button, #us-add-new, #us-new input, #us-new button').forEach(el => { el.disabled = true; });
+      }
+      // Each flag that saves comes off the list, so a retry only redoes the ones that failed
+      let flagError = null;
+      for (const id of [...low]) {
+        const { error } = await supabaseClient.rpc('stock_flag_low', { p_material_id: id, p_loc: source.type, p_vehicle_id: source.type === 'vehicle' ? source.vehicleId : null, p_note: null });
+        if (error) { flagError = error; continue; }
+        low.delete(id);
+        const flagBtn = overlay.querySelector(`.us-low-btn[data-id="${id}"]`);
+        if (flagBtn) flagBtn.disabled = true;
+      }
+      if (flagError) {
+        msg.innerHTML = `<div class="error-box">${po ? `Stock PO ${escapeHtml(po.po_number)} is made and costed to ${escapeHtml(jobLabel || 'the job')}. ` : ''}The Running-low flag did not save: ${escapeHtml(friendlyError(flagError))} Press ${po ? 'Flag again' : 'Done'} to retry it${po ? ', or Close' : ''}.</div>`;
+        btn.disabled = false; btn.textContent = po ? 'Flag again' : 'Done';
+        if (po) { const cancel = q('#us-cancel'); cancel.textContent = 'Close'; cancel.onclick = async () => { overlay.remove(); if (onDone) await onDone(po); }; }
+        return;
+      }
+      lsSet(USED_STOCK_SOURCE_KEY, source);
+      overlay.remove();
+      const needs = (po && po.needs_price && po.needs_price.length) ? ` ${po.needs_price.join(', ')} added to Stock, Admin to price.` : '';
+      showToast(po ? `Stock PO ${po.po_number} made, costed to ${jobLabel || 'the job'}.${needs}` : `Running low flagged: Admin has been told.`);
+      if (onDone) await onDone(po);
+    } catch (err) {
+      msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+      btn.disabled = false; btn.textContent = 'Done';
+    }
+  });
+}
+
+// After a clock-out on a job: "Did you take any stock?", once per job per Sydney day.
+async function maybeAskUsedStock(entry, project) {
+  if (!entry || !entry.project_id || !project || !project.job_number) return;
+  const key = `teops-stock-asked:${entry.project_id}:${sydneyDateKey(new Date())}`;
+  if (lsGet(key, null)) return;
+  lsSet(key, 1);
+  const label = projectRef(project);
+  const yes = await new Promise(resolve => {
+    const o = openModal(`<h2>Did you take any stock for ${escapeHtml(label)}?</h2>
+      <p class="subtitle" style="margin-bottom:12px;">From the van or the Warehouse. It goes on the job's costs and keeps the counts right.</p>
+      <div style="display:flex; gap:8px;"><button id="ask-yes" style="flex:1; min-height:44px;">Yes</button><button type="button" class="secondary" id="ask-no" style="flex:1; min-height:44px;">No</button></div>`, { maxWidth: 400 });
+    o.querySelector('#ask-yes').addEventListener('click', () => { o.remove(); resolve(true); });
+    o.querySelector('#ask-no').addEventListener('click', () => { o.remove(); resolve(false); });
+  });
+  if (yes) await openUsedStockPanel({ projectId: entry.project_id, jobLabel: label });
+}
+
+// Stocktake of one place: every item with stock there (plus any you search for), type the real count,
+// one Save. Consumables are OK / Low / Out, no numbers. Differences are logged as count corrections.
+async function openStocktakePanel({ loc, vehicleId, placeLabel, onDone }) {
+  const [{ data: materials }, have] = await Promise.all([
+    supabaseClient.from('materials').select('id, name, is_consumable, pack_label').order('name'),
+    loadPlaceCounts(loc, vehicleId),
+  ]);
+  const all = materials || [];
+  const listed = new Set(all.filter(m => (have[m.id] || 0) > 0 || m.is_consumable).map(m => m.id));
+  const states = {};
+  const overlay = openModal(`
+    <h2>Stocktake: ${escapeHtml(placeLabel)}</h2>
+    <p class="subtitle" style="margin-bottom:10px;">Walk through and type what is really there. Consumables are just OK, Low or Out. Nothing changes until Save.</p>
+    <input id="st-search" placeholder="Add an item that is here but not listed..." autocomplete="off" />
+    <div id="st-results"></div>
+    <div id="st-list" style="margin-top:8px;"></div>
+    <div style="margin-top:14px; display:flex; gap:8px;">
+      <button id="st-save" style="flex:1; min-height:44px;">Save stocktake</button>
+      <button type="button" class="secondary" id="st-cancel" style="min-height:44px;">Cancel</button>
+    </div>
+    <div id="st-msg"></div>`, { maxWidth: 560 });
+  const q = (sel) => overlay.querySelector(sel);
+  function renderList() {
+    const items = all.filter(m => listed.has(m.id));
+    q('#st-list').innerHTML = items.length ? items.map(m => m.is_consumable
+      ? `<div style="display:flex; justify-content:space-between; align-items:center; gap:6px; padding:6px 0; border-top:1px solid var(--border); flex-wrap:wrap;">
+          <span>${escapeHtml(m.name)}${m.pack_label ? ` <span class="subtitle">(${escapeHtml(m.pack_label)})</span>` : ''}</span>
+          <span style="display:flex; gap:4px;">${['ok', 'low', 'out'].map(s => `<button type="button" class="${states[m.id] === s ? '' : 'secondary'} btn-sm st-state" data-id="${m.id}" data-state="${s}">${s === 'ok' ? 'OK' : s === 'low' ? 'Low' : 'Out'}</button>`).join('')}</span>
+        </div>`
+      : `<div style="display:flex; justify-content:space-between; align-items:center; gap:6px; padding:6px 0; border-top:1px solid var(--border);">
+          <span>${escapeHtml(m.name)} <span class="subtitle">(app: ${poQty(have[m.id] || 0)})</span></span>
+          <input class="st-count" data-id="${m.id}" type="number" inputmode="numeric" step="1" min="0" value="${states[m.id] ?? (have[m.id] || 0)}" style="width:90px; text-align:center;" />
+        </div>`).join('') : '<p class="subtitle">Nothing is recorded here yet. Search above to add items.</p>';
+    q('#st-list').querySelectorAll('.st-state').forEach(b => b.addEventListener('click', () => { states[b.dataset.id] = b.dataset.state; renderList(); }));
+    q('#st-list').querySelectorAll('.st-count').forEach(inp => inp.addEventListener('input', () => { states[inp.dataset.id] = inp.value; }));
+  }
+  renderList();
+  q('#st-search').addEventListener('input', (e) => {
+    const text = e.target.value.trim().toLowerCase();
+    const el = q('#st-results');
+    if (text.length < 2) { el.innerHTML = ''; return; }
+    const list = all.filter(m => !listed.has(m.id) && matchesAllWords(m.name, text)).slice(0, 8);
+    el.innerHTML = list.map(m => `<button type="button" class="secondary btn-sm st-add" data-id="${m.id}" style="margin:2px;">${escapeHtml(m.name)}</button>`).join('') || '<p class="subtitle" style="font-size:12px;">No item by that name.</p>';
+    el.querySelectorAll('.st-add').forEach(b => b.addEventListener('click', () => { listed.add(b.dataset.id); if (!all.find(m => m.id === b.dataset.id).is_consumable) states[b.dataset.id] = states[b.dataset.id] ?? 0; e.target.value = ''; el.innerHTML = ''; renderList(); }));
+  });
+  q('#st-cancel').addEventListener('click', () => overlay.remove());
+  q('#st-save').addEventListener('click', async () => {
+    const btn = q('#st-save'), msg = q('#st-msg');
+    const counts = [];
+    all.filter(m => listed.has(m.id)).forEach(m => {
+      if (m.is_consumable) { if (states[m.id]) counts.push({ material_id: m.id, state: states[m.id] }); }
+      else if (states[m.id] !== undefined && states[m.id] !== '') counts.push({ material_id: m.id, count: Number(states[m.id]) });
+    });
+    if (!counts.length) { msg.innerHTML = '<div class="error-box">Nothing changed.</div>'; return; }
+    btn.disabled = true; btn.textContent = 'Saving...';
+    const { data, error } = await supabaseClient.rpc('stock_stocktake', { p_loc: loc, p_vehicle_id: loc === 'vehicle' ? vehicleId : null, p_counts: counts });
+    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; btn.disabled = false; btn.textContent = 'Save stocktake'; return; }
+    overlay.remove();
+    showToast(`Stocktake saved: ${data.changed} count${data.changed === 1 ? '' : 's'} corrected${data.low ? `, ${data.low} running low` : ''}`);
+    if (onDone) await onDone();
+  });
+}
+
+// Move gear between the Warehouse and a vehicle in one step (no PO). Fixes the source count on the spot.
+async function openStockTransferPanel({ fromLoc, fromVehicleId, fromLabel, toLoc, toVehicleId, toLabel, onDone }) {
+  const [{ data: materials }, have] = await Promise.all([
+    supabaseClient.from('materials').select('id, name, is_consumable, pack_label').order('name'),
+    loadPlaceCounts(fromLoc, fromVehicleId),
+  ]);
+  const all = materials || [];
+  const picked = [];
+  const overlay = openModal(`
+    <h2>Move stock: ${escapeHtml(fromLabel)} to ${escapeHtml(toLabel)}</h2>
+    <p class="subtitle" style="margin-bottom:10px;">Counts move straight away, no PO. If the app's count at ${escapeHtml(fromLabel)} is wrong, fix "Left" and it is corrected.</p>
+    <input id="tr-search" placeholder="Type part of the name..." autocomplete="off" />
+    <div id="tr-results"></div>
+    <div id="tr-picked" style="margin-top:8px;"></div>
+    <div style="margin-top:14px; display:flex; gap:8px;">
+      <button id="tr-save" style="flex:1; min-height:44px;">Move</button>
+      <button type="button" class="secondary" id="tr-cancel" style="min-height:44px;">Cancel</button>
+    </div>
+    <div id="tr-msg"></div>`, { maxWidth: 520 });
+  const q = (sel) => overlay.querySelector(sel);
+  function renderPicked() {
+    q('#tr-picked').innerHTML = picked.map((p, i) => `<div class="tr-line" data-i="${i}" style="border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;"><strong>${escapeHtml(p.name)}</strong><button type="button" class="secondary btn-sm tr-remove">&times;</button></div>
+      <div class="grid cols-2" style="margin-top:6px;">
+        <div><label style="margin-top:0; font-size:12px;">Moving</label><input class="tr-qty" type="number" inputmode="numeric" step="1" min="1" value="${p.qty}" /></div>
+        <div><label style="margin-top:0; font-size:12px;">Left at ${escapeHtml(fromLabel)} <span class="subtitle">(app: ${poQty(have[p.id] || 0)})</span></label><input class="tr-left" type="number" inputmode="numeric" step="1" min="0" value="${p.left ?? ''}" /></div>
+      </div></div>`).join('');
+    q('#tr-picked').querySelectorAll('.tr-line').forEach(line => {
+      const p = picked[Number(line.dataset.i)];
+      line.querySelector('.tr-qty').addEventListener('input', (e) => { p.qty = Math.max(1, parseInt(e.target.value, 10) || 1); if (!p.leftTouched) { p.left = Math.max(0, (have[p.id] || 0) - p.qty); line.querySelector('.tr-left').value = p.left; } });
+      line.querySelector('.tr-left').addEventListener('input', (e) => { p.leftTouched = true; p.left = e.target.value === '' ? null : Math.max(0, parseFloat(e.target.value) || 0); });
+      line.querySelector('.tr-remove').addEventListener('click', () => { picked.splice(Number(line.dataset.i), 1); renderPicked(); });
+    });
+  }
+  q('#tr-search').addEventListener('input', (e) => {
+    const text = e.target.value.trim().toLowerCase();
+    const el = q('#tr-results');
+    if (text.length < 2) { el.innerHTML = ''; return; }
+    const list = all.filter(m => matchesAllWords(m.name, text) && !picked.some(p => p.id === m.id)).slice(0, 8);
+    el.innerHTML = `<div style="display:flex; flex-direction:column; gap:4px;">${list.map(m => `<button type="button" class="secondary tr-pick" data-id="${m.id}" style="text-align:left; min-height:40px;">${escapeHtml(m.name)} <span class="subtitle">(${poQty(have[m.id] || 0)} at ${escapeHtml(fromLabel)})</span></button>`).join('') || '<p class="subtitle" style="font-size:12px;">No item by that name.</p>'}</div>`;
+    el.querySelectorAll('.tr-pick').forEach(b => b.addEventListener('click', () => {
+      const m = all.find(x => x.id === b.dataset.id);
+      picked.push({ id: m.id, name: m.name, qty: 1, left: Math.max(0, (have[m.id] || 0) - 1), leftTouched: false });
+      e.target.value = ''; el.innerHTML = ''; renderPicked();
+    }));
+  });
+  q('#tr-cancel').addEventListener('click', () => overlay.remove());
+  q('#tr-save').addEventListener('click', async () => {
+    const btn = q('#tr-save'), msg = q('#tr-msg');
+    if (!picked.length) { msg.innerHTML = '<div class="error-box">Pick what you are moving.</div>'; return; }
+    btn.disabled = true; btn.textContent = 'Moving...';
+    try {
+      for (const p of picked) {
+        if (p.moved) continue; // moved by an earlier attempt: a retry never moves it twice (bug F18)
+        const { error } = await supabaseClient.rpc('stock_transfer', { p_material_id: p.id, p_qty: p.qty, p_from_loc: fromLoc, p_from_vehicle: fromLoc === 'vehicle' ? fromVehicleId : null, p_to_loc: toLoc, p_to_vehicle: toLoc === 'vehicle' ? toVehicleId : null, p_left_after: p.left });
+        if (error) throw new Error(`${p.name}: ${friendlyError(error)}`);
+        p.moved = true;
+      }
+      overlay.remove();
+      showToast(`Moved ${picked.length} item${picked.length === 1 ? '' : 's'} to ${toLabel}`);
+      if (onDone) await onDone();
+    } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Move'; }
+  });
+}
+
+async function openAddPoItemPanel(po, onComplete) {
+  const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
+  const overlay = poOverlay(`
+    <h2>Add to PO ${escapeHtml(po.po_number || '')}</h2>
+    <div id="api-items"></div>
+    <button type="button" class="secondary btn-sm" id="api-add-line">+ Add another</button>
+    <div style="margin-top:14px;">
+      <button id="api-save-btn">Add</button>
+      <button type="button" class="secondary" id="api-cancel-btn">Cancel</button>
+    </div>
+    <div id="api-msg"></div>`, 560);
+  buildMaterialSearchRow(materials || [], 'api-items');
+  overlay.querySelector('#api-add-line').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'api-items'));
+  overlay.querySelector('#api-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#api-save-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#api-save-btn');
+    const label = btn.textContent;
+    const msg = overlay.querySelector('#api-msg');
+    const lineProblem = materialLineRowsProblem('api-items');
+    if (lineProblem) { msg.innerHTML = `<div class="error-box">${escapeHtml(lineProblem)}</div>`; return; }
+    const lines = readMaterialLineRows('api-items');
+    if (!lines.length) { msg.innerHTML = `<div class="error-box">Add an item with a quantity.</div>`; return; }
+    btn.disabled = true; btn.textContent = 'Adding...';
+    try {
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const { error } = await supabaseClient.from('purchase_order_line_items').insert(lines.map(l => ({
+        po_id: po.id, material_id: l.materialId, description: l.description, quantity: l.quantity, unit_cost: l.unit_cost, added_by: user.id,
+      })));
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const text = `PO ${po.po_number || ''}: added ${lines.map(l => `${l.description} x${l.quantity} at ${money(l.unit_cost)}`).join(', ')}`;
+      await logActivity('purchase_order', po.id, 'po_item_added', text);
+      if (po.project_id) await logActivity('project', po.project_id, 'po_item_added', text);
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
+  });
+}
+
+// Pricing roles fix a line's name, qty or price while the PO is Open (e.g. the real invoice came in different).
+function openEditPoLinesPanel(po, onComplete) {
+  const items = po.purchase_order_line_items || [];
+  const overlay = poOverlay(`
+    <h2>Edit PO ${escapeHtml(po.po_number || '')}</h2>
+    <p class="subtitle" style="margin-bottom:10px;">Name, quantity and unit cost of each line.</p>
+    ${items.map(li => `
+      <div class="ov-line" data-id="${li.id}" style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:6px; margin-bottom:6px;">
+        <input class="ov-desc" value="${escapeHtml(li.description)}" style="font-size:13px;" />
+        <input class="ov-qty" type="number" step="0.01" value="${li.quantity}" style="font-size:13px;" ${li.received ? 'disabled' : ''} />
+        <input class="ov-cost" type="number" step="0.01" value="${li.unit_cost}" style="font-size:13px;" ${li.received ? 'disabled' : ''} />
+        ${li.received ? '<div style="grid-column:1 / -1; font-size:11px; color:var(--muted);">Received. Undo received first to change the quantity or cost.</div>' : ''}
+      </div>`).join('')}
+    <div style="margin-top:14px;">
+      <button id="ov-save-btn">Save changes</button>
+      <button type="button" class="secondary" id="ov-cancel-btn">Cancel</button>
+    </div>
+    <div id="ov-msg"></div>`, 520);
+  overlay.querySelector('#ov-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#ov-save-btn').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#ov-msg');
+    try {
+      for (const row of overlay.querySelectorAll('.ov-line')) {
+        const next = {
+          description: row.querySelector('.ov-desc').value.trim(),
+          quantity: parseFloat(row.querySelector('.ov-qty').value) || 0,
+          unit_cost: parseFloat(row.querySelector('.ov-cost').value) || 0,
+        };
+        const was = items.find(li => li.id === row.dataset.id) || {};
+        // received lines: qty and cost are locked (stock and job cost were set when it landed)
+        if (was.received) { next.quantity = Number(was.quantity); next.unit_cost = Number(was.unit_cost); }
+        const changes = [];
+        if ((was.description || '') !== next.description) changes.push(`name "${was.description || ''}" to "${next.description}"`);
+        if (Number(was.quantity) !== next.quantity) changes.push(`qty ${Number(was.quantity)} to ${next.quantity}`);
+        if (Math.abs(Number(was.unit_cost) - next.unit_cost) >= 0.01) changes.push(`cost ${money(Number(was.unit_cost))} to ${money(next.unit_cost)}`);
+        if (!changes.length) continue;
+        const { error } = await supabaseClient.from('purchase_order_line_items').update(next).eq('id', row.dataset.id);
+        if (error) throw error;
+        const text = `PO ${po.po_number || ''}: ${next.description} ${changes.join(', ')}`;
+        await logActivity('purchase_order', po.id, 'po_item_edited', text);
+        if (po.project_id) await logActivity('project', po.project_id, 'po_item_edited', text);
+      }
+      overlay.remove();
+      if (onComplete) await onComplete();
+    } catch (err) {
+      msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+    }
+  });
+}
+
+// Makes the PO PDF (po.html) and opens the email window to the supplier with it attached.
+async function emailPurchaseOrder(po, btn) {
+  if (typeof openEmailComposer !== 'function') { alert('Email is not available on this page.'); return; }
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Making the PDF...'; }
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const res = await fetch('/.netlify/functions/generate-client-document-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ doc_type: 'po', record_id: po.id }),
+    });
+    const out = await res.json().catch(() => ({ ok: false, error: 'Unexpected reply from the server' }));
+    if (!res.ok || !out.ok) throw new Error(out.error || 'Could not make the PO PDF');
+    const { data: sup } = await supabaseClient.from('suppliers').select('name, contact_email').eq('id', po.supplier_id).maybeSingle();
+    const name = `Purchase order ${po.po_number}.pdf`;
+    openEmailComposer({
+      title: `Email PO ${po.po_number}`,
+      to: sup?.contact_email || '',
+      subject: `Purchase order ${po.po_number} from Thomson Energy`,
+      body: `Hi${sup?.name ? ' ' + sup.name : ''},\n\nPlease find purchase order ${po.po_number} attached. Please quote ${po.po_number} on your invoice and delivery docket.\n\nThanks,`,
+      projectId: po.project_id || undefined, tagKind: 'supplier',
+      attachOptions: [{ group: 'Purchase order', label: name, bucket: 'project-documents', path: out.path, name, checked: true }],
+      onSent: async () => { await logActivity('purchase_order', po.id, 'emailed', `PO ${po.po_number} emailed to ${sup?.name || 'the supplier'}`); },
+    });
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+
+// Stock PO on a job: pull gear from the Warehouse or a vehicle. Each line shows what the app has there
+// and "Left after you take it"; if they take more than the app has they must say how many are left,
+// and that becomes the real count.
+async function openStockPullPanel({ projectId, jobLabel, centres, source, vehicleId, vehicleLabel, onDone }) {
+  const { data: materials } = await supabaseClient.from('materials').select('id, name').order('name');
+  let stockQuery = supabaseClient.from('material_stock_by_location').select('material_id, quantity').eq('location_type', source);
+  if (source === 'vehicle') stockQuery = stockQuery.eq('vehicle_id', vehicleId);
+  const { data: stockRows } = await stockQuery;
+  const have = {};
+  (stockRows || []).forEach(r => { have[r.material_id] = Number(r.quantity) || 0; });
+  const place = source === 'vehicle' ? (vehicleLabel || 'the vehicle') : 'Warehouse';
+
+  const overlay = poOverlay(`
+    <h2>Stock PO from ${escapeHtml(place)}</h2>
+    <p class="subtitle" style="margin-bottom:10px;">For ${escapeHtml(jobLabel || 'this job')}. Pick what you're taking. If the app's count is wrong, say how many are left and the count is fixed.</p>
+    ${(centres || []).length ? `<label style="margin-top:0">Stage (optional)</label>
+    <select id="sp2-stage"><option value="">Whole job</option>${centres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>` : ''}
+    <label>Items</label>
+    <div id="sp2-lines"></div>
+    <button type="button" class="secondary btn-sm" id="sp2-add">+ Add item</button>
+    <div style="margin-top:14px;">
+      <button id="sp2-save">Create stock PO</button>
+      <button type="button" class="secondary" id="sp2-cancel">Cancel</button>
+    </div>
+    <div id="sp2-msg"></div>`, 600);
+
+  const linesEl = overlay.querySelector('#sp2-lines');
+  function addLine() {
+    const row = document.createElement('div');
+    row.className = 'sp2-line';
+    row.style.cssText = 'border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:8px; position:relative;';
+    row.innerHTML = `
+      <div style="position:relative;">
+        <input class="sp2-search" placeholder="Search Stock..." autocomplete="off" style="font-size:13px;" />
+        <div class="sp2-results" style="position:absolute; top:100%; left:0; right:0; z-index:10; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:none;"></div>
+      </div>
+      <div class="sp2-have subtitle" style="font-size:12px; margin:4px 0;"></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:6px; align-items:end;">
+        <div><label style="margin-top:0; font-size:12px;">Taking</label><input class="sp2-qty" type="number" step="1" min="0" value="1" style="font-size:13px;" /></div>
+        <div><label style="margin-top:0; font-size:12px;">Left after you take it</label><input class="sp2-left" type="number" step="1" min="0" style="font-size:13px;" /></div>
+        <button type="button" class="secondary btn-sm sp2-remove">&times;</button>
+      </div>`;
+    linesEl.appendChild(row);
+    const search = row.querySelector('.sp2-search');
+    const results = row.querySelector('.sp2-results');
+    const qtyEl = row.querySelector('.sp2-qty');
+    const leftEl = row.querySelector('.sp2-left');
+    let leftTouched = false;
+    const refresh = () => {
+      const id = row.dataset.materialId;
+      if (!id) { row.querySelector('.sp2-have').textContent = ''; return; }
+      const h = have[id] || 0;
+      const qty = parseFloat(qtyEl.value) || 0;
+      row.querySelector('.sp2-have').textContent = `App says ${poQty(h)} in ${place}.${qty > h ? ' Say how many are really left.' : ''}`;
+      if (!leftTouched) leftEl.value = qty > h ? '' : String(Math.round((h - qty) * 100) / 100);
+    };
+    search.addEventListener('input', () => {
+      delete row.dataset.materialId;
+      refresh();
+      const q = search.value.trim().toLowerCase();
+      if (q.length < 2) { results.style.display = 'none'; return; }
+      const matches = (materials || []).filter(m => matchesAllWords(m.name, q)).slice(0, 8);
+      if (!matches.length) { results.style.display = 'none'; return; }
+      results.innerHTML = matches.map(m => `<div class="sp2-pick" data-id="${m.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(m.name)} <span class="subtitle">(${poQty(have[m.id] || 0)} in ${escapeHtml(place)})</span></div>`).join('');
+      results.style.display = 'block';
+      results.querySelectorAll('.sp2-pick').forEach(pick => pick.addEventListener('click', () => {
+        const m = materials.find(x => x.id === pick.dataset.id);
+        search.value = m.name;
+        row.dataset.materialId = m.id;
+        results.style.display = 'none';
+        leftTouched = false;
+        refresh();
+      }));
+    });
+    search.addEventListener('blur', () => setTimeout(() => { results.style.display = 'none'; }, 200));
+    qtyEl.addEventListener('input', refresh);
+    leftEl.addEventListener('input', () => { leftTouched = leftEl.value !== ''; });
+    row.querySelector('.sp2-remove').addEventListener('click', () => row.remove());
+  }
+  addLine();
+  overlay.querySelector('#sp2-add').addEventListener('click', addLine);
+  overlay.querySelector('#sp2-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#sp2-save').addEventListener('click', async () => {
+    const msg = overlay.querySelector('#sp2-msg');
+    const lines = [];
+    for (const row of overlay.querySelectorAll('.sp2-line')) {
+      const id = row.dataset.materialId;
+      const name = row.querySelector('.sp2-search').value.trim();
+      if (!id) { if (name) { msg.innerHTML = `<div class="error-box">Pick "${escapeHtml(name)}" from the Stock list.</div>`; return; } continue; }
+      const qty = parseFloat(row.querySelector('.sp2-qty').value) || 0;
+      if (qty <= 0) { msg.innerHTML = `<div class="error-box">Enter how many ${escapeHtml(name)} you're taking.</div>`; return; }
+      const leftRaw = row.querySelector('.sp2-left').value;
+      const h = have[id] || 0;
+      if (leftRaw === '' && qty > h) { msg.innerHTML = `<div class="error-box">The app says ${poQty(h)} ${escapeHtml(name)} in ${escapeHtml(place)}. Say how many are left after you take ${poQty(qty)}.</div>`; return; }
+      lines.push({ material_id: id, quantity: qty, left_after: leftRaw === '' ? null : Number(leftRaw) });
+    }
+    if (!lines.length) { msg.innerHTML = `<div class="error-box">Add at least one item from Stock.</div>`; return; }
+    const btn = overlay.querySelector('#sp2-save');
+    btn.disabled = true;
+    const stageEl = overlay.querySelector('#sp2-stage');
+    const { data, error } = await supabaseClient.rpc('po_create_stock_pull', {
+      p_project_id: projectId, p_cost_centre_id: stageEl ? (stageEl.value || null) : null,
+      p_source: source, p_vehicle_id: source === 'vehicle' ? vehicleId : null, p_lines: lines, p_description: null,
+    });
+    if (error) { btn.disabled = false; msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+    overlay.remove();
+    if (onDone) await onDone(data);
+  });
+}
+
+// The "Where from" choice on a job's Create PO panels: a supplier, the Warehouse, or a stock vehicle.
+function poSourceOptionsHtml(vehicles) {
+  return `<option value="supplier">A supplier (order it)</option><option value="warehouse">Warehouse stock</option>${vehicles.map(v => `<option value="vehicle:${v.id}">Stock in ${escapeHtml(v.vehicle_name || v.rego)}</option>`).join('')}`;
 }
 
 // Marks a not-yet-received line item as backordered with an expected
 // date - a separate status from "received", for when a supplier says an
 // item's delayed rather than it having actually arrived.
 function openBackorderPanel(lineItem, onComplete) {
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-  overlay.innerHTML = `
-    <div class="card" style="max-width:360px; width:100%;">
+  const overlay = openModal(`
       <h2>Backorder</h2>
-      <p class="subtitle" style="margin-bottom:10px;">${lineItem.description} x${lineItem.quantity}</p>
+      <p class="subtitle" style="margin-bottom:10px;">${escapeHtml(lineItem.description)} x${lineItem.quantity}</p>
       <label style="margin-top:0">Expected date</label>
       <input type="date" id="bo-eta" value="${lineItem.backorder_eta || ''}" />
       <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -4537,190 +7600,44 @@ function openBackorderPanel(lineItem, onComplete) {
         ${lineItem.is_backordered ? '<button type="button" class="secondary" id="bo-clear-btn">No longer backordered</button>' : ''}
         <button type="button" class="secondary" id="bo-cancel-btn">Cancel</button>
       </div>
-      <div id="bo-msg"></div>
-    </div>`;
-  document.body.appendChild(overlay);
+      <div id="bo-msg"></div>`, { maxWidth: 360 });
 
   overlay.querySelector('#bo-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#bo-save-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#bo-save-btn');
+    const label = btn.textContent;
     const msg = overlay.querySelector('#bo-msg');
-    const { error } = await supabaseClient.from('purchase_order_line_items')
-      .update({ is_backordered: true, backorder_eta: overlay.querySelector('#bo-eta').value || null })
-      .eq('id', lineItem.id);
-    if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-    overlay.remove();
-    await onComplete();
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      // po_set_backorder (not a plain update): PO line updates are pricing roles only, so Staff got 0 rows and no error
+      const { error } = await supabaseClient.rpc('po_set_backorder', { p_line_id: lineItem.id, p_backordered: true, p_eta: overlay.querySelector('#bo-eta').value || null });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      overlay.remove();
+      await onComplete();
+    } finally { btn.disabled = false; btn.textContent = label; }
   });
   const clearBtn = overlay.querySelector('#bo-clear-btn');
   if (clearBtn) {
     clearBtn.addEventListener('click', async () => {
       const msg = overlay.querySelector('#bo-msg');
-      const { error } = await supabaseClient.from('purchase_order_line_items')
-        .update({ is_backordered: false, backorder_eta: null })
-        .eq('id', lineItem.id);
-      if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      const { error } = await supabaseClient.rpc('po_set_backorder', { p_line_id: lineItem.id, p_backordered: false, p_eta: null });
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       overlay.remove();
       await onComplete();
     });
   }
 }
 
-async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComplete) {
-  const sourceIsWarehouse = !!po.vehicle_id && !po.supplier_id; // pulled from the shed, not a new purchase
-  const { data: vehicles } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
-
-  let defaultJobName = null;
-  if (po.project_id) {
-    const { data: proj } = await supabaseClient.from('projects').select('name, job_number').eq('id', po.project_id).maybeSingle();
-    defaultJobName = proj ? (proj.job_number ? `J${proj.job_number}` : proj.name) : null;
-  }
-
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-  overlay.innerHTML = `
-    <div class="card" style="max-width:420px; width:100%; max-height:85vh; overflow-y:auto;">
-      <h2>Receive item</h2>
-      <p class="subtitle" style="margin-bottom:10px;">${lineItem.description} x${lineItem.quantity}</p>
-      <label style="margin-top:0">Send to</label>
-      <select id="rl-dest-type">
-        <option value="warehouse" ${defaultDestination === 'warehouse' ? 'selected' : ''}>Warehouse</option>
-        <option value="job" ${defaultDestination === 'job' ? 'selected' : ''}>A job</option>
-        ${vehicles?.length ? `<option value="vehicle" ${defaultDestination === 'vehicle' ? 'selected' : ''}>A vehicle</option>` : ''}
-      </select>
-      <div id="rl-job-section" style="display:none; margin-top:8px;">
-        <input id="rl-job-search" placeholder="Search for the job..." autocomplete="off" />
-        <div id="rl-job-results"></div>
-        <div id="rl-job-selected" class="subtitle" style="margin-top:4px;"></div>
-      </div>
-      <div id="rl-vehicle-section" style="display:none; margin-top:8px;">
-        <select id="rl-vehicle-select">${(vehicles || []).map(v => `<option value="${v.id}" ${v.id === po.vehicle_id ? 'selected' : ''}>${v.vehicle_name || v.rego}</option>`).join('')}</select>
-      </div>
-      <div style="margin-top:14px;">
-        <button id="rl-confirm-btn">Confirm received</button>
-        <button type="button" class="secondary" id="rl-cancel-btn">Cancel</button>
-      </div>
-      <div id="rl-msg"></div>
-    </div>`;
-  document.body.appendChild(overlay);
-
-  function syncSections() {
-    const val = overlay.querySelector('#rl-dest-type').value;
-    overlay.querySelector('#rl-job-section').style.display = val === 'job' ? 'block' : 'none';
-    overlay.querySelector('#rl-vehicle-section').style.display = val === 'vehicle' ? 'block' : 'none';
-  }
-  overlay.querySelector('#rl-dest-type').addEventListener('change', syncSections);
-  syncSections();
-
-  let selectedJob = po.project_id ? { id: po.project_id, name: defaultJobName } : null;
-  const jobSearchInput = overlay.querySelector('#rl-job-search');
-  if (po.project_id) {
-    overlay.querySelector('#rl-job-selected').textContent = defaultJobName ? `This PO's own job: ${defaultJobName}` : 'This PO\'s own job (default)';
-  }
-  let jobSearchTimeout;
-  jobSearchInput.addEventListener('input', (e) => {
-    clearTimeout(jobSearchTimeout);
-    selectedJob = null;
-    const q = e.target.value.trim();
-    if (q.length < 2) { overlay.querySelector('#rl-job-results').innerHTML = ''; return; }
-    jobSearchTimeout = setTimeout(async () => {
-      const results = await searchProjects(q);
-      const resultsEl = overlay.querySelector('#rl-job-results');
-      resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-        ${results.map(p => `<div class="rl-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
-      </div>`;
-      resultsEl.querySelectorAll('.rl-job-pick').forEach(row => {
-        row.addEventListener('click', () => {
-          selectedJob = { id: row.dataset.id, name: row.dataset.jobNumber ? `J${row.dataset.jobNumber}` : row.dataset.name };
-          jobSearchInput.value = row.dataset.name;
-          overlay.querySelector('#rl-job-selected').textContent = `Selected: ${row.dataset.name}`;
-          resultsEl.innerHTML = '';
-        });
-      });
-    }, 250);
-  });
-
-  overlay.querySelector('#rl-cancel-btn').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('#rl-confirm-btn').addEventListener('click', async () => {
-    const msg = overlay.querySelector('#rl-msg');
-    const destType = overlay.querySelector('#rl-dest-type').value;
-    if (destType === 'job' && !selectedJob) { msg.innerHTML = `<div class="error-box">Search for and select a job.</div>`; return; }
-    const vehicleId = destType === 'vehicle' ? overlay.querySelector('#rl-vehicle-select').value : null;
-
-    try {
-      const { data: { user } } = await supabaseClient.auth.getUser();
-
-      if (destType === 'warehouse') {
-        // If this PO itself was a vehicle-pull-from-stock (no supplier),
-        // the warehouse quantity was already the source, not the
-        // destination - this path only ever ADDS to warehouse.
-        const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', lineItem.material_id).eq('location_type', 'warehouse').maybeSingle();
-        if (whRow) {
-          await supabaseClient.from('material_stock_by_location').update({ quantity: Number(whRow.quantity) + Number(lineItem.quantity), updated_at: new Date().toISOString() }).eq('id', whRow.id);
-        } else {
-          await supabaseClient.from('material_stock_by_location').insert({ material_id: lineItem.material_id, location_type: 'warehouse', quantity: lineItem.quantity });
-        }
-      } else if (destType === 'job') {
-        await supabaseClient.from('job_material_usage').insert({
-          project_id: selectedJob.id, cost_centre_id: po.cost_centre_id || null, material_id: lineItem.material_id,
-          quantity: lineItem.quantity, unit_cost: lineItem.unit_cost, source: 'from_po', po_line_item_id: lineItem.id, created_by: user.id,
-        });
-      } else if (destType === 'vehicle') {
-        if (sourceIsWarehouse) {
-          const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', lineItem.material_id).eq('location_type', 'warehouse').maybeSingle();
-          const warehouseQty = Number(whRow?.quantity) || 0;
-          if (lineItem.quantity > warehouseQty) throw new Error(`Only ${warehouseQty} available in the Warehouse.`);
-          if (whRow) {
-            await supabaseClient.from('material_stock_by_location').update({ quantity: warehouseQty - lineItem.quantity, updated_at: new Date().toISOString() }).eq('id', whRow.id);
-          }
-        }
-        const { data: vehRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', lineItem.material_id).eq('location_type', 'vehicle').eq('vehicle_id', vehicleId).maybeSingle();
-        if (vehRow) {
-          await supabaseClient.from('material_stock_by_location').update({ quantity: Number(vehRow.quantity) + Number(lineItem.quantity), updated_at: new Date().toISOString() }).eq('id', vehRow.id);
-        } else {
-          await supabaseClient.from('material_stock_by_location').insert({ material_id: lineItem.material_id, location_type: 'vehicle', vehicle_id: vehicleId, quantity: lineItem.quantity });
-        }
-      }
-
-      await supabaseClient.from('purchase_order_line_items').update({
-        received: true, destination_type: destType,
-        destination_job_id: destType === 'job' ? selectedJob.id : null,
-        destination_vehicle_id: destType === 'vehicle' ? vehicleId : null,
-        received_by: user.id, received_at: new Date().toISOString(),
-      }).eq('id', lineItem.id);
-
-      const destLabel = destType === 'job' ? (selectedJob.name || 'a job') : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || vehicles.find(v => v.id === vehicleId)?.rego || 'a vehicle') : 'Warehouse';
-      await logActivity('purchase_order', po.id, 'item_received', `${lineItem.description} x${lineItem.quantity} received - sent to ${destLabel}`);
-      if (destType === 'job') {
-        await logActivity('project', selectedJob.id, 'material_received', `${lineItem.description} x${lineItem.quantity} received from PO ${po.po_number || ''}, costed to this job`);
-      }
-
-      // If every line item on this PO is now received, mark the PO
-      // itself received and approve any linked bill for payment.
-      const { data: allItems } = await supabaseClient.from('purchase_order_line_items').select('received').eq('po_id', po.id);
-      if ((allItems || []).every(li => li.received)) {
-        await supabaseClient.from('purchase_orders').update({
-          received: true, received_by: user.id, received_at: new Date().toISOString(),
-        }).eq('id', po.id);
-        await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('po_id', po.id);
-        await logActivity('purchase_order', po.id, 'fully_received', `PO ${po.po_number || ''} fully received - any linked bill approved for payment`);
-      }
-
-      overlay.remove();
-      if (onComplete) await onComplete();
-    } catch (err) {
-      msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-    }
-  });
-}
-
-// Draws the next sequential PO number (e.g. "PO2001") - same atomic
-// counter pattern already used for quotes/jobs/invoices, so two people
-// creating a PO at the same moment never collide.
+// Deprecated: new POs leave po_number out and read it back from the insert
+// (.select('id, po_number')); trigger trg_purchase_orders_fill_number fills
+// it for every role. get_next_number is pricing roles only, so on any error
+// this returns null and the trigger fills the number instead. Kept only
+// until the last callers (project.html) switch over.
 async function drawNextPoNumber() {
   const { data: settings } = await supabaseClient.from('company_settings').select('po_number_prefix').eq('id', 1).single();
   const prefix = settings?.po_number_prefix || 'PO';
   const { data: nextNum, error } = await supabaseClient.rpc('get_next_number', { counter_name: 'po' });
-  if (error) throw error;
+  if (error) return null;
   return `${prefix}${nextNum}`;
 }
 
@@ -4729,7 +7646,9 @@ async function drawNextPoNumber() {
 // than typing every line item by hand later. The supplier is already
 // known from the PO, so this skips straight to the review screen on
 // that supplier's page instead of asking which supplier it's for.
-function uploadInvoiceForPo(po) {
+async function uploadInvoiceForPo(po) {
+  // The extraction function is for Admin, Finance and Sales only (bug F9).
+  if (!isPricingRole(await getMyRole())) { alert('Only Admin, Finance or Sales can upload a supplier invoice.'); return; }
   if (!po.supplier_id) {
     alert("This PO has no supplier attached - it was pulled from Warehouse stock, so there's no invoice to upload.");
     return;
@@ -4741,10 +7660,7 @@ function uploadInvoiceForPo(po) {
     const file = e.target.files[0];
     if (!file) return;
 
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-    overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the invoice...</p></div>`;
-    document.body.appendChild(overlay);
+    const overlay = openModal(`<p class="subtitle">Reading the invoice...</p>`, { maxWidth: 400 });
 
     try {
       const fileBase64 = await fileToBase64(file);
@@ -4756,12 +7672,14 @@ function uploadInvoiceForPo(po) {
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
 
+      // By storage path, not base64 in sessionStorage (bug F49, see resolveSupplierAndHandoff)
+      const filePath = await uploadPrivateFile(file, 'ai-extraction-uploads');
       sessionStorage.setItem('pending_upload', JSON.stringify({
-        type: 'bill', extracted: data.extracted, fileBase64, fileName: file.name, fileType: file.type, preselectedPoId: po.id,
+        type: 'bill', extracted: data.extracted, filePath, fileName: file.name, fileType: file.type, preselectedPoId: po.id,
       }));
       window.location.href = `/supplier-detail.html?id=${po.supplier_id}&resume_upload=1`;
     } catch (err) {
-      overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="uip-close">Close</button>`;
+      overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${escapeHtml(friendlyError(err))}</div><button type="button" class="secondary" id="uip-close">Close</button>`;
       overlay.querySelector('#uip-close').addEventListener('click', () => overlay.remove());
     }
   };
@@ -4783,14 +7701,17 @@ function buildMaterialSearchRow(materials, containerId) {
   row.className = 'po-material-line';
   row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:6px; margin-bottom:6px; position:relative;';
   row.innerHTML = `
-    <div style="position:relative;">
-      <input class="po-line-search" placeholder="Search Stock or type a new item..." autocomplete="off" style="font-size:13px;" />
+    <span class="pml-lbl pml-lbl-item">Item</span>
+    <div class="pml-item" style="position:relative;">
+      <input class="po-line-search" placeholder="Search Stock or type a new item..." autocomplete="off" />
       <input type="hidden" class="po-line-material-id" />
       <div class="po-line-results" style="position:absolute; top:100%; left:0; right:0; z-index:10; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:none;"></div>
     </div>
-    <input class="po-line-qty" type="number" step="1" value="1" placeholder="Qty" style="font-size:13px;" />
-    <input class="po-line-cost" type="number" step="0.01" value="0" placeholder="Unit cost" style="font-size:13px;" />
-    <button type="button" class="secondary po-remove-line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
+    <span class="pml-lbl pml-lbl-qty">Qty</span>
+    <input class="po-line-qty" type="number" inputmode="decimal" min="0" step="1" value="1" placeholder="Qty" />
+    <span class="pml-lbl pml-lbl-cost">Unit cost</span>
+    <input class="po-line-cost" type="number" inputmode="decimal" min="0" step="0.01" value="" placeholder="Unit cost" />
+    <button type="button" class="secondary po-remove-line" aria-label="Remove line" style="padding:6px 10px; font-size:12px;">&times;</button>`;
   document.getElementById(containerId).appendChild(row);
 
   const searchInput = row.querySelector('.po-line-search');
@@ -4806,8 +7727,8 @@ function buildMaterialSearchRow(materials, containerId) {
     const materialMatches = materials.filter(m => matchesAllWords(m.name, q)).slice(0, 8);
     if (!prebuildMatches.length && !materialMatches.length) { resultsEl.style.display = 'none'; return; }
     resultsEl.innerHTML = [
-      ...prebuildMatches.map(p => `<div class="po-line-pick" data-kind="prebuild" data-id="${p.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${p.name} <span class="subtitle">(Prebuild - adds each material)</span></div>`),
-      ...materialMatches.map(m => `<div class="po-line-pick" data-kind="material" data-id="${m.id}" data-name="${m.name}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${m.name} <span class="subtitle">(${money(m.cost_price)})</span></div>`),
+      ...prebuildMatches.map(p => `<div class="po-line-pick" data-kind="prebuild" data-id="${p.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(p.name)} <span class="subtitle">(Prebuild - adds each material)</span></div>`),
+      ...materialMatches.map(m => `<div class="po-line-pick" data-kind="material" data-id="${m.id}" data-name="${escapeHtml(m.name)}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(m.name)} <span class="subtitle">(${money(m.cost_price)})</span></div>`),
     ].join('');
     resultsEl.style.display = 'block';
     resultsEl.querySelectorAll('.po-line-pick').forEach(pick => {
@@ -4845,6 +7766,21 @@ function readMaterialLineRows(containerId) {
     quantity: parseFloat(row.querySelector('.po-line-qty').value) || 0,
     unit_cost: parseFloat(row.querySelector('.po-line-cost').value) || 0,
   })).filter(l => l.description && l.quantity > 0);
+}
+
+// Checked before anything is saved: a named line with no quantity or no unit cost is an error
+// instead of being dropped or ordered at $0. A blank spare row is ignored.
+function materialLineRowsProblem(containerId) {
+  const rows = [...document.querySelectorAll(`#${containerId} .po-material-line`)];
+  for (let i = 0; i < rows.length; i++) {
+    const desc = rows[i].querySelector('.po-line-search').value.trim();
+    if (!desc) continue;
+    const qty = parseFloat(rows[i].querySelector('.po-line-qty').value);
+    const costRaw = rows[i].querySelector('.po-line-cost').value.trim();
+    if (!(qty > 0)) return `Line ${i + 1} (${desc}) has no quantity.`;
+    if (costRaw === '' || isNaN(parseFloat(costRaw))) return `Line ${i + 1} (${desc}) has no unit cost. Enter 0 if it is free.`;
+  }
+  return '';
 }
 
 // Universal activity log - one shared table for every entity type. Call
@@ -4934,9 +7870,18 @@ async function createPoFollowUpTask(projectId, poNumber, supplierName) {
   }
 }
 
+function activityEntryHtml(text, e) {
+  return `
+    <div class="activity-entry">
+      <div>${escapeHtml(text)}</div>
+      <div class="subtitle">${escapeHtml(e.profiles?.full_name || 'Someone')} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+    </div>`;
+}
+
 async function renderActivityLog(entityType, entityId, containerId) {
   const containerEl = document.getElementById(containerId);
   if (!containerEl) return;
+  containerEl.classList.add('activity-log-scroll');
   containerEl.innerHTML = `<p class="subtitle">Loading...</p>`;
 
   const { data: entries, error } = await supabaseClient
@@ -4946,14 +7891,108 @@ async function renderActivityLog(entityType, entityId, containerId) {
     .eq('entity_id', entityId)
     .order('created_at', { ascending: false });
 
-  if (error) { containerEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+  if (error) { containerEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
   if (!entries.length) { containerEl.innerHTML = `<p class="subtitle">No activity logged yet.</p>`; return; }
 
-  containerEl.innerHTML = entries.map(e => `
-    <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
-      <span>${e.description}</span>
-      <span class="subtitle" style="white-space:nowrap;">${e.profiles?.full_name || 'Someone'} - ${new Date(e.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
-    </div>`).join('');
+  containerEl.innerHTML = entries.map(e => activityEntryHtml(e.description, e)).join('');
+}
+
+// Job activity log, split by tab so it stays short. Summary shows one line
+// per action (a run of changes by the same person on the same thing, close
+// together, becomes one line like "Edited PO 1234 (3 changes)"); every
+// other tab shows only its own entries in full detail. The tab comes from
+// the action, so entries logged before this sort the same way.
+const JOB_ACTIVITY_GROUPS = [
+  { tab: 'costcentres', actions: ['timesheet_added', 'timesheet_edited', 'timesheet_removed', 'timesheet_moved', 'timesheet_split'],
+    label: (n) => n === 1 ? 'Edited a timesheet' : `Edited timesheets (${n} changes)` },
+  { tab: 'costcentres', actions: ['stage_updated', 'cost_centre_added'],
+    label: (n) => n === 1 ? 'Edited the cost centres' : `Edited the cost centres (${n} changes)` },
+  { tab: 'pos', actions: ['po_item_added', 'po_item_edited'], byPo: true,
+    label: (n, po) => `Edited ${po ? 'PO ' + po : 'a PO'}${n === 1 ? '' : ` (${n} changes)`}` },
+  { tab: 'pos', actions: ['material_received'], byPo: true,
+    label: (n, po) => `Received ${n} item${n === 1 ? '' : 's'} on ${po ? 'PO ' + po : 'a PO'}` },
+  { tab: 'variations', actions: ['variation_hours_logged', 'variation_materials_added'],
+    label: (n) => n === 1 ? 'Logged work on a variation' : `Logged work on variations (${n} entries)` },
+  { tab: 'documents', actions: ['documents_uploaded', 'document_deleted'],
+    label: (n, po, e) => n === 1 ? e.description : `Changed documents (${n} changes)` },
+  { tab: 'summary', actions: ['task_added', 'task_completed', 'task_reopened', 'task_deleted', 'task_picked_up'],
+    label: (n, po, e) => n === 1 ? e.description : `Updated ${n} tasks` },
+];
+const JOB_ACTIVITY_TABS = {
+  staff_scheduled: 'schedule', schedule_added: 'schedule', job_not_complete: 'schedule', schedule_conflict: 'schedule',
+  booking_client_informed: 'schedule', booking_moved: 'schedule', booking_cancelled: 'schedule',
+  time_offer_sent: 'schedule', time_offer_picked: 'schedule', time_offer_declined: 'schedule', time_offer_withdrawn: 'schedule',
+  po_created: 'pos',
+  variation_logged: 'variations', variation_sent: 'variations', variation_recorded: 'variations', variation_approved: 'variations',
+  invoice_created: 'invoices', invoice_edited: 'invoices', credit_note_created: 'invoices', sm8_invoice_deleted: 'invoices',
+};
+const JOB_ACTIVITY_GROUP_GAP_MS = 30 * 60 * 1000;
+
+function jobActivityGroupOf(action) {
+  return JOB_ACTIVITY_GROUPS.find(g => g.actions.includes(action)) || null;
+}
+
+function jobActivityTab(action) {
+  const group = jobActivityGroupOf(action);
+  return group ? group.tab : (JOB_ACTIVITY_TABS[action] || 'summary');
+}
+
+function poNumberFromLog(description) {
+  const m = /\bPO\s+([A-Za-z0-9-]+)/.exec(description || '');
+  return m ? m[1] : '';
+}
+
+// Entries arrive newest first. Neighbours join a run while the person and
+// group (and PO, where it matters) match and the gap stays under 30 min.
+function groupJobActivity(entries) {
+  const runs = [];
+  entries.forEach(e => {
+    const group = jobActivityGroupOf(e.action);
+    const po = group?.byPo ? poNumberFromLog(e.description) : '';
+    const last = runs[runs.length - 1];
+    if (group && last && last.group === group && last.po === po && last.changedBy === e.changed_by
+      && new Date(last.oldest.created_at) - new Date(e.created_at) <= JOB_ACTIVITY_GROUP_GAP_MS) {
+      last.count++;
+      last.oldest = e;
+      return;
+    }
+    runs.push({ group, po, changedBy: e.changed_by, count: 1, newest: e, oldest: e });
+  });
+  return runs.map(r => ({ entry: r.newest, text: r.group ? r.group.label(r.count, r.po, r.newest) : r.newest.description }));
+}
+
+// Loads the job's log once; setTab() redraws it for the tab that is open.
+async function renderJobActivityLog(projectId, containerId, titleId) {
+  const containerEl = document.getElementById(containerId);
+  if (!containerEl) return { setTab() {} };
+  containerEl.classList.add('activity-log-scroll');
+  containerEl.innerHTML = `<p class="subtitle">Loading...</p>`;
+  let entries = null;
+  let tab = 'summary';
+
+  const draw = () => {
+    const titleEl = titleId && document.getElementById(titleId);
+    if (titleEl) titleEl.textContent = tab === 'summary' ? 'Activity log' : 'Activity on this tab';
+    if (!entries) return;
+    if (tab === 'summary') {
+      const lines = groupJobActivity(entries);
+      containerEl.innerHTML = lines.length ? lines.map(l => activityEntryHtml(l.text, l.entry)).join('') : `<p class="subtitle">No activity logged yet.</p>`;
+      return;
+    }
+    const mine = entries.filter(e => jobActivityTab(e.action) === tab);
+    containerEl.innerHTML = mine.length ? mine.map(e => activityEntryHtml(e.description, e)).join('') : `<p class="subtitle">Nothing logged on this tab yet.</p>`;
+  };
+
+  const { data, error } = await supabaseClient
+    .from('activity_log')
+    .select('*, profiles(full_name)')
+    .eq('entity_type', 'project')
+    .eq('entity_id', projectId)
+    .order('created_at', { ascending: false });
+  if (error) { containerEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return { setTab() {} }; }
+  entries = data || [];
+  draw();
+  return { setTab(next) { tab = next; draw(); } };
 }
 
 // Shared safety check before deleting a quote/job - blocks (rather than
@@ -5004,68 +8043,70 @@ async function checkCostCentreHasActivity(costCentre) {
 // database will do it - invoices/purchase orders first (since old-style
 // invoices can reference a cost_centre directly), then the cost
 // centres themselves, then the project.
+// Every step checks its error and stops at the first failure (M5), so a job is never left half
+// deleted without the caller knowing which step failed.
 async function deleteProject(projectId) {
-  const { data: centres } = await supabaseClient.from('cost_centres').select('id').eq('project_id', projectId);
-  const centreIds = (centres || []).map(c => c.id);
+  const step = (name, res) => { if (res.error) throw new Error(`Delete stopped at ${name}: ${res.error.message}`); return res.data; };
 
-  const { data: invoices } = await supabaseClient.from('invoices').select('id').eq('project_id', projectId);
+  const centres = step('cost centres (lookup)', await supabaseClient.from('cost_centres').select('id').eq('project_id', projectId));
+  const centreIds = (centres || []).map(c => c.id);
+  const invoices = step('invoices (lookup)', await supabaseClient.from('invoices').select('id').eq('project_id', projectId));
   const invoiceIds = (invoices || []).map(i => i.id);
-  if (invoiceIds.length) {
-    await supabaseClient.from('invoice_claims').delete().in('invoice_id', invoiceIds);
-    await supabaseClient.from('invoices').delete().in('id', invoiceIds);
+  const pos = step('purchase orders (lookup)', await supabaseClient.from('purchase_orders').select('id').eq('project_id', projectId));
+  const poIds = (pos || []).map(po => po.id);
+
+  // Everything that would make the database refuse the last steps is checked before the first delete:
+  // before this, the invoices and claims were already gone by the time the project delete failed, and
+  // the job was left standing with empty stages (bug M5). Pricing roles (the only ones who can delete)
+  // see every row of these tables, so the counts are complete. One message lists the lot.
+  const blockers = [];
+  const count = async (name, q) => {
+    const { count: n, error } = await q;
+    if (error) throw new Error(`Delete stopped at ${name} (check): ${error.message}`);
+    if (n) blockers.push(`${n} ${name}`);
+  };
+  const head = (table) => supabaseClient.from(table).select('id', { count: 'exact', head: true });
+  await count('timesheet entries', head('time_entries').eq('project_id', projectId));
+  await count('schedule bookings', head('schedule_assignments').eq('project_id', projectId));
+  await count('supplier bills', head('supplier_bills').eq('project_id', projectId));
+  await count('DNSP records', head('dnsp_records').eq('project_id', projectId));
+  await count('stock usage rows', head('job_material_usage').eq('project_id', projectId));
+  if (centreIds.length) await count('stock usage rows on its stages', head('job_material_usage').is('project_id', null).in('cost_centre_id', centreIds));
+  await count('PO lines moved onto it from other POs', head('purchase_order_line_items').eq('destination_job_id', projectId));
+  if (poIds.length) await count('received PO lines', head('purchase_order_line_items').in('po_id', poIds).eq('received', true));
+  if (blockers.length) {
+    throw new Error(`This job cannot be deleted while it has ${blockers.join(', ')}. Remove or move those first (received PO lines: Undo received), then try again.`);
   }
 
-  const { data: pos } = await supabaseClient.from('purchase_orders').select('id').eq('project_id', projectId);
-  const poIds = (pos || []).map(po => po.id);
+  if (invoiceIds.length) {
+    step('invoice claims', await supabaseClient.from('invoice_claims').delete().in('invoice_id', invoiceIds));
+    step('invoices', await supabaseClient.from('invoices').delete().in('id', invoiceIds));
+  }
+
   if (poIds.length) {
-    await supabaseClient.from('purchase_order_line_items').delete().in('po_id', poIds);
-    await supabaseClient.from('purchase_orders').delete().in('id', poIds);
+    step('purchase order lines', await supabaseClient.from('purchase_order_line_items').delete().in('po_id', poIds));
+    step('purchase orders', await supabaseClient.from('purchase_orders').delete().in('id', poIds));
   }
 
   if (centreIds.length) {
-    await supabaseClient.from('cost_centre_line_items').delete().in('cost_centre_id', centreIds);
-    await supabaseClient.from('cost_centre_photo_groups').delete().in('cost_centre_id', centreIds);
-    await supabaseClient.from('cost_centres').delete().in('id', centreIds);
+    step('stage line items', await supabaseClient.from('cost_centre_line_items').delete().in('cost_centre_id', centreIds));
+    step('stage photo groups', await supabaseClient.from('cost_centre_photo_groups').delete().in('cost_centre_id', centreIds));
+    step('cost centres', await supabaseClient.from('cost_centres').delete().in('id', centreIds));
   }
 
-  const { error } = await supabaseClient.from('projects').delete().eq('id', projectId);
+  step('the project', await supabaseClient.from('projects').delete().eq('id', projectId));
+}
+
+// The only way a count is changed by hand: one server step (stock_set_count), locked and logged on
+// the item with who and why. Receiving, moving and stock pulls change counts through the po_ steps.
+// locationType 'warehouse' or 'vehicle' (with the vehicle id). Returns the new count.
+async function setStockCount(materialId, locationType, vehicleId, newQuantity, reason) {
+  const { data, error } = await supabaseClient.rpc('stock_set_count', {
+    p_material_id: materialId, p_loc: locationType, p_vehicle_id: vehicleId || null,
+    p_new: Number(newQuantity) || 0, p_reason: (reason || '').trim() || null,
+  });
   if (error) throw error;
-}
-
-// The two correct ways to change a material's Warehouse stock - used
-// everywhere Warehouse quantity changes, so material_stock_by_location
-// (and the trigger-maintained materials.quantity_on_hand total) never
-// drifts out of sync the way direct writes to quantity_on_hand did.
-
-// Adds (or subtracts, if negative) a quantity - for bills arriving,
-// materials being drawn for a job, etc. Never goes below zero.
-async function adjustWarehouseStock(materialId, quantityDelta) {
-  const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('*').eq('material_id', materialId).eq('location_type', 'warehouse').maybeSingle();
-  if (whRow) {
-    await supabaseClient.from('material_stock_by_location').update({
-      quantity: Math.max(0, Number(whRow.quantity) + quantityDelta), updated_at: new Date().toISOString(),
-    }).eq('id', whRow.id);
-  } else {
-    await supabaseClient.from('material_stock_by_location').insert({
-      material_id: materialId, location_type: 'warehouse', quantity: Math.max(0, quantityDelta),
-    });
-  }
-}
-
-// Sets Warehouse quantity to an exact value - for manual admin edits
-// where the person is stating "we have X of these", not adding to
-// whatever's already recorded.
-async function setWarehouseStock(materialId, absoluteQuantity) {
-  const { data: whRow } = await supabaseClient.from('material_stock_by_location').select('id').eq('material_id', materialId).eq('location_type', 'warehouse').maybeSingle();
-  if (whRow) {
-    await supabaseClient.from('material_stock_by_location').update({
-      quantity: Math.max(0, absoluteQuantity), updated_at: new Date().toISOString(),
-    }).eq('id', whRow.id);
-  } else {
-    await supabaseClient.from('material_stock_by_location').insert({
-      material_id: materialId, location_type: 'warehouse', quantity: Math.max(0, absoluteQuantity),
-    });
-  }
+  return data;
 }
 
 // Consistent number-first formatting for jobs and quotes, used
@@ -5097,25 +8138,50 @@ function timeCategoryOptionsHtml(selected) {
 }
 
 // A TAFE day is always 8 paid hours: 7:00am to 3:30pm with a 30 minute unpaid
-// break at 12:00, saved as two entries so the gap IS the break and the day
-// adds up to exactly 8 hours, which is what payroll counts. Refuses to
-// double up on time already logged that day. Throws on any problem.
-const TAFE_DAY = { start: '07:00', breakStart: '12:00', breakEnd: '12:30', end: '15:30' };
+// break at 12:00, saved as ONE entry with break_minutes on it (paid hours are
+// clock-out minus clock-in minus the break, the same as a clock-out), so the
+// day adds up to exactly 8 hours, which is what payroll counts (bug M9).
+// Refuses to double up on time already logged that day. Throws on any problem.
+const TAFE_DAY = { start: '07:00', breakStart: '12:00', end: '15:30' };
 async function createTafeDay(staffId, dateStr) {
   const t = (hhmm) => new Date(`${dateStr}T${hhmm}:00`);
   const { data: clash, error: clashErr } = await supabaseClient.from('time_entries').select('id')
     .eq('staff_id', staffId).lt('clock_in', t(TAFE_DAY.end).toISOString()).or(`clock_out.is.null,clock_out.gt.${t(TAFE_DAY.start).toISOString()}`);
   if (clashErr) throw clashErr;
   if (clash && clash.length) throw new Error('You already have time logged during that day. Open the day from your week list to change it, or remove it first.');
-  const base = { staff_id: staffId, project_id: null, time_category: 'tafe', notes: 'TAFE' };
-  const { error } = await supabaseClient.from('time_entries').insert([
-    { ...base, clock_in: t(TAFE_DAY.start).toISOString(), clock_out: t(TAFE_DAY.breakStart).toISOString(),
-      break_taken: true, break_start: t(TAFE_DAY.breakStart).toISOString(), break_minutes: 30, break_skip_reason: null },
-    { ...base, clock_in: t(TAFE_DAY.breakEnd).toISOString(), clock_out: t(TAFE_DAY.end).toISOString() },
-  ]);
+  const { error } = await supabaseClient.from('time_entries').insert({
+    staff_id: staffId, project_id: null, time_category: 'tafe', notes: 'TAFE',
+    clock_in: t(TAFE_DAY.start).toISOString(), clock_out: t(TAFE_DAY.end).toISOString(),
+    break_taken: true, break_start: t(TAFE_DAY.breakStart).toISOString(), break_minutes: 30, break_skip_reason: null,
+  });
   if (error) throw error;
 }
 
+// Pipeline stages: board columns in order (dashboard.html) and the stage badge on the job page.
+const PIPELINE_STAGES = [
+  { key: 'lead',              label: 'Lead' },
+  { key: 'draft_quote',       label: 'Draft Quote' },
+  { key: 'quote_sent',        label: 'Quote Sent' },
+  { key: 'quote_approved',    label: 'Quote Approved' },
+  { key: 'deposit_paid',      label: 'Deposit Paid' },
+  { key: 'awaiting_action',   label: 'Awaiting Our Action' },
+  { key: 'awaiting_client_action', label: 'Awaiting Client Action' },
+  { key: 'ready_to_book',     label: 'Ready to Book' },
+  { key: 'job_booked',        label: 'Job Booked' },
+  { key: 'job_not_complete',  label: 'Job Not Complete' },
+  { key: 'client_handover',   label: 'Client Handover' },
+  { key: 'ready_to_invoice',  label: 'Ready to Invoice' },
+  { key: 'awaiting_payment',  label: 'Invoice Sent - Awaiting Payment' },
+  { key: 'complete',          label: 'Complete' },
+];
+function pipelineStageLabel(key) {
+  if (key === 'archived') return 'Archived';
+  const s = PIPELINE_STAGES.find(x => x.key === key);
+  return s ? s.label : String(key || '').replace(/_/g, ' ');
+}
+
+// Plain text. Job names are typed by anyone (and by the website lead form), so wrap the result
+// in escapeHtml() before it goes into HTML (S11).
 function projectRef(project) {
   if (!project) return '';
   if (project.job_number) return `J${project.job_number} - ${project.name}`;
@@ -5143,17 +8209,18 @@ function invoiceClaimRows(invoice) {
   if (invoice.invoice_claims && invoice.invoice_claims.length) {
     return invoice.invoice_claims.slice()
       .sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
-      .map(ic => ({ stageName: ic.cost_centres?.name || 'Stage', labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount }));
+      .map(ic => ({ stageName: ic.cost_centres?.name || 'Stage', labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount, bstc_amount: ic.bstc_amount }));
   }
   return [{
     stageName: invoice.cost_centres?.name || invoice.description || 'Invoice',
-    labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount,
+    labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount, bstc_amount: invoice.bstc_amount,
   }];
 }
 
 // Groups an invoice's claims by Xero category (Labour/Materials/STC
-// credit) instead of by stage - this is how Xero actually receives it
-// (push-invoice-to-xero.js sends one line per stage per category), and
+// credit/BSTC credit) instead of by stage - this is how Xero actually receives it
+// (push-invoice-to-xero.js sends one line per stage per category, the battery
+// credit as its own line on the STC account), and
 // how it should read for anyone checking the coding before pushing.
 // clientType picks the right STC mapping (a company vs an individual
 // gets credited to a different account). Drops any category with
@@ -5167,6 +8234,7 @@ function xeroCategoryGroups(invoice, mappings, clientType) {
     { label: 'Labour', map: labourMap, lines: rows.map(r => ({ stageName: r.stageName, amount: Number(r.labour_amount) || 0 })).filter(l => l.amount > 0) },
     { label: 'Materials', map: materialsMap, lines: rows.map(r => ({ stageName: r.stageName, amount: Number(r.material_amount) || 0 })).filter(l => l.amount > 0) },
     { label: 'STC Credit', map: stcMap, lines: rows.map(r => ({ stageName: r.stageName, amount: -(Number(r.stc_amount) || 0) })).filter(l => l.amount !== 0) },
+    { label: 'BSTC Credit', map: stcMap, lines: rows.map(r => ({ stageName: r.stageName, amount: -(Number(r.bstc_amount) || 0) })).filter(l => l.amount !== 0) },
   ].filter(g => g.lines.length);
 }
 
@@ -5185,8 +8253,8 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
           <span>${g.label}</span>
           <span style="text-align:right; font-weight:400;">${g.map ? `${g.map.xero_account_code} (${g.map.xero_tax_type})` : '<span style="color:var(--red);">Not mapped - set this in Settings &gt; Xero Mapping</span>'}</span>
         </div>
-        ${g.lines.length > 1 ? g.lines.map(l => `<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); padding-left:12px;"><span>${l.stageName}</span><span>${money(l.amount)}</span></div>`).join('') : ''}
-        <div style="display:flex; justify-content:space-between; font-size:13px; ${g.lines.length > 1 ? 'border-top:1px solid var(--border); margin-top:2px; padding-top:2px;' : ''}"><span>${g.lines.length === 1 ? g.lines[0].stageName : 'Subtotal'}</span><span>${money(total)}</span></div>
+        ${g.lines.length > 1 ? g.lines.map(l => `<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); padding-left:12px;"><span>${escapeHtml(l.stageName)}</span><span>${money(l.amount)}</span></div>`).join('') : ''}
+        <div style="display:flex; justify-content:space-between; font-size:13px; ${g.lines.length > 1 ? 'border-top:1px solid var(--border); margin-top:2px; padding-top:2px;' : ''}"><span>${g.lines.length === 1 ? escapeHtml(g.lines[0].stageName) : 'Subtotal'}</span><span>${money(total)}</span></div>
       </div>`;
   }).join('');
 }
@@ -5195,7 +8263,7 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
 // still here; login and home load the animated version themselves. Left off
 // the client-facing pages, which also keeps it out of quote and invoice PDFs.
 (function () {
-  const clientPages = ['quote', 'invoice', 'review', 'letter', 'share-licences'];
+  const clientPages = ['quote', 'invoice', 'review', 'letter', 'share-licences', 'rates', 'po'];
   const page = (location.pathname.split('/').pop() || '').replace(/\.html$/, '');
   if (clientPages.includes(page)) return;
   const start = () => {
@@ -5207,4 +8275,14 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
+})();
+
+// Spell check and Polish on every multi-line text box (js/writing-help.js, docs/PROJECT_SPEC.md A33).
+(function loadWritingHelp() {
+  if (typeof document === 'undefined' || document.querySelector('script[data-writing-help]')) return;
+  const s = document.createElement('script');
+  s.src = '/js/writing-help.js?v=2';
+  s.defer = true;
+  s.dataset.writingHelp = '1';
+  document.head.appendChild(s);
 })();

@@ -36,6 +36,7 @@ exports.handler = async (event) => {
   }
   const { supabaseAdmin, user } = auth;
 
+  const undo = { supabaseAdmin: null, invoiceId: null, usageIds: [], stock: [], added: [] };
   try {
     const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId, variationEntryIds } = JSON.parse(event.body || '{}');
 
@@ -61,18 +62,84 @@ exports.handler = async (event) => {
         labour_amount: r2((Number(c.labourAmount) || 0) + priced.labour),
         material_amount: r2((Number(c.materialAmount) || 0) + priced.material),
         stc_amount: Number(c.stcAmount) || 0,
+        bstc_amount: Number(c.bstcAmount) || 0, // battery credit, kept apart from the solar one
         claim_percent: c.claimPercent != null ? Number(c.claimPercent) : null,
         _items: priced.rows,
       }))
-      .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount) > 0);
+      .filter(c => c.cost_centre_id && (c.labour_amount + c.material_amount + c.stc_amount + c.bstc_amount) > 0);
     if (!claimRows.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'At least one cost centre needs a non-zero claim amount' }) };
+    }
+    // Server-side limits (the panel limits them too): no negative parts, and a quoted stage can't
+    // be claimed past what is left of it (a cent of rounding allowed). Bug review M9.
+    if (claimRows.some(c => c.labour_amount < 0 || c.material_amount < 0 || c.stc_amount < 0 || c.bstc_amount < 0)) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Claim amounts can not be negative.' }) };
+    }
+    // Stock / prebuild items added on the invoice are extra on top, so only the typed claim is limited.
+    // Estimates and time-and-materials jobs bill actuals, which can run past the estimate: not limited.
+    const { data: jobForCap } = await supabaseAdmin.from('projects').select('proposal_template, stc_total, bstc_total, client_id').eq('id', projectId).maybeSingle();
+    const capped = !['quick_estimate', 'time_and_materials', 'direct_job'].includes(jobForCap?.proposal_template);
+    for (const { c } of (capped ? pricedClaims : [])) {
+      const centre = (allCentres || []).find(cc => cc.id === c.costCentreId);
+      const quoted = Number(centre?.quoted_amount) || 0;
+      if (centre && quoted > 0) {
+        const left = r2(quoted - (Number(centre.invoiced_amount) || 0));
+        if (r2((Number(c.labourAmount) || 0) + (Number(c.materialAmount) || 0)) > left + 0.01) {
+          return { statusCode: 400, body: JSON.stringify({ error: `${centre.name}: only $${left.toFixed(2)} is left to claim on this stage.` }) };
+        }
+      }
     }
 
     const totalLabour = claimRows.reduce((s, c) => s + c.labour_amount, 0);
     const totalMaterial = claimRows.reduce((s, c) => s + c.material_amount, 0);
     const totalStc = claimRows.reduce((s, c) => s + c.stc_amount, 0);
+    const totalBstc = claimRows.reduce((s, c) => s + c.bstc_amount, 0);
     const totalAmount = totalLabour + totalMaterial;
+
+    // An invoice is work with a credit on it, never a credit on its own, and never less than nothing (Xero
+    // refuses a negative invoice and the pay link would charge a negative balance). Bug review M7.
+    if (r2(totalAmount) <= 0) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'An invoice needs labour or materials on it. A credit on its own is not an invoice.' }) };
+    }
+    // Compared with GST on both sides, the way the invoice totals it (invoice_client_type in the database):
+    // the work carries GST for everyone, a certificate credit carries it for a company client only.
+    const creditClientId = billToClientId || jobForCap?.client_id || null;
+    const { data: creditClient } = creditClientId
+      ? await supabaseAdmin.from('clients').select('client_type').eq('id', creditClientId).maybeSingle()
+      : { data: null };
+    const creditIncGst = (n) => (creditClient?.client_type === 'company' ? r2(n * 1.1) : r2(n));
+    if (r2(creditIncGst(totalStc) + creditIncGst(totalBstc)) > r2(totalAmount * 1.1) + 0.01) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'The STC and BSTC credits on this claim are more than the work claimed, so the invoice would be negative. Claim more of the stage with the credits, or less credit.' }) };
+    }
+    // The credits are the quote's (projects.stc_total and bstc_total): a claim can carry at most what is left of
+    // each after every earlier claim and credit note on the job, the same figure the claim panel shows
+    // (quoteCreditSummary in project.html, where a credit note gives the credit back). A failed read here
+    // refuses the claim, it never loosens the cap.
+    if (totalStc > 0 || totalBstc > 0) {
+      const centreIds = (allCentres || []).map(cc => cc.id);
+      const [{ data: byProject, error: byProjectErr }, { data: byCentre, error: byCentreErr }] = await Promise.all([
+        supabaseAdmin.from('invoices').select('id, stc_amount, bstc_amount').eq('project_id', projectId),
+        centreIds.length ? supabaseAdmin.from('invoices').select('id, stc_amount, bstc_amount').in('cost_centre_id', centreIds) : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (byProjectErr) throw byProjectErr;
+      if (byCentreErr) throw byCentreErr;
+      const seen = new Set();
+      const jobInvoices = [...(byProject || []), ...(byCentre || [])].filter(inv => !seen.has(inv.id) && seen.add(inv.id));
+      const invoiceIds = jobInvoices.map(inv => inv.id);
+      const { data: credited, error: creditedErr } = invoiceIds.length
+        ? await supabaseAdmin.from('credit_note_claims').select('stc_amount, bstc_amount, credit_notes!inner(invoice_id)').in('credit_notes.invoice_id', invoiceIds)
+        : { data: [], error: null };
+      if (creditedErr) throw creditedErr;
+      const sum = (rows, key) => (rows || []).reduce((s, row) => s + (Number(row[key]) || 0), 0);
+      const stcLeft = Math.max(0, r2((Number(jobForCap?.stc_total) || 0) - sum(jobInvoices, 'stc_amount') + sum(credited, 'stc_amount')));
+      const bstcLeft = Math.max(0, r2((Number(jobForCap?.bstc_total) || 0) - sum(jobInvoices, 'bstc_amount') + sum(credited, 'bstc_amount')));
+      if (r2(totalStc) > stcLeft + 0.01) {
+        return { statusCode: 400, body: JSON.stringify({ error: `Only $${stcLeft.toFixed(2)} of the STC credit is left to claim on this job.` }) };
+      }
+      if (r2(totalBstc) > bstcLeft + 0.01) {
+        return { statusCode: 400, body: JSON.stringify({ error: `Only $${bstcLeft.toFixed(2)} of the BSTC credit is left to claim on this job.` }) };
+      }
+    }
 
     // Always auto-assigned, never user-typed - a manually-entered number
     // could collide with or skip the real sequence.
@@ -135,9 +202,13 @@ exports.handler = async (event) => {
       const { data: client } = resolvedClientId
         ? await supabaseAdmin.from('clients').select('payment_terms').eq('id', resolvedClientId).maybeSingle()
         : { data: null };
-      dueDate = computeDueDate(client?.payment_terms || 'cod', invoiceDate);
+      // Count terms from the Sydney calendar date (the UTC date is yesterday before 10/11am).
+      dueDate = computeDueDate(client?.payment_terms || 'cod', new Date(invoiceDate).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }));
     }
 
+    // If anything after the invoice row fails, take back what was done so far (no half-made invoice
+    // with a used SI number and no claims, no stock taken out for nothing). Bug review M9.
+    undo.supabaseAdmin = supabaseAdmin;
     const { data: insertedInvoice, error: insErr } = await supabaseAdmin
       .from('invoices')
       .insert({
@@ -150,6 +221,7 @@ exports.handler = async (event) => {
         labour_amount: totalLabour,
         material_amount: totalMaterial,
         stc_amount: totalStc,
+        bstc_amount: totalBstc,
         claim_percent: overallClaimPercent,
         sent_at: invoiceDate,
         due_date: dueDate,
@@ -159,6 +231,7 @@ exports.handler = async (event) => {
       .select('id')
       .single();
     if (insErr) throw insErr;
+    undo.invoiceId = insertedInvoice.id;
 
     const { data: insertedClaims, error: claimsErr } = await supabaseAdmin
       .from('invoice_claims')
@@ -181,7 +254,9 @@ exports.handler = async (event) => {
           }).select('id').single();
           if (usageErr) throw usageErr;
           usageId = usage.id;
+          undo.usageIds.push(usage.id);
           await adjustWarehouseStockAdmin(supabaseAdmin, item.material_id, -Number(item.quantity));
+          undo.stock.push({ materialId: item.material_id, qty: Number(item.quantity) });
         }
         itemRows.push({
           ...item, invoice_id: insertedInvoice.id, invoice_claim_id: claimId, cost_centre_id: c.cost_centre_id,
@@ -192,14 +267,13 @@ exports.handler = async (event) => {
       if (itemsErr) throw itemsErr;
     }
 
-    const { data: centresBefore } = await supabaseAdmin
-      .from('cost_centres')
-      .select('id, invoiced_amount')
-      .in('id', claimRows.map(c => c.cost_centre_id));
-    await Promise.all(claimRows.map(c => {
-      const before = Number((centresBefore || []).find(cc => cc.id === c.cost_centre_id)?.invoiced_amount) || 0;
-      return supabaseAdmin.from('cost_centres').update({ invoiced_amount: before + c.labour_amount + c.material_amount }).eq('id', c.cost_centre_id);
-    }));
+    // Added in one step in the database, so two invoices raised at once can't lose one.
+    for (const c of claimRows) {
+      const { error: addErr } = await supabaseAdmin.rpc('add_invoiced_amount', { p_centre_id: c.cost_centre_id, p_amount: r2(c.labour_amount + c.material_amount) });
+      if (addErr) throw addErr;
+      undo.added.push({ centreId: c.cost_centre_id, amount: r2(c.labour_amount + c.material_amount) });
+    }
+    undo.invoiceId = null; // done: nothing to take back from here on
 
     // Logged variations (bill-variations.js made each one a stage, claimed above)
     // are now billed on this invoice.
@@ -231,6 +305,19 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error(err);
+    if (undo.invoiceId && undo.supabaseAdmin) {
+      const db = undo.supabaseAdmin;
+      try {
+        for (const a of undo.added) await db.rpc('add_invoiced_amount', { p_centre_id: a.centreId, p_amount: -a.amount });
+        for (const st of undo.stock) await adjustWarehouseStockAdmin(db, st.materialId, st.qty);
+        await db.from('invoice_line_items').delete().eq('invoice_id', undo.invoiceId);
+        if (undo.usageIds.length) await db.from('job_material_usage').delete().in('id', undo.usageIds);
+        await db.from('invoice_claims').delete().eq('invoice_id', undo.invoiceId);
+        await db.from('invoices').delete().eq('id', undo.invoiceId);
+      } catch (undoErr) {
+        console.error('create-invoice: could not take back the part-made invoice', undo.invoiceId, undoErr.message);
+      }
+    }
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
   }
 };

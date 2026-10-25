@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Timesheets - Thomson Energy</title>
+<title>Timesheets - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -36,9 +36,10 @@
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
         <h2 style="margin:0;">Pay week</h2>
-        <div>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
           <button type="button" class="secondary" id="week-prev">&larr; Previous</button>
-          <span class="subtitle" id="week-range" style="margin:0 10px; font-weight:600;"></span>
+          <span class="subtitle" id="week-range" style="margin:0; font-weight:600;"></span>
+          <button type="button" class="secondary" id="week-today" title="Back to the current pay week">This week</button>
           <button type="button" class="secondary" id="week-next">Next &rarr;</button>
         </div>
       </div>
@@ -112,6 +113,7 @@
 
     <div class="card" id="approvals-card" style="display:none;">
       <h2>Pending approvals</h2>
+      <div id="approvals-msg"></div>
       <div id="approvals-list"></div>
     </div>
 
@@ -154,8 +156,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let myUserId = null;
     let myProfileName = '';
@@ -173,6 +175,17 @@
     function fmtTime(iso) {
       return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
     }
+    // Activity log helpers: "Fri 16 Oct", "7:00 am - 8:45 am", and the
+    // short job ref ("J7003") so a line reads plainly on the job page.
+    function fmtLogDay(dateStr) {
+      return new Date(`${dateStr}T00:00`).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '');
+    }
+    function fmtLogRange(inIso, outIso) {
+      return `${fmtTime(inIso)} - ${outIso ? fmtTime(outIso) : 'in progress'}`;
+    }
+    function shortRef(label) {
+      return label ? label.split(' - ')[0] : 'General / Office';
+    }
 
     // Break is a once-per-day answer, so it lives on whichever entry
     // happened to carry it - find that one entry among the day's rows.
@@ -182,24 +195,24 @@
     function breakNoteHtml(breakEntry) {
       if (!breakEntry) return '';
       return breakEntry.break_taken
-        ? `<span class="subtitle" style="font-size:12px;">Break: ${breakEntry.break_minutes}m${breakEntry.break_start ? ' from ' + fmtTime(breakEntry.break_start) : ''}</span>`
-        : `<span style="font-size:12px; color:var(--red);">No break taken${breakEntry.break_skip_reason ? ' - ' + breakEntry.break_skip_reason : ''}</span>`;
+        ? `<span class="subtitle small">Break: ${breakEntry.break_minutes}m${breakEntry.break_start ? ' from ' + fmtTime(breakEntry.break_start) : ''}</span>`
+        : `<span class="small" style="color:var(--red);">No break taken${breakEntry.break_skip_reason ? ' - ' + escapeHtml(breakEntry.break_skip_reason) : ''}</span>`;
     }
 
     // Overlapping entries / forgotten clock-outs, with a Fix button that opens
     // that day for editing. Staff see their own; admin/finance see everyone's.
     const issueNames = {};
-    async function loadTimesheetIssues() {
+    async function loadTimesheetIssues(knownRole) {
       const el = document.getElementById('timesheet-issues');
-      const role = await getMyRole();
+      const role = knownRole || await getMyRole();
       const everyone = role === 'admin' || role === 'finance';
       const { overlaps, stale } = await findTimesheetProblems({ staffId: everyone ? null : myUserId });
       if (!overlaps.length && !stale.length) { el.innerHTML = ''; return; }
       const ids = [...new Set([...overlaps.map(o => o.staffId), ...stale.map(s => s.staff_id)])];
       const { data: people } = await supabaseClient.from('profiles').select('id, full_name').in('id', ids);
       (people || []).forEach(p => { issueNames[p.id] = p.full_name || 'Someone'; });
-      const who = (id) => (id === myUserId ? 'You' : (issueNames[id] || 'Someone'));
-      const ref = (e) => (e.projects ? projectRef(e.projects) : 'General / Office');
+      const who = (id) => escapeHtml(id === myUserId ? 'You' : (issueNames[id] || 'Someone'));
+      const ref = (e) => escapeHtml(e.projects ? projectRef(e.projects) : 'General / Office');
       const range = (e) => `${fmtDateTime(e.clock_in)} - ${e.clock_out ? fmtTime(e.clock_out) : 'now'}`;
       el.innerHTML = `
         <div class="card" style="border-color:var(--red);">
@@ -208,12 +221,12 @@
           ${overlaps.map(o => `
             <div class="day-item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
               <span><strong>${who(o.staffId)}</strong>: ${ref(o.a)} (${range(o.a)}) overlaps ${ref(o.b)} (${range(o.b)})</span>
-              <button type="button" class="secondary fix-day-btn" data-date="${o.date}" data-staff="${o.staffId}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Fix</button>
+              <button type="button" class="secondary fix-day-btn" data-date="${escapeHtml(o.date)}" data-staff="${escapeHtml(o.staffId)}" style="flex-shrink:0;">Fix</button>
             </div>`).join('')}
           ${stale.map(s => `
             <div class="day-item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
               <span><strong>${who(s.staff_id)}</strong> is still clocked in to ${ref(s)} since ${fmtDateTime(s.clock_in)} - add the clock-out time</span>
-              <button type="button" class="secondary fix-day-btn" data-date="${sydneyDateKey(new Date(s.clock_in))}" data-staff="${s.staff_id}" style="font-size:12px; padding:6px 10px; flex-shrink:0;">Fix</button>
+              <button type="button" class="secondary fix-day-btn" data-date="${sydneyDateKey(new Date(s.clock_in))}" data-staff="${escapeHtml(s.staff_id)}" style="flex-shrink:0;">Fix</button>
             </div>`).join('')}
         </div>`;
       el.querySelectorAll('.fix-day-btn').forEach(b => b.addEventListener('click', () => {
@@ -234,8 +247,10 @@
     // ---------- pay week (Friday - Thursday) helpers ----------
 
     function getPayWeekStart(d) {
-      const diff = (d.getDay() - 5 + 7) % 7; // days since the most recent Friday
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+      // The pay week follows the Sydney calendar date, not the device's.
+      const s = new Date(sydneyDateKey(d) + 'T00:00:00');
+      const diff = (s.getDay() - 5 + 7) % 7; // days since the most recent Friday
+      return new Date(s.getFullYear(), s.getMonth(), s.getDate() - diff);
     }
     function addDays(d, n) {
       return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
@@ -255,23 +270,28 @@
       const end = addDays(weekStart, 6);
       document.getElementById('week-range').textContent =
         `${weekStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} - ${end.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+      const onCurrentWeek = localDateStr(weekStart) === localDateStr(getPayWeekStart(new Date()));
+      document.getElementById('week-today').disabled = onCurrentWeek;
     }
 
     async function refreshWeekViews() {
       renderWeekRange();
-      await loadMyWeek();
       if (canSeeTeamWeek) {
-        await loadTeamWeek();
         // Push-to-Xero dates default to the week currently being reviewed -
         // still editable before pushing, this is just a sensible starting point.
         document.getElementById('xero-push-start').value = localDateStr(weekStart);
         document.getElementById('xero-push-end').value = localDateStr(addDays(weekStart, 6));
       }
-      if (canSeeDevEntries) await loadDevModeEntries();
+      await Promise.all([
+        loadMyWeek(),
+        canSeeTeamWeek ? loadTeamWeek() : null,
+        canSeeDevEntries ? loadDevModeEntries() : null,
+      ]);
     }
 
     document.getElementById('week-prev').addEventListener('click', () => { weekStart = addDays(weekStart, -7); refreshWeekViews(); });
     document.getElementById('week-next').addEventListener('click', () => { weekStart = addDays(weekStart, 7); refreshWeekViews(); });
+    document.getElementById('week-today').addEventListener('click', () => { weekStart = getPayWeekStart(new Date()); refreshWeekViews(); });
 
     async function loadMyWeek() {
       const el = document.getElementById('my-week-days');
@@ -284,10 +304,11 @@
         .from('time_entries')
         .select('id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, clock_out, xero_pushed_at, break_taken, break_start, break_minutes, break_skip_reason, projects(name, job_number, quote_number)')
         .eq('staff_id', myUserId)
-        .gte('clock_in', rangeStart.toISOString())
-        .lt('clock_in', rangeEndExclusive.toISOString())
+        .is('sm8_activity_uuid', null) // ServiceM8 imports show on the job only
+        .gte('clock_in', sydneyMidnightUtc(localDateStr(rangeStart)).toISOString())
+        .lt('clock_in', sydneyMidnightUtc(localDateStr(rangeEndExclusive)).toISOString())
         .order('clock_in');
-      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
       const { data: leave } = await supabaseClient
         .from('leave_requests')
@@ -313,9 +334,10 @@
       const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
       el.innerHTML = days.map(day => {
         const dStr = localDateStr(day);
-        const dayEntries = (entries || []).filter(e => localDateStr(new Date(e.clock_in)) === dStr);
+        const dayEntries = (entries || []).filter(e => sydneyDateKey(new Date(e.clock_in)) === dStr);
         const onLeave = (leave || []).find(l => dStr >= l.start_date && dStr <= l.end_date);
-        const totalMs = dayEntries.reduce((s, e) => s + (e.clock_out ? new Date(e.clock_out) - new Date(e.clock_in) : 0), 0);
+        // paid time: the unpaid break on the row comes off (one row per shift carries break_minutes)
+        const totalMs = dayEntries.reduce((s, e) => s + (e.clock_out ? Math.max(0, new Date(e.clock_out) - new Date(e.clock_in) - (e.break_taken && e.break_minutes ? e.break_minutes * 60000 : 0)) : 0), 0);
 
         let bodyHtml;
         if (dayEntries.length) {
@@ -326,15 +348,15 @@
             let splitNote = '';
             if (e.project_id) {
               if (e.selected_cost_centre_ids && e.selected_cost_centre_ids.length > 1) {
-                splitNote = `<span class="subtitle" style="font-size:12px;">Split: ${e.selected_cost_centre_ids.map(id => ccMap[id] || '?').join(', ')}</span>`;
+                splitNote = `<span class="subtitle small">Split: ${e.selected_cost_centre_ids.map(id => escapeHtml(ccMap[id] || '?')).join(', ')}</span>`;
               } else if (e.cost_centre_id) {
-                splitNote = `<span class="subtitle" style="font-size:12px;">${ccMap[e.cost_centre_id] || 'Stage selected'}</span>`;
+                splitNote = `<span class="subtitle small">${escapeHtml(ccMap[e.cost_centre_id] || 'Stage selected')}</span>`;
               } else if (e.clock_out) {
-                splitNote = `<span style="font-size:12px; color:var(--red);">No stage selected</span>`;
+                splitNote = `<span class="small" style="color:var(--red);">No stage selected</span>`;
               }
             }
             return `<div class="week-entry-row" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; margin:4px 0; font-size:13px; border-radius:6px; background:var(--surface-2);">
-              <span><strong>${timesLabel}</strong> &middot; ${jobLabel}${splitNote ? ' &middot; ' + splitNote : ''}</span>
+              <span><strong>${timesLabel}</strong> &middot; ${escapeHtml(jobLabel)}${splitNote ? ' &middot; ' + splitNote : ''}</span>
               <span class="subtitle">${dur}</span>
             </div>`;
           }).join('');
@@ -370,22 +392,26 @@
       el.innerHTML = '<p class="subtitle">Loading...</p>';
 
       const { data: staff, error: staffErr } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
-      if (staffErr) { el.innerHTML = `<div class="error-box">${staffErr.message}</div>`; return; }
+      if (staffErr) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(staffErr))}</div>`; return; }
 
       const rangeStart = weekStart;
       const rangeEndExclusive = addDays(weekStart, 7);
       const { data: entries, error } = await supabaseClient
         .from('time_entries')
         .select('staff_id, clock_in, clock_out, break_taken, break_minutes, break_skip_reason')
-        .gte('clock_in', rangeStart.toISOString())
-        .lt('clock_in', rangeEndExclusive.toISOString());
-      if (error) { el.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        .is('sm8_activity_uuid', null) // ServiceM8 imports show on the job only, already paid
+        .gte('clock_in', sydneyMidnightUtc(localDateStr(rangeStart)).toISOString())
+        .lt('clock_in', sydneyMidnightUtc(localDateStr(rangeEndExclusive)).toISOString());
+      if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
       const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
       const entriesFor = (staffId, dStr) => (entries || [])
-        .filter(e => e.staff_id === staffId && e.clock_out && localDateStr(new Date(e.clock_in)) === dStr);
-      const hoursFor = (staffId, dStr) => entriesFor(staffId, dStr)
+        .filter(e => e.staff_id === staffId && e.clock_out && sydneyDateKey(new Date(e.clock_in)) === dStr);
+      // clock span (for the "long day with no break" check) and paid hours (the unpaid break comes off)
+      const spanHoursFor = (staffId, dStr) => entriesFor(staffId, dStr)
         .reduce((s, e) => s + (new Date(e.clock_out) - new Date(e.clock_in)), 0) / 3600000;
+      const hoursFor = (staffId, dStr) => entriesFor(staffId, dStr)
+        .reduce((s, e) => s + Math.max(0, new Date(e.clock_out) - new Date(e.clock_in) - (e.break_taken && e.break_minutes ? e.break_minutes * 60000 : 0)), 0) / 3600000;
 
       el.innerHTML = `
         <div style="overflow-x:auto;">
@@ -400,8 +426,8 @@
               const dayHours = days.map(d => hoursFor(s.id, localDateStr(d)));
               const total = dayHours.reduce((a, b) => a + b, 0);
               return `<tr>
-                <td data-label="Staff">${s.full_name || 'Unnamed'}</td>
-                ${dayHours.map((h, i) => `<td class="num team-week-cell" data-label="${days[i].toLocaleDateString('en-AU', { weekday: 'short' })}" data-staff-id="${s.id}" data-date="${localDateStr(days[i])}" data-staff-name="${(s.full_name || 'staff member').replace(/"/g, '&quot;')}" style="cursor:pointer; text-decoration:underline dotted;">${h ? h.toFixed(1) : '-'}</td>`).join('')}
+                <td data-label="Staff">${escapeHtml(s.full_name || 'Unnamed')}</td>
+                ${dayHours.map((h, i) => `<td class="num team-week-cell" data-label="${days[i].toLocaleDateString('en-AU', { weekday: 'short' })}" data-staff-id="${s.id}" data-date="${localDateStr(days[i])}" data-staff-name="${escapeHtml(s.full_name || 'staff member').replace(/"/g, '&quot;')}" style="cursor:pointer; text-decoration:underline dotted;">${h ? h.toFixed(1) : '-'}</td>`).join('')}
                 <td class="num" data-label="Total" style="font-weight:600;">${total.toFixed(1)}</td>
               </tr>`;
             }).join('')}
@@ -428,7 +454,7 @@
           if (!dayEntries.length) return;
           const breakEntry = breakInfoFor(dayEntries);
           if (!breakEntry) {
-            if (hoursFor(s.id, dStr) > 6) {
+            if (spanHoursFor(s.id, dStr) > 6) {
               exceptions.push({ staffName: s.full_name || 'Unnamed', staffId: s.id, dStr, day: d, note: 'Break not recorded', isSkip: false });
             }
           } else if (breakEntry.break_taken === false) {
@@ -441,8 +467,8 @@
         ? exceptions.map(ex => `
           <div class="project-list-item" data-staff-id="${ex.staffId}" data-date="${ex.dStr}" style="cursor:pointer;">
             <div>
-              <div class="name">${ex.staffName} - ${fmtDayLabel(ex.day)}</div>
-              <div class="meta" style="${ex.isSkip ? 'color:var(--red);' : ''}">${ex.note}</div>
+              <div class="name">${escapeHtml(ex.staffName)} - ${fmtDayLabel(ex.day)}</div>
+              <div class="meta" style="${ex.isSkip ? 'color:var(--red);' : ''}">${escapeHtml(ex.note)}</div>
             </div>
           </div>`).join('')
         : `<p class="subtitle">No skipped or missing breaks this week.</p>`;
@@ -475,7 +501,7 @@
           .order('clock_in', { ascending: false }),
         supabaseClient.from('profiles').select('id, full_name'),
       ]);
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No entries this week.</p>`; return; }
 
       listEl.innerHTML = `
@@ -487,8 +513,8 @@
               return `
               <tr>
                 <td data-label=""><input type="checkbox" class="entry-select" data-id="${e.id}" style="width:auto;" /></td>
-                <td data-label="Staff">${staffName}</td>
-                <td data-label="Job">${e.projects ? projectRef(e.projects) : 'General / Office'}</td>
+                <td data-label="Staff">${escapeHtml(staffName)}</td>
+                <td data-label="Job">${e.projects ? escapeHtml(projectRef(e.projects)) : 'General / Office'}</td>
                 <td data-label="Clocked in">${fmtDateTime(e.clock_in)}</td>
                 <td data-label="Clocked out">${e.clock_out ? fmtDateTime(e.clock_out) : '<span class="badge in_progress">In progress</span>'}</td>
                 <td class="num" data-label="Duration">${e.clock_out ? fmtDuration(new Date(e.clock_out) - new Date(e.clock_in)) : ''}</td>
@@ -532,7 +558,7 @@
         deleteBtn.textContent = 'Deleting...';
         const { error } = await supabaseClient.from('time_entries').delete().in('id', ids);
         if (error) {
-          msg.innerHTML = `<div class="error-box">${error.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
           deleteBtn.disabled = false;
           refreshDeleteBtn();
           return;
@@ -560,6 +586,13 @@
       if (!dateStr || !timeStr) return null;
       return new Date(`${dateStr}T${timeStr}`);
     }
+    // A finish time of 00:00 is midnight at the END of the day (shifts are
+    // split at Sydney midnight, so the first segment ends at 00:00).
+    function combineEndDateTime(dateStr, timeStr) {
+      const d = combineDateTime(dateStr, timeStr);
+      if (d && timeStr === '00:00') d.setDate(d.getDate() + 1);
+      return d;
+    }
 
     let cachedProjects = [];
 
@@ -583,7 +616,7 @@
       return {
         key: dayBlockKeySeq++, id: null, projectId: null, projectLabel: '', projectLahaApproved: false, ccIds: [],
         clockInTime: '', clockOutTime: '', xeroPushed: false, centres: [], splitPercentages: [],
-        origClockIn: null, origClockOut: null, origProjectId: null, timeCategory: 'admin', stayedOvernight: null,
+        origClockIn: null, origClockOut: null, origProjectId: null, origProjectLabel: '', timeCategory: 'admin', stayedOvernight: null,
       };
     }
     function dayBlockFromEntry(e) {
@@ -595,6 +628,7 @@
         clockInTime: isoToTimePart(e.clock_in), clockOutTime: isoToTimePart(e.clock_out),
         xeroPushed: !!e.xero_pushed_at, centres: [], splitPercentages: [],
         origClockIn: e.clock_in, origClockOut: e.clock_out, origProjectId: e.project_id,
+        origProjectLabel: e.projects ? projectRef(e.projects) : '',
         timeCategory: (e.time_category && e.time_category !== 'job') ? e.time_category : 'admin',
         stayedOvernight: e.stayed_overnight !== null && e.stayed_overnight !== undefined ? e.stayed_overnight : null,
       };
@@ -602,23 +636,36 @@
     function dayBlockTotalMinutes(block, dateStr) {
       if (!block.clockInTime || !block.clockOutTime) return 0;
       const start = combineDateTime(dateStr, block.clockInTime);
-      const end = combineDateTime(dateStr, block.clockOutTime);
+      const end = combineEndDateTime(dateStr, block.clockOutTime);
       return end > start ? Math.round((end - start) / 60000) : 0;
     }
 
     let dayBreak = { taken: null, start: '', minutes: 30, skipReason: '' };
 
     async function openDayEditPanel(dateStr, staffId = myUserId, staffName = myProfileName, prefill = null) {
+      // The job list loads in the background; the editor needs it for Recent jobs and stage chips
+      if (window.__tsProjectsReady) await window.__tsProjectsReady;
+      if (document.getElementById('day-edit-overlay')) return;
+      const overlay = document.createElement('div');
+      overlay.id = 'day-edit-overlay';
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px; overflow-y:auto;';
+      overlay.innerHTML = `<div class="card" style="max-width:640px; width:100%;"><p class="subtitle" style="margin:0;">Loading ${dayKeyLabel(dateStr)}...</p></div>`;
+      document.body.appendChild(overlay);
       const windowStart = combineDateTime(dateStr, '00:00');
       const windowEnd = new Date(windowStart); windowEnd.setDate(windowEnd.getDate() + 1);
       const { data: existing, error } = await supabaseClient
         .from('time_entries')
         .select('id, project_id, cost_centre_id, selected_cost_centre_ids, time_category, clock_in, clock_out, xero_pushed_at, break_taken, break_start, break_minutes, break_skip_reason, stayed_overnight, projects(name, job_number, quote_number, laha_approved)')
         .eq('staff_id', staffId)
+        .is('sm8_activity_uuid', null)
         .gte('clock_in', windowStart.toISOString())
         .lt('clock_in', windowEnd.toISOString())
         .order('clock_in');
-      if (error) { alert(error.message); return; }
+      if (error) {
+        overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><div class="error-box" style="margin-top:0;">Could not load this day. ${escapeHtml(friendlyError(error))}</div><button type="button" class="secondary" id="day-load-close" style="margin-top:10px;">Close</button></div>`;
+        overlay.querySelector('#day-load-close').addEventListener('click', () => overlay.remove());
+        return;
+      }
 
       dayBlockKeySeq = 0;
       dayBlocks = (existing || []).map(dayBlockFromEntry);
@@ -652,14 +699,11 @@
 
       if (prefillBreak) dayBreak = prefillBreak;
       const isSelf = staffId === myUserId;
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:16px; overflow-y:auto;';
-      document.body.appendChild(overlay);
 
       async function renderAll() {
         overlay.innerHTML = `
           <div class="card" style="max-width:640px; width:100%; max-height:90vh; overflow-y:auto;">
-            <h2>Edit timesheet${isSelf ? '' : ` - ${staffName || 'staff member'}`} - ${new Date(dateStr + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' })}</h2>
+            <h2>Edit timesheet${isSelf ? '' : ` - ${escapeHtml(staffName || 'staff member')}`} - ${new Date(dateStr + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' })}</h2>
             <p class="subtitle" style="margin-bottom:14px;">You can be logged against more than one job in a day - add a block per job and split each one across its own stages.</p>
             <div id="day-blocks"></div>
             <button type="button" class="secondary" id="day-add-block-btn" style="margin-top:6px;">+ Add another job for this day</button>
@@ -715,7 +759,7 @@
           detailEl.querySelector('#day-break-start').addEventListener('input', (e) => { dayBreak.start = e.target.value; });
           detailEl.querySelector('#day-break-minutes').addEventListener('change', (e) => { dayBreak.minutes = parseInt(e.target.value) || 30; });
         } else if (dayBreak.taken === false) {
-          detailEl.innerHTML = `<label style="margin-top:0">Why not?</label><input id="day-break-reason" placeholder="e.g. too busy on site" value="${dayBreak.skipReason}" />`;
+          detailEl.innerHTML = `<label style="margin-top:0">Why not?</label><input id="day-break-reason" placeholder="e.g. too busy on site" value="${escapeHtml(dayBreak.skipReason).replace(/"/g, '&quot;')}" />`;
           detailEl.querySelector('#day-break-reason').addEventListener('input', (e) => { dayBreak.skipReason = e.target.value; });
         } else {
           detailEl.innerHTML = '';
@@ -737,7 +781,7 @@
           <div style="display:flex; gap:10px; align-items:flex-end;">
             <div style="flex:1;">
               <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
-              <input class="day-block-job-search" placeholder="Job number, name, client..." autocomplete="off" value="${block.projectLabel}" />
+              <input class="day-block-job-search" placeholder="Job number, name, client..." autocomplete="off" value="${escapeHtml(block.projectLabel).replace(/"/g, '&quot;')}" />
               <div class="day-block-job-results"></div>
             </div>
             <button type="button" class="secondary day-block-remove" style="flex-shrink:0;">Remove</button>
@@ -758,7 +802,7 @@
             <label style="margin-top:0">Stage(s)</label>
             <div class="day-block-cc-chips">${block.centres.map(c => `
               <button type="button" class="cc-chip ${block.ccIds.includes(c.id) ? 'selected' : ''}" data-id="${c.id}">
-                <span class="cc-chip-num">${c.number}</span> ${c.name}
+                <span class="cc-chip-num">${c.number}</span> ${escapeHtml(c.name)}
               </button>`).join('')}</div>
           </div>
           <div style="display:flex; gap:10px; margin-top:8px;">
@@ -781,7 +825,7 @@
           jobResultsEl.innerHTML = `
             ${label ? `<p class="subtitle" style="margin:6px 0 2px; font-size:12px;">${label}</p>` : ''}
             <div style="border:1px solid var(--border); border-radius:8px; ${label ? '' : 'margin-top:6px;'}">
-              ${results.map(p => `<div class="day-block-job-pick" data-id="${p.id}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:13px;">${projectRef(p)}</div>`).join('')}
+              ${results.map(p => `<div class="day-block-job-pick" data-id="${p.id}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:13px;">${escapeHtml(projectRef(p))}</div>`).join('')}
             </div>`;
           jobResultsEl.querySelectorAll('.day-block-job-pick').forEach(row => {
             row.addEventListener('click', async () => {
@@ -882,7 +926,7 @@
           ${splitCentres.map((c, i) => `
             <div style="margin-bottom:10px;">
               <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:3px; gap:8px;">
-                <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${c.number}</strong> ${c.name}</span>
+                <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${c.number}</strong> ${escapeHtml(c.name)}</span>
                 <span style="display:flex; align-items:center; gap:4px;">
                   <input type="number" min="0" max="100" value="${block.splitPercentages[i]}" class="day-split-number" data-index="${i}" style="width:50px; padding:3px 5px; text-align:right;" />%
                   <span class="day-split-label subtitle" data-index="${i}" style="min-width:60px; text-align:right;">${fmtDuration(Math.round(totalMin * block.splitPercentages[i] / 100) * 60000)}</span>
@@ -972,10 +1016,10 @@
         const activeBlocks = dayBlocks.filter(b => b.clockInTime);
         for (let i = 0; i < activeBlocks.length; i++) {
           const aStart = combineDateTime(dateStr, activeBlocks[i].clockInTime);
-          const aEnd = activeBlocks[i].clockOutTime ? combineDateTime(dateStr, activeBlocks[i].clockOutTime) : new Date(`${dateStr}T23:59:59`);
+          const aEnd = activeBlocks[i].clockOutTime ? combineEndDateTime(dateStr, activeBlocks[i].clockOutTime) : new Date(`${dateStr}T23:59:59`);
           for (let j = i + 1; j < activeBlocks.length; j++) {
             const bStart = combineDateTime(dateStr, activeBlocks[j].clockInTime);
-            const bEnd = activeBlocks[j].clockOutTime ? combineDateTime(dateStr, activeBlocks[j].clockOutTime) : new Date(`${dateStr}T23:59:59`);
+            const bEnd = activeBlocks[j].clockOutTime ? combineEndDateTime(dateStr, activeBlocks[j].clockOutTime) : new Date(`${dateStr}T23:59:59`);
             if (aStart < bEnd && bStart < aEnd) {
               throw new Error('Two job blocks overlap in time - rewrite one of the times or remove one of them before saving.');
             }
@@ -989,7 +1033,7 @@
         const ownIds = new Set([...dayBlocks, ...dayRemovedBlocks].map(b => b.id).filter(Boolean));
         for (const b of activeBlocks) {
           const start = combineDateTime(dateStr, b.clockInTime);
-          const end = b.clockOutTime ? combineDateTime(dateStr, b.clockOutTime) : new Date(`${dateStr}T23:59:59`);
+          const end = b.clockOutTime ? combineEndDateTime(dateStr, b.clockOutTime) : new Date(`${dateStr}T23:59:59`);
           const { data: clashes } = await supabaseClient.from('time_entries')
             .select('id, clock_in, clock_out, projects(name, job_number, quote_number)')
             .eq('staff_id', staffId)
@@ -1001,25 +1045,32 @@
           }
         }
 
-        for (const removed of dayRemovedBlocks) {
-          const { error } = await supabaseClient.from('time_entries').delete().eq('id', removed.id);
-          if (error) throw error;
-          if (removed.origProjectId) {
-            await logActivity('project', removed.origProjectId, 'timesheet_removed', `Timesheet entry removed (was ${fmtTime(removed.origClockIn)} - ${removed.origClockOut ? fmtTime(removed.origClockOut) : 'in progress'})`);
-          }
-        }
-
+        // Every block is checked before anything is written, so a bad block
+        // cannot leave the day half saved (removed blocks already gone, the
+        // rest not yet in). The first error stops the save with nothing changed.
+        const plans = [];
         for (const block of dayBlocks) {
           const isNew = !block.id;
           if (isNew && !block.clockInTime) continue; // an untouched blank "add another job" row
 
           if (!block.clockInTime) throw new Error('Every job block needs a start time.');
           const clockIn = combineDateTime(dateStr, block.clockInTime);
-          const clockOut = block.clockOutTime ? combineDateTime(dateStr, block.clockOutTime) : null;
+          const clockOut = block.clockOutTime ? combineEndDateTime(dateStr, block.clockOutTime) : null;
           if (clockOut && clockOut <= clockIn) throw new Error('Finish time must be after start time for one of the jobs listed.');
           if (block.projectId && block.centres.length && !block.ccIds.length) throw new Error('Pick at least one stage for every job block.');
           if (block.projectLahaApproved && block.stayedOvernight === null && isSelf) throw new Error('Let us know if you stayed overnight for the LAHA-approved job.');
+          plans.push({ block, clockIn, clockOut });
+        }
 
+        for (const removed of dayRemovedBlocks) {
+          const { error } = await supabaseClient.from('time_entries').delete().eq('id', removed.id);
+          if (error) throw error;
+          if (removed.origProjectId) {
+            await logActivity('project', removed.origProjectId, 'timesheet_removed', `Timesheet entry removed for ${fmtLogDay(dateStr)} (was ${fmtLogRange(removed.origClockIn, removed.origClockOut)})`);
+          }
+        }
+
+        for (const { block, clockIn, clockOut } of plans) {
           const isBreakTarget = block === breakTargetBlock && breakFields;
           const doingSplit = !block.xeroPushed && block.ccIds.length > 1 && block.splitPercentages.length === block.ccIds.length && clockOut;
           const projectId = block.projectId;
@@ -1046,6 +1097,9 @@
               }))
             );
             if (insErr) throw insErr;
+            // The segments are in before the original goes, so a dropped
+            // connection can only leave double hours (the overlap card
+            // catches those), never lost hours.
             if (block.id) {
               const { error: delErr } = await supabaseClient.from('time_entries').delete().eq('id', block.id);
               if (delErr) throw delErr;
@@ -1058,6 +1112,8 @@
 
           const fields = { project_id: projectId, time_category: projectId ? 'job' : block.timeCategory, stayed_overnight: block.stayedOvernight };
           if (block.ccIds.length === 1) { fields.cost_centre_id = block.ccIds[0]; fields.selected_cost_centre_ids = null; }
+          // A variation stage picked here stays in selected_cost_centre_ids: the
+          // variation card and billing read that list as well as cost_centre_id.
           else if (block.ccIds.length > 1) { fields.cost_centre_id = null; fields.selected_cost_centre_ids = block.ccIds; }
           else { fields.cost_centre_id = null; fields.selected_cost_centre_ids = null; }
           if (!block.xeroPushed) {
@@ -1069,27 +1125,33 @@
           if (block.id) {
             const { error } = await supabaseClient.from('time_entries').update(fields).eq('id', block.id);
             if (error) throw error;
-            // A time change is worth a paper trail, surfaced on the job's
-            // own Activity Log when it's tied to one.
-            if (!block.xeroPushed) {
-              const changes = [];
-              if (new Date(block.origClockIn).getTime() !== clockIn.getTime()) {
-                changes.push(`clock-in ${fmtTime(block.origClockIn)} to ${fmtTime(clockIn.toISOString())}`);
+            // A time or job change is worth a paper trail, surfaced on the
+            // job's own Activity Log. Written as "was X, now Y" with the day
+            // it was for, since edits are often made days later. A move
+            // between jobs is logged on both jobs.
+            const day = fmtLogDay(dateStr);
+            const wasRange = fmtLogRange(block.origClockIn, block.origClockOut);
+            const nowRange = block.xeroPushed ? wasRange : fmtLogRange(clockIn.toISOString(), clockOut ? clockOut.toISOString() : null);
+            const timeChanged = wasRange !== nowRange;
+            const origProjectId = block.origProjectId || null;
+            if (origProjectId !== (projectId || null)) {
+              const timeNote = timeChanged ? `was ${wasRange}, now ${nowRange}` : nowRange;
+              if (origProjectId) {
+                await logActivity('project', origProjectId, 'timesheet_moved', `Timesheet entry for ${day} moved to ${shortRef(block.projectLabel)} (${timeNote})`);
               }
-              const origOutMs = block.origClockOut ? new Date(block.origClockOut).getTime() : null;
-              const newOutMs = clockOut ? clockOut.getTime() : null;
-              if (origOutMs !== newOutMs) {
-                changes.push(`clock-out ${block.origClockOut ? fmtTime(block.origClockOut) : 'in progress'} to ${clockOut ? fmtTime(clockOut.toISOString()) : 'in progress'}`);
+              if (projectId) {
+                await logActivity('project', projectId, 'timesheet_moved', `Timesheet entry for ${day} moved from ${shortRef(block.origProjectLabel)} (${timeNote})`);
               }
-              if (changes.length) {
-                const entityProjectId = projectId || block.origProjectId || null;
-                await logActivity(entityProjectId ? 'project' : 'time_entry', entityProjectId || block.id, 'timesheet_edited', `Timesheet edited: ${changes.join(', ')}`);
-              }
+            } else if (timeChanged) {
+              await logActivity(projectId ? 'project' : 'time_entry', projectId || block.id, 'timesheet_edited', `Timesheet edited for ${day}: was ${wasRange}, now ${nowRange}`);
             }
           } else {
             fields.staff_id = staffId;
             const { error } = await supabaseClient.from('time_entries').insert(fields);
             if (error) throw error;
+            if (projectId) {
+              await logActivity('project', projectId, 'timesheet_added', `Timesheet entry added for ${fmtLogDay(dateStr)}: ${fmtLogRange(clockIn.toISOString(), clockOut ? clockOut.toISOString() : null)}`);
+            }
           }
         }
 
@@ -1098,31 +1160,26 @@
         if (canSeeTeamWeek) await loadTeamWeek();
         await loadTimesheetIssues();
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         btn.disabled = false;
       }
     }
 
     document.getElementById('add-today-entry-btn').addEventListener('click', () => {
-      openDayEditPanel(localDateStr(new Date()));
+      openDayEditPanel(sydneyDateKey(new Date()));
     });
 
     document.getElementById('add-tafe-day-btn').addEventListener('click', () => {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:380px; width:100%;">
+      const overlay = openModal(`
           <h2 style="margin-top:0;">TAFE day</h2>
           <p class="subtitle" style="margin-top:0;">Adds an 8 hour TAFE timesheet: 7:00am to 3:30pm with a 30 minute unpaid break at 12:00.</p>
           <label>Which day?</label>
-          <input type="date" id="tafe-date" value="${localDateStr(new Date())}" />
+          <input type="date" id="tafe-date" value="${sydneyDateKey(new Date())}" />
           <div style="margin-top:14px; display:flex; gap:8px;">
             <button type="button" id="tafe-save">Add TAFE day</button>
             <button type="button" class="secondary" id="tafe-cancel">Cancel</button>
           </div>
-          <div id="tafe-msg" style="margin-top:8px;"></div>
-        </div>`;
-      document.body.appendChild(overlay);
+          <div id="tafe-msg" style="margin-top:8px;"></div>`, { maxWidth: 380 });
       overlay.querySelector('#tafe-cancel').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#tafe-save').addEventListener('click', async () => {
         const msg = overlay.querySelector('#tafe-msg');
@@ -1136,7 +1193,7 @@
           await refreshWeekViews();
           await loadTimesheetIssues();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           btn.disabled = false;
         }
       });
@@ -1150,16 +1207,24 @@
       const notes = document.getElementById('leave-notes').value.trim();
       if (!start_date || !end_date) { msg.innerHTML = `<div class="error-box">Pick a start and end date.</div>`; return; }
       if (end_date < start_date) { msg.innerHTML = `<div class="error-box">End date can't be before the start date.</div>`; return; }
-
+      const btn = document.getElementById('request-leave-btn');
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Requesting...';
+      try {
       const { error } = await supabaseClient.from('leave_requests').insert({ staff_id: myUserId, start_date, end_date, leave_type, notes });
       msg.innerHTML = error
-        ? `<div class="error-box">${error.message}</div>`
+        ? `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`
         : `<div class="success-box">Requested. You'll see it below once it's actioned.</div>`;
       if (!error) {
         document.getElementById('leave-start').value = '';
         document.getElementById('leave-end').value = '';
         document.getElementById('leave-notes').value = '';
         await loadMyLeave();
+      }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
       }
     });
 
@@ -1170,14 +1235,14 @@
         .select('*')
         .eq('staff_id', myUserId)
         .order('start_date', { ascending: false });
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!data.length) { listEl.innerHTML = `<p class="subtitle">No leave requests yet.</p>`; return; }
-      const badgeClass = { pending: 'draft', approved: 'accepted', declined: 'draft' };
+      const badgeClass = { pending: 'amber', approved: 'accepted', declined: 'declined' };
       listEl.innerHTML = data.map(l => `
         <div class="project-list-item">
           <div>
             <div class="name">${l.leave_type[0].toUpperCase() + l.leave_type.slice(1)} leave</div>
-            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + l.notes : ''}</div>
+            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + escapeHtml(l.notes) : ''}</div>
           </div>
           <span class="badge ${badgeClass[l.status]}">${l.status}</span>
         </div>`).join('');
@@ -1191,10 +1256,9 @@
     function initNonbillableCard(myRole) {
       if (myRole !== 'admin' && myRole !== 'finance') return;
       document.getElementById('nonbillable-card').style.display = 'block';
-      const now = new Date();
-      const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      document.getElementById('nonbillable-start').value = firstOfMonth.toISOString().slice(0, 10);
-      document.getElementById('nonbillable-end').value = now.toISOString().slice(0, 10);
+      const todayKey = sydneyDateKey(new Date());
+      document.getElementById('nonbillable-start').value = todayKey.slice(0, 8) + '01';
+      document.getElementById('nonbillable-end').value = todayKey;
       loadNonbillableSummary();
     }
 
@@ -1206,7 +1270,7 @@
 
       resultsEl.innerHTML = `<p class="subtitle">Loading...</p>`;
       const { data, error } = await supabaseClient.rpc('get_nonbillable_cost_by_category', { p_start: start, p_end: end });
-      if (error) { resultsEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { resultsEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
 
       const labels = { quoting: 'Quoting', admin: 'Admin', maintenance: 'Maintenance', tafe: 'TAFE', training: 'Training', other: 'Other' };
       // Old 'office' entries count as Admin.
@@ -1260,14 +1324,14 @@
 
         let html = `<div class="success-box">Pushed ${data.pushed} timesheet${data.pushed === 1 ? '' : 's'}.</div>`;
         if (data.warnings && data.warnings.length) {
-          html += `<div class="error-box" style="margin-top:8px;">${data.warnings.join('<br>')}</div>`;
+          html += `<div class="error-box" style="margin-top:8px;">${data.warnings.map(w => escapeHtml(w)).join('<br>')}</div>`;
         }
         if (data.skipped && data.skipped.length) {
-          html += `<div class="error-box" style="margin-top:8px;">Skipped: ${data.skipped.join('; ')}</div>`;
+          html += `<div class="error-box" style="margin-top:8px;">Skipped: ${data.skipped.map(s => escapeHtml(s)).join('; ')}</div>`;
         }
         msg.innerHTML = html;
       } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
       }
       btn.disabled = false;
       btn.textContent = 'Push timesheets';
@@ -1279,16 +1343,20 @@
       const listEl = document.getElementById('approvals-list');
       const { data, error } = await supabaseClient
         .from('leave_requests')
-        .select('*, profiles(full_name)')
+        .select('*, profiles!leave_requests_staff_id_fkey(full_name)')
         .eq('status', 'pending')
         .order('start_date');
-      if (error || !data || !data.length) return;
+      if (error || !data) return;
+      if (!data.length) {
+        if (card.style.display === 'block') listEl.innerHTML = '<p class="subtitle">No more requests waiting.</p>';
+        return;
+      }
       card.style.display = 'block';
       listEl.innerHTML = data.map(l => `
         <div class="project-list-item" data-id="${l.id}">
           <div>
-            <div class="name">${(l.profiles && l.profiles.full_name) || 'Staff member'} - ${l.leave_type} leave</div>
-            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + l.notes : ''}</div>
+            <div class="name">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff member')} - ${escapeHtml(l.leave_type)} leave</div>
+            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + escapeHtml(l.notes) : ''}</div>
           </div>
           <div>
             <button class="secondary approve-leave-btn" data-id="${l.id}">Approve</button>
@@ -1297,12 +1365,35 @@
         </div>`).join('');
       listEl.querySelectorAll('.approve-leave-btn, .decline-leave-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          const status = btn.classList.contains('approve-leave-btn') ? 'approved' : 'declined';
-          const { error: updErr } = await supabaseClient
+          const approving = btn.classList.contains('approve-leave-btn');
+          const status = approving ? 'approved' : 'declined';
+          const l = data.find(x => x.id === btn.dataset.id);
+          const who = (l.profiles && l.profiles.full_name) || 'Staff member';
+          const dates = l.start_date === l.end_date ? dayKeyLabel(l.start_date) : `${dayKeyLabel(l.start_date)} to ${dayKeyLabel(l.end_date)}`;
+          const msgEl = document.getElementById('approvals-msg');
+          const rowBtns = btn.parentElement.querySelectorAll('button');
+          const label = btn.textContent;
+          rowBtns.forEach(b => { b.disabled = true; });
+          btn.textContent = approving ? 'Approving...' : 'Declining...';
+          const { data: updated, error: updErr } = await supabaseClient
             .from('leave_requests')
             .update({ status, decided_by: myUserId, decided_at: new Date().toISOString() })
-            .eq('id', btn.dataset.id);
-          if (updErr) { alert(updErr.message); return; }
+            .eq('id', l.id)
+            .eq('status', 'pending')
+            .select('id');
+          if (updErr) {
+            rowBtns.forEach(b => { b.disabled = false; });
+            btn.textContent = label;
+            msgEl.innerHTML = `<div class="error-box">Could not ${approving ? 'approve' : 'decline'} ${escapeHtml(who)}'s leave: ${escapeHtml(friendlyError(updErr))}</div>`;
+            return;
+          }
+          msgEl.innerHTML = (updated && updated.length)
+            ? `<div class="success-box">${approving ? 'Approved' : 'Declined'}: ${escapeHtml(who)}, ${escapeHtml(l.leave_type)} leave ${dates}.</div>`
+            : `<div class="error-box">${escapeHtml(who)}'s request was already decided by someone else.</div>`;
+          // Drop the decided row now, so a failed reload on bad signal never leaves it greyed out
+          const row = btn.closest('.project-list-item');
+          if (row) row.remove();
+          if (listEl && !listEl.querySelector('.project-list-item')) listEl.innerHTML = '<p class="subtitle">No more requests waiting.</p>';
           await loadApprovals(myRole);
         });
       });
@@ -1321,7 +1412,7 @@
       } else {
         myProfileName = existingProfile.full_name || '';
       }
-      await syncThemeFromProfile();
+      syncThemeFromProfile(); // cosmetic, never holds up the cards
       renderMainNav('timesheets');
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
@@ -1330,26 +1421,34 @@
       });
 
       const myRole = await getMyRole();
-      await loadProjectOptions();
+      // Every card loads at once; the job list only matters once a day is opened for editing
+      const logFail = (what) => (err) => console.error(`Timesheets: ${what} failed`, err);
+      const projectsReady = loadProjectOptions().catch(logFail('job list'));
+      window.__tsProjectsReady = projectsReady;
       initTeamWeekCard(myRole);
       initDevModeEntriesCard(myRole);
-      await refreshWeekViews();
-      await loadTimesheetIssues();
+      initXeroPayrollCard(myRole);
+      initNonbillableCard(myRole);
+      const issuesReady = loadTimesheetIssues(myRole).catch(logFail('issues'));
+      const cardsReady = Promise.all([
+        refreshWeekViews().catch(logFail('week')),
+        issuesReady,
+        loadMyLeave().catch(logFail('leave')),
+        loadApprovals(myRole).catch(logFail('approvals')),
+      ]);
       const aiPf = aiPrefillRead('timesheet');
+      const fixParams = new URLSearchParams(window.location.search);
+      if (aiPf || fixParams.get('fix')) await Promise.all([projectsReady, issuesReady]);
       if (aiPf) {
         aiPrefillClear();
-        const day = /^\d{4}-\d{2}-\d{2}$/.test(aiPf.date || '') ? aiPf.date : localDateStr(new Date());
+        const day = /^\d{4}-\d{2}-\d{2}$/.test(aiPf.date || '') ? aiPf.date : sydneyDateKey(new Date());
         openDayEditPanel(day, myUserId, myProfileName, aiPf);
       }
-      const fixParams = new URLSearchParams(window.location.search);
       if (fixParams.get('fix')) {
         const fixStaff = fixParams.get('staff') || myUserId;
         if (fixStaff === myUserId || canSeeTeamWeek) openDayEditPanel(fixParams.get('fix'), fixStaff, issueNames[fixStaff] || '');
       }
-      await loadMyLeave();
-      await loadApprovals(myRole);
-      initXeroPayrollCard(myRole);
-      initNonbillableCard(myRole);
+      await cardsReady;
     })();
   </script>
 </body>

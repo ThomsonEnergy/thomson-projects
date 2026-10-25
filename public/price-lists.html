@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Price lists - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
+<style>
+  .pl-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+  .pl-filters button { font-size:13px; padding:6px 14px; border-radius:20px; }
+  .pl-filters button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .pl-group { padding:12px 0; border-top:1px solid var(--border); }
+  .pl-group:first-child { border-top:none; }
+  .pl-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline; }
+  .pl-meta { font-size:12px; color:var(--muted); margin-top:3px; word-wrap:break-word; }
+  .pl-change { padding:8px 0 8px 10px; border-left:3px solid var(--border); margin-top:8px; }
+  .pl-change.up { border-left-color:#d08a00; }
+  .pl-change.down { border-left-color:var(--green); }
+  .pl-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .pl-actions button, .pl-actions select { font-size:12px; padding:5px 10px; }
+  .pl-chip { font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
+  .pl-row { display:flex; justify-content:space-between; gap:10px; padding:6px 0; border-top:1px solid var(--border); font-size:13px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Price lists</h1>
+    <p class="subtitle">Supplier price lists emailed to sales@ or invoice@. TEops reads every line and keeps our material cost prices up to date: changes under 20% on an item it already knows are applied straight away, bigger ones and first-time matches wait here. Nothing is ever deleted.</p>
+
+    <div class="card">
+      <div class="pl-filters" id="pl-filters">
+        <button type="button" class="secondary active" data-f="check">To check</button>
+        <button type="button" class="secondary" data-f="lists">Price lists</button>
+        <button type="button" class="secondary" data-f="applied">Changes made</button>
+        <button type="button" class="secondary" data-f="search">Supplier lists</button>
+      </div>
+      <div id="pl-body"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
+  <script>
+    let filter = 'check', imports = [], changes = [], applied = [], suppliers = [], materials = {};
+    const esc = (s) => escapeHtml(s == null ? '' : String(s));
+    const dateText = (iso) => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const pctText = (p) => p == null ? '' : `${p > 0 ? '+' : ''}${p}%`;
+    const supplierName = (id) => (suppliers.find(s => s.id === id) || {}).name || '';
+    const SHEET_MIME = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'text/csv', 'application/csv'];
+    const isSheet = (i) => SHEET_MIME.includes(String(i.mime_type || '').toLowerCase()) || /\.(xlsx|xls|csv)$/i.test(i.file_name || '');
+    const STATUS_TEXT = { pending: 'Being read', processing: 'Being read', to_check: 'To check', applied: 'Done', too_large: 'Very large', not_a_price_list: 'Not a price list', failed: 'Could not be read' };
+    const KIND_TEXT = { price: 'Price change', match: 'Match to confirm', superseded: 'Looks replaced' };
+
+    async function call(body) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/price-list-inbox', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+      return data;
+    }
+    async function act(btn, body, busy) {
+      const t = btn.textContent; btn.disabled = true; btn.textContent = busy;
+      try { await call(body); await load(); } catch (err) { alert(err.message); btn.disabled = false; btn.textContent = t; }
+    }
+
+    function changeHtml(c, withUndo) {
+      const m = materials[c.material_id] || {};
+      const dir = Number(c.new_cost) > Number(c.old_cost) ? 'up' : 'down';
+      const title = c.kind === 'price' ? esc(m.name || c.old_name) : `${esc(c.old_name || m.name)} &rarr; ${esc(c.new_name)}`;
+      const buttons = withUndo
+        ? `<button type="button" class="secondary" data-undo="${c.id}">Undo</button>`
+        : c.kind === 'price' ? `<button type="button" data-apply="${c.id}">Apply new price</button><button type="button" class="secondary" data-skip="${c.id}">Keep ours</button>`
+        : c.kind === 'match' ? `<button type="button" data-apply="${c.id}">Yes, same item</button><button type="button" class="secondary" data-skip="${c.id}">No</button>`
+        : `<button type="button" data-apply="${c.id}">Switch to the new item</button><button type="button" class="secondary" data-skip="${c.id}">Keep the old one</button>`;
+      return `<div class="pl-change ${dir}">
+        <div class="pl-head"><span><strong>${title}</strong> <span class="pl-chip">${esc(KIND_TEXT[c.kind] || c.kind)}</span></span>
+          <span>${money(c.old_cost)} &rarr; <strong>${money(c.new_cost)}</strong> ${pctText(c.change_pct)}</span></div>
+        <div class="pl-meta">${esc(c.reason || '')}${withUndo ? ` · ${dateText(c.resolved_at)}${c.resolved_by ? '' : ' (automatic)'}` : ''}</div>
+        <div class="pl-actions">${buttons}</div></div>`;
+    }
+
+    function importHead(i) {
+      return `<div class="pl-head"><strong>${esc(supplierName(i.supplier_id) || i.supplier_name_read || i.file_name)}</strong><span class="pl-chip">${esc(STATUS_TEXT[i.status] || i.status)}</span></div>
+        <div class="pl-meta">${esc(i.file_name || '')} · emailed ${dateText(i.received_at || i.created_at)} by ${esc(i.email_from || 'unknown')}${i.pages_total ? ` · ${i.pages_done}/${i.pages_total} pages read` : ''}</div>
+        ${i.summary ? `<div class="pl-meta" style="color:var(--text);">${esc(i.summary)}</div>` : ''}
+        ${i.error && i.status !== 'applied' ? `<div class="pl-meta" style="color:var(--red, #c0392b);">${esc(i.error)}</div>` : ''}`;
+    }
+
+    function importActions(i) {
+      const b = [];
+      if (i.file_path) b.push(`<button type="button" class="secondary" data-open="${i.id}">Open file</button>`);
+      // The supplier picker shows when items were read but the supplier was not recognised, and for a
+      // spreadsheet from an unknown sender, which is not read until a person picks the supplier
+      if (i.status === 'to_check' && !i.supplier_id && (i.item_count || (i.items || []).length || isSheet(i))) {
+        b.push(`<select data-supplier-for="${i.id}"><option value="">Pick the supplier...</option>${suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><button type="button" data-set-supplier="${i.id}">Use this supplier</button>${i.supplier_name_read ? `<button type="button" class="secondary" data-new-supplier="${i.id}">Create supplier "${esc(i.supplier_name_read)}"</button>` : ''}`);
+      }
+      if (i.status === 'too_large') b.push(`<button type="button" data-read-all="${i.id}">Read all pages</button>`);
+      if (i.status === 'failed') b.push(`<button type="button" data-retry="${i.id}">Try again</button>`);
+      if (i.waiting > 1) b.push(`<button type="button" data-apply-all="${i.id}">Apply all ${i.waiting}</button>`);
+      if (!['applied', 'not_a_price_list'].includes(i.status)) b.push(`<button type="button" class="secondary" data-not="${i.id}">Not a price list</button>`);
+      return b.length ? `<div class="pl-actions">${b.join('')}</div>` : '';
+    }
+
+    function render() {
+      const body = document.getElementById('pl-body');
+      if (filter === 'search') {
+        body.innerHTML = `<input id="pl-q" placeholder="Search every supplier's list (name or part number)..." autocomplete="off" /><div id="pl-results" style="margin-top:8px;"></div>`;
+        let t;
+        body.querySelector('#pl-q').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => search(e.target.value.trim()), 250); });
+        return;
+      }
+      if (filter === 'applied') {
+        body.innerHTML = applied.length ? applied.map(c => changeHtml(c, c.status === 'applied')).join('') : '<p class="subtitle">No changes yet.</p>';
+      } else if (filter === 'lists') {
+        body.innerHTML = imports.length ? imports.map(i => `<div class="pl-group">${importHead(i)}${importActions(i)}</div>`).join('') : '<p class="subtitle">No price lists yet. They are picked up within about an hour of being emailed.</p>';
+      } else {
+        const groups = imports.filter(i => i.status === 'to_check' || i.status === 'too_large' || i.status === 'failed' || changes.some(c => c.import_id === i.id));
+        body.innerHTML = groups.length ? groups.map(i => `<div class="pl-group">${importHead(i)}${importActions(i)}
+            ${changes.filter(c => c.import_id === i.id).sort((a, b) => ({ price: 0, superseded: 1, match: 2 }[a.kind] - { price: 0, superseded: 1, match: 2 }[b.kind])).map(c => changeHtml(c, false)).join('')}</div>`).join('')
+          : '<p class="subtitle">Nothing to check. Prices are up to date with the last lists received.</p>';
+      }
+      body.querySelectorAll('[data-apply]').forEach(b => b.addEventListener('click', () => act(b, { action: 'apply_change', id: b.dataset.apply }, 'Applying...')));
+      body.querySelectorAll('[data-skip]').forEach(b => b.addEventListener('click', () => act(b, { action: 'skip_change', id: b.dataset.skip }, '...')));
+      body.querySelectorAll('[data-undo]').forEach(b => b.addEventListener('click', () => act(b, { action: 'undo_change', id: b.dataset.undo }, 'Undoing...')));
+      body.querySelectorAll('[data-apply-all]').forEach(b => b.addEventListener('click', () => { if (confirm('Apply every change from this price list?')) act(b, { action: 'apply_all', id: b.dataset.applyAll }, 'Applying...'); }));
+      body.querySelectorAll('[data-read-all]').forEach(b => b.addEventListener('click', () => act(b, { action: 'read_all', id: b.dataset.readAll }, 'Starting...')));
+      body.querySelectorAll('[data-retry]').forEach(b => b.addEventListener('click', () => act(b, { action: 'retry', id: b.dataset.retry }, 'Starting...')));
+      body.querySelectorAll('[data-not]').forEach(b => b.addEventListener('click', () => act(b, { action: 'not_price_list', id: b.dataset.not }, '...')));
+      body.querySelectorAll('[data-new-supplier]').forEach(b => b.addEventListener('click', () => {
+        if (confirm('Create this supplier (net 30 days terms, edit anything later on their page) and compare the list?')) act(b, { action: 'new_supplier', id: b.dataset.newSupplier }, 'Creating...');
+      }));
+      body.querySelectorAll('[data-set-supplier]').forEach(b => b.addEventListener('click', () => {
+        const sid = body.querySelector(`[data-supplier-for="${b.dataset.setSupplier}"]`).value;
+        if (!sid) { alert('Pick the supplier first.'); return; }
+        act(b, { action: 'set_supplier', id: b.dataset.setSupplier, supplier_id: sid }, 'Comparing...');
+      }));
+      body.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', async () => {
+        const i = imports.find(x => x.id === b.dataset.open);
+        const win = window.open('', '_blank');
+        try { const url = await getSignedDocUrl(i.file_path); if (win) win.location = url; else window.location = url; } catch (err) { if (win) win.close(); alert(err.message); }
+      }));
+    }
+
+    async function search(q) {
+      const el = document.getElementById('pl-results');
+      if (q.length < 2) { el.innerHTML = ''; return; }
+      const like = `%${q.replace(/[%_,()]/g, ' ')}%`;
+      const { data, error } = await supabaseClient.from('supplier_price_items').select('supplier_id, part_number, description, unit_cost, previous_cost, last_seen_at')
+        .or(`description.ilike.${like},part_number.ilike.${like}`).order('description').limit(60);
+      if (error) { el.innerHTML = `<div class="error-box">${esc(error.message)}</div>`; return; }
+      el.innerHTML = (data || []).length ? data.map(r => `<div class="pl-row"><span>${esc(r.description)}<br><span class="pl-meta">${esc(supplierName(r.supplier_id))}${r.part_number ? ' · ' + esc(r.part_number) : ''} · seen ${dateText(r.last_seen_at)}</span></span>
+          <span style="white-space:nowrap; text-align:right;"><strong>${money(r.unit_cost)}</strong>${r.previous_cost != null ? `<br><span class="pl-meta">was ${money(r.previous_cost)}</span>` : ''}</span></div>`).join('')
+        : '<p class="subtitle">Nothing found.</p>';
+    }
+
+    async function load() {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      const [imp, ch, ap, sup, mat] = await Promise.all([
+        supabaseClient.from('price_list_imports').select('id, status, supplier_id, supplier_name_read, file_name, mime_type, file_path, email_from, received_at, created_at, pages_total, pages_done, item_count, waiting, summary, error').order('created_at', { ascending: false }).limit(100),
+        supabaseClient.from('price_changes').select('*').eq('status', 'waiting').order('created_at').limit(1000),
+        supabaseClient.from('price_changes').select('*').in('status', ['applied', 'undone']).gte('resolved_at', since).order('resolved_at', { ascending: false }).limit(300),
+        supabaseClient.from('suppliers').select('id, name').order('name'),
+        supabaseClient.from('materials').select('id, name, cost_price'),
+      ]);
+      const err = [imp, ch, ap].find(r => r.error);
+      if (err) { document.getElementById('pl-body').innerHTML = `<div class="error-box">${esc(err.error.message)}</div>`; return; }
+      imports = imp.data || []; changes = ch.data || []; applied = ap.data || []; suppliers = sup.data || [];
+      materials = Object.fromEntries((mat.data || []).map(m => [m.id, m]));
+      const btn = document.querySelector('#pl-filters [data-f="check"]');
+      btn.textContent = changes.length ? `To check (${changes.length})` : 'To check';
+      render();
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('price-lists');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      if (!isPricingRole(await getMyRole())) {
+        document.getElementById('pl-body').innerHTML = '<div class="error-box">Price lists are for Admin, Finance and Sales.</div>';
+        return;
+      }
+      document.querySelectorAll('#pl-filters button').forEach(b => b.addEventListener('click', () => {
+        filter = b.dataset.f;
+        document.querySelectorAll('#pl-filters button').forEach(x => x.classList.toggle('active', x === b));
+        render();
+      }));
+      await load();
+    })();
+  </script>
+</body>
+</html>

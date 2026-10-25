@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh pr merge:*)",
+      "mcp__Supabase__execute_sql",
+      "mcp__Supabase__list_migrations",
+      "mcp__Supabase__list_tables"
+    ]
+  }
+}

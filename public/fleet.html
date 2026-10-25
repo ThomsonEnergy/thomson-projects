@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Fleet - Thomson Energy</title>
+<title>Vehicles - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -28,7 +28,7 @@
   </div>
 
   <div class="wrap wide">
-    <h1>Fleet</h1>
+    <h1>Vehicles</h1>
     <p class="subtitle">Vehicle details, who's driving what, and upcoming rego/service dates.</p>
 
     <div class="card">
@@ -40,10 +40,13 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let staffOptions = [];
+    // Vehicle writes are admin only at the database (policy "Admin manages fleet"), so the
+    // buttons only show for admin (F16).
+    let isAdmin = false;
 
     function daysUntil(dateStr) {
       if (!dateStr) return null;
@@ -56,7 +59,7 @@
         .from('fleet_vehicles')
         .select('*, profiles(full_name)')
         .order('rego');
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       if (!data.length) { listEl.innerHTML = `<p class="subtitle">No vehicles yet - add one to get started.</p>`; return; }
 
       listEl.innerHTML = `
@@ -70,15 +73,15 @@
               const serviceWarn = serviceDays !== null && serviceDays <= 30;
               return `
                 <tr>
-                  <td data-label="Name"><strong>${v.vehicle_name || '-'}</strong></td>
-                  <td data-label="Rego">${v.rego}</td>
-                  <td data-label="Vehicle">${[v.year, v.make, v.model].filter(Boolean).join(' ')}</td>
-                  <td data-label="Assigned to">${v.profiles?.full_name || '-'}</td>
-                  <td data-label="Rego expiry">${v.rego_expiry ? new Date(v.rego_expiry).toLocaleDateString('en-AU') : '-'}${regoWarn ? ` <span class="badge draft" style="color:var(--red);">${regoDays}d</span>` : ''}</td>
-                  <td data-label="Next service">${v.next_service_date ? new Date(v.next_service_date).toLocaleDateString('en-AU') : '-'}${serviceWarn ? ` <span class="badge draft" style="color:var(--red);">${serviceDays}d</span>` : ''}</td>
+                  <td data-label="Name"><strong>${escapeHtml(v.vehicle_name || '-')}</strong></td>
+                  <td data-label="Rego">${escapeHtml(v.rego)}</td>
+                  <td data-label="Vehicle">${escapeHtml([v.year, v.make, v.model].filter(Boolean).join(' '))}</td>
+                  <td data-label="Assigned to">${escapeHtml(v.profiles?.full_name || '-')}</td>
+                  <td data-label="Rego expiry">${v.rego_expiry ? new Date(v.rego_expiry).toLocaleDateString('en-AU') : '-'}${regoWarn ? ` <span class="badge red">${regoDays}d</span>` : ''}</td>
+                  <td data-label="Next service">${v.next_service_date ? new Date(v.next_service_date).toLocaleDateString('en-AU') : '-'}${serviceWarn ? ` <span class="badge red">${serviceDays}d</span>` : ''}</td>
                   <td data-label="">
                     ${v.holds_stock ? `<a href="/vehicle-stock.html?id=${v.id}" class="link-quiet" style="font-size:12px; margin-right:10px;">Stock</a>` : ''}
-                    <button class="secondary edit-vehicle-btn" data-id="${v.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
+                    ${isAdmin ? `<button class="secondary edit-vehicle-btn" data-id="${v.id}" style="font-size:12px; padding:6px 10px;">Edit</button>` : ''}
                   </td>
                 </tr>`;
             }).join('')}
@@ -97,33 +100,33 @@
         <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
           <h2>${vehicle ? 'Edit vehicle' : 'Add vehicle'}</h2>
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Vehicle name</label><input id="veh-name" value="${vehicle?.vehicle_name || ''}" placeholder="e.g. TE03" /></div>
-            <div><label style="margin-top:0">Asset number</label><input id="veh-asset" value="${vehicle?.asset_number || ''}" /></div>
+            <div><label style="margin-top:0">Vehicle name</label><input id="veh-name" value="${escapeHtml(vehicle?.vehicle_name)}" placeholder="e.g. TE03" /></div>
+            <div><label style="margin-top:0">Asset number</label><input id="veh-asset" value="${escapeHtml(vehicle?.asset_number)}" /></div>
           </div>
           <label>Rego</label>
-          <input id="veh-rego" value="${vehicle?.rego || ''}" />
+          <input id="veh-rego" value="${escapeHtml(vehicle?.rego)}" autocapitalize="characters" autocorrect="off" spellcheck="false" />
           <div class="grid cols-3">
-            <div><label>Year</label><input id="veh-year" type="number" value="${vehicle?.year || ''}" /></div>
-            <div><label>Make</label><input id="veh-make" value="${vehicle?.make || ''}" /></div>
-            <div><label>Model</label><input id="veh-model" value="${vehicle?.model || ''}" /></div>
+            <div><label>Year</label><input id="veh-year" type="number" value="${escapeHtml(vehicle?.year)}" /></div>
+            <div><label>Make</label><input id="veh-make" value="${escapeHtml(vehicle?.make)}" /></div>
+            <div><label>Model</label><input id="veh-model" value="${escapeHtml(vehicle?.model)}" /></div>
           </div>
           <label>Assigned to</label>
-          <select id="veh-staff"><option value="">-- Unassigned --</option>${staffOptions.map(s => `<option value="${s.id}" ${vehicle?.assigned_staff_id === s.id ? 'selected' : ''}>${s.full_name}</option>`).join('')}</select>
+          <select id="veh-staff"><option value="">-- Unassigned --</option>${staffOptions.map(s => `<option value="${s.id}" ${vehicle?.assigned_staff_id === s.id ? 'selected' : ''}>${escapeHtml(s.full_name)}</option>`).join('')}</select>
           <div class="grid cols-2">
-            <div><label>Rego expiry</label><input type="date" id="veh-rego-expiry" value="${vehicle?.rego_expiry || ''}" /></div>
-            <div><label>Next service</label><input type="date" id="veh-service" value="${vehicle?.next_service_date || ''}" /></div>
+            <div><label>Rego expiry</label><input type="date" id="veh-rego-expiry" value="${escapeHtml(vehicle?.rego_expiry)}" /></div>
+            <div><label>Next service</label><input type="date" id="veh-service" value="${escapeHtml(vehicle?.next_service_date)}" /></div>
           </div>
           <label>Odometer</label>
-          <input id="veh-odo" type="number" value="${vehicle?.odometer || ''}" />
+          <input id="veh-odo" type="number" value="${escapeHtml(vehicle?.odometer)}" />
           <label style="margin-top:14px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="veh-holds-stock" ${vehicle?.holds_stock ? 'checked' : ''} style="width:auto;" /> This vehicle holds stock</label>
           <label>Notes</label>
-          <textarea id="veh-notes" style="min-height:60px;">${vehicle?.notes || ''}</textarea>
+          <textarea id="veh-notes" style="min-height:60px;">${escapeHtml(vehicle?.notes)}</textarea>
           <div style="margin-top:14px; display:flex; justify-content:space-between;">
             <div>
               <button id="veh-save-btn">Save</button>
               <button type="button" class="secondary" id="veh-cancel-btn">Cancel</button>
             </div>
-            ${vehicle ? `<button type="button" class="secondary" id="veh-delete-btn" style="color:var(--red);">Delete</button>` : ''}
+            ${vehicle && isAdmin ? `<button type="button" class="secondary" id="veh-delete-btn" style="color:var(--red);">Delete</button>` : ''}
           </div>
           <div id="veh-msg"></div>
         </div>`;
@@ -134,6 +137,11 @@
         const msg = overlay.querySelector('#veh-msg');
         const rego = overlay.querySelector('#veh-rego').value.trim();
         if (!rego) { msg.innerHTML = `<div class="error-box">Rego is required.</div>`; return; }
+        const btn = overlay.querySelector('#veh-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const fields = {
           rego,
           vehicle_name: overlay.querySelector('#veh-name').value.trim() || null,
@@ -148,19 +156,26 @@
           odometer: parseFloat(overlay.querySelector('#veh-odo').value) || null,
           notes: overlay.querySelector('#veh-notes').value.trim() || null,
         };
-        const { error } = vehicle
-          ? await supabaseClient.from('fleet_vehicles').update(fields).eq('id', vehicle.id)
-          : await supabaseClient.from('fleet_vehicles').insert(fields);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        const { data: saved, error } = vehicle
+          ? await supabaseClient.from('fleet_vehicles').update(fields).eq('id', vehicle.id).select('id')
+          : await supabaseClient.from('fleet_vehicles').insert(fields).select('id');
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+        // RLS filters a refused update to 0 rows with no error: say so instead of closing
+        if (!saved || !saved.length) { msg.innerHTML = `<div class="error-box">Not saved: only an admin can change vehicles.</div>`; return; }
         overlay.remove();
         await loadFleet();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
 
-      if (vehicle) {
+      if (vehicle && isAdmin) {
         overlay.querySelector('#veh-delete-btn').addEventListener('click', async () => {
           if (!confirm(`Delete ${vehicle.rego}?`)) return;
-          const { error } = await supabaseClient.from('fleet_vehicles').delete().eq('id', vehicle.id);
+          const { data: gone, error } = await supabaseClient.from('fleet_vehicles').delete().eq('id', vehicle.id).select('id');
           if (error) { alert(error.message); return; }
+          if (!gone || !gone.length) { alert('Not deleted: only an admin can delete vehicles.'); return; }
           overlay.remove();
           await loadFleet();
         });
@@ -181,6 +196,8 @@
       });
       const { data: profiles } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true);
       staffOptions = profiles || [];
+      isAdmin = (await getMyRole()) === 'admin';
+      if (!isAdmin) document.getElementById('add-vehicle-btn').style.display = 'none';
       await loadFleet();
     })();
   </script>

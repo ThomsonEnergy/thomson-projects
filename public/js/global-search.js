@@ -1,6 +1,6 @@
 // Search box in the top bar that looks across the whole database (jobs,
 // quotes, clients, leads, suppliers, POs, invoices, stock, staff, vehicles,
-// meetings, knowledge). Loaded once by renderMainNav() on any page with the
+// meetings, knowledge, customer equipment). Loaded once by renderMainNav() on any page with the
 // top bar. Every query goes through the logged-in user's own Supabase
 // session, so RLS still decides what each person can see - a table they
 // can't read just comes back empty instead of breaking the rest.
@@ -18,113 +18,129 @@
   const clean = (s) => s.replace(/[,()*%\\:"']/g, ' ').replace(/\s+/g, ' ').trim();
   const ilikeOr = (cols, q) => cols.map(c => `${c}.ilike.%${q}%`).join(',');
   const enc = encodeURIComponent;
+  // Supabase returns { data: null, error } instead of throwing; throw so
+  // runSearch can tell 'failed' from 'nothing found'.
+  const must = ({ data, error }) => { if (error) throw error; return data || []; };
 
   // Each source is one table. run(q, num) returns rows already shaped as
   // { title, sub, href }. num is the bare number when the search looks like
-  // a job/quote/PO number (e.g. "7004", "J7004", "Q1005").
+  // a job/quote/PO number (e.g. "7004", "J7004", "Q1005"). pricingOnly
+  // groups are left out for Staff, whose Leads and Clients pages are locked.
   const SOURCES = [
     {
       label: 'Jobs & quotes',
       run: async (q, num) => {
         const ors = [ilikeOr(['name', 'client_name', 'client_address'], q)];
         if (num) ors.push(`job_number.eq.${num}`, `quote_number.eq.${num}`, `sm8_job_number.eq.${num}`);
-        const { data } = await supabaseClient.from('projects')
+        const data = must(await supabaseClient.from('projects')
           .select('id, name, job_number, quote_number, client_name, client_address')
-          .or(ors.join(',')).order('created_at', { ascending: false }).limit(PER_GROUP);
-        return (data || []).map(p => ({ title: projectRef(p), sub: [p.client_name, p.client_address].filter(Boolean).join(' · '), href: `/project.html?id=${p.id}` }));
+          .or(ors.join(',')).order('created_at', { ascending: false }).limit(PER_GROUP));
+        return data.map(p => ({ title: projectRef(p), sub: [p.client_name, p.client_address].filter(Boolean).join(' · '), href: `/project.html?id=${p.id}` }));
       },
     },
     {
       label: 'Clients',
+      pricingOnly: true,
       run: async (q) => {
-        const { data } = await supabaseClient.from('clients')
+        const data = must(await supabaseClient.from('clients')
           .select('id, name, email, phone, address')
-          .or(ilikeOr(['name', 'email', 'phone', 'address'], q)).order('name').limit(PER_GROUP);
-        return (data || []).map(c => ({ title: c.name, sub: [c.phone, c.email, c.address].filter(Boolean).join(' · '), href: `/clients.html?q=${enc(c.name || '')}` }));
+          .or(ilikeOr(['name', 'email', 'phone', 'address'], q)).order('name').limit(PER_GROUP));
+        return data.map(c => ({ title: c.name, sub: [c.phone, c.email, c.address].filter(Boolean).join(' · '), href: `/clients.html?id=${enc(c.id)}` }));
       },
     },
     {
       label: 'Leads',
+      pricingOnly: true,
       run: async (q) => {
-        const { data } = await supabaseClient.from('leads')
+        const data = must(await supabaseClient.from('leads')
           .select('id, name, email, phone, address_formatted, suburb')
           .or(ilikeOr(['name', 'email', 'phone', 'address_formatted', 'suburb'], q))
-          .order('created_at', { ascending: false }).limit(PER_GROUP);
-        return (data || []).map(l => ({ title: l.name || l.email || l.phone || 'Lead', sub: [l.phone, l.address_formatted || l.suburb].filter(Boolean).join(' · '), href: '/leads.html' }));
+          .order('created_at', { ascending: false }).limit(PER_GROUP));
+        return data.map(l => ({ title: l.name || l.email || l.phone || 'Lead', sub: [l.phone, l.address_formatted || l.suburb].filter(Boolean).join(' · '), href: `/leads.html?id=${enc(l.id)}` }));
       },
     },
     {
       label: 'Suppliers',
       run: async (q) => {
-        const { data } = await supabaseClient.from('suppliers')
+        const data = must(await supabaseClient.from('suppliers')
           .select('id, name, contact_email, contact_phone')
-          .or(ilikeOr(['name', 'contact_email'], q)).order('name').limit(PER_GROUP);
-        return (data || []).map(s => ({ title: s.name, sub: [s.contact_phone, s.contact_email].filter(Boolean).join(' · '), href: `/supplier-detail.html?id=${s.id}` }));
+          .or(ilikeOr(['name', 'contact_email'], q)).order('name').limit(PER_GROUP));
+        return data.map(s => ({ title: s.name, sub: [s.contact_phone, s.contact_email].filter(Boolean).join(' · '), href: `/supplier-detail.html?id=${s.id}` }));
       },
     },
     {
       label: 'Purchase orders',
       run: async (q) => {
-        const { data } = await supabaseClient.from('purchase_orders')
+        const data = must(await supabaseClient.from('purchase_orders')
           .select('id, po_number, supplier_name, description')
           .or(ilikeOr(['po_number', 'supplier_name', 'description'], q))
-          .order('created_at', { ascending: false }).limit(PER_GROUP);
-        return (data || []).map(po => ({ title: `${po.po_number || 'PO'} - ${po.supplier_name || ''}`, sub: po.description || '', href: `/purchase-orders.html?q=${enc(po.po_number || po.supplier_name || '')}` }));
+          .order('created_at', { ascending: false }).limit(PER_GROUP));
+        return data.map(po => ({ title: `${po.po_number || 'PO'} - ${po.supplier_name || ''}`, sub: po.description || '', href: `/purchase-order.html?id=${enc(po.id)}` }));
       },
     },
     {
       label: 'Invoices',
       run: async (q) => {
-        const { data } = await supabaseClient.from('invoices')
+        const data = must(await supabaseClient.from('invoices')
           .select('id, invoice_number, description, project_id, cost_centres(project_id), projects(name, job_number, quote_number)')
           .or(ilikeOr(['invoice_number', 'description'], q))
-          .order('created_at', { ascending: false }).limit(PER_GROUP);
-        return (data || []).map(inv => {
-          const projectId = inv.project_id || inv.cost_centres?.project_id;
-          return { title: inv.invoice_number || 'Invoice', sub: inv.projects ? projectRef(inv.projects) : (inv.description || ''), href: projectId ? `/project.html?id=${projectId}` : '/invoices.html' };
+          .order('created_at', { ascending: false }).limit(PER_GROUP));
+        return data.map(inv => {
+          return { title: inv.invoice_number || 'Invoice', sub: inv.projects ? projectRef(inv.projects) : (inv.description || ''), href: `/invoices.html?id=${enc(inv.id)}` };
         });
       },
     },
     {
       label: 'Stock',
       run: async (q) => {
-        const { data } = await supabaseClient.from('materials')
+        const data = must(await supabaseClient.from('materials')
           .select('id, name, category, supplier')
-          .or(ilikeOr(['name', 'category', 'supplier'], q)).order('name').limit(PER_GROUP);
-        return (data || []).map(m => ({ title: m.name, sub: [m.category, m.supplier].filter(Boolean).join(' · '), href: `/stock.html?q=${enc(m.name || '')}` }));
+          .or(ilikeOr(['name', 'category', 'supplier'], q)).order('name').limit(PER_GROUP));
+        return data.map(m => ({ title: m.name, sub: [m.category, m.supplier].filter(Boolean).join(' · '), href: `/stock.html?q=${enc(m.name || '')}` }));
       },
     },
     {
       label: 'Staff',
+      financeOnly: true, // only Admin and Finance can open another person's profile
       run: async (q) => {
-        const { data } = await supabaseClient.from('profiles')
-          .select('id, full_name').ilike('full_name', `%${q}%`).order('full_name').limit(PER_GROUP);
-        return (data || []).map(p => ({ title: p.full_name, sub: '', href: `/staff.html?id=${p.id}` }));
+        const data = must(await supabaseClient.from('profiles')
+          .select('id, full_name').ilike('full_name', `%${q}%`).order('full_name').limit(PER_GROUP));
+        return data.map(p => ({ title: p.full_name, sub: '', href: `/staff.html?id=${p.id}` }));
       },
     },
     {
       label: 'Vehicles',
       run: async (q) => {
-        const { data } = await supabaseClient.from('fleet_vehicles')
-          .select('id, rego, make, model').or(ilikeOr(['rego', 'make', 'model'], q)).limit(PER_GROUP);
-        return (data || []).map(v => ({ title: v.rego, sub: [v.make, v.model].filter(Boolean).join(' '), href: `/vehicle-stock.html?id=${v.id}` }));
+        const data = must(await supabaseClient.from('fleet_vehicles')
+          .select('id, rego, make, model').or(ilikeOr(['rego', 'make', 'model'], q)).limit(PER_GROUP));
+        return data.map(v => ({ title: v.rego, sub: [v.make, v.model].filter(Boolean).join(' '), href: `/vehicle-stock.html?id=${v.id}` }));
       },
     },
     {
       label: 'Meetings',
       run: async (q) => {
-        const { data } = await supabaseClient.from('meetings')
+        const data = must(await supabaseClient.from('meetings')
           .select('id, title, location').or(ilikeOr(['title', 'location'], q))
-          .order('created_at', { ascending: false }).limit(PER_GROUP);
-        return (data || []).map(m => ({ title: m.title, sub: m.location || '', href: `/meetings.html?id=${m.id}` }));
+          .order('created_at', { ascending: false }).limit(PER_GROUP));
+        return data.map(m => ({ title: m.title, sub: m.location || '', href: `/meetings.html?id=${m.id}` }));
+      },
+    },
+    {
+      label: 'Customer equipment',
+      run: async (q) => {
+        const data = must(await supabaseClient.from('customer_assets')
+          .select('id, name, make, model, client_name, site_address, clients(name)')
+          .or(ilikeOr(['name', 'make', 'model', 'serial_numbers', 'client_name', 'site_address'], q))
+          .order('created_at', { ascending: false }).limit(PER_GROUP));
+        return data.map(a => ({ title: [a.name, [a.make, a.model].filter(Boolean).join(' ')].filter(Boolean).join(' · '), sub: [a.clients?.name || a.client_name, a.site_address].filter(Boolean).join(' · '), href: `/assets.html?id=${enc(a.id)}` }));
       },
     },
     {
       label: 'Knowledge',
       run: async (q) => {
-        const { data } = await supabaseClient.from('knowledge_entries')
-          .select('id, title, category').or(ilikeOr(['title', 'category'], q)).order('title').limit(PER_GROUP);
-        return (data || []).map(k => ({ title: k.title, sub: k.category || '', href: `/knowledge.html?q=${enc(k.title || '')}` }));
+        const data = must(await supabaseClient.from('knowledge_entries')
+          .select('id, title, category').or(ilikeOr(['title', 'category'], q)).order('title').limit(PER_GROUP));
+        return data.map(k => ({ title: k.title, sub: k.category || '', href: `/knowledge.html?q=${enc(k.title || '')}` }));
       },
     },
   ];
@@ -170,11 +186,18 @@
     const num = numMatch ? numMatch[1] : null;
     panel.innerHTML = '<div class="gsearch-empty">Searching...</div>';
     showPanel();
-    const groups = await Promise.all(SOURCES.map(s =>
-      s.run(q, num).then(rows => ({ label: s.label, rows }), () => ({ label: s.label, rows: [] }))));
+    let pricing = false, finance = false;
+    try { const role = await getMyRole(); pricing = isPricingRole(role); finance = isFinanceRole(role); } catch (e) { /* treat as Staff */ }
+    if (mySeq !== seq) return;
+    const groups = await Promise.all(SOURCES.filter(s => (pricing || !s.pricingOnly) && (finance || !s.financeOnly)).map(s =>
+      s.run(q, num).then(rows => ({ label: s.label, rows }), () => ({ label: s.label, rows: [], failed: true }))));
     if (mySeq !== seq) return; // a newer search has started since
     const filled = groups.filter(g => g.rows.length);
     activeIndex = -1;
+    if (!filled.length && groups.every(g => g.failed)) {
+      panel.innerHTML = '<div class="gsearch-empty">Search failed, check your signal.</div>';
+      return;
+    }
     panel.innerHTML = filled.length
       ? filled.map(g => `<div class="gsearch-group">${escapeHtml(g.label)}</div>` + g.rows.map(r =>
           `<a class="gsearch-result" href="${r.href}"><div class="gsearch-title">${escapeHtml(r.title || '')}</div>${r.sub ? `<div class="gsearch-sub">${escapeHtml(r.sub)}</div>` : ''}</a>`).join('')).join('')
@@ -214,7 +237,7 @@
   const PAGE_SEARCH_INPUTS = {
     '/clients.html': 'client-search', '/stock.html': 'stock-search', '/purchase-orders.html': 'po-search',
     '/knowledge.html': 'kb-search', '/projects.html': 'project-search', '/meetings.html': 'mt-search',
-    '/assets.html': 'asset-search', '/suppliers.html': 'supplier-search',
+    '/assets.html': 'asset-search', '/suppliers.html': 'supplier-search', '/invoices.html': 'invoice-search',
   };
   const prefill = new URLSearchParams(window.location.search).get('q');
   const pageInput = prefill && document.getElementById(PAGE_SEARCH_INPUTS[window.location.pathname]);

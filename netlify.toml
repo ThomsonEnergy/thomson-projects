@@ -6,6 +6,11 @@
   # left as is. See scripts/write-config.js and docs/ENV_VARS.md.
   command = "node scripts/write-config.js"
 
+# The pre-quote question list is one file shared by the browser (quote pages) and the functions
+# (ready-to-send gate, job tasks): make sure the bundler ships it with every function.
+[functions]
+  included_files = ["public/js/template-questions.js", "public/js/solar-roi.js"]
+
 # Headless Chromium (quote/invoice PDF rendering) needs more headroom than
 # the default Lambda allocation - it was OOM-killing consistently even
 # rendering a plain, photo-free invoice page (root cause fixed directly in
@@ -23,10 +28,32 @@
 [functions.archive-completed-jobs]
   schedule = "@daily"
 
+# Just after midnight Sydney time: moves jobs out of Job Booked when their last booking has passed
+# and nobody is clocked in - see sweep-job-booked.js. Runs at 13:05 and 14:05 UTC so it lands on
+# 00:05 with and without daylight saving; a second run finds nothing to do.
+[functions.sweep-job-booked]
+  schedule = "5 13,14 * * *"
+
+# Just after midnight Sydney time: quote and variation reminders (3 days before they run out) and
+# auto decline as Expired - see sweep-quote-expiry.js. Same two runs as above; the second finds nothing.
+[functions.sweep-quote-expiry]
+  schedule = "10 13,14 * * *"
+
+# Just after midnight Sydney time: licence and insurance expiry reminders to the employee and Admin
+# (30, 14, 7 days, on the day, weekly after) - see sweep-licence-expiry.js. Same two runs as above.
+[functions.sweep-licence-expiry]
+  schedule = "15 13,14 * * *"
+
 # Once a day: refreshes the overhead lines from the Xero Profit and Loss report - see
 # sync-overheads-nightly.js. Does nothing until accounts are mapped on the Overheads page.
 [functions.sync-overheads-nightly]
   schedule = "@daily"
+
+# 7am Sydney: a phone notification to whoever made a booking starting within 3 days while the
+# client has not been told - see remind-client-bookings.js. Runs at 20:05 and 21:05 UTC so it
+# lands on 7am with and without daylight saving; only the 7am one does anything.
+[functions.remind-client-bookings]
+  schedule = "5 20,21 * * *"
 
 # Polls sales@thomsonenergy.com.au for new mail every 5 minutes - see
 # sync-gmail.js. The Sync now buttons (Settings, Inbox) call sync-gmail-now.js
@@ -49,3 +76,36 @@
 # warm-pdf.js.
 [functions.warm-pdf]
   schedule = "*/4 * * * *"
+
+# The ops manager's morning digest at 5am Sydney time - see ops-digest.js. Runs at 18:00 and
+# 19:00 UTC so it lands on 5am with and without daylight saving; only the 5am one sends.
+[functions.ops-digest]
+  schedule = "0 18,19 * * *"
+# Every 2 minutes: catches any team chat message Sparky has not tagged to a
+# job yet (normally done the moment it is sent) - see chat-ai-sweep.js.
+[functions.chat-ai-sweep]
+  schedule = "*/2 * * * *"
+
+# Every 2 minutes: starts the Knowledge Base reader if a read is queued, or a run died and left a job
+# locked past its time - see read-knowledge-sweep.js.
+[functions.read-knowledge-sweep]
+  schedule = "*/2 * * * *"
+
+# Renders PDF pages itself (pdf.js plus @napi-rs/canvas, no browser), so it needs pdf.js's worker, font and
+# CMap files on disk and more memory (and so CPU) than the default - see _shared/knowledge-reader.js.
+[functions.read-knowledge-background]
+  memory = "2048mb"
+  included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.js", "node_modules/pdfjs-dist/standard_fonts/**", "node_modules/pdfjs-dist/cmaps/**"]
+
+# Every 15 minutes: starts the retail plan download from the AER's Consumer Data Right data when the
+# last good one is over 20 hours old (about once a day) - see sync-energy-plans.js; the download is
+# sync-energy-plans-background.js (docs/IDEAS_BACKLOG.md item 34).
+[functions.sync-energy-plans]
+  schedule = "*/15 * * * *"
+
+# Once a day at 17:30 UTC (3:30am or 4:30am Sydney, before anyone is in): copies each linked
+# employee's leave balances from Xero Payroll into leave_balances for the Staff page - see
+# sync-leave-balances.js. Its "Refresh from Xero" button needs a plain HTTP function, since a
+# scheduled function cannot be called over HTTP in production.
+[functions.sync-leave-balances]
+  schedule = "30 17 * * *"

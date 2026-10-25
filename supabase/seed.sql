@@ -38,8 +38,9 @@ begin
             'email', now(), now(), now())
     on conflict do nothing;
 
-    insert into public.profiles (id, full_name, role, active)
-    values (u.id, u.full_name, u.role, true)
+    -- Marked as onboarded, so test logins go straight into the app.
+    insert into public.profiles (id, full_name, role, active, onboarding_completed_at)
+    values (u.id, u.full_name, u.role, true, now())
     on conflict (id) do nothing;
   end loop;
 end $$;

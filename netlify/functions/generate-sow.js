@@ -1,14 +1,16 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
-const { getAdminClient } = require('./_shared/require-admin');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 // Drafts a full scope-of-works document from a brief, the stage names/
 // descriptions already generated, and optionally the actual content of
-// uploaded plans or electricity bills — pulled from the private
+// uploaded plans or electricity bills, pulled from the private
 // project-documents bucket so the client never has to send large files
 // through the browser twice.
 
-const MAX_DOCS = 5;
+// Supporting documents plus the electricity bill pages from step 1. Anything past this many is not sent;
+// the response says so (left_out) instead of dropping them quietly (F30 in docs/BUG_REVIEW_2026-10-23.md).
+const MAX_DOCS = 20;
 
 function mimeFor(path) {
   const ext = (path.split('.').pop() || '').toLowerCase();
@@ -24,22 +26,30 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
+  // Pricing roles only: it spends the Anthropic key and reads private job documents.
+  const auth = await requirePricingRole(event);
+  if (!auth) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
+
   try {
-    const { projectName, brief, stageNames = [], stageDescriptions = {}, documentPaths = [], style = 'story', template = '' } = JSON.parse(event.body);
-    if (!brief) {
-      return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'A project brief is required' }) };
+    const { projectName, brief = '', stageNames = [], stageDescriptions = {}, documentPaths = [], style = 'story', template = '', templateAnswers = '', customerGets = '', withBattery = false } = JSON.parse(event.body);
+    if (!brief && !templateAnswers) {
+      return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'A project brief or the pre-quote answers are required' }) };
     }
 
     const apiKey = await getIntegrationKey('anthropic');
-    const supabaseAdmin = getAdminClient();
+    const { supabaseAdmin } = auth;
 
     const docBlocks = [];
-    for (const path of documentPaths.slice(0, MAX_DOCS)) {
+    const paths = Array.isArray(documentPaths) ? documentPaths.map(String) : [];
+    const fileName = (p) => p.split('/').pop();
+    const leftOut = paths.slice(MAX_DOCS).map(fileName);
+    const skipped = [];
+    for (const path of paths.slice(0, MAX_DOCS)) {
       const mediaType = mimeFor(path);
-      if (!mediaType) continue; // skip anything we don't know how to hand to the model
+      if (!mediaType) { skipped.push(fileName(path)); continue; } // nothing we know how to hand to the model
 
       const { data, error } = await supabaseAdmin.storage.from('project-documents').download(path);
-      if (error || !data) continue; // best-effort — one bad file shouldn't block the whole draft
+      if (error || !data) { skipped.push(fileName(path)); continue; } // best effort: one bad file does not block the whole draft
 
       const buffer = Buffer.from(await data.arrayBuffer());
       const base64 = buffer.toString('base64');
@@ -80,14 +90,22 @@ THIS DOCUMENT IS AN ESTIMATE. Whatever the style above says, it must clearly lis
 - Put "Exclusions" after "Inclusions". Do not leave either list out.
 ` : '';
 
+    // Battery jobs (a Battery proposal, or Solar with Batteries as well): what the client must be
+    // told and what the installer must get right. Sources: docs/BATTERY_QUOTE_COMPLIANCE_REQUIREMENTS.md.
+    const batteryRule = (withBattery || template === 'battery') ? `
+BATTERY: this job includes a home battery. The scope must cover, in plain words: the battery's usable capacity in kWh and the make and model where given; which circuits are backed up in a blackout (and that the rest are not); where the battery is mounted and that the location meets AS/NZS 5139 (not in a habitable room, clear of exits, with the required clearances and signage); whether it is a hybrid (DC coupled) or AC coupled system; that the battery is VPP capable and registered for monitoring; the network (DNSP) connection application; commissioning and a demonstration of the backup; and that the federal Cheaper Home Batteries discount (shown as an STC credit on the price) depends on the battery being on the CEC approved list, 5 to 100 kWh usable (the discount covers the first 50 kWh), designed and installed by an installer accredited with Solar Accreditation Australia for grid connected battery systems, the first claim at the address and the solar being commissioned before or with it. State these as what is being done, not as a legal lecture.
+` : '';
+
+    const typeLine = { solar: 'a grid-connected solar PV system', battery: 'a home battery storage system', renovation: 'a renovation', service_work: 'service work', quick_estimate: 'an estimate', new_build: 'a new build' }[template] || 'electrical work';
     const promptText = `You are writing a scope-of-works document for an electrical contractor's client-facing quote.
 
 Project: ${projectName || 'This project'}
-Brief from the contractor: ${brief}
-
+Type of job: ${typeLine}${withBattery && template !== 'battery' ? ' with a battery as well' : ''}
+Brief from the contractor: ${brief || '(none typed, use the pre-quote answers below)'}
+${customerGets ? `\nWhat the customer is getting (from the design and the stages):\n${customerGets}\n` : ''}${templateAnswers ? `\nPre-quote information gathered from the client (internal notes: use them so the scope fits this site, never list them back as a questionnaire, and leave out anything the client would not expect to see, such as medical equipment or access codes):\n${templateAnswers}\n` : ''}
 Stages in this quote:
 ${stageList}
-
+${batteryRule}
 ${docBlocks.length ? 'Reference any attached plans, drawings, or electricity bills where relevant to ground the scope in what they actually show (e.g. existing switchboard capacity, circuit count, meter details).' : ''}
 
 ${styleGuide}
@@ -104,7 +122,7 @@ Write the scope of works now (plain text - no markdown headers/asterisks, use pl
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-5-5',
         max_tokens: 1500,
         messages: [{ role: 'user', content }],
       }),
@@ -118,7 +136,10 @@ Write the scope of works now (plain text - no markdown headers/asterisks, use pl
     const data = await res.json();
     const sow = data.content.map((b) => b.text || '').join('').trim();
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, sow }) };
+    const notes = [];
+    if (leftOut.length) notes.push(`Only the first ${MAX_DOCS} documents were given to the AI; not used: ${leftOut.join(', ')}.`);
+    if (skipped.length) notes.push(`Could not be read (use PDF, JPG, PNG or WEBP): ${skipped.join(', ')}.`);
+    return { statusCode: 200, body: JSON.stringify({ ok: true, sow, documents_used: docBlocks.length, left_out: leftOut, skipped, warning: notes.join(' ') || null }) };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };

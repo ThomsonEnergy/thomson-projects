@@ -7,11 +7,16 @@
 // inserted as job_tasks. See word-solar-tasks.js for the full explanation.
 
 const { wordSolarTasks } = require('./_shared/word-solar-tasks');
+const { requireActiveUser } = require('./_shared/require-active-user');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
   }
+
+  // Any logged-in staff member (the checklist panel is on the job page); every call spends the Anthropic key.
+  const auth = await requireActiveUser(event);
+  if (!auth) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Please log in again' }) };
 
   try {
     const { missing = [], equipment = {} } = JSON.parse(event.body || '{}');

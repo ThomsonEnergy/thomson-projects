@@ -23,6 +23,9 @@ async function hrInit(session) {
 }
 const hrIsFinance = () => HR.myRole === 'admin' || HR.myRole === 'finance';
 const hrToday = () => hrLocalDate();
+// A stored signature is only used as an image when it is a PNG or JPEG data URL (staff write
+// their own rows), the same guard as quote.html's safeSig (S15).
+const hrSafeSig = (u) => (typeof u === 'string' && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(u)) ? u : '';
 const hrStaffName = (id) => (HR.staff.find(s => s.id === id) || {}).full_name || '';
 
 function hrModal(html, maxWidth = 640) {
@@ -44,9 +47,9 @@ async function hrUpload(file, prefix) {
 }
 async function hrViewFile(path, title) {
   if (/\.pdf$/i.test(path)) { openPdfViewer(path, title || 'Document', { bucket: HR_BUCKET }); return; }
-  const url = await getSignedDocUrl(path, HR_BUCKET);
-  if (/\.(jpe?g|png|webp|gif)$/i.test(path)) openPhotoLightbox([url], 0);
-  else window.open(url, '_blank', 'noopener');
+  if (/\.(jpe?g|png|webp|gif)$/i.test(path)) { const url = await getSignedDocUrl(path, HR_BUCKET); openPhotoLightbox([url], 0); return; }
+  // First await in this branch: the tab opens on the tap itself, so iPhone does not block it as a popup.
+  await openSignedDocInNewTab(path, HR_BUCKET);
 }
 
 // ---------- Warnings and letters ----------
@@ -162,22 +165,26 @@ async function hrOpenLetterEditor(opts) {
   };
   q('#w-preview').addEventListener('click', () => showHrDocument(writtenWarningHtml(Object.assign({ id: 'preview' }, collect()), person, HR.company), 'Preview'));
   q('#w-save').addEventListener('click', async () => {
-    const payload = collect();
-    if (!payload.subject && !payload.details) { q('#w-msg').innerHTML = '<div class="error-box">Add a subject or describe the concern.</div>'; return; }
-    payload.updated_at = new Date().toISOString();
-    let res;
-    if (existing) {
-      // Editing after it was signed changes what was signed, so it goes back to a draft.
-      Object.assign(payload, { status: 'draft', manager_signature_data_url: null, manager_signed_at: null, employee_signature_data_url: null, employee_signed_at: null,
-        employee_signed_name: null, employee_signed_how: null, witness_signature_data_url: null, witness_signed_at: null, sent_to_employee_at: null, refused_to_sign: false, acknowledged_at: null });
-      res = await supabaseClient.from('staff_warnings').update(payload).eq('id', existing.id).select().single();
-    } else {
-      payload.issued_by = HR.me.id; payload.status = 'draft';
-      res = await supabaseClient.from('staff_warnings').insert(payload).select().single();
-    }
-    if (res.error) { q('#w-msg').innerHTML = `<div class="error-box">${escapeHtml(res.error.message)}</div>`; return; }
-    o.remove();
-    if (onSaved) onSaved(res.data);
+    const btn = q('#w-save'); const label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      const payload = collect();
+      if (!payload.subject && !payload.details) { q('#w-msg').innerHTML = '<div class="error-box">Add a subject or describe the concern.</div>'; return; }
+      payload.updated_at = new Date().toISOString();
+      let res;
+      if (existing) {
+        // Editing after it was signed changes what was signed, so it goes back to a draft.
+        Object.assign(payload, { status: 'draft', manager_signature_data_url: null, manager_signed_at: null, employee_signature_data_url: null, employee_signed_at: null,
+          employee_signed_name: null, employee_signed_how: null, witness_signature_data_url: null, witness_signed_at: null, sent_to_employee_at: null, refused_to_sign: false, acknowledged_at: null });
+        res = await supabaseClient.from('staff_warnings').update(payload).eq('id', existing.id).select().single();
+      } else {
+        payload.issued_by = HR.me.id; payload.status = 'draft';
+        res = await supabaseClient.from('staff_warnings').insert(payload).select().single();
+      }
+      if (res.error) { q('#w-msg').innerHTML = `<div class="error-box">${escapeHtml(res.error.message)}</div>`; return; }
+      o.remove();
+      if (onSaved) onSaved(res.data);
+    } finally { btn.disabled = false; btn.textContent = label; }
   });
 }
 
@@ -199,6 +206,8 @@ function hrSignAndIssue(w, person, onDone) {
   o.querySelector('#si-cancel').addEventListener('click', () => o.remove());
   o.querySelector('#si-save').addEventListener('click', async () => {
     if (pad.isEmpty()) { o.querySelector('#si-msg').innerHTML = '<div class="error-box">Draw your signature.</div>'; return; }
+    const btn = o.querySelector('#si-save'); const label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Signing...';
     try {
       const row = await hrSaveWarning(w.id, {
         status: 'issued', manager_signature_data_url: pad.toDataURL(), manager_signed_at: new Date().toISOString(),
@@ -206,6 +215,7 @@ function hrSignAndIssue(w, person, onDone) {
       });
       o.remove(); onDone(row);
     } catch (err) { o.querySelector('#si-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+    finally { btn.disabled = false; btn.textContent = label; }
   });
 }
 
@@ -233,23 +243,27 @@ function hrEmployeeSignsNow(w, person, onDone) {
   o.querySelector('#es-preview').addEventListener('click', () => showHrDocument(writtenWarningHtml(w, person, HR.company), letterTitle(w)));
   o.querySelector('#es-cancel').addEventListener('click', () => o.remove());
   o.querySelector('#es-save').addEventListener('click', async () => {
-    const msg = o.querySelector('#es-msg');
-    const witnessName = o.querySelector('#es-witness-name').value.trim();
-    const updates = { support_person: witnessName || w.support_person || null };
-    if (!wpad.isEmpty()) Object.assign(updates, { witness_signature_data_url: wpad.toDataURL(), witness_signed_at: new Date().toISOString() });
-    if (refused.checked) {
-      if (wpad.isEmpty() || !witnessName) { msg.innerHTML = '<div class="error-box">When they decline, a witness needs to add their name and sign.</div>'; return; }
-      Object.assign(updates, { refused_to_sign: true });
-    } else {
-      if (pad.isEmpty()) { msg.innerHTML = '<div class="error-box">They need to sign, or tick that they declined.</div>'; return; }
-      Object.assign(updates, {
-        refused_to_sign: false, employee_signature_data_url: pad.toDataURL(), employee_signed_at: new Date().toISOString(),
-        employee_signed_name: o.querySelector('#es-name').value.trim() || person.full_name, employee_signed_how: 'in_person',
-        employee_comments: o.querySelector('#es-comments').value.trim() || null, acknowledged_at: hrToday(), status: 'acknowledged',
-      });
-    }
-    try { const row = await hrSaveWarning(w.id, updates); o.remove(); onDone(row); }
-    catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+    const btn = o.querySelector('#es-save'); const label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      const msg = o.querySelector('#es-msg');
+      const witnessName = o.querySelector('#es-witness-name').value.trim();
+      const updates = { support_person: witnessName || w.support_person || null };
+      if (!wpad.isEmpty()) Object.assign(updates, { witness_signature_data_url: wpad.toDataURL(), witness_signed_at: new Date().toISOString() });
+      if (refused.checked) {
+        if (wpad.isEmpty() || !witnessName) { msg.innerHTML = '<div class="error-box">When they decline, a witness needs to add their name and sign.</div>'; return; }
+        Object.assign(updates, { refused_to_sign: true });
+      } else {
+        if (pad.isEmpty()) { msg.innerHTML = '<div class="error-box">They need to sign, or tick that they declined.</div>'; return; }
+        Object.assign(updates, {
+          refused_to_sign: false, employee_signature_data_url: pad.toDataURL(), employee_signed_at: new Date().toISOString(),
+          employee_signed_name: o.querySelector('#es-name').value.trim() || person.full_name, employee_signed_how: 'in_person',
+          employee_comments: o.querySelector('#es-comments').value.trim() || null, acknowledged_at: hrToday(), status: 'acknowledged',
+        });
+      }
+      try { const row = await hrSaveWarning(w.id, updates); o.remove(); onDone(row); }
+      catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+    } finally { btn.disabled = false; btn.textContent = label; }
   });
 }
 
@@ -275,6 +289,8 @@ function hrResolve(w, person, onDone) {
     <div id="rs-msg"></div>`, 560);
   o.querySelector('#rs-cancel').addEventListener('click', () => o.remove());
   o.querySelector('#rs-save').addEventListener('click', async () => {
+    const btn = o.querySelector('#rs-save'); const label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Saving...';
     try {
       let row = await hrSaveWarning(w.id, {
         status: 'resolved', resolved_at: o.querySelector('#rs-date').value || hrToday(),
@@ -287,6 +303,7 @@ function hrResolve(w, person, onDone) {
       }
       o.remove(); onDone(row);
     } catch (err) { o.querySelector('#rs-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+    finally { btn.disabled = false; btn.textContent = label; }
   });
 }
 
@@ -442,31 +459,37 @@ function hrNewIncident(opts = {}) {
     const msg = o.querySelector('#ni-msg');
     const title = o.querySelector('#ni-title').value.trim();
     if (!title) { msg.innerHTML = '<div class="error-box">Say in one line what happened.</div>'; return; }
-    const chosen = [...o.querySelectorAll('.ni-person:checked')].map(c => ({ id: c.value, role: o.querySelector(`.ni-role[data-id="${c.value}"]`).value }));
-    const injured = chosen.find(c => c.role === 'injured');
-    const injuredStaff = injured ? HR.staff.find(s => s.id === injured.id) : null;
-    let injuredSensitive = null;
-    if (injured) injuredSensitive = (await supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', injured.id).maybeSingle()).data;
-    const { data: inc, error } = await supabaseClient.from('incident_reports').insert({
-      nature: o.querySelector('#ni-nature').value, incident_date: o.querySelector('#ni-date').value || hrToday(),
-      incident_time: o.querySelector('#ni-time').value || null, title, project_id: projectId,
-      site_location: o.querySelector('#ni-location').value.trim() || null,
-      injured_profile_id: injured ? injured.id : null,
-      injured_name: injuredStaff ? injuredStaff.full_name : null, injured_occupation: injuredStaff ? injuredStaff.job_title : null,
-      injured_phone: injuredStaff ? injuredStaff.mobile_number : null, injured_dob: injuredSensitive ? injuredSensitive.date_of_birth : null,
-      injured_address: injuredSensitive ? [injuredSensitive.residential_address, injuredSensitive.residential_suburb, injuredSensitive.residential_state, injuredSensitive.residential_postcode].filter(Boolean).join(', ') || null : null,
-      injured_employer: injured ? HR.company.company_name : null,
-      completed_by_name: HR.me.full_name || null, completed_by_position: HR.me.job_title || null, completed_date: hrToday(),
-      created_by: HR.me.id, status: 'open',
-    }).select().single();
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
-    if (chosen.length) {
-      const { error: pErr } = await supabaseClient.from('incident_people').insert(chosen.map(c => {
-        const s = HR.staff.find(x => x.id === c.id) || {};
-        return { incident_id: inc.id, profile_id: c.id, name: s.full_name || 'Staff member', contact: s.mobile_number || null, role: c.role };
-      }));
-      if (pErr) { msg.innerHTML = `<div class="error-box">Incident saved, but adding people failed: ${escapeHtml(pErr.message)}</div>`; return; }
-    }
-    window.location.href = `/incident.html?id=${inc.id}`;
+    const btn = o.querySelector('#ni-save'); const label = btn.textContent;
+    let navigated = false;
+    btn.disabled = true; btn.textContent = 'Creating...';
+    try {
+      const chosen = [...o.querySelectorAll('.ni-person:checked')].map(c => ({ id: c.value, role: o.querySelector(`.ni-role[data-id="${c.value}"]`).value }));
+      const injured = chosen.find(c => c.role === 'injured');
+      const injuredStaff = injured ? HR.staff.find(s => s.id === injured.id) : null;
+      let injuredSensitive = null;
+      if (injured) injuredSensitive = (await supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', injured.id).maybeSingle()).data;
+      const { data: inc, error } = await supabaseClient.from('incident_reports').insert({
+        nature: o.querySelector('#ni-nature').value, incident_date: o.querySelector('#ni-date').value || hrToday(),
+        incident_time: o.querySelector('#ni-time').value || null, title, project_id: projectId,
+        site_location: o.querySelector('#ni-location').value.trim() || null,
+        injured_profile_id: injured ? injured.id : null,
+        injured_name: injuredStaff ? injuredStaff.full_name : null, injured_occupation: injuredStaff ? injuredStaff.job_title : null,
+        injured_phone: injuredStaff ? injuredStaff.mobile_number : null, injured_dob: injuredSensitive ? injuredSensitive.date_of_birth : null,
+        injured_address: injuredSensitive ? [injuredSensitive.residential_address, injuredSensitive.residential_suburb, injuredSensitive.residential_state, injuredSensitive.residential_postcode].filter(Boolean).join(', ') || null : null,
+        injured_employer: injured ? HR.company.company_name : null,
+        completed_by_name: HR.me.full_name || null, completed_by_position: HR.me.job_title || null, completed_date: hrToday(),
+        created_by: HR.me.id, status: 'open',
+      }).select().single();
+      if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      if (chosen.length) {
+        const { error: pErr } = await supabaseClient.from('incident_people').insert(chosen.map(c => {
+          const s = HR.staff.find(x => x.id === c.id) || {};
+          return { incident_id: inc.id, profile_id: c.id, name: s.full_name || 'Staff member', contact: s.mobile_number || null, role: c.role };
+        }));
+        if (pErr) { msg.innerHTML = `<div class="error-box">Incident saved, but adding people failed: ${escapeHtml(pErr.message)}</div>`; return; }
+      }
+      navigated = true;
+      window.location.href = `/incident.html?id=${inc.id}`;
+    } finally { if (!navigated) { btn.disabled = false; btn.textContent = label; } }
   });
 }

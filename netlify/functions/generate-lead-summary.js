@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 // Turns a lead's raw source + details JSON (see WEBSITE_LEAD_CAPTURE.md
 // for the shape each source sends) into a short, plain-English "what
@@ -14,6 +15,10 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
   }
+
+  // Leads is a pricing-role page, and every call spends the Anthropic key.
+  const auth = await requirePricingRole(event);
+  if (!auth) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
 
   try {
     const { source, details, name } = JSON.parse(event.body || '{}');
@@ -43,7 +48,7 @@ No other text, no markdown, exactly those two lines.`;
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-5-5',
         max_tokens: 300,
         messages: [{ role: 'user', content: prompt }],
       }),

@@ -10,9 +10,9 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<link rel="stylesheet" href="/css/hr.css?v=1" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/hr.css?v=2" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -32,11 +32,11 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script src="/js/licence-share.js?v=1"></script>
-  <script src="/js/hr-templates.js?v=2"></script>
-  <script src="/js/hr-shared.js?v=2"></script>
+  <script src="/js/hr-templates.js?v=3"></script>
+  <script src="/js/hr-shared.js?v=4"></script>
   <script>
     // One incident, near miss or accident, with everything about it in one
     // place: the Form 10 details, everyone involved (with their part, any
@@ -161,7 +161,7 @@
           <label>Damage to equipment or property</label>${area('d-damage', r.property_damage, 'e.g. Side cutters destroyed, cable end burnt')}
           <div class="grid cols-2">
             <div><label>Who received the report</label>${inp('d-recv', r.report_received_by)}</div>
-            <div><label>Their phone</label>${inp('d-recv-phone', r.report_received_phone)}</div>
+            <div><label>Their phone</label>${inp('d-recv-phone', r.report_received_phone, 'tel')}</div>
           </div>
         </div>
 
@@ -177,7 +177,7 @@
           <label>Address</label>${inp('d-inj-addr', r.injured_address)}
           <div class="grid cols-3">
             <div><label>Date of birth</label>${inp('d-inj-dob', r.injured_dob, 'date')}</div>
-            <div><label>Phone</label>${inp('d-inj-phone', r.injured_phone)}</div>
+            <div><label>Phone</label>${inp('d-inj-phone', r.injured_phone, 'tel')}</div>
             <div><label>Employer</label>${inp('d-inj-emp', r.injured_employer)}</div>
           </div>
           <label>Nature of injury (eg fracture, burn, sprain, foreign body in eye)</label>${inp('d-injury', r.injury_nature)}
@@ -254,6 +254,11 @@
 
       document.getElementById('d-save').addEventListener('click', async () => {
         const msg = document.getElementById('d-msg');
+        const btn = document.getElementById('d-save');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const updates = {
           nature: g('d-nature'), incident_date: g('d-date') || hrToday(), incident_time: gn('d-time'), title: gn('d-title'),
           project_id: job.value.trim() ? projectId : null, site_location: gn('d-location'),
@@ -270,6 +275,10 @@
         await saveIncident(updates, msg);
         if (inc.project_id !== (project && project.id)) project = inc.project_id ? (await supabaseClient.from('projects').select('id, name, job_number, client_address').eq('id', inc.project_id).maybeSingle()).data : null;
         renderHeader();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 
@@ -364,11 +373,20 @@
           what_happened: v('#pe-what') || null, finding: v('#pe-finding') || null, procedure_breached: v('#pe-proc') || null, at_fault: o.querySelector('#pe-fault').checked,
         };
         if (!payload.name) { o.querySelector('#pe-msg').innerHTML = '<div class="error-box">Enter a name.</div>'; return; }
+        const btn = o.querySelector('#pe-save');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const q = existing ? supabaseClient.from('incident_people').update(payload).eq('id', existing.id).select().single() : supabaseClient.from('incident_people').insert(payload).select().single();
         const { data, error } = await q;
         if (error) { o.querySelector('#pe-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         people = existing ? people.map(x => (x.id === data.id ? data : x)) : [...people, data];
         o.remove(); renderPeople(); renderHeader();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 
@@ -384,6 +402,11 @@
       const pad = createSignaturePad(o.querySelector('#st-pad'), 120);
       o.querySelector('#st-cancel').addEventListener('click', () => o.remove());
       o.querySelector('#st-save').addEventListener('click', async () => {
+        const btn = o.querySelector('#st-save');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const text = o.querySelector('#st-text').value.trim();
         const changed = text !== (p.statement || '');
         const updates = { statement: text || null };
@@ -392,6 +415,10 @@
         const { data, error } = await supabaseClient.from('incident_people').update(updates).eq('id', p.id).select().single();
         if (error) { alert(error.message); return; }
         people = people.map(x => (x.id === data.id ? data : x)); o.remove(); renderPeople();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 
@@ -523,9 +550,18 @@
       document.getElementById('a-add').addEventListener('click', async () => {
         const description = g('a-desc');
         if (!description) return;
+        const btn = document.getElementById('a-add');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Adding...';
+        try {
         const { data, error } = await supabaseClient.from('incident_actions').insert({ incident_id: incidentId, description, assigned_to: gn('a-who'), due_date: gn('a-due'), notes: gn('a-notes') }).select().single();
         if (error) { alert(error.message); return; }
         actions.push(data); renderActions(); renderHeader();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 

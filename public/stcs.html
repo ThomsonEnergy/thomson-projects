@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .stc-filters { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
   .stc-filters button { font-size:12px; padding:5px 10px; }
@@ -77,8 +77,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script src="/js/formbay-advice-parser.js"></script>
   <script>
     let settings = { stc_expected_sale_price: 39.25, stc_fee_per_certificate: 1 };
@@ -184,7 +184,7 @@
                 <td class="num" data-label="Sale total">${money(a.total)}</td>
                 <td class="num" data-label="Fees">${money(a.fee_total)}</td>
                 <td class="num" data-label="Received">${money(a.amount_received)}</td>
-                <td data-label="Jobs">${matched} of ${lines.length} matched${matched < lines.length ? ' <span class="badge draft" style="color:var(--red);">check</span>' : ''}</td>
+                <td data-label="Jobs">${matched} of ${lines.length} matched${matched < lines.length ? ' <span class="badge red">check</span>' : ''}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -264,10 +264,10 @@
             const received = (a ? a.total : 0) - (f ? f.fee_total : 0);
             return `<div style="margin-bottom:14px;">
               <p style="margin:0 0 6px;"><strong>Payment ${escapeHtml(g.reference)}</strong>${a?.date ? ` - ${new Date(a.date + 'T00:00:00').toLocaleDateString('en-AU')}` : ''}
-                ${already ? ' <span class="badge draft" style="color:var(--red);">already imported, will be skipped</span>' : ''}
-                ${!a ? ' <span class="badge draft" style="color:var(--red);">payment advice missing</span>' : ''}
+                ${already ? ' <span class="badge amber">already imported, will be skipped</span>' : ''}
+                ${!a ? ' <span class="badge red">payment advice missing</span>' : ''}
                 ${!f ? ' <span class="badge draft">fee invoice missing (fees taken as $0)</span>' : ''}
-                ${!unitsOk ? ' <span class="badge draft" style="color:var(--red);">fee units differ from advice</span>' : ''}</p>
+                ${!unitsOk ? ' <span class="badge red">fee units differ from advice</span>' : ''}</p>
               ${a ? `<p class="subtitle" style="margin:0 0 6px;">${a.units} STCs, sale ${money(a.net_total)}${a.gst_on_units ? ` + GST ${money(a.gst_on_units)}` : ''} = ${money(a.total)}; fees ${f ? `${money(f.fee_ex_gst)} + GST ${money(f.fee_gst)} = ${money(f.fee_total)}` : '-'}; received ${money(received)}</p>
               <table class="responsive-stack">
                 <thead><tr><th>Formbay job</th><th class="num">STCs</th><th class="num">Price</th><th class="num">Total</th><th>Our job</th></tr></thead>

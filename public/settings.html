@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Settings - Thomson Energy</title>
+<title>Settings - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -55,6 +55,7 @@
         <button class="settings-tab" data-panel="numbering" data-admin-only="1">Numbering</button>
         <button class="settings-tab" data-panel="quoting" data-pricing-only="1">Quoting Defaults</button>
         <button class="settings-tab" data-panel="billable-rates" data-pricing-only="1">Billable Rates</button>
+        <button class="settings-tab" data-panel="auto-replies">Email Agent</button>
         <button class="settings-tab" data-panel="inspections" data-pricing-only="1">Inspection Checklists</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
         <button class="settings-tab" data-panel="terms" data-admin-only="1">Payment Terms &amp; T&amp;Cs</button>
@@ -101,7 +102,7 @@
               </div>
               <div>
                 <label>Phone</label>
-                <input id="phone" placeholder="0455 415 464" />
+                <input id="phone" type="tel" autocomplete="tel" placeholder="0455 415 464" />
               </div>
             </div>
             <div class="grid cols-3">
@@ -278,7 +279,7 @@
               </div>
             </div>
             <label>Mobile number</label>
-            <input id="my-profile-mobile" />
+            <input id="my-profile-mobile" type="tel" autocomplete="tel" />
             <label>Qualifications line (optional)</label>
             <input id="my-profile-signature" placeholder="e.g. Nominated Supervisor (NSW) | QBP &amp; QTP (QLD) | Electrical Nominee (WA)" />
             <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
@@ -307,11 +308,24 @@
           </div>
 
           <div class="card">
+            <h2>Your leave</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Balances from Xero Payroll, refreshed each day. Request leave on the Timesheets page.</p>
+            <div id="my-leave-block"><p class="subtitle">Loading...</p></div>
+          </div>
+
+          <div class="card">
             <h2>My licences</h2>
             <div id="my-licence-rows"></div>
             <button type="button" class="secondary" id="my-add-licence-btn" style="font-size:12px; padding:6px 10px;">+ Add licence</button>
             <button id="my-licences-save-btn" style="margin-top:14px; display:block;">Save licences</button>
             <div id="my-licences-msg"></div>
+          </div>
+
+          <div class="card" id="my-consent-card" style="display:none;">
+            <h2>AI and location</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Your choice, any time. Changing it has no effect on your job or pay.</p>
+            <div id="my-consent-list"></div>
+            <div id="my-consent-msg"></div>
           </div>
 
           <div class="card">
@@ -381,10 +395,61 @@
                 <label>Default deposit %</label>
                 <input id="default-deposit" type="number" step="0.1" placeholder="10" />
               </div>
+              <div>
+                <label>Quotes and variations valid for (days)</label>
+                <input id="quote-valid-days" type="number" step="1" min="1" placeholder="30" />
+              </div>
             </div>
+            <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400;">
+              <input type="checkbox" id="auto-decline-expired" style="width:auto;" /> Auto decline expired quotes and variations
+            </label>
+            <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Checked just after midnight. A quote or variation still waiting past its valid until date is declined as Expired, and whoever made it is told (they get a reminder 3 days before). Untick to keep the date and reminder but never decline. Sales can extend any one, even after it expired, and each can be set to "Don't auto decline this one".</p>
           </div>
           <button id="save-quoting-btn">Save quoting defaults</button>
           <div id="save-quoting-msg"></div>
+        </div>
+
+        <!-- Email agent: writing style (mailboxes.writing_style, migration 20261103020000) and auto replies (company_settings.routing_reply_mode, migration 20261103010000) -->
+        <div class="settings-panel" id="panel-auto-replies">
+          <div class="card">
+            <h2>Writing style</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Postie drafts replies in the <b>company voice</b> (one person's learned style, set by an admin) unless a mailbox is switched to its own. <b>Learn</b> reads the replies already sent from a mailbox (the ones TEops holds), writes a short guide and keeps up to 8 real replies as examples. Edit the guide any time ("never say reach out", "always give a price range"): Learn again keeps your edits and refreshes the examples, and it refreshes by itself every 30 days. Other mailboxes using the company voice get the guide and the writer's own words from the examples, never the emails they were answering. Drafts answer what was asked instead of repeating the sender's email back.</p>
+            <div id="company-voice-box" style="margin-bottom:6px;"></div>
+            <div id="writing-style-list"><p class="subtitle">Loading...</p></div>
+          </div>
+          <!-- Labels made by the agent (mailboxes.auto_labels, migration 20261105010000) -->
+          <div class="card">
+            <h2>Labels made by Postie</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Labels group the emails of a matter that is not a job (a supplier dispute, a licence application, a council matter). Normally Postie only <b>suggests</b> a new label on the conversation and a person adds it. With this on, Postie makes the label itself (marked AI in the Inbox sidebar), files the conversation under it and checks the last 60 days of that inbox for others that belong. It reuses an existing label when the matter is already there, so you do not end up with near duplicates. Rename, merge or delete any label from the Inbox. Job emails are never labelled: they are tagged to the job.</p>
+            <div id="auto-labels-list"><p class="subtitle">Loading...</p></div>
+          </div>
+          <!-- Spell check and Polish (profiles.spellcheck_mode, migration 20261103030000, js/writing-help.js) -->
+          <div class="card">
+            <h2>Spell check and Polish</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Works in every multi-line text box in TEops (notes, replies, briefs, chat). Names, addresses, amounts and serial numbers are never touched. <b>Polish</b> shows under a box with 5 or more words while you type in it, and rewrites the sentences in the company voice (or your own, if your inbox is set to it), keeping every fact. Every change has an Undo; undoing a spelling fix tells it to leave those words alone from then on.</p>
+            <label>Spell check</label>
+            <select id="spellcheck-mode">
+              <option value="auto">Automatic (fixes spelling when you pause or leave the box)</option>
+              <option value="button">Only when I press Fix spelling</option>
+              <option value="off">Off (no Fix spelling or Polish buttons)</option>
+            </select>
+            <div style="margin-top:10px;"><button type="button" id="save-spellcheck-btn">Save</button> <span id="save-spellcheck-msg" class="subtitle" style="font-size:12px;"></span></div>
+          </div>
+          <div class="card" data-pricing-only="1">
+            <h2>Email auto replies</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Two replies that point people to the right mailbox:</p>
+            <p class="subtitle" style="margin-bottom:6px;"><b>Postie (sales@):</b> a supplier emails an invoice to sales@. The invoice is passed to invoice@ for reading, and the reply asks them to send invoices to invoice@ next time with our PO number on it.</p>
+            <p class="subtitle" style="margin-bottom:10px;"><b>Tally (invoice@):</b> an email to invoice@ with no invoice, statement, credit note or price list. The reply asks them to use sales@.</p>
+            <label>Replies</label>
+            <select id="routing-reply-mode">
+              <option value="draft">Drafts (in sales@ Gmail Drafts, a person sends them)</option>
+              <option value="send">Send automatically</option>
+              <option value="off">Off (also stops passing sales@ invoices to invoice@)</option>
+            </select>
+            <p class="subtitle" style="margin:6px 0 0; font-size:12px;">One reply per conversation, and no more than one per sender every 14 days. Never to our own addresses, no-reply senders or automatic mail.</p>
+          </div>
+          <button id="save-auto-replies-btn" data-pricing-only="1">Save auto replies</button>
+          <div id="save-auto-replies-msg"></div>
         </div>
 
         <!-- Billable Rates -->
@@ -405,6 +470,13 @@
               <button id="add-tier-btn">Add tier</button>
             </div>
             <div id="rate-tiers-msg"></div>
+          </div>
+          <div class="card">
+            <h2>Schedule of Rates review</h2>
+            <p class="subtitle" style="margin-bottom:10px;">These rates print on the <a href="/rates.html" target="_blank">Schedule of Rates</a> (Documents page and every estimate) as "current as at" this date. Changing a rate above sets it to today. Six months on, the Ops manager adds a "Needs me" reminder to review them.</p>
+            <div id="rates-review-status" class="subtitle"></div>
+            <button type="button" id="rates-reviewed-btn" class="secondary" style="margin-top:10px;">Rates checked, still correct today</button>
+            <div id="rates-review-msg"></div>
           </div>
         </div>
 
@@ -652,6 +724,16 @@
             <input id="key-abr-guid" type="password" placeholder="Free from abr.business.gov.au/tools/webservices" autocomplete="off" />
             <p class="subtitle" style="margin:2px 0 10px;">Powers the super fund search during onboarding, so nobody has to type an ABN and hope it's right. Register for a free GUID at <a href="https://abr.business.gov.au/Tools/WebServices" target="_blank" rel="noopener" class="link-quiet">abr.business.gov.au</a> - it's emailed to you instantly.</p>
 
+            <label>Apple push Key ID (TEgo iPhone app) <span class="key-status" data-key="apns_key_id"></span></label>
+            <input id="key-apns-key-id" type="password" placeholder="10 characters, Apple Developer > Keys" autocomplete="off" />
+
+            <label>Apple Team ID <span class="key-status" data-key="apns_team_id"></span></label>
+            <input id="key-apns-team-id" type="password" placeholder="10 characters, Apple Developer > Membership" autocomplete="off" />
+
+            <label>Apple push key (.p8 file) <span class="key-status" data-key="apns_private_key"></span></label>
+            <textarea id="key-apns-private-key" rows="3" placeholder="Open the AuthKey_....p8 file in Notepad and paste all of it, including the BEGIN and END lines" autocomplete="off" spellcheck="false"></textarea>
+            <p class="subtitle" style="margin:2px 0 10px;">Sends phone notifications to the TEgo iPhone app. Steps are in docs/IOS_APP.md.</p>
+
             <button id="save-keys-btn" style="margin-top:14px;">Save keys</button>
           </div>
 
@@ -683,7 +765,8 @@
             <p class="subtitle" style="margin-bottom:10px;">
               Save the Client ID/Secret above first (from a Google Cloud OAuth client - see docs/archive/SETUP.md for the one-time
               setup steps), then connect sales@thomsonenergy.com.au here. Once connected, every active staff member
-              can read and send from that mailbox in the Inbox tab.
+              can read and send from that mailbox in the Inbox tab (Sales inbox). Each person connects their own Gmail
+              themselves in Inbox &gt; My inbox.
             </p>
             <p>Status: <span id="google-connection-status">Checking...</span></p>
             <button type="button" class="secondary" id="google-connect-btn">Connect sales@thomsonenergy.com.au</button>
@@ -720,10 +803,11 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let portfolioPhotos = [];
+    let xeroMappingLoaded = false;
     let logoUrl = '';
     let coverPhotoUrl = '';
 
@@ -734,6 +818,8 @@
         document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
         document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+        // Xero Mapping makes a live Xero call: only when the tab is opened
+        if (btn.dataset.panel === 'xero' && !xeroMappingLoaded) { xeroMappingLoaded = true; loadXeroMapping(); }
       });
     });
 
@@ -799,6 +885,9 @@
       document.getElementById('google-review-url').value = data.google_review_url || '';
       document.getElementById('default-markup').value = data.default_markup_percent ?? 45;
       document.getElementById('default-deposit').value = data.default_deposit_percent ?? 10;
+      document.getElementById('quote-valid-days').value = data.quote_valid_days ?? 30;
+      document.getElementById('auto-decline-expired').checked = data.auto_decline_expired !== false;
+      document.getElementById('routing-reply-mode').value = data.routing_reply_mode || 'draft';
       document.getElementById('next-quote-number').value = data.next_quote_number ?? 1000;
       document.getElementById('next-job-number').value = data.next_job_number ?? 7000;
       document.getElementById('next-invoice-number').value = data.next_invoice_number ?? 3000;
@@ -944,6 +1033,8 @@
         .update({
           default_markup_percent: parseFloat(document.getElementById('default-markup').value) || 45,
           default_deposit_percent: parseFloat(document.getElementById('default-deposit').value) || 10,
+          quote_valid_days: Math.max(1, parseInt(document.getElementById('quote-valid-days').value, 10) || 30),
+          auto_decline_expired: document.getElementById('auto-decline-expired').checked,
         })
         .eq('id', 1);
       msg.innerHTML = error
@@ -951,13 +1042,210 @@
         : `<div class="success-box">Saved.</div>`;
     });
 
+    document.getElementById('save-auto-replies-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('save-auto-replies-msg');
+      const { error } = await supabaseClient
+        .from('company_settings')
+        .update({ routing_reply_mode: document.getElementById('routing-reply-mode').value })
+        .eq('id', 1);
+      msg.innerHTML = error
+        ? `<div class="error-box">${escapeHtml(error.message)}</div>`
+        : `<div class="success-box">Saved.</div>`;
+    });
+
+    // Writing style per mailbox (mailboxes.writing_style, migration 20261103020000). sales@ for
+    // pricing roles, plus the person's own My inbox. Learn runs in the mailbox worker, so poll.
+    const WS_COLS = 'id, address, kind, owner_id, writing_style, writing_style_examples, writing_style_learned_at, writing_style_edited_at, writing_style_requested_at, writing_style_error, writing_style_source, auto_labels';
+    // The company voice (company_settings.writing_style_mailbox_id, migration 20261103030000): Admin picks it.
+    async function loadCompanyVoice() {
+      const el = document.getElementById('company-voice-box');
+      let info;
+      try { info = await wsCall(null, 'info'); } catch (err) { el.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; return null; }
+      const c = info.company;
+      const line = c
+        ? `<b>Company voice:</b> ${escapeHtml(c.address)}${c.learned ? (c.learned_at ? `, learned ${escapeHtml(wsWhen(c.learned_at))}` : '') : ' <span style="color:var(--red);">(not learned yet: press Learn on that mailbox. Until then drafts use the standard rules)</span>'}`
+        : '<b>Company voice:</b> none set. Drafts use each mailbox\'s own style, or the standard rules.';
+      let pick = '';
+      if (info.isAdmin) {
+        const opts = (info.options || []).slice();
+        if (c && !opts.some((o) => o.id === c.id)) opts.unshift({ id: c.id, address: c.address });
+        pick = `<div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:6px;">
+          <select id="company-voice-select" style="max-width:340px;">
+            <option value="">None</option>
+            ${opts.map((o) => `<option value="${escapeHtml(o.id)}" ${c && c.id === o.id ? 'selected' : ''}>${escapeHtml(o.address)}</option>`).join('')}
+          </select>
+          <button type="button" class="secondary" id="company-voice-save">Set company voice</button>
+          <span id="company-voice-msg" class="subtitle" style="font-size:12px;"></span>
+        </div>`;
+      }
+      el.innerHTML = `<p style="margin:0;">${line}</p>${pick}`;
+      const btn = document.getElementById('company-voice-save');
+      if (btn) btn.addEventListener('click', async () => {
+        const msg = document.getElementById('company-voice-msg');
+        try {
+          await wsCall(null, 'company_voice', null, { mailbox_id: document.getElementById('company-voice-select').value || null });
+          msg.textContent = 'Saved.';
+          loadWritingStyles();
+        } catch (err) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+      });
+      return info;
+    }
+    let wsPollTimer = null;
+    async function wsCall(mailbox, action, text, extra) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/learn-writing-style', {
+        method: 'POST', headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mailbox, action, text, ...(extra || {}) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+      return data;
+    }
+    const wsWhen = (iso) => new Date(iso).toLocaleString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+    async function loadWritingStyles() {
+      const listEl = document.getElementById('writing-style-list');
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const { data: rows, error } = await supabaseClient.from('mailboxes').select(WS_COLS).not('connected_at', 'is', null).order('kind', { ascending: false });
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      const info = await loadCompanyVoice();
+      const companyId = info && info.company ? info.company.id : null;
+      const mine = (rows || []).filter((m) => m.kind === 'personal' && m.owner_id === session.user.id);
+      const shared = isPricingRoleLocal(myRole) ? (rows || []).filter((m) => m.kind === 'shared') : [];
+      const boxes = [...mine, ...shared];
+      if (!boxes.length) {
+        listEl.innerHTML = '<p class="subtitle">Connect your Gmail in Inbox &gt; My inbox first, then come back here.</p>';
+        return;
+      }
+      renderAutoLabels(boxes);
+      let anyLearning = false;
+      listEl.innerHTML = boxes.map((m) => {
+        const key = m.kind === 'shared' ? 'sales' : 'mine';
+        const learning = !!m.writing_style_requested_at;
+        if (learning) anyLearning = true;
+        const examples = Array.isArray(m.writing_style_examples) ? m.writing_style_examples : [];
+        let status = '';
+        if (learning) status = '<span style="color:var(--muted);">Reading sent replies, this takes a minute or two...</span>';
+        else if (m.writing_style_error) status = `<span style="color:var(--red);">${escapeHtml(m.writing_style_error)}</span>`;
+        else if (m.writing_style_learned_at) status = `Learned ${escapeHtml(wsWhen(m.writing_style_learned_at))}${m.writing_style_edited_at ? `, edited ${escapeHtml(wsWhen(m.writing_style_edited_at))}` : ''}. Refreshes by itself every 30 days.`;
+        else status = 'Not learned yet. Drafts use the standard rules only.';
+        return `<div class="ws-box" data-mailbox="${key}" style="margin-top:14px; padding:12px; background:var(--surface-2); border-radius:8px;">
+          <label style="margin-top:0;">${escapeHtml(m.address)}${m.kind === 'shared' ? ' (shared, written as the office team)' : ' (your own replies)'}</label>
+          ${m.id === companyId
+            ? '<p class="subtitle" style="margin:0 0 8px; font-size:12px;">This is the company voice: every mailbox set to Company voice drafts like this, and Polish uses it.</p>'
+            : `<div style="display:flex; gap:16px; flex-wrap:wrap; margin:0 0 8px; font-size:13px;">
+                <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ws-src-${key}" class="ws-src" value="company" style="width:auto;" ${m.writing_style_source !== 'own' ? 'checked' : ''} /> Draft in the company voice</label>
+                <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ws-src-${key}" class="ws-src" value="own" style="width:auto;" ${m.writing_style_source === 'own' ? 'checked' : ''} /> Use this mailbox's own style (below)</label>
+              </div>${m.writing_style_source === 'own' && !String(m.writing_style || '').trim() ? '<p class="subtitle" style="margin:0 0 8px; font-size:12px; color:var(--red);">No style learned yet, so drafts still use the company voice. Press Learn from sent mail.</p>' : ''}`}
+          <textarea class="ws-text" rows="10" style="width:100%; font-size:13px;" ${learning ? 'disabled' : ''} placeholder="Press Learn from sent mail, or write the guide yourself: how you greet, how long you write, how you say no, phrases you use, things you never say.">${escapeHtml(m.writing_style || '')}</textarea>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;">
+            <button type="button" class="ws-learn" ${learning ? 'disabled' : ''}>${m.writing_style_learned_at ? 'Learn again' : 'Learn from sent mail'}</button>
+            <button type="button" class="secondary ws-save" ${learning ? 'disabled' : ''}>Save</button>
+            <span class="ws-status subtitle" style="font-size:12px;">${status}</span>
+          </div>
+          ${examples.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer; font-size:13px;">${examples.length} real repl${examples.length === 1 ? 'y' : 'ies'} kept as examples</summary>
+            ${examples.map((e) => `<div style="margin-top:10px; font-size:12px; white-space:pre-wrap; border-left:3px solid var(--border); padding-left:10px;"><b>${escapeHtml(e.subject || '(no subject)')}</b>${e.they_said ? `\n<span style="color:var(--muted);">They wrote: ${escapeHtml(e.they_said.slice(0, 300))}${e.they_said.length > 300 ? '...' : ''}</span>` : ''}\n${escapeHtml(e.we_replied || '')}</div>`).join('')}
+          </details>` : ''}
+        </div>`;
+      }).join('');
+      listEl.querySelectorAll('.ws-box').forEach((box) => {
+        const key = box.dataset.mailbox;
+        const status = box.querySelector('.ws-status');
+        box.querySelector('.ws-learn').addEventListener('click', async () => {
+          const btn = box.querySelector('.ws-learn');
+          btn.disabled = true;
+          try {
+            await wsCall(key, 'learn');
+            await loadWritingStyles();
+          } catch (err) { btn.disabled = false; status.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+        });
+        box.querySelectorAll('.ws-src').forEach((r) => r.addEventListener('change', async () => {
+          try {
+            await wsCall(key, 'source', null, { value: r.value });
+            status.textContent = 'Saved.';
+            setTimeout(loadWritingStyles, 800);
+          } catch (err) { status.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+        }));
+        box.querySelector('.ws-save').addEventListener('click', async () => {
+          try {
+            await wsCall(key, 'save', box.querySelector('.ws-text').value);
+            status.textContent = 'Saved.';
+            setTimeout(loadWritingStyles, 1500);
+          } catch (err) { status.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+        });
+      });
+      clearTimeout(wsPollTimer);
+      if (anyLearning) wsPollTimer = setTimeout(loadWritingStyles, 4000);
+    }
+
+    // Let Postie make labels itself, per mailbox (mailboxes.auto_labels, email-actions set_auto_labels)
+    function renderAutoLabels(boxes) {
+      const el = document.getElementById('auto-labels-list');
+      if (!el) return;
+      el.innerHTML = boxes.map((m) => `<label style="display:flex; align-items:center; gap:8px; margin:6px 0; font-weight:400;">
+          <input type="checkbox" class="auto-labels" data-id="${escapeHtml(m.id)}" style="width:auto;" ${m.auto_labels ? 'checked' : ''} />
+          <span>${escapeHtml(m.address)}${m.kind === 'shared' ? ' (shared labels, the whole team sees them)' : ' (your own labels)'}: let Postie create labels</span>
+        </label>`).join('') + '<span id="auto-labels-msg" class="subtitle" style="font-size:12px;"></span>';
+      el.querySelectorAll('.auto-labels').forEach((box) => box.addEventListener('change', async () => {
+        const msg = document.getElementById('auto-labels-msg');
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const res = await fetch('/.netlify/functions/email-actions', {
+            method: 'POST', headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'set_auto_labels', mailbox_id: box.dataset.id, on: box.checked }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+          msg.textContent = box.checked ? 'On. New labels Postie makes show in the Inbox sidebar with an AI tag.' : 'Off. Postie suggests labels and you confirm them.';
+        } catch (err) { box.checked = !box.checked; msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; }
+      }));
+    }
+
+    // Spell check and Polish setting (profiles.spellcheck_mode, migration 20261103030000)
+    async function loadSpellcheckMode() {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const { data } = await supabaseClient.from('profiles').select('spellcheck_mode').eq('id', session.user.id).maybeSingle();
+      document.getElementById('spellcheck-mode').value = (data && data.spellcheck_mode) || 'auto';
+    }
+    document.getElementById('save-spellcheck-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('save-spellcheck-msg');
+      const value = document.getElementById('spellcheck-mode').value;
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const { error } = await supabaseClient.from('profiles').update({ spellcheck_mode: value }).eq('id', session.user.id);
+      if (error) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(error.message)}</span>`; return; }
+      if (window.teWriting) window.teWriting.setMode(value);
+      msg.textContent = 'Saved.';
+    });
+
+    // Schedule of Rates review date (company_settings.rates_reviewed_on, migration 20261022000000)
+    const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+    async function loadRatesReview() {
+      const el = document.getElementById('rates-review-status');
+      const { data } = await supabaseClient.from('company_settings').select('rates_reviewed_on').eq('id', 1).maybeSingle();
+      const reviewed = data?.rates_reviewed_on;
+      if (!reviewed) { el.textContent = 'No review date yet.'; return; }
+      const due = new Date(reviewed + 'T00:00:00'); due.setMonth(due.getMonth() + 6);
+      const fmt = (d) => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+      el.innerHTML = `Current as at <b>${fmt(new Date(reviewed + 'T00:00:00'))}</b>. ${due <= new Date() ? '<span style="color:var(--red); font-weight:600;">Review overdue</span>' : 'Next review'}: ${fmt(due)}.`;
+    }
+    async function markRatesReviewed() {
+      const { error } = await supabaseClient.from('company_settings').update({ rates_reviewed_on: sydneyToday() }).eq('id', 1);
+      if (error) throw error;
+      await loadRatesReview();
+    }
+    document.getElementById('rates-reviewed-btn').addEventListener('click', async () => {
+      const msg = document.getElementById('rates-review-msg');
+      try { await markRatesReviewed(); msg.innerHTML = `<div class="success-box">Saved. The reminder clears at the next 5am digest.</div>`; }
+      catch (err) { msg.innerHTML = `<div class="error-box">${err.message}</div>`; }
+    });
+
     async function loadRateTiers() {
+      loadRatesReview();
       const listEl = document.getElementById('rate-tiers-list');
       const { data, error } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
 
       const inviteTierSelect = document.getElementById('invite-rate-tier');
       if (inviteTierSelect) {
-        inviteTierSelect.innerHTML = `<option value="">-- None --</option>${(data || []).map(t => `<option value="${t.id}">${t.name}</option>`).join('')}`;
+        inviteTierSelect.innerHTML = `<option value="">-- None --</option>${(data || []).map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}`;
       }
 
       if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
@@ -969,7 +1257,7 @@
           <tbody>
             ${data.map(t => `
               <tr>
-                <td><input class="tier-name-input" data-id="${t.id}" value="${t.name}" /></td>
+                <td><input class="tier-name-input" data-id="${t.id}" value="${escapeHtml(t.name)}" /></td>
                 <td class="num"><input class="tier-rate-input" data-id="${t.id}" type="number" step="0.01" value="${t.sell_rate}" style="text-align:right;" /></td>
                 <td><button class="secondary delete-tier-btn" data-id="${t.id}" style="font-size:12px; padding:6px 10px;">Delete</button></td>
               </tr>`).join('')}
@@ -983,6 +1271,7 @@
           const sell_rate = parseFloat(listEl.querySelector(`.tier-rate-input[data-id="${id}"]`).value) || 0;
           const { error } = await supabaseClient.from('billable_rate_tiers').update({ name, sell_rate }).eq('id', id);
           if (error) alert('Could not save: ' + error.message);
+          else { showToast('Saved'); markRatesReviewed().catch(() => {}); }
         });
       });
       listEl.querySelectorAll('.delete-tier-btn').forEach(btn => {
@@ -1004,6 +1293,7 @@
       const nextSort = (existing?.[0]?.sort_order || 0) + 1;
       const { error } = await supabaseClient.from('billable_rate_tiers').insert({ name, sell_rate, sort_order: nextSort });
       if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      markRatesReviewed().catch(() => {});
       document.getElementById('new-tier-name').value = '';
       document.getElementById('new-tier-rate').value = '';
       msg.innerHTML = '';
@@ -1054,7 +1344,7 @@
         <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
             <div>
-              <strong>${t.name}</strong> ${!t.active ? '<span class="badge draft">Inactive</span>' : ''}
+              <strong>${escapeHtml(t.name)}</strong> ${!t.active ? '<span class="badge draft">Inactive</span>' : ''}
               <span class="subtitle" style="margin-left:6px;">${items.length} item${items.length === 1 ? '' : 's'}</span>
             </div>
             <div>
@@ -1070,10 +1360,10 @@
                 return `
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:8px 0; ${i > 0 ? 'border-top:1px solid var(--border);' : ''}">
                   <div>
-                    <span class="badge ${it.item_type === 'photo' ? 'sent' : 'draft'}">${it.item_type === 'photo' ? 'Photo' : 'Yes/No'}</span>
-                    <strong style="margin-left:6px;">${it.label}</strong> ${!it.required ? '<span class="subtitle">(optional)</span>' : ''}
-                    ${it.description ? `<p class="subtitle" style="margin:4px 0 0;">${it.description}</p>` : ''}
-                    ${parent ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Shown when "${parent.label}" = ${it.show_when_parent_answer ? 'Yes' : 'No'}</p>` : ''}
+                    <span class="badge ${it.item_type === 'photo' ? 'info' : 'draft'}">${it.item_type === 'photo' ? 'Photo' : 'Yes/No'}</span>
+                    <strong style="margin-left:6px;">${escapeHtml(it.label)}</strong> ${!it.required ? '<span class="subtitle">(optional)</span>' : ''}
+                    ${it.description ? `<p class="subtitle" style="margin:4px 0 0;">${escapeHtml(it.description)}</p>` : ''}
+                    ${parent ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Shown when "${escapeHtml(parent.label)}" = ${it.show_when_parent_answer ? 'Yes' : 'No'}</p>` : ''}
                   </div>
                   <div style="display:flex; gap:4px; flex-shrink:0;">
                     <button type="button" class="secondary move-item-btn" data-id="${it.id}" data-dir="up" style="font-size:11px; padding:4px 8px;" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
@@ -1098,8 +1388,8 @@
                     <select class="new-item-parent" data-template="${t.id}">
                       <option value="">Always shown</option>
                       ${items.filter(it => it.item_type === 'yes_no').map(it => `
-                        <option value="${it.id}|true">"${it.label}" = Yes</option>
-                        <option value="${it.id}|false">"${it.label}" = No</option>
+                        <option value="${it.id}|true">"${escapeHtml(it.label)}" = Yes</option>
+                        <option value="${it.id}|false">"${escapeHtml(it.label)}" = No</option>
                       `).join('')}
                     </select>
                   </div>
@@ -1340,13 +1630,15 @@
 
     // --- My Profile (self-service, every role) ---
     let myProfileUserId = null;
+    let myLicenceIds = [];
 
     function myLicenceRowHtml(l) {
       return `
-        <div class="my-licence-row" data-id="${l.id || ''}" data-file-path="${l.file_path || ''}" data-file-name="${l.file_name || ''}" style="margin-bottom:12px; padding:10px; background:var(--surface-2); border-radius:8px;">
+        <div class="my-licence-row" data-id="${escapeHtml(l.id || '')}" data-file-path="${escapeHtml(l.file_path || '')}" data-file-name="${escapeHtml(l.file_name || '')}" style="margin-bottom:12px; padding:10px; background:var(--surface-2); border-radius:8px;">
+          ${l.update_requested_at ? `<div class="error-box" style="margin:0 0 8px; font-size:13px;">Please update this licence: upload the current one and its expiry date, then Save licences.</div>` : ''}
           <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
-            <input class="my-licence-name" value="${l.licence_name || ''}" placeholder="Licence name" style="flex:2; margin:0;" />
-            <input class="my-licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1; margin:0;" />
+            <input class="my-licence-name" value="${escapeHtml(l.licence_name || '')}" placeholder="Licence name" style="flex:2; margin:0;" />
+            <input class="my-licence-number" value="${escapeHtml(l.licence_number || '')}" placeholder="Number" style="flex:1; margin:0;" />
             <input class="my-licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1; margin:0;" />
             <button type="button" class="secondary remove-my-licence-btn" style="padding:8px 10px;">&times;</button>
           </div>
@@ -1354,6 +1646,7 @@
           <input type="file" class="my-licence-file" accept="image/*,.pdf" style="margin:0;" />
           <button type="button" class="secondary my-licence-view" style="font-size:12px; padding:4px 10px; margin-left:8px; ${l.file_path ? '' : 'display:none;'}">View uploaded file</button>
           <div class="my-licence-scan-msg" style="margin-top:4px;"></div>
+          <textarea class="my-licence-notes" rows="1" placeholder="Notes, e.g. Paid for renewal, waiting on card" style="margin:6px 0 0;">${escapeHtml(l.notes || '')}</textarea>
         </div>`;
     }
     function wireMyLicenceRows() {
@@ -1392,13 +1685,30 @@
       });
     }
 
+    // Leave balances (public.leave_balances, filled from Xero Payroll by sync-leave-balances):
+    // annual, sick and long service hours "as at" the Sydney date of the last sync.
+    function leaveBlockHtml(leave) {
+      if (!leave || !leave.as_at) return '<p class="subtitle" style="margin:0;">Not synced yet.</p>';
+      const hrs = (n) => n == null ? '-' : `${Number(n).toFixed(1)} hrs`;
+      const asAt = new Date(leave.as_at).toLocaleDateString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', year: 'numeric' });
+      return `
+        <div class="grid cols-3">
+          <div class="stat"><div class="label">Annual leave</div><div class="value">${hrs(leave.annual_leave_hours)}</div></div>
+          <div class="stat"><div class="label">Sick leave</div><div class="value">${hrs(leave.sick_leave_hours)}</div></div>
+          ${leave.long_service_hours != null ? `<div class="stat"><div class="label">Long service</div><div class="value">${hrs(leave.long_service_hours)}</div></div>` : ''}
+        </div>
+        <p class="subtitle" style="margin:8px 0 0; font-size:12px;">As at ${escapeHtml(asAt)}</p>`;
+    }
+
     async function loadMyProfile(userId) {
       myProfileUserId = userId;
-      const [{ data: profile }, { data: rates }, { data: licences }] = await Promise.all([
+      const [{ data: profile }, { data: rates }, { data: licences }, { data: leave }] = await Promise.all([
         supabaseClient.from('profiles').select('mobile_number, photo_url, email_signature, email_signature_include_photo').eq('id', userId).single(),
         supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle(),
         supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date'),
+        supabaseClient.from('leave_balances').select('*').eq('profile_id', userId).maybeSingle(),
       ]);
+      document.getElementById('my-leave-block').innerHTML = leaveBlockHtml(leave);
 
       document.getElementById('my-profile-mobile').value = profile?.mobile_number || '';
       document.getElementById('my-profile-signature').value = profile?.email_signature || '';
@@ -1412,11 +1722,56 @@
       document.getElementById('my-rate-2x').textContent = rates?.rate_2x != null ? money(rates.rate_2x) : 'Not set';
       document.getElementById('my-rate-2-5x').textContent = rates?.rate_2_5x != null ? money(rates.rate_2_5x) : 'Not set';
 
+      myLicenceIds = (licences || []).map(l => l.id);
       document.getElementById('my-licence-rows').innerHTML = (licences || []).map(myLicenceRowHtml).join('');
       wireMyLicenceRows();
+      // ?licence=<id>: from an "update your licence" notification
+      const askedLicence = new URLSearchParams(location.search).get('licence');
+      const askedRow = askedLicence && [...document.querySelectorAll('.my-licence-row')].find(r => r.dataset.id === askedLicence);
+      if (askedRow) { askedRow.style.outline = '2px solid var(--accent)'; askedRow.scrollIntoView({ block: 'center' }); }
 
-      await loadMySignedDocs(userId);
-      await loadMyLetters(userId);
+      await Promise.all([loadMySignedDocs(userId), loadMyLetters(userId), loadMyConsent(userId)]);
+    }
+
+    // AI and location consent (migration 20261018120000). Turning one off
+    // is instant; turning it on means signing the consent form again. The
+    // card only shows once an admin has added a consent form.
+    async function loadMyConsent(userId) {
+      const [{ data: forms }, { data: status, error }] = await Promise.all([
+        supabaseClient.from('onboarding_documents').select('id, consent_type').not('consent_type', 'is', null),
+        supabaseClient.rpc('get_consent_status', { p_profile_id: userId }),
+      ]);
+      if (error || !forms || !forms.length) return;
+      const st = (status && status[0]) || {};
+      const fmt = (d) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      const labels = { ai: 'AI features (chat, voice, email if connected)', location: 'Location tracking (iPhone app)' };
+      document.getElementById('my-consent-card').style.display = '';
+      const listEl = document.getElementById('my-consent-list');
+      listEl.innerHTML = ['ai', 'location'].filter(t => forms.some(f => f.consent_type === t)).map(t => {
+        const on = st[`${t}_consent_at`];
+        const form = forms.find(f => f.consent_type === t);
+        return `
+          <div class="project-list-item">
+            <div>
+              <div class="name">${labels[t]}</div>
+              <div class="meta">${on ? `On since ${fmt(on)}` : 'Off'}</div>
+            </div>
+            ${on
+              ? `<button type="button" class="secondary consent-off-btn" data-type="${t}" style="font-size:12px; padding:6px 10px;">Turn off</button>`
+              : `<button type="button" class="secondary consent-on-btn" data-doc="${form.id}" style="font-size:12px; padding:6px 10px;">Turn on</button>`}
+          </div>`;
+      }).join('');
+      listEl.querySelectorAll('.consent-on-btn').forEach(btn => {
+        btn.addEventListener('click', () => { window.location.href = `/policy-update.html?doc=${btn.dataset.doc}`; });
+      });
+      listEl.querySelectorAll('.consent-off-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Turn this off? It stops straight away.')) return;
+          const { error: wErr } = await supabaseClient.rpc('withdraw_consent', { p_type: btn.dataset.type });
+          if (wErr) { document.getElementById('my-consent-msg').innerHTML = `<div class="error-box">${escapeHtml(wErr.message)}</div>`; return; }
+          await loadMyConsent(userId);
+        });
+      });
     }
 
     // Letters sent to this person from their staff profile (migration 148);
@@ -1484,7 +1839,7 @@
           <h2>${sig.document_title_snapshot}</h2>
           <p class="subtitle" style="margin-bottom:10px;">Signed ${new Date(sig.signed_at).toLocaleString('en-AU')} as ${sig.signed_by_name} - shown exactly as it was at the time, even if the template has since changed.</p>
           <div style="white-space:pre-wrap; line-height:1.6; max-height:320px; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px;">${sig.document_body_snapshot}</div>
-          ${sig.signature_data_url ? `<img src="${sig.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
+          ${/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(sig.signature_data_url || '') ? `<img src="${sig.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
           ${sig.file_path ? `<button type="button" class="secondary" id="download-signed-doc-modal-btn" style="margin-top:10px; display:block; font-size:12px; padding:6px 10px;">View signed PDF (with Fair Work Statement if applicable)</button>` : ''}
           <button type="button" class="secondary" id="close-signed-doc-btn" style="margin-top:14px;">Close</button>
         </div>`;
@@ -1551,24 +1906,20 @@
     document.getElementById('my-licences-save-btn').addEventListener('click', async () => {
       const msg = document.getElementById('my-licences-msg');
       try {
-        // Replace-all, same approach the admin panel uses - simplest way
-        // to handle add/edit/remove in one save given how few licences a
-        // person typically has.
-        await supabaseClient.from('profile_licences').delete().eq('profile_id', myProfileUserId);
-        const newLicences = [...document.querySelectorAll('.my-licence-row')]
+        // Rows keep their id, so notes, update requests and reminders stay with the licence.
+        const rows = [...document.querySelectorAll('.my-licence-row')]
           .map(row => ({
+            id: row.dataset.id || null,
             profile_id: myProfileUserId,
             licence_name: row.querySelector('.my-licence-name').value.trim(),
             licence_number: row.querySelector('.my-licence-number').value.trim() || null,
             expiry_date: row.querySelector('.my-licence-expiry').value || null,
+            notes: row.querySelector('.my-licence-notes').value.trim() || null,
             file_path: row.dataset.filePath || null,
             file_name: row.dataset.fileName || null,
           }))
           .filter(l => l.licence_name);
-        if (newLicences.length) {
-          const { error } = await supabaseClient.from('profile_licences').insert(newLicences);
-          if (error) throw error;
-        }
+        await saveLicenceRows(myLicenceIds, rows);
         msg.innerHTML = `<div class="success-box">Licences saved.</div>`;
         await loadMyProfile(myProfileUserId);
       } catch (err) {
@@ -1694,8 +2045,8 @@
             <tbody>
               ${activeUsers.map(u => `
                 <tr data-id="${u.id}">
-                  <td data-label="Name"><input class="user-name-input" data-id="${u.id}" value="${u.full_name || ''}" placeholder="Full name" style="font-size:13px;" /></td>
-                  <td data-label="Email">${u.email}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
+                  <td data-label="Name"><input class="user-name-input" data-id="${u.id}" value="${escapeHtml(u.full_name || '')}" placeholder="Full name" style="font-size:13px;" /></td>
+                  <td data-label="Email">${escapeHtml(u.email || '')}${u.confirmed ? '' : ' <span class="badge sent" style="margin-left:6px;">Invited</span>'}</td>
                   <td data-label="Role"><select class="role-select" data-id="${u.id}">${roleOptionsHtml(u.role)}</select></td>
                   <td data-label="Xero Employee">${xeroCellHtml(u)}</td>
                   <td data-label="Onboarding">${onboardingCellHtml(u)}</td>
@@ -1704,7 +2055,7 @@
                     <button class="secondary toggle-active-btn" data-id="${u.id}" data-active="${u.active}">
                       ${u.active ? 'Deactivate' : 'Reactivate'}
                     </button>
-                    <button class="secondary set-password-btn" data-id="${u.id}" data-name="${u.full_name || u.email}" style="margin-top:4px;">Set password</button>
+                    <button class="secondary set-password-btn" data-id="${u.id}" data-name="${escapeHtml(u.full_name || u.email || '')}" style="margin-top:4px;">Set password</button>
                     <a class="btn secondary" href="/staff.html?id=${u.id}&edit=1" style="margin-top:4px;">Edit employee</a>
                   </td>
                 </tr>
@@ -1741,6 +2092,7 @@
               .update({ full_name: input.value.trim() || null })
               .eq('id', input.dataset.id);
             if (error) alert('Could not save name: ' + error.message);
+            else showToast('Name saved');
           });
         });
 
@@ -1752,7 +2104,7 @@
               .update({ xero_employee_id: id, xero_payroll_status: id ? 'synced' : 'pending', xero_payroll_error: null })
               .eq('id', input.dataset.id);
             if (error) alert('Could not save Xero Employee ID: ' + error.message);
-            else await loadUsers();
+            else { showToast('Xero Employee ID saved'); await loadUsers(); }
           });
         });
 
@@ -1855,6 +2207,7 @@
               .eq('id', sel.dataset.id);
             sel.disabled = false;
             if (error) alert('Could not update role: ' + error.message);
+            else showToast('Role updated');
           });
         });
 
@@ -1983,15 +2336,26 @@
       return `
         <div class="onboarding-doc-row" data-id="${d.id || ''}" style="padding:14px 0; border-bottom:1px solid var(--border);">
           <div style="display:flex; gap:10px; align-items:center; margin-bottom:8px;">
-            <input class="od-title" value="${d.title || ''}" placeholder="Document title" style="flex:1; font-weight:600;" />
-            ${d.is_contract ? '<span class="badge sent">Contract template</span>' : `
+            <input class="od-title" value="${escapeHtml(d.title || '')}" placeholder="Document title" style="flex:1; font-weight:600;" />
+            ${d.is_contract ? '<span class="badge info">Contract template</span>' : `
+              ${d.id ? `<span class="badge draft od-version" title="Publish new version to make everyone re-sign">v${d.version || 1}</span>` : ''}
               <label style="display:flex; align-items:center; gap:6px; font-weight:400; white-space:nowrap;">
                 <input type="checkbox" class="od-required" style="width:auto;" ${d.is_required !== false ? 'checked' : ''} /> Required
               </label>`}
           </div>
-          <textarea class="od-body" style="min-height:140px;">${d.body || ''}</textarea>
-          <div style="margin-top:8px; display:flex; gap:8px;">
+          ${d.is_contract ? '' : `
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+              <label style="margin:0; white-space:nowrap;">Type</label>
+              <select class="od-consent-type" style="max-width:260px;">
+                <option value="" ${!d.consent_type ? 'selected' : ''}>Policy (read and sign)</option>
+                <option value="ai" ${d.consent_type === 'ai' ? 'selected' : ''}>AI consent (I agree / I don't agree)</option>
+                <option value="location" ${d.consent_type === 'location' ? 'selected' : ''}>Location consent (I agree / I don't agree)</option>
+              </select>
+            </div>`}
+          <textarea class="od-body" style="min-height:140px;">${escapeHtml(d.body || '')}</textarea>
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="secondary od-save-btn" style="font-size:12px; padding:6px 12px;">Save</button>
+            ${!d.is_contract && d.id ? `<button type="button" class="secondary od-publish-btn" style="font-size:12px; padding:6px 12px;">Publish new version (everyone re-signs)</button>` : ''}
             ${d.is_contract ? '' : `<button type="button" class="secondary od-delete-btn" style="font-size:12px; padding:6px 12px;">Delete</button>`}
           </div>
           <div class="od-msg"></div>
@@ -2011,20 +2375,72 @@
     function wireOnboardingDocRows() {
       document.querySelectorAll('.onboarding-doc-row').forEach(row => {
         row.querySelector('.od-save-btn').onclick = async () => {
+          const btn = row.querySelector('.od-save-btn');
           const msg = row.querySelector('.od-msg');
           const title = row.querySelector('.od-title').value.trim();
           const body = row.querySelector('.od-body').value;
           if (!title) { msg.innerHTML = `<div class="error-box">Enter a title.</div>`; return; }
           const requiredCheckbox = row.querySelector('.od-required');
+          const consentSelect = row.querySelector('.od-consent-type');
           const fields = { title, body };
           if (requiredCheckbox) fields.is_required = requiredCheckbox.checked;
-          const { error } = row.dataset.id
-            ? await supabaseClient.from('onboarding_documents').update(fields).eq('id', row.dataset.id)
-            : await supabaseClient.from('onboarding_documents').insert(fields);
-          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-          msg.innerHTML = `<div class="success-box">Saved.</div>`;
-          await loadOnboardingDocs();
+          if (consentSelect) fields.consent_type = consentSelect.value || null;
+          const label = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Saving...';
+          try {
+            if (row.dataset.id) {
+              const { error } = await supabaseClient.from('onboarding_documents').update(fields).eq('id', row.dataset.id);
+              if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+              msg.innerHTML = '';
+              showToast(`Saved: ${title}`);
+            } else {
+              // New document: swap in a fresh row for it (id, v1 badge, Publish button) without reloading the list, so unsaved edits in other rows are kept.
+              const { data, error } = await supabaseClient.from('onboarding_documents').insert(fields).select().single();
+              if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+              row.insertAdjacentHTML('afterend', onboardingDocRowHtml(data));
+              row.remove();
+              wireOnboardingDocRows();
+              showToast(`Added: ${title}`);
+            }
+          } finally {
+            btn.disabled = false;
+            btn.textContent = label;
+          }
         };
+        // Saving fixes typos without bothering anyone. Publishing bumps the
+        // version: everyone who finished onboarding is asked to sign it
+        // again on their next login (policy-update.html).
+        const publishBtn = row.querySelector('.od-publish-btn');
+        if (publishBtn) {
+          publishBtn.onclick = async () => {
+            const msg = row.querySelector('.od-msg');
+            if (!confirm('Save and publish a new version? Everyone will be asked to read and sign it again next time they log in.')) return;
+            const label = publishBtn.textContent;
+            publishBtn.disabled = true;
+            publishBtn.textContent = 'Publishing...';
+            try {
+              const consentSelect = row.querySelector('.od-consent-type');
+              const { data: current, error: readErr } = await supabaseClient.from('onboarding_documents').select('version').eq('id', row.dataset.id).single();
+              if (readErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(readErr.message)}</div>`; return; }
+              const newVersion = (current.version || 1) + 1;
+              const { error } = await supabaseClient.from('onboarding_documents').update({
+                title: row.querySelector('.od-title').value.trim(),
+                body: row.querySelector('.od-body').value,
+                is_required: row.querySelector('.od-required').checked,
+                consent_type: consentSelect ? (consentSelect.value || null) : null,
+                version: newVersion,
+              }).eq('id', row.dataset.id);
+              if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+              const versionEl = row.querySelector('.od-version');
+              if (versionEl) versionEl.textContent = `v${newVersion}`;
+              msg.innerHTML = `<div class="success-box">Published v${newVersion}. Everyone will be asked to read and sign it again on their next login.</div>`;
+            } finally {
+              publishBtn.disabled = false;
+              publishBtn.textContent = label;
+            }
+          };
+        }
         const deleteBtn = row.querySelector('.od-delete-btn');
         if (deleteBtn) {
           deleteBtn.onclick = async () => {
@@ -2065,6 +2481,11 @@
           googleStatusEl.innerHTML = data.status.google_refresh_token
             ? '<span style="color:var(--green); font-weight:600;">Connected</span>'
             : '<span style="color:var(--muted);">Not connected</span>';
+          // labels, drafts, Done and Clean up need the newer gmail.modify permission (Oct 2026)
+          const { data: shared } = await supabaseClient.from('mailboxes').select('scopes').eq('kind', 'shared').maybeSingle();
+          if (data.status.google_refresh_token && !String(shared?.scopes || '').includes('gmail.modify')) {
+            googleStatusEl.innerHTML += ' <span style="color:var(--red);">: press Connect once more to give the new permission (labels, drafts and Done in Gmail, Clean up)</span>';
+          }
         }
       } catch {
         // fails quietly - the fields still work, they just won't show a status
@@ -2090,6 +2511,9 @@
         { key_name: 'airwallex_api_key', key_value: document.getElementById('key-airwallex-api-key').value.trim() },
         { key_name: 'airwallex_webhook_secret', key_value: document.getElementById('key-airwallex-webhook-secret').value.trim() },
         { key_name: 'abr_guid', key_value: document.getElementById('key-abr-guid').value.trim() },
+        { key_name: 'apns_key_id', key_value: document.getElementById('key-apns-key-id').value.trim() },
+        { key_name: 'apns_team_id', key_value: document.getElementById('key-apns-team-id').value.trim() },
+        { key_name: 'apns_private_key', key_value: document.getElementById('key-apns-private-key').value.trim() },
       ].filter(r => r.key_value);
 
       if (!rows.length) {
@@ -2196,7 +2620,7 @@
         try { data = JSON.parse(text); } catch (e) { throw new Error(`The sync did not answer properly (status ${res.status}). Try again in a minute.`); }
         if (!data.ok) throw new Error(data.error || 'The sync failed.');
         msg.innerHTML = data.done === false
-          ? `<div class="success-box">Pulled in ${data.synced} of ${data.total} messages so far. Press Sync now again to bring in the rest.</div>`
+          ? `<div class="success-box">Pulled in ${data.synced} message${data.synced === 1 ? '' : 's'} so far. The rest carries on in the background, or press Sync now again.</div>`
           : `<div class="success-box">Synced - ${data.synced} new message(s).</div>`;
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${err.message}</div>`;
@@ -2233,15 +2657,15 @@
     // it's visible and gently flagged rather than silently vanishing.
     function accountOptionsHtml(accounts, currentCode) {
       const known = accounts.some(a => a.code === currentCode);
-      const currentOption = currentCode && !known ? `<option value="${currentCode}" selected>${currentCode} (current - not found in Xero)</option>` : '';
+      const currentOption = currentCode && !known ? `<option value="${escapeHtml(currentCode)}" selected>${escapeHtml(currentCode)} (current - not found in Xero)</option>` : '';
       return `<option value="">-- Select account --</option>${currentOption}` +
-        accounts.map(a => `<option value="${a.code}" ${a.code === currentCode ? 'selected' : ''}>${a.code} - ${a.name} (${a.type})</option>`).join('');
+        accounts.map(a => `<option value="${escapeHtml(a.code)}" ${a.code === currentCode ? 'selected' : ''}>${escapeHtml(a.code)} - ${escapeHtml(a.name)} (${escapeHtml(a.type)})</option>`).join('');
     }
     function taxTypeOptionsHtml(taxRates, currentTaxType) {
       const known = taxRates.some(t => t.taxType === currentTaxType);
-      const currentOption = currentTaxType && !known ? `<option value="${currentTaxType}" selected>${currentTaxType} (current - not a valid Xero tax type)</option>` : '';
+      const currentOption = currentTaxType && !known ? `<option value="${escapeHtml(currentTaxType)}" selected>${escapeHtml(currentTaxType)} (current - not a valid Xero tax type)</option>` : '';
       return `<option value="">-- Select tax type --</option>${currentOption}` +
-        taxRates.map(t => `<option value="${t.taxType}" ${t.taxType === currentTaxType ? 'selected' : ''}>${t.name}</option>`).join('');
+        taxRates.map(t => `<option value="${escapeHtml(t.taxType)}" ${t.taxType === currentTaxType ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
     }
 
     async function loadXeroMapping() {
@@ -2255,7 +2679,7 @@
       const errorEl = document.getElementById('xm-chart-error');
       if (chart.error) {
         errorEl.style.display = 'block';
-        errorEl.innerHTML = `<span style="color:var(--red);">Couldn't load your chart of accounts from Xero (${chart.error}) - falling back to plain text entry below.</span>`;
+        errorEl.innerHTML = `<span style="color:var(--red);">Couldn't load your chart of accounts from Xero (${escapeHtml(chart.error)}) - falling back to plain text entry below.</span>`;
       } else {
         errorEl.style.display = 'none';
       }
@@ -2275,14 +2699,14 @@
           <tbody>
             ${data.map(m => `
               <tr data-id="${m.id}">
-                <td>${m.label}</td>
-                <td style="color:var(--muted); font-size:12px;">${m.category}</td>
+                <td>${escapeHtml(m.label)}</td>
+                <td style="color:var(--muted); font-size:12px;">${escapeHtml(m.category)}</td>
                 <td>${chart.accounts.length
                   ? `<select class="xm-edit-code">${accountOptionsHtml(chart.accounts, m.xero_account_code)}</select>`
-                  : `<input class="xm-edit-code" value="${m.xero_account_code}" style="width:90px;" />`}</td>
+                  : `<input class="xm-edit-code" value="${escapeHtml(m.xero_account_code || '')}" style="width:90px;" />`}</td>
                 <td>${chart.taxRates.length
                   ? `<select class="xm-edit-tax">${taxTypeOptionsHtml(chart.taxRates, m.xero_tax_type)}</select>`
-                  : `<input class="xm-edit-tax" value="${m.xero_tax_type}" style="width:110px;" />`}</td>
+                  : `<input class="xm-edit-tax" value="${escapeHtml(m.xero_tax_type || '')}" style="width:110px;" />`}</td>
                 <td style="text-align:right;">
                   <button class="secondary xm-save-btn" style="font-size:12px; padding:6px 10px;">Save</button>
                   <button class="secondary danger xm-delete-btn" style="font-size:12px; padding:6px 10px;">Delete</button>
@@ -2294,14 +2718,23 @@
       listEl.querySelectorAll('.xm-save-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const row = btn.closest('tr');
-          const { error: updErr } = await supabaseClient
-            .from('xero_account_mapping')
-            .update({
-              xero_account_code: row.querySelector('.xm-edit-code').value.trim(),
-              xero_tax_type: row.querySelector('.xm-edit-tax').value.trim(),
-            })
-            .eq('id', row.dataset.id);
-          if (updErr) alert(updErr.message);
+          const label = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Saving...';
+          try {
+            const { error: updErr } = await supabaseClient
+              .from('xero_account_mapping')
+              .update({
+                xero_account_code: row.querySelector('.xm-edit-code').value.trim(),
+                xero_tax_type: row.querySelector('.xm-edit-tax').value.trim(),
+              })
+              .eq('id', row.dataset.id);
+            if (updErr) { alert(updErr.message); return; }
+            showToast('Mapping saved');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = label;
+          }
         });
       });
       listEl.querySelectorAll('.xm-delete-btn').forEach(btn => {
@@ -2397,9 +2830,9 @@
         if (data.trackingCategories.length) {
           html += `<p class="subtitle" style="margin-bottom:6px;"><strong style="color:var(--text);">Tracking Categories</strong> - click a category ID to fill it in above:</p>`;
           data.trackingCategories.forEach(tc => {
-            html += `<div class="project-list-item" style="cursor:pointer;" onclick="document.getElementById('xero-tracking-category-id').value='${tc.id}'">
-              <div><div class="name">${tc.name}</div><div class="meta">${tc.options.map(o => o.name).join(', ') || 'no options yet'}</div></div>
-              <span class="subtitle" style="font-size:11px;">${tc.id}</span>
+            html += `<div class="project-list-item xero-fill" style="cursor:pointer;" data-target="xero-tracking-category-id" data-value="${escapeHtml(tc.id)}">
+              <div><div class="name">${escapeHtml(tc.name)}</div><div class="meta">${escapeHtml((tc.options || []).map(o => o.name).join(', ') || 'no options yet')}</div></div>
+              <span class="subtitle" style="font-size:11px;">${escapeHtml(tc.id)}</span>
             </div>`;
           });
         } else {
@@ -2408,20 +2841,24 @@
 
         if (data.earningsRates.length) {
           html += `<p class="subtitle" style="margin:14px 0 6px;"><strong style="color:var(--text);">Earnings Rates</strong> - click which band each one represents:</p>`;
+          // Which band each button fills (S27: data attributes and one listener, no inline onclick with Xero text in it)
+          const bandButtons = [
+            ['xero-earnings-rate-id', 'Ord. Jobs'],
+            ['xero-ordinary-office-earnings-rate-id', 'Ord. Office'],
+            ['xero-ot1-earnings-rate-id', 'OT1 Jobs'],
+            ['xero-ot1-office-earnings-rate-id', 'OT1 Office'],
+            ['xero-ot2-earnings-rate-id', 'OT2 Jobs'],
+            ['xero-ot2-office-earnings-rate-id', 'OT2 Office'],
+            ['xero-public-holiday-earnings-rate-id', 'Pub hol. penalty Jobs'],
+            ['xero-public-holiday-office-earnings-rate-id', 'Pub hol. penalty Office'],
+            ['xero-public-holiday-base-earnings-rate-id', 'Pub hol. Base'],
+            ['xero-laha-earnings-rate-id', 'LAHA'],
+          ];
           data.earningsRates.forEach(er => {
             html += `<div class="project-list-item" style="align-items:center;">
-              <div><div class="name">${er.name}</div><div class="meta">${er.type || ''} - ${er.id}</div></div>
+              <div><div class="name">${escapeHtml(er.name)}</div><div class="meta">${escapeHtml(er.type || '')} - ${escapeHtml(er.id)}</div></div>
               <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;">
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-earnings-rate-id').value='${er.id}'">Ord. Jobs</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ordinary-office-earnings-rate-id').value='${er.id}'">Ord. Office</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot1-earnings-rate-id').value='${er.id}'">OT1 Jobs</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot1-office-earnings-rate-id').value='${er.id}'">OT1 Office</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot2-earnings-rate-id').value='${er.id}'">OT2 Jobs</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-ot2-office-earnings-rate-id').value='${er.id}'">OT2 Office</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-earnings-rate-id').value='${er.id}'">Pub hol. penalty Jobs</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-office-earnings-rate-id').value='${er.id}'">Pub hol. penalty Office</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-public-holiday-base-earnings-rate-id').value='${er.id}'">Pub hol. Base</button>
-                <button class="secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('xero-laha-earnings-rate-id').value='${er.id}'">LAHA</button>
+                ${bandButtons.map(([target, label]) => `<button type="button" class="secondary xero-fill" style="padding:4px 8px; font-size:11px;" data-target="${target}" data-value="${escapeHtml(er.id)}">${label}</button>`).join('')}
               </div>
             </div>`;
           });
@@ -2430,9 +2867,9 @@
         if (data.payrollCalendars.length) {
           html += `<p class="subtitle" style="margin:14px 0 6px;"><strong style="color:var(--text);">Payroll Calendars</strong> - click the one your staff are paid on:</p>`;
           data.payrollCalendars.forEach(pc => {
-            html += `<div class="project-list-item" style="cursor:pointer;" onclick="document.getElementById('xero-payroll-calendar-id').value='${pc.id}'">
-              <div><div class="name">${pc.name}</div><div class="meta">${pc.type || ''}</div></div>
-              <span class="subtitle" style="font-size:11px;">${pc.id}</span>
+            html += `<div class="project-list-item xero-fill" style="cursor:pointer;" data-target="xero-payroll-calendar-id" data-value="${escapeHtml(pc.id)}">
+              <div><div class="name">${escapeHtml(pc.name)}</div><div class="meta">${escapeHtml(pc.type || '')}</div></div>
+              <span class="subtitle" style="font-size:11px;">${escapeHtml(pc.id)}</span>
             </div>`;
           });
         } else {
@@ -2440,12 +2877,18 @@
         }
 
         if (data.errors.length) {
-          html += `<div class="error-box" style="margin-top:10px;">${data.errors.join('<br>')}</div>`;
+          html += `<div class="error-box" style="margin-top:10px;">${data.errors.map(e => escapeHtml(String(e))).join('<br>')}</div>`;
         }
 
         resultEl.innerHTML = html;
+        resultEl.querySelectorAll('.xero-fill').forEach(el => {
+          el.addEventListener('click', () => {
+            const target = document.getElementById(el.dataset.target);
+            if (target) target.value = el.dataset.value || '';
+          });
+        });
       } catch (err) {
-        resultEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        resultEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       }
       btn.disabled = false;
       btn.textContent = 'Look up IDs from Xero';
@@ -2462,23 +2905,21 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
-      await loadMyProfile(session.user.id);
-      await loadSettings();
       await applyAdminGating();
-      if (myRole === 'admin') {
-        await loadUsers();
-        await loadOnboardingDocs();
-        await loadApiKeys();
-        // Old ?profile=<id> links: employee editing now lives on the staff profile.
-        const deepLinkProfile = new URLSearchParams(location.search).get('profile');
-        if (deepLinkProfile) { window.location.replace(`/staff.html?id=${encodeURIComponent(deepLinkProfile)}&edit=1`); return; }
-      }
-      if (isPricingRoleLocal(myRole)) {
-        await loadXeroMapping();
-        await loadXeroConnection();
-        await loadRateTiers();
-        await loadInspectionTemplates();
-      }
+      // Old ?profile=<id> links: employee editing now lives on the staff profile.
+      const deepLinkProfile = myRole === 'admin' && new URLSearchParams(location.search).get('profile');
+      if (deepLinkProfile) { window.location.replace(`/staff.html?id=${encodeURIComponent(deepLinkProfile)}&edit=1`); return; }
+      // ?panel=<name> opens that tab first (e.g. the ops manager's rates review reminder); the loads fill it in after
+      const deepLinkPanel = new URLSearchParams(location.search).get('panel');
+      const panelBtn = deepLinkPanel && document.querySelector(`.settings-tab[data-panel="${CSS.escape(deepLinkPanel)}"]`);
+      if (panelBtn && panelBtn.style.display !== 'none') panelBtn.click();
+
+      const loads = [loadMyProfile(session.user.id), loadSettings(), loadWritingStyles(), loadSpellcheckMode()];
+      // Xero Mapping and connection IDs sit on an admin-only panel; the mapping loads when its tab opens
+      if (myRole === 'admin') loads.push(loadUsers(), loadOnboardingDocs(), loadApiKeys(), loadXeroConnection());
+      if (isPricingRoleLocal(myRole)) loads.push(loadRateTiers(), loadInspectionTemplates());
+      const results = await Promise.allSettled(loads);
+      results.forEach(r => { if (r.status === 'rejected') console.error('Settings load failed', r.reason); });
     })();
   </script>
 </body>

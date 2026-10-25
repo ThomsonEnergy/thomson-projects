@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 // Uses your Anthropic API key (set in Settings > API Keys, falls back to the
 // ANTHROPIC_API_KEY environment variable if that hasn't been set yet) to
@@ -11,19 +12,24 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
+  // Pricing roles only: it spends the Anthropic key.
+  if (!(await requirePricingRole(event))) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not authorized' }) };
+
   try {
-    const { projectName, brief, stageNames } = JSON.parse(event.body);
-    if (!brief || !Array.isArray(stageNames) || stageNames.length === 0) {
-      return { statusCode: 400, body: 'brief and stageNames are required' };
+    const { projectName, brief = '', stageNames, templateAnswers = '', customerGets = '', template = '', withBattery = false } = JSON.parse(event.body);
+    if ((!brief && !templateAnswers) || !Array.isArray(stageNames) || stageNames.length === 0) {
+      return { statusCode: 400, body: 'brief (or pre-quote answers) and stageNames are required' };
     }
 
     const apiKey = await getIntegrationKey('anthropic');
 
+    const typeLine = { solar: 'a grid-connected solar PV system', battery: 'a home battery storage system', renovation: 'a renovation', service_work: 'service work', quick_estimate: 'an estimate', new_build: 'a new build' }[template] || 'electrical work';
     const prompt = `You are writing scope-of-works descriptions for an electrical contractor's client-facing quote.
 
 Project: ${projectName}
-Brief from the contractor: ${brief}
-
+Type of job: ${typeLine}${withBattery && template !== 'battery' ? ' with a battery as well' : ''}
+Brief from the contractor: ${brief || '(none typed, use the pre-quote answers below)'}
+${customerGets ? `\nWhat the customer is getting (from the design and the stages):\n${customerGets}\n` : ''}${templateAnswers ? `\nPre-quote information gathered from the client (internal, do not repeat verbatim, use it to make the stages fit the site):\n${templateAnswers}\n` : ''}
 The quote currently has ${stageNames.length} stage(s), placeholder-named: ${stageNames.join(', ')}.
 
 For each stage, suggest a short, fitting stage name (2-4 words, plain trade language - e.g. "Site Power", "Switchboard Upgrade", "Panel Install") that matches what's actually being described in the brief, rather than keeping a generic placeholder name that may not suit this particular job. Then write a short scope-of-works description (1 to 2 sentences, plain trade language, no marketing fluff) for that stage.
@@ -41,7 +47,7 @@ Respond with ONLY a JSON array, no other text, no markdown fences, one object pe
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-5-5',
         max_tokens: 800,
         messages: [{ role: 'user', content: prompt }],
       }),

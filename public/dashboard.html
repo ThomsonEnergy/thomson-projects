@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Projects - Thomson Energy</title>
+<title>Pipeline - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -30,8 +30,8 @@
   <div class="wrap wide">
     <div style="display:flex; justify-content:space-between; align-items:start; flex-wrap:wrap; gap:12px;">
       <div>
-        <h1>Job pipeline</h1>
-        <p class="subtitle">Every project, left to right through its lifecycle. Quote Approved through Job Booked now move automatically (quote approval, deposit paid, mandatory tasks, scheduling) - Job Not Complete onward still moves by hand until later phases land.</p>
+        <h1>Pipeline</h1>
+        <p class="subtitle">Every job, left to right through its lifecycle. Quote Approved through Job Booked move automatically (quote approval, deposit paid, mandatory tasks, scheduling). A job is only Job Booked while someone is scheduled to it or clocked into it. Awaiting Our Action: we need to do something. Awaiting Client Action: the client does (move it there and back by hand).</p>
       </div>
       <button class="secondary" id="new-direct-job-btn">+ New job (no quote)</button>
     </div>
@@ -41,24 +41,14 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
-    const STAGES = [
-      { key: 'lead',              label: 'Lead' },
-      { key: 'draft_quote',       label: 'Draft Quote' },
-      { key: 'quote_sent',        label: 'Quote Sent' },
-      { key: 'quote_approved',    label: 'Quote Approved' },
-      { key: 'deposit_paid',      label: 'Deposit Paid' },
-      { key: 'awaiting_action',   label: 'Awaiting Action' },
-      { key: 'ready_to_book',     label: 'Ready to Book' },
-      { key: 'job_booked',        label: 'Job Booked' },
-      { key: 'job_not_complete',  label: 'Job Not Complete' },
-      { key: 'client_handover',   label: 'Client Handover' },
-      { key: 'ready_to_invoice',  label: 'Ready to Invoice' },
-      { key: 'awaiting_payment',  label: 'Invoice Sent - Awaiting Payment' },
-      { key: 'complete',          label: 'Complete' },
-    ];
+    // Board columns in order, shared with the job page's stage badge (supabase-client.js).
+    const STAGES = PIPELINE_STAGES;
+    // A quote (no J number yet) only moves between the quote stages here: approving it has to go
+    // through Mark approved on the quote (or the client signing), which makes the job and deposit.
+    const QUOTE_STAGES = ['lead', 'draft_quote', 'quote_sent'];
     // Archived sits off-board per the spec - it's a valid stage value but
     // doesn't get its own column here. The scheduled archive-completed-
     // jobs.js function moves a job here 2 days after it hits 'complete';
@@ -92,8 +82,8 @@
       listEl.innerHTML = data.map(p => `
         <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
           <div>
-            <a class="link-quiet" href="/project.html?id=${p.id}">${projectRef(p)}</a>
-            <div class="subtitle" style="font-size:12px;">${p.client_name || ''}</div>
+            <a class="link-quiet" href="/project.html?id=${p.id}">${escapeHtml(projectRef(p))}</a>
+            <div class="subtitle" style="font-size:12px;">${escapeHtml(p.client_name)}</div>
           </div>
           <div class="subtitle" style="font-size:12px;">${p.completed_at ? 'Completed ' + new Date(p.completed_at).toLocaleDateString('en-AU') : ''}</div>
         </div>`).join('');
@@ -136,13 +126,13 @@
       });
 
       board.innerHTML = STAGES.map(stage => `
-        <div class="pipeline-column">
+        <div class="pipeline-column" data-stage="${stage.key}">
           <div class="pipeline-column-header">
             <span>${stage.label}${stage.key === 'complete' ? ' <a class="link-quiet" id="view-archived-link" href="#" style="font-size:11px; font-weight:400;">(Archived &rarr;)</a>' : ''}</span>
             <span class="count">${byStage[stage.key].length}</span>
           </div>
           <div class="pipeline-column-body">
-            ${byStage[stage.key].length ? byStage[stage.key].map(p => cardHtml(p)).join('') : `<div class="pipeline-column-empty">No projects here</div>`}
+            ${byStage[stage.key].length ? byStage[stage.key].map(p => cardHtml(p)).join('') : `<div class="pipeline-column-empty">Nothing here</div>`}
           </div>
         </div>
       `).join('');
@@ -152,33 +142,73 @@
 
       function cardHtml(p) {
         return `
-          <div class="pipeline-card" data-id="${p.id}">
-            <a class="name" href="/project.html?id=${p.id}">${projectRef(p)}</a>
-            <div class="client">${p.client_name || ''}</div>
+          <div class="pipeline-card" data-id="${escapeHtml(p.id)}" data-stage="${escapeHtml(p.pipeline_stage)}">
+            <a class="name" href="/project.html?id=${p.id}">${escapeHtml(projectRef(p))}</a>
+            <div class="client">${escapeHtml(p.client_name)}</div>
             <select class="stage-select" data-id="${p.id}">
-              ${STAGES.map(s => `<option value="${s.key}" ${s.key === p.pipeline_stage ? 'selected' : ''}>${s.label}</option>`).join('')}
+              ${STAGES.filter(s => p.job_number || QUOTE_STAGES.includes(s.key) || s.key === p.pipeline_stage).map(s => `<option value="${s.key}" ${s.key === p.pipeline_stage ? 'selected' : ''}>${s.label}</option>`).join('')}
               <option value="archived" ${p.pipeline_stage === 'archived' ? 'selected' : ''}>Archived</option>
             </select>
           </div>`;
       }
 
-      board.querySelectorAll('.stage-select').forEach(sel => {
-        sel.addEventListener('change', async () => {
-          const id = sel.dataset.id;
-          const newStage = sel.value;
+      function refreshColumn(col) {
+        if (!col) return;
+        const body = col.querySelector('.pipeline-column-body');
+        const n = body.querySelectorAll('.pipeline-card').length;
+        col.querySelector('.pipeline-column-header .count').textContent = n;
+        const empty = body.querySelector('.pipeline-column-empty');
+        if (n === 0 && !empty) body.insertAdjacentHTML('beforeend', '<div class="pipeline-column-empty">Nothing here</div>');
+        if (n > 0 && empty) empty.remove();
+      }
+
+      // Rebuild the card from the row the server stored (a trigger may have changed the stage or
+      // given it a J number) and drop it into that column. Archived has no column: the card leaves the board.
+      function moveCard(card, row) {
+        const fromCol = card.closest('.pipeline-column');
+        const toCol = board.querySelector(`.pipeline-column[data-stage="${row.pipeline_stage}"]`);
+        card.remove();
+        let fresh = null;
+        if (toCol) {
+          const tmp = document.createElement('div');
+          tmp.innerHTML = cardHtml(row);
+          fresh = tmp.firstElementChild;
+          toCol.querySelector('.pipeline-column-body').prepend(fresh);
+        }
+        refreshColumn(fromCol);
+        refreshColumn(toCol);
+        if (fresh) fresh.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+
+      board.addEventListener('change', async (e) => {
+        const sel = e.target.closest('.stage-select');
+        if (!sel) return;
+        const card = sel.closest('.pipeline-card');
+        const oldStage = card.dataset.stage;
+        const newStage = sel.value;
+        if (newStage === oldStage) return;
+        card.querySelector('.pipeline-card-error')?.remove();
+        // Ready-to-send gate on a quote (same check as Email quote to client).
+        if (newStage === 'quote_sent' && oldStage === 'draft_quote') {
           sel.disabled = true;
-          const { error: updateErr } = await supabaseClient
-            .from('projects')
-            .update({ pipeline_stage: newStage })
-            .eq('id', id);
-          if (updateErr) {
-            alert('Could not move this card: ' + updateErr.message);
-            sel.disabled = false;
-            return;
-          }
-          // Re-render so the card lands in its new column.
-          location.reload();
-        });
+          const ok = await quoteSendGate({ id: card.dataset.id });
+          sel.disabled = false;
+          if (!ok) { sel.value = oldStage; return; }
+        }
+        sel.disabled = true;
+        const { data: row, error: updateErr } = await supabaseClient
+          .from('projects')
+          .update({ pipeline_stage: newStage })
+          .eq('id', card.dataset.id)
+          .select('id, name, client_name, pipeline_stage, job_number, quote_number')
+          .single();
+        if (updateErr || !row) {
+          sel.value = oldStage;
+          sel.disabled = false;
+          card.insertAdjacentHTML('beforeend', `<div class="error-box pipeline-card-error">Could not move: ${escapeHtml(updateErr?.message || 'no row returned')}</div>`);
+          return;
+        }
+        moveCard(card, row);
       });
     })();
   </script>

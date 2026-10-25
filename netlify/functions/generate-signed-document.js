@@ -1,5 +1,7 @@
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const { getAdminClient } = require('./_shared/require-admin');
+const { requireActiveUser } = require('./_shared/require-active-user');
+const { requireInternal } = require('./_shared/require-internal');
 const { drawCoverPage } = require('./_shared/pdf-cover-page');
 
 // Turns one onboarding_document_signatures row into a real, saved PDF -
@@ -127,6 +129,15 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
+  // The person who just signed (their own signature row), an admin (the backfill), or another
+  // function on this site with the internal secret. The signature uuid alone is not enough.
+  const internal = requireInternal(event);
+  let actor = null;
+  if (!internal) {
+    actor = await requireActiveUser(event);
+    if (!actor) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Please log in again' }) };
+  }
+
   try {
     const { signature_id } = JSON.parse(event.body || '{}');
     if (!signature_id) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'signature_id is required' }) };
@@ -138,6 +149,9 @@ exports.handler = async (event) => {
       .eq('id', signature_id)
       .single();
     if (error || !sig) throw new Error(error?.message || 'Signature not found');
+    if (actor && actor.role !== 'admin' && sig.profile_id !== actor.user.id) {
+      return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Not your signature' }) };
+    }
 
     const pdfDoc = await buildDocumentPdf({
       title: sig.document_title_snapshot,

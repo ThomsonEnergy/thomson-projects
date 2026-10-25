@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Tech Support - Thomson Energy</title>
+<title>Tech Support - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .support-card { border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px; }
   .support-card .call-btn { display:inline-block; padding:10px 16px; border-radius:8px; background:var(--accent); color:var(--accent-contrast); font-weight:700; text-decoration:none; font-size:15px; margin:4px 8px 4px 0; }
@@ -35,7 +35,8 @@
 
   <div class="wrap">
     <h1>Tech Support</h1>
-    <p class="subtitle">Phone numbers for manufacturer and software tech support - tap a number to call. Anyone can add or fix an entry, so keep it current.</p>
+    <p class="subtitle">Tech support phone numbers for our suppliers and manufacturers (inverters, batteries, meters, software). Tap a number to call. Anyone can add or fix an entry, so keep it current.</p>
+    <p class="subtitle" style="margin-top:-6px;">Something wrong with this app? <a class="link-quiet" href="/bugs.html">Report it in Updates and ideas</a>.</p>
 
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
@@ -50,8 +51,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     const CATEGORY_SUGGESTIONS = ['Inverters', 'Batteries', 'Solar panels', 'Monitoring', 'EV chargers', 'Switchgear', 'Generators', 'Networks / DNSP', 'Software', 'Suppliers', 'Other'];
     let allContacts = [];

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TEgo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #e8e8e8; font-family: -apple-system, system-ui, sans-serif; }
+  .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; text-align: center; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { font-size: 15px; color: #9a9a9a; margin: 0 0 24px; max-width: 320px; line-height: 1.4; }
+  button { font: inherit; font-size: 16px; font-weight: 600; color: #fff; background: #1f6fd1; border: 0; border-radius: 10px; padding: 12px 28px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>No connection</h1>
+  <p>TEgo needs internet to load. It will try again by itself as soon as you are back online.</p>
+  <button type="button" id="retry">Try again</button>
+</div>
+<script>
+  // Shown by the app (server.errorPath in capacitor.config.json) when the live
+  // site cannot be reached. Retries on tap, when the phone reconnects, and
+  // every 15 seconds.
+  var APP_URL = 'https://projects.thomsonenergy.com.au/index.html';
+  function retry() { window.location.href = APP_URL; }
+  document.getElementById('retry').addEventListener('click', retry);
+  window.addEventListener('online', retry);
+  setInterval(function () { if (navigator.onLine) retry(); }, 15000);
+</script>
+</body>
+</html>

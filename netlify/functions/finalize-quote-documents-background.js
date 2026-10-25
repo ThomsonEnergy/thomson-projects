@@ -17,10 +17,11 @@
 const fetch = require('node-fetch');
 const { getAdminClient } = require('./_shared/require-admin');
 const { selfBaseUrl } = require('./_shared/site-url');
+const { requireInternal, internalHeaders } = require('./_shared/require-internal');
 
 async function makePdf(docType, recordId) {
   const res = await fetch(`${selfBaseUrl()}/.netlify/functions/generate-client-document-pdf`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc_type: docType, record_id: recordId }),
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() }, body: JSON.stringify({ doc_type: docType, record_id: recordId }),
   });
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch (e) { throw new Error(`PDF function answered ${res.status}`); }
@@ -87,6 +88,11 @@ async function variationSigned(supabaseAdmin, variationId) {
 }
 
 async function quoteAccepted(supabaseAdmin, quoteId, jobId) {
+  // the PDF only ever goes onto the job that was made from this quote
+  if (jobId) {
+    const { data: job } = await supabaseAdmin.from('projects').select('id, source_quote_id').eq('id', jobId).maybeSingle();
+    if (!job || job.source_quote_id !== quoteId) throw new Error(`job ${jobId} was not made from quote ${quoteId}`);
+  }
   const path = await makePdf('quote', quoteId); // the signed, accepted quote
   if (!jobId) return;
   const dest = `client-documents/quotes/${jobId}.pdf`;
@@ -101,6 +107,11 @@ async function quoteAccepted(supabaseAdmin, quoteId, jobId) {
 }
 
 exports.handler = async (event) => {
+  // only accept-quote and accept-variation start this (x-internal-secret, _shared/start-finalize-documents.js)
+  if (!requireInternal(event)) {
+    console.error('finalize-quote-documents-background: refused, no internal secret');
+    return { statusCode: 202, body: '' };
+  }
   try {
     const body = JSON.parse(event.body || '{}');
     const supabaseAdmin = getAdminClient();

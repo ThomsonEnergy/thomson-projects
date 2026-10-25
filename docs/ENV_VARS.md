@@ -11,6 +11,7 @@ Names only. Values never go in the repo, in chat, or in a commit.
 | `SUPABASE_ANON_KEY` | Public anon key. Optional in production (falls back to the live key in code). In other contexts it is required: `scripts/write-config.js` swaps it into the browser build and functions use it | Branch deploys / previews: staging branch anon key |
 | `DEV_MODE_PASSWORD` | Unlocks Dev Mode (`verify-dev-mode.js`) | All |
 | `CLAUDE_AGENT_KEY` | Lets Claude agents post comments on bugs (`add-agent-comment.js`) | All |
+| `INTERNAL_FUNCTION_SECRET` | Shared secret for calls between this site's own functions (the Gmail sync starting a background worker, warm-pdf, chat-ai-sweep, the invoice PDF refresh after a payment). Sent as the `x-internal-secret` header, checked by `requireInternal()` in `netlify/functions/_shared/require-internal.js`. Any long random string (for example 48 characters from a password manager), the same value in every context. Until it is set nothing is refused, only logged, so set it at the first deploy that carries the check | All |
 | `GITHUB_TOKEN` | Writes `BUGS_AND_UPDATES.md` to the repo (`sync-bugs-to-repo.js`) | Production |
 | `SERVICEM8_API_KEY` | Legacy SM8 functions and the SM8 import fallback | Production |
 | `PDF_KEEP_BROWSER` | Optional PDF function tuning flag | Optional |
@@ -22,7 +23,7 @@ Names only. Values never go in the repo, in chat, or in a commit.
 
 Integration credentials live in the database, not env vars, read through `getIntegrationKey()` (`netlify/functions/_shared/get-integration-key.js`). A `<NAME>_API_KEY` env var is only a fallback.
 
-Keys: `anthropic`, `assemblyai`, `abr_guid`, `servicem8`, `pylon`, `xero_client_id`, `xero_client_secret`, `xero_webhook_key`, `google_client_id`, `google_client_secret`, `google_refresh_token`, `google_history_id`, `google_oauth_pending_state`, `airwallex_api_key`, `airwallex_client_id`, `airwallex_webhook_secret`, `formbay`, `formbay_username`, `formbay_password`, `formbay_webhook_secret`, `vapid_public_key`, `vapid_private_key`.
+Keys: `anthropic`, `assemblyai`, `abr_guid`, `servicem8`, `pylon`, `xero_client_id`, `xero_client_secret`, `xero_webhook_key`, `google_client_id`, `google_client_secret`, `google_refresh_token`, `google_history_id`, `google_oauth_pending_state`, `airwallex_api_key`, `airwallex_client_id`, `airwallex_webhook_secret`, `formbay`, `formbay_username`, `formbay_password`, `formbay_webhook_secret`, `vapid_public_key`, `vapid_private_key`, `apns_key_id`, `apns_team_id`, `apns_private_key` (Apple push for the TEgo iPhone app, see `docs/IOS_APP.md`).
 
 The staging branch starts with an empty `api_keys` table, so Xero, Gmail, Airwallex, Formbay and push do nothing there. That is deliberate: staging can never email a customer or post to the live Xero. Add sandbox keys to staging only when testing that integration.
 
@@ -33,7 +34,18 @@ Future (not built): Twilio (`twilio_account_sid`, `twilio_auth_token`, `twilio_n
 | Name | What it's for |
 |---|---|
 | `SUPABASE_ACCESS_TOKEN` | Supabase CLI login (personal access token from supabase.com/dashboard/account/tokens) |
-| `SUPABASE_PROJECT_REF` | Project the CLI links to. **Default to the staging branch ref.** Use the live ref `ziakpklnzkbbjjnqgkmz` only for an approved production migration |
+| `SUPABASE_PROJECT_REF` | Project the CLI links to. **Default to the staging branch ref `jpmaudhhsahjhnrufzez`.** Use the live ref `ziakpklnzkbbjjnqgkmz` only for an approved production migration |
 | `SUPABASE_DB_PASSWORD` | Database password for the linked project |
 
 `scripts/cloud-setup.sh` uses all three to link the CLI. Without them it still installs everything and runs `npm run check`.
+
+## GitHub Actions secrets (TEgo iPhone app builds)
+
+Repository > Settings > Secrets and variables > Actions. Only needed for the "Upload to TestFlight" run of `.github/workflows/tego-ios.yml`; the normal compile check needs none.
+
+| Name | What it's for |
+|---|---|
+| `APPLE_TEAM_ID` | Apple Developer Team ID |
+| `ASC_KEY_ID` | App Store Connect API key ID (Admin access) |
+| `ASC_ISSUER_ID` | App Store Connect API Issuer ID |
+| `ASC_KEY_P8` | The whole App Store Connect API .p8 key text |

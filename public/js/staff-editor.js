@@ -11,6 +11,12 @@
 // fields show depends on employment type / pay type, same as the
 // clause selection itself (see generateContractDraft in
 // supabase-client.js).
+// escapeHtml (supabase-client.js) leaves quotes alone, so values inside
+// attribute quotes also need " escaped.
+function staffEditorEscAttr(s) {
+  return escapeHtml(s).replace(/"/g, '&quot;');
+}
+
 function contractAnswerFieldsHtml(profile, answers) {
   const fields = [
     ...CONTRACT_ANSWER_FIELDS,
@@ -23,7 +29,7 @@ function contractAnswerFieldsHtml(profile, answers) {
       <div>
         <label style="margin-top:0; font-size:12px;">${f.label}</label>
         <input class="contract-answer-input" data-key="${f.key}" type="${f.type}" ${f.type === 'number' ? 'step="0.01"' : ''}
-          placeholder="${f.placeholder || ''}" value="${answers[f.key] ?? defaults[f.key] ?? ''}" />
+          placeholder="${f.placeholder || ''}" value="${staffEditorEscAttr(answers[f.key] ?? defaults[f.key] ?? '')}" />
       </div>`).join('')}
   </div>`;
 }
@@ -56,36 +62,53 @@ async function openStaffEditor(userId, opts = {}) {
   // directly - the base table's rate columns are locked to admin/
   // finance (or the row's own owner) at the database level, so a
   // direct select on profiles can no longer see them at all.
-  const { data: profile, error } = await supabaseClient.from('profiles')
-    .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id,
-      employment_type, employment_start_date, pay_type, salary_includes_super, has_company_vehicle, has_probationary_period,
-      emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_employee_id`)
-    .eq('id', userId).single();
-  const { data: rates } = await supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle();
-  const { data: sensitive } = await supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', userId).maybeSingle();
-  const { data: licences } = await supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date');
-  const { data: allowances } = await supabaseClient.from('employee_allowances').select('*').eq('profile_id', userId);
-  const { data: rateTiers } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
-  const { data: contract } = await supabaseClient.from('employee_contracts').select('*').eq('profile_id', userId).maybeSingle();
-  const { data: contractTemplate } = await supabaseClient.from('onboarding_documents').select('*').eq('is_contract', true).maybeSingle();
+  // All nine reads at once (they do not depend on each other).
+  const [
+    { data: profile, error },
+    { data: rates },
+    { data: sensitive },
+    { data: licences },
+    { data: allowances },
+    { data: rateTiers },
+    { data: contract },
+    { data: contractTemplate },
+    policyStatusHtml,
+  ] = await Promise.all([
+    supabaseClient.from('profiles')
+      .select(`id, full_name, role, active, mobile_number, notes, photo_url, rate_tier_id, site_rank,
+        employment_type, employment_start_date, pay_type, salary_includes_super, has_company_vehicle, has_probationary_period,
+        emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_employee_id`)
+      .eq('id', userId).single(),
+    supabaseClient.from('profiles_pay_rates_secure').select('*').eq('id', userId).maybeSingle(),
+    supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', userId).maybeSingle(),
+    supabaseClient.from('profile_licences').select('*').eq('profile_id', userId).order('expiry_date'),
+    supabaseClient.from('employee_allowances').select('*').eq('profile_id', userId),
+    supabaseClient.from('billable_rate_tiers').select('*').order('sort_order'),
+    supabaseClient.from('employee_contracts').select('*').eq('profile_id', userId).maybeSingle(),
+    supabaseClient.from('onboarding_documents').select('*').eq('is_contract', true).maybeSingle(),
+    staffPolicyStatusHtml(userId).catch(() => ''),
+  ]);
   if (error) { overlay.querySelector('.card').innerHTML = `<div class="error-box">${error.message}</div>`; return; }
   if (rates) Object.assign(profile, rates);
   if (sensitive) Object.assign(profile, sensitive);
 
   function renderLicenceRows(list) {
     return (list || []).map(l => `
-      <div class="licence-row" data-id="${l.id}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <input class="licence-name" value="${l.licence_name || ''}" placeholder="Licence name" style="flex:2;" />
-        <input class="licence-number" value="${l.licence_number || ''}" placeholder="Number" style="flex:1;" />
-        <input class="licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1;" />
-        <button type="button" class="secondary remove-licence-btn" style="padding:8px 10px;">&times;</button>
+      <div class="licence-row" data-id="${staffEditorEscAttr(l.id)}" style="margin-bottom:8px;">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input class="licence-name" value="${staffEditorEscAttr(l.licence_name)}" placeholder="Licence name" style="flex:2;" />
+          <input class="licence-number" value="${staffEditorEscAttr(l.licence_number)}" placeholder="Number" style="flex:1;" />
+          <input class="licence-expiry" type="date" value="${l.expiry_date || ''}" style="flex:1;" />
+          <button type="button" class="secondary remove-licence-btn" style="padding:8px 10px;">&times;</button>
+        </div>
+        <input class="licence-notes" value="${staffEditorEscAttr(l.notes)}" placeholder="Notes, e.g. Paid for renewal, waiting on card" style="margin-top:4px;" />
       </div>`).join('');
   }
 
   function renderAllowanceRows(list) {
     return (list || []).map(a => `
       <div class="allowance-row" data-id="${a.id}" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <input class="allowance-name" value="${a.name || ''}" placeholder="e.g. Company car" style="flex:2;" />
+        <input class="allowance-name" value="${staffEditorEscAttr(a.name)}" placeholder="e.g. Company car" style="flex:2;" />
         <input class="allowance-amount" type="number" step="0.01" value="${a.amount || ''}" placeholder="$" style="flex:1;" />
         <select class="allowance-frequency" style="flex:1;">
           <option value="per_day" ${a.frequency === 'per_day' ? 'selected' : ''}>Per day</option>
@@ -96,9 +119,9 @@ async function openStaffEditor(userId, opts = {}) {
   }
 
   overlay.querySelector('.card').innerHTML = `
-    <h2>${profile.full_name || 'User profile'}</h2>
+    <h2>${escapeHtml(profile.full_name || 'User profile')}</h2>
     <div style="display:flex; gap:16px; align-items:start; margin-bottom:10px;">
-      <img id="profile-photo-preview" src="${profile.photo_url || ''}" style="width:80px; height:80px; border-radius:50%; object-fit:cover; background:var(--surface-2); display:${profile.photo_url ? 'block' : 'none'};" />
+      <img id="profile-photo-preview" src="${staffEditorEscAttr(profile.photo_url)}" style="width:80px; height:80px; border-radius:50%; object-fit:cover; background:var(--surface-2); display:${profile.photo_url ? 'block' : 'none'};" />
       <div style="flex:1;">
         <label style="margin-top:0">Photo</label>
         <input type="file" id="profile-photo-input" accept="image/*" />
@@ -106,13 +129,17 @@ async function openStaffEditor(userId, opts = {}) {
     </div>
 
     <label>Name</label>
-    <input id="profile-name-input" value="${profile.full_name || ''}" />
+    <input id="profile-name-input" value="${staffEditorEscAttr(profile.full_name)}" />
 
     <label>Mobile number</label>
-    <input id="profile-mobile-input" value="${profile.mobile_number || ''}" />
+    <input id="profile-mobile-input" type="tel" autocomplete="tel" value="${staffEditorEscAttr(profile.mobile_number)}" />
+
+    <label>Site rank</label>
+    <input id="profile-site-rank-input" type="number" min="1" max="99" inputmode="numeric" value="${profile.site_rank || ''}" placeholder="1 is the most senior" />
+    <p class="subtitle" style="font-size:12px; margin:4px 0 0;">Decides who is asked "How's the job?" at clock-out when the job's Thomson site manager has not clocked in that day: the lowest number on the job that day. Blank uses the role (Admin 1, Finance 2, Sales 3, Staff 9).</p>
 
     <label>Notes</label>
-    <textarea id="profile-notes-input" style="min-height:70px;">${profile.notes || ''}</textarea>
+    <textarea id="profile-notes-input" style="min-height:70px;">${escapeHtml(profile.notes)}</textarea>
 
     <label style="margin-top:14px;">Industry licences</label>
     <div id="licence-rows">${renderLicenceRows(licences)}</div>
@@ -122,7 +149,7 @@ async function openStaffEditor(userId, opts = {}) {
       <label style="margin-top:0">Rate tier (for quoting - see Settings &gt; Billable Rates)</label>
       <select id="profile-tier-select">
         <option value="">-- None --</option>
-        ${(rateTiers || []).map(t => `<option value="${t.id}" ${profile.rate_tier_id === t.id ? 'selected' : ''}>${t.name}</option>`).join('')}
+        ${(rateTiers || []).map(t => `<option value="${t.id}" ${profile.rate_tier_id === t.id ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
       </select>
 
       <p class="subtitle" style="margin:14px 0 8px;">Actual pay rates - entered directly since award overtime rarely equals a clean multiple of ordinary time. Used to calculate real job costs from logged hours.</p>
@@ -152,6 +179,8 @@ async function openStaffEditor(userId, opts = {}) {
 
     <div style="margin-top:20px; padding-top:16px; border-top:0.5px solid var(--border);">
       <p style="margin:0 0 10px; font-weight:600;">Onboarding &amp; payroll ${profile.onboarding_completed_at ? '<span class="badge accepted" style="font-weight:400;">Onboarding complete</span>' : '<span class="badge draft" style="font-weight:400;">Onboarding not started</span>'}${profile.onboarding_reissue_reason ? ' <span class="badge sent" style="font-weight:400;">Re-issue pending</span>' : ''}</p>
+
+      ${policyStatusHtml}
 
       ${profile.onboarding_completed_at ? `
         <div style="padding:12px; background:var(--surface-2); border-radius:8px; margin-bottom:12px;">
@@ -224,15 +253,15 @@ async function openStaffEditor(userId, opts = {}) {
         </div>
       </div>
       <label style="margin-top:10px;">Residential address</label>
-      <input id="profile-address" value="${profile.residential_address || ''}" />
+      <input id="profile-address" value="${staffEditorEscAttr(profile.residential_address)}" />
       <div class="grid cols-2" style="margin-top:10px;">
         <div>
           <label style="margin-top:0">Emergency contact</label>
-          <input id="profile-emergency-name" value="${profile.emergency_contact_name || ''}" placeholder="Name" />
+          <input id="profile-emergency-name" value="${staffEditorEscAttr(profile.emergency_contact_name)}" placeholder="Name" />
         </div>
         <div>
           <label style="margin-top:0">Relationship</label>
-          <input id="profile-emergency-relationship" value="${profile.emergency_contact_relationship || ''}" />
+          <input id="profile-emergency-relationship" value="${staffEditorEscAttr(profile.emergency_contact_relationship)}" />
         </div>
       </div>
     </div>
@@ -242,7 +271,7 @@ async function openStaffEditor(userId, opts = {}) {
       <p class="subtitle" style="margin-bottom:8px;">Fills in the contract template against the fields above plus these - edit the raw template under Settings &gt; Onboarding Documents if the wording itself needs to change. Review the generated draft below and edit anything it couldn't resolve, then mark ready to sign - the employee only sees it once you do.</p>
       ${contractAnswerFieldsHtml(profile, (contract && contract.answers) || {})}
       <button type="button" class="secondary" id="generate-contract-btn" style="font-size:12px; padding:6px 10px; margin:10px 0 8px;" ${contractTemplate ? '' : 'disabled'}>${contract ? 'Regenerate draft' : 'Generate draft'}</button>
-      <textarea id="profile-contract-body" style="min-height:220px; font-family:monospace; font-size:12px; ${contract ? '' : 'display:none;'}">${contract ? contract.generated_body : ''}</textarea>
+      <textarea id="profile-contract-body" style="min-height:220px; font-family:monospace; font-size:12px; ${contract ? '' : 'display:none;'}">${contract ? escapeHtml(contract.generated_body) : ''}</textarea>
       <div style="margin-top:8px; display:${contract ? 'flex' : 'none'}; gap:8px;" id="contract-action-row">
         <button type="button" class="secondary" id="save-contract-draft-btn" style="font-size:12px; padding:6px 10px;">Save draft</button>
         <button type="button" class="secondary" id="mark-contract-ready-btn" style="font-size:12px; padding:6px 10px;" ${contract && contract.status === 'ready_to_sign' ? 'disabled' : ''}>Mark ready to sign</button>
@@ -299,8 +328,27 @@ async function openStaffEditor(userId, opts = {}) {
     overlay.querySelector(sel).addEventListener('change', () => refreshContractAnswerFields(overlay, profile));
   });
 
+  // Unsaved edits: anything typed into the profile fields (Save saves them),
+  // and the contract text (Save draft or Mark ready saves it). The contract
+  // answers and the re-issue fields act through their own buttons.
+  let profileDirty = false;
+  let contractDirty = false;
+  const markDirty = (e) => {
+    const t = e.target;
+    if (t.closest('#contract-answer-fields') || /^reissue-/.test(t.id || '')) return;
+    if (t.id === 'profile-contract-body') contractDirty = true; else profileDirty = true;
+  };
+  overlay.addEventListener('input', markDirty);
+  overlay.addEventListener('change', markDirty);
+  ['#add-licence-btn', '#add-allowance-btn'].forEach(sel => overlay.querySelector(sel).addEventListener('click', () => { profileDirty = true; }));
+  overlay.addEventListener('click', (e) => { if (e.target.closest('.remove-licence-btn, .remove-allowance-btn')) profileDirty = true; });
+
   // Contract and re-issue buttons save on their own, so refresh on close too.
-  overlay.querySelector('#close-profile-btn').addEventListener('click', () => { overlay.remove(); if (opts.onClosed) opts.onClosed(); });
+  overlay.querySelector('#close-profile-btn').addEventListener('click', () => {
+    if ((profileDirty || contractDirty) && !confirm('You have unsaved changes. Close and lose them?')) return;
+    overlay.remove();
+    if (opts.onClosed) opts.onClosed();
+  });
   overlay.querySelector('#save-profile-btn').addEventListener('click', async () => {
     const msg = overlay.querySelector('#profile-panel-msg');
     const saveBtn = overlay.querySelector('#save-profile-btn');
@@ -311,6 +359,7 @@ async function openStaffEditor(userId, opts = {}) {
       const updates = {
         full_name: overlay.querySelector('#profile-name-input').value.trim() || null,
         mobile_number: overlay.querySelector('#profile-mobile-input').value.trim() || null,
+        site_rank: Math.min(99, Math.max(1, parseInt(overlay.querySelector('#profile-site-rank-input').value, 10))) || null,
         notes: overlay.querySelector('#profile-notes-input').value.trim() || null,
         rate_tier_id: overlay.querySelector('#profile-tier-select').value || null,
         ordinary_rate: parseFloat(overlay.querySelector('#profile-rate-ordinary').value) || null,
@@ -334,26 +383,19 @@ async function openStaffEditor(userId, opts = {}) {
       const { error: updErr } = await supabaseClient.from('profiles').update(updates).eq('id', userId);
       if (updErr) throw updErr;
 
-      // Replace all licences with whatever's currently in the form -
-      // simplest way to handle add/edit/remove in one save, given how
-      // few licences a person typically has.
-      // Keep each licence's uploaded file (added on the Team page) across the
-      // replace - the rows here only edit name, number and expiry.
-      const keptFiles = Object.fromEntries((licences || []).map(l => [l.id, { file_path: l.file_path || null, file_name: l.file_name || null }]));
-      await supabaseClient.from('profile_licences').delete().eq('profile_id', userId);
-      const newLicences = [...overlay.querySelectorAll('.licence-row')]
+      // Rows keep their id (saveLicenceRows), so the uploaded file, notes and
+      // update requests stay with each licence.
+      const licenceRows = [...overlay.querySelectorAll('.licence-row')]
         .map(row => ({
-          ...(keptFiles[row.dataset.id] || {}),
+          id: row.dataset.id || null,
           profile_id: userId,
           licence_name: row.querySelector('.licence-name').value.trim(),
           licence_number: row.querySelector('.licence-number').value.trim() || null,
           expiry_date: row.querySelector('.licence-expiry').value || null,
+          notes: row.querySelector('.licence-notes').value.trim() || null,
         }))
         .filter(l => l.licence_name);
-      if (newLicences.length) {
-        const { error: licErr } = await supabaseClient.from('profile_licences').insert(newLicences);
-        if (licErr) throw licErr;
-      }
+      await saveLicenceRows((licences || []).map(l => l.id), licenceRows);
 
       // Same replace-all approach for allowances.
       await supabaseClient.from('employee_allowances').delete().eq('profile_id', userId);
@@ -440,6 +482,7 @@ async function openStaffEditor(userId, opts = {}) {
     overlay.querySelector('#profile-contract-body').style.display = 'block';
     overlay.querySelector('#contract-action-row').style.display = 'flex';
     overlay.querySelector('#mark-contract-ready-btn').disabled = false;
+    contractDirty = false;
     msg.innerHTML = `<div class="success-box">Draft generated - give it a read before marking it ready to sign, particularly anything still in [brackets] it couldn't resolve. You can leave the employee's address as [insert employee address]: it is filled in from their own details when they open the contract to sign.</div>`;
   });
 
@@ -448,6 +491,7 @@ async function openStaffEditor(userId, opts = {}) {
     const { error: saveErr } = await supabaseClient.from('employee_contracts')
       .update({ generated_body: overlay.querySelector('#profile-contract-body').value, updated_at: new Date().toISOString() })
       .eq('profile_id', userId);
+    if (!saveErr) contractDirty = false;
     msg.innerHTML = saveErr ? `<div class="error-box">${saveErr.message}</div>` : `<div class="success-box">Draft saved.</div>`;
   });
 
@@ -457,6 +501,7 @@ async function openStaffEditor(userId, opts = {}) {
       .update({ generated_body: overlay.querySelector('#profile-contract-body').value, status: 'ready_to_sign', updated_at: new Date().toISOString() })
       .eq('profile_id', userId);
     if (readyErr) { msg.innerHTML = `<div class="error-box">${readyErr.message}</div>`; return; }
+    contractDirty = false;
     msg.innerHTML = `<div class="success-box">Ready to sign - it'll now show up in this person's onboarding.</div>`;
     overlay.querySelector('#mark-contract-ready-btn').disabled = true;
   });
@@ -495,3 +540,35 @@ async function openStaffEditor(userId, opts = {}) {
   }
 }
 
+// Which version of each policy this person signed, and their AI and
+// location answers (migration 20261018120000). Empty if that migration
+// isn't there or nothing applies.
+async function staffPolicyStatusHtml(userId) {
+  const [{ data: docs }, { data: sigs }, { data: status }] = await Promise.all([
+    supabaseClient.from('onboarding_documents').select('id, title, version, is_required, consent_type, is_contract').eq('is_contract', false).order('sort_order'),
+    supabaseClient.from('onboarding_document_signatures').select('document_id, document_version, response, signed_at').eq('profile_id', userId),
+    supabaseClient.rpc('get_consent_status', { p_profile_id: userId }),
+  ]);
+  const tracked = (docs || []).filter(d => d.is_required || d.consent_type);
+  if (!tracked.length) return '';
+  const fmt = (d) => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  const st = (status && status[0]) || {};
+  const rows = tracked.map(d => {
+    const latest = (sigs || []).filter(x => x.document_id === d.id).sort((a, b) => new Date(b.signed_at) - new Date(a.signed_at))[0];
+    const current = latest && (latest.document_version || 1) >= (d.version || 1);
+    let state;
+    if (!latest) state = '<span class="badge draft">Not signed</span>';
+    else if (!current) state = `<span class="badge sent">Signed v${latest.document_version || 1}, needs v${d.version || 1}</span>`;
+    else state = `<span class="badge accepted">Signed v${latest.document_version || 1} ${fmt(latest.signed_at)}</span>`;
+    let answer = '';
+    if (d.consent_type) {
+      const on = st[`${d.consent_type}_consent_at`];
+      const off = st[`${d.consent_type}_consent_withdrawn_at`];
+      answer = on ? ` <span class="badge accepted">On since ${fmt(on)}</span>`
+        : off ? ` <span class="badge draft">Off (withdrawn ${fmt(off)})</span>`
+        : latest ? ' <span class="badge draft">Did not agree</span>' : '';
+    }
+    return `<div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:6px 0; border-bottom:0.5px solid var(--border);"><span>${escapeHtml(d.title)}</span><span>${state}${answer}</span></div>`;
+  }).join('');
+  return `<div style="margin-bottom:12px;"><p class="subtitle" style="margin:0 0 6px;">Policies and consent</p>${rows}</div>`;
+}

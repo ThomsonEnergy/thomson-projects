@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -36,10 +36,13 @@
       <div class="stat"><div class="label">Below minimum</div><div class="value" id="stat-below-minimum">-</div></div>
     </div>
 
+    <div id="stock-checks"></div>
+
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
         <input id="stock-search" placeholder="Search by name, category, or supplier..." style="max-width:320px;" />
         <div>
+          <button class="secondary" id="stocktake-btn" style="margin-right:8px;">Stocktake (Warehouse)</button>
           <button id="create-stock-po-btn" style="margin-right:8px;">+ Create PO</button>
           <button class="secondary" id="suggest-restock-btn" style="margin-right:8px;">Suggest restock PO</button>
           <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
@@ -56,34 +59,80 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     let allMaterials = [];
     let allSuppliers = [];
-    let stockVehicles = [];
+    let vehicleList = [];
     let locationRows = [];
+    let lowFlags = [];
+    let corrections = []; // last 90 days of count corrections, moves and prices (activity_log on the item)
+    let myRole = 'staff';
+    const dayText = (iso) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'Australia/Sydney' });
+    const placeName = (loc, vehicleId) => loc === 'vehicle' ? (vehicleList.find(v => v.id === vehicleId)?.vehicle_name || vehicleList.find(v => v.id === vehicleId)?.rego || 'a vehicle') : 'Warehouse';
+
+    // Running low flags, parts that need a price, and the last 90 days of count corrections (who, when).
+    function renderStockChecks() {
+      const el = document.getElementById('stock-checks');
+      const needsPrice = allMaterials.filter(m => m.needs_price);
+      const canClear = isPricingRole(myRole);
+      const recent = corrections.filter(c => c.action === 'stock_count_corrected');
+      if (!lowFlags.length && !needsPrice.length && !recent.length) { el.innerHTML = ''; return; }
+      el.innerHTML = `<div class="card">
+        <h2>Stock checks</h2>
+        ${lowFlags.length ? `<p style="margin:8px 0 4px; font-weight:600; font-size:13px;">Running low (flagged from site)</p>
+          ${lowFlags.map(f => `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; font-size:13px; flex-wrap:wrap;">
+            <span><strong>${escapeHtml(f.materials?.name || '')}</strong>${f.materials?.pack_label ? ` <span class="subtitle">(${escapeHtml(f.materials.pack_label)})</span>` : ''} in ${escapeHtml(placeName(f.location_type, f.vehicle_id))} &middot; ${escapeHtml(f.profiles?.full_name || 'someone')}, ${escapeHtml(dayText(f.created_at))}${f.note ? ' &middot; ' + escapeHtml(f.note) : ''}</span>
+            ${canClear ? `<button type="button" class="secondary btn-sm clear-low-btn" data-id="${f.id}">Restocked, clear</button>` : ''}
+          </div>`).join('')}` : ''}
+        ${needsPrice.length ? `<p style="margin:10px 0 4px; font-weight:600; font-size:13px; color:var(--red);">Needs a price (added from site, on jobs at $0 until priced)</p>
+          ${needsPrice.map(m => `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; font-size:13px;">
+            <span>${escapeHtml(m.name)}</span>
+            ${canClear ? `<button type="button" class="secondary btn-sm edit-material-btn" data-id="${m.id}">Set the price</button>` : ''}
+          </div>`).join('')}` : ''}
+        ${recent.length ? `<details style="margin-top:10px;"><summary class="subtitle" style="cursor:pointer;">Count corrections, last 90 days (${recent.length})</summary>
+          ${recent.map(c => `<div style="font-size:12px; padding:3px 0; border-top:1px solid var(--border);">${escapeHtml(dayText(c.created_at))} &middot; <strong>${escapeHtml(c.materials?.name || '')}</strong>: ${escapeHtml(c.description)} <span class="subtitle">(${escapeHtml(c.profiles?.full_name || 'someone')})</span></div>`).join('')}
+        </details>` : ''}
+      </div>`;
+      el.querySelectorAll('.clear-low-btn').forEach(btn => btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const { error } = await supabaseClient.rpc('stock_clear_low', { p_flag_id: btn.dataset.id });
+        if (error) { alert(friendlyError(error)); btn.disabled = false; return; }
+        await loadMaterials();
+      }));
+      el.querySelectorAll('.edit-material-btn').forEach(btn => btn.addEventListener('click', () => openMaterialPanel(allMaterials.find(m => m.id === btn.dataset.id))));
+    }
 
     async function loadMaterials() {
       const listEl = document.getElementById('stock-list');
       const { data, error } = await supabaseClient.from('materials').select('*, suppliers(id, name)').order('name');
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       allMaterials = data || [];
 
       const { data: vehicles } = await supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego').eq('holds_stock', true).order('vehicle_name');
-      stockVehicles = vehicles || [];
+      vehicleList = vehicles || [];
       const { data: locations } = await supabaseClient.from('material_stock_by_location').select('*');
       locationRows = locations || [];
+      myRole = await getMyRole();
+      const since = new Date(Date.now() - 90 * 86400000).toISOString();
+      const [{ data: flags }, { data: log }] = await Promise.all([
+        supabaseClient.from('stock_low_flags').select('*, materials(name, pack_label), profiles!stock_low_flags_flagged_by_fkey(full_name)').is('cleared_at', null).order('created_at', { ascending: false }),
+        supabaseClient.from('activity_log').select('id, action, description, created_at, entity_id, profiles!activity_log_changed_by_fkey(full_name)').eq('entity_type', 'material').in('action', ['stock_count_corrected', 'stock_moved', 'priced']).gte('created_at', since).order('created_at', { ascending: false }).limit(300),
+      ]);
+      lowFlags = flags || [];
+      corrections = (log || []).map(c => ({ ...c, materials: allMaterials.find(m => m.id === c.entity_id) }));
 
+      renderStockChecks();
       renderMaterials();
     }
 
     function locationBreakdown(materialId) {
       const warehouseQty = locationRows.find(r => r.material_id === materialId && r.location_type === 'warehouse')?.quantity || 0;
       const parts = [`${warehouseQty} Warehouse`];
-      stockVehicles.forEach(v => {
+      vehicleList.forEach(v => {
         const qty = locationRows.find(r => r.material_id === materialId && r.location_type === 'vehicle' && r.vehicle_id === v.id)?.quantity || 0;
-        parts.push(`${qty} ${v.vehicle_name || v.rego}`);
+        parts.push(`${escapeHtml(qty)} ${escapeHtml(v.vehicle_name || v.rego)}`);
       });
       return parts.join(' &middot; ');
     }
@@ -112,19 +161,25 @@
       function stockRowsHtml(rows, showQtyCols) {
         return rows.map(m => {
           const isBelowMin = Number(m.minimum_quantity) > 0 && Number(m.quantity_on_hand) < Number(m.minimum_quantity);
+          const lastFix = corrections.find(c => c.action === 'stock_count_corrected' && c.entity_id === m.id && new Date(c.created_at) > new Date(Date.now() - 30 * 86400000));
+          const chips = [
+            m.needs_price ? '<span class="badge draft" style="color:var(--red);">Needs a price</span>' : '',
+            m.is_consumable ? `<span class="badge draft" title="Counted by the pack, never asked about at clock-out">Consumable${m.pack_label ? ': ' + escapeHtml(m.pack_label) : ''}</span>` : '',
+            lastFix ? `<span class="badge draft" title="${escapeHtml(lastFix.description)}">Count corrected ${escapeHtml(dayText(lastFix.created_at))} by ${escapeHtml(lastFix.profiles?.full_name || 'someone')}</span>` : '',
+          ].filter(Boolean).join(' ');
           return `
           <tr>
-            <td data-label="Name">${m.name}</td>
-            <td data-label="Category">${m.category || '-'}</td>
-            <td data-label="Supplier">${m.suppliers?.name || '-'}</td>
+            <td data-label="Name">${escapeHtml(m.name)}${chips ? `<div style="margin-top:3px; display:flex; gap:4px; flex-wrap:wrap;">${chips}</div>` : ''}</td>
+            <td data-label="Category">${escapeHtml(m.category || '-')}</td>
+            <td data-label="Supplier">${escapeHtml(m.suppliers?.name || '-')}</td>
             <td class="num" data-label="Cost">${money(m.cost_price)}</td>
             <td class="num" data-label="Sell">${money(m.sell_price)}</td>
             ${showQtyCols ? `
               <td class="num" data-label="Qty" style="${isBelowMin ? 'color:var(--red); font-weight:600;' : ''}">
-                ${m.quantity_on_hand}${isBelowMin ? ' &#9888;' : ''}
-                ${stockVehicles.length ? `<div class="subtitle" style="font-size:11px; font-weight:400; white-space:nowrap;">${locationBreakdown(m.id)}</div>` : ''}
+                ${escapeHtml(m.quantity_on_hand)}${isBelowMin ? ' &#9888;' : ''}
+                ${vehicleList.length ? `<div class="subtitle" style="font-size:11px; font-weight:400; white-space:nowrap;">${locationBreakdown(m.id)}</div>` : ''}
               </td>
-              <td class="num" data-label="Minimum">${m.minimum_quantity || '-'}</td>
+              <td class="num" data-label="Minimum">${escapeHtml(m.minimum_quantity || '-')}</td>
             ` : ''}
             <td data-label="">
               <button class="secondary edit-material-btn" data-id="${m.id}" style="font-size:12px; padding:6px 10px;">Edit</button>
@@ -171,41 +226,48 @@
     document.getElementById('stock-search').addEventListener('input', renderMaterials);
 
     function openMaterialPanel(material) {
+      const startWarehouseQty = Number(material ? (locationRows.find(r => r.material_id === material.id && r.location_type === 'warehouse')?.quantity || 0) : 0);
+      const vehicleQty = (v) => Number(material ? (locationRows.find(r => r.material_id === material.id && r.location_type === 'vehicle' && r.vehicle_id === v.id)?.quantity || 0) : 0);
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
           <h2>${material ? 'Edit material' : 'Add material'}</h2>
           <label style="margin-top:0">Name</label>
-          <input id="mat-name" value="${material?.name || ''}" />
+          <input id="mat-name" value="${escapeHtml(material?.name)}" />
           <div class="grid cols-2">
             <div>
               <label>Category</label>
-              <input id="mat-category" value="${material?.category || ''}" placeholder="e.g. Cable" />
+              <input id="mat-category" value="${escapeHtml(material?.category)}" placeholder="e.g. Cable" />
             </div>
             <div>
               <label>Supplier</label>
-              <select id="mat-supplier"><option value="">-- None --</option>${allSuppliers.map(s => `<option value="${s.id}" ${material?.supplier_id === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}</select>
+              <select id="mat-supplier"><option value="">-- None --</option>${allSuppliers.map(s => `<option value="${s.id}" ${material?.supplier_id === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select>
             </div>
           </div>
           <div class="grid cols-3">
             <div>
               <label>Cost price</label>
-              <input id="mat-cost" type="number" step="0.01" value="${material?.cost_price || 0}" />
+              <input id="mat-cost" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(material?.cost_price || 0)}" />
             </div>
             <div>
               <label>Sell price</label>
-              <input id="mat-sell" type="number" step="0.01" value="${material?.sell_price || 0}" />
+              <input id="mat-sell" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(material?.sell_price || 0)}" />
             </div>
             <div>
-              <label>Qty on hand</label>
-              <input id="mat-qty" type="number" step="1" value="${material?.quantity_on_hand || 0}" />
+              <label>Warehouse qty</label>
+              <input id="mat-qty" type="number" inputmode="decimal" step="1" value="${escapeHtml(startWarehouseQty)}" />
             </div>
           </div>
+          ${vehicleList.length ? `<div class="grid cols-3">${vehicleList.map(v => `<div><label>${escapeHtml(v.vehicle_name || v.rego)} qty</label><input class="mat-vqty" data-vehicle-id="${escapeHtml(v.id)}" data-start="${vehicleQty(v)}" type="number" inputmode="decimal" step="1" value="${vehicleQty(v)}" /></div>`).join('')}</div>` : ''}
+          <label>Why the count changed <span class="subtitle">(needed when you change a count; logged on the item)</span></label>
+          <input id="mat-count-reason" placeholder="e.g. stocktake, damaged, miscounted" />
           <label>Minimum quantity - flags for restocking below this</label>
-          <input id="mat-minimum" type="number" step="1" value="${material?.minimum_quantity || 0}" />
+          <input id="mat-minimum" type="number" inputmode="decimal" step="1" value="${escapeHtml(material?.minimum_quantity || 0)}" />
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="mat-consumable" style="width:auto;" ${material?.is_consumable ? 'checked' : ''} /> Consumable: counted by the pack, never asked about at clock-out (zip ties, saddles, tape)</label>
+          <input id="mat-pack" placeholder="Pack, e.g. bag of 100" value="${escapeHtml(material?.pack_label)}" />
           <label>Notes</label>
-          <textarea id="mat-notes" style="min-height:60px;">${material?.notes || ''}</textarea>
+          <textarea id="mat-notes" style="min-height:60px;">${escapeHtml(material?.notes)}</textarea>
           <div style="margin-top:14px; display:flex; justify-content:space-between;">
             <div>
               <button id="mat-save-btn">Save</button>
@@ -222,7 +284,21 @@
         const msg = overlay.querySelector('#mat-msg');
         const name = overlay.querySelector('#mat-name').value.trim();
         if (!name) { msg.innerHTML = `<div class="error-box">Name is required.</div>`; return; }
+        const btn = overlay.querySelector('#mat-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const quantityValue = parseFloat(overlay.querySelector('#mat-qty').value) || 0;
+        // counts: only the places the person changed, each through the logged server step
+        const countChanges = [];
+        if (quantityValue !== startWarehouseQty) countChanges.push({ loc: 'warehouse', vehicleId: null, qty: quantityValue });
+        overlay.querySelectorAll('.mat-vqty').forEach(inp => {
+          const q = parseFloat(inp.value) || 0;
+          if (q !== Number(inp.dataset.start)) countChanges.push({ loc: 'vehicle', vehicleId: inp.dataset.vehicleId, qty: q });
+        });
+        const countReason = overlay.querySelector('#mat-count-reason').value.trim();
+        if (countChanges.length && material && !countReason) { msg.innerHTML = `<div class="error-box">Say why the count changed.</div>`; return; }
         const fields = {
           name,
           category: overlay.querySelector('#mat-category').value.trim() || null,
@@ -231,20 +307,37 @@
           sell_price: parseFloat(overlay.querySelector('#mat-sell').value) || 0,
           minimum_quantity: parseFloat(overlay.querySelector('#mat-minimum').value) || 0,
           notes: overlay.querySelector('#mat-notes').value.trim() || null,
+          is_consumable: overlay.querySelector('#mat-consumable').checked,
+          pack_label: overlay.querySelector('#mat-pack').value.trim() || null,
         };
+        let materialId = material ? material.id : null;
         if (material) {
-          const { error } = await supabaseClient.from('materials').update(fields).eq('id', material.id);
-          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-          await setWarehouseStock(material.id, quantityValue);
-          await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
+          // Only write the details when something changed, so a count-only edit by any role goes through;
+          // when the database refuses the details (not a pricing role) stop here, nothing is dropped silently (F17).
+          const same = (a, b) => typeof a === 'number' ? Number(b) === a : typeof a === 'boolean' ? !!b === a : (a ?? null) === (b ?? null);
+          const detailsChanged = Object.keys(fields).some(k => !same(fields[k], material[k]));
+          if (detailsChanged) {
+            const { data: upd, error } = await supabaseClient.from('materials').update(fields).eq('id', material.id).select('id');
+            if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+            if (!upd || !upd.length) { msg.innerHTML = `<div class="error-box">Only Admin, Finance or Sales can change an item's details. Put the details back as they were to save a count change.</div>`; return; }
+            await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
+          }
         } else {
           const { data: newMat, error } = await supabaseClient.from('materials').insert(fields).select('id').single();
-          if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-          await setWarehouseStock(newMat.id, quantityValue);
+          if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+          materialId = newMat.id;
           await logActivity('material', newMat.id, 'created', `Material "${name}" added`);
+        }
+        for (const c of countChanges) {
+          try { await setStockCount(materialId, c.loc, c.vehicleId, c.qty, material ? countReason : 'Added to Stock'); }
+          catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; return; }
         }
         overlay.remove();
         await loadMaterials();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
 
       if (material) {
@@ -260,6 +353,7 @@
     }
 
     document.getElementById('add-material-btn').addEventListener('click', () => openMaterialPanel(null));
+    document.getElementById('stocktake-btn').addEventListener('click', () => openStocktakePanel({ loc: 'warehouse', vehicleId: null, placeLabel: 'Warehouse', onDone: loadMaterials }));
 
     document.getElementById('create-stock-po-btn').addEventListener('click', openCreateStockPoPanel);
 
@@ -272,10 +366,14 @@
           <h2>Create purchase order for Stock</h2>
           <label style="margin-top:0">Supplier</label>
           ${supplierPickerHtml({ search: 'csp-supplier-search', results: 'csp-supplier-results', selected: 'csp-supplier-selected', newSection: 'csp-supplier-new-section', newEmail: 'csp-supplier-new-email', newPhone: 'csp-supplier-new-phone' })}
-          <button type="button" class="secondary" id="csp-upload-invoice-btn" style="margin-top:8px; font-size:12px; padding:6px 10px;">Or upload the supplier's invoice instead</button>
-          <label style="margin-top:14px;">Items</label>
+          <label style="margin-top:14px;">Lines</label>
           <div id="csp-items-container"></div>
-          <button type="button" class="secondary" id="csp-add-line-btn" style="font-size:12px; padding:6px 10px;">+ Add item</button>
+          <button type="button" class="secondary btn-sm" id="csp-add-line-btn">+ Add item</button>
+          <details class="po-fold" style="margin-top:14px;">
+            <summary>More options <span class="subtitle" style="font-weight:400; font-size:12px; margin-left:auto;">open PO, invoice</span></summary>
+            ${poTypeChoiceHtml('csp')}
+            ${isPricingRole(myRole) ? `<button type="button" class="secondary btn-sm" id="csp-upload-invoice-btn" style="margin-top:10px;">Or upload the supplier's invoice instead</button>` : ''}
+          </details>
           <div style="margin-top:14px;">
             <button id="csp-save-btn">Create PO</button>
             <button type="button" class="secondary" id="csp-cancel-btn">Cancel</button>
@@ -285,7 +383,9 @@
       document.body.appendChild(overlay);
 
       const resolveSupplier = wireSupplierPicker(overlay, suppliers, { search: 'csp-supplier-search', results: 'csp-supplier-results', selected: 'csp-supplier-selected', newSection: 'csp-supplier-new-section', newEmail: 'csp-supplier-new-email', newPhone: 'csp-supplier-new-phone' });
-      wireUploadInvoiceButton(overlay.querySelector('#csp-upload-invoice-btn'), overlay.querySelector('#csp-msg'));
+      // reading the invoice is for Admin, Finance and Sales only, so nobody else is offered it (F9)
+      const cspUploadBtn = overlay.querySelector('#csp-upload-invoice-btn');
+      if (cspUploadBtn) wireUploadInvoiceButton(cspUploadBtn, overlay.querySelector('#csp-msg'));
 
       buildMaterialSearchRow(allMaterials, 'csp-items-container');
       overlay.querySelector('#csp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(allMaterials, 'csp-items-container'));
@@ -293,6 +393,12 @@
       overlay.querySelector('#csp-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#csp-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#csp-msg');
+        const btn = overlay.querySelector('#csp-save-btn');
+        const label = btn.textContent;
+        const lineProblem = materialLineRowsProblem('csp-items-container');
+        if (lineProblem) { msg.innerHTML = `<div class="error-box">${escapeHtml(lineProblem)}</div>`; return; }
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
 
         try {
           const { supplierId, supplierName } = await resolveSupplier();
@@ -302,10 +408,9 @@
 
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: null, supplier_id: supplierId, supplier_name: supplierName,
-            po_number: await drawNextPoNumber(),
-            po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+            po_type: readPoTypeChoice(overlay, 'csp'), locked: false, status: 'ordered', amount: 0,
             description: 'Stock purchase order',
-          }).select('id, po_number').single();
+          }).select('id, po_number, supplier_id, project_id').single();
           if (poErr) throw poErr;
           await logActivity('purchase_order', newPo.id, 'created', `PO ${newPo.po_number || ''} created for ${supplierName} - Stock`);
 
@@ -319,9 +424,13 @@
           }
 
           overlay.remove();
-          await loadStockPOs();
+          loadStockPOs();
+          showPoCreatedPanel(newPo, supplierName, { onDone: loadStockPOs });
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
         }
       });
     }
@@ -363,16 +472,16 @@
           <p class="subtitle" style="margin-bottom:14px;">Below minimum quantity - nothing's created yet, review then confirm.</p>
 
           ${Object.entries(grouped).map(([supplierId, group]) => `
-            <div class="rk-group" data-supplier-id="${supplierId}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
-              <label style="margin-top:0; display:flex; align-items:center; gap:8px;"><input type="checkbox" class="rk-include" checked style="width:auto;" /><strong>${group.supplierName}</strong></label>
-              ${group.items.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${item.description} x${item.quantity}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
+            <div class="rk-group" data-supplier-id="${escapeHtml(supplierId)}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+              <label style="margin-top:0; display:flex; align-items:center; gap:8px;"><input type="checkbox" class="rk-include" checked style="width:auto;" /><strong>${escapeHtml(group.supplierName)}</strong></label>
+              ${group.items.map(item => `<div style="font-size:13px; display:flex; justify-content:space-between; padding:4px 0;"><span>${escapeHtml(item.description)} x${escapeHtml(item.quantity)}</span><span>${money(item.quantity * item.unit_cost)}</span></div>`).join('')}
               <p class="subtitle" style="margin-top:6px;">Total: ${money(group.items.reduce((s, i) => s + i.quantity * i.unit_cost, 0))}</p>
             </div>`).join('')}
 
           ${noSupplier.length ? `
             <div style="border:1px solid var(--red); border-radius:8px; padding:12px; margin-bottom:10px;">
               <p style="margin:0 0 8px; color:var(--red); font-weight:600;">No supplier assigned - can't include in a PO</p>
-              ${noSupplier.map(item => `<div style="font-size:13px; padding:4px 0;">${item.description} x${item.quantity} - assign a supplier on this material first</div>`).join('')}
+              ${noSupplier.map(item => `<div style="font-size:13px; padding:4px 0;">${escapeHtml(item.description)} x${escapeHtml(item.quantity)} - assign a supplier on this material first</div>`).join('')}
             </div>` : ''}
 
           <div style="margin-top:14px;">
@@ -397,22 +506,26 @@
             const group = grouped[supplierId];
             const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
               project_id: null, supplier_id: supplierId, supplier_name: group.supplierName,
-              po_number: await drawNextPoNumber(),
-              po_type: 'fixed', locked: true, status: 'ordered', amount: 0,
+              po_type: 'fixed', locked: false, status: 'ordered', amount: 0,
               description: 'Restock - below minimum quantity',
             }).select('id, po_number').single();
             if (poErr) throw poErr;
             await logActivity('purchase_order', newPo.id, 'created', `Restock PO ${newPo.po_number || ''} created for ${group.supplierName}`);
-            await supabaseClient.from('purchase_order_line_items').insert(
+            const { error: liErr } = await supabaseClient.from('purchase_order_line_items').insert(
               group.items.map(item => ({ po_id: newPo.id, material_id: item.materialId, description: item.description, quantity: item.quantity, unit_cost: item.unit_cost, added_by: user.id }))
             );
+            if (liErr) {
+              // no lines, no PO: take the empty one back out rather than leave it behind a success toast (F41)
+              const { error: rmErr } = await supabaseClient.from('purchase_orders').delete().eq('id', newPo.id);
+              throw new Error(`${newPo.po_number || 'The PO'} for ${group.supplierName}: the lines could not be added (${liErr.message}).${rmErr ? ' The empty PO is still there, delete it from its page.' : ' It was not created.'}${created ? ` ${created} earlier PO${created === 1 ? ' was' : 's were'} created.` : ''}`);
+            }
             created++;
           }
           overlay.remove();
-          alert(`Created ${created} restock purchase order${created === 1 ? '' : 's'}.`);
+          showToast(`Created ${created} restock purchase order${created === 1 ? '' : 's'}.`);
           await loadStockPOs();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           confirmBtn.disabled = false;
           confirmBtn.textContent = 'Create purchase orders';
         }
@@ -421,39 +534,16 @@
 
     async function loadStockPOs() {
       const listEl = document.getElementById('stock-pos-list');
+      // Open stock POs as short rows (backlog item 31); closed ones live on the Purchase Orders page.
       const { data: pos, error } = await supabaseClient
         .from('purchase_orders')
-        .select('*, purchase_order_line_items(*), suppliers(name)')
+        .select('id, po_number, supplier_id, supplier_name, project_id, vehicle_id, po_kind, po_type, stock_source, status, closed_at, amount, created_at, description, purchase_order_line_items(id, quantity, unit_cost, received, is_backordered), suppliers(name), fleet_vehicles!vehicle_id(vehicle_name, rego), supplier_bills(id, paid, check_status)')
         .is('project_id', null)
+        .is('closed_at', null)
         .order('created_at', { ascending: false });
-      if (error) { listEl.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
-      if (!pos.length) { listEl.innerHTML = `<p class="subtitle">No stock purchase orders yet.</p>`; return; }
-
-      listEl.innerHTML = pos.map(po => {
-        const items = po.purchase_order_line_items || [];
-        const total = items.length ? items.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0) : Number(po.amount) || 0;
-        return `
-          <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
-            <div style="display:flex; justify-content:space-between;">
-              <strong>${po.suppliers?.name || po.supplier_name || 'Unknown supplier'}${po.po_number ? ' (' + po.po_number + ')' : ''}</strong>
-              <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
-            </div>
-            <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''} - ${money(total)}</p>
-            ${renderPoLineItemsReceivable(po, true)}
-            ${po.supplier_id && !po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice</button>` : ''}
-          </div>`;
-      }).join('');
-
-      listEl.querySelectorAll('.upload-invoice-btn').forEach(btn => {
-        btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
-      });
-
-      wireReceiveLineItemButtons(
-        listEl,
-        pos,
-        () => 'warehouse', // POs on this page default to Warehouse
-        async () => { await loadStockPOs(); await loadMaterials(); }
-      );
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      if (!pos.length) { listEl.innerHTML = '<p class="subtitle">No open stock purchase orders. Closed ones are on the <a href="/purchase-orders.html" class="link-quiet">Purchase Orders</a> page.</p>'; return; }
+      listEl.innerHTML = pos.map(po => renderPoRow(po)).join('') + '<p class="subtitle" style="font-size:13px;">Tap a PO to receive gear into the Warehouse. Closed ones are on the <a href="/purchase-orders.html" class="link-quiet">Purchase Orders</a> page.</p>';
     }
 
     document.getElementById('upload-pricelist-btn').addEventListener('click', () => {
@@ -463,16 +553,13 @@
       input.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-        overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
-        document.body.appendChild(overlay);
+        const overlay = openModal(`<p class="subtitle">Reading the price list - this can take a little longer for a long document...</p>`, { maxWidth: 400 });
         try {
           const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', file, file.type);
           overlay.remove();
           await resolveSupplierAndHandoff(data.supplier, 'pricelist', { items: data.items }, file);
         } catch (err) {
-          overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="sp-close">Close</button>`;
+          overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="sp-close">Close</button>`;
           overlay.querySelector('#sp-close').addEventListener('click', () => overlay.remove());
         }
       };

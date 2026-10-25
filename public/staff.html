@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Staff profile - Thomson Energy</title>
+<title>Staff profile - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,9 +11,9 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<link rel="stylesheet" href="/css/hr.css?v=1" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/hr.css?v=2" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .staff-head { display: flex; gap: 16px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
   .staff-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: var(--surface-2); }
@@ -38,11 +38,11 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
-  <script src="/js/hr-templates.js?v=2"></script>
-  <script src="/js/hr-shared.js?v=2"></script>
-  <script src="/js/staff-editor.js?v=2"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
+  <script src="/js/hr-templates.js?v=3"></script>
+  <script src="/js/hr-shared.js?v=4"></script>
+  <script src="/js/staff-editor.js?v=8"></script>
   <script>
     // Staff profile: everything about one team member in one place, laid out
     // like a job (tabs for overview, documents, photos, letters, incidents
@@ -58,7 +58,7 @@
     const KPI_STATUS_LABELS = { active: 'In progress', met: 'Met', not_met: 'Not met', cancelled: 'Cancelled' };
     const KPI_STATUS_BADGE = { active: 'sent', met: 'accepted', not_met: 'red', cancelled: 'draft' };
 
-    let person = null, staffEmail = '';
+    let person = null, staffEmail = '', leaveBalance = null;
     let letters = [], incidentLinks = [], kpis = [], files = [];
 
     const fmtDate = (d) => d ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? d + 'T00:00:00' : d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
@@ -68,21 +68,25 @@
 
     // ---------- Loading ----------
     async function loadPerson() {
-      const [{ data: profile, error }, { data: sensitive }, { data: licences }, { data: contract }] = await Promise.all([
-        supabaseClient.from('profiles').select(`id, full_name, role, active, job_title, mobile_number, notes, photo_url, created_at,
+      const [{ data: profile, error }, { data: sensitive }, { data: licences }, { data: contract }, { data: leave }] = await Promise.all([
+        supabaseClient.from('profiles').select(`id, full_name, role, active, job_title, mobile_number, notes, photo_url, created_at, site_rank,
           employment_type, employment_start_date, pay_type, has_company_vehicle, has_probationary_period,
           emergency_contact_name, emergency_contact_relationship, onboarding_completed_at, onboarding_reissue_reason, xero_payroll_status`)
           .eq('id', staffId).single(),
         supabaseClient.from('profiles_sensitive_secure').select('*').eq('id', staffId).maybeSingle(),
         supabaseClient.from('profile_licences').select('*').eq('profile_id', staffId).order('expiry_date'),
         supabaseClient.from('employee_contracts').select('status, updated_at').eq('profile_id', staffId).maybeSingle(),
+        // Leave balances from Xero Payroll (public.leave_balances): own row, or every row for finance roles
+        supabaseClient.from('leave_balances').select('*').eq('profile_id', staffId).maybeSingle(),
       ]);
       if (error) throw error;
+      leaveBalance = leave || null;
+      const { data: people } = await supabaseClient.from('profiles').select('id, full_name');
       // The signed contract itself: the latest signature on the contract template.
       const { data: tmpl } = await supabaseClient.from('onboarding_documents').select('id').eq('is_contract', true).maybeSingle();
       const contractSig = tmpl ? (await supabaseClient.from('onboarding_document_signatures').select('id, signed_at, file_path, document_title_snapshot')
         .eq('profile_id', staffId).eq('document_id', tmpl.id).order('signed_at', { ascending: false }).limit(1).maybeSingle()).data : null;
-      person = Object.assign(profile, sensitive || {}, { licences: licences || [], contract, contractSig });
+      person = Object.assign(profile, sensitive || {}, { licences: licences || [], contract, contractSig, names: Object.fromEntries((people || []).map(x => [x.id, x.full_name])) });
       person.address_full = [person.residential_address, person.residential_suburb, person.residential_state, person.residential_postcode].filter(Boolean).join(', ');
     }
 
@@ -115,7 +119,9 @@
     // ---------- Shell ----------
     function renderShell() {
       const initials = (person.full_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
-      document.title = `${person.full_name || 'Staff'} - Thomson Energy`;
+      // setPageTitle (supabase-client.js, when present) also keeps the notification count prefix in step
+      if (typeof setPageTitle === 'function') setPageTitle(person.full_name || 'Staff');
+      else document.title = `${person.full_name || 'Staff'} - TEops`;
       document.getElementById('content').innerHTML = `
         <div class="staff-head">
           ${person.photo_url ? `<img class="staff-avatar" src="${escapeHtml(person.photo_url)}" alt="" />` : `<div class="staff-avatar-fallback">${escapeHtml(initials)}</div>`}
@@ -268,6 +274,42 @@
       root.querySelectorAll('.contract-pdf').forEach(b => b.addEventListener('click', () => openPdfViewer(person.contractSig.file_path, person.contractSig.document_title_snapshot || 'Employment contract')));
     }
 
+    // Annual, sick and long service hours "as at" the Sydney date of the last Xero sync.
+    function leaveBlockHtml(leave) {
+      if (!leave || !leave.as_at) return '<p class="subtitle" style="margin:0;">Not synced yet.</p>';
+      const hrs = (n) => n == null ? '-' : `${Number(n).toFixed(1)} hrs`;
+      const asAt = new Date(leave.as_at).toLocaleDateString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', year: 'numeric' });
+      return `
+        <dl class="kv">
+          <dt>Annual leave</dt><dd>${hrs(leave.annual_leave_hours)}</dd>
+          <dt>Sick leave</dt><dd>${hrs(leave.sick_leave_hours)}</dd>
+          ${leave.long_service_hours != null ? `<dt>Long service</dt><dd>${hrs(leave.long_service_hours)}</dd>` : ''}
+        </dl>
+        <p class="subtitle" style="margin:8px 0 0; font-size:12px;">As at ${escapeHtml(asAt)}</p>`;
+    }
+
+    // Finance roles only: POSTs to sync-leave-balances-now (the on-demand twin of the nightly
+    // sync-leave-balances, which Netlify runs on its schedule only and never over HTTP), then reloads the block.
+    async function refreshLeaveFromXero(btn, msgEl) {
+      const label = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Refreshing...';
+      msgEl.innerHTML = '';
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/sync-leave-balances-now', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.ok) throw new Error(json.error || 'Could not refresh from Xero');
+        const { data: leave } = await supabaseClient.from('leave_balances').select('*').eq('profile_id', staffId).maybeSingle();
+        leaveBalance = leave || null;
+        document.getElementById('leave-block').innerHTML = leaveBlockHtml(leaveBalance);
+        if (json.problems && json.problems.length) msgEl.innerHTML = `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">${escapeHtml(json.problems.length)} of ${escapeHtml(json.total)} people could not be read from Xero.</p>`;
+      } catch (err) {
+        msgEl.innerHTML = `<div class="error-box" style="margin-top:8px;">${escapeHtml(err.message)}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = label;
+      }
+    }
+
     function renderOverview() {
       const p = person;
       const contractBadge = contractHtml(p);
@@ -281,6 +323,7 @@
               <dt>Mobile</dt><dd>${p.mobile_number ? `<a class="link-quiet" href="tel:${escapeHtml(p.mobile_number)}">${escapeHtml(p.mobile_number)}</a>` : '-'}</dd>
               <dt>Email</dt><dd>${staffEmail ? `<a class="link-quiet" href="mailto:${escapeHtml(staffEmail)}">${escapeHtml(staffEmail)}</a>` : '-'}</dd>
               <dt>Position</dt><dd>${escapeHtml(p.job_title || '-')}</dd>
+              <dt>Site rank</dt><dd>${p.site_rank ? escapeHtml(String(p.site_rank)) : `<span class="subtitle">from role (${{ admin: 1, finance: 2, sales: 3 }[p.role] || 9})</span>`}</dd>
               <dt>Employment type</dt><dd>${EMPLOYMENT_LABELS[p.employment_type] || '-'}</dd>
               <dt>Start date</dt><dd>${fmtDate(p.employment_start_date)}${p.employment_start_date ? ` <span class="subtitle">(${serviceLength(p.employment_start_date)})</span>` : ''}</dd>
               <dt>Pay type</dt><dd>${p.pay_type === 'salary' ? 'Salary' : 'Hourly'}</dd>
@@ -306,6 +349,14 @@
               <dt>Xero Payroll</dt><dd>${escapeHtml(p.xero_payroll_status || '-')}</dd>
             </dl>
           </div>
+          <div class="card" style="margin:0;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+              <h2 style="margin:0;">Leave</h2>
+              ${hrIsFinance() ? '<button type="button" class="secondary" id="leave-refresh-btn" style="font-size:12px; padding:4px 10px;">Refresh from Xero</button>' : ''}
+            </div>
+            <div id="leave-block" style="margin-top:8px;">${leaveBlockHtml(leaveBalance)}</div>
+            <div id="leave-msg"></div>
+          </div>
           <div class="card" style="margin:0; ${selfView ? 'display:none;' : ''}">
             <h2>HR summary</h2>
             <dl class="kv">
@@ -320,15 +371,27 @@
           <h2>Licences</h2>
           ${p.licences.length ? `<table class="responsive-stack"><thead><tr><th>Licence</th><th>Number</th><th>Expiry</th><th></th></tr></thead><tbody>
             ${p.licences.map(l => `<tr>
-              <td data-label="Licence">${escapeHtml(l.licence_name)}</td>
+              <td data-label="Licence">${escapeHtml(l.licence_name)}${licenceNoteHtml(l, p.names)}</td>
               <td data-label="Number">${escapeHtml(l.licence_number || '-')}</td>
               <td data-label="Expiry">${expiryBadge(l.expiry_date)}</td>
-              <td data-label="">${l.file_path ? `<button type="button" class="secondary lic-view" data-path="${escapeHtml(l.file_path)}" data-title="${escapeHtml(l.licence_name)}" style="font-size:12px; padding:4px 10px;">View file</button>` : '<span class="subtitle" style="font-size:12px;">No file</span>'}</td>
+              <td data-label="">${l.file_path ? `<button type="button" class="secondary lic-view" data-path="${escapeHtml(l.file_path)}" data-title="${escapeHtml(l.licence_name)}" style="font-size:12px; padding:4px 10px;">View file</button>` : '<span class="subtitle" style="font-size:12px;">No file</span>'}${HR.myRole === 'admin' ? ` <button type="button" class="secondary lic-ask" data-id="${l.id}" style="font-size:12px; padding:4px 10px;">Ask to update</button>` : ''}</td>
             </tr>`).join('')}</tbody></table>` : '<p class="subtitle">No licences recorded. Add them on the Team page.</p>'}
         </div>`;
       wireContractPdf(document.getElementById('panel-overview'));
+      const leaveBtn = document.getElementById('leave-refresh-btn');
+      if (leaveBtn) leaveBtn.addEventListener('click', () => refreshLeaveFromXero(leaveBtn, document.getElementById('leave-msg')));
       document.querySelectorAll('#panel-overview .lic-view').forEach(b => b.addEventListener('click', async () => {
         try { await viewStoredFile(b.dataset.path, b.dataset.title); } catch (err) { alert(err.message); }
+      }));
+      document.querySelectorAll('#panel-overview .lic-ask').forEach(b => b.addEventListener('click', async () => {
+        const l = p.licences.find(x => x.id === b.dataset.id);
+        if (!confirm(`Send ${p.full_name || 'them'} a notification asking them to update their ${l.licence_name}?`)) return;
+        b.disabled = true;
+        const { error } = await supabaseClient.rpc('request_licence_update', { p_licence_id: l.id });
+        if (error) { alert(error.message); b.disabled = false; return; }
+        const { data: fresh } = await supabaseClient.from('profile_licences').select('*').eq('profile_id', p.id).order('expiry_date');
+        p.licences = fresh || [];
+        renderOverview();
       }));
     }
 
@@ -383,7 +446,7 @@
           <h2>${escapeHtml(s.document_title_snapshot)}</h2>
           <p class="subtitle" style="margin-bottom:10px;">Signed ${new Date(s.signed_at).toLocaleString('en-AU')} as ${escapeHtml(s.signed_by_name)}, shown exactly as it was at the time.</p>
           <div style="white-space:pre-wrap; line-height:1.6; max-height:50vh; overflow-y:auto; padding:14px; background:var(--surface-2); border-radius:8px;">${escapeHtml(s.document_body_snapshot)}</div>
-          ${s.signature_data_url ? `<img src="${s.signature_data_url}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
+          ${hrSafeSig(s.signature_data_url) ? `<img src="${hrSafeSig(s.signature_data_url)}" style="max-width:200px; margin-top:10px; background:#fff; border-radius:6px;" />` : ''}
           <div style="margin-top:14px;"><button type="button" class="secondary close-btn">Close</button></div>`);
         o.querySelector('.close-btn').addEventListener('click', () => o.remove());
       }));
@@ -525,14 +588,14 @@
       const since30 = new Date(Date.now() - 30 * 86400000);
       const { data: entries, error } = await supabaseClient.from('time_entries')
         .select('clock_in, clock_out, break_minutes, project_id, time_category')
-        .eq('staff_id', staffId).gte('clock_in', since90.toISOString());
+        .eq('staff_id', staffId).is('sm8_activity_uuid', null).gte('clock_in', since90.toISOString());
       if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
       const hours = (list) => list.reduce((sum, e) => sum + (e.clock_out ? Math.max(0, (new Date(e.clock_out) - new Date(e.clock_in)) / 3600000 - (e.break_minutes || 0) / 60) : 0), 0);
       const last30 = entries.filter(e => new Date(e.clock_in) >= since30);
       const jobHours90 = hours(entries.filter(e => e.time_category === 'job' && e.project_id));
       const total90 = hours(entries);
       const daysWorked90 = new Set(entries.map(e => sydneyDateKey(new Date(e.clock_in)))).size;
-      const yearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      const yearAgo = sydneyDateKey(new Date(Date.now() - 365 * 86400000));
       const tiles = [
         [hours(last30).toFixed(1), 'Hours, last 30 days'],
         [total90.toFixed(1), 'Hours, last 90 days'],
@@ -602,6 +665,11 @@
           notes: orNull(val(o, '#k-notes')), updated_at: new Date().toISOString(),
         };
         if (!payload.title) { o.querySelector('#k-msg').innerHTML = '<div class="error-box">Give the KPI a name.</div>'; return; }
+        const btn = o.querySelector('#k-save');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
         const q = existing
           ? supabaseClient.from('staff_kpis').update(payload).eq('id', existing.id).select().single()
           : supabaseClient.from('staff_kpis').insert(payload).select().single();
@@ -609,6 +677,10 @@
         if (error) { o.querySelector('#k-msg').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         kpis = existing ? kpis.map(x => (x.id === data.id ? data : x)) : [data, ...kpis];
         o.remove(); refreshAll();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Supplier - Thomson Energy</title>
+<title>Supplier - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -31,8 +31,8 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     const supplierId = new URLSearchParams(window.location.search).get('id');
     let currentSupplier = null;
@@ -46,12 +46,14 @@
       }
       currentSupplier = supplier;
 
-      const { data: summaryRows } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: supplierId });
-      const summary = summaryRows?.[0] || { invoiced_not_paid: 0, approved_for_payment: 0, not_approved: 0, overdue: 0 };
+      // pricing roles only (the function refuses Staff): then the tiles say so instead of showing $0
+      const { data: summaryRows, error: sumErr } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: supplierId });
+      const summary = sumErr ? null : (summaryRows?.[0] || { invoiced_not_paid: 0, approved_for_payment: 0, not_approved: 0, overdue: 0 });
+      const sm = (v) => (summary ? money(v) : 'n/a');
 
       const { data: bills } = await supabaseClient
         .from('supplier_bills')
-        .select('*, purchase_orders(id, po_number, description, received)')
+        .select('*, purchase_orders(id, po_number, description, received, closed_at)')
         .eq('supplier_id', supplierId)
         .order('bill_date', { ascending: false });
 
@@ -61,24 +63,32 @@
         .eq('supplier_bills.supplier_id', supplierId)
         .not('flag_reason', 'is', null);
 
+      // Short rows (backlog item 31): open POs first, then the last closed ones. Each opens its own page.
       const { data: pos } = await supabaseClient
         .from('purchase_orders')
-        .select('*, purchase_order_line_items(*)')
+        .select('id, po_number, supplier_id, supplier_name, project_id, vehicle_id, po_kind, po_type, stock_source, status, closed_at, amount, created_at, description, purchase_order_line_items(id, quantity, unit_cost, received, is_backordered), projects(name, job_number), fleet_vehicles!vehicle_id(vehicle_name, rego), supplier_bills(id, paid, check_status)')
         .eq('supplier_id', supplierId)
-        .order('created_at', { ascending: false });
+        .order('closed_at', { ascending: false, nullsFirst: true })
+        .order('created_at', { ascending: false })
+        .limit(60);
 
-      render(supplier, summary, bills || [], flaggedItems || [], pos || []);
+      const myRole = await getMyRole();
+      render(supplier, summary, bills || [], flaggedItems || [], pos || [], myRole);
     }
 
-    function render(supplier, summary, bills, flaggedItems, pos) {
+    function render(supplier, summary, bills, flaggedItems, pos, myRole) {
+      const canPay = isFinanceRole(myRole);
+      const dayText = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
       const terms = supplier.credit_terms_type === 'cod' ? 'COD' : `${supplier.credit_terms_days} ${CREDIT_TERMS_LABELS[supplier.credit_terms_type]}`;
+      if (typeof setPageTitle === 'function') setPageTitle(supplier.name || 'Supplier');
+      else document.title = `${supplier.name || 'Supplier'} - TEops`;
 
       document.getElementById('content').innerHTML = `
         <a href="/suppliers.html" class="link-quiet">&larr; Suppliers</a>
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-top:8px;">
           <div>
-            <h1>${supplier.name}</h1>
-            <p class="subtitle">${terms}${supplier.contact_email ? ' &middot; ' + supplier.contact_email : ''}${supplier.contact_phone ? ' &middot; ' + supplier.contact_phone : ''}</p>
+            <h1>${escapeHtml(supplier.name)}${supplier.kind === 'contractor' ? ' <span class="badge draft" style="vertical-align:middle;">Contractor</span>' : ''}</h1>
+            <p class="subtitle">${supplier.abn ? 'ABN ' + escapeHtml(supplier.abn) + (supplier.abn_legal_name ? ' (' + escapeHtml(supplier.abn_legal_name) + (supplier.gst_registered === false ? ', not registered for GST' : '') + ')' : '') + ' &middot; ' : ''}${escapeHtml(terms)}${supplier.contact_email ? ' &middot; ' + escapeHtml(supplier.contact_email) : ''}${supplier.contact_phone ? ' &middot; ' + escapeHtml(supplier.contact_phone) : ''}</p>
           </div>
           <div>
             <button class="secondary" id="edit-supplier-btn" style="margin-right:8px;">Edit details</button>
@@ -88,11 +98,12 @@
           </div>
         </div>
 
+        ${supplier.needs_review ? `<div class="error-box" style="margin:10px 0;">Created automatically from ${supplier.created_from === 'price_list' ? 'a price list' : 'an emailed bill'}. Check the details, especially the bank account (call them on a number you already have), then press Edit details and Save. Bills from them cannot be approved for payment until then.</div>` : ''}
         <div class="grid cols-4">
-          <div class="stat"><div class="label">Invoiced, not paid</div><div class="value">${money(summary.invoiced_not_paid)}</div></div>
-          <div class="stat"><div class="label">Approved for payment</div><div class="value">${money(summary.approved_for_payment)}</div></div>
-          <div class="stat"><div class="label">Not approved</div><div class="value">${money(summary.not_approved)}</div></div>
-          <div class="stat"><div class="label">Overdue</div><div class="value" style="color:${Number(summary.overdue) > 0 ? 'var(--red)' : 'inherit'};">${money(summary.overdue)}</div></div>
+          <div class="stat"><div class="label">Invoiced, not paid</div><div class="value">${sm(summary?.invoiced_not_paid)}</div></div>
+          <div class="stat"><div class="label">Approved for payment</div><div class="value">${sm(summary?.approved_for_payment)}</div></div>
+          <div class="stat"><div class="label">Not approved</div><div class="value">${sm(summary?.not_approved)}</div></div>
+          <div class="stat"><div class="label">Overdue</div><div class="value" style="color:${Number(summary?.overdue) > 0 ? 'var(--red)' : 'inherit'};">${sm(summary?.overdue)}</div></div>
         </div>
 
         ${flaggedItems.length ? `
@@ -102,8 +113,8 @@
           ${flaggedItems.map(fi => `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
               <div>
-                <p style="margin:0 0 2px;">${fi.description}</p>
-                <p class="subtitle" style="margin:0; color:var(--red);">${fi.flag_reason} - bill ${fi.supplier_bills.bill_number || ''}</p>
+                <p style="margin:0 0 2px;">${escapeHtml(fi.description)}</p>
+                <p class="subtitle" style="margin:0; color:var(--red);">${escapeHtml(fi.flag_reason)} - bill ${escapeHtml(fi.supplier_bills.bill_number)}</p>
               </div>
             </div>`).join('')}
         </div>` : ''}
@@ -113,21 +124,25 @@
           <div id="bills-list">
             ${!bills.length ? '<p class="subtitle">No bills logged yet.</p>' : `
             <table class="responsive-stack">
-              <thead><tr><th>Bill #</th><th>Date</th><th>PO</th><th class="num">Amount</th><th>Due</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Bill #</th><th>Date</th><th>PO</th><th class="num">Amount</th><th>Terms due</th><th>Pay on</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 ${bills.map(b => `
                   <tr>
-                    <td data-label="Bill #">${b.bill_number || '-'}</td>
+                    <td data-label="Bill #">${escapeHtml(b.bill_number || '-')}</td>
                     <td data-label="Date">${b.bill_date ? new Date(b.bill_date).toLocaleDateString('en-AU') : '-'}</td>
-                    <td data-label="PO">${b.purchase_orders?.po_number || '-'}</td>
+                    <td data-label="PO">${escapeHtml(b.purchase_orders?.po_number || '-')}</td>
                     <td class="num" data-label="Amount">${money(b.amount)}</td>
-                    <td data-label="Due">${b.due_date ? new Date(b.due_date).toLocaleDateString('en-AU') : '-'}</td>
-                    <td data-label="Status">${b.paid ? '<span class="badge accepted">Paid</span>' : (b.approved_for_payment ? '<span class="badge sent">Approved</span>' : '<span class="badge draft">Not approved</span>')}</td>
+                    <td data-label="Terms due">${dayText(b.due_date)}</td>
+                    <td data-label="Pay on">${b.paid ? '-' : (b.approved_for_payment ? dayText(b.pay_on || b.due_date) : '<span class="subtitle" style="font-size:12px;">after approval</span>')}</td>
+                    <td data-label="Status">${b.paid ? `<span class="badge accepted" title="${escapeHtml(b.payment_reference || '')}">Paid ${b.paid_at ? dayText(b.paid_at.slice(0, 10)) : ''}</span>`
+                      : b.approved_for_payment ? '<span class="badge sent">Approved</span>'
+                      : b.purchase_orders && !b.purchase_orders.closed_at ? '<span class="badge draft">Waiting on PO close</span>'
+                      : '<span class="badge draft">Not approved</span>'}</td>
                     <td data-label="">${!b.paid && !b.approved_for_payment ? (
                       b.purchase_orders
-                        ? (b.purchase_orders.received ? '' : '<span class="subtitle" style="font-size:12px;">Waiting on goods received</span>')
-                        : `<button class="secondary approve-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Approve</button>`
-                    ) : ''}</td>
+                        ? (b.purchase_orders.closed_at ? '<span class="subtitle" style="font-size:12px;">See Bill checks</span>' : '<span class="subtitle" style="font-size:12px;">Approved when the PO is closed</span>')
+                        : (supplier.needs_review ? '<span class="subtitle" style="font-size:12px;">Check supplier details first</span>' : `<button class="secondary approve-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Approve</button>`)
+                    ) : ''}${!b.paid && b.approved_for_payment && canPay ? `<button class="secondary paid-bill-btn" data-id="${b.id}" data-number="${escapeHtml(b.bill_number || '')}" style="font-size:12px; padding:6px 10px;">Paid</button>` : ''}${b.paid && canPay ? `<button class="secondary unpaid-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Not paid</button>` : ''}</td>
                   </tr>`).join('')}
               </tbody>
             </table>`}
@@ -137,17 +152,7 @@
         <div class="card">
           <h2>Purchase orders</h2>
           <div id="pos-list">
-            ${!pos.length ? '<p class="subtitle">No purchase orders for this supplier yet.</p>' : pos.map(po => `
-              <div style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
-                <div style="display:flex; justify-content:space-between;">
-                  <strong>${po.po_number || 'PO'} ${po.po_type === 'open' ? '(open-ended)' : '(fixed)'}</strong>
-                  <span class="badge ${po.received ? 'accepted' : 'draft'}">${po.received ? 'Fully received' : po.status}</span>
-                </div>
-                <p class="subtitle" style="margin:4px 0 8px;">${po.description || ''}</p>
-                ${renderPoLineItemsReceivable(po, true)}
-                ${po.po_type === 'open' && po.budget_cap ? `<p class="subtitle" style="margin-top:8px;">Budget cap: ${money(po.budget_cap)}</p>` : ''}
-                ${!po.received ? `<button type="button" class="secondary upload-invoice-btn" data-po-id="${po.id}" style="font-size:12px; padding:6px 10px; margin-top:8px;">Upload invoice for this PO</button>` : ''}
-              </div>`).join('')}
+            ${!pos.length ? '<p class="subtitle">No purchase orders for this supplier yet.</p>' : pos.map(po => renderPoRow(po)).join('') + (pos.length >= 60 ? '<p class="subtitle">Showing the last 60. Older ones are on the <a href="/purchase-orders.html" class="link-quiet">Purchase Orders</a> page.</p>' : '')}
           </div>
         </div>
 
@@ -158,26 +163,35 @@
       `;
 
       renderActivityLog('supplier', supplier.id, 'supplier-activity-log');
-      document.querySelectorAll('.approve-bill-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const { error } = await supabaseClient.from('supplier_bills').update({ approved_for_payment: true }).eq('id', btn.dataset.id);
-          if (error) { alert(error.message); return; }
-          const bill = bills.find(b => b.id === btn.dataset.id);
-          await logActivity('supplier', supplierId, 'bill_approved', `Bill ${bill?.bill_number || ''} approved for payment`);
-          await loadSupplier();
-        });
-      });
-
-      document.querySelectorAll('.upload-invoice-btn').forEach(btn => {
-        btn.addEventListener('click', () => uploadInvoiceForPo(pos.find(p => p.id === btn.dataset.poId)));
-      });
-
-      wireReceiveLineItemButtons(
-        document.getElementById('pos-list'),
-        pos,
-        (po) => po.project_id ? 'job' : po.vehicle_id ? 'vehicle' : 'warehouse',
-        loadSupplier
-      );
+      // Approve, Paid and Not paid all run on the server (who, when, pay-on date, the payment batch).
+      async function callServer(fn, body) {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch(`/.netlify/functions/${fn}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+        return data;
+      }
+      const busy = async (btn, working, fn) => {
+        const label = btn.textContent;
+        btn.disabled = true; btn.textContent = working;
+        try { await fn(); await loadSupplier(); }
+        catch (err) { alert(friendlyError(err)); btn.disabled = false; btn.textContent = label; }
+      };
+      document.querySelectorAll('.approve-bill-btn').forEach(btn => btn.addEventListener('click', () =>
+        busy(btn, 'Approving...', () => callServer('supplier-checks', { action: 'approve_bill', id: btn.dataset.id }))));
+      document.querySelectorAll('.paid-bill-btn').forEach(btn => btn.addEventListener('click', () => {
+        const paidOn = prompt(`Bill ${btn.dataset.number} paid on which day? (YYYY-MM-DD)`, sydneyDateKey(new Date()));
+        if (paidOn === null) return;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn.trim())) { alert('Enter the date as YYYY-MM-DD.'); return; }
+        const reference = prompt('Payment reference (optional, e.g. Airwallex transfer or bank reference)', '');
+        if (reference === null) return;
+        busy(btn, 'Saving...', () => callServer('run-supplier-payments', { action: 'mark_paid', bill_ids: [btn.dataset.id], paid_on: paidOn.trim(), reference }));
+      }));
+      document.querySelectorAll('.unpaid-bill-btn').forEach(btn => btn.addEventListener('click', () => {
+        const note = prompt('Mark this bill as not paid. Why?', '');
+        if (note === null) return;
+        busy(btn, 'Saving...', () => callServer('run-supplier-payments', { action: 'undo_paid', bill_id: btn.dataset.id, note }));
+      }));
 
       document.getElementById('edit-supplier-btn').addEventListener('click', () => openEditPanel(supplier));
       document.getElementById('upload-bill-btn').addEventListener('click', () => {
@@ -213,10 +227,7 @@
     }
 
     async function runStatementExtraction(file) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the statement...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the statement...</p>`, { maxWidth: 400 });
 
       try {
         const fileBase64 = await fileToBase64(file);
@@ -231,7 +242,7 @@
         overlay.remove();
         await openStatementReviewPanel(data.extracted, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that statement</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="st-err-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that statement</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="st-err-close">Close</button>`;
         overlay.querySelector('#st-err-close').addEventListener('click', () => overlay.remove());
       }
     }
@@ -239,7 +250,8 @@
     async function openStatementReviewPanel(extracted, sourceFile) {
       const { data: ourBills } = await supabaseClient.from('supplier_bills').select('*').eq('supplier_id', supplierId);
       const bills = ourBills || [];
-      const statementInvoices = extracted.invoices || [];
+      // payments and credits are listed on statements too; only invoices are matched to bills
+      const statementInvoices = (extracted.invoices || []).filter(inv => !inv.type || inv.type === 'invoice');
 
       // Reconcile: for each line the statement shows, does it match one of
       // our own bills (by bill number), and if so, does the amount agree?
@@ -259,15 +271,15 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:700px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Statement reconciliation</h2>
-          <p class="subtitle" style="margin-bottom:14px;">Statement total: ${money(extracted.total_amount || 0)} - dated ${extracted.statement_date || 'unknown'}</p>
+          <p class="subtitle" style="margin-bottom:14px;">Statement total: ${money(extracted.total_amount || 0)} - dated ${escapeHtml(extracted.statement_date || 'unknown')}</p>
 
           ${mismatches.length ? `
             <div style="border:1px solid var(--red); border-radius:8px; padding:12px; margin-bottom:14px;">
               <p style="margin:0 0 8px; color:var(--red); font-weight:600;">${mismatches.length} discrepanc${mismatches.length === 1 ? 'y' : 'ies'} found</p>
               ${mismatches.map(m => `
                 <div style="padding:6px 0; border-bottom:1px solid var(--border); font-size:13px;">
-                  <strong>${m.bill_number || 'Unlisted'}</strong> - ${money(m.amount)}
-                  <p class="subtitle" style="margin:2px 0 0; color:var(--red);">${m.note}</p>
+                  <strong>${escapeHtml(m.bill_number || 'Unlisted')}</strong> - ${money(m.amount)}
+                  <p class="subtitle" style="margin:2px 0 0; color:var(--red);">${escapeHtml(m.note)}</p>
                 </div>`).join('')}
             </div>` : `<div class="success-box" style="margin-bottom:14px;">Every invoice on this statement matches our own records.</div>`}
 
@@ -288,43 +300,40 @@
         try {
           const { data: { user } } = await supabaseClient.auth.getUser();
           const filePath = await uploadPrivateFile(sourceFile, `statements/${supplierId}`);
-          const { error } = await supabaseClient.from('supplier_statements').insert({
+          const { data: savedSt, error } = await supabaseClient.from('supplier_statements').insert({
             supplier_id: supplierId,
             statement_date: extracted.statement_date || null,
             total_amount: extracted.total_amount || 0,
             file_path: filePath,
+            file_name: sourceFile.name,
+            lines: extracted.invoices || [],
             reconciliation_notes: overlay.querySelector('#st-notes').value.trim() || null,
             created_by: user.id,
-          });
+          }).select('id').single();
           if (error) throw error;
+          // full two-way reconciliation, kept on the Bill checks page
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          await fetch('/.netlify/functions/supplier-checks', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ action: 'reconcile', id: savedSt.id }),
+          }).catch(e => console.error('statement reconcile did not run:', e.message));
           overlay.remove();
-          alert('Statement saved.');
+          alert('Statement saved. The full check (both ways, duplicates, balance) is on the Bill checks page.');
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         }
       });
     }
 
     async function runPricelistExtraction(file) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the price list - this can take a little longer for a long document...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the price list - this can take a little longer for a long document...</p>`, { maxWidth: 400 });
 
       try {
-        const fileBase64 = await fileToBase64(file);
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/extract-pricelist', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ fileBase64, mediaType: file.type }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Extraction failed');
+        const data = await runBackgroundExtraction('pricelist', 'extract-pricelist-background', file, file.type);
         overlay.remove();
         await openPricelistReviewPanel(data.items);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="pl-err-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that price list</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="pl-err-close">Close</button>`;
         overlay.querySelector('#pl-err-close').addEventListener('click', () => overlay.remove());
       }
     }
@@ -352,12 +361,12 @@
             ${rows.map((r, i) => `
               <div class="pl-row" data-index="${i}" style="display:grid; grid-template-columns:24px 2fr 1.5fr 1fr; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:13px;">
                 <input type="checkbox" class="pl-include" checked style="width:auto;" />
-                <span>${r.description}</span>
+                <span>${escapeHtml(r.description)}</span>
                 <select class="pl-match" style="font-size:12px;">
                   <option value="__new__">+ Create as new material</option>
-                  ${materials.map(m => `<option value="${m.id}" ${r.suggestedMatchId === m.id ? 'selected' : ''}>${m.name} (currently ${money(m.cost_price)})</option>`).join('')}
+                  ${materials.map(m => `<option value="${m.id}" ${r.suggestedMatchId === m.id ? 'selected' : ''}>${escapeHtml(m.name)} (currently ${money(m.cost_price)})</option>`).join('')}
                 </select>
-                <input class="pl-cost" type="number" step="0.01" value="${r.unit_cost ?? ''}" style="font-size:12px;" />
+                <input class="pl-cost" type="number" step="0.01" value="${escapeHtml(r.unit_cost)}" style="font-size:12px;" />
               </div>`).join('')}
           </div>
           <div style="margin-top:14px;">
@@ -404,7 +413,7 @@
           overlay.remove();
           alert(`Done - ${updated} material${updated === 1 ? '' : 's'} updated, ${created} created.`);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           confirmBtn.disabled = false;
           confirmBtn.textContent = 'Apply price updates';
         }
@@ -416,12 +425,14 @@
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:440px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Edit ${supplier.name}</h2>
+          <h2>Edit ${escapeHtml(supplier.name)}</h2>
           <label style="margin-top:0">Name</label>
-          <input id="ed-name" value="${supplier.name}" />
+          <input id="ed-name" value="${escapeHtml(supplier.name)}" />
+          <label>Type</label>
+          <select id="ed-kind"><option value="supplier" ${supplier.kind !== 'contractor' ? 'selected' : ''}>Supplier (goods, materials)</option><option value="contractor" ${supplier.kind === 'contractor' ? 'selected' : ''}>Contractor (labour, services)</option></select>
           <div class="grid cols-2">
-            <div><label>Contact email</label><input id="ed-email" value="${supplier.contact_email || ''}" /></div>
-            <div><label>Contact phone</label><input id="ed-phone" value="${supplier.contact_phone || ''}" /></div>
+            <div><label>Contact email</label><input id="ed-email" type="email" autocapitalize="off" value="${escapeHtml(supplier.contact_email)}" /></div>
+            <div><label>Contact phone</label><input id="ed-phone" type="tel" value="${escapeHtml(supplier.contact_phone)}" /></div>
           </div>
           <label>Credit terms</label>
           <div class="grid cols-2">
@@ -430,28 +441,28 @@
               <option value="net_days" ${supplier.credit_terms_type === 'net_days' ? 'selected' : ''}>Net days</option>
               <option value="eom_days" ${supplier.credit_terms_type === 'eom_days' ? 'selected' : ''}>Days after end of month</option>
             </select>
-            <input id="ed-terms-days" type="number" value="${supplier.credit_terms_days}" />
+            <input id="ed-terms-days" type="number" inputmode="numeric" value="${escapeHtml(supplier.credit_terms_days)}" />
           </div>
           <p class="subtitle" style="margin-top:14px;">Used to match future invoices to this supplier automatically.</p>
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Our account number with them</label><input id="ed-account-number" value="${supplier.our_account_number || ''}" placeholder="e.g. the \"Charge To\" number on their invoices" /></div>
-            <div><label style="margin-top:0">ABN</label><input id="ed-abn" value="${supplier.abn || ''}" /></div>
+            <div><label style="margin-top:0">Our account number with them</label><input id="ed-account-number" value="${escapeHtml(supplier.our_account_number)}" placeholder="e.g. the \"Charge To\" number on their invoices" /></div>
+            <div><label style="margin-top:0">ABN</label><input id="ed-abn" inputmode="numeric" value="${escapeHtml(supplier.abn)}" /></div>
           </div>
 
           <p class="subtitle" style="margin-top:14px;">Bank details - needed to pay this supplier via Airwallex.</p>
           <label>Account name</label>
-          <input id="ed-bank-name" value="${supplier.bank_account_name || ''}" />
+          <input id="ed-bank-name" value="${escapeHtml(supplier.bank_account_name)}" />
           <div class="grid cols-2">
-            <div><label>BSB</label><input id="ed-bsb" value="${supplier.bsb || ''}" /></div>
-            <div><label>Account number</label><input id="ed-account" value="${supplier.bank_account_number || ''}" /></div>
+            <div><label>BSB</label><input id="ed-bsb" inputmode="numeric" value="${escapeHtml(supplier.bsb)}" /></div>
+            <div><label>Account number</label><input id="ed-account" inputmode="numeric" value="${escapeHtml(supplier.bank_account_number)}" /></div>
           </div>
           <p class="subtitle" style="margin-top:14px;">BPAY - if this supplier is paid that way instead.</p>
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Biller code</label><input id="ed-bpay-code" value="${supplier.bpay_biller_code || ''}" /></div>
-            <div><label style="margin-top:0">Reference</label><input id="ed-bpay-ref" value="${supplier.bpay_reference || ''}" /></div>
+            <div><label style="margin-top:0">Biller code</label><input id="ed-bpay-code" inputmode="numeric" value="${escapeHtml(supplier.bpay_biller_code)}" /></div>
+            <div><label style="margin-top:0">Reference</label><input id="ed-bpay-ref" inputmode="numeric" value="${escapeHtml(supplier.bpay_reference)}" /></div>
           </div>
           <label>Notes</label>
-          <textarea id="ed-notes" style="min-height:60px;">${supplier.notes || ''}</textarea>
+          <textarea id="ed-notes" style="min-height:60px;">${escapeHtml(supplier.notes)}</textarea>
           <div style="margin-top:14px;">
             <button id="ed-save-btn">Save</button>
             <button type="button" class="secondary" id="ed-cancel-btn">Cancel</button>
@@ -463,8 +474,28 @@
       overlay.querySelector('#ed-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#ed-save-btn').addEventListener('click', async () => {
         const msg = overlay.querySelector('#ed-msg');
+        const btn = overlay.querySelector('#ed-save-btn');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+        // Finance pays to these details, so a change is confirmed first and logged with the old and
+        // new values, where it can be seen before anything is paid (M27).
+        const payFields = [
+          ['bank_account_name', 'Account name', '#ed-bank-name'], ['bsb', 'BSB', '#ed-bsb'], ['bank_account_number', 'Account number', '#ed-account'],
+          ['bpay_biller_code', 'BPAY biller code', '#ed-bpay-code'], ['bpay_reference', 'BPAY reference', '#ed-bpay-ref'],
+        ];
+        const payChanges = payFields
+          .map(([key, label, sel]) => ({ label, from: String(supplier[key] ?? '').trim() || null, to: overlay.querySelector(sel).value.trim() || null }))
+          .filter(c => c.from !== c.to);
+        if (payChanges.length) {
+          const lines = payChanges.map(c => `${c.label}: ${c.from || '(none)'} to ${c.to || '(none)'}`).join('\n');
+          if (!confirm(`Change how ${supplier.name} is paid?\n\n${lines}\n\nRing the supplier on a number you already have to check new bank details. This change is logged.`)) return;
+        }
         const { error } = await supabaseClient.from('suppliers').update({
           name: overlay.querySelector('#ed-name').value.trim(),
+          kind: overlay.querySelector('#ed-kind').value,
+          needs_review: false, // a person has now gone through the details
           contact_email: overlay.querySelector('#ed-email').value.trim() || null,
           contact_phone: overlay.querySelector('#ed-phone').value.trim() || null,
           credit_terms_type: overlay.querySelector('#ed-terms-type').value,
@@ -478,10 +509,17 @@
           bank_account_number: overlay.querySelector('#ed-account').value.trim() || null,
           notes: overlay.querySelector('#ed-notes').value.trim() || null,
         }).eq('id', supplier.id);
-        if (error) { msg.innerHTML = `<div class="error-box">${error.message}</div>`; return; }
+        if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
         await logActivity('supplier', supplier.id, 'updated', `Supplier "${overlay.querySelector('#ed-name').value.trim()}" updated`);
+        if (payChanges.length) {
+          await logActivity('supplier', supplier.id, 'payment_details_changed', `Payment details changed: ${payChanges.map(c => `${c.label} ${c.from || '(none)'} to ${c.to || '(none)'}`).join('; ')}`);
+        }
         overlay.remove();
         await loadSupplier();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
       });
     }
 
@@ -490,10 +528,7 @@
     // shared with the Suppliers page's own upload-and-detect flow.
 
     async function runExtraction(file) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `<div class="card" style="max-width:400px; width:100%;"><p class="subtitle">Reading the invoice...</p></div>`;
-      document.body.appendChild(overlay);
+      const overlay = openModal(`<p class="subtitle">Reading the invoice...</p>`, { maxWidth: 400 });
 
       try {
         const fileBase64 = await fileToBase64(file);
@@ -508,20 +543,21 @@
         overlay.remove();
         await openReviewPanel(data.extracted, null, file);
       } catch (err) {
-        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${err.message}</div><button type="button" class="secondary" id="extract-err-close">Close</button>`;
+        overlay.querySelector('.card').innerHTML = `<h2>Couldn't read that invoice</h2><div class="error-box">${escapeHtml(err.message)}</div><button type="button" class="secondary" id="extract-err-close">Close</button>`;
         overlay.querySelector('#extract-err-close').addEventListener('click', () => overlay.remove());
       }
     }
 
-    async function openReviewPanel(extracted, preselectedPoId = null, sourceFile = null) {
+    // inboxItemId: set when the bill came from the Emailed bills page; saving ticks it off there.
+    async function openReviewPanel(extracted, preselectedPoId = null, sourceFile = null, inboxItemId = null) {
       const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand');
       const materials = allMaterials || [];
 
       const { data: openPOs } = await supabaseClient
         .from('purchase_orders')
-        .select('id, po_number, description, status, purchase_order_line_items(id, material_id, description, quantity, unit_cost)')
+        .select('id, po_number, description, status, closed_at, purchase_order_line_items(id, material_id, description, quantity, unit_cost)')
         .eq('supplier_id', supplierId)
-        .not('status', 'in', '(paid,invoiced)');
+        .is('closed_at', null);
 
       // If the invoice itself references our PO number (e.g. "Your
       // Order: PO2014"), auto-match against it rather than making the
@@ -562,25 +598,25 @@
       });
 
       const nameWarning = extracted.supplier && !fuzzyMatchScore(currentSupplier.name, extracted.supplier)
-        ? `<div class="error-box" style="margin-bottom:10px;">The invoice says "${extracted.supplier}" - check this is actually a ${currentSupplier.name} bill before saving.</div>` : '';
+        ? `<div class="error-box" style="margin-bottom:10px;">The invoice says "${escapeHtml(extracted.supplier)}" - check this is actually a ${escapeHtml(currentSupplier.name)} bill before saving.</div>` : '';
 
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; overflow-y:auto;';
       overlay.innerHTML = `
         <div class="card" style="max-width:720px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Review before saving</h2>
-          <p class="subtitle" style="margin-bottom:14px;">Saving against ${currentSupplier.name}. Nothing's saved yet.</p>
+          <p class="subtitle" style="margin-bottom:14px;">Saving against ${escapeHtml(currentSupplier.name)}. Nothing's saved yet.</p>
           ${nameWarning}
 
           <div class="grid cols-2">
-            <div><label style="margin-top:0">Bill number</label><input id="rev-bill-number" value="${extracted.bill_number || ''}" /></div>
-            <div><label style="margin-top:0">Date</label><input type="date" id="rev-bill-date" value="${extracted.bill_date || ''}" /></div>
+            <div><label style="margin-top:0">Bill number</label><input id="rev-bill-number" value="${escapeHtml(extracted.bill_number)}" /></div>
+            <div><label style="margin-top:0">Date</label><input type="date" id="rev-bill-date" value="${escapeHtml(extracted.bill_date)}" /></div>
           </div>
           <label>Total amount</label>
-          <input type="number" step="0.01" id="rev-total" value="${extracted.total || ''}" />
+          <input type="number" step="0.01" id="rev-total" value="${escapeHtml(extracted.total || '')}" />
 
           <label style="margin-top:14px;">Purchase order</label>
-          ${autoMatchedPoId ? `<p class="subtitle" style="color:var(--green); margin-bottom:6px;">${preselectedPoId ? 'Uploaded directly to this PO.' : `Matched to PO ${(openPOs.find(p => p.id === autoMatchedPoId) || {}).po_number} from the invoice's own reference - check this is correct.`}</p>` : ''}
+          ${autoMatchedPoId ? `<p class="subtitle" style="color:var(--green); margin-bottom:6px;">${preselectedPoId ? 'Uploaded directly to this PO.' : `Matched to PO ${escapeHtml((openPOs.find(p => p.id === autoMatchedPoId) || {}).po_number)} from the invoice's own reference - check this is correct.`}</p>` : ''}
           <select id="rev-po-mode">
             <option value="none" ${!autoMatchedPoId ? 'selected' : ''}>No PO for this bill</option>
             ${openPOs?.length ? `<option value="existing" ${autoMatchedPoId ? 'selected' : ''}>Link to an existing open PO</option>` : ''}
@@ -588,11 +624,11 @@
           </select>
 
           <div id="rev-po-existing-section" style="display:${autoMatchedPoId ? 'block' : 'none'}; margin-top:8px;">
-            <select id="rev-po"><option value="">-- Select --</option>${(openPOs || []).map(po => `<option value="${po.id}" ${po.id === autoMatchedPoId ? 'selected' : ''}>${po.po_number || 'PO'} - ${po.description || ''}</option>`).join('')}</select>
+            <select id="rev-po"><option value="">-- Select --</option>${(openPOs || []).map(po => `<option value="${po.id}" ${po.id === autoMatchedPoId ? 'selected' : ''}>${escapeHtml(po.po_number || 'PO')} - ${escapeHtml(po.description)}</option>`).join('')}</select>
           </div>
 
           <div id="rev-po-new-section" style="display:none; margin-top:8px;">
-            <p class="subtitle" style="margin-bottom:8px;">Auto-filled from this bill's line items below - creates a locked PO so it can be signed off once everything's arrived, before this bill gets approved for payment.</p>
+            <p class="subtitle" style="margin-bottom:8px;">Auto-filled from this bill's line items below - creates a PO so it can be signed off once everything's arrived, before this bill gets approved for payment.</p>
             <select id="rev-po-assign-type">
               <option value="stock">Assign to Stock (not a specific job)</option>
               <option value="job">Assign to a job</option>
@@ -608,21 +644,21 @@
           <div id="rev-line-items">
             ${lineItems.map((li, i) => `
               <div class="rev-line-item" data-index="${i}" style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px;">
-                <input class="rli-desc" value="${li.description || ''}" placeholder="Description" style="margin-bottom:6px;" />
+                <input class="rli-desc" value="${escapeHtml(li.description)}" placeholder="Description" style="margin-bottom:6px;" />
                 <div class="grid cols-2">
-                  <div><label style="margin-top:0; font-size:11px;">Quantity</label><input class="rli-qty" type="number" step="0.01" value="${li.quantity ?? 1}" /></div>
-                  <div><label style="margin-top:0; font-size:11px;">Unit cost</label><input class="rli-cost" type="number" step="0.01" value="${li.unit_cost ?? 0}" /></div>
+                  <div><label style="margin-top:0; font-size:11px;">Quantity</label><input class="rli-qty" type="number" step="0.01" value="${escapeHtml(li.quantity ?? 1)}" /></div>
+                  <div><label style="margin-top:0; font-size:11px;">Unit cost</label><input class="rli-cost" type="number" step="0.01" value="${escapeHtml(li.unit_cost ?? 0)}" /></div>
                 </div>
                 <label style="margin-top:6px; font-size:11px;">Match to Stock</label>
                 <select class="rli-match">
                   <option value="__new__">+ Create as new material</option>
-                  ${materials.map(m => `<option value="${m.id}" ${li.suggestedMatchId === m.id ? 'selected' : ''}>${m.name} (currently ${money(m.cost_price)})</option>`).join('')}
+                  ${materials.map(m => `<option value="${m.id}" ${li.suggestedMatchId === m.id ? 'selected' : ''}>${escapeHtml(m.name)} (currently ${money(m.cost_price)})</option>`).join('')}
                 </select>
                 ${li.suggestedMatchId ? `<p class="subtitle" style="margin:4px 0 0; font-size:11px;">Suggested match - check this is actually the same item before confirming.</p>` : ''}
                 ${li.genericPoLineId ? `
                   <label style="margin-top:8px; display:flex; align-items:flex-start; gap:6px; font-size:12px;">
                     <input type="checkbox" class="rli-replace-generic" data-po-line-id="${li.genericPoLineId}" checked style="width:auto; margin-top:2px;" />
-                    Update the PO's "${li.genericPoLineDescription}" to this specific item
+                    Update the PO's "${escapeHtml(li.genericPoLineDescription)}" to this specific item
                   </label>` : ''}
               </div>`).join('')}
           </div>
@@ -660,7 +696,7 @@
             const results = await searchProjects(q);
             const resultsEl = overlay.querySelector('#rev-po-job-results');
             resultsEl.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:6px;">
-              ${results.map(p => `<div class="rev-job-pick" data-id="${p.id}" data-name="${p.name}" data-job-number="${p.job_number || ''}" data-quote-number="${p.quote_number || ''}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${projectRef(p)}</div>`).join('')}
+              ${results.map(p => `<div class="rev-job-pick" data-id="${p.id}" data-name="${escapeHtml(p.name)}" data-job-number="${escapeHtml(p.job_number)}" data-quote-number="${escapeHtml(p.quote_number)}" style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(projectRef(p))}</div>`).join('')}
             </div>`;
             resultsEl.querySelectorAll('.rev-job-pick').forEach(row => {
               row.addEventListener('click', () => {
@@ -682,147 +718,76 @@
         confirmBtn.textContent = 'Saving...';
 
         try {
-          const { data: { user } } = await supabaseClient.auth.getUser();
-          const { data: companySettings } = await supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).single();
-          const markup = Number(companySettings?.default_markup_percent) || 45;
-
           const poMode = overlay.querySelector('#rev-po-mode').value;
-          let poId = null;
-          let linkedPO = null;
-
+          let poId = null, newPo = null;
           if (poMode === 'existing') {
             poId = overlay.querySelector('#rev-po').value || null;
-            linkedPO = poId ? openPOs.find(p => p.id === poId) : null;
+            if (!poId) throw new Error('Pick the PO, or switch to "No PO for this bill".');
           } else if (poMode === 'new') {
             const assignType = overlay.querySelector('#rev-po-assign-type').value;
             if (assignType === 'job' && !selectedJobForNewPO) {
               throw new Error('Search for and select a job, or switch to assigning this PO to Stock instead.');
             }
-            const lineRows = [...overlay.querySelectorAll('.rev-line-item')];
-            const { data: newPO, error: poErr } = await supabaseClient.from('purchase_orders').insert({
-              project_id: assignType === 'job' ? selectedJobForNewPO.id : null,
-              supplier_id: supplierId,
-              supplier_name: currentSupplier.name,
-              po_type: 'fixed',
-              locked: true,
-              status: 'ordered',
-              amount: 0,
-              description: `Created from bill ${overlay.querySelector('#rev-bill-number').value.trim() || ''}`.trim(),
-            }).select('*').single();
-            if (poErr) throw poErr;
-
-            const poLineItems = lineRows.map(row => ({
-              po_id: newPO.id,
+            newPo = { project_id: assignType === 'job' ? selectedJobForNewPO.id : null };
+          }
+          const billDate = overlay.querySelector('#rev-bill-date').value || null;
+          const lines = [...overlay.querySelectorAll('.rev-line-item')].map(row => {
+            const replaceCheckbox = row.querySelector('.rli-replace-generic');
+            const matchValue = row.querySelector('.rli-match').value;
+            return {
               description: row.querySelector('.rli-desc').value.trim(),
               quantity: parseFloat(row.querySelector('.rli-qty').value) || 0,
               unit_cost: parseFloat(row.querySelector('.rli-cost').value) || 0,
-              added_by: user.id,
-            })).filter(li => li.description);
-            if (poLineItems.length) {
-              const { error: poLiErr } = await supabaseClient.from('purchase_order_line_items').insert(poLineItems);
-              if (poLiErr) throw poLiErr;
-            }
+              material_id: matchValue === '__new__' ? null : matchValue,
+              create_material: matchValue === '__new__',
+              replace_po_line_id: replaceCheckbox && replaceCheckbox.checked ? replaceCheckbox.dataset.poLineId : null,
+            };
+          }).filter(l => l.description);
+          if (!lines.length) throw new Error('Add at least one line item.');
 
-            poId = newPO.id;
-            linkedPO = { ...newPO, purchase_order_line_items: poLineItems };
-          }
-
-          const billDate = overlay.querySelector('#rev-bill-date').value || null;
-          const dueDate = billDate ? await (async () => {
-            const { data: computed } = await supabaseClient.rpc('calculate_bill_due_date', {
-              p_bill_date: billDate, p_credit_terms_type: currentSupplier.credit_terms_type, p_credit_terms_days: currentSupplier.credit_terms_days,
-            });
-            return computed;
-          })() : null;
-
-          // Keeps the original scan/PDF, same as the sibling statement
-          // upload already does - without this the source document was
-          // silently discarded the moment extraction succeeded, with no
-          // way to pull it back up later.
+          // Keeps the original scan/PDF, same as the sibling statement upload does.
           let filePath = null, fileName = null;
           if (sourceFile) {
             filePath = await uploadPrivateFile(sourceFile, `bills/${supplierId}`);
             fileName = sourceFile.name;
           }
 
-          const { data: newBill, error: billErr } = await supabaseClient.from('supplier_bills').insert({
+          // One server step, all or nothing: duplicate check by bill number, the PO (linked or new), the
+          // bill and its lines linked or flagged against the PO. Stock counts are not touched here: gear
+          // goes into stock or onto the job when its PO line is received.
+          const { data: billId, error: saveErr } = await supabaseClient.rpc('supplier_bill_save_review', { p: {
             supplier_id: supplierId,
-            supplier_name: currentSupplier.name,
             bill_number: overlay.querySelector('#rev-bill-number').value.trim() || null,
             bill_date: billDate,
-            due_date: dueDate,
             amount: parseFloat(overlay.querySelector('#rev-total').value) || 0,
-            po_id: poId,
-            file_path: filePath,
-            file_name: fileName,
-            created_by: user.id,
-          }).select('id').single();
-          if (billErr) throw billErr;
+            po_mode: poMode, po_id: poId, new_po: newPo,
+            file_path: filePath, file_name: fileName,
+            lines,
+          } });
+          if (saveErr) throw saveErr;
+          const newBill = { id: billId };
 
-          const rows = [...overlay.querySelectorAll('.rev-line-item')];
-          for (const row of rows) {
-            const description = row.querySelector('.rli-desc').value.trim();
-            const quantity = parseFloat(row.querySelector('.rli-qty').value) || 0;
-            const unitCost = parseFloat(row.querySelector('.rli-cost').value) || 0;
-            const matchValue = row.querySelector('.rli-match').value;
-            if (!description) continue;
+          // check the new bill line by line against its PO (Bill checks page)
+          {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            await fetch('/.netlify/functions/supplier-checks', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({ action: 'check_bill', id: newBill.id }),
+            }).catch(e => console.error('bill check did not run:', e.message));
+          }
 
-            let materialId;
-            if (matchValue === '__new__') {
-              const { data: newMat, error: matErr } = await supabaseClient.from('materials').insert({
-                name: description, cost_price: unitCost,
-                sell_price: Math.round(unitCost * (1 + markup / 100) * 100) / 100,
-                supplier_id: supplierId,
-              }).select('id').single();
-              if (matErr) throw matErr;
-              materialId = newMat.id;
-              await adjustWarehouseStock(materialId, quantity);
-            } else {
-              materialId = matchValue;
-              await supabaseClient.from('materials').update({ cost_price: unitCost }).eq('id', materialId);
-              await adjustWarehouseStock(materialId, quantity);
-            }
-
-            // If accepted, update the PO's generic line item to reflect
-            // what was actually invoiced - never done without the
-            // person seeing and confirming it on the review screen.
-            const replaceCheckbox = row.querySelector('.rli-replace-generic');
-            let replacedGenericPoLineId = null;
-            if (replaceCheckbox && replaceCheckbox.checked) {
-              const genericPoLineId = replaceCheckbox.dataset.poLineId;
-              await supabaseClient.from('purchase_order_line_items').update({
-                material_id: materialId, description,
-              }).eq('id', genericPoLineId);
-              replacedGenericPoLineId = genericPoLineId;
-            }
-
-            // Flag against the linked PO, if one was chosen - either the
-            // item isn't on that PO at all, or it's genuinely priced
-            // higher than what the PO expected.
-            let flagReason = null;
-            let poLineItemId = replacedGenericPoLineId;
-            if (linkedPO && !poLineItemId) {
-              const poLine = (linkedPO.purchase_order_line_items || []).find(pl => pl.material_id === materialId);
-              if (!poLine) {
-                flagReason = 'Not on the linked PO';
-              } else {
-                poLineItemId = poLine.id;
-                if (unitCost > Number(poLine.unit_cost) * 1.01) {
-                  flagReason = `Charged ${money(unitCost)}, PO expected ${money(poLine.unit_cost)}`;
-                }
-              }
-            }
-
-            await supabaseClient.from('supplier_bill_line_items').insert({
-              bill_id: newBill.id, material_id: materialId, description, quantity, unit_cost: unitCost,
-              po_line_item_id: poLineItemId, flag_reason: flagReason,
-            });
+          if (inboxItemId) {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            await fetch('/.netlify/functions/supplier-bill-inbox', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({ action: 'mark_saved', id: inboxItemId, bill_id: newBill.id }),
+            }).catch(e => console.error('could not tick off the emailed bill:', e.message));
           }
 
           overlay.remove();
           await loadSupplier();
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${err.message}</div>`;
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
           confirmBtn.disabled = false;
           confirmBtn.textContent = 'Confirm & save';
         }
@@ -849,13 +814,22 @@
         const pending = sessionStorage.getItem('pending_upload');
         if (pending) {
           sessionStorage.removeItem('pending_upload');
-          const { type, extracted, fileBase64, fileName, fileType, preselectedPoId } = JSON.parse(pending);
-          const byteString = atob(fileBase64);
-          const bytes = new Uint8Array(byteString.length);
-          for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
-          const file = new File([bytes], fileName, { type: fileType });
+          const { type, extracted, filePath, fileBase64, fileName, fileType, preselectedPoId, inboxItemId } = JSON.parse(pending);
+          let file;
+          if (filePath) {
+            // The file was put in storage by the page that read it (bug F49): download it by path
+            const { data: blob, error } = await supabaseClient.storage.from('project-documents').download(filePath);
+            if (error) throw error;
+            file = new File([blob], fileName, { type: fileType });
+          } else {
+            // Old shape: a tab opened before the deploy still carries the file as base64
+            const byteString = atob(fileBase64);
+            const bytes = new Uint8Array(byteString.length);
+            for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
+            file = new File([bytes], fileName, { type: fileType });
+          }
 
-          if (type === 'bill') await openReviewPanel(extracted, preselectedPoId || null, file);
+          if (type === 'bill') await openReviewPanel(extracted, preselectedPoId || null, file, inboxItemId || null);
           else if (type === 'pricelist') await openPricelistReviewPanel(extracted.items);
           else if (type === 'statement') await openStatementReviewPanel(extracted, file);
         }

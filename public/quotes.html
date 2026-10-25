@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -41,8 +41,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     (async function () {
       const session = await requireLogin();
@@ -90,22 +90,23 @@
       const pendingQuotes = projects.filter(p => p.status === 'draft');
       const sentQuotes = projects.filter(p => p.status === 'sent');
       const approvedQuotes = projects.filter(p => p.status === 'approved');
-      const archived = projects.filter(p => !['draft', 'sent', 'approved'].includes(p.status));
+      const declinedQuotes = projects.filter(p => p.status === 'declined'); // the client said no (on the quote page, or marked by us)
+      const archived = projects.filter(p => !['draft', 'sent', 'approved', 'declined'].includes(p.status));
 
       function buildRowsHtml(rowProjects) {
         return rowProjects.map((p, i) => {
           const stageCount = p.cost_centres.length;
           const stageLabel = `${stageCount} stage${stageCount === 1 ? '' : 's'}`;
-          const nameDisplay = `${p.quote_number ? '#' + p.quote_number + ' - ' : ''}${p.name}`;
+          const nameDisplay = `${p.quote_number ? '#' + p.quote_number + ' - ' : ''}${escapeHtml(p.name)}`;
           const isLast = i === rowProjects.length - 1;
           const rowInner = !pricingVisible ? `
                 <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
                   <div>
                     <div class="name">${nameDisplay}</div>
-                    <div class="meta">${p.client_name} &middot; ${stageLabel}</div>
+                    <div class="meta">${escapeHtml(p.client_name)} &middot; ${stageLabel}</div>
                   </div>
                   <div style="text-align:right; min-width:160px;">
-                    <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
+                    <span class="badge ${p.status}">${p.expired && p.status === 'declined' ? 'expired' : p.status.replace('_',' ')}</span>${p.status === 'sent' && p.valid_until ? ` <span class="subtitle" style="font-size:11px;">until ${new Date(p.valid_until + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span>` : ''}
                   </div>
                 </a>` : (() => {
             const quoted = p.cost_centres.reduce((s, c) => s + Number(c.quoted_amount), 0);
@@ -115,10 +116,10 @@
                 <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
                   <div>
                     <div class="name">${nameDisplay}</div>
-                    <div class="meta">${p.client_name} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
+                    <div class="meta">${escapeHtml(p.client_name)} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
                   </div>
                   <div style="text-align:right; min-width:160px;">
-                    <span class="badge ${p.status}">${p.status.replace('_',' ')}</span>
+                    <span class="badge ${p.status}">${p.expired && p.status === 'declined' ? 'expired' : p.status.replace('_',' ')}</span>${p.status === 'sent' && p.valid_until ? ` <span class="subtitle" style="font-size:11px;">until ${new Date(p.valid_until + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span>` : ''}
                     <div class="meta" style="margin-top:6px;">${pctInvoiced}% invoiced</div>
                   </div>
                 </a>`;
@@ -153,6 +154,7 @@
           <button class="settings-tab active" data-panel="active">Active (${pendingQuotes.length})</button>
           <button class="settings-tab" data-panel="sent">Sent to Client (${sentQuotes.length})</button>
           <button class="settings-tab" data-panel="approved">Approved (${approvedQuotes.length})</button>
+          <button class="settings-tab" data-panel="declined">Declined (${declinedQuotes.length})</button>
           <button class="settings-tab" data-panel="archived">Archived (${archived.length})</button>
         </div>
         <div class="settings-panel active" id="panel-active">
@@ -166,6 +168,10 @@
         <div class="settings-panel" id="panel-approved">
           ${bulkBarHtml()}
           ${approvedQuotes.length ? buildRowsHtml(approvedQuotes) : `<p class="subtitle">No approved quotes yet - a quote stays here as a frozen record once accepted; the job it becomes is a separate record, in Projects.</p>`}
+        </div>
+        <div class="settings-panel" id="panel-declined">
+          ${bulkBarHtml()}
+          ${declinedQuotes.length ? buildRowsHtml(declinedQuotes) : `<p class="subtitle">No declined quotes. A quote lands here when the client declines it, or you mark it declined. Open it to reopen.</p>`}
         </div>
         <div class="settings-panel" id="panel-archived">
           ${bulkBarHtml()}
@@ -185,6 +191,7 @@
         wireBulkDelete(document.getElementById('panel-active'), projects);
         wireBulkDelete(document.getElementById('panel-sent'), projects);
         wireBulkDelete(document.getElementById('panel-approved'), projects);
+        wireBulkDelete(document.getElementById('panel-declined'), projects);
         wireBulkDelete(document.getElementById('panel-archived'), projects);
       }
     })();
@@ -231,7 +238,7 @@
 
         const parts = [];
         if (blocked.length) {
-          parts.push(`<div class="error-box">Not deleted, has real activity against it:<ul style="margin:6px 0 0 18px;">${blocked.map(b => `<li>${b.project.name} - ${b.reasons.join(', ')}</li>`).join('')}</ul></div>`);
+          parts.push(`<div class="error-box">Not deleted, has real activity against it:<ul style="margin:6px 0 0 18px;">${blocked.map(b => `<li>${escapeHtml(b.project.name)} - ${b.reasons.join(', ')}</li>`).join('')}</ul></div>`);
         }
         if (!clear.length) {
           msg.innerHTML = parts.join('');
@@ -246,14 +253,18 @@
         }
 
         deleteBtn.textContent = 'Deleting...';
+        const deleted = [];
         try {
-          for (const p of clear) await deleteProject(p.id);
+          for (const p of clear) { await deleteProject(p.id); deleted.push(p); }
           parts.push(`<div class="success-box">Deleted ${clear.length} quote${clear.length === 1 ? '' : 's'}.</div>`);
           msg.innerHTML = parts.join('');
           location.reload();
         } catch (err) {
-          parts.push(`<div class="error-box">${err.message}</div>`);
+          // deleteProject stops at the first failed step. The quotes already gone come off the list here
+          // (a page reload would wipe this message), so what is shown matches the database.
+          parts.push(`<div class="error-box">${escapeHtml(err.message)}${deleted.length ? ` Deleted before it stopped: ${escapeHtml(deleted.map(p => p.name).join(', '))}.` : ''}</div>`);
           msg.innerHTML = parts.join('');
+          deleted.forEach(p => { const cb = panel.querySelector(`.quote-select[data-id="${p.id}"]`); if (cb) cb.parentElement.remove(); });
           deleteBtn.disabled = false;
           refreshDeleteBtn();
         }

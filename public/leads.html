@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
-<title>Leads - Thomson Energy</title>
+<title>Leads - TEops</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
@@ -11,8 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=16" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
   <div class="topbar">
@@ -57,8 +57,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=72"></script>
-  <script src="/js/theme.js"></script>
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
   <script>
     function timeAgo(dateStr) {
       const diffMs = Date.now() - new Date(dateStr).getTime();
@@ -74,6 +74,14 @@
       return { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form' }[source] || source;
     }
 
+    // A value inside a PostgREST filter (.or('email.eq.…')): quoted, so a comma, bracket or
+    // dot in a website-typed email or phone cannot add a clause or break the lookup (F21).
+    function pgQuote(value) {
+      return '"' + String(value).replace(/[\\"]/g, (m) => '\\' + m) + '"';
+    }
+    // Text from the website lead form, kept plain before it names a job or quote (S11).
+    const plainText = (s) => String(s || '').replace(/[<>]/g, '').trim();
+
     // Pretty labels for the flexible `details` JSON each source sends
     // (see WEBSITE_LEAD_CAPTURE.md) - falls back to the raw key for
     // anything not explicitly named here, rather than hiding it.
@@ -88,7 +96,7 @@
       const rows = Object.entries(details).filter(([k]) => k !== 'attachments');
       if (!rows.length) return `<p class="subtitle">No further details captured.</p>`;
       return `<table><tbody>${rows.map(([k, v]) => `
-        <tr><td style="font-weight:600; white-space:nowrap;">${DETAIL_FIELD_LABELS[k] || k}</td><td>${typeof v === 'boolean' ? (v ? 'Yes' : 'No') : escapeHtml(String(v))}</td></tr>
+        <tr><td style="font-weight:600; white-space:nowrap;">${escapeHtml(DETAIL_FIELD_LABELS[k] || k)}</td><td>${typeof v === 'boolean' ? (v ? 'Yes' : 'No') : escapeHtml(String(v))}</td></tr>
       `).join('')}</tbody></table>`;
     }
 
@@ -106,8 +114,9 @@
 
     async function generateSummaryFor(lead) {
       try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const res = await fetch('/.netlify/functions/generate-lead-summary', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
           body: JSON.stringify({ source: lead.source, details: lead.details, name: lead.name }),
         });
         const data = await res.json();
@@ -133,8 +142,8 @@
         <div class="card" style="max-width:640px; width:100%; max-height:88vh; overflow-y:auto;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
             <div>
-              <h2 style="margin:0;">${lead.name || '(no name given)'}</h2>
-              <p class="subtitle" style="margin:4px 0 0;">${sourceLabel(lead.source)} &middot; ${timeAgo(lead.created_at)}</p>
+              <h2 style="margin:0;">${escapeHtml(lead.name || '(no name given)')}</h2>
+              <p class="subtitle" style="margin:4px 0 0;">${escapeHtml(sourceLabel(lead.source))} &middot; ${timeAgo(lead.created_at)}</p>
             </div>
             <button type="button" class="secondary" id="ld-close-btn" style="font-size:12px; padding:6px 10px;">Close</button>
           </div>
@@ -166,8 +175,8 @@
           </div>
 
           <div class="grid cols-2" style="margin-top:14px;">
-            <div><label style="margin-top:0">Phone</label><p>${lead.phone || '-'}</p></div>
-            <div><label style="margin-top:0">Email</label><p>${lead.email || '-'}</p></div>
+            <div><label style="margin-top:0">Phone</label><p>${escapeHtml(lead.phone || '-')}</p></div>
+            <div><label style="margin-top:0">Email</label><p>${escapeHtml(lead.email || '-')}</p></div>
           </div>
           ${lead.address_formatted ? `<label>Address</label><p>${mapsLink(lead.address_formatted)}</p>` : ''}
 
@@ -197,7 +206,7 @@
             const name = attachments[i].name || 'file';
             return isImage(name)
               ? `<a href="${u.data.signedUrl}" target="_blank" rel="noopener"><img src="${u.data.signedUrl}" style="width:100px; height:100px; object-fit:cover; border-radius:8px; border:1px solid var(--border);" /></a>`
-              : `<a class="link-quiet" href="${u.data.signedUrl}" target="_blank" rel="noopener" style="display:block; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:12px;">${name}</a>`;
+              : `<a class="link-quiet" href="${u.data.signedUrl}" target="_blank" rel="noopener" style="display:block; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:12px;">${escapeHtml(name)}</a>`;
           }).join('') || '(could not load files)';
         });
       }
@@ -224,8 +233,8 @@
 
       (async () => {
         const clauses = [];
-        if (lead.email) clauses.push(`email.eq.${lead.email}`);
-        if (lead.phone) clauses.push(`phone.eq.${lead.phone}`);
+        if (lead.email) clauses.push(`email.eq.${pgQuote(lead.email)}`);
+        if (lead.phone) clauses.push(`phone.eq.${pgQuote(lead.phone)}`);
         if (!clauses.length) return;
         const { data: cbs } = await supabaseClient.from('callback_requests').select('*').or(clauses.join(',')).order('requested_date', { ascending: false });
         if (!cbs || !cbs.length) return;
@@ -234,7 +243,7 @@
         card.style.display = 'block';
         overlay.querySelector('#ld-callbacks-area').innerHTML = cbs.map(r => `
           <p style="margin:4px 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}
-            <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}">${r.status}</span>
+            <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}">${escapeHtml(r.status)}</span>
           </p>`).join('');
       })();
 
@@ -261,20 +270,25 @@
       try {
         let clientId = null;
         if (lead.email || lead.phone) {
-          const orClauses = [lead.email ? `email.eq.${lead.email}` : null, lead.phone ? `phone.eq.${lead.phone}` : null].filter(Boolean);
-          const { data: existing } = await supabaseClient.from('clients').select('id').or(orClauses.join(',')).limit(1).maybeSingle();
+          const orClauses = [lead.email ? `email.eq.${pgQuote(lead.email)}` : null, lead.phone ? `phone.eq.${pgQuote(lead.phone)}` : null].filter(Boolean);
+          const { data: existing, error: lookupErr } = await supabaseClient.from('clients').select('id').or(orClauses.join(',')).limit(1).maybeSingle();
+          // A failed lookup must not make a duplicate client
+          if (lookupErr) throw lookupErr;
           if (existing) clientId = existing.id;
         }
+        // An existing client's job at a new address becomes a saved site; a new client's
+        // first address doubles as their office address until it is set on the Clients page.
+        const clientSiteId = clientId ? await resolveClientSite(clientId, lead.address_formatted || lead.address_line) : null;
         if (!clientId) {
           const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({
-            name: lead.name || 'New client', email: lead.email || null, phone: lead.phone || null, address: lead.address_formatted || lead.address_line || null,
+            name: plainText(lead.name) || 'New client', email: lead.email || null, phone: lead.phone || null, address: lead.address_formatted || lead.address_line || null,
           }).select('id').single();
           if (clientErr) throw clientErr;
           clientId = newClient.id;
         }
 
         const { data: project, error } = await supabaseClient.from('projects').insert({
-          name: `${lead.name || 'New enquiry'} - ${lead.ai_title || sourceLabel(lead.source)}`,
+          name: `${plainText(lead.name) || 'New enquiry'} - ${plainText(lead.ai_title) || sourceLabel(lead.source)}`,
           sow_text: lead.ai_summary || null,
           notes: leadContextText(lead),
           client_id: clientId,
@@ -282,6 +296,7 @@
           client_email: lead.email,
           client_phone: lead.phone,
           client_address: lead.address_formatted || lead.address_line,
+          client_site_id: clientSiteId,
           proposal_template: 'direct_job',
           pipeline_stage: 'job_booked',
           status: 'in_progress',
@@ -297,7 +312,7 @@
         await supabaseClient.from('leads').update({ status: 'converted' }).eq('id', lead.id);
         window.location.href = `/project.html?id=${project.id}`;
       } catch (err) {
-        msgEl.innerHTML = `<div class="error-box">${err.message}</div>`;
+        msgEl.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         btn.disabled = false;
         btn.textContent = 'Create job';
       }
@@ -349,11 +364,11 @@
         contactList.innerHTML = contactLeads.map(l => `
           <div class="project-list-item lead-row" data-id="${l.id}" style="cursor:pointer;">
             <div>
-              <div class="name">${l.name || '(no name given)'}</div>
+              <div class="name">${escapeHtml(l.name || '(no name given)')}</div>
               <p class="subtitle lead-summary-text" data-id="${l.id}" style="margin:4px 0; max-width:520px;">${l.ai_summary ? escapeHtml(l.ai_summary) : 'Generating description...'}</p>
               <div class="meta">
-                ${sourceLabel(l.source)} &middot; ${timeAgo(l.created_at)}
-                ${l.phone ? ' &middot; ' + l.phone : ''}${l.email ? ' &middot; ' + l.email : ''}
+                ${escapeHtml(sourceLabel(l.source))} &middot; ${timeAgo(l.created_at)}
+                ${l.phone ? ' &middot; ' + escapeHtml(l.phone) : ''}${l.email ? ' &middot; ' + escapeHtml(l.email) : ''}
               </div>
             </div>
             <div style="text-align:right; min-width:110px;">
@@ -392,8 +407,8 @@
               ${anonLeads.slice(0, 30).map(l => `
                 <tr>
                   <td>${timeAgo(l.created_at)}</td>
-                  <td>${sourceLabel(l.source)}</td>
-                  <td style="color:var(--muted); font-size:12px;">${l.details ? JSON.stringify(l.details) : ''}</td>
+                  <td>${escapeHtml(sourceLabel(l.source))}</td>
+                  <td style="color:var(--muted); font-size:12px;">${l.details ? escapeHtml(JSON.stringify(l.details)) : ''}</td>
                 </tr>`).join('')}
             </tbody>
           </table>`;
@@ -420,8 +435,8 @@
     // means phone matches won't always hit, email is more reliable).
     async function matchCallbackToRecords(r) {
       const leadClauses = [];
-      if (r.email) leadClauses.push(`email.eq.${r.email}`);
-      if (r.phone) leadClauses.push(`phone.eq.${r.phone}`);
+      if (r.email) leadClauses.push(`email.eq.${pgQuote(r.email)}`);
+      if (r.phone) leadClauses.push(`phone.eq.${pgQuote(r.phone)}`);
       let leadsMatch = [];
       if (leadClauses.length) {
         const { data } = await supabaseClient.from('leads').select('id, name, email, phone, created_at').or(leadClauses.join(','));
@@ -429,8 +444,8 @@
       }
 
       const projectClauses = [];
-      if (r.email) projectClauses.push(`client_email.eq.${r.email}`);
-      if (r.phone) projectClauses.push(`client_phone.eq.${r.phone}`);
+      if (r.email) projectClauses.push(`client_email.eq.${pgQuote(r.email)}`);
+      if (r.phone) projectClauses.push(`client_phone.eq.${pgQuote(r.phone)}`);
       let projectsMatch = [];
       if (projectClauses.length) {
         const { data } = await supabaseClient.from('projects').select('id, name, job_number, quote_number, pipeline_stage, client_name, created_at').or(projectClauses.join(','));
@@ -449,22 +464,22 @@
         <div class="card" style="max-width:560px; width:100%; max-height:88vh; overflow-y:auto;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
             <div>
-              <h2 style="margin:0;">${r.name || '(no name given)'}</h2>
+              <h2 style="margin:0;">${escapeHtml(r.name || '(no name given)')}</h2>
               <p class="subtitle" style="margin:4px 0 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}</p>
             </div>
             <button type="button" class="secondary" id="cb-close-btn" style="font-size:12px; padding:6px 10px;">Close</button>
           </div>
           <div class="grid cols-2" style="margin-top:14px;">
-            <div><label style="margin-top:0">Phone</label><p>${r.phone || '<span class="subtitle">No number given</span>'}</p></div>
-            <div><label style="margin-top:0">Email</label><p>${r.email || '-'}</p></div>
+            <div><label style="margin-top:0">Phone</label><p>${r.phone ? escapeHtml(r.phone) : '<span class="subtitle">No number given</span>'}</p></div>
+            <div><label style="margin-top:0">Email</label><p>${escapeHtml(r.email || '-')}</p></div>
           </div>
           ${r.message ? `<label>Message</label><p>${escapeHtml(r.message)}</p>` : ''}
 
           ${!leadsMatch.length && !projectsMatch.length ? `<p class="subtitle" style="margin-top:14px;">No matching lead or customer record found - this looks like a new contact.</p>` : `
             ${leadsMatch.length ? `<label>Matching lead${leadsMatch.length > 1 ? 's' : ''}</label>
-              ${leadsMatch.map(l => `<p style="margin:4px 0;"><a class="link-quiet cb-open-lead" data-id="${l.id}" href="#">${l.name || '(no name)'} &middot; ${timeAgo(l.created_at)}</a></p>`).join('')}` : ''}
+              ${leadsMatch.map(l => `<p style="margin:4px 0;"><a class="link-quiet cb-open-lead" data-id="${l.id}" href="#">${escapeHtml(l.name || '(no name)')} &middot; ${timeAgo(l.created_at)}</a></p>`).join('')}` : ''}
             ${projectsMatch.length ? `<label>Jobs &amp; quotes</label>
-              ${projectsMatch.map(p => `<p style="margin:4px 0;"><a class="link-quiet" href="/project.html?id=${p.id}" target="_blank" rel="noopener">${p.job_number ? 'Job #' + p.job_number : p.quote_number ? 'Quote #' + p.quote_number : p.name}</a> ${p.pipeline_stage === 'archived' ? '<span class="badge draft">Archived</span>' : ''}</p>`).join('')}` : ''}
+              ${projectsMatch.map(p => `<p style="margin:4px 0;"><a class="link-quiet" href="/project.html?id=${p.id}" target="_blank" rel="noopener">${p.job_number ? 'Job #' + p.job_number : p.quote_number ? 'Quote #' + p.quote_number : escapeHtml(p.name)}</a> ${p.pipeline_stage === 'archived' ? '<span class="badge draft">Archived</span>' : ''}</p>`).join('')}` : ''}
           `}
         </div>`;
       document.body.appendChild(overlay);
@@ -504,11 +519,11 @@
         <div class="callback-row" data-id="${r.id}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; cursor:pointer;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
             <div>
-              <strong>${r.name || '(no name given)'}</strong>
-              <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}" style="margin-left:6px;">${r.status}</span>
+              <strong>${escapeHtml(r.name || '(no name given)')}</strong>
+              <span class="badge ${r.status === 'completed' ? 'accepted' : r.status === 'scheduled' ? 'in_progress' : r.status === 'cancelled' ? 'draft' : 'sent'}" style="margin-left:6px;">${escapeHtml(r.status)}</span>
               ${matchTag}
               <p class="subtitle" style="margin:4px 0 0;">Wants a call ${fmtRequestedTime(r.requested_date, r.requested_time)}</p>
-              <p class="subtitle" style="margin:2px 0 0;">${r.phone ? r.phone + ' &middot; ' : ''}${r.email || ''}</p>
+              <p class="subtitle" style="margin:2px 0 0;">${r.phone ? escapeHtml(r.phone) + ' &middot; ' : ''}${escapeHtml(r.email)}</p>
               ${r.message ? `<p style="margin:6px 0 0;">${escapeHtml(r.message)}</p>` : ''}
             </div>
             <div>
@@ -554,15 +569,28 @@
               <div class="empty-icon">&#128274;</div>
               <h2>Not available for your role</h2>
               <p>Leads are limited to Sales, Finance, and Admin accounts.</p>
-              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Projects</a>
+              <a class="btn" style="margin-top:10px; display:inline-flex;" href="/dashboard.html">Back to Pipeline</a>
             </div>
           </div>`;
         return;
       }
 
+      // ?id= (from the top bar search) opens that lead straight away
+      const deepLeadId = new URLSearchParams(window.location.search).get('id');
+      if (deepLeadId) openLeadById(deepLeadId);
+
       await loadCallbackRequests();
       await loadLeads();
     })();
+
+    async function openLeadById(id) {
+      const [{ data: lead }, { data: linked }] = await Promise.all([
+        supabaseClient.from('leads').select('*').eq('id', id).maybeSingle(),
+        supabaseClient.from('projects').select('id').eq('lead_id', id).limit(1).maybeSingle(),
+      ]);
+      if (!lead) { showToast('That lead could not be found', { error: true }); return; }
+      openLeadDetail(lead, linked ? linked.id : null);
+    }
   </script>
 </body>
 </html>

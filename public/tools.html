@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Tools - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
+<style>
+  .tl-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .tl-tabs button { padding:8px 14px; font-size:13px; }
+  .tl-tabs button.active { background:var(--accent-dim); color:var(--accent); border-color:var(--accent); }
+  .tl-chips { display:flex; gap:4px; flex-wrap:wrap; margin-top:3px; }
+  .tl-thumb { width:44px; height:44px; object-fit:cover; border-radius:6px; border:1px solid var(--border); }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/schedule.html" class="topbar-icon-link" title="Schedule">&#128197;</a>
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap wide">
+    <h1>Tools and equipment</h1>
+    <p class="subtitle">Every tool and perishable we own, where it sits (Warehouse or a vehicle) and what state it is in. Tools bought on a PO land here when the line is received; over $500 ex GST a tool needs its serial number, a photo and the receipt.</p>
+
+    <div class="grid cols-4">
+      <div class="stat"><div class="label">Tools in use</div><div class="value" id="stat-tools">-</div></div>
+      <div class="stat"><div class="label">Value in use</div><div class="value" id="stat-value">-</div></div>
+      <div class="stat"><div class="label">Needs serial, photo or receipt</div><div class="value" id="stat-needs" style="color:var(--red);">-</div></div>
+      <div class="stat"><div class="label">Perishables, last 12 months</div><div class="value" id="stat-perishables">-</div></div>
+    </div>
+
+    <div class="card">
+      <div class="tl-tabs" id="tl-tabs">
+        <button type="button" class="secondary active" data-tab="all">All</button>
+        <button type="button" class="secondary" data-tab="tools">Tools</button>
+        <button type="button" class="secondary" data-tab="perishables">Perishables</button>
+        <button type="button" class="secondary" data-tab="needs">Needs details</button>
+        <button type="button" class="secondary" data-tab="out">Broken, lost, gone</button>
+        <button type="button" class="secondary" data-tab="vehicles">By vehicle</button>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+        <input id="tl-search" placeholder="Search name, serial, supplier..." style="max-width:320px;" autocomplete="off" />
+        <button id="add-tool-btn">+ Add tool</button>
+      </div>
+      <div id="tl-body"><p class="subtitle">Loading...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/supabase-client.js?v=120"></script>
+  <script src="/js/theme.js?v=2"></script>
+  <script>
+    let tools = [], vehicles = [], suppliers = [], myRole = 'staff', tab = 'all';
+    const STATUS = { in_use: 'In use', broken: 'Broken', replaced: 'Replaced', lost: 'Lost', sold: 'Sold', written_off: 'Written off' };
+    const DETAIL_LIMIT = 500; // ex GST: over this a tool needs serial, photo and receipt
+    const dayText = (iso) => iso ? new Date(String(iso).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const placeName = (t) => t.location_type === 'vehicle' ? (vehicles.find(v => v.id === t.vehicle_id)?.vehicle_name || vehicles.find(v => v.id === t.vehicle_id)?.rego || 'a vehicle') : 'Warehouse';
+    const driverName = (v) => v.profiles?.full_name || '';
+    const missing = (t) => {
+      if (t.kind !== 'tool' || Number(t.cost) <= DETAIL_LIMIT) return [];
+      const m = [];
+      if (!t.serial_number) m.push('serial');
+      if (!t.photo_path) m.push('photo');
+      if (!t.receipt_path && !(t.supplier_bills && t.supplier_bills.file_path)) m.push('receipt');
+      return m;
+    };
+
+    async function load() {
+      const [{ data: t, error }, { data: v }, { data: s }] = await Promise.all([
+        supabaseClient.from('tools').select('*, supplier_bills(id, bill_number, file_path, supplier_id), profiles!tools_bought_by_fkey(full_name)').order('created_at', { ascending: false }),
+        supabaseClient.from('fleet_vehicles').select('id, vehicle_name, rego, holds_stock, assigned_staff_id, profiles!fleet_vehicles_assigned_staff_id_fkey(full_name)').order('vehicle_name'),
+        supabaseClient.from('suppliers').select('id, name').order('name'),
+      ]);
+      if (error) { document.getElementById('tl-body').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
+      tools = t || []; vehicles = v || []; suppliers = s || [];
+      myRole = await getMyRole();
+      renderStats();
+      render();
+    }
+
+    function renderStats() {
+      const inUse = tools.filter(t => t.status === 'in_use');
+      const yearAgo = sydneyDateKey(new Date(Date.now() - 365 * 86400000));
+      const per = tools.filter(t => t.kind === 'perishable' && t.purchase_date && t.purchase_date >= yearAgo);
+      document.getElementById('stat-tools').textContent = inUse.filter(t => t.kind === 'tool').length;
+      document.getElementById('stat-value').textContent = money(inUse.reduce((s, t) => s + (Number(t.cost) || 0) * (t.kind === 'perishable' ? (Number(t.quantity) || 1) : 1), 0));
+      document.getElementById('stat-needs').textContent = tools.filter(t => t.status === 'in_use' && missing(t).length).length;
+      document.getElementById('stat-perishables').textContent = money(per.reduce((s, t) => s + (Number(t.cost) || 0) * (Number(t.quantity) || 1), 0));
+    }
+
+    function chips(t) {
+      const m = missing(t);
+      return [
+        t.kind === 'perishable' ? '<span class="badge draft">Perishable</span>' : '',
+        t.status !== 'in_use' ? `<span class="badge draft" style="color:var(--red);" title="${escapeHtml(t.status_note || '')}">${STATUS[t.status] || t.status}${t.status_changed_at ? ' ' + escapeHtml(dayText(t.status_changed_at)) : ''}</span>` : '',
+        m.length ? `<span class="badge draft" style="color:var(--red);">Needs ${m.join(', ')}</span>` : '',
+        t.test_tag_due && t.test_tag_due < sydneyDateKey(new Date()) ? '<span class="badge draft" style="color:var(--red);">Test and tag overdue</span>' : '',
+      ].filter(Boolean).join(' ');
+    }
+
+    function render() {
+      const body = document.getElementById('tl-body');
+      const q = document.getElementById('tl-search').value.trim().toLowerCase();
+      if (tab === 'vehicles') { renderByVehicle(body); return; }
+      let list = tools;
+      if (tab === 'tools') list = list.filter(t => t.kind === 'tool' && t.status === 'in_use');
+      if (tab === 'perishables') list = list.filter(t => t.kind === 'perishable');
+      if (tab === 'needs') list = list.filter(t => t.status === 'in_use' && missing(t).length);
+      if (tab === 'out') list = list.filter(t => t.status !== 'in_use');
+      if (tab === 'all') list = list.filter(t => t.status === 'in_use');
+      if (q) list = list.filter(t => [t.name, t.serial_number, t.supplier_name, t.category, placeName(t)].some(x => (x || '').toLowerCase().includes(q)));
+      if (!list.length) { body.innerHTML = '<p class="subtitle">Nothing here yet. Tools arrive from a PO line marked as a tool, or + Add tool.</p>'; return; }
+      body.innerHTML = `<table class="responsive-stack">
+        <thead><tr><th></th><th>Tool</th><th>Serial</th><th>Where</th><th>Bought</th><th class="num">Cost</th><th></th></tr></thead>
+        <tbody>${list.map(t => `<tr>
+          <td data-label="">${t.photo_path ? `<a href="#" class="tl-file" data-path="${escapeHtml(t.photo_path)}"><img class="tl-thumb" data-photo="${escapeHtml(t.photo_path)}" alt="" /></a>` : ''}</td>
+          <td data-label="Tool"><strong>${escapeHtml(t.name)}</strong>${t.kind === 'perishable' && Number(t.quantity) !== 1 ? ` <span class="subtitle">x${poQty(t.quantity)}</span>` : ''}${t.category ? ` <span class="subtitle">${escapeHtml(t.category)}</span>` : ''}<div class="tl-chips">${chips(t)}</div></td>
+          <td data-label="Serial">${escapeHtml(t.serial_number || '-')}</td>
+          <td data-label="Where">${escapeHtml(placeName(t))}</td>
+          <td data-label="Bought">${t.purchase_date ? escapeHtml(dayText(t.purchase_date)) : '-'}${t.supplier_name ? ' &middot; ' + escapeHtml(t.supplier_name) : ''}${t.profiles?.full_name ? ' &middot; ' + escapeHtml(t.profiles.full_name) : ''}${t.supplier_bills ? ` &middot; <a href="/supplier-detail.html?id=${escapeHtml(t.supplier_bills.supplier_id || '')}" class="link-quiet">bill ${escapeHtml(t.supplier_bills.bill_number || '')}</a>` : ''}${t.receipt_path ? ` &middot; <a href="#" class="tl-file link-quiet" data-path="${escapeHtml(t.receipt_path)}">receipt</a>` : (t.supplier_bills?.file_path ? ` &middot; <a href="#" class="tl-file link-quiet" data-path="${escapeHtml(t.supplier_bills.file_path)}">bill file</a>` : '')}</td>
+          <td class="num" data-label="Cost">${isPricingRole(myRole) ? money(t.cost) : ''}</td>
+          <td data-label=""><button type="button" class="secondary btn-sm tl-edit" data-id="${t.id}">Edit</button></td>
+        </tr>`).join('')}</tbody></table>`;
+      body.querySelectorAll('.tl-edit').forEach(b => b.addEventListener('click', () => openToolPanel(tools.find(t => t.id === b.dataset.id))));
+      body.querySelectorAll('.tl-file').forEach(a => a.addEventListener('click', async (e) => { e.preventDefault(); try { await openSignedDocInNewTab(a.dataset.path); } catch (err) { alert(friendlyError(err)); } }));
+      body.querySelectorAll('img[data-photo]').forEach(async img => { try { img.src = await getSignedDocUrl(img.dataset.photo); } catch (e) { img.remove(); } });
+    }
+
+    // Perishables per vehicle over the last 12 months against the fleet average. Each van has one
+    // driver, so heavy use shows by vehicle (the owner's "50 drill bits for one van").
+    function renderByVehicle(body) {
+      const yearAgo = sydneyDateKey(new Date(Date.now() - 365 * 86400000));
+      const per = tools.filter(t => t.kind === 'perishable' && t.purchase_date && t.purchase_date >= yearAgo);
+      const stockVans = vehicles.filter(v => v.holds_stock);
+      const rows = [...stockVans.map(v => ({ key: v.id, label: v.vehicle_name || v.rego, driver: driverName(v), items: per.filter(t => t.location_type === 'vehicle' && t.vehicle_id === v.id) })),
+        { key: 'warehouse', label: 'Warehouse', driver: '', items: per.filter(t => t.location_type === 'warehouse') }];
+      const cost = (items) => items.reduce((s, t) => s + (Number(t.cost) || 0) * (Number(t.quantity) || 1), 0);
+      const count = (items) => items.reduce((s, t) => s + (Number(t.quantity) || 1), 0);
+      const vanCosts = rows.filter(r => r.key !== 'warehouse').map(r => cost(r.items));
+      const avg = vanCosts.length ? vanCosts.reduce((s, c) => s + c, 0) / vanCosts.length : 0;
+      body.innerHTML = `<p class="subtitle" style="margin-bottom:10px;">Perishables (drill bits, blades, hole saws) bought in the last 12 months, by where they went. Fleet average per van: ${money(avg)}.</p>
+        <table class="responsive-stack">
+          <thead><tr><th>Vehicle</th><th>Driver</th><th class="num">Items</th><th class="num">Cost</th><th>vs average</th><th>Most</th></tr></thead>
+          <tbody>${rows.map(r => {
+            const c = cost(r.items);
+            const ratio = avg > 0 && r.key !== 'warehouse' ? c / avg : null;
+            const byName = {};
+            r.items.forEach(t => { byName[t.name] = (byName[t.name] || 0) + (Number(t.quantity) || 1); });
+            const top = Object.entries(byName).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, q]) => `${poQty(q)} ${escapeHtml(n)}`).join(', ');
+            return `<tr style="${ratio != null && ratio >= 1.5 ? 'color:var(--red); font-weight:600;' : ''}">
+              <td data-label="Vehicle">${escapeHtml(r.label)}</td>
+              <td data-label="Driver">${escapeHtml(r.driver || '-')}</td>
+              <td class="num" data-label="Items">${poQty(count(r.items))}</td>
+              <td class="num" data-label="Cost">${money(c)}</td>
+              <td data-label="vs average">${ratio == null ? '-' : Math.round(ratio * 100) + '%' + (ratio >= 1.5 ? ' (high)' : '')}</td>
+              <td data-label="Most">${top || '-'}</td>
+            </tr>`;
+          }).join('')}</tbody></table>`;
+    }
+
+    // Add or edit a tool. Photo and receipt go to project-documents/tools/<id>/ (photos compressed).
+    function openToolPanel(tool) {
+      const isNew = !tool;
+      const t = tool || { kind: 'tool', status: 'in_use', location_type: 'warehouse', quantity: 1 };
+      const canPrice = isPricingRole(myRole);
+      const overlay = openModal(`
+        <h2>${isNew ? 'Add tool' : escapeHtml(t.name)}</h2>
+        <label style="margin-top:0">Name</label><input id="tl-name" value="${escapeHtml(t.name || '')}" placeholder="e.g. Makita 18V hammer drill" />
+        <div class="grid cols-2">
+          <div><label>Kind</label><select id="tl-kind"><option value="tool" ${t.kind === 'tool' ? 'selected' : ''}>Tool</option><option value="perishable" ${t.kind === 'perishable' ? 'selected' : ''}>Perishable (bits, blades)</option></select></div>
+          <div><label>Category</label><input id="tl-category" value="${escapeHtml(t.category || '')}" placeholder="e.g. Power tool, Test gear, Ladder" /></div>
+        </div>
+        <div class="grid cols-2">
+          <div><label>Where it sits</label><select id="tl-loc"><option value="warehouse" ${t.location_type === 'warehouse' ? 'selected' : ''}>Warehouse</option>${vehicles.map(v => `<option value="vehicle:${v.id}" ${t.location_type === 'vehicle' && t.vehicle_id === v.id ? 'selected' : ''}>${escapeHtml(v.vehicle_name || v.rego)}${driverName(v) ? ' (' + escapeHtml(driverName(v)) + ')' : ''}</option>`).join('')}</select></div>
+          <div><label>Status</label><select id="tl-status">${Object.entries(STATUS).map(([k, l]) => `<option value="${k}" ${t.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        </div>
+        <div id="tl-status-note-wrap" style="display:${t.status !== 'in_use' ? 'block' : 'none'};"><label>What happened?</label><input id="tl-status-note" value="${escapeHtml(t.status_note || '')}" placeholder="e.g. dropped off the roof, replaced under warranty" /></div>
+        <div class="grid cols-2">
+          <div><label>Serial number</label><input id="tl-serial" value="${escapeHtml(t.serial_number || '')}" autocorrect="off" autocapitalize="characters" /></div>
+          <div><label>Quantity</label><input id="tl-qty" type="number" inputmode="numeric" step="1" min="1" value="${escapeHtml(t.quantity || 1)}" /></div>
+        </div>
+        <div class="grid cols-3">
+          <div><label>Bought on</label><input id="tl-date" type="date" value="${escapeHtml(t.purchase_date || '')}" /></div>
+          <div><label>Cost ex GST${canPrice ? '' : ' (Admin sets)'}</label><input id="tl-cost" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(t.cost ?? '')}" ${canPrice ? '' : 'disabled'} /></div>
+          <div><label>Supplier</label><select id="tl-supplier"><option value="">-- Pick --</option>${suppliers.map(s => `<option value="${s.id}" ${t.supplier_id === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></div>
+        </div>
+        <div class="grid cols-2">
+          <div><label>Warranty ends</label><input id="tl-warranty" type="date" value="${escapeHtml(t.warranty_expires || '')}" /></div>
+          <div><label>Test and tag due</label><input id="tl-tag" type="date" value="${escapeHtml(t.test_tag_due || '')}" /></div>
+        </div>
+        <div class="grid cols-2">
+          <div><label>Photo of the tool${t.photo_path ? ' (on file, pick to replace)' : ''}</label><input id="tl-photo" type="file" accept="image/*" /></div>
+          <div><label>Receipt${t.receipt_path ? ' (on file, pick to replace)' : (t.supplier_bills ? ' (bill ' + escapeHtml(t.supplier_bills.bill_number || '') + ' on file)' : '')}</label><input id="tl-receipt" type="file" accept="image/*,.pdf" /></div>
+        </div>
+        <label>Notes</label><textarea id="tl-notes" style="min-height:50px;">${escapeHtml(t.notes || '')}</textarea>
+        <p class="subtitle" style="font-size:12px; margin-top:8px;">Over $${DETAIL_LIMIT} ex GST a tool needs its serial number, a photo and the receipt (or the supplier bill on file).</p>
+        <div style="margin-top:14px; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+          <div><button id="tl-save">${isNew ? 'Add tool' : 'Save'}</button> <button type="button" class="secondary" id="tl-cancel">Cancel</button></div>
+          ${!isNew && canPrice ? '<button type="button" class="secondary" id="tl-delete" style="color:var(--red);">Delete</button>' : ''}
+        </div>
+        <div id="tl-msg"></div>`, { maxWidth: 620 });
+      const q = (s) => overlay.querySelector(s);
+      q('#tl-status').addEventListener('change', () => { q('#tl-status-note-wrap').style.display = q('#tl-status').value === 'in_use' ? 'none' : 'block'; });
+      q('#tl-cancel').addEventListener('click', () => overlay.remove());
+      q('#tl-delete')?.addEventListener('click', async () => {
+        if (!confirm(`Delete ${t.name} from the register? Use a status (lost, sold, written off) to keep the history instead.`)) return;
+        const { error } = await supabaseClient.from('tools').delete().eq('id', t.id);
+        if (error) { alert(friendlyError(error)); return; }
+        overlay.remove(); await load();
+      });
+      q('#tl-save').addEventListener('click', async () => {
+        const btn = q('#tl-save'), msg = q('#tl-msg');
+        const name = q('#tl-name').value.trim();
+        if (!name) { msg.innerHTML = '<div class="error-box">Give it a name.</div>'; return; }
+        btn.disabled = true; btn.textContent = 'Saving...';
+        try {
+          const loc = q('#tl-loc').value;
+          const p = {
+            name, kind: q('#tl-kind').value, category: q('#tl-category').value.trim(),
+            location_type: loc.startsWith('vehicle:') ? 'vehicle' : 'warehouse', vehicle_id: loc.startsWith('vehicle:') ? loc.slice(8) : null,
+            status: q('#tl-status').value, status_note: q('#tl-status-note').value.trim(),
+            serial_number: q('#tl-serial').value.trim(), quantity: parseFloat(q('#tl-qty').value) || 1,
+            purchase_date: q('#tl-date').value || null, supplier_id: q('#tl-supplier').value || null,
+            supplier_name: suppliers.find(s => s.id === q('#tl-supplier').value)?.name || null,
+            warranty_expires: q('#tl-warranty').value || null, test_tag_due: q('#tl-tag').value || null,
+            notes: q('#tl-notes').value.trim(),
+          };
+          if (canPrice) p.cost = parseFloat(q('#tl-cost').value) || 0;
+          const folder = `tools/${isNew ? 'new' : t.id}`;
+          if (q('#tl-photo').files[0]) p.photo_path = await uploadPrivateFile(q('#tl-photo').files[0], folder);
+          if (q('#tl-receipt').files[0]) p.receipt_path = await uploadPrivateFile(q('#tl-receipt').files[0], folder);
+          if (isNew) {
+            const { data: newId, error } = await supabaseClient.rpc('tool_create', { p });
+            if (error) throw error;
+            // tool_create lands every tool as In use. A tool added as broken, lost
+            // or sold gets its status and note through tool_update, which logs it.
+            if (p.status !== 'in_use' && newId) {
+              const { error: statusErr } = await supabaseClient.rpc('tool_update', { p_id: newId, p: { status: p.status, status_note: p.status_note } });
+              if (statusErr) throw statusErr;
+            }
+          } else {
+            const { error } = await supabaseClient.rpc('tool_update', { p_id: t.id, p });
+            if (error) throw error;
+          }
+          overlay.remove();
+          showToast(isNew ? `${name} added` : `${name} saved`);
+          await load();
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+          btn.disabled = false; btn.textContent = isNew ? 'Add tool' : 'Save';
+        }
+      });
+    }
+
+    document.getElementById('tl-search').addEventListener('input', render);
+    document.getElementById('add-tool-btn').addEventListener('click', () => openToolPanel(null));
+    document.querySelectorAll('#tl-tabs button').forEach(b => b.addEventListener('click', () => {
+      tab = b.dataset.tab;
+      document.querySelectorAll('#tl-tabs button').forEach(x => x.classList.toggle('active', x === b));
+      render();
+    }));
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav('tools');
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      await load();
+    })();
+  </script>
+</body>
+</html>

@@ -88,20 +88,18 @@ async function priceInvoiceItems(supabaseAdmin, items, markupPercent) {
 }
 
 // Takes quantity out of (negative delta) or back into the Warehouse - the
-// server-side twin of adjustWarehouseStock() in supabase-client.js. The
-// trigger on material_stock_by_location keeps materials.quantity_on_hand in
-// step. Never goes below zero.
+// server-side twin of adjustWarehouseStock() in supabase-client.js. Runs
+// through _stock_adjust (migration 20261025000000), which locks the stock row
+// and stops at zero, so a receive or count on the same material at the same
+// moment can not overwrite it (bug review M29). The trigger on
+// material_stock_by_location keeps materials.quantity_on_hand in step.
 async function adjustWarehouseStockAdmin(supabaseAdmin, materialId, quantityDelta) {
-  const { data: wh } = await supabaseAdmin.from('material_stock_by_location').select('id, quantity').eq('material_id', materialId).eq('location_type', 'warehouse').maybeSingle();
-  if (wh) {
-    await supabaseAdmin.from('material_stock_by_location').update({
-      quantity: Math.max(0, Number(wh.quantity) + quantityDelta), updated_at: new Date().toISOString(),
-    }).eq('id', wh.id);
-  } else {
-    await supabaseAdmin.from('material_stock_by_location').insert({
-      material_id: materialId, location_type: 'warehouse', quantity: Math.max(0, quantityDelta),
-    });
-  }
+  const delta = Number(quantityDelta) || 0;
+  if (!materialId || !delta) return;
+  const { error } = await supabaseAdmin.rpc('_stock_adjust', {
+    p_material: materialId, p_loc: 'warehouse', p_vehicle: null, p_delta: delta, p_allow_short: true,
+  });
+  if (error) throw error;
 }
 
 module.exports = { priceInvoiceItems, prebuildUnitPrice, adjustWarehouseStockAdmin, r2 };
