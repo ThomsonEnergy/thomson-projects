@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 26 Oct 2026
 
+- Owner: Xero timesheets stay DRAFT (approved in Xero), reversing the APPROVED change from earlier today; the Xero check for already-sent hours stays. Straight to `main`, no staging merge. Code: `netlify/functions/push-timesheets-to-xero.js`, `public/timesheets.html`.
 - Bug fix, LIVE: the Xero timesheet push now reads Xero first. Entries marked sent whose day is no longer in a live Xero timesheet (the owner deleted the payslips after moving to a new pay cycle) are sent again; a day still held in Xero is never sent twice. Owner's rule: timesheets go up as APPROVED, since the sign-off is in the app. Code: `netlify/functions/push-timesheets-to-xero.js`, `public/timesheets.html`. Detail: `docs/PROJECT_SPEC.md` A1, `docs/BUSINESS_FACTS.md` Xero.
 
 ## 25 Oct 2026

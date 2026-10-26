@@ -3,11 +3,10 @@
 // in Xero - Xero Payroll timesheets are tied to a payroll calendar's exact
 // period boundaries, this doesn't try to guess them)
 //
-// Pushes each staff member's clocked hours in the range as one APPROVED
-// timesheet per employee (the check and sign-off happen in this app, so
-// the timesheet is ready for the pay run; owner's rule, 26 Oct 2026).
-// Each day's hours are banded into the same 4 award rates payroll costing already uses (ordinary/OT1 1.5x/OT2 2x/
-// public holiday 2.5x - see dayBands in compute-labour-cost.js) banded
+// Pushes each staff member's clocked hours in the range as one DRAFT
+// timesheet per employee (the owner approves them in Xero; 26 Oct 2026).
+// Each day's hours are banded into the same 4 award rates payroll costing
+// already uses (ordinary/OT1 1.5x/OT2 2x/public holiday 2.5x - see dayBands in compute-labour-cost.js) banded
 // across the employee's WHOLE day (every job), same as a real payslip.
 // Hours are also split by time_entries.time_category into a small fixed set
 // of Xero tracking options - Billable (Jobs), Quoting, Admin, Maintenance,
@@ -499,24 +498,18 @@ exports.handler = async (event) => {
         // Payroll AU wants a bare JSON array as the request body (same as
         // Employees) - wrapping the timesheet in a plain object gets
         // rejected as a deserialization error before Xero looks at it.
-        // Approved on arrival (the check and sign-off happen in this app),
-        // so it is ready for the pay run. If Xero answers no to the approved
-        // status, the same lines go up as DRAFT instead: a Xero "no" means
-        // nothing was created, but a network failure (TypeError) may have
-        // created it, so that one is not retried.
-        const timesheet = { EmployeeID: employeeId, StartDate: startDate, EndDate: endDate, Status: 'APPROVED', TimesheetLines: timesheetLines };
-        let result;
-        let status = 'APPROVED';
-        try {
-          result = await xeroRequest('payroll.au', 'Timesheets', { method: 'POST', body: [timesheet] });
-        } catch (err) {
-          if (err instanceof TypeError) throw err;
-          result = await xeroRequest('payroll.au', 'Timesheets', { method: 'POST', body: [{ ...timesheet, Status: 'DRAFT' }] });
-          status = 'DRAFT';
-          warnings.push(`${staffName}: Xero would not take the timesheet as approved (${err.message}), so it went up as DRAFT. Approve it in Xero (Payroll > Timesheets).`);
-        }
+        const result = await xeroRequest('payroll.au', 'Timesheets', {
+          method: 'POST',
+          body: [{
+            EmployeeID: employeeId,
+            StartDate: startDate,
+            EndDate: endDate,
+            Status: 'DRAFT',
+            TimesheetLines: timesheetLines,
+          }],
+        });
         const timesheetId = result?.Timesheets?.[0]?.TimesheetID;
-        results.push({ staff: staffName, timesheetId, status });
+        results.push({ staff: staffName, timesheetId });
         allEntriesForThisStaff.forEach(e => pushedEntryIds.push(e.id));
         unworkedHolidays.forEach(d => paidHolidayRows.push({ profile_id: staffId, holiday_date: d, hours: FULL_TIME_PUBLIC_HOLIDAY_HOURS }));
         workedHolidays.forEach(w => paidHolidayRows.push({ profile_id: staffId, holiday_date: w.date, hours: Math.round(w.hours * 100) / 100 }));
