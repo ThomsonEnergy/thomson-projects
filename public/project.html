@@ -2009,7 +2009,8 @@
         const btn = document.getElementById('generate-scope-btn');
         const msg = document.getElementById('generate-msg');
         const brief = document.getElementById('p-brief').value.trim();
-        const projectName = document.getElementById('p-name').value.trim();
+        // The step-by-step quote view has no name box (only the full edit form does), so fall back to the saved name.
+        const projectName = (document.getElementById('p-name')?.value ?? project.name ?? '').trim();
         const rows = [...document.querySelectorAll('#cc-rows .cc-row')];
         const stageNames = rows.map(r => r.dataset.name).filter(Boolean);
         Object.assign(templateAnswers, readTemplateAnswers(document.getElementById('template-questions')));

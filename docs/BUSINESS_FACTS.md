@@ -33,7 +33,8 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
 
 - Each employee's rates are agreed in their employment contract. There are 4 rates: ordinary, 1.5x, 2x and 2.5x bands. These are set amounts, not calculated multiples.
 - Rates are set in the app and pushed to Xero from the app, including after pay rises.
-- Timesheets are checked and signed off in the app, so they arrive in Xero Payroll already approved (26 Oct 2026). A timesheet deleted in Xero (pay run redone) is sent again by the next push; one still in Xero is never sent twice.
+- Timesheets arrive in Xero Payroll as drafts and are approved there (owner, 26 Oct 2026). A timesheet deleted in Xero (pay run redone) is sent again by the next push; one still in Xero is never sent twice.
+- Leave is requested and approved in the app (Timesheets page); approved leave goes to Xero Payroll as leave applications with the timesheet push (26 Oct 2026). Xero works out the leave hours from each person's ordinary hours.
 
 ## STCs and Formbay (confirmed 14 Oct 2026)
 
