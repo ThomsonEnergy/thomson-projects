@@ -1239,8 +1239,10 @@
         .eq('staff_id', myUserId)
         .order('start_date', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
-      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No leave requests yet. Use the form above, and you will see here whether each one is approved.</p>`; return; }
-      listEl.innerHTML = data.map(l => `
+      const balances = await loadLeaveBalances();
+      const mine = `<p class="subtitle" style="margin:0 0 10px;">Your balance from Xero payroll: ${balanceLine(balances[myUserId])}</p>`;
+      if (!data.length) { listEl.innerHTML = mine + `<p class="subtitle">No leave requests yet. Use the form above, and you will see here whether each one is approved.</p>`; return; }
+      listEl.innerHTML = mine + data.map(l => `
         <div class="project-list-item">
           <div>
             <div class="name">${LEAVE_TYPE_LABEL[l.leave_type] || 'Leave'} &middot; ${leaveSpanLabel(l)}</div>
@@ -1248,6 +1250,31 @@
           </div>
           <span class="badge ${LEAVE_BADGE[l.status] || 'draft'}">${LEAVE_STATUS_LABEL[l.status] || l.status}</span>
         </div>`).join('');
+    }
+
+    // Leave balances copied from Xero Payroll (public.leave_balances): the nightly
+    // sync, the Staff page's Refresh button, and every timesheet push refresh them.
+    let leaveBalances = null;
+    async function loadLeaveBalances(force = false) {
+      if (leaveBalances && !force) return leaveBalances;
+      const { data } = await supabaseClient.from('leave_balances').select('*');
+      leaveBalances = {};
+      (data || []).forEach(b => { leaveBalances[b.profile_id] = b; });
+      return leaveBalances;
+    }
+    const balHrs = (n) => n == null ? '-' : `${Number(n).toFixed(1)}h`;
+    function balanceLine(b) {
+      if (!b) return 'No leave balance from Xero yet';
+      const asAt = b.as_at ? ` as at ${dayKeyLabel(sydneyDateKey(new Date(b.as_at)))}` : '';
+      return `Annual ${balHrs(b.annual_leave_hours)} &middot; Sick ${balHrs(b.sick_leave_hours)}${b.long_service_hours != null ? ` &middot; Long service ${balHrs(b.long_service_hours)}` : ''}${asAt}`;
+    }
+    async function refreshLeaveBalancesFromXero() {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/sync-leave-balances-now', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Refresh failed');
+      await loadLeaveBalances(true);
+      return data;
     }
 
     const LEAVE_TYPE_LABEL = { annual: 'Annual leave', sick: 'Sick leave', unpaid: 'Unpaid leave', other: 'Other leave' };
@@ -1359,6 +1386,17 @@
           html += `<div class="error-box" style="margin-top:8px;">Skipped: ${data.skipped.map(s => escapeHtml(s)).join('; ')}</div>`;
         }
         msg.innerHTML = html;
+        // Leave balances follow: Xero's numbers move when leave is applied and when
+        // a pay run posts, so every push ends with a fresh copy for the Leave cards.
+        try {
+          const sync = await refreshLeaveBalancesFromXero();
+          const problems = Array.isArray(sync.problems) && sync.problems.length ? ` ${sync.problems.map(x => escapeHtml(String(x))).join('; ')}` : '';
+          msg.innerHTML += `<p class="subtitle" style="margin:8px 0 0;">Leave balances refreshed from Xero${sync.synced != null ? ` (${sync.synced} of ${sync.total} people)` : ''}.${problems}</p>`;
+        } catch (err) {
+          msg.innerHTML += `<p class="subtitle" style="margin:8px 0 0; color:var(--red);">Leave balances could not be refreshed from Xero: ${escapeHtml(friendlyError(err))}</p>`;
+        }
+        loadMyLeave().catch(() => {});
+        loadApprovals(await getMyRole()).catch(() => {});
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
       }
@@ -1381,7 +1419,7 @@
         .select('*, profiles!leave_requests_staff_id_fkey(full_name), decider:profiles!leave_requests_decided_by_fkey(full_name)')
         .order('start_date', { ascending: false });
       if (!leaveFilter.older) q = q.gte('end_date', sydneyDateKey(since));
-      const { data: all, error } = await q;
+      const [{ data: all, error }, balances] = await Promise.all([q, loadLeaveBalances()]);
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       const pendingCount = (all || []).filter(l => l.status === 'pending').length;
       const chip = (key, value, label) => `<button type="button" class="${leaveFilter[key] === value ? '' : 'secondary'} leave-filter" data-key="${key}" data-value="${value}" style="padding:4px 10px; font-size:12px;">${label}</button>`;
@@ -1415,7 +1453,7 @@
           <tbody>
             ${data.map(l => `
               <tr data-id="${l.id}">
-                <td data-label="Who"><strong>${escapeHtml(who(l))}</strong>${l.notes ? `<div class="subtitle small">${escapeHtml(l.notes)}</div>` : ''}</td>
+                <td data-label="Who"><strong>${escapeHtml(who(l))}</strong><div class="subtitle small">${balanceLine(balances[l.staff_id])}</div>${l.notes ? `<div class="subtitle small">${escapeHtml(l.notes)}</div>` : ''}</td>
                 <td data-label="Leave">${l.leave_type === 'sick' ? '<span style="color:var(--red);">' : ''}${LEAVE_TYPE_LABEL[l.leave_type] || 'Leave'}${l.leave_type === 'sick' ? '</span>' : ''}</td>
                 <td data-label="When">${leaveSpanLabel(l)}</td>
                 <td class="num" data-label="Days">${leaveWeekdays(l)}</td>
