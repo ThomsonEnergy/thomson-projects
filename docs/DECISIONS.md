@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 26 Oct 2026
+
+- Bug fix, LIVE: the Xero timesheet push now reads Xero first. Entries marked sent whose day is no longer in a live Xero timesheet (the owner deleted the payslips after moving to a new pay cycle) are sent again; a day still held in Xero is never sent twice. Owner's rule: timesheets go up as APPROVED, since the sign-off is in the app. Code: `netlify/functions/push-timesheets-to-xero.js`, `public/timesheets.html`. Detail: `docs/PROJECT_SPEC.md` A1, `docs/BUSINESS_FACTS.md` Xero.
+
 ## 25 Oct 2026
 
 - Staging database is behind: its newest migration on 26 Oct was 20261025000000, so merges into `staging` are not running migrations by themselves. 20261125000000 (ServiceM8 time delete, PR 216) was applied to staging by hand, with one fake ServiceM8 row on J9002 to test with. Owner to check Supabase Dashboard > Branches > staging (and the GitHub integration) before release night.
