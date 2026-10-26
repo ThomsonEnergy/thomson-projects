@@ -31,7 +31,14 @@
 // employee's timesheets in Xero are read, and an entry marked sent whose
 // day is no longer inside a live Xero timesheet (deleted there when a pay
 // run was redone) is sent again, while a day still held in Xero is never
-// sent twice. See the "What Xero still holds" section below.
+// sent twice. See the "What Xero still holds" section below. Xero allows
+// one timesheet per employee per period, so when it already has one for
+// these exact dates (draft, approved, rejected) that timesheet is updated
+// with the whole period's hours instead of a second one being created.
+//
+// Approved leave requests that fall in the period go to Xero too, as
+// leave applications (annual, sick, unpaid), once each: the Xero id is
+// kept on the request, and one Xero no longer holds is sent again.
 //
 // Also pushes a LAHA (living-away-from-home allowance) line for every
 // night flagged at clock-out (time_entries.stayed_overnight, only asked
@@ -99,6 +106,14 @@ function xeroDateToYmd(v) {
 // dead counts as held: the cost of guessing wrong here is paying twice.
 const DEAD_STATUSES = new Set(['REJECTED', 'DELETED']);
 const isLiveTimesheet = (t) => !DEAD_STATUSES.has(t.status);
+const isWeekday = (ymd) => { const dow = new Date(`${ymd}T12:00:00Z`).getUTCDay(); return dow >= 1 && dow <= 5; };
+
+// Leave requests to Xero leave types: the id set in Settings > Xero Mapping,
+// or the first Xero leave type whose name fits, saved back so the match is
+// made once and can be corrected there.
+const LEAVE_TYPE_COLUMNS = { annual: 'xero_annual_leave_type_id', sick: 'xero_sick_leave_type_id', unpaid: 'xero_unpaid_leave_type_id' };
+const LEAVE_TYPE_PATTERNS = { annual: /annual/i, sick: /personal|sick|carer/i, unpaid: /without pay|unpaid/i };
+const LEAVE_TITLES = { annual: 'Annual leave', sick: 'Sick leave', unpaid: 'Unpaid leave', other: 'Other leave' };
 
 // Every timesheet Xero holds for one employee that overlaps the period, as
 // { id, employeeId, start, end, status }. Asked by employee; if Xero refuses
@@ -154,7 +169,7 @@ exports.handler = async (event) => {
 
     const { data: settings } = await supabaseAdmin
       .from('company_settings')
-      .select('xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_ordinary_office_earnings_rate_id, xero_ot1_office_earnings_rate_id, xero_ot2_office_earnings_rate_id, xero_public_holiday_office_earnings_rate_id, xero_public_holiday_base_earnings_rate_id, xero_laha_earnings_rate_id, xero_tracking_category_id')
+      .select('xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_ordinary_office_earnings_rate_id, xero_ot1_office_earnings_rate_id, xero_ot2_office_earnings_rate_id, xero_public_holiday_office_earnings_rate_id, xero_public_holiday_base_earnings_rate_id, xero_laha_earnings_rate_id, xero_tracking_category_id, xero_annual_leave_type_id, xero_sick_leave_type_id, xero_unpaid_leave_type_id')
       .eq('id', 1)
       .single();
     if (!settings?.xero_ordinary_earnings_rate_id) {
@@ -258,18 +273,29 @@ exports.handler = async (event) => {
     const sentEntries = (allEntries || []).filter(e => e.xero_pushed_at && !e.sm8_activity_uuid);
     const staffToCheck = new Set([...sentEntries.map(e => e.staff_id), ...paidHolidayRowsInRange.map(r => r.profile_id)]);
     const scanCache = {};
+    // staffId -> { list } of their Xero timesheets overlapping the period, or { error }; read once per run
+    const xeroByStaff = {};
+    async function timesheetsInXero(staffId) {
+      if (!(staffId in xeroByStaff)) {
+        const employeeId = profileById[staffId]?.xero_employee_id;
+        if (!employeeId) xeroByStaff[staffId] = { list: [] };
+        else {
+          try { xeroByStaff[staffId] = { list: await xeroTimesheetsFor(employeeId, startDate, endDate, scanCache) }; }
+          catch (err) { xeroByStaff[staffId] = { error: err.message }; }
+        }
+      }
+      return xeroByStaff[staffId];
+    }
     for (const staffId of staffToCheck) {
       const profile = profileById[staffId];
       const staffName = profile?.full_name || staffId;
       if (!profile?.xero_employee_id) continue;
-      let inXero;
-      try {
-        inXero = await xeroTimesheetsFor(profile.xero_employee_id, startDate, endDate, scanCache);
-      } catch (err) {
-        warnings.push(`${staffName}: could not check Xero for timesheets already there (${err.message}), so their hours already sent were left as sent.`);
+      const got = await timesheetsInXero(staffId);
+      if (got.error) {
+        warnings.push(`${staffName}: could not check Xero for timesheets already there (${got.error}), so their hours already sent were left as sent.`);
         continue;
       }
-      const live = inXero.filter(isLiveTimesheet);
+      const live = got.list.filter(isLiveTimesheet);
       const holder = (ymd) => live.find(t => t.start <= ymd && ymd <= t.end);
       let freedHours = 0, heldHours = 0, freedHolidays = 0;
       const holders = new Set();
@@ -331,17 +357,14 @@ exports.handler = async (event) => {
         if (weekdayHolidaysInRange.some(d => holidayPending(p.id, p, d))) byStaff[p.id] ||= [];
       });
 
-    if (!Object.keys(byStaff).length) {
-      return { statusCode: 200, body: JSON.stringify({ ok: true, pushed: 0, message: 'No unpushed entries in that range.', results: [], resent, held, skipped: [], warnings }) };
-    }
-
     const results = [];
     const skipped = [];
     const pushedEntryIds = [];
     const paidHolidayRows = [];
 
+    const periodLabel = `${fmtYmd(startDate)} to ${fmtYmd(endDate)}`;
     for (const staffId of Object.keys(byStaff)) {
-      const staffEntries = byStaff[staffId];
+      let staffEntries = byStaff[staffId];
       const staffProfile = profileById[staffId] || staffEntries[0]?.profiles || {};
       const employeeId = staffProfile.xero_employee_id;
       const staffName = staffProfile.full_name || staffId;
@@ -350,6 +373,31 @@ exports.handler = async (event) => {
         skipped.push(`${staffName} has no Xero Employee ID set (Settings > Users & Roles)`);
         continue;
       }
+
+      // Xero keeps one timesheet per employee per period. One already there
+      // for these exact dates is updated with the WHOLE period's hours (so
+      // its lines are replaced, never added to); one that overlaps with
+      // different dates would pay those days twice, so that person waits
+      // until it is deleted in Xero or the push uses its dates; one in a
+      // posted pay run cannot change at all.
+      const got = await timesheetsInXero(staffId);
+      if (got.error) {
+        skipped.push(`${staffName}: could not check Xero for an existing timesheet (${got.error}), nothing sent for them this run.`);
+        continue;
+      }
+      const existing = got.list.find(t => t.start === startDate && t.end === endDate) || null;
+      const overlapOther = got.list.filter(t => isLiveTimesheet(t) && t !== existing);
+      const newHours = round2(staffEntries.reduce((s, e) => s + entryHours(e), 0));
+      if (existing && existing.status === 'PROCESSED') {
+        skipped.push(`${staffName}: their ${periodLabel} timesheet is already in a posted pay run, so the ${newHours}h added since cannot go on it. Add those hours to the next pay run by hand.`);
+        continue;
+      }
+      if (overlapOther.length) {
+        skipped.push(`${staffName}: Xero has a timesheet ${overlapOther.map(t => `${fmtYmd(t.start)} to ${fmtYmd(t.end)} (${t.status.toLowerCase()})`).join(', ')} that overlaps these dates, so those days would be paid twice. Delete it in Xero (Payroll > Timesheets) or push with its dates.`);
+        continue;
+      }
+      // Replacing: every entry of theirs in the period goes on, banded from zero.
+      if (existing) staffEntries = (allEntries || []).filter(e => e.staff_id === staffId && !e.sm8_activity_uuid);
 
       // Xero wants a fixed-length NumberOfUnits array, one slot per day of
       // the timesheet period, in order from startDate to endDate - shared
@@ -367,7 +415,7 @@ exports.handler = async (event) => {
       const unitsByLabelBandDay = {};
       const byDay = {};
       staffEntries.forEach(e => { (byDay[localDateKey(e.clock_in)] ||= []).push(e); });
-      const pushedHoursByDay = pushedHoursByStaffDay[staffId] || {};
+      const pushedHoursByDay = existing ? {} : (pushedHoursByStaffDay[staffId] || {});
       Object.keys(byDay).forEach(dateKey => {
         const dayEntries = byDay[dateKey].slice().sort((a, b) => new Date(a.clock_in) - new Date(b.clock_in));
         const bands = dayBands(dateKey, holidaySet.has(dateKey), { ordinary: 'ordinary', ot1: 'ot1', ot2: 'ot2', publicHoliday: 'publicHoliday' });
@@ -419,7 +467,10 @@ exports.handler = async (event) => {
       const unworkedHolidays = [];
       const workedHolidays = [];
       weekdayHolidaysInRange.forEach(d => {
-        if (!holidayPending(staffId, staffProfile, d)) return;
+        const pending = existing
+          ? !(staffProfile.employment_start_date && staffProfile.employment_start_date > d)
+          : holidayPending(staffId, staffProfile, d);
+        if (!pending) return;
         const workedHours = (byDay[d] || []).reduce((s, e) => s + entryHours(e), 0) + (pushedHoursByDay[d] || 0);
         if (workedHours > 0) workedHolidays.push({ date: d, hours: workedHours });
         if (staffProfile.employment_type === 'full_time') {
@@ -498,23 +549,37 @@ exports.handler = async (event) => {
         // Payroll AU wants a bare JSON array as the request body (same as
         // Employees) - wrapping the timesheet in a plain object gets
         // rejected as a deserialization error before Xero looks at it.
-        const result = await xeroRequest('payroll.au', 'Timesheets', {
-          method: 'POST',
-          body: [{
-            EmployeeID: employeeId,
-            StartDate: startDate,
-            EndDate: endDate,
-            Status: 'DRAFT',
-            TimesheetLines: timesheetLines,
-          }],
-        });
-        const timesheetId = result?.Timesheets?.[0]?.TimesheetID;
-        results.push({ staff: staffName, timesheetId });
+        const timesheet = { EmployeeID: employeeId, StartDate: startDate, EndDate: endDate, Status: 'DRAFT', TimesheetLines: timesheetLines };
+        const result = existing
+          ? await xeroRequest('payroll.au', `Timesheets/${encodeURIComponent(existing.id)}`, { method: 'POST', body: [{ TimesheetID: existing.id, ...timesheet }] })
+          : await xeroRequest('payroll.au', 'Timesheets', { method: 'POST', body: [timesheet] });
+        const ts = result?.Timesheets?.[0] || {};
+        const timesheetId = ts.TimesheetID || existing?.id || null;
+        const sentUnits = round2(timesheetLines.reduce((s, l) => s + l.NumberOfUnits.reduce((a, b) => a + b, 0), 0));
+        results.push({ staff: staffName, timesheetId, action: existing ? 'updated' : 'created' });
+        if (existing) {
+          resent.push(`${staffName}: Xero timesheet ${periodLabel} updated with all ${sentUnits}h (was ${existing.status.toLowerCase()}, now draft).`);
+          // Xero's own total after the write, against what was sent: lines
+          // added to instead of replaced would show as more.
+          let xeroHours = Number(ts.Hours);
+          if (!Number.isFinite(xeroHours) && timesheetId) {
+            try { xeroHours = Number((await xeroRequest('payroll.au', `Timesheets/${encodeURIComponent(timesheetId)}`))?.Timesheets?.[0]?.Hours); } catch { xeroHours = NaN; }
+          }
+          if (Number.isFinite(xeroHours) && xeroHours > sentUnits + 0.05) {
+            warnings.push(`${staffName}: Xero shows ${round2(xeroHours)}h on their ${periodLabel} timesheet but the app sent ${sentUnits}h. Open it in Xero and check the lines before the pay run.`);
+          }
+        }
         allEntriesForThisStaff.forEach(e => pushedEntryIds.push(e.id));
         unworkedHolidays.forEach(d => paidHolidayRows.push({ profile_id: staffId, holiday_date: d, hours: FULL_TIME_PUBLIC_HOLIDAY_HOURS }));
         workedHolidays.forEach(w => paidHolidayRows.push({ profile_id: staffId, holiday_date: w.date, hours: Math.round(w.hours * 100) / 100 }));
       } catch (err) {
-        skipped.push(`${staffName}: ${err.message}`);
+        if (existing) {
+          skipped.push(`${staffName}: Xero would not update their ${periodLabel} timesheet (${existing.status.toLowerCase()}): ${err.message}. Delete it in Xero (Payroll > Timesheets) and push again.`);
+        } else if (/already exists/i.test(err.message)) {
+          skipped.push(`${staffName}: Xero has a timesheet for ${periodLabel} that it does not list (most likely rejected). In Xero: Payroll > Timesheets, show rejected timesheets, delete it, then push again.`);
+        } else {
+          skipped.push(`${staffName}: ${err.message}`);
+        }
       }
     }
 
@@ -528,6 +593,100 @@ exports.handler = async (event) => {
       await supabaseAdmin.from('public_holiday_pay_pushes').upsert(paidHolidayRows, { onConflict: 'profile_id,holiday_date' });
     }
 
+    // ---- Approved leave in the period, as Xero leave applications ----
+    // Once each: the Xero id stays on the request; a request whose
+    // application Xero no longer holds is sent again. Xero works out the
+    // hours from the person's ordinary hours and splits them across pay
+    // periods itself, so a request is sent whole the first time any period
+    // it touches is pushed.
+    const leaveSent = [];
+    const { data: leaveRows, error: leaveErr } = await supabaseAdmin.from('leave_requests')
+      .select('id, staff_id, leave_type, start_date, end_date, notes, created_at, xero_leave_application_id, xero_units')
+      .eq('status', 'approved').lte('start_date', endDate).gte('end_date', startDate)
+      .order('created_at');
+    if (leaveErr) throw leaveErr;
+    let xeroLeaveTypes = null;
+    async function leaveTypeIdFor(kind) {
+      const col = LEAVE_TYPE_COLUMNS[kind];
+      if (!col) return null;
+      if (settings[col]) return settings[col];
+      if (!xeroLeaveTypes) xeroLeaveTypes = (await xeroRequest('payroll.au', 'PayItems'))?.PayItems?.LeaveTypes || [];
+      const match = xeroLeaveTypes.find(lt => LEAVE_TYPE_PATTERNS[kind].test(String(lt.Name || '')));
+      if (!match) return null;
+      settings[col] = match.LeaveTypeID;
+      await supabaseAdmin.from('company_settings').update({ [col]: match.LeaveTypeID }).eq('id', 1);
+      return match.LeaveTypeID;
+    }
+    // Requests of the same kind for the same person that Xero holds or got this run, to catch a double request
+    const leaveInXero = [];
+    const sameLeave = (a, b) => a.staffId === b.staffId && a.kind === b.kind && a.start <= b.end && a.end >= b.start;
+    for (const lr of leaveRows || []) {
+      const profile = profileById[lr.staff_id] || {};
+      const staffName = profile.full_name || lr.staff_id;
+      const title = (LEAVE_TITLES[lr.leave_type] || 'Leave').toLowerCase();
+      const span = lr.start_date === lr.end_date ? fmtYmd(lr.start_date) : `${fmtYmd(lr.start_date)} to ${fmtYmd(lr.end_date)}`;
+      const thisLeave = { staffId: lr.staff_id, kind: lr.leave_type, start: lr.start_date, end: lr.end_date };
+      // Worth a look whatever happens below: hours clocked on a leave day, a public holiday inside the leave
+      const leaveDays = [];
+      for (let d = lr.start_date; d <= lr.end_date && leaveDays.length < 400; d = addDays(d, 1)) leaveDays.push(d);
+      const workedOnLeave = (allEntries || []).filter(e => e.staff_id === lr.staff_id && !e.sm8_activity_uuid && leaveDays.includes(localDateKey(e.clock_in)));
+      if (workedOnLeave.length) warnings.push(`${staffName} also clocked ${round2(workedOnLeave.reduce((s, e) => s + entryHours(e), 0))}h on ${title} days (${span}): check the leave hours in Xero.`);
+      const holidaysInLeave = leaveDays.filter(d => holidaySet.has(d) && isWeekday(d));
+      if (holidaysInLeave.length) warnings.push(`${staffName}: ${holidaysInLeave.map(fmtYmd).join(', ')} is a public holiday inside their ${title}, check Xero pays it as the holiday, not leave.`);
+
+      if (lr.leave_type === 'other') { warnings.push(`${staffName}: "other" leave ${span} is approved but has no Xero leave type, add it in Xero by hand if it is paid.`); continue; }
+      if (!profile.xero_employee_id) { skipped.push(`${staffName}: ${title} ${span} not sent, no Xero Employee ID set (Settings > Users & Roles)`); continue; }
+      if (lr.xero_leave_application_id) {
+        let stillThere;
+        try {
+          stillThere = ((await xeroRequest('payroll.au', `LeaveApplications/${encodeURIComponent(lr.xero_leave_application_id)}`))?.LeaveApplications || []).length > 0;
+        } catch (err) {
+          if (/404|not found/i.test(err.message)) stillThere = false;
+          else { warnings.push(`${staffName}: could not check Xero for their ${title} ${span} (${err.message}), left as sent.`); leaveInXero.push(thisLeave); continue; }
+        }
+        if (stillThere) { held.push(`${staffName}: ${title} ${span} already in Xero${lr.xero_units ? ` (${round2(lr.xero_units)}h)` : ''}.`); leaveInXero.push(thisLeave); continue; }
+      }
+      if (leaveInXero.some(l => sameLeave(l, thisLeave))) {
+        warnings.push(`${staffName}: a second approved ${title} request covers ${span}, not sent. Decline the duplicate on the Leave card.`);
+        continue;
+      }
+      let leaveTypeId;
+      try { leaveTypeId = await leaveTypeIdFor(lr.leave_type); }
+      catch (err) { skipped.push(`${staffName}: ${title} ${span} not sent, could not read Xero's leave types (${err.message})`); continue; }
+      if (!leaveTypeId) { skipped.push(`${staffName}: ${title} ${span} not sent, no Xero leave type set for ${lr.leave_type} leave (Settings > Xero Mapping, Look up IDs)`); continue; }
+      let app;
+      try {
+        const result = await xeroRequest('payroll.au', 'LeaveApplications', {
+          method: 'POST',
+          body: [{
+            EmployeeID: profile.xero_employee_id,
+            LeaveTypeID: leaveTypeId,
+            StartDate: lr.start_date,
+            EndDate: lr.end_date,
+            Title: `${LEAVE_TITLES[lr.leave_type]} (TEops)`,
+            Description: String(lr.notes || '').slice(0, 200) || undefined,
+          }],
+        });
+        app = result?.LeaveApplications?.[0] || {};
+      } catch (err) {
+        skipped.push(`${staffName}: ${title} ${span}: ${err.message}`);
+        continue;
+      }
+      const units = round2((app.LeavePeriods || []).reduce((s, p) => s + (Number(p.NumberOfUnits) || 0), 0));
+      const { error: saveErr } = await supabaseAdmin.from('leave_requests')
+        .update({ xero_leave_application_id: app.LeaveApplicationID || null, xero_pushed_at: new Date().toISOString(), xero_units: units })
+        .eq('id', lr.id);
+      leaveInXero.push(thisLeave);
+      if (saveErr) {
+        // Xero has it; the app must not forget that or the next push sends it twice.
+        console.error('Leave sent to Xero but not recorded', lr.id, app.LeaveApplicationID, saveErr.message);
+        warnings.push(`${staffName}: ${title} ${span} went to Xero (id ${app.LeaveApplicationID || '?'}) but the app could not record it (${saveErr.message}). Do not push again until that is fixed, or it goes twice.`);
+        continue;
+      }
+      leaveSent.push(`${staffName}: ${title} ${span} sent to Xero, ${units}h.`);
+      if (!(units > 0)) warnings.push(`${staffName}: Xero worked out 0 hours for that leave. Check their hours per day in Xero (Payroll > Employees > Employment) and the leave application.`);
+    }
+
     warnings.push(
       ...[...fallbackBands].map(b => `${BAND_NAMES[b]} has no earnings rate ID set - those hours were pushed at the Ordinary Hours rate instead (Settings > Xero Mapping).`),
       ...[...officeFallbackBands].map(b => `${BAND_NAMES[b]} (Office) has no earnings rate ID set - non-job hours in that band were pushed to the Jobs rate, so they landed in Direct Costs (Settings > Xero Mapping).`),
@@ -535,7 +694,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ ok: true, pushed: results.length, results, resent, held, skipped, warnings }),
+      body: JSON.stringify({ ok: true, pushed: results.length, results, resent, leaveSent, held, skipped, warnings, message: results.length || leaveSent.length ? undefined : 'No new hours or leave to send.' }),
     };
   } catch (err) {
     console.error(err);
