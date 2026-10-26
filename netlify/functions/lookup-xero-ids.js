@@ -22,6 +22,7 @@ exports.handler = async (event) => {
   const errors = [];
   let trackingCategories = [];
   let earningsRates = [];
+  let leaveTypes = [];
   let payrollCalendars = [];
 
   try {
@@ -42,6 +43,14 @@ exports.handler = async (event) => {
       name: er.Name,
       type: er.EarningsType,
     }));
+    // Leave types live on the same PayItems call: approved leave goes to
+    // Xero as leave applications (push-timesheets-to-xero.js).
+    leaveTypes = (piResult.PayItems?.LeaveTypes || []).map(lt => ({
+      id: lt.LeaveTypeID,
+      name: lt.Name,
+      units: lt.TypeOfUnits,
+      paid: lt.IsPaidLeave,
+    }));
   } catch (err) {
     errors.push(`Earnings rates: ${err.message}`);
   }
@@ -60,5 +69,5 @@ exports.handler = async (event) => {
     errors.push(`Payroll calendars: ${err.message}`);
   }
 
-  return { statusCode: 200, body: JSON.stringify({ ok: true, trackingCategories, earningsRates, payrollCalendars, errors }) };
+  return { statusCode: 200, body: JSON.stringify({ ok: true, trackingCategories, earningsRates, leaveTypes, payrollCalendars, errors }) };
 };

@@ -254,6 +254,21 @@
             <label>LAHA (living away from home) earnings rate ID</label>
             <input id="xero-laha-earnings-rate-id" placeholder="Required before pushing anyone with a flagged overnight stay" />
             <p class="subtitle" style="margin:2px 0 0;">Paid per night flagged at clock-out on a LAHA-approved job (Settings on the job/quote itself). No fallback for this one - if it's not set, that person's whole timesheet is skipped (not pushed at the wrong rate) until it is.</p>
+            <p class="subtitle" style="margin:12px 0 6px;">Leave types: approved leave requests go to Xero as leave applications with the timesheet push. Blank = matched by name from Xero's own leave types the first time one is needed (Annual, Personal/Carer's, Leave without pay) and saved here, so a wrong match can be fixed below.</p>
+            <div class="grid cols-3">
+              <div>
+                <label style="margin-top:0">Annual leave</label>
+                <input id="xero-annual-leave-type-id" placeholder="Use Look up IDs below" />
+              </div>
+              <div>
+                <label style="margin-top:0">Sick leave</label>
+                <input id="xero-sick-leave-type-id" placeholder="Use Look up IDs below" />
+              </div>
+              <div>
+                <label style="margin-top:0">Unpaid leave</label>
+                <input id="xero-unpaid-leave-type-id" placeholder="Use Look up IDs below" />
+              </div>
+            </div>
             <label>Payroll calendar ID</label>
             <input id="xero-payroll-calendar-id" placeholder="Use Look up IDs below to find this" />
             <p class="subtitle" style="margin:2px 0 0;">Every employee needs one of these assigned in Xero before they can have timesheets or a pay run - pushing an employee to Xero now assigns this one automatically.</p>
@@ -2770,8 +2785,11 @@
     });
 
     async function loadXeroConnection() {
-      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_ordinary_office_earnings_rate_id, xero_ot1_office_earnings_rate_id, xero_ot2_office_earnings_rate_id, xero_public_holiday_office_earnings_rate_id, xero_public_holiday_base_earnings_rate_id, xero_laha_earnings_rate_id, xero_payroll_calendar_id').eq('id', 1).single();
+      const { data } = await supabaseClient.from('company_settings').select('xero_tracking_category_id, xero_ordinary_earnings_rate_id, xero_ot1_earnings_rate_id, xero_ot2_earnings_rate_id, xero_public_holiday_earnings_rate_id, xero_ordinary_office_earnings_rate_id, xero_ot1_office_earnings_rate_id, xero_ot2_office_earnings_rate_id, xero_public_holiday_office_earnings_rate_id, xero_public_holiday_base_earnings_rate_id, xero_laha_earnings_rate_id, xero_payroll_calendar_id, xero_annual_leave_type_id, xero_sick_leave_type_id, xero_unpaid_leave_type_id').eq('id', 1).single();
       if (data) {
+        document.getElementById('xero-annual-leave-type-id').value = data.xero_annual_leave_type_id || '';
+        document.getElementById('xero-sick-leave-type-id').value = data.xero_sick_leave_type_id || '';
+        document.getElementById('xero-unpaid-leave-type-id').value = data.xero_unpaid_leave_type_id || '';
         document.getElementById('xero-tracking-category-id').value = data.xero_tracking_category_id || '';
         document.getElementById('xero-earnings-rate-id').value = data.xero_ordinary_earnings_rate_id || '';
         document.getElementById('xero-ot1-earnings-rate-id').value = data.xero_ot1_earnings_rate_id || '';
@@ -2804,6 +2822,9 @@
           xero_public_holiday_base_earnings_rate_id: document.getElementById('xero-public-holiday-base-earnings-rate-id').value.trim() || null,
           xero_laha_earnings_rate_id: document.getElementById('xero-laha-earnings-rate-id').value.trim(),
           xero_payroll_calendar_id: document.getElementById('xero-payroll-calendar-id').value.trim(),
+          xero_annual_leave_type_id: document.getElementById('xero-annual-leave-type-id').value.trim() || null,
+          xero_sick_leave_type_id: document.getElementById('xero-sick-leave-type-id').value.trim() || null,
+          xero_unpaid_leave_type_id: document.getElementById('xero-unpaid-leave-type-id').value.trim() || null,
         })
         .eq('id', 1);
       msg.innerHTML = error
@@ -2859,6 +2880,23 @@
               <div><div class="name">${escapeHtml(er.name)}</div><div class="meta">${escapeHtml(er.type || '')} - ${escapeHtml(er.id)}</div></div>
               <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;">
                 ${bandButtons.map(([target, label]) => `<button type="button" class="secondary xero-fill" style="padding:4px 8px; font-size:11px;" data-target="${target}" data-value="${escapeHtml(er.id)}">${label}</button>`).join('')}
+              </div>
+            </div>`;
+          });
+        }
+
+        if (data.leaveTypes && data.leaveTypes.length) {
+          html += `<p class="subtitle" style="margin:14px 0 6px;"><strong style="color:var(--text);">Leave types</strong> - click which kind of request each one is for:</p>`;
+          const leaveButtons = [
+            ['xero-annual-leave-type-id', 'Annual'],
+            ['xero-sick-leave-type-id', 'Sick'],
+            ['xero-unpaid-leave-type-id', 'Unpaid'],
+          ];
+          data.leaveTypes.forEach(lt => {
+            html += `<div class="project-list-item" style="align-items:center;">
+              <div><div class="name">${escapeHtml(lt.name)}</div><div class="meta">${escapeHtml(lt.units || '')}${lt.paid === false ? ', unpaid' : ''} - ${escapeHtml(lt.id)}</div></div>
+              <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;">
+                ${leaveButtons.map(([target, label]) => `<button type="button" class="secondary xero-fill" style="padding:4px 8px; font-size:11px;" data-target="${target}" data-value="${escapeHtml(lt.id)}">${label}</button>`).join('')}
               </div>
             </div>`;
           });

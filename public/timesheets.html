@@ -112,14 +112,16 @@
     </div>
 
     <div class="card" id="approvals-card" style="display:none;">
-      <h2>Pending approvals</h2>
+      <h2>Leave</h2>
+      <p class="subtitle" style="margin-bottom:10px;">Everyone's leave: who, when, what kind, and whether it is approved. Approved leave goes to Xero with the timesheet push below.</p>
+      <div id="leave-filters" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
       <div id="approvals-msg"></div>
       <div id="approvals-list"></div>
     </div>
 
     <div class="card" id="xero-payroll-card" style="display:none;">
       <h2>Push to Xero Payroll</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Pushes everyone's clocked hours in the range as DRAFT timesheets (approve them in Xero). Dates must match a real pay period in Xero. Safe to run more than once: hours already in a Xero timesheet are skipped, and hours whose Xero timesheet was deleted (a pay run redone) are sent again.</p>
+      <p class="subtitle" style="margin-bottom:10px;">Pushes everyone's clocked hours in the range as DRAFT timesheets (approve them in Xero), and approved leave in the range as Xero leave applications. Dates must match a real pay period in Xero. Safe to run more than once: hours and leave already in Xero are skipped, hours added since go onto the existing Xero timesheet, and anything deleted in Xero (a pay run redone) is sent again.</p>
       <div class="grid cols-3">
         <div>
           <label style="margin-top:0">Pay period start</label>
@@ -1207,6 +1209,7 @@
       const notes = document.getElementById('leave-notes').value.trim();
       if (!start_date || !end_date) { msg.innerHTML = `<div class="error-box">Pick a start and end date.</div>`; return; }
       if (end_date < start_date) { msg.innerHTML = `<div class="error-box">End date can't be before the start date.</div>`; return; }
+      if (!/^20\d\d-\d\d-\d\d$/.test(start_date) || !/^20\d\d-\d\d-\d\d$/.test(end_date)) { msg.innerHTML = `<div class="error-box">Check the year on those dates.</div>`; return; }
       const btn = document.getElementById('request-leave-btn');
       const label = btn.textContent;
       btn.disabled = true;
@@ -1232,20 +1235,37 @@
       const listEl = document.getElementById('my-leave-list');
       const { data, error } = await supabaseClient
         .from('leave_requests')
-        .select('*')
+        .select('*, decider:profiles!leave_requests_decided_by_fkey(full_name)')
         .eq('staff_id', myUserId)
         .order('start_date', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
-      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No leave requests yet.</p>`; return; }
-      const badgeClass = { pending: 'amber', approved: 'accepted', declined: 'declined' };
+      if (!data.length) { listEl.innerHTML = `<p class="subtitle">No leave requests yet. Use the form above, and you will see here whether each one is approved.</p>`; return; }
       listEl.innerHTML = data.map(l => `
         <div class="project-list-item">
           <div>
-            <div class="name">${l.leave_type[0].toUpperCase() + l.leave_type.slice(1)} leave</div>
-            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + escapeHtml(l.notes) : ''}</div>
+            <div class="name">${LEAVE_TYPE_LABEL[l.leave_type] || 'Leave'} &middot; ${leaveSpanLabel(l)}</div>
+            <div class="meta">${leaveDaysLabel(l)}${l.notes ? ' &middot; ' + escapeHtml(l.notes) : ''}${leaveDecidedLabel(l)}${l.xero_pushed_at ? ' &middot; In Xero payroll' + (Number(l.xero_units) > 0 ? ` (${Number(l.xero_units)}h)` : '') : ''}</div>
           </div>
-          <span class="badge ${badgeClass[l.status]}">${l.status}</span>
+          <span class="badge ${LEAVE_BADGE[l.status] || 'draft'}">${LEAVE_STATUS_LABEL[l.status] || l.status}</span>
         </div>`).join('');
+    }
+
+    const LEAVE_TYPE_LABEL = { annual: 'Annual leave', sick: 'Sick leave', unpaid: 'Unpaid leave', other: 'Other leave' };
+    const LEAVE_STATUS_LABEL = { pending: 'Waiting for approval', approved: 'Approved', declined: 'Declined' };
+    const LEAVE_BADGE = { pending: 'amber', approved: 'accepted', declined: 'declined' };
+    function nextDayKey(key) { const d = new Date(`${key}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
+    function leaveSpanLabel(l) { return l.start_date === l.end_date ? dayKeyLabel(l.start_date) : `${dayKeyLabel(l.start_date)} to ${dayKeyLabel(l.end_date)}`; }
+    // Weekdays in the request (public holidays not taken off: Xero decides those)
+    function leaveWeekdays(l) {
+      let n = 0;
+      for (let d = l.start_date; d <= l.end_date && n < 400; d = nextDayKey(d)) { const dow = new Date(`${d}T12:00:00Z`).getUTCDay(); if (dow >= 1 && dow <= 5) n++; }
+      return n;
+    }
+    function leaveDaysLabel(l) { const n = leaveWeekdays(l); return `${n} working day${n === 1 ? '' : 's'}`; }
+    function leaveDecidedLabel(l) {
+      if (l.status === 'pending' || !l.decided_at) return '';
+      const who = l.decider && l.decider.full_name ? ` by ${escapeHtml(l.decider.full_name)}` : '';
+      return ` &middot; ${l.status === 'approved' ? 'Approved' : 'Declined'}${who} ${dayKeyLabel(sydneyDateKey(new Date(l.decided_at)))}`;
     }
 
     function initXeroPayrollCard(myRole) {
@@ -1326,6 +1346,9 @@
         if (data.resent && data.resent.length) {
           html += `<div class="success-box" style="margin-top:8px;">${data.resent.map(r => escapeHtml(r)).join('<br>')}</div>`;
         }
+        if (data.leaveSent && data.leaveSent.length) {
+          html += `<div class="success-box" style="margin-top:8px;">${data.leaveSent.map(r => escapeHtml(r)).join('<br>')}</div>`;
+        }
         if (data.held && data.held.length) {
           html += `<p class="subtitle" style="margin:8px 0 0;">${data.held.map(h => escapeHtml(h)).join('<br>')}</p>`;
         }
@@ -1343,39 +1366,73 @@
       btn.textContent = 'Push timesheets';
     });
 
+    // Admin and Finance: everyone's leave, with the decision buttons on the
+    // ones still waiting. Filters are status, kind and how far back.
+    const leaveFilter = { status: 'all', kind: 'all', older: false };
     async function loadApprovals(myRole) {
       if (myRole !== 'admin' && myRole !== 'finance') return;
       const card = document.getElementById('approvals-card');
       const listEl = document.getElementById('approvals-list');
-      const { data, error } = await supabaseClient
+      const filtersEl = document.getElementById('leave-filters');
+      card.style.display = 'block';
+      const since = new Date(); since.setDate(since.getDate() - 60);
+      let q = supabaseClient
         .from('leave_requests')
-        .select('*, profiles!leave_requests_staff_id_fkey(full_name)')
-        .eq('status', 'pending')
-        .order('start_date');
-      if (error || !data) return;
+        .select('*, profiles!leave_requests_staff_id_fkey(full_name), decider:profiles!leave_requests_decided_by_fkey(full_name)')
+        .order('start_date', { ascending: false });
+      if (!leaveFilter.older) q = q.gte('end_date', sydneyDateKey(since));
+      const { data: all, error } = await q;
+      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
+      const pendingCount = (all || []).filter(l => l.status === 'pending').length;
+      const chip = (key, value, label) => `<button type="button" class="${leaveFilter[key] === value ? '' : 'secondary'} leave-filter" data-key="${key}" data-value="${value}" style="padding:4px 10px; font-size:12px;">${label}</button>`;
+      filtersEl.innerHTML = [
+        chip('status', 'all', 'All'), chip('status', 'pending', `Waiting${pendingCount ? ` (${pendingCount})` : ''}`), chip('status', 'approved', 'Approved'), chip('status', 'declined', 'Declined'),
+        `<span style="width:8px;"></span>`,
+        chip('kind', 'all', 'All kinds'), chip('kind', 'sick', 'Sick'), chip('kind', 'annual', 'Annual'), chip('kind', 'unpaid', 'Unpaid'), chip('kind', 'other', 'Other'),
+        `<span style="width:8px;"></span>`,
+        `<button type="button" class="${leaveFilter.older ? '' : 'secondary'} leave-filter" data-key="older" data-value="toggle" style="padding:4px 10px; font-size:12px;">${leaveFilter.older ? 'Showing everything' : 'Last 60 days and ahead'}</button>`,
+      ].join('');
+      filtersEl.querySelectorAll('.leave-filter').forEach(btn => btn.addEventListener('click', () => {
+        if (btn.dataset.key === 'older') leaveFilter.older = !leaveFilter.older;
+        else leaveFilter[btn.dataset.key] = btn.dataset.value;
+        loadApprovals(myRole);
+      }));
+
+      const data = (all || [])
+        .filter(l => leaveFilter.status === 'all' || l.status === leaveFilter.status)
+        .filter(l => leaveFilter.kind === 'all' || l.leave_type === leaveFilter.kind)
+        // waiting ones first, then most recent
+        .sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || (a.start_date < b.start_date ? 1 : a.start_date > b.start_date ? -1 : 0));
       if (!data.length) {
-        if (card.style.display === 'block') listEl.innerHTML = '<p class="subtitle">No more requests waiting.</p>';
+        listEl.innerHTML = `<p class="subtitle">${leaveFilter.status === 'pending' ? 'Nothing waiting for a decision.' : 'No leave to show for these filters.'}</p>`;
         return;
       }
-      card.style.display = 'block';
-      listEl.innerHTML = data.map(l => `
-        <div class="project-list-item" data-id="${l.id}">
-          <div>
-            <div class="name">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff member')} - ${escapeHtml(l.leave_type)} leave</div>
-            <div class="meta">${l.start_date} &rarr; ${l.end_date}${l.notes ? ' &middot; ' + escapeHtml(l.notes) : ''}</div>
-          </div>
-          <div>
-            <button class="secondary approve-leave-btn" data-id="${l.id}">Approve</button>
-            <button class="secondary danger decline-leave-btn" data-id="${l.id}">Decline</button>
-          </div>
-        </div>`).join('');
+      const who = (l) => (l.profiles && l.profiles.full_name) || 'Staff member';
+      listEl.innerHTML = `
+        <div style="overflow-x:auto;">
+        <table class="responsive-stack">
+          <thead><tr><th>Who</th><th>Leave</th><th>When</th><th class="num">Days</th><th>Status</th><th>Xero</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(l => `
+              <tr data-id="${l.id}">
+                <td data-label="Who"><strong>${escapeHtml(who(l))}</strong>${l.notes ? `<div class="subtitle small">${escapeHtml(l.notes)}</div>` : ''}</td>
+                <td data-label="Leave">${l.leave_type === 'sick' ? '<span style="color:var(--red);">' : ''}${LEAVE_TYPE_LABEL[l.leave_type] || 'Leave'}${l.leave_type === 'sick' ? '</span>' : ''}</td>
+                <td data-label="When">${leaveSpanLabel(l)}</td>
+                <td class="num" data-label="Days">${leaveWeekdays(l)}</td>
+                <td data-label="Status"><span class="badge ${LEAVE_BADGE[l.status] || 'draft'}">${LEAVE_STATUS_LABEL[l.status] || l.status}</span>${leaveDecidedLabel(l) ? `<div class="subtitle small">${leaveDecidedLabel(l).replace(/^ &middot; /, '')}</div>` : ''}</td>
+                <td data-label="Xero">${l.xero_pushed_at ? `Sent${Number(l.xero_units) > 0 ? ` (${Number(l.xero_units)}h)` : ''}` : (l.status === 'approved' ? '<span class="subtitle">With the next push</span>' : '<span class="subtitle">-</span>')}</td>
+                <td>${l.status === 'pending' ? `
+                  <button class="secondary approve-leave-btn" data-id="${l.id}" style="font-size:12px; padding:4px 8px;">Approve</button>
+                  <button class="secondary danger decline-leave-btn" data-id="${l.id}" style="font-size:12px; padding:4px 8px;">Decline</button>` : ''}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        </div>`;
       listEl.querySelectorAll('.approve-leave-btn, .decline-leave-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const approving = btn.classList.contains('approve-leave-btn');
           const status = approving ? 'approved' : 'declined';
           const l = data.find(x => x.id === btn.dataset.id);
-          const who = (l.profiles && l.profiles.full_name) || 'Staff member';
-          const dates = l.start_date === l.end_date ? dayKeyLabel(l.start_date) : `${dayKeyLabel(l.start_date)} to ${dayKeyLabel(l.end_date)}`;
           const msgEl = document.getElementById('approvals-msg');
           const rowBtns = btn.parentElement.querySelectorAll('button');
           const label = btn.textContent;
@@ -1390,16 +1447,12 @@
           if (updErr) {
             rowBtns.forEach(b => { b.disabled = false; });
             btn.textContent = label;
-            msgEl.innerHTML = `<div class="error-box">Could not ${approving ? 'approve' : 'decline'} ${escapeHtml(who)}'s leave: ${escapeHtml(friendlyError(updErr))}</div>`;
+            msgEl.innerHTML = `<div class="error-box">Could not ${approving ? 'approve' : 'decline'} ${escapeHtml(who(l))}'s leave: ${escapeHtml(friendlyError(updErr))}</div>`;
             return;
           }
           msgEl.innerHTML = (updated && updated.length)
-            ? `<div class="success-box">${approving ? 'Approved' : 'Declined'}: ${escapeHtml(who)}, ${escapeHtml(l.leave_type)} leave ${dates}.</div>`
-            : `<div class="error-box">${escapeHtml(who)}'s request was already decided by someone else.</div>`;
-          // Drop the decided row now, so a failed reload on bad signal never leaves it greyed out
-          const row = btn.closest('.project-list-item');
-          if (row) row.remove();
-          if (listEl && !listEl.querySelector('.project-list-item')) listEl.innerHTML = '<p class="subtitle">No more requests waiting.</p>';
+            ? `<div class="success-box">${approving ? 'Approved' : 'Declined'}: ${escapeHtml(who(l))}, ${LEAVE_TYPE_LABEL[l.leave_type] || 'leave'} ${leaveSpanLabel(l)}.${approving && l.leave_type !== 'other' ? ' It goes to Xero with the next timesheet push.' : ''}</div>`
+            : `<div class="error-box">${escapeHtml(who(l))}'s request was already decided by someone else.</div>`;
           await loadApprovals(myRole);
         });
       });
