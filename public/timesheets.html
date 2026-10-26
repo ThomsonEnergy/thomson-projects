@@ -119,7 +119,7 @@
 
     <div class="card" id="xero-payroll-card" style="display:none;">
       <h2>Push to Xero Payroll</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Pushes everyone's unpushed clocked hours in the range as DRAFT timesheets. Dates must match a real pay period in Xero. Safe to run more than once - already-pushed hours are skipped.</p>
+      <p class="subtitle" style="margin-bottom:10px;">Pushes everyone's clocked hours in the range as APPROVED timesheets (the check happens here, so they are ready for the pay run). Dates must match a real pay period in Xero. Safe to run more than once: hours already in a Xero timesheet are skipped, and hours whose Xero timesheet was deleted (a pay run redone) are sent again.</p>
       <div class="grid cols-3">
         <div>
           <label style="margin-top:0">Pay period start</label>
@@ -1322,7 +1322,13 @@
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
 
-        let html = `<div class="success-box">Pushed ${data.pushed} timesheet${data.pushed === 1 ? '' : 's'}.</div>`;
+        let html = `<div class="success-box">Pushed ${data.pushed} timesheet${data.pushed === 1 ? '' : 's'}.${data.message ? ' ' + escapeHtml(data.message) : ''}</div>`;
+        if (data.resent && data.resent.length) {
+          html += `<div class="success-box" style="margin-top:8px;">${data.resent.map(r => escapeHtml(r)).join('<br>')}</div>`;
+        }
+        if (data.held && data.held.length) {
+          html += `<p class="subtitle" style="margin:8px 0 0;">${data.held.map(h => escapeHtml(h)).join('<br>')}</p>`;
+        }
         if (data.warnings && data.warnings.length) {
           html += `<div class="error-box" style="margin-top:8px;">${data.warnings.map(w => escapeHtml(w)).join('<br>')}</div>`;
         }

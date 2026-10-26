@@ -3,9 +3,10 @@
 // in Xero - Xero Payroll timesheets are tied to a payroll calendar's exact
 // period boundaries, this doesn't try to guess them)
 //
-// Pushes each staff member's clocked hours in the range as one DRAFT
-// timesheet per employee. Each day's hours are banded into the same 4
-// award rates payroll costing already uses (ordinary/OT1 1.5x/OT2 2x/
+// Pushes each staff member's clocked hours in the range as one APPROVED
+// timesheet per employee (the check and sign-off happen in this app, so
+// the timesheet is ready for the pay run; owner's rule, 26 Oct 2026).
+// Each day's hours are banded into the same 4 award rates payroll costing already uses (ordinary/OT1 1.5x/OT2 2x/
 // public holiday 2.5x - see dayBands in compute-labour-cost.js) banded
 // across the employee's WHOLE day (every job), same as a real payslip.
 // Hours are also split by time_entries.time_category into a small fixed set
@@ -26,6 +27,12 @@
 // hours still count towards its bands and its public holiday, so a re-run
 // pays a late-added entry on top of the day already paid (never from
 // zero) and never pays the public holiday base day twice.
+//
+// Xero is the check for "already pushed": before anything is built, each
+// employee's timesheets in Xero are read, and an entry marked sent whose
+// day is no longer inside a live Xero timesheet (deleted there when a pay
+// run was redone) is sent again, while a day still held in Xero is never
+// sent twice. See the "What Xero still holds" section below.
 //
 // Also pushes a LAHA (living-away-from-home allowance) line for every
 // night flagged at clock-out (time_entries.stayed_overnight, only asked
@@ -74,6 +81,59 @@ function trackingLabelFor(entry) {
     case 'training': return 'Training';
     default: return 'Admin'; // 'admin', plus legacy 'office' / 'other'
   }
+}
+
+const round2 = (n) => Math.round(n * 100) / 100;
+const fmtYmd = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+// Payroll AU 1.0 returns dates as "/Date(1760313600000+0000)/" (UTC
+// midnight of the calendar date); plain ISO is accepted too.
+function xeroDateToYmd(v) {
+  if (typeof v !== 'string') return null;
+  const m = v.match(/\/Date\((-?\d+)/);
+  if (m) return new Date(Number(m[1])).toISOString().slice(0, 10);
+  const iso = v.match(/^(\d{4}-\d{2}-\d{2})/);
+  return iso ? iso[1] : null;
+}
+
+// A timesheet Xero still holds (or has paid). Anything not known to be
+// dead counts as held: the cost of guessing wrong here is paying twice.
+const DEAD_STATUSES = new Set(['REJECTED', 'DELETED']);
+const isLiveTimesheet = (t) => !DEAD_STATUSES.has(t.status);
+
+// Every timesheet Xero holds for one employee that overlaps the period, as
+// { id, employeeId, start, end, status }. Asked by employee; if Xero refuses
+// that filter, one full scan (kept in scanCache for the rest of the run)
+// is filtered here instead. Throws when the answer cannot be trusted (the
+// scan ran off the end), so the caller leaves that person's marks alone.
+async function xeroTimesheetsFor(employeeId, startDate, endDate, scanCache) {
+  const id = String(employeeId).toLowerCase();
+  const overlaps = (t) => t.start && t.end && t.start <= endDate && t.end >= startDate;
+  const shape = (t) => ({
+    id: t.TimesheetID, employeeId: String(t.EmployeeID || '').toLowerCase(),
+    start: xeroDateToYmd(t.StartDate), end: xeroDateToYmd(t.EndDate), status: String(t.Status || '').toUpperCase(),
+  });
+  const MAX_PAGES = 40;
+  async function pages(query) {
+    const out = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const result = await xeroRequest('payroll.au', `Timesheets?${query}page=${page}`);
+      const list = (result?.Timesheets || []).map(shape);
+      out.push(...list);
+      if (list.length < 100) return out;
+    }
+    throw new Error(`more than ${MAX_PAGES * 100} timesheets in Xero, too many to check`);
+  }
+  if (!scanCache.all) {
+    try {
+      return (await pages(`where=${encodeURIComponent(`EmployeeID==Guid("${employeeId}")`)}&`)).filter(t => t.employeeId === id && overlaps(t));
+    } catch (err) {
+      if (err instanceof TypeError) throw err; // the network, not the filter
+      console.warn('Xero timesheet filter by employee refused, scanning all:', err.message);
+    }
+  }
+  scanCache.all ||= await pages('');
+  return scanCache.all.filter(t => t.employeeId === id && overlaps(t));
 }
 
 exports.handler = async (event) => {
@@ -155,19 +215,11 @@ exports.handler = async (event) => {
       .lt('clock_in', sydneyMidnightUtc(addDays(endDate, 1)))
       .not('clock_out', 'is', null);
     if (entriesErr) throw entriesErr;
-    // Entries already pushed (and ServiceM8 imports, paid through Xero
-    // already) are never pushed again, but their hours stay in the picture:
-    // a re-run bands a late-added entry on top of the day already paid, and
-    // sees a public holiday that was worked as worked.
-    const isPushed = (e) => !!e.xero_pushed_at || !!e.sm8_activity_uuid;
-    const entries = (allEntries || []).filter(e => !isPushed(e));
-    // staffId -> Sydney date -> paid hours already pushed for that day
-    const pushedHoursByStaffDay = {};
-    (allEntries || []).filter(isPushed).forEach(e => {
-      const staffDays = (pushedHoursByStaffDay[e.staff_id] ||= {});
-      const key = localDateKey(e.clock_in);
-      staffDays[key] = (staffDays[key] || 0) + entryHours(e);
-    });
+
+    const { data: staffProfiles, error: profilesErr } = await supabaseAdmin.from('profiles')
+      .select('id, full_name, xero_employee_id, employment_type, employment_start_date, active');
+    if (profilesErr) throw profilesErr;
+    const profileById = Object.fromEntries((staffProfiles || []).map(p => [p.id, p]));
 
     const { data: holidays } = await supabaseAdmin.from('public_holidays').select('holiday_date');
     const holidaySet = new Set((holidays || []).map(h => h.holiday_date));
@@ -181,15 +233,90 @@ exports.handler = async (event) => {
     const FULL_TIME_PUBLIC_HOLIDAY_HOURS = 8;
     const weekdayHolidaysInRange = [...holidaySet].filter(d => d >= startDate && d <= endDate)
       .filter(d => { const dow = new Date(`${d}T12:00:00Z`).getUTCDay(); return dow >= 1 && dow <= 5; });
-    const { data: staffProfiles } = await supabaseAdmin.from('profiles')
-      .select('id, full_name, xero_employee_id, employment_type, employment_start_date, active');
-    const profileById = Object.fromEntries((staffProfiles || []).map(p => [p.id, p]));
-    const alreadyPaidHoliday = new Set();
+    let paidHolidayRowsInRange = [];
     if (weekdayHolidaysInRange.length) {
-      const { data: paid } = await supabaseAdmin.from('public_holiday_pay_pushes')
+      const { data: paid, error: paidErr } = await supabaseAdmin.from('public_holiday_pay_pushes')
         .select('profile_id, holiday_date').in('holiday_date', weekdayHolidaysInRange);
-      (paid || []).forEach(r => alreadyPaidHoliday.add(`${r.profile_id}|${r.holiday_date}`));
+      if (paidErr) throw paidErr;
+      paidHolidayRowsInRange = paid || [];
     }
+
+    // ---- What Xero still holds ----
+    // xero_pushed_at only says this app sent the entry once; it cannot see
+    // a timesheet deleted in Xero since (a pay run redone on a new payroll
+    // calendar, 26 Oct 2026). So Xero is asked: an entry marked sent whose
+    // Sydney day is inside no live Xero timesheet for that employee is sent
+    // again in this run (un-marked here, marked again below once Xero has
+    // it); a day still inside a live timesheet is never sent twice. The
+    // same check frees a public holiday base day. ServiceM8 imports are
+    // never sent. When Xero cannot be asked for someone, their marks stay
+    // as they are: never worse than before this check existed.
+    const warnings = [];
+    const resent = [];
+    const held = [];
+    const unmarkIds = new Set();
+    const clearHolidayRows = [];
+    const sentEntries = (allEntries || []).filter(e => e.xero_pushed_at && !e.sm8_activity_uuid);
+    const staffToCheck = new Set([...sentEntries.map(e => e.staff_id), ...paidHolidayRowsInRange.map(r => r.profile_id)]);
+    const scanCache = {};
+    for (const staffId of staffToCheck) {
+      const profile = profileById[staffId];
+      const staffName = profile?.full_name || staffId;
+      if (!profile?.xero_employee_id) continue;
+      let inXero;
+      try {
+        inXero = await xeroTimesheetsFor(profile.xero_employee_id, startDate, endDate, scanCache);
+      } catch (err) {
+        warnings.push(`${staffName}: could not check Xero for timesheets already there (${err.message}), so their hours already sent were left as sent.`);
+        continue;
+      }
+      const live = inXero.filter(isLiveTimesheet);
+      const holder = (ymd) => live.find(t => t.start <= ymd && ymd <= t.end);
+      let freedHours = 0, heldHours = 0, freedHolidays = 0;
+      const holders = new Set();
+      sentEntries.filter(e => e.staff_id === staffId).forEach(e => {
+        const t = holder(localDateKey(e.clock_in));
+        if (t) { heldHours += entryHours(e); holders.add(`${fmtYmd(t.start)} to ${fmtYmd(t.end)} (${t.status.toLowerCase()})`); }
+        else { unmarkIds.add(e.id); freedHours += entryHours(e); }
+      });
+      paidHolidayRowsInRange.filter(r => r.profile_id === staffId).forEach(r => {
+        if (!holder(r.holiday_date)) { clearHolidayRows.push(r); freedHolidays++; }
+      });
+      if (freedHours > 0 || freedHolidays) {
+        resent.push(`${staffName}: ${round2(freedHours)}h${freedHolidays ? ` and ${freedHolidays} public holiday base day${freedHolidays === 1 ? '' : 's'}` : ''} sent before but no longer in a Xero timesheet, so they are in this push.`);
+      }
+      if (heldHours > 0) {
+        held.push(`${staffName}: ${round2(heldHours)}h already in Xero timesheet ${[...holders].join(', ')}, not sent again. If that timesheet is from before the pay run was redone, delete it in Xero (Payroll > Timesheets) and push again.`);
+      }
+    }
+    if (unmarkIds.size) {
+      const { error: unmarkErr } = await supabaseAdmin.from('time_entries')
+        .update({ xero_pushed_at: null }).in('id', [...unmarkIds]);
+      if (unmarkErr) throw unmarkErr;
+    }
+    for (const r of clearHolidayRows) {
+      const { error: clearErr } = await supabaseAdmin.from('public_holiday_pay_pushes')
+        .delete().eq('profile_id', r.profile_id).eq('holiday_date', r.holiday_date);
+      if (clearErr) throw clearErr;
+    }
+
+    // Entries already pushed (and ServiceM8 imports, paid through Xero
+    // already) are never pushed again, but their hours stay in the picture:
+    // a re-run bands a late-added entry on top of the day already paid, and
+    // sees a public holiday that was worked as worked.
+    const isPushed = (e) => (!!e.xero_pushed_at && !unmarkIds.has(e.id)) || !!e.sm8_activity_uuid;
+    const entries = (allEntries || []).filter(e => !isPushed(e));
+    // staffId -> Sydney date -> paid hours already pushed for that day
+    const pushedHoursByStaffDay = {};
+    (allEntries || []).filter(isPushed).forEach(e => {
+      const staffDays = (pushedHoursByStaffDay[e.staff_id] ||= {});
+      const key = localDateKey(e.clock_in);
+      staffDays[key] = (staffDays[key] || 0) + entryHours(e);
+    });
+
+    // Holiday base days already paid, less the ones Xero no longer holds.
+    const clearedHolidayKeys = new Set(clearHolidayRows.map(r => `${r.profile_id}|${r.holiday_date}`));
+    const alreadyPaidHoliday = new Set(paidHolidayRowsInRange.map(r => `${r.profile_id}|${r.holiday_date}`).filter(k => !clearedHolidayKeys.has(k)));
     // A holiday still to be dealt with for this person: not pushed before,
     // and not from before they started (nobody is owed a day they were not
     // yet employed for).
@@ -206,12 +333,11 @@ exports.handler = async (event) => {
       });
 
     if (!Object.keys(byStaff).length) {
-      return { statusCode: 200, body: JSON.stringify({ ok: true, pushed: 0, message: 'No unpushed entries in that range.' }) };
+      return { statusCode: 200, body: JSON.stringify({ ok: true, pushed: 0, message: 'No unpushed entries in that range.', results: [], resent, held, skipped: [], warnings }) };
     }
 
     const results = [];
     const skipped = [];
-    const warnings = [];
     const pushedEntryIds = [];
     const paidHolidayRows = [];
 
@@ -373,18 +499,24 @@ exports.handler = async (event) => {
         // Payroll AU wants a bare JSON array as the request body (same as
         // Employees) - wrapping the timesheet in a plain object gets
         // rejected as a deserialization error before Xero looks at it.
-        const result = await xeroRequest('payroll.au', 'Timesheets', {
-          method: 'POST',
-          body: [{
-            EmployeeID: employeeId,
-            StartDate: startDate,
-            EndDate: endDate,
-            Status: 'DRAFT',
-            TimesheetLines: timesheetLines,
-          }],
-        });
+        // Approved on arrival (the check and sign-off happen in this app),
+        // so it is ready for the pay run. If Xero answers no to the approved
+        // status, the same lines go up as DRAFT instead: a Xero "no" means
+        // nothing was created, but a network failure (TypeError) may have
+        // created it, so that one is not retried.
+        const timesheet = { EmployeeID: employeeId, StartDate: startDate, EndDate: endDate, Status: 'APPROVED', TimesheetLines: timesheetLines };
+        let result;
+        let status = 'APPROVED';
+        try {
+          result = await xeroRequest('payroll.au', 'Timesheets', { method: 'POST', body: [timesheet] });
+        } catch (err) {
+          if (err instanceof TypeError) throw err;
+          result = await xeroRequest('payroll.au', 'Timesheets', { method: 'POST', body: [{ ...timesheet, Status: 'DRAFT' }] });
+          status = 'DRAFT';
+          warnings.push(`${staffName}: Xero would not take the timesheet as approved (${err.message}), so it went up as DRAFT. Approve it in Xero (Payroll > Timesheets).`);
+        }
         const timesheetId = result?.Timesheets?.[0]?.TimesheetID;
-        results.push({ staff: staffName, timesheetId });
+        results.push({ staff: staffName, timesheetId, status });
         allEntriesForThisStaff.forEach(e => pushedEntryIds.push(e.id));
         unworkedHolidays.forEach(d => paidHolidayRows.push({ profile_id: staffId, holiday_date: d, hours: FULL_TIME_PUBLIC_HOLIDAY_HOURS }));
         workedHolidays.forEach(w => paidHolidayRows.push({ profile_id: staffId, holiday_date: w.date, hours: Math.round(w.hours * 100) / 100 }));
@@ -410,7 +542,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ ok: true, pushed: results.length, results, skipped, warnings }),
+      body: JSON.stringify({ ok: true, pushed: results.length, results, resent, held, skipped, warnings }),
     };
   } catch (err) {
     console.error(err);
