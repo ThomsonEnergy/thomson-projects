@@ -18,4 +18,4 @@ function safeSlice(s, n) {
   return last >= 0xD800 && last <= 0xDBFF ? out.slice(0, -1) : out;
 }
 
-module.exports = { claudeJson, safeSlice, LONE_SURROGATE };
+module.exports = { claudeJson, safeSlice };
