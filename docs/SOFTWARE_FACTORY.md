@@ -1,6 +1,6 @@
 # Software factory: how every chat builds
 
-**Status: draft 27 Oct 2026, for Fable to review, waiting on the owner's yes.** Once agreed, the short rules move into `CLAUDE.md` and each step becomes a skill in `.claude/skills/`. Backlog item 36.
+**Status: agreed 27 Oct 2026 (owner's answers below), waiting on the owner's yes to build the setup.** Once agreed, the short rules move into `CLAUDE.md` and each step becomes a skill in `.claude/skills/`. Backlog item 36.
 
 ## Why
 
@@ -36,7 +36,7 @@ Same as today (plan footer: Touches, Overlaps, Kind, Size, Test on staging, Best
 1. `git fetch origin`.
 2. Check Overlaps (branches not merged into `staging`, open PRs, backlog items marked "Building in"). If another branch touches the same page, stop and say "build this in that chat".
 3. Make a fresh worktree: a feature from `origin/staging` on `feat/<short-name>`, a bug fix from `origin/main` on `fix/<short-name>`. Never build on `main` or `staging` directly.
-   - Note for Fable: the owner's first idea was "branch from `origin/main`". The release rule from 23 Oct 2026 says features branch from `staging`. This draft keeps the release rule. Confirm.
+   - Owner confirmed 27 Oct 2026: features from `staging`, fixes from `main`.
 4. Write "Building in: `feat/<short-name>`" on the backlog item, so other chats see the claim before a PR exists.
 
 Cloud sessions are already their own copy of the repo; the worktree matters most on the laptop, where several chats share one folder.
@@ -87,7 +87,7 @@ Run on the branch, then on the PR's Netlify deploy preview with a staging test l
 8. A fresh reviewer (new subagent, not told the builder's reasoning) reads the diff against **Done means** only.
 9. **Plain words.** Anything a person will read (commit message, PR title and body, button text, docs) gets a last pass: no em dashes, no filler, no "comprehensive" or "robust", say what changed and why in the owner's style (`CLAUDE.md` "How the owner works").
 
-Note for Fable: points 2 and 3 are automatic checks, which backlog item 16 (19 Oct 2026) decided against. They check for dead code and speed, not code style. Owner to confirm the change.
+Points 2 and 3 are automatic checks. Owner's yes 27 Oct 2026: they override backlog item 16 (19 Oct 2026, no automatic checks). They check for dead code and speed only; code style still comes from the rules above and the review pass.
 
 ### 4. Ship: `/ship`
 
@@ -125,11 +125,11 @@ Note for Fable: points 2 and 3 are automatic checks, which backlog item 16 (19 O
 5. Rules summary into `CLAUDE.md` (Delivery standards), backlog item 16 updated.
 6. First cleanup: start splitting `project.html`.
 
-## Questions for Fable and the owner
+## Owner's answers (27 Oct 2026)
 
-1. Features from `staging` (current rule) or `main` (owner's first idea)?
-2. Automatic dead code and page weight checks: yes (reverses item 16)?
-3. Smoke run: required check on every PR, or run by the chat and reported in the PR?
-4. Screenshot hosting for PRs.
-5. Line limits: 300 inline, 800 per file. Right numbers?
-6. Owner's answers 27 Oct 2026: features branch from `staging`, fixes from `main` (settled). Smoke run starts as reported in the PR, becomes a required check once stable. Automatic dead code and page weight checks: still the owner's call (item 16). Source of the four steps: the "Agent workflow" AGENTS.md shown in the owner's screenshot (why and when vs how, before captured first, review until clean, plain words pass), folded in above.
+1. Features branch from `staging`, fixes from `main`.
+2. Automatic dead code and page weight checks: yes, overrides item 16.
+3. Smoke run: reported in the PR by the chat first, becomes a required GitHub check once the test set is stable (about a month).
+4. Screenshots on a private `pr-assets` branch, never a public host.
+5. Line limits 300 inline, 800 per file stand until the weekly cleanup shows they are wrong.
+6. Source of the four steps: the "Agent workflow" AGENTS.md in the owner's screenshot (why and when vs how, before captured first, review until clean, plain words pass), folded in above.
