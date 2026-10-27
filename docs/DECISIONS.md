@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 27 Oct 2026
 
+- LIVE (owner's "just go straight to main", PR 229): top bar Messages badge counts unread team chats only; a new Mail icon (envelope) with its own badge counts unread emails and opens the email list that used to sit inside Messages; the Schedule icon is gone from the top bar (Schedule stays in the Team menu and pinned in the phone menu). No migration. Code: `public/js/supabase-client.js` (`loadChatBadge`), every page's top bar. Detail: `docs/PROJECT_SPEC.md` A20.
 - Owner: software factory agreed (`docs/SOFTWARE_FACTORY.md`): features branch from `staging`, fixes from `main`; automatic dead code and page weight checks go into `npm run check` (overrides backlog item 16); smoke run reported in the PR first, required check later. Build of the setup waits on the owner's yes.
 - Planned, waiting on yes: software factory (isolate, build, prove, ship, weekly cleanup) drafted for Fable to review in `docs/SOFTWARE_FACTORY.md` (backlog item 36). Agents: Sparky and the ops manager become one assistant with a company view and a personal view; workers report events the ops manager routes; Postie filing fix (4 of 8 emails under the GCW label were wrong), learning from edited drafts, My Plan page, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`, backlog item 37).
 
