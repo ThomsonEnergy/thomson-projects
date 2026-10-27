@@ -55,6 +55,8 @@ Cloud sessions are already their own copy of the repo; the worktree matters most
 | Anything that changes money or stock | One database function | As `CLAUDE.md` already says. |
 | Agent prompts and rules | `agents/prompts/<agent>.md`, settings tables | Never as long strings inside the code (the agents plan already says this, the folder was never made). |
 
+**Why and when in one place, how in another.** A page or endpoint decides *when* something happens and *why* (the person clicked, the schedule fired, the caller is an admin). A `_shared/` or `public/js/` file owns *how* (the reusable logic), takes plain inputs and returns a plain result (`{ ok, data, error }`), never touches the page or the HTTP response. So one "how" serves the button, Sparky, a worker and a test alike, and a person can read the "when" without the "how" in the way.
+
 **Rules**
 
 - **Reuse before writing.** Search `_shared/` and `public/js/` first (`escapeHtml`, `compressImage`, Sydney date, `require-*`, `agent-log`, `push`, `calc`, `sparky-tools`). Two copies of the same logic means make it one.
@@ -74,14 +76,16 @@ Run on the branch, then on the PR's Netlify deploy preview with a staging test l
 1. `npm run check` (as today).
 2. **Dead code check** (new `scripts/deadcode.js`): Netlify functions nothing calls and no schedule runs, `public/js` files no page loads, `_shared` exports nothing uses, `?v=` numbers out of step. Today's leftovers go in a baseline file so only *new* dead code fails; the weekly sweep works the baseline down.
 3. **Page weight budget** (new `scripts/page-budgets.json`): each page's HTML plus the scripts and styles it loads. A PR that grows a page past its budget says why in the PR. `project.html` budget is today's size and only goes down.
-4. **Smoke run** (Playwright, already installed in cloud sessions): open every touched page as the right test login, fail on console errors or failed network calls, record load time, click through the **Done means** steps, take screenshots at phone and desktop width, before (staging) and after (preview).
+4. **Smoke run** (Playwright, already installed in cloud sessions): open every touched page as the right test login, fail on console errors or failed network calls, record load time, click through the **Done means** steps, take screenshots at phone and desktop width.
+   - **Before first.** A bug fix starts by reproducing the bug on staging and keeping the screenshot or output *before* touching the code (cheapest then, impossible after). A feature keeps the before shot of the page as it is. The after shot comes from the PR preview once Done means passes.
 5. **Migrations:** Supabase security and performance advisors on staging after the migration runs.
 6. **Agents:** every agent has `agents/evals/<agent>/` with real cases (names removed) and the right answer. A prompt or model change passes every case before it ships. First set: Postie's four misfiled emails (see the agents plan).
 
 **Review**
 
-7. `/code-review high` and `/simplify` on the diff, fix what they find.
+7. **Review loop.** `/code-review high` and `/simplify` on the diff, fix what they find, run again, until a pass comes back with nothing to fix (cap of 3 rounds, then the leftovers go in the PR as "known").
 8. A fresh reviewer (new subagent, not told the builder's reasoning) reads the diff against **Done means** only.
+9. **Plain words.** Anything a person will read (commit message, PR title and body, button text, docs) gets a last pass: no em dashes, no filler, no "comprehensive" or "robust", say what changed and why in the owner's style (`CLAUDE.md` "How the owner works").
 
 Note for Fable: points 2 and 3 are automatic checks, which backlog item 16 (19 Oct 2026) decided against. They check for dead code and speed, not code style. Owner to confirm the change.
 
@@ -95,7 +99,7 @@ Note for Fable: points 2 and 3 are automatic checks, which backlog item 16 (19 O
    - Speed: page weight and load time, before and after
    - Removed: dead code and old versions deleted
    - Touches, Migration (yes or no, number), Docs updated
-3. Screenshots go up with the PR (Fable to pick how: a `pr-assets` branch that is never merged and linked from the PR, or a GitHub upload).
+3. Screenshots go up with the PR as a before and after table (the smoke run writes the markdown). Hosting: screenshots are of real job data, so never a public image host; a `pr-assets` branch in this private repo, linked from the PR body, until GitHub upload from the CLI is available.
 4. Merge when `check` is green, by the release rules.
 
 ### 5. Look after: `/weekly-cleanup` (Fable, once a week)
@@ -128,4 +132,4 @@ Note for Fable: points 2 and 3 are automatic checks, which backlog item 16 (19 O
 3. Smoke run: required check on every PR, or run by the chat and reported in the PR?
 4. Screenshot hosting for PRs.
 5. Line limits: 300 inline, 800 per file. Right numbers?
-6. Fable also has the owner's phone screenshot with more notes; add anything from it here.
+6. Owner's answers 27 Oct 2026: features branch from `staging`, fixes from `main` (settled). Smoke run starts as reported in the PR, becomes a required check once stable. Automatic dead code and page weight checks: still the owner's call (item 16). Source of the four steps: the "Agent workflow" AGENTS.md shown in the owner's screenshot (why and when vs how, before captured first, review until clean, plain words pass), folded in above.
