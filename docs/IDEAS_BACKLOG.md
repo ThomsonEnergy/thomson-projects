@@ -840,9 +840,9 @@ Owner chose option C from item 34, to build later. Until then the app says "We d
 
 Size: a bigger build (two tables, a monthly download, model changes, proposal wording). Do it only if wholesale plans come up in enough battery sales. Best model: Fable 5.1, effort xhigh (money shown to customers, new data source, model change).
 
-## 36. Software factory (planned 27 Oct 2026, waiting on Fable review and the owner's yes)
+## 36. Software factory (built 27 Oct 2026, on `staging`, no migration)
 
-Owner's ask: one way for every chat to build so code is easy to add to, easy for a person to step in, with no dead code, no half-working features and no slow pages. Steps: isolate (`/new-feature`, own worktree), build (`/code-structure`), prove (`/prove`: check, dead code, page weight, Playwright smoke run with screenshots, agent evals, fresh review), ship (`/ship`: PR with before and after screenshots), weekly cleanup. Full draft and open questions: `docs/SOFTWARE_FACTORY.md`.
+Owner's ask: one way for every chat to build so code is easy to add to, easy for a person to step in, with no dead code, no half-working features and no slow pages. Steps: isolate (`/new-feature`, own worktree), build (`/code-structure`), prove (`/prove`: check, dead code, page weight, Playwright smoke run with screenshots, agent evals, fresh review), ship (`/ship`: PR with before and after screenshots), weekly cleanup. What was built, and the one owner step (network access for the smoke run): `docs/SOFTWARE_FACTORY.md`.
 
 Touches: `CLAUDE.md`, `.claude/skills/` (new), `scripts/deadcode.js`, `scripts/page-budgets.json`, `scripts/smoke.js` (new), `scripts/check.js`, `.github/pull_request_template.md` (new), `agents/prompts/`, `agents/evals/` (new). Size: medium. Best model: Fable 5.1, effort high (sets the rules every later build follows).
 

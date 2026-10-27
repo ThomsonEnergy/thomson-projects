@@ -112,14 +112,18 @@ Note for Fable: points 2 and 3 are automatic checks, which backlog item 16 (19 O
 - Small files with a header comment, settings on screens, prompts in their own files: a person can find and change one thing without reading a 700 KB page.
 - Every AI action is logged and undoable (already the rule for tags).
 
-## What to build to set this up
+## What was built (27 Oct 2026)
 
-1. Skills: `.claude/skills/new-feature`, `code-structure`, `prove`, `ship`, `weekly-cleanup`.
-2. Scripts: `scripts/deadcode.js`, `scripts/page-budgets.json` and its check, `scripts/smoke.js` (Playwright).
+1. Skills: `.claude/skills/new-feature`, `code-structure`, `prove`, `ship`, `weekly-cleanup` (one `SKILL.md` each).
+2. Scripts: `scripts/deadcode.js` with `scripts/deadcode-baseline.json` (50 findings on the day, 49 unused `_shared` exports and `extract-pricelist.js`; `formbay-webhook.js` kept by design), `scripts/page-budgets.js` with `scripts/page-budgets.json` (59 pages, budget = that day's weight rounded up to 5 KB; `project.html` 1590 KB and `settings.html` 815 KB only go down), both wired into `npm run check`. `scripts/smoke.js` (Playwright: login, load time, errors, failed calls, phone and desktop screenshots, steps file, `--compare` table).
 3. `.github/pull_request_template.md`.
-4. `agents/prompts/` and `agents/evals/` folders, Postie's first eval set.
-5. Rules summary into `CLAUDE.md` (Delivery standards), backlog item 16 updated.
-6. First cleanup: start splitting `project.html`.
+4. `agents/prompts/README.md`, `agents/evals/README.md`, `agents/evals/postie/cases.json` (5 cases: the GCW emails that were right and wrong). The Postie runner comes with the filing fix (item 37).
+5. Rules summary in `CLAUDE.md` ("Software factory"), item 16 updated.
+6. Not yet: splitting `project.html` (first `/weekly-cleanup`), moving prompts out of code (one agent per PR).
+
+**Cloud sessions and the smoke run:** the cloud environment's network policy did not allow `staging--thomsonprojects.netlify.app` on 27 Oct 2026, so `/prove` step 1 and 3 could not reach the site from a phone session (the script was proved against a local copy of the pages instead). Owner, once: the cloud environment menu in the session's title bar > Edit > Network access > add `*.netlify.app` under Allowed domains (keep "Allow package managers" ticked). Laptop sessions are not affected.
+
+**What the first run found:** the biggest weight on every page is `public/js/supabase-client.js` (494 KB, loaded by 56 pages), not the inline code. The first cleanups are that file (split by area, load per page) and `project.html` (683 KB of inline code, one file per tab).
 
 ## Questions for Fable and the owner
 

@@ -13,6 +13,9 @@ node_modules/
 supabase/.temp/
 supabase/.branches/
 
+# Smoke run output (scripts/smoke.js); screenshots go on the pr-assets branch, not here
+smoke/
+
 # Claude Code local files
 .claude/worktrees/
 .claude/settings.local.json

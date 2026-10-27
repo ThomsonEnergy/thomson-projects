@@ -21,7 +21,9 @@ Live business app for Thomson Energy Australia: leads, quotes, jobs, scheduling,
 | `supabase/migrations/` | Schema migrations (baseline + new changes) |
 | `supabase/seed.sql` | Fake data for staging and preview branches |
 | `Migrations/` | Archive of the old numbered migrations (007 to 155), history only |
-| `scripts/` | `check.js` (syntax checks), `cloud-setup.sh`, `write-config.js` |
+| `scripts/` | `check.js` (syntax, policies, dead code, page budgets), `deadcode.js`, `page-budgets.js`, `smoke.js` (browser smoke run), `cloud-setup.sh`, `write-config.js` |
+| `agents/` | `prompts/` (agent prompts, one file each) and `evals/` (real cases with the right answer) |
+| `.claude/skills/` | The software factory steps: `new-feature`, `code-structure`, `prove`, `ship`, `weekly-cleanup` (`docs/SOFTWARE_FACTORY.md`) |
 | `docs/` | Spec, backlog, agents plan, env vars, staging; `docs/archive/` for finished handoffs |
 | `policies and Contracts/` | Source text for onboarding documents and contracts |
 | `BUGS_AND_UPDATES.md` | Auto-written by `sync-bugs-to-repo.js`, do not edit by hand |
@@ -40,6 +42,7 @@ Installs dependencies and the Supabase CLI, links to Supabase if the env vars ar
 - [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md): what is built and what is planned
 - [docs/IDEAS_BACKLOG.md](docs/IDEAS_BACKLOG.md): future features
 - [docs/AI_AGENTS_PLAN.md](docs/AI_AGENTS_PLAN.md): AI agents
+- [docs/SOFTWARE_FACTORY.md](docs/SOFTWARE_FACTORY.md): how every chat builds (isolate, build, prove, ship, weekly cleanup)
 - [docs/ENV_VARS.md](docs/ENV_VARS.md): env vars and keys
 - [docs/STAGING.md](docs/STAGING.md): staging, migrations, backups
 - [docs/BUSINESS_FACTS.md](docs/BUSINESS_FACTS.md): Xero codes, pay rates, STC pricing, perf backlog

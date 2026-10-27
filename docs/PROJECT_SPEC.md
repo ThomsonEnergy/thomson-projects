@@ -574,6 +574,7 @@ Done since last review: clock-out cost-centre slider (A1), overheads calculator 
 - Keep screens simple; small learning curve.
 - "Admin can change it, the user can't" needs a BEFORE UPDATE trigger, not just RLS.
 - Compress every image (`compressImage()`).
+- Every build goes through the software factory (`docs/SOFTWARE_FACTORY.md`, 27 Oct 2026): own branch, code in the right place, proof with before and after screenshots, PR template, weekly cleanup. `npm run check` fails on new dead code and on a page over its weight budget.
 
 ---
 
