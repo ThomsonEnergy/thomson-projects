@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./get-integration-key');
+const { claudeJson } = require('./claude-json');
 const {
   CALC_TOOL, WEB_SEARCH_TOOL, QUERYABLE_TABLES, KB_TOOL, READ_ENTRY_TOOL, queryTool,
   runQuery, searchKnowledgeBase, readKnowledgeEntry, evaluate,
@@ -28,7 +29,7 @@ async function claude(apiKey, body) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: claudeJson(body),
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => '');

@@ -12,6 +12,7 @@ const fetch = require('node-fetch');
 const XLSX = require('xlsx');
 const { PDFDocument } = require('pdf-lib');
 const { getIntegrationKey } = require('./get-integration-key');
+const { claudeJson } = require('./claude-json');
 
 const MODEL = 'claude-sonnet-5-5';
 
@@ -20,7 +21,7 @@ async function callClaude(content, maxTokens) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content }] }),
+    body: claudeJson({ model: MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content }] }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');

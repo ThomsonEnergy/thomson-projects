@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { prepare, ACTION_TOOLS, ACTION_TOOL_NAMES } = require('./_shared/ai-actions');
 const { requireInternal } = require('./_shared/require-internal');
+const { claudeJson } = require('./_shared/claude-json');
 
 const {
   CALC_TOOL, WEB_SEARCH_TOOL, QUERY_TOOL, KB_TOOL, READ_ENTRY_TOOL,
@@ -89,7 +90,7 @@ Personality: you are a tough, cheeky tradie robot in a hard hat and a black-and-
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({
+        body: claudeJson({
           model: 'claude-sonnet-5-5',
           max_tokens: 2048,
           system: systemPrompt,

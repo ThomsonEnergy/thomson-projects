@@ -25,6 +25,7 @@ const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
 const { getIntegrationKey } = require('./get-integration-key');
 const { selfBaseUrl } = require('./site-url');
 const { internalHeaders } = require('./require-internal');
+const { claudeJson } = require('./claude-json');
 
 const MODEL = 'claude-sonnet-5-5';
 const RUN_BUDGET_MS = 11 * 60 * 1000; // a background function gets 15 minutes
@@ -115,7 +116,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // One Claude call. err.filtered: the copyright / safety filter said no (try differently, not again).
 // err.fatal: the key or account is the problem (stop the whole job).
 async function claudeRead(apiKey, prompt, jpeg) {
-  const body = JSON.stringify({
+  const body = claudeJson({
     model: MODEL,
     max_tokens: MAX_TOKENS,
     output_config: { effort: 'low' },

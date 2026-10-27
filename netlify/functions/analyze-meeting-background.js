@@ -2,6 +2,7 @@ const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { buildPrompt, buildDraft } = require('./_shared/meeting-ai');
+const { claudeJson } = require('./_shared/claude-json');
 
 // POST { meeting_id } - background function (up to 15 minutes), so the page
 // does not wait on it: it sets meetings.ai_status to 'analyzing', and to
@@ -44,7 +45,7 @@ exports.handler = async (event) => {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 8000, messages: [{ role: 'user', content: prompt }] }),
+      body: claudeJson({ model: 'claude-sonnet-5-5', max_tokens: 8000, messages: [{ role: 'user', content: prompt }] }),
     });
     if (!res.ok) {
       const errText = await res.text().catch(() => '');

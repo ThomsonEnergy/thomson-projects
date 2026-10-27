@@ -5,6 +5,7 @@
 
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./get-integration-key');
+const { claudeJson } = require('./claude-json');
 
 // Returns { extracted, usage } (usage = the Claude tokens, for the ops manager's log).
 async function extractSupplierInvoiceWithUsage({ fileBase64, mediaType }) {
@@ -49,7 +50,7 @@ If a field genuinely isn't visible or determinable, use null rather than guessin
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
+    body: claudeJson({
       model: 'claude-sonnet-5-5',
       max_tokens: 4000,
       messages: [{

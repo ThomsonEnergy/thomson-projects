@@ -1,6 +1,7 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
+const { claudeJson } = require('./_shared/claude-json');
 
 // Uses your Anthropic API key (set in Settings > API Keys, falls back to the
 // ANTHROPIC_API_KEY environment variable if that hasn't been set yet) to
@@ -46,7 +47,7 @@ Respond with ONLY a JSON array, no other text, no markdown fences, one object pe
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
+      body: claudeJson({
         model: 'claude-sonnet-5-5',
         max_tokens: 800,
         messages: [{ role: 'user', content: prompt }],

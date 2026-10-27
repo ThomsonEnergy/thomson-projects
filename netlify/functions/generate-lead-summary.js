@@ -1,6 +1,7 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
+const { claudeJson } = require('./_shared/claude-json');
 
 // Turns a lead's raw source + details JSON (see WEBSITE_LEAD_CAPTURE.md
 // for the shape each source sends) into a short, plain-English "what
@@ -47,7 +48,7 @@ No other text, no markdown, exactly those two lines.`;
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
+      body: claudeJson({
         model: 'claude-sonnet-5-5',
         max_tokens: 300,
         messages: [{ role: 'user', content: prompt }],

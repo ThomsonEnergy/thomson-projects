@@ -9,6 +9,7 @@
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { voiceForUser } = require('./_shared/writing-style');
+const { claudeJson } = require('./_shared/claude-json');
 
 const SPELL_MODEL = 'claude-haiku-5-5';
 const POLISH_MODEL = 'claude-sonnet-5-5';
@@ -32,7 +33,7 @@ async function claude(apiKey, body) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: claudeJson(body),
   });
   if (!res.ok) throw new Error(`Anthropic API error: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   return res.json();

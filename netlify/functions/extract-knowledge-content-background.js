@@ -7,6 +7,7 @@ const { PDFDocument } = require('pdf-lib');
 const pdfParse = require('pdf-parse');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requireActiveUser } = require('./_shared/require-active-user');
+const { claudeJson } = require('./_shared/claude-json');
 
 // Reads whatever a staff member added to the Knowledge Base - a pasted
 // website URL, or an uploaded PDF/image/spreadsheet - into plain
@@ -78,7 +79,7 @@ async function extractDocumentOrImage(buffer, mediaType, apiKey, maxTokens) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({
+    body: claudeJson({
       model: 'claude-sonnet-5-5',
       max_tokens: maxTokens || 4000,
       messages: [{ role: 'user', content: [{ type: 'text', text: promptText }, block] }],
